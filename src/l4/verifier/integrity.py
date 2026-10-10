@@ -320,6 +320,49 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
     return Outcome(findings, note, unfrozen=listed)
 
 
+# --- 2.5b the test-path freeze (L4-IMP-006 (7)) ---------------------------------------------------------------------
+
+
+def _allowed_in_step(ctx: IntegrityContext, commit: "Commit") -> set[str]:
+    """The test paths a green or exempt commit of the harness may change: those a `task.unfrozen` of the same unit and
+    task names, and for an exempt commit those a `task.tests_added` of the same unit and task lists."""
+    kinds = ("task.unfrozen", "task.tests_added") if commit.tdd == "exempt" else ("task.unfrozen",)
+    allowed: set[str] = set()
+    for e in ctx.events:
+        if e.type in kinds and e.data.get("task") == commit.task and _unit_of(ctx, e) == commit.unit:
+            allowed |= {str(p) for p in e.data.get("paths" if e.type == "task.unfrozen" else "files") or []}
+    return allowed
+
+
+def check_test_paths(ctx: IntegrityContext) -> Outcome:
+    """A commit of the harness whose `L4-TDD` is `green` or `exempt` (a fix chore) may not add, change, delete or
+    rename a path of `tdd.test_globs` or `tdd.test_support_globs`, except the paths a `task.unfrozen` of its unit and
+    task names, those of the `task.tests_added` of an exempt commit, and anything a task with the human `[test-infra]`
+    tag commits. People's commits are not walked (`check_tests` lists theirs)."""
+    tdd = ctx.cfg.tdd
+    globs = (*tdd.test_globs, *tdd.test_support_globs)
+    steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt")}
+    infra = {(unit, t.key) for unit, t in ctx.tasks if "test-infra" in task_tags(t.title)}
+    hits, checked = [], 0
+    for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
+        commit = steps.get(record[SHA])
+        if commit is None or not is_harness(record) or not commit.parent:
+            continue
+        checked += 1
+        if (commit.unit, commit.task) in infra:
+            continue
+        allowed = _allowed_in_step(ctx, commit)
+        for path in sorted(_changed(ctx.git, commit.parent, commit.sha)):
+            if _matches(globs, path) and not _in_unit_dirs(ctx, path) and path not in allowed:
+                hits.append(f"{path} (task {commit.task}, {commit.tdd} commit {commit.sha[:10]})")
+    if not checked:
+        return Outcome(note="no green or fix-chore commit of the harness", skipped=True)
+    note = f"{checked} harness step commit(s) checked"
+    if not hits:
+        return Outcome(note=note)
+    return Outcome([_blocker("a test file changed in a step that may not change tests", _listed(hits))], note)
+
+
 # --- 2.6 content scan -----------------------------------------------------------------------------------------------
 
 
@@ -597,6 +640,7 @@ CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("protected paths", check_protected),
     ("pre-existing tests", check_tests),
     ("red-green freeze", check_freeze),
+    ("test path freeze", check_test_paths),
     ("content scan", check_scan),
     ("suppressions", check_suppressions),
     ("tdd history", check_tdd_history),
