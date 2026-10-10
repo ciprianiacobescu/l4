@@ -166,6 +166,14 @@ project_path() {   # group/name from https://host/group/name(.git), ssh://git@ho
   esac
   rest=${rest%/}; rest=${rest%.git}; printf '%s' "$rest"
 }
+server_url() {     # https://host[:port] of the forge: an https origin keeps its port, an SSH origin's port is the SSH port
+  local u=$1 host
+  case "$u" in
+    https://*|http://*) host=${u#*://}; host=${host#*@}; host=${host%%/*}; printf '%s' "${u%%://*}://$host";;
+    *://*) host=${u#*://}; host=${host#*@}; host=${host%%/*}; host=${host%%:*}; printf 'https://%s' "$host";;
+    *@*:*) host=${u#*@}; host=${host%%:*}; printf 'https://%s' "$host";;
+  esac
+}
 echo
 echo "Remaining steps:"
 if [ -z "$ORIGIN" ]; then echo "  0. git remote add origin <url of the empty ${CI} project>   # no origin remote yet"; fi
@@ -174,7 +182,7 @@ RUNNER_BLOCK() {
   if [ "$CI" = gitlab ]; then
     echo "     install gitlab-runner (https://docs.gitlab.com/runner/install/linux-repository/), create a PROJECT runner"
     echo "     (Settings > CI/CD > Runners > New project runner, tags = ci.runner_tags, default agentic, run untagged jobs off), then on the host:"
-    echo "     sudo gitlab-runner register --non-interactive --url <gitlab url> --token <glrt-... runner token> --executor shell"
+    echo "     sudo gitlab-runner register --non-interactive --url $GLURL --token <glrt-... runner token> --executor shell"
   else
     echo "     register a self-hosted runner (repo Settings > Actions > Runners > New self-hosted runner) with the labels of runs-on: $RUNSON"
   fi
@@ -188,6 +196,7 @@ WF="$REPO/.github/workflows/l4.yml"
 RUNSON=$(sed -n 's/^ *runs-on: *//p' "$WF" 2>/dev/null | head -1); RUNSON=${RUNSON:-<see runs-on in .github/workflows/l4.yml>}
 if [ "$CI" = gitlab ]; then
   PROJ=$(project_path "$ORIGIN"); PROJ=${PROJ:-<group/name>}
+  GLURL=$(server_url "$ORIGIN"); GLURL=${GLURL:-<gitlab url>}
   echo "  1. git -C \"$REPO\" push -o ci.skip -u origin $BRANCH   # ci.skip: the token does not exist yet"
   echo "  2. the runner (below): setup in step 3 needs an online runner with the ci.runner_tags"
   echo "  3. GITLAB_TOKEN=<maintainer token> \"$REPO/.l4/bin/l4\" setup gitlab --project $PROJ --watch"

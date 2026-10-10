@@ -194,15 +194,21 @@ def test_no_install_without_uv_prints_installer_command(env, repo):
 
 
 @pytest.mark.parametrize(
-    "origin",
-    ["git@gitlab.example.com:group/name.git", "https://gitlab.example.com/group/name.git"],
+    ("origin", "url"),
+    [
+        ("git@gitlab.example.com:group/name.git", "https://gitlab.example.com"),
+        ("ssh://git@gitlab.example.com:2222/group/name.git", "https://gitlab.example.com"),
+        ("https://gitlab.example.com/group/name.git", "https://gitlab.example.com"),
+        ("https://gitlab.example.com:8443/group/name.git", "https://gitlab.example.com:8443"),
+    ],
 )
-def test_gitlab_next_steps_derive_the_project_path(env, repo, origin):
+def test_gitlab_next_steps_derive_the_project_path_and_the_server(env, repo, origin, url):
     git(repo, "remote", "add", "origin", origin)
     r = adopt(env, repo)
     assert r.returncode == 0
     assert "--project group/name --watch" in r.stdout
     assert "push -o ci.skip -u origin main" in r.stdout
+    assert f"gitlab-runner register --non-interactive --url {url} --token" in r.stdout
 
 
 def test_gitlab_next_steps_put_the_runner_before_setup(env, repo):
