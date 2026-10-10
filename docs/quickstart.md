@@ -83,6 +83,11 @@ tdd:
   extra_test_globs: ["**/*.Tests/**", "**/*.Test/**", "**/*.IntegrationTests/**", "web/tests/**"]
 ```
 
+What the test command writes must not land in those folders unless git ignores it: a report or coverage file the
+test gate leaves in a test folder is committed with the step and counts as a test-path change. Write reports under
+`.l4-out/` (the default `gates.test.reports` path, never committed), e.g. `dotnet test --results-directory .l4-out`,
+or ignore the folder (`TestResults/` in that project's `.gitignore`).
+
 ## 2. Commit and push
 
 Commit exactly what the adoption wrote: `--commit` does it for you (only the paths the adoption added or changed; your own
