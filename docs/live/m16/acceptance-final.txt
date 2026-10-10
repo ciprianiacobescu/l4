@@ -1,0 +1,18 @@
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 10 items
+
+tests/live/test_m1_6_acceptance.py::test_p1_intake_raises_q001_and_the_unit_waits_for_a_human PASSED [ 10%]
+tests/live/test_m1_6_acceptance.py::test_p2_human_edits_survive_every_guard PASSED [ 20%]
+tests/live/test_m1_6_acceptance.py::test_p2_the_scope_hold_and_the_coverage_hold_are_in_the_evidence PASSED [ 30%]
+tests/live/test_m1_6_acceptance.py::test_p2_verdict_report_and_questions PASSED [ 40%]
+tests/live/test_m1_6_acceptance.py::test_p2_items_and_answers_from_both_engines_and_laya_serve_inside_step_8 PASSED [ 50%]
+tests/live/test_m1_6_acceptance.py::test_p3_the_scope_reject_is_a_label_and_the_coverage_accept_is_not PASSED [ 60%]
+tests/live/test_m1_6_acceptance.py::test_p4_doctor_s1_002_is_ok_and_the_tuned_profile_is_selected SKIPPED [ 70%]
+tests/live/test_m1_6_acceptance.py::test_p4_verdict_pass_and_three_engines_answered_every_item SKIPPED [ 80%]
+tests/live/test_m1_6_acceptance.py::test_skip_ci_commits_have_no_l4_job PASSED [ 90%]
+tests/live/test_m1_6_acceptance.py::test_job_logs_hold_no_token_shape_and_record_the_peak_memory PASSED [100%]
+
+=========================== short test summary info ============================
+SKIPPED [2] tests/live/test_m1_6_acceptance.py:106: no commit on main with 'laya-tuned' in its title yet
+=================== 8 passed, 2 skipped in 82.78s (0:01:22) ====================

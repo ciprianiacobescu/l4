@@ -1,0 +1,2 @@
+[l4] cli: kiro:add-bulk-discount is halted: only a merged unit can be archived
+exit=2

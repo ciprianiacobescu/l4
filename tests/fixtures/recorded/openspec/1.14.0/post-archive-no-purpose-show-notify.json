@@ -1,0 +1,26 @@
+{
+  "id": "notify",
+  "title": "notify",
+  "overview": "TBD - created by archiving change no-purpose. Update Purpose after archive.",
+  "requirementCount": 1,
+  "requirements": [
+    {
+      "name": "Notify on greet",
+      "text": "The system SHALL print a notice after each greeting.",
+      "scenarios": [
+        {
+          "name": "Notice printed",
+          "rawText": "- **WHEN** the user runs `greet Ada`\n- **THEN** a notice line follows the greeting"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "format": "openspec"
+  },
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

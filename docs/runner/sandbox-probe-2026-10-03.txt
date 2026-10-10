@@ -1,0 +1,3 @@
+SANDBOX claude (bwrap) | PASS | 10.4s | exit=0 edit=yes tests=pass testdiff=none | 
+SANDBOX codex (bwrap) | PASS | 31.0s | exit=0 edit=yes tests=pass testdiff=none | 
+SANDBOX opencode (bwrap) | PASS | 18.4s | exit=0 edit=yes tests=pass testdiff=none | 

@@ -1,0 +1,33 @@
+# The first implementer profile is out of quota at its probe, so the second one does the work. Pending: it needs the
+# fallback chains and the quota probe of agent-factory (M1.2), and the harness's shared FakeClock.
+name: quota-fallback
+fixture: openspec-basic
+profiles:
+  primary:
+    probe:
+      quota: {used_percent: 100, window_minutes: 300}
+  secondary:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:
+    verdict: "@fixture:pass_all.json"
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: availability.selected, role: implementer, selected: secondary, fallback_index: 1}
+    - {type: phase.changed, to: in_review}

@@ -1,0 +1,93 @@
+from pathlib import Path
+
+import pytest
+
+from l4.gates.junit import ReportError, TestCase, parse_junit
+
+RECORDED = Path(__file__).resolve().parents[2] / "fixtures" / "recorded" / "pytest"
+
+
+def write(tmp_path: Path, text: str | bytes, name: str = "junit.xml") -> Path:
+    path = tmp_path / name
+    path.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
+    return path
+
+
+@pytest.mark.parametrize("family", ["xunit1", "xunit2"])
+def test_collection_error_has_no_individual_cases(family: str):
+    report = parse_junit(RECORDED / f"collection-error-{family}.xml")
+    assert report.tests == {}
+    assert report.collection_errors == ["tests.test_broken"]
+    assert report.total == 0
+
+
+@pytest.mark.parametrize("family", ["xunit1", "xunit2"])
+def test_every_case_is_reported_individually_with_a_status(family: str):
+    report = parse_junit(RECORDED / f"mixed-{family}.xml")
+    assert {i: c.status for i, c in report.tests.items()} == {
+        "tests.test_mix::test_pass": "passed",
+        "tests.test_mix::test_fail": "failed",
+        "tests.test_mix::test_param[1]": "passed",
+        "tests.test_mix::test_param[2]": "failed",
+        "tests.test_mix::test_skipped": "skipped",
+        "tests.test_mix::test_error": "error",
+    }
+    assert report.collection_errors == []
+    assert report.total == 6 and report.executed == 5
+    assert report.tests["tests.test_mix::test_fail"].message == "assert 1 == 2"
+    assert report.tests["tests.test_mix::test_pass"] == TestCase("tests.test_mix::test_pass", "passed", "")
+
+
+def test_a_bare_testsuite_root_and_a_case_without_classname(tmp_path: Path):
+    path = write(tmp_path, '<testsuite><testcase name="test_a"/><testcase classname="m" name="test_b"/></testsuite>')
+    assert sorted(parse_junit(path).tests) == ["m::test_b", "test_a"]
+
+
+def test_report_with_entity_is_rejected(tmp_path: Path):
+    bomb = '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><testsuite><testcase name="&a;"/></testsuite>'
+    with pytest.raises(ReportError, match="DTD"):
+        parse_junit(write(tmp_path, bomb))
+
+
+def test_a_doctype_hidden_in_another_encoding_is_rejected_too(tmp_path: Path):
+    text = '<?xml version="1.0" encoding="utf-16"?><!DOCTYPE x [<!ENTITY a "b">]><testsuite/>'
+    with pytest.raises(ReportError, match="DTD"):
+        parse_junit(write(tmp_path, text.encode("utf-16")))
+
+
+def test_oversize_report_is_rejected_without_reading_it(tmp_path: Path):
+    path = write(tmp_path, "<testsuite>" + " " * 200 + "</testsuite>")
+    with pytest.raises(ReportError, match="larger than"):
+        parse_junit(path, max_bytes=100)
+
+
+@pytest.mark.parametrize("text", ["", "<testsuite><testcase", "<other/>"])
+def test_unreadable_reports_are_errors(tmp_path: Path, text: str):
+    with pytest.raises(ReportError):
+        parse_junit(write(tmp_path, text))
+
+
+def test_a_symlinked_report_is_refused(tmp_path: Path):
+    target = write(tmp_path, "<testsuite/>", "real.xml")
+    link = tmp_path / "link.xml"
+    link.symlink_to(target)
+    with pytest.raises(ReportError, match="symlink"):
+        parse_junit(link)
+
+
+def test_the_failure_body_is_kept_bounded(tmp_path: Path):
+    body = "start\n" + "x" * 6000 + "\nE   FileNotFoundError: gone"
+    xml = (
+        '<testsuite><testcase classname="m" name="test_a"><failure message="boom">'
+        + body
+        + "</failure></testcase></testsuite>"
+    )
+    case = parse_junit(write(tmp_path, xml)).tests["m::test_a"]
+    assert len(case.detail) == 4000
+    assert case.detail.endswith("E   FileNotFoundError: gone")  # the end is kept
+    assert case.message == "boom"
+
+
+def test_a_passing_case_has_no_detail(tmp_path: Path):
+    path = write(tmp_path, '<testsuite><testcase classname="m" name="test_a"/></testsuite>')
+    assert parse_junit(path).tests["m::test_a"].detail == ""

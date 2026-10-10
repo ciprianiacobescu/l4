@@ -1,0 +1,9 @@
+{
+ "url": "https://openrouter.ai/api/v1/credits",
+ "http": 200,
+ "wall_s": 0.04,
+ "data": {
+  "total_credits": 15,
+  "total_usage": 15.03400069
+ }
+}

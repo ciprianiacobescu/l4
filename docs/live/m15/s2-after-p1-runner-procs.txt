@@ -1,0 +1,5 @@
+pgrep laya-serve:
+none
+               total        used        free      shared  buff/cache   available
+Mem:            3801        1292        1697           4         811        2204
+Swap:           2047        2029          18

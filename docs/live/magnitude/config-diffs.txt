@@ -1,0 +1,63 @@
+diff --git a/.l4/config.yaml b/.l4/config.yaml
+index 60d1df0..e1e6fa8 100644
+--- a/.l4/config.yaml
++++ b/.l4/config.yaml
+@@ -91,7 +91,7 @@ roles:
+   # Free first where the gates and an independent judge check the work; Claude first where a wrong answer is not
+   # checked again (the judge, the audit writer). A 429 cools a profile (its reset, else 30 min) and the next one is used; a halt
+   # (3 failed attempts) or an invalid judge reply does NOT fall through.
+-  implementer: [magnitude-qwen]   # MEASUREMENT 2026-10-07: magnitude is the only implementer (restored after the run)
++  implementer: [f-muse, f-mimo, f-nemotron-ultra, f-longcat, codex, claude-code]   # magnitude-qwen left out 2026-10-07: it never writes the result file where the prompt says (a halt does not fall through), see harness docs/live/magnitude/
+   judges: [claude-code, magnitude-qwen, f-longcat, f-muse, codex]           # two free fallbacks of different vendors: one is always independent of a free implementer
+   clarifier: [f-longcat, f-space-bunny, claude-code, codex]
+   s1_judge: [laya, f-muse, claude-code]   # laya-local is free and runs here (job 5851 step 8); f-muse is the llm_boolean stand-in when it cannot, a different vendor than the clarifier's first
+commit 75ce93ad14eeb1afce86162990b3b017e6566ff5
+Author: CiprianSpot <maintainer@example.invalid>
+Date:   Wed Oct 7 01:42:21 2026 +0300
+
+    Add the magnitude-qwen profile; seed add-pallet-count with magnitude-qwen as the only implementer (measurement)
+
+diff --git a/.l4/config.yaml b/.l4/config.yaml
+index 4db8ec2..60d1df0 100644
+--- a/.l4/config.yaml
++++ b/.l4/config.yaml
+@@ -59,6 +59,20 @@ profiles:
+     adapter: opencode
+     model: opencode/space-bunny-free
+     vendor: stealth
++  magnitude-qwen:           # the maintainer's MacBook (Qwen3.6-35B-A3B over an OpenAI-compatible server); only while it is awake
++    adapter: opencode
++    model: magnitude/qwen3.6-35b-a3b:gguf:q5
++    auth: api_key
++    vendor: alibaba          # declared: opencode does not report the served model
++    options:
++      provider:
++        id: magnitude
++        base_url: http://192.0.2.10:10100/inference/v1
++        api_key_env: MAGNITUDE_API_KEY
++        models:
++          "qwen3.6-35b-a3b:gguf:q5": {context: 262144, output: 16384}
++      tools: [bash, edit, write, read, glob, grep]
++      reasoning: none
+   kiro:
+     adapter: kiro-cli
+     vendor: amazon
+@@ -77,14 +91,16 @@ roles:
+   # Free first where the gates and an independent judge check the work; Claude first where a wrong answer is not
+   # checked again (the judge, the audit writer). A 429 cools a profile (its reset, else 30 min) and the next one is used; a halt
+   # (3 failed attempts) or an invalid judge reply does NOT fall through.
+-  implementer: [f-muse, f-mimo, f-nemotron-ultra, f-longcat, codex, claude-code]
+-  judges: [claude-code, f-longcat, f-muse, codex]           # two free fallbacks of different vendors: one is always independent of a free implementer
++  implementer: [magnitude-qwen]   # MEASUREMENT 2026-10-07: magnitude is the only implementer (restored after the run)
++  judges: [claude-code, magnitude-qwen, f-longcat, f-muse, codex]           # two free fallbacks of different vendors: one is always independent of a free implementer
+   clarifier: [f-longcat, f-space-bunny, claude-code, codex]
+   s1_judge: [laya, f-muse, claude-code]   # laya-local is free and runs here (job 5851 step 8); f-muse is the llm_boolean stand-in when it cannot, a different vendor than the clarifier's first
+   verifier_agent: [claude-code, f-longcat, f-muse]          # audit tests by free models are unmeasured: Claude first
+ clarifier:
+   s1_standin: llm_boolean
+   min_confidence: medium   # live variant 2026-10-04: the default 'high' escalated a repo-answerable technical question
++availability:
++  probe_timeout: 150s       # magnitude's hello took 33 s on the Mac itself; the cap is global (SPEC 3.2)
+ sdd:
+   scope_check: warn          # M1.6 live: one hold per out-of-module file
+ forge:

@@ -1,0 +1,74 @@
+
+
+Device: mps
+Training items: 2121; calibration items: 0
+micro_batch=1; grad_accum=16; epochs=2
+epoch 1/2, step 100, loss=0.0036
+epoch 1/2, step 200, loss=0.9188
+epoch 1/2, step 300, loss=0.7057
+epoch 1/2, step 400, loss=0.9375
+epoch 1/2, step 500, loss=0.0000
+epoch 1/2, step 600, loss=-0.7967
+epoch 1/2, step 700, loss=0.0000
+epoch 1/2, step 800, loss=0.4908
+epoch 1/2, step 900, loss=0.0000
+epoch 1/2, step 1000, loss=0.0000
+epoch 1/2, step 1100, loss=0.4325
+epoch 1/2, step 1200, loss=0.0000
+epoch 1/2, step 1300, loss=24.1450
+epoch 1/2, step 1400, loss=0.0000
+epoch 1/2, step 1500, loss=0.3006
+epoch 1/2, step 1600, loss=0.0000
+epoch 1/2, step 1700, loss=0.0000
+epoch 1/2, step 1800, loss=0.0000
+epoch 1/2, step 1900, loss=0.0000
+epoch 1/2, step 2000, loss=0.0184
+epoch 1/2, step 2100, loss=0.1886
+Epoch 1/2 complete; avg_loss=1.5065
+epoch 2/2, step 100, loss=0.0000
+epoch 2/2, step 200, loss=0.0307
+epoch 2/2, step 300, loss=0.0000
+epoch 2/2, step 400, loss=0.0000
+epoch 2/2, step 500, loss=-0.0302
+epoch 2/2, step 600, loss=0.0143
+epoch 2/2, step 700, loss=0.0000
+epoch 2/2, step 800, loss=-0.0384
+epoch 2/2, step 900, loss=19.8071
+epoch 2/2, step 1000, loss=0.0000
+epoch 2/2, step 1100, loss=0.0000
+epoch 2/2, step 1200, loss=0.0000
+epoch 2/2, step 1300, loss=0.0000
+epoch 2/2, step 1400, loss=0.0000
+epoch 2/2, step 1500, loss=0.0000
+epoch 2/2, step 1600, loss=0.0000
+epoch 2/2, step 1700, loss=18.1135
+epoch 2/2, step 1800, loss=0.0000
+epoch 2/2, step 1900, loss=0.0000
+epoch 2/2, step 2000, loss=0.0000
+epoch 2/2, step 2100, loss=0.0000
+Epoch 2/2 complete; avg_loss=0.6967
+Running temperature calibration ...
+Model saved to /tmp/scratch/m16live-run/l4cache/s1/checkpoints/m16live-2026-10-05
+Temperatures: [1.2, 1.2, 1.2]
+{"wall_seconds": 2113.1, "peak_rss_gb": 7.24, "temperatures": [1.0, 4.382614612579346, 5.0]}
+     2115.93 real       965.33 user       133.63 sys
+          7237517312  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              935257  page reclaims
+               60295  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                  55  messages sent
+                 206  messages received
+                   1  signals received
+               29385  voluntary context switches
+             4555050  involuntary context switches
+           190279366  instructions retired
+            79196098  cycles elapsed
+            12370352  peak memory footprint
+EXIT 0
+2026-10-05T10:20:43Z
+/dev/disk3s5   3.6Ti   3.5Ti    72Gi    99%     27M  757M    3%   /System/Volumes/Data

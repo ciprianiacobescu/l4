@@ -1,0 +1,12 @@
+        mr = unit_mr(gl)
+>       assert mr is not None and not mr.get("draft") and "l4:in_review" in mr.get("labels", [])
+E       AssertionError: assert ({'id': 396, 'iid': 15, 'project_id': 118, 'title': 'Draft: [l4] add-shipping-fee: shipping fee', ...} is not None and not True)
+E        +  where True = <built-in method get of dict object at 0x10bd3c200>('draft')
+E        +    where <built-in method get of dict object at 0x10bd3c200> = {'id': 396, 'iid': 15, 'project_id': 118, 'title': 'Draft: [l4] add-shipping-fee: shipping fee', ...}.get
+
+tests/live/test_m1_3_acceptance.py:239: AssertionError
+=========================== short test summary info ============================
+SKIPPED [1] tests/live/test_m1_3_acceptance.py:157: branch 1A did not happen (no fix unit was spawned)
+SKIPPED [1] tests/live/test_m1_3_acceptance.py:201: no verdict answer has been consumed yet (step 2)
+SKIPPED [1] tests/live/test_m1_3_acceptance.py:256: the unit is not merged yet (optional step 5)
+4 failed, 2 passed, 3 skipped in 8.87s

@@ -1,0 +1,4 @@
+{
+  "check": "stubs",
+  "about": "a new dataclass with plain fields is an admissible red addition"
+}

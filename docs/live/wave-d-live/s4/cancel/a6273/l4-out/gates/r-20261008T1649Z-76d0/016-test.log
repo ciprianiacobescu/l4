@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-three-for-two
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 52 items
+
+tests/test_bulk_discount.py .........                                    [ 17%]
+tests/test_bulk_savings.py .....                                         [ 26%]
+tests/test_cart.py ............                                          [ 50%]
+tests/test_cart_gift_wrap.py ..                                          [ 53%]
+tests/test_cart_surcharge.py ....                                        [ 61%]
+tests/test_discounts.py ....                                             [ 69%]
+tests/test_gift_wrap.py ...                                              [ 75%]
+tests/test_gift_wrap_checkout.py .                                       [ 76%]
+tests/test_stock.py ..                                                   [ 80%]
+tests/test_surcharge.py .....                                            [ 90%]
+tests/test_three_for_two.py ...                                          [ 96%]
+tests/test_web_page.py ..                                                [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-three-for-two/.l4-out/junit.xml -
+============================== 52 passed in 0.30s ==============================

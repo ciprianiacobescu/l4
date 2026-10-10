@@ -1,0 +1,164 @@
+{
+  "items": [
+    {
+      "id": "broken-change",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "INFO",
+          "path": "badcap/spec.md",
+          "line": 6,
+          "message": "Header \"### Scenario: Three hashtags instead of four\" in ADDED Requirements is not a \"### Requirement:\" header and is ignored by validation. Use \"### Requirement: Scenario: Three hashtags instead of four\" if it should be validated as a requirement."
+        },
+        {
+          "level": "ERROR",
+          "path": "badcap/spec.md",
+          "message": "ADDED \"Broken scenario heading\" must include at least one scenario"
+        }
+      ],
+      "durationMs": 22
+    },
+    {
+      "id": "chore-tasks-only",
+      "type": "change",
+      "valid": true,
+      "issues": [
+        {
+          "level": "INFO",
+          "path": "file",
+          "message": "skip_specs is set in .openspec.yaml: change declares no spec-level behavior changes, zero deltas accepted"
+        }
+      ],
+      "durationMs": 14
+    },
+    {
+      "id": "farewell",
+      "type": "spec",
+      "valid": true,
+      "issues": [],
+      "durationMs": 2
+    },
+    {
+      "id": "greeting",
+      "type": "spec",
+      "valid": true,
+      "issues": [],
+      "durationMs": 0
+    },
+    {
+      "id": "modify-missing",
+      "type": "change",
+      "valid": true,
+      "issues": [
+        {
+          "level": "INFO",
+          "path": "greeting/spec.md",
+          "message": "Archive would refuse this delta: greeting MODIFIED failed for header \"### Requirement: Greet in Klingon\" - not found"
+        }
+      ],
+      "durationMs": 31
+    },
+    {
+      "id": "no-purpose",
+      "type": "change",
+      "valid": true,
+      "issues": [],
+      "durationMs": 29
+    },
+    {
+      "id": "no-shall",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "WARNING",
+          "path": "banner/spec.md",
+          "message": "ADDED \"Banner line\" should contain SHALL or MUST (RFC 2119 best practice for English specs)"
+        }
+      ],
+      "durationMs": 29
+    },
+    {
+      "id": "task-grammar",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "INFO",
+          "path": "file",
+          "message": "skip_specs is set in .openspec.yaml: change declares no spec-level behavior changes, zero deltas accepted"
+        },
+        {
+          "level": "WARNING",
+          "path": "tasks.md",
+          "line": 34,
+          "message": "Task \"9.9\" is under group 1, but its leading number points to group 9. Move it to group 9 or renumber it."
+        },
+        {
+          "level": "WARNING",
+          "path": "tasks.md",
+          "line": 37,
+          "message": "Task \"9.8\" is under group 1, but its leading number points to group 9. Move it to group 9 or renumber it."
+        }
+      ],
+      "durationMs": 15
+    },
+    {
+      "id": "task-grammar-crlf",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "INFO",
+          "path": "file",
+          "message": "skip_specs is set in .openspec.yaml: change declares no spec-level behavior changes, zero deltas accepted"
+        },
+        {
+          "level": "WARNING",
+          "path": "tasks.md",
+          "line": 34,
+          "message": "Task \"9.9\" is under group 1, but its leading number points to group 9. Move it to group 9 or renumber it."
+        },
+        {
+          "level": "WARNING",
+          "path": "tasks.md",
+          "line": 37,
+          "message": "Task \"9.8\" is under group 1, but its leading number points to group 9. Move it to group 9 or renumber it."
+        }
+      ],
+      "durationMs": 14
+    },
+    {
+      "id": "with-extras",
+      "type": "change",
+      "valid": true,
+      "issues": [],
+      "durationMs": 18
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 10,
+      "passed": 6,
+      "failed": 4
+    },
+    "byType": {
+      "change": {
+        "items": 8,
+        "passed": 4,
+        "failed": 4
+      },
+      "spec": {
+        "items": 2,
+        "passed": 2,
+        "failed": 0
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

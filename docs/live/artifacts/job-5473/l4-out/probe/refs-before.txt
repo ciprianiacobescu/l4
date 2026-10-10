@@ -1,0 +1,11 @@
+087f755767aa63cd743a82ccb1ed9d2fb5aeea8d	refs/l4/locks/openspec/add-is-empty
+13b4a576c772e4d114f149117f5abedbeebb759d	refs/heads/l4/openspec/add-money-format
+3017899bf57dd1db2a983eb7cbecf6fcb96d722b	refs/heads/l4/openspec/add-vat
+4a5d7780fedaaa3ac4a6a71d123869c5814a3f0f	refs/heads/l4/archive/openspec/add-discount-codes
+69d37013bd1a7b90255ed874896bcabbf1076012	refs/l4/locks/openspec/add-discount-codes
+9fea38c882ffdff1209936c37745d2f3cdd8cb5a	refs/l4/locks/openspec/add-split-amount
+cc6f174d7bf0866a069a515b36b653a79df06ff9	refs/heads/l4/openspec/add-split-amount
+d01a9b8cddc2beefde035d76840a2b2f9b318023	refs/heads/l4/openspec/add-is-empty
+e163fe8aa5a7ec2ecf8978160eeade81f80f7889	refs/l4/locks/openspec/add-money-format
+f03af3d12b363e34829d5038ac1becc2e92eaf53	refs/l4/locks/openspec/add-average-price
+f4f36d379dd86c95a16d6d0c709cf5ad7da0c6b6	refs/heads/l4/openspec/add-average-price

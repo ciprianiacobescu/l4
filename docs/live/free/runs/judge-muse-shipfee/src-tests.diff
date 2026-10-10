@@ -1,0 +1,60 @@
+diff --git a/src/pricing/__init__.py b/src/pricing/__init__.py
+index 60436be..e48d2d7 100644
+--- a/src/pricing/__init__.py
++++ b/src/pricing/__init__.py
+@@ -7,6 +7,7 @@ from pricing.discounts import (
+     PercentOff,
+     UnknownDiscountCode,
+ )
++from pricing.shipping import UnsupportedShippingCountry, shipping_fee
+ 
+ __all__ = [
+     "AmountOff",
+@@ -15,4 +16,6 @@ __all__ = [
+     "LineItem",
+     "PercentOff",
+     "UnknownDiscountCode",
++    "UnsupportedShippingCountry",
++    "shipping_fee",
+ ]
+diff --git a/src/pricing/shipping.py b/src/pricing/shipping.py
+new file mode 100644
+index 0000000..6a2ea2e
+--- /dev/null
++++ b/src/pricing/shipping.py
+@@ -0,0 +1,14 @@
++from decimal import ROUND_HALF_UP, Decimal
++
++
++class UnsupportedShippingCountry(Exception):
++    pass
++
++
++def shipping_fee(subtotal: Decimal, country: str) -> Decimal:
++    fee_by_country = {"RO": Decimal("4.99"), "DE": Decimal("9.99")}
++    try:
++        fee = fee_by_country[country]
++    except KeyError as exc:
++        raise UnsupportedShippingCountry(country) from exc
++    return fee.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+diff --git a/tests/test_shipping.py b/tests/test_shipping.py
+new file mode 100644
+index 0000000..5b47b06
+--- /dev/null
++++ b/tests/test_shipping.py
+@@ -0,0 +1,15 @@
++from decimal import Decimal
++
++import pytest
++
++from pricing.shipping import shipping_fee
++
++
++@pytest.mark.l4("C-e25f06d8")
++def test_romanian_order_below_free_shipping_threshold_has_4_99_fee():
++    assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
++
++
++@pytest.mark.l4("C-1b1fbe16")
++def test_german_order_below_free_shipping_threshold_has_9_99_fee():
++    assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")

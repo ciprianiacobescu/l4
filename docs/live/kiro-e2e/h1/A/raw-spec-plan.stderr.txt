@@ -1,0 +1,6 @@
+Using CPython 3.12.12
+Creating virtual environment at: .l4/vendor/.venv
+   Building l4harness @ file:///tmp/scratch/kiro-e2e/h1-author-a1b/.l4/vendor
+      Built l4harness @ file:///tmp/scratch/kiro-e2e/h1-author-a1b/.l4/vendor
+Installed 14 packages in 27ms
+[l4] spec: invalid Task Dependency Graph (wave 0 has no list of task ids); using document order

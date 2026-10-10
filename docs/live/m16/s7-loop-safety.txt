@@ -1,0 +1,38 @@
+# M1.6 live exit: every pipeline of the run (#2787-#2813), read-only API listing 2026-10-05
+# id status source ref sha
+2787 success push main 89fb3ad1
+2788 skipped push l4/openspec/add-bulk-discount 178b3083
+2789 skipped merge_request_event refs/merge-requests/23/head 178b3083
+2790 skipped push l4/openspec/add-bulk-discount b3f9a0c5
+2791 skipped merge_request_event refs/merge-requests/23/head b3f9a0c5
+2792 failed push l4/openspec/add-bulk-discount c3cbd075
+2793 skipped push l4/openspec/add-bulk-discount 34c0acfe
+2794 skipped merge_request_event refs/merge-requests/23/head 34c0acfe
+2795 success push main b98d1d06
+2796 skipped push l4/openspec/add-bulk-discount 2b39997a
+2797 skipped merge_request_event refs/merge-requests/24/head 2b39997a
+2798 skipped push l4/openspec/add-bulk-discount 20f87dc4
+2799 skipped merge_request_event refs/merge-requests/24/head 20f87dc4
+2800 success push l4/openspec/add-bulk-discount f7e75d72
+2801 skipped push l4/openspec/add-bulk-discount 4a611d0d
+2802 skipped merge_request_event refs/merge-requests/24/head 4a611d0d
+2803 skipped push l4/openspec/add-bulk-discount 790d85b0
+2804 skipped merge_request_event refs/merge-requests/24/head 790d85b0
+2805 skipped push l4/openspec/add-bulk-discount 57dc844e
+2806 skipped merge_request_event refs/merge-requests/24/head 57dc844e
+2807 skipped push l4/openspec/add-bulk-discount a8000ac3
+2808 skipped merge_request_event refs/merge-requests/24/head a8000ac3
+2809 success push l4/openspec/add-bulk-discount 21caaeab
+2810 skipped push l4/openspec/add-bulk-discount ac172357
+2811 skipped merge_request_event refs/merge-requests/24/head ac172357
+2812 skipped push l4/openspec/add-bulk-discount ad2000ca
+2813 skipped merge_request_event refs/merge-requests/24/head ad2000ca
+
+# jobs of the non-skipped pipelines (only human pushes: P1 89fb3ad, P2 c3cbd07, P1' b98d1d0, P2' f7e75d7, P3 21caaea)
+2787: l4:failed:5535 test:success:5534
+2792: l4:failed:5537 test:success:5536
+2795: l4:failed:5539 test:success:5538
+2800: l4:failed:5541 test:success:5540
+2809: l4:failed:5543 test:success:5542
+
+skipped: 22 pipelines, all on l4-bot [skip ci] commits, no job

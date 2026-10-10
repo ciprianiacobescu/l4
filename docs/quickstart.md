@@ -1,0 +1,191 @@
+# Quickstart: adopt the harness in a project
+
+One script, then a commit, a push and the forge and runner steps, on a project whose tests and lint are green at HEAD.
+
+## 0. What you need
+
+* A git repository with at least one commit and tests that pass at HEAD (and a committed `uv.lock` for a uv project).
+* `git` >= 2.34 and `curl`. `uv` is installed by the script when it is missing (pinned, user-local).
+* For CI: a GitLab project and a Maintainer token, or a GitHub repository where you can add a secret.
+* A runner host you control, with sudo (section 3).
+
+## 1. Clone and adopt
+
+```bash
+git clone https://github.com/ciprianiacobescu/agent-supervisor.git ~/l4
+cd /path/to/your-project
+~/l4/scripts/adopt.sh
+```
+
+`adopt.sh [--repo DIR] [--ci gitlab|github] [--framework openspec|kiro] [--commit] [--no-install] [--no-gates] [--dry-run]`
+prints one line per step, `[ADOPT-nn] STATUS title - detail`:
+
+| Step | What it does |
+|---|---|
+| ADOPT-01 harness | the checkout the script lives in |
+| ADOPT-02 git | git >= 2.34 |
+| ADOPT-03 repository | the project, with at least one commit; warns about uncommitted changes (doctor checks HEAD only) |
+| ADOPT-04 uv | finds or installs uv (`--no-install` fails instead and prints the installer command) |
+| ADOPT-05 harness environment | `uv sync --frozen` of the harness |
+| ADOPT-06 CI | `--ci`, else github when `origin` contains github.com, else gitlab; no origin and no `.gitlab-ci.yml` asks for `--ci` |
+| ADOPT-07 adopt | `l4 init --vendor` the first time; `l4 upgrade` when `.l4/config.yaml` exists (output passed through) |
+| ADOPT-08 check | `.l4/bin/l4 doctor --adoption` (`--no-gates`: config rows only); a red base exits 3 |
+| ADOPT-09 commit | only with `--commit`: stages exactly the paths the adoption added or changed (compared with a snapshot taken before ADOPT-07), never `git add -A`; files that were already dirty stay unstaged |
+
+`--dry-run` changes nothing (no sync, no doctor, no commit). The script ends with the remaining steps, filled in for
+your project, and `adopt: done (exit N)`; exit 3 means the gate dry run was red: fix what doctor lists and rerun.
+
+A Python project gets its gates proposed from `pyproject.toml`; any other ecosystem gets `# TODO:` gates at the top of
+`.l4/config.yaml` for you to fill in. Run from the project's checkout, which has an `origin` on the forge.
+
+### What `l4 init` and `l4 doctor --adoption` do
+
+**`l4 init`** writes `.l4/` (config, the vendored harness, the CI template, the shim), the `.gitlab-ci.yml` include,
+and extends `.gitignore`. It reads `pyproject.toml` to propose the gates: a `dev` extra gives
+`uv sync --frozen --extra dev`, a `dev` dependency group keeps plain `uv sync --frozen`, ruff in neither leaves
+`lint: []`, and every assumption is a `# TODO:` line at the top of `.l4/config.yaml`. It never writes `--all-extras`
+(an extra such as `embed` may pull torch) and prints the extras it did **not** install:
+
+```
+note: extras not installed by gates.setup: embed, index, otel; a test that needs one fails until you add `--extra <name>` ...
+next: run `.l4/bin/l4 doctor --adoption` ...
+```
+
+`.gitlab-ci.yml` is **created** with the include and a `test` job when it is absent (tagged with `ci.runner_tags`; its
+first line ends the job on a schedule pipeline), gets the include inserted when it has none, and gets one `- local:` item
+when it has a block-list `include:`. A form it cannot edit safely (`include: file.yml`, a flow list, a mapping) is
+refused with exit 2 and nothing written; add the printed snippet yourself and run `l4 init --no-ci-edit`. A
+repository that ignores `.serena/` gets no seed and `memory.enabled: false`, with the `.gitignore` carve-out printed.
+
+**`l4 doctor --adoption`** runs the rows that read only the repository (config, specs, memory, CI tags) and a dry run
+of the gates at HEAD, in a detached worktree (`GATE-001`): setup, build, lint, typecheck, then the test command. It runs
+no environment, provisioning or sandbox row, so it works on a laptop with no agent CLI. It exits 3 on a red base and says
+what to change:
+
+```
+GATE-001  error  fail  HEAD 0123456789; uncommitted changes are not included; gates ran bwrap: lint: fail (...) ...
+  fix: lint `ruff check .` fails on style findings; `ruff check --select F,E9 .` passes: use it in gates.lint ...
+       tests need modules from optional extras: chromadb (extra index); change gates.setup ... to `uv sync --frozen --extra dev --extra index`
+```
+
+Fix what it lists (config edits), run it again, and go on. `--no-gates` runs only the config rows (seconds, no venv).
+A laptop cannot see a failure that exists only on the runner's platform (a module missing on Linux): section 4 ends with a
+check pipeline on the runner for that reason.
+
+## 2. Commit and push
+
+Commit exactly what the adoption wrote: `--commit` does it for you (only the paths the adoption added or changed; your own
+uncommitted edits stay out), or by hand with the list that `l4 init` prints in its `next:` line (`.l4/`, `.gitignore`, the
+CI file, and `conftest.py` and `.serena/project.yml` when it wrote them), then `git commit -m "Adopt the L4 harness"`. On
+GitLab push with `-o ci.skip`: the token does not exist yet, so a first pipeline would fail CI-001.
+
+```bash
+git push -o ci.skip -u origin main      # GitHub: git push -u origin main
+```
+
+If the project is not on the server yet, create it (GitLab's push-to-create makes a private project when your namespace
+allows it; otherwise one click or API call) and `git remote add origin <url>` first.
+
+## 3. Prepare the runner
+
+`l4 setup gitlab` fails when no online runner carries `ci.runner_tags`, and its check pipeline runs on the runner, so the
+runner comes first. You need a host you control, with sudo.
+
+### Get a runner
+
+**GitLab.** Install `gitlab-runner` from GitLab's official packages
+(https://docs.gitlab.com/runner/install/linux-repository/). In the project create a **project** runner (Settings > CI/CD >
+Runners > New project runner) with tags = the config's `ci.runner_tags` (default `agentic`) and "Run untagged jobs" off.
+Then on the host:
+
+```bash
+sudo gitlab-runner register --non-interactive --url https://gitlab.example.com --token <glrt-... runner authentication token> --executor shell
+```
+
+A project runner is preferred: `l4 setup gitlab` WARNs on instance runners, because any tagged job of the instance runs
+next to the runner's agent logins.
+
+**GitHub.** Register a self-hosted runner (repository Settings > Actions > Runners > New self-hosted runner) with the
+labels in `runs-on` of `.github/workflows/l4.yml` (`["self-hosted", <ci.runner_tags>]`), and run `prereqs.sh` below with
+`RUNNER_USER=<the user the runner service runs as>`.
+
+### Prerequisites and logins
+
+As an admin with sudo, from a clone of the harness on the runner host:
+
+```bash
+bash scripts/runner/prereqs.sh --check
+bash scripts/runner/prereqs.sh --apply        # RUNNER_USER=<user> for a runner user other than gitlab-runner
+```
+
+Then log in the agent CLIs AS the runner user (`prereqs.sh` PRQ-15 prints the exact steps). Never copy CLI credentials
+between users or machines: a second copy of a refresh token kills the first. The check pipeline of section 4 (GitLab:
+`l4 setup gitlab` triggers it; `l4 ci watch --project group/name --ref main` follows it) then verifies the runner.
+
+## 4. Connect the forge
+
+### GitLab
+
+```bash
+GITLAB_TOKEN=<maintainer PAT> .l4/bin/l4 setup gitlab --project group/name --watch
+```
+
+`l4 setup gitlab` reads the project, then, one row per fact and never a value:
+
+```
+OK    config no .l4/config.yaml: schema defaults (...)        # only when run without a config
+OK    project group/name (id 119) private, default branch main
+WARN  runner #12 (instance_type, online) is an instance runner on a private project: any project of this GitLab whose jobs carry these tags can run on it ...
+OK    .gitlab-ci.yml on main includes .l4/ci/l4.gitlab-ci.yml; the project's own jobs: test (they run on every scheduled pipeline too)
+NEW   token l4-bot id=63 scopes=api,write_repository level=30 expires=2027-10-05
+SET   variable L4_FORGE_TOKEN (environment scope l4, masked, not protected, raw)
+OK    new token can read project group/name as the bot user
+NEW   schedule l4 sweep (*/30 * * * * UTC on main)
+OK    pipeline #1234 triggered on main with L4_ADOPTION_CHECK=1: https://...
+... the watcher's lines, then the job's trace if it failed ...
+summary: 5 ok, 2 new, 1 set, 0 kept, 1 warn, 0 fail -> exit 0
+```
+
+* A `WARN` row names every instance (shared) runner the `l4` job can take, whatever the project's visibility (a
+  public or internal project says so in the row): any tagged job of the instance runs next to the runner's agent logins.
+* `FAIL` rows make the exit code 3: no online runner carries `ci.runner_tags` (the `l4` job would stay pending), only
+  instance runners while shared runners are off, a bot token that does not verify, or a red check pipeline.
+* A second run with the same arguments sends only reads (and the check pipeline unless `--no-pipeline`); `--dry-run`
+  sends only reads and says what it would change.
+* `--secret NAME=ENVVAR` (repeatable) copies a secret from your environment into a masked variable of the `l4`
+  environment; `--rotate` makes a new token (add `--revoke-old` to revoke the older ones once the new one verified);
+  `--cron EXPR`, `--no-schedule` and `--no-pipeline` change or skip the schedule and the check pipeline.
+* The check pipeline runs `doctor --ci --fix --adoption` on the runner (the CI template adds `--adoption` when the
+  pipeline variable `L4_ADOPTION_CHECK` is non-empty), then `plan`, which says `nothing to do`. `--watch` follows it; so
+  does `l4 ci watch --project group/name --ref main [--tail 60]` at any time.
+* Exit 1 is an HTTP error (the rows printed before it say what was done): a 403 means the credential is not a
+  Maintainer's; a 401 means it was refused.
+
+### GitHub
+
+`l4 setup` automates GitLab only; on GitHub these steps are manual:
+
+1. Add a repository secret `L4_FORGE_TOKEN` (the name `forge.token_env` sets) holding a fine-grained token for this
+   repository with contents, pull requests, commit statuses and actions write access.
+2. Run the `l4` workflow by hand (Actions > l4 > Run workflow) and read its log.
+
+## 5. First run
+
+The `l4` job starts on a merge to the base branch, on a push to a unit branch, on the schedule and by hand. It runs
+`doctor`, `plan --sweep` and `run`; with no unfinished spec task it says `nothing to do`. Add a spec (OpenSpec change or
+Kiro spec) with unchecked tasks and push it: the job implements them test-first on a unit branch and opens an MR/PR.
+Questions for you appear in `questions.md` next to the spec: answer in the file and push. `.l4/bin/l4 status` (also the
+last step of the job) lists each unit with its state and what it waits for.
+
+## Conditional extras
+
+| When | Extra step |
+|---|---|
+| the repository was never on the server | `git remote add origin <url>` before the push of section 2 |
+| ADOPT-08 (`doctor --adoption`) or the check pipeline is red | the config edits its fix column names (an extra, `lint: []`, a deselect) |
+| GitLab does not create the project on push | create it first (one click or API call) |
+| the schedule on a project with its own jobs | those jobs also run every 30 minutes: `--cron '0 * * * *'`, or `--no-schedule` |
+
+A parked unit whose agent login is dead is probed again on every run, so while the login stays dead each sweep leaves one
+`chore(<unit>): ledger [skip ci]` commit on the unit branch and refreshes the "Waiting for capacity" note on the MR
+(it names the login steps); a backoff is deferred.

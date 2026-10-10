@@ -1,0 +1,11 @@
+{
+ "type": "error",
+ "timestamp": 1791038436079,
+ "sessionID": "ses_efdca5a51ffeISaPliqBhgCLFs",
+ "error": {
+  "name": "UnknownError",
+  "data": {
+   "message": "Token refresh failed: 401"
+  }
+ }
+}

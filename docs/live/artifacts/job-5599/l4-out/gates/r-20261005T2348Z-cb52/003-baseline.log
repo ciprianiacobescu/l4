@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-return-policy
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 19 items
+
+tests/test_cart.py ...........                                           [ 57%]
+tests/test_discounts.py ....                                             [ 78%]
+tests/test_stock.py ..                                                   [ 89%]
+tests/test_web_page.py ..                                                [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-return-policy/.l4-out/junit.xml -
+============================== 19 passed in 0.06s ==============================

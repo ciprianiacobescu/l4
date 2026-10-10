@@ -1,0 +1,273 @@
+"""Versioned prompt templates and `render_prompt` (SPEC L4-IMP-004).
+
+Sections, in order: harness contract; unit context; the task and the unit's criteria; answered questions and lessons
+(`data_blocks`: answers from `l4.clarifier.inject`; lessons are M1); the phase; the gate command; the output
+contract. Everything that comes from the repository or from an agent is placed inside an `<l4:data>` block whose
+closing tag it cannot forge.
+M1: overrides from `.l4/prompts/` of the base branch (CFG-004), the single/stuck/repair templates, `trim_context`
+with a real tokenizer estimate, lessons as `data_blocks`.
+"""
+
+import hashlib
+import json
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
+from importlib import resources
+from pathlib import Path
+from typing import Any, Literal
+
+from l4.fsutil import UnsafeFile, read_regular_file
+from l4.implementer.result import RESULT_SCHEMA, TraceRules, trace_rules
+from l4.specs.base import Criterion
+
+Role = Literal["red", "green", "single"]
+CHARS_PER_TOKEN = 4  # [I] a rough estimate; the budget only bounds the prompt, it does not meter it
+MAX_SOURCE_BYTES = 256 * 1024
+_TAG = re.compile(r"<\s*(/?)\s*l4\s*:\s*data", re.IGNORECASE)
+_ADAPTER_LINE = re.compile(r"^@([a-z0-9-]+): (.*)$")
+_VERSION = re.compile(r"^version: (\d+)\n\n")
+
+
+@dataclass(frozen=True)
+class Template:
+    name: str
+    version: int
+    body: str
+
+
+@dataclass(frozen=True)
+class PromptContext:
+    unit_id: str
+    adapter: str
+    task_key: str
+    task_title: str
+    sources: tuple[tuple[str, str], ...]  # (path relative to the unit directory, text)
+    criteria: tuple[Criterion, ...]
+    gate_command: str
+    result_path: Path | None = None  # only for an adapter that writes its result to a file
+    previous_failure: str | None = None
+    # (heading, blocks): answered questions, lessons. The supplier wraps its text in `<l4:data>` blocks itself.
+    data_blocks: tuple[tuple[str, str], ...] = ()
+    context_budget_tokens: int = 24000
+    static_gate_commands: tuple[str, ...] = ()  # lint and typecheck: a step that makes them fail is rejected
+    run_ledger: str | None = None  # the run's ledger, repo-relative: it shows as modified in `git status` (expected)
+    e2e_dir: str | None = None  # where the browser tests of `gates.e2e` live; None when the project has no e2e gate
+    e2e_base_url_env: str = "L4_E2E_BASE_URL"
+    unfrozen: tuple[tuple[str, str], ...] = ()  # green only: (frozen test path, question id) that a human answer freed
+    adds_tests: bool = False  # single only: the chore adds tests (a coverage hold's task): `single_tests.md`
+    task_links: tuple[str, ...] = ()  # a Kiro leaf's `_Requirements: 1.1, 2_` refs; () for OpenSpec (kiro-e2e K20)
+    # How a test names the criteria it checks (`{trace_rule}` in the templates, L4-CRT-002). None: decided from
+    # `gate_command` by `trace_rules` (the pytest marker for a pytest gate, else the id in the test name).
+    trace_rule: str | None = None
+
+
+@dataclass(frozen=True)
+class RenderedPrompt:
+    text: str
+    sha256: str
+    template_version: str
+    sources: tuple[str, ...]
+
+
+def load_template(name: str) -> Template:
+    text = resources.files("l4.implementer").joinpath("templates", f"{name}.md").read_text(encoding="utf-8")
+    match = _VERSION.match(text)
+    if match is None:
+        raise ValueError(f"template {name} has no version line")
+    return Template(name, int(match.group(1)), text[match.end() :])
+
+
+def defuse(text: str) -> str:
+    """Rewrite every `<l4:data` and `</l4:data` in text, so the text cannot open or end a block (SPEC L4-SEC-003)."""
+    return _TAG.sub(lambda m: f"<\\{m.group(1)}l4:data", text)
+
+
+def _require_wrapped(heading: str, text: str) -> None:
+    """A supplier's blocks must be `<l4:data>` blocks that open and close in turn, with nothing outside them: text
+    that was not wrapped and defused would reach the agent as instructions."""
+    tags = [m.group(1) == "/" for m in _TAG.finditer(text)]
+    opens_first = text.lstrip().lower().startswith("<l4:data")
+    if not (opens_first and text.rstrip().endswith("</l4:data>") and tags == [i % 2 == 1 for i in range(len(tags))]):
+        raise ValueError(f"the {heading!r} data blocks are not wrapped in <l4:data> blocks")
+
+
+def data_block(source: str, text: str) -> str:
+    """`<l4:data source="...">` around text that must stay information."""
+    safe = defuse(text)
+    return f'<l4:data source="{source.replace(chr(34), chr(39))}">\n{safe}\n</l4:data>'
+
+
+def _contract(template: Template, ctx: PromptContext) -> str:
+    kept = []
+    for line in template.body.rstrip("\n").splitlines():
+        if "{ledger}" in line and ctx.run_ledger is None:
+            continue
+        match = _ADAPTER_LINE.match(line)
+        if match is None:
+            kept.append(line)
+        elif match.group(1) == ctx.adapter:
+            kept.append(f"- {match.group(2)}")
+    rules = _trace_rules(ctx)
+    text = "\n".join(kept).replace("{gate}", ctx.gate_command).replace("{ledger}", ctx.run_ledger or "")
+    return text.replace("{trace_rule}", rules.rule).replace("{trace_stub}", rules.stub)
+
+
+def _trace_rules(ctx: PromptContext) -> TraceRules:
+    """The trace wording for the unit's test gate; a `trace_rule` set on the context replaces the contract sentence."""
+    rules = trace_rules(ctx.gate_command)
+    return replace(rules, rule=ctx.trace_rule) if ctx.trace_rule is not None else rules
+
+
+def _context(ctx: PromptContext) -> str:
+    budget = max(ctx.context_budget_tokens, 1) * CHARS_PER_TOKEN
+    blocks = []
+    for path, text in ctx.sources:
+        if budget <= 0:
+            blocks.append(data_block(path, "[truncated: omitted to fit the context budget]"))
+            continue
+        if len(text) > budget:
+            text = f"{text[:budget]}\n[truncated: {len(text) - budget} characters omitted]"
+        budget -= len(text)
+        blocks.append(data_block(path, text))
+    return "# Unit context\n" + "\n".join(blocks)
+
+
+def result_values_line(schema: Mapping[str, Any], phase: str) -> str:
+    """The one line next to the phase heading that names the values the result's `status` and `phase` can take
+    (SCN-IMP-M1). It is built from the result schema, so an edit of the schema's enum reaches the prompt. The agent's
+    own text never enters it. Before it, the allowed values sat only in the schema at the end of the prompt, and a
+    model that had just read `# Phase: RED` wrote `"status": "red"`."""
+    if phase not in schema["properties"]["phase"]["enum"]:  # never a value the schema would reject
+        raise ValueError(f"no result values for phase {phase!r}")
+    statuses = " | ".join(str(v) for v in schema["properties"]["status"]["enum"])
+    return (
+        f"result values: status is one of {statuses} (the outcome of this step, never the phase name); "
+        f'phase is "{phase}".'
+    )
+
+
+def _linked(criteria: Sequence[Criterion], links: Sequence[str]) -> list[Criterion]:
+    """The criteria a Kiro leaf's `_Requirements:_` refs name: `1.1` names `Req 1.1`, a bare `1` every `Req 1.*`."""
+    return [
+        c for c in criteria
+        if any(c.alias == f"Req {ref}" or c.alias.startswith(f"Req {ref}.") for ref in links)
+    ]  # fmt: skip
+
+
+def _criteria_section(ctx: PromptContext) -> tuple[str, str]:
+    """(the task block's text, the criteria section). A Kiro leaf shows its `_Requirements:_` line and gets only the
+    criteria it names (kiro-e2e K20); a leaf whose refs name none, and every OpenSpec task, gets the whole list."""
+    linked = _linked(ctx.criteria, ctx.task_links)
+    if not ctx.task_links:
+        title, shown = ctx.task_title, ctx.criteria
+        lead = (
+            "OpenSpec does not link tasks to scenarios, so all of them are listed; cover those that this task's "
+            "requirement names."
+        )
+    elif linked:
+        title, shown = f"{ctx.task_title}\n_Requirements: {', '.join(ctx.task_links)}_", tuple(linked)
+        lead = (
+            "This task's `_Requirements:_` line names these criteria; cover these. The unit's other criteria belong "
+            "to its other tasks: do not test them here."
+        )
+    else:
+        title, shown = f"{ctx.task_title}\n_Requirements: {', '.join(ctx.task_links)}_", ctx.criteria
+        lead = "This task's `_Requirements:_` line names none of the criteria below, so all of them are listed."
+    listing = "\n".join(f"- {c.id}  {c.alias}" for c in shown) or "(the unit has no scenarios)"
+    return title, f"# Criteria of this unit\n{lead}\n" + data_block("criteria", listing)
+
+
+def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
+    if role not in ("red", "green", "single"):
+        raise ValueError(f"no prompt template for role {role!r}")
+    contract = load_template("contract")
+    phase = load_template("single_tests" if role == "single" and ctx.adds_tests else role)
+    title, criteria = _criteria_section(ctx)
+    parts = [
+        _contract(contract, ctx),
+        _context(ctx),
+        f"# Task {ctx.task_key}\n" + data_block("tasks.md", title),
+        criteria,
+    ]
+    for heading, text in ctx.data_blocks:
+        _require_wrapped(heading, text)
+        parts.append(f"# {heading.capitalize()}\n{text}")
+    if ctx.previous_failure:
+        parts.append(
+            "# Your previous attempt was rejected\nThe harness rejected it for the reason below; do not repeat it.\n"
+            + data_block("previous attempt", ctx.previous_failure)
+        )
+    if role == "green" and ctx.unfrozen:
+        by = ", ".join(sorted({q for _, q in ctx.unfrozen}))
+        listing = "\n".join(f"- {path} ({question})" for path, question in ctx.unfrozen)
+        parts.append(
+            f"# Tests unfrozen by a human answer\nThe human answer to {by} names these frozen test files, so you may "
+            "change them as the answer says; every other test stays frozen.\n" + data_block("unfrozen tests", listing)
+        )
+    rules = _trace_rules(ctx)
+    phase_text = phase.body.strip("\n").replace("{result_values}", result_values_line(RESULT_SCHEMA, role))
+    fills = (("{trace_rule}", rules.rule), ("{trace_also}", rules.also), ("{trace_form}", rules.form))
+    for placeholder, value in fills:
+        phase_text = phase_text.replace(placeholder, value)
+    parts.append(phase_text)
+    gate = (
+        f"# Gate command\nRun tests only with `{ctx.gate_command}` (the network is off, and `uv run` cannot write its "
+        "cache here). The harness installed the dependencies before this step."
+    )
+    if ctx.static_gate_commands:
+        listed = ", ".join(f"`{c}`" for c in ctx.static_gate_commands)
+        if role == "red":
+            gate += (
+                f"\nThe harness also runs {listed} after your step. Your new tests (and any stub) must pass them: "
+                "a lint or type error in a test file rejects this attempt, and those files are frozen afterwards."
+            )
+        else:
+            gate += f"\nThe harness also runs {listed} after your step and rejects the task while they fail."
+    if role == "red" and ctx.e2e_dir:
+        # an e2e directory under `tests/` (`tests/e2e`) is not contradicted by "never under `tests/`"
+        elsewhere = "and nowhere else" if f"{ctx.e2e_dir}/".startswith("tests/") else "never under `tests/`"
+        gate += (
+            f"\nBrowser (Playwright) tests are not run by that command: put each one in `{ctx.e2e_dir}/` (for example "
+            f"`{ctx.e2e_dir}/test_<name>.py`), {elsewhere}, where the unit gate would run it without a "
+            f"server and reject the attempt. The harness serves the app for `gates.e2e` and gives its address in "
+            f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other."
+        )
+    parts.append(gate)
+    fields = (
+        f'phase "{role}", task_ids ["{ctx.task_key}"], criteria_ids = the criterion ids your work traces, '
+        "tests_added = the pytest node ids you added, suppressions = every new `# noqa` or `# type: ignore`, "
+        "files_changed; use null for anything you have nothing for."
+    )
+    if ctx.result_path is None:  # a native adapter: the CLI enforces the schema
+        output = f"# Output\nYour final message is the result JSON object (schema enforced): {fields}"
+    else:  # prompt contract (SPEC 8.1): nothing enforces the schema, so the prompt carries it (live job 5465)
+        schema = json.dumps(RESULT_SCHEMA, separators=(",", ":"), sort_keys=True)
+        output = (
+            f"# Output\nYour final message is the result JSON object: {fields}\n"
+            f"Write your result object to `{ctx.result_path}`.\n"
+            f"It must have status and summary (both required) and conform to this JSON Schema:\n{schema}"
+        )
+    parts.append(output)
+    text = "\n\n".join(parts) + "\n"
+    version = f"{contract.name}@{contract.version}+{phase.name}@{phase.version}"
+    return RenderedPrompt(
+        text, hashlib.sha256(text.encode("utf-8")).hexdigest(), version, tuple(p for p, _ in ctx.sources)
+    )
+
+
+def collect_sources(unit_dir: Path) -> tuple[tuple[str, str], ...]:
+    """proposal.md, design.md, a Kiro unit's requirements.md and bugfix.md, and the spec deltas of the unit, in that
+    order. A symlink, a non-regular file or an oversized file is skipped: the path is repository content."""
+    candidates = [unit_dir / name for name in ("proposal.md", "design.md", "requirements.md", "bugfix.md")]
+    specs = unit_dir / "specs"
+    if specs.is_dir() and not specs.is_symlink():
+        candidates += [d / "spec.md" for d in sorted(specs.iterdir(), key=lambda p: p.name) if d.is_dir()]
+    found = []
+    for path in candidates:
+        try:
+            data = read_regular_file(path, limit=MAX_SOURCE_BYTES)
+        except (UnsafeFile, OSError):
+            continue
+        found.append((path.relative_to(unit_dir).as_posix(), data.decode("utf-8", errors="replace")))
+    return tuple(found)

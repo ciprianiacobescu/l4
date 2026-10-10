@@ -1,0 +1,26 @@
+{
+  "schema": "l4/simulate@1",
+  "scenarios": [
+    {
+      "name": "happy-openspec",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "5db7f8afd59425e42da014067780d78813cf9e49cc2f5dd64e299bad392feb1f"
+    },
+    {
+      "name": "happy-kiro",
+      "status": "pass",
+      "driver": "orchestrator",
+      "exit_code": 0,
+      "final_phase": "in_review",
+      "events_sha256": "d29738cc19ac2c8c5757dad4e9673b383fe70538f693b1c3cd9409160fe5b7ad"
+    }
+  ],
+  "summary": {
+    "pass": 2,
+    "fail": 0,
+    "pending": 0
+  }
+}

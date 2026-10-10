@@ -1,0 +1,22 @@
+┌  Credentials [90m~/.local/share/opencode/auth.json
+│
+●  ollama [90mapi
+│
+●  OpenAI [90moauth
+│
+●  ollama2 [90mapi
+│
+●  Google [90mapi
+│
+●  OpenRouter [90mapi
+│
+●  localproxy1 [90mapi
+│
+●  Anthropic [90moauth
+│
+●  runpod1 [90mapi
+│
+●  OpenCode Go [90mapi
+│
+└  9 credentials
+

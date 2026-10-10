@@ -1,0 +1,31 @@
+{
+  "2": {
+    "branch_head": "0fb24dd2fc1347bcbb3b8d5b1b055fcc8e74b9dc",
+    "dry_run_decision": "kiro:add-loyalty-points  phase=none  next=implement  task=2.1 (red)",
+    "fix1_applied": true,
+    "fix2_applied": false,
+    "job": 5473,
+    "pipeline": 2645,
+    "plan_exit": 10
+  },
+  "3": {
+    "c1": "b0b384ddaf81a69cd4754150af7ccfaf36c6f21e",
+    "duration": 207.814994,
+    "head": "940c6ff5ebdcf0849eb978a8692a6c7d84a19ca1",
+    "job": 5475,
+    "l4_pipeline": 2646,
+    "mr": 13,
+    "pipeline": 2646,
+    "started": [
+      "2.1",
+      "1.1"
+    ]
+  },
+  "4": {
+    "predicted": "kiro:add-loyalty-points  phase=none  next=implement  task=2.1 (red)",
+    "real": [
+      "2.1",
+      "red"
+    ]
+  }
+}

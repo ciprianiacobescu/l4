@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": "2026-10-03-add-farewell",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "ERROR",
+          "path": "tasks.md",
+          "message": "3 incomplete tasks (2/5 completed)"
+        }
+      ],
+      "durationMs": 6
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "byType": {
+      "change": {
+        "items": 1,
+        "passed": 0,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

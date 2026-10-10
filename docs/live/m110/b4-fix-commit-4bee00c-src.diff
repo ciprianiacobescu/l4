@@ -1,0 +1,26 @@
+commit 4bee00c16f66aec90c0bcaa4bd2ba68a7f133aaa
+Author: l4-bot <l4-bot@users.noreply.invalid>
+Date:   Tue Oct 6 08:05:47 2026 +0300
+
+    fix(add-pickup-notice-fix-1): 1.1 repository CI failed: test (F-2aa04fcb) [skip ci]
+    
+    L4-Unit: openspec:add-pickup-notice-fix-1
+    L4-Run: r-20261006T0505Z-0bdf
+    L4-Iteration: 2
+    L4-Phase: implementing
+    L4-Task: 1.1
+    L4-TDD: exempt
+    L4-Agent: codex/gpt-6-luna
+    L4-Step: 1.1/single/1
+
+diff --git a/src/pricing/pickup.py b/src/pricing/pickup.py
+index 0a02041..420e5d1 100644
+--- a/src/pricing/pickup.py
++++ b/src/pricing/pickup.py
+@@ -1,2 +1,5 @@
+ def pickup_notice() -> str:
+-    return "Pickup orders wait at the shop counter for seven days; bring the order number and a photo ID."
++    return (
++        "Pickup orders wait at the shop counter for seven days; "
++        "bring the order number and a photo ID."
++    )

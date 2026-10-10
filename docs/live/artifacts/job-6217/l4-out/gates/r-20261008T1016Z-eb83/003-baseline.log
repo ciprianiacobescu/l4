@@ -1,0 +1,113 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-small-order-surcharge
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 43 items
+
+tests/test_bulk_discount.py .........                                    [ 20%]
+tests/test_bulk_savings.py .....                                         [ 32%]
+tests/test_cart.py ............                                          [ 60%]
+tests/test_cart_surcharge.py FFFF                                        [ 69%]
+tests/test_discounts.py ....                                             [ 79%]
+tests/test_stock.py ..                                                   [ 83%]
+tests/test_surcharge.py .....                                            [ 95%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_ TestCartSmallOrderSurcharge.test_non_empty_cart_below_threshold_returns_2_00 _
+
+self = <test_cart_surcharge.TestCartSmallOrderSurcharge object at 0x75237ae85810>
+
+    @pytest.mark.l4("C-092aad11")
+    def test_non_empty_cart_below_threshold_returns_2_00(self):
+        """WHEN cart is non-empty with subtotal below 20.00 THEN return 2.00 surcharge."""
+        cart = Cart([LineItem("widget", Decimal("5.00"), 1)])
+>       result = cart.small_order_surcharge()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_cart_surcharge.py:17: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='widget', unit_price=Decimal('5.00'), quantity=1)])
+
+    def small_order_surcharge(self) -> Decimal:
+        """Return the small-order surcharge for this cart."""
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:70: NotImplementedError
+__ TestCartSmallOrderSurcharge.test_non_empty_cart_at_threshold_returns_0_00 ___
+
+self = <test_cart_surcharge.TestCartSmallOrderSurcharge object at 0x75237ae85950>
+
+    @pytest.mark.l4("C-092aad11")
+    def test_non_empty_cart_at_threshold_returns_0_00(self):
+        """WHEN cart is non-empty with subtotal at 20.00 THEN return 0.00 surcharge."""
+        cart = Cart([LineItem("widget", Decimal("20.00"), 1)])
+>       result = cart.small_order_surcharge()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_cart_surcharge.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='widget', unit_price=Decimal('20.00'), quantity=1)])
+
+    def small_order_surcharge(self) -> Decimal:
+        """Return the small-order surcharge for this cart."""
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:70: NotImplementedError
+_ TestCartSmallOrderSurcharge.test_non_empty_cart_above_threshold_returns_0_00 _
+
+self = <test_cart_surcharge.TestCartSmallOrderSurcharge object at 0x75237ae409d0>
+
+    @pytest.mark.l4("C-092aad11")
+    def test_non_empty_cart_above_threshold_returns_0_00(self):
+        """WHEN cart is non-empty with subtotal above 20.00 THEN return 0.00 surcharge."""
+        cart = Cart([LineItem("widget", Decimal("35.00"), 1)])
+>       result = cart.small_order_surcharge()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_cart_surcharge.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[LineItem(sku='widget', unit_price=Decimal('35.00'), quantity=1)])
+
+    def small_order_surcharge(self) -> Decimal:
+        """Return the small-order surcharge for this cart."""
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:70: NotImplementedError
+___________ TestCartSmallOrderSurcharge.test_empty_cart_returns_0_00 ___________
+
+self = <test_cart_surcharge.TestCartSmallOrderSurcharge object at 0x75237ae40b00>
+
+    @pytest.mark.l4("C-d79cc434")
+    def test_empty_cart_returns_0_00(self):
+        """WHEN cart is empty THEN return 0.00 surcharge."""
+        cart = Cart()
+>       result = cart.small_order_surcharge()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_cart_surcharge.py:38: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = Cart(items=[])
+
+    def small_order_surcharge(self) -> Decimal:
+        """Return the small-order surcharge for this cart."""
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/cart.py:70: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-small-order-surcharge/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart_surcharge.py::TestCartSmallOrderSurcharge::test_non_empty_cart_below_threshold_returns_2_00
+FAILED tests/test_cart_surcharge.py::TestCartSmallOrderSurcharge::test_non_empty_cart_at_threshold_returns_0_00
+FAILED tests/test_cart_surcharge.py::TestCartSmallOrderSurcharge::test_non_empty_cart_above_threshold_returns_0_00
+FAILED tests/test_cart_surcharge.py::TestCartSmallOrderSurcharge::test_empty_cart_returns_0_00
+========================= 4 failed, 39 passed in 0.12s =========================

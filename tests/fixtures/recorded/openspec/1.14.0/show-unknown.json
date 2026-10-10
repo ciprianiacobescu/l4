@@ -1,0 +1,9 @@
+{
+  "status": [
+    {
+      "severity": "error",
+      "code": "show_error",
+      "message": "Change \"nope\" not found at {{REPO}}/openspec/changes/nope/proposal.md"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "schema": "l4/evidence@1",
+  "holds": [],
+  "items": {},
+  "scope": {
+    "declared": [
+      "src/inventory/reorder.py",
+      "tests",
+      "module inventory"
+    ],
+    "skipped": false,
+    "note": "",
+    "holds": [],
+    "files": [
+      {
+        "path": "openspec/changes/add-reorder-quantity/.l4/ledger/r-20261006T2025Z-d345.jsonl",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "openspec/changes/add-reorder-quantity/tasks.md",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "src/inventory/reorder.py",
+        "module": "inventory",
+        "kind": "code",
+        "label": "relevant",
+        "reason": "named in the spec"
+      },
+      {
+        "path": "tests/test_reorder.py",
+        "module": null,
+        "kind": "test",
+        "label": "relevant",
+        "reason": "new test file"
+      }
+    ]
+  },
+  "diff_coverage": {
+    "status": "ok",
+    "reason": "",
+    "percent": 100.0,
+    "unmeasured_files": [],
+    "functions": [
+      {
+        "path": "src/inventory/reorder.py",
+        "qualname": "reorder_quantity",
+        "status": "covered",
+        "executable": 1,
+        "executed": 1,
+        "tests": [
+          "test_reorder.test_stock_above_target_is_not_ordered",
+          "test_reorder.test_stock_below_target_is_topped_up"
+        ],
+        "label": true
+      }
+    ]
+  },
+  "tests_ran": {
+    "tests_ok": true,
+    "summary": {
+      "total": 24,
+      "passed": 24,
+      "failed": 0,
+      "errored": 0,
+      "skipped": 0,
+      "new": 2,
+      "new_passed": 2,
+      "skipped_unchanged": []
+    },
+    "findings": []
+  }
+}

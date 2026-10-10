@@ -1,0 +1,101 @@
+{
+  "changeName": "chore-tasks-only",
+  "schemaName": "spec-driven",
+  "planningHome": {
+    "kind": "repo",
+    "root": "{{REPO}}",
+    "changesDir": "{{REPO}}/openspec/changes",
+    "defaultSchema": "spec-driven"
+  },
+  "changeRoot": "{{REPO}}/openspec/changes/chore-tasks-only",
+  "artifactPaths": {
+    "proposal": {
+      "outputPath": "proposal.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/chore-tasks-only/proposal.md",
+      "existingOutputPaths": []
+    },
+    "specs": {
+      "outputPath": "specs/**/*.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/chore-tasks-only/specs/**/*.md",
+      "existingOutputPaths": []
+    },
+    "design": {
+      "outputPath": "design.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/chore-tasks-only/design.md",
+      "existingOutputPaths": []
+    },
+    "tasks": {
+      "outputPath": "tasks.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/chore-tasks-only/tasks.md",
+      "existingOutputPaths": [
+        "{{REPO}}/openspec/changes/chore-tasks-only/tasks.md"
+      ]
+    }
+  },
+  "isPlanningComplete": false,
+  "isComplete": false,
+  "applyRequires": [
+    "tasks"
+  ],
+  "nextSteps": [
+    "Run openspec instructions proposal --change \"chore-tasks-only\" --json before writing that artifact."
+  ],
+  "actionContext": {
+    "mode": "repo-local",
+    "sourceOfTruth": "repo",
+    "planningArtifacts": [
+      "proposal",
+      "specs",
+      "design",
+      "tasks"
+    ],
+    "linkedContext": [],
+    "allowedEditRoots": [
+      "{{REPO}}"
+    ],
+    "requiresAffectedAreaSelection": false,
+    "constraints": [
+      "Repo-local change artifacts and implementation edits are scoped to this project."
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "proposal",
+      "outputPath": "proposal.md",
+      "status": "ready",
+      "requires": []
+    },
+    {
+      "id": "specs",
+      "outputPath": "specs/**/*.md",
+      "status": "skipped",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "design",
+      "outputPath": "design.md",
+      "status": "blocked",
+      "requires": [
+        "proposal"
+      ],
+      "missingDeps": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "tasks",
+      "outputPath": "tasks.md",
+      "status": "done",
+      "requires": [
+        "specs",
+        "design"
+      ]
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

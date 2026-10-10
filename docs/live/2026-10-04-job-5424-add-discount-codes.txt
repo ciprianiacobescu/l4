@@ -1,0 +1,60 @@
+Running with gitlab-runner 19.4.1 (3c39fceb)
+  on l4-runner XXXXXXXXX, system ID: s_000000000001
+  UUID: not supported with this GitLab version
+section_start:1791075908:prepare_executor
+Preparing the "shell" executor
+Using Shell (bash) executor...
+section_end:1791075908:prepare_executor
+section_start:1791075908:prepare_script
+Preparing environment
+Running on gitlab-runner...
+section_end:1791075908:prepare_script
+section_start:1791075908:get_sources
+Getting source from Git repository
+Gitaly correlation ID: 01M4272Y8CHG557HJ55RQ7X09T
+Fetching changes...
+Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+Checking out e1db758c as detached HEAD (ref is main)...
+Skipping Git submodules setup
+section_end:1791075909:get_sources
+section_start:1791075909:step_script
+Executing "step_script" stage of the job script
+$ .l4/bin/l4 doctor || .l4/bin/l4 ci map-exit $?
+Using CPython 3.12.15
+Creating virtual environment at: .l4/vendor/.venv
+Installed 14 packages in 13ms
+id       severity  status  message                                                                               fix
+-------  --------  ------  ------------------------------------------------------------------------------------
+CI-001   error     pass    the runner rewrites the origin URL; pushes go to oauth2@ with L4_FORGE_TOKEN instead  -
+CFG-002  error     pass    role chains and profiles are consistent                                               -
+ENV-001  error     pass    Python 3.12.15, uv present                                                            -
+ENV-002  error     pass    git 2.34                                                                              -
+ENV-003  error     pass    OpenSpec 1.14.0 via /usr/bin/node                                                     -
+
+cache: /home/gitlab-runner/.cache/l4
+home:  /home/gitlab-runner/.local/share/l4
+$ .l4/bin/l4 plan || .l4/bin/l4 ci map-exit $?
+UNIT                         PHASE  TASKS  NEXT       REASON
+openspec:add-discount-codes  -      0/2    implement  pending tasks
+openspec:add-vat             -      0/2    implement  pending tasks
+$ .l4/bin/l4 run --unit "$L4_UNIT" || .l4/bin/l4 ci map-exit $?
+section_end:1791076144:step_script
+section_start:1791076144:after_script
+Running after_script
+Running after script...
+$ .l4/bin/l4 status
+UNIT                         PHASE      ITER  TASKS  OPEN-Q  VERDICT  SOURCE
+openspec:add-discount-codes  in_review  1     2/2    -       PASS     branch
+openspec:add-vat             -          0     0/2    -       -        worktree
+section_end:1791076144:after_script
+section_start:1791076144:upload_artifacts_on_success
+Uploading artifacts for successful job
+Uploading artifacts...
+Runtime platform                                    arch=amd64 os=linux pid=45921 revision=3c39fceb version=19.4.1
+.l4-out/: found 41 matching artifact files and directories 
+Uploading artifacts as "archive" to coordinator... 201 Created  correlation_id=01M427A5TP8NZPXRYC3B5YNR1X id=5424 status=201 token=<redacted>
+section_end:1791076145:upload_artifacts_on_success
+section_start:1791076145:cleanup_file_variables
+Cleaning up project directory and file based variables
+section_end:1791076145:cleanup_file_variables
+Job succeeded

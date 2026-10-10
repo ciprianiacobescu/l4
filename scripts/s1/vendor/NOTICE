@@ -1,0 +1,5 @@
+laya_finetune_mps.py is copied unmodified from https://github.com/NandhaKishorM/laya
+(notebooks/laya_finetune_typed_decisions_mps.py at commit 2e4d9c87e8b1621deb344eac7de5c7258f32f849),
+which is licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+Copyright the Laya authors. It is not edited here: laya_tune.py imports it and wraps it.
+Its SHA-256 is pinned in SHA256 and checked by check_vendor.py.

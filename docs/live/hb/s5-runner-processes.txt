@@ -1,0 +1,17 @@
+# l4-runner process check (read-only, mk-ssh as the admin user), after job 5553 and after job 5556.
+## after job 5553 (2026-10-05T16:02:46Z)
+gitlab-runner owned processes: 0
+admin         2265  2-20:33:06 opencode -s
+admin         4603  2-20:12:39 /home/admin/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex app-server --listen unix
+admin         4644  2-20:12:39 /home/admin/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex app-server daemon pid-up
+admin        21086  2-06:06:19 opencode -s ses_<redacted>
+admin        28415  2-01:07:15 codex
+## after job 5556
+2026-10-05T16:23:35Z
+gitlab-runner owned processes: 0
+admin         2265  2-20:53:46 opencode -s
+admin         4603  2-20:33:19 /home/admin/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex app-server --listen unix
+admin         4644  2-20:33:19 /home/admin/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex app-server daemon pid-up
+admin        21086  2-06:26:59 opencode -s ses_<redacted>
+admin        28415  2-01:27:55 codex
+# Every listed process belongs to the admin user admin (interactive opencode/codex sessions running for 2+ days, not L4; also noted in the M1.6 section). No bwrap, codex, opencode, laya-serve, serena or pytest process of gitlab-runner is left.

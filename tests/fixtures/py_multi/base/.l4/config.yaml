@@ -1,0 +1,5 @@
+version: 1
+gates:
+  test:
+    command: "python -m pytest -q --junitxml=.l4-out/junit.xml"
+    reports: [".l4-out/junit.xml"]

@@ -1,0 +1,9 @@
+{
+  "status": [
+    {
+      "severity": "error",
+      "code": "change_error",
+      "message": "Change 'nope' not found. Available changes:\n  add-farewell\n  broken-change\n  chore-tasks-only\n  modify-missing\n  no-purpose\n  no-shall\n  task-grammar\n  task-grammar-crlf\n  with-extras"
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+ "allow_list": [
+  "deterministic:scope",
+  "deterministic:diff-coverage",
+  "deterministic:tests-ran",
+  "deterministic:traceability",
+  "human:verdict",
+  "human:audit"
+ ],
+ "counts": {
+  "balance_cut": 162,
+  "ingest": {
+   "items_read": 1198,
+   "rejected_label_source": 0
+  },
+  "label_source": {
+   "deterministic:diff-coverage": 544,
+   "deterministic:scope": 324,
+   "deterministic:tests-ran": 168
+  },
+  "mutation": {
+   "add_passing_test": 241,
+   "break_test": 59,
+   "drop_covering_test": 149,
+   "none": 76,
+   "skip_old_test": 109,
+   "template_edit": 96,
+   "transplant_hunk": 170,
+   "untested_function": 136
+  },
+  "origin": {
+   "canary": 1036
+  },
+  "question_sets": {
+   "l4/change-covered@1": 544,
+   "l4/file-relevant@1": 324,
+   "l4/tests-ok@1": 168
+  },
+  "questions": {
+   "calib": {
+    "l4/change-covered@1/exercised": {
+     "false": 34,
+     "true": 23
+    },
+    "l4/change-covered@1/extent": {
+     "0": 34,
+     "3": 23
+    },
+    "l4/change-covered@1/untested": {
+     "false": 23,
+     "true": 34
+    },
+    "l4/file-relevant@1/relatedness": {
+     "0": 16,
+     "1": 1,
+     "2": 10
+    },
+    "l4/file-relevant@1/relevant": {
+     "false": 16,
+     "true": 32
+    },
+    "l4/file-relevant@1/unrelated": {
+     "false": 32,
+     "true": 16
+    },
+    "l4/tests-ok@1/all_passed": {
+     "false": 10,
+     "true": 20
+    }
+   },
+   "test": {
+    "l4/change-covered@1/exercised": {
+     "false": 31,
+     "true": 25
+    },
+    "l4/change-covered@1/extent": {
+     "0": 31,
+     "3": 25
+    },
+    "l4/change-covered@1/untested": {
+     "false": 25,
+     "true": 31
+    },
+    "l4/file-relevant@1/relatedness": {
+     "0": 11,
+     "2": 8
+    },
+    "l4/file-relevant@1/relevant": {
+     "false": 11,
+     "true": 22
+    },
+    "l4/file-relevant@1/unrelated": {
+     "false": 22,
+     "true": 11
+    },
+    "l4/tests-ok@1/all_passed": {
+     "false": 4,
+     "true": 8
+    }
+   },
+   "train": {
+    "l4/change-covered@1/exercised": {
+     "false": 162,
+     "true": 269
+    },
+    "l4/change-covered@1/extent": {
+     "0": 162,
+     "3": 269
+    },
+    "l4/change-covered@1/untested": {
+     "false": 269,
+     "true": 162
+    },
+    "l4/file-relevant@1/relatedness": {
+     "0": 81,
+     "1": 21,
+     "2": 28
+    },
+    "l4/file-relevant@1/relevant": {
+     "false": 81,
+     "true": 162
+    },
+    "l4/file-relevant@1/unrelated": {
+     "false": 162,
+     "true": 81
+    },
+    "l4/tests-ok@1/all_passed": {
+     "false": 42,
+     "true": 84
+    }
+   }
+  },
+  "rows": {
+   "calib": 135,
+   "test": 101,
+   "train": 800
+  },
+  "units": {
+   "calib": 2,
+   "test": 2,
+   "train": 11
+  }
+ },
+ "dataset_sha256": "eb2d21b05d61221a226edb51ac139b8e3e78dadacfc5cb16d3cde9f413a6a382",
+ "files": {
+  "calib.jsonl": {
+   "rows": 135,
+   "sha256": "702ce63bfac051c1482a58c7abea92bc614ad45feeb090b922f65e63226dce95"
+  },
+  "test.jsonl": {
+   "rows": 101,
+   "sha256": "6c4bedce043c7ad5a79e6094b1bae7dfa216bda3cbf3528ffb3c55ee9380864c"
+  },
+  "train.jsonl": {
+   "rows": 800,
+   "sha256": "e314ef9ce0d3c941d002ac05bd8f2b46a540293447abbd38e09a4a9c90ccdaa5"
+  }
+ },
+ "generators": {
+  "export": "l4/s1-export@1",
+  "question_sets": {
+   "l4/change-covered@1": "cf82cac6de84af957227df319f9284470667aabb373ed95dc755e96672aa2f9b",
+   "l4/criterion-satisfied@2": "b7675103a58447c7ba73e5a9c25d88d0002eb9978dffaaaacc068d67eb317cb9",
+   "l4/file-relevant@1": "8353d7dbdc8bba02a4ea8f2a6d4f36200219977e336d31bc83cea8f002a37af5",
+   "l4/tests-ok@1": "2329b80870e28fbe526ed30337559a129c966abdb631a719997b84a64621d8f8"
+  }
+ },
+ "ratios": {
+  "calib": 0.15,
+  "test": 0.15,
+  "train": 0.7
+ },
+ "schema": "l4/s1-dataset@1",
+ "split_seed": 1606
+}

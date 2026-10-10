@@ -1,0 +1,11 @@
+{
+ "$id": "l4/generated-test@1",
+ "type": "object",
+ "required": ["criterion"],
+ "additionalProperties": false,
+ "properties": {
+  "criterion": {"type": "string", "pattern": "^C-[0-9a-f]{8}$"},
+  "code": {"type": "string", "minLength": 1, "maxLength": 20000},
+  "not_testable": {"type": "string", "minLength": 1, "maxLength": 500}
+ }
+}

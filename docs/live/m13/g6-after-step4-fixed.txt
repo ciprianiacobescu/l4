@@ -1,0 +1,12 @@
+tests/live/test_m1_3_acceptance.py::test_step0_main_carries_the_m13_levers_and_the_seed PASSED [ 11%]
+tests/live/test_m1_3_acceptance.py::test_step1_task_1_1_goes_red_with_zero_value_proofs_then_green PASSED [ 22%]
+tests/live/test_m1_3_acceptance.py::test_step1_round_1_ran_the_full_ladder_with_the_matrix_and_one_audit_test PASSED [ 33%]
+tests/live/test_m1_3_acceptance.py::test_step1a_a_convertible_minor_becomes_fix_unit_1_before_the_hand_off SKIPPED [ 44%]
+tests/live/test_m1_3_acceptance.py::test_step1b_needs_human_asks_one_verdict_question_per_criterion_and_judge_finding PASSED [ 55%]
+tests/live/test_m1_3_acceptance.py::test_step2_answers_resume_at_aggregation_and_a_reject_spawns_the_fix_unit PASSED [ 66%]
+tests/live/test_m1_3_acceptance.py::test_step3_no_checkpoint_commit_started_an_l4_job PASSED [ 77%]
+tests/live/test_m1_3_acceptance.py::test_step4_the_merge_request_is_in_review_with_the_fix_unit_in_its_diff PASSED [ 88%]
+tests/live/test_m1_3_acceptance.py::test_step5_the_archive_mr_moves_the_parent_and_its_fix_units_in_one_commit SKIPPED [100%]
+SKIPPED [1] tests/live/test_m1_3_acceptance.py:159: branch 1A did not happen (round 1 did not PASS with a fix unit)
+SKIPPED [1] tests/live/test_m1_3_acceptance.py:258: the unit is not merged yet (optional step 5)
+======================== 7 passed, 2 skipped in 15.74s =========================

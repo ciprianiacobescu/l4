@@ -1,0 +1,9 @@
+{
+  "status": [
+    {
+      "severity": "error",
+      "code": "unknown_item",
+      "message": "Unknown item 'nope'. Did you mean: no-purpose, no-shall, greeting, with-extras, add-farewell?"
+    }
+  ]
+}

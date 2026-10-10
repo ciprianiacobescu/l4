@@ -1,0 +1,30 @@
+[l4] spec: invalid Task Dependency Graph (wave 0 has no list of task ids); using document order
+[l4] spec: invalid Task Dependency Graph (wave 0 has no list of task ids); using document order
+id           severity  status  message                                                                                                                                             fix
+-----------  --------  ------  --------------------------------------------------------------------------------------------------------------------------------------------------
+CI-001       error     skip    not a GitLab CI job                                                                                                                                 -
+CI-002       error     skip    ci.platform is local                                                                                                                                -
+CFG-002      error     pass    role chains and profiles are consistent                                                                                                             -
+CFG-005      warn      pass    no explicitly set list drops a default                                                                                                              -
+ENV-001      error     pass    Python 3.12.12, uv present                                                                                                                          -
+ENV-002      error     pass    git 2.48                                                                                                                                            -
+ENV-003      error     pass    OpenSpec 1.14.0 via /Users/USER/.hermes/node/bin/node                                                                                 -
+ENV-004      error     pass    3 agent CLI(s) present                                                                                                                              -
+SPEC-001     error     pass    openspec, kiro                                                                                                                                      -
+SPEC-002     error     fail    kiro:add-bulk-discount tasks.md: invalid Task Dependency Graph: wave 0 has no list of task ids                                                      fix the Kiro spec files named above
+SPEC-004     warn      pass    1 Kiro unit(s): every leaf cites a requirement                                                                                                      -
+PRV-001      warn      pass    claude-code claude-code ready; f-longcat opencode ready; kiro-qwen kiro-cli ready                                                                   -
+PRV-002      warn      pass    no root-only prerequisite is missing                                                                                                                -
+MEM-001      warn      pass    1 lessons, lint clean                                                                                                                               -
+MEM-002      warn      skip    memory or Serena is off                                                                                                                             -
+ENV-006      warn      skip    verifier.s1.enabled is false                                                                                                                        -
+ENV-007      warn      skip    no e2e gate, or verifier.playwright.enabled is false                                                                                                -
+ENV-008      warn      skip    memory.serena.enabled is false                                                                                                                      -
+ENV-013      warn      skip    verifier.s1.enabled is false                                                                                                                        -
+S1-001       warn      skip    verifier.s1.shadow names no profile                                                                                                                 -
+S1-002       warn      skip    no System-One profile names a tuned checkpoint path                                                                                                 -
+COV-001      warn      skip    no project interpreter yet: gates.setup creates it inside the run, which checks coverage.py again right after it (the doctor.check event, COV-001)  -
+SANDBOX-002  error     skip    sandbox.mode is none: not a bwrap sandbox                                                                                                           -
+
+cache: /tmp/scratch/kiro-e2e/h1-cache
+home:  /Users/USER/.local/share/l4

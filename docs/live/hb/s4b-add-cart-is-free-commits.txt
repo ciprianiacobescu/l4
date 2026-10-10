@@ -1,0 +1,40 @@
+365afeda06287098b44f8f3d0de42f122e9ff0f5 l4-bot <l4-bot@users.noreply.invalid> 2026-10-05T19:19:16+03:00
+docs(add-cart-is-free): hand off to review
+
+L4-Unit: openspec:add-cart-is-free
+L4-Run: r-20261005T1615Z-a459
+L4-Iteration: 1
+L4-Phase: verified
+---
+c315b854c5059f5c53331363970beb7269de5471 l4-bot <l4-bot@users.noreply.invalid> 2026-10-05T19:19:14+03:00
+docs(add-cart-is-free): verification round 1 [skip ci]
+
+L4-Unit: openspec:add-cart-is-free
+L4-Run: r-20261005T1615Z-a459
+L4-Iteration: 1
+L4-Phase: verifying
+---
+189272eb7ce62b58986041de110bc9cebcd30568 l4-bot <l4-bot@users.noreply.invalid> 2026-10-05T19:16:41+03:00
+feat(add-cart-is-free): 1.1 Add `Cart.is_free()` (`True` exactly when `Cart.total()` is 0.00) [skip ci]
+
+L4-Unit: openspec:add-cart-is-free
+L4-Run: r-20261005T1615Z-a459
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+---
+2513137bb9688c7dab3f88e10c6efebc13365713 l4-bot <l4-bot@users.noreply.invalid> 2026-10-05T19:16:12+03:00
+test(add-cart-is-free): red for 1.1 [skip ci]
+
+L4-Unit: openspec:add-cart-is-free
+L4-Run: r-20261005T1615Z-a459
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+---

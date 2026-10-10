@@ -1,0 +1,31 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-cart-is-free
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 20 items
+
+tests/test_cart.py .F..........                                          [ 60%]
+tests/test_discounts.py ....                                             [ 80%]
+tests/test_stock.py ..                                                   [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_______________ test_cart_is_free_matches_whether_total_is_zero ________________
+
+    @pytest.mark.l4("C-1946aec3", "C-d366c023")
+    def test_cart_is_free_matches_whether_total_is_zero():
+        owing_cart = Cart([LineItem("apple", Decimal("10.00"))])
+        assert owing_cart.is_free() is False
+>       assert Cart().is_free() is True
+E       assert False is True
+E        +  where False = is_free()
+E        +    where is_free = Cart(items=[]).is_free
+E        +      where Cart(items=[]) = Cart()
+
+tests/test_cart.py:23: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-cart-is-free/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_cart_is_free_matches_whether_total_is_zero - ...
+========================= 1 failed, 19 passed in 0.08s =========================

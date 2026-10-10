@@ -1,0 +1,61 @@
+# M1.7 loop safety: every pipeline #2718 onward (read-only, GitLab API + git log of the clone)
+# id | ref | source | status | jobs | commit author | subject
+#2718 | main | push | success | l4:failed:5494 test:success:5493 | CiprianSpot | Seed add-item-count and add-cart-clear
+#2719 | l4/openspec/add-cart-clear | push | skipped | - | l4-bot | chore(add-cart-clear): ledger [skip ci]
+#2720 | refs/merge-requests/16/head | merge_request_event | skipped | - | l4-bot | chore(add-cart-clear): ledger [skip ci]
+#2721 | l4/openspec/add-item-count | push | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]
+#2722 | refs/merge-requests/17/head | merge_request_event | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]
+#2723 | main | push | success | l4:success:5496 test:success:5495 | CiprianSpot | Document LineItem
+#2724 | l4/openspec/add-item-count | push | failed | l4:failed:5498 test:success:5497 | CiprianSpot | Answer Q-001 of add-item-count: the badge adds up the quantities
+#2725 | l4/openspec/add-item-count | push | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]  (sha from the API: the attempt-1 branch is deleted, its commits stay on closed MR !17)
+#2726 | refs/merge-requests/17/head | merge_request_event | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]  (sha from the API: the attempt-1 branch is deleted, its commits stay on closed MR !17)
+#2727 | main | push | success | l4:failed:5500 test:success:5499 | CiprianSpot | Upgrade the vendored L4 harness to ba54759 (M1.7 live-fix: the vacuity message)
+#2728 | l4/openspec/add-item-count | push | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]
+#2729 | refs/merge-requests/18/head | merge_request_event | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]
+#2730 | main | push | success | l4:success:5502 test:success:5501 | CiprianSpot | Document the cart module
+#2731 | l4/openspec/add-item-count | push | failed | l4:failed:5504 test:success:5503 | CiprianSpot | Answer Q-001 of add-item-count: the badge adds up the quantities
+#2732 | l4/openspec/add-item-count | push | skipped | - | l4-bot | test(add-item-count): red for 1.1 [skip ci]
+#2733 | refs/merge-requests/18/head | merge_request_event | skipped | - | l4-bot | test(add-item-count): red for 1.1 [skip ci]
+#2734 | l4/openspec/add-item-count | push | skipped | - | l4-bot | feat(add-item-count): 1.1 Add `Cart.item_count()` (the sum of the quantities of every line item) [sk
+#2735 | refs/merge-requests/18/head | merge_request_event | skipped | - | l4-bot | feat(add-item-count): 1.1 Add `Cart.item_count()` (the sum of the quantities of every line item) [sk
+#2736 | l4/openspec/add-item-count | push | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]
+#2737 | refs/merge-requests/18/head | merge_request_event | skipped | - | l4-bot | chore(add-item-count): ledger [skip ci]
+#2738 | main | push | success | l4:success:5506 test:success:5505 | CiprianSpot | Upgrade the vendored L4 harness to 12cc820 (M1.7 live-fix: the base merge's git identity)
+#2739 | l4/openspec/add-item-count | push | skipped | - | l4-bot | chore(add-item-count): merge main@0c43167896 into the unit branch [skip ci]
+#2740 | refs/merge-requests/18/head | merge_request_event | skipped | - | l4-bot | chore(add-item-count): merge main@0c43167896 into the unit branch [skip ci]
+#2741 | l4/openspec/add-item-count | push | skipped | - | l4-bot | docs(add-item-count): verification round 1 [skip ci]
+#2742 | refs/merge-requests/18/head | merge_request_event | skipped | - | l4-bot | docs(add-item-count): verification round 1 [skip ci]
+#2743 | l4/openspec/add-item-count | push | success | test:success:5507 | l4-bot | docs(add-item-count): hand off to review
+#2744 | main | push | success | l4:success:5509 test:success:5508 | CiprianSpot | Add small Cart helpers: add_all, skus, has_code, line_count
+#2745 | main | push | success | l4:success:5511 test:success:5510 | CiprianSpot | Put add-cart-clear's questions.md on main, Q-001 answered (main copy, older)
+#2746 | l4/openspec/add-cart-clear | push | failed | l4:failed:5513 test:success:5512 | CiprianSpot | Answer Q-001 of add-cart-clear: Start over also forgets the code
+#2747 | l4/openspec/add-cart-clear | push | skipped | - | l4-bot | test(add-cart-clear): red for 1.1 [skip ci]
+#2748 | refs/merge-requests/16/head | merge_request_event | skipped | - | l4-bot | test(add-cart-clear): red for 1.1 [skip ci]
+#2749 | l4/openspec/add-cart-clear | push | skipped | - | l4-bot | feat(add-cart-clear): 1.1 Add `Cart.clear()` (drops every line item and the applied discount code) [
+#2750 | refs/merge-requests/16/head | merge_request_event | skipped | - | l4-bot | feat(add-cart-clear): 1.1 Add `Cart.clear()` (drops every line item and the applied discount code) [
+#2751 | l4/openspec/add-cart-clear | push | skipped | - | l4-bot | chore(add-cart-clear): ledger [skip ci]
+#2752 | refs/merge-requests/16/head | merge_request_event | skipped | - | l4-bot | chore(add-cart-clear): ledger [skip ci]
+#2753 | main | push | success | l4:success:5515 test:success:5514 | CiprianSpot | Revert "Add small Cart helpers: add_all, skus, has_code, line_count"
+#2754 | l4/openspec/add-cart-clear | push | skipped | - | l4-bot | chore(add-cart-clear): merge main@703a7768d6 into the unit branch [skip ci]
+#2755 | refs/merge-requests/16/head | merge_request_event | skipped | - | l4-bot | chore(add-cart-clear): merge main@703a7768d6 into the unit branch [skip ci]
+#2756 | l4/openspec/add-cart-clear | push | skipped | - | l4-bot | docs(add-cart-clear): verification round 1 [skip ci]
+#2757 | refs/merge-requests/16/head | merge_request_event | skipped | - | l4-bot | docs(add-cart-clear): verification round 1 [skip ci]
+#2758 | l4/openspec/add-cart-clear | push | success | test:success:5516 | l4-bot | docs(add-cart-clear): hand off to review
+#2759 | main | push | success | l4:success:5518 test:success:5517 | CiprianSpot | M1.7: cleanup, clarifier.enabled back to its default
+
+l4 jobs and the author of the commit that started them:
+  5494 CiprianSpot: Seed add-item-count and add-cart-clear
+  5496 CiprianSpot: Document LineItem
+  5498 CiprianSpot: Answer Q-001 of add-item-count: the badge adds up the quanti
+  5500 CiprianSpot: Upgrade the vendored L4 harness to ba54759 (M1.7 live-fix: t
+  5502 CiprianSpot: Document the cart module
+  5504 CiprianSpot: Answer Q-001 of add-item-count: the badge adds up the quanti
+  5506 CiprianSpot: Upgrade the vendored L4 harness to 12cc820 (M1.7 live-fix: t
+  5509 CiprianSpot: Add small Cart helpers: add_all, skus, has_code, line_count
+  5511 CiprianSpot: Put add-cart-clear's questions.md on main, Q-001 answered (m
+  5513 CiprianSpot: Answer Q-001 of add-cart-clear: Start over also forgets the 
+  5515 CiprianSpot: Revert "Add small Cart helpers: add_all, skus, has_code, lin
+  5518 CiprianSpot: M1.7: cleanup, clarifier.enabled back to its default
+
+l4 jobs on an l4-bot commit: 0
+pipelines on a [skip ci] head: 24, all skipped: True

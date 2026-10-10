@@ -1,0 +1,32 @@
+104645c l4-bot <l4-bot@users.noreply.invalid> | docs(add-reorder-quantity): hand off to review
+L4-Unit: openspec:add-reorder-quantity
+L4-Run: r-20261006T2025Z-d345
+L4-Iteration: 1
+L4-Phase: verified
+
+fc98fe3 l4-bot <l4-bot@users.noreply.invalid> | docs(add-reorder-quantity): verification round 1 [skip ci]
+L4-Unit: openspec:add-reorder-quantity
+L4-Run: r-20261006T2025Z-d345
+L4-Iteration: 1
+L4-Phase: verifying
+
+cf065f7 l4-bot <l4-bot@users.noreply.invalid> | feat(add-reorder-quantity): 1.1 Add `inventory.reorder.reorder_quantity(on_hand, target)` returning the units to order, never below 0 [skip ci]
+L4-Unit: openspec:add-reorder-quantity
+L4-Run: r-20261006T2025Z-d345
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: f-muse/opencode/muse-spark-1.3-contributor-free
+L4-Step: 1.1/green/1
+
+859bfa7 l4-bot <l4-bot@users.noreply.invalid> | test(add-reorder-quantity): red for 1.1 [skip ci]
+L4-Unit: openspec:add-reorder-quantity
+L4-Run: r-20261006T2025Z-d345
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: f-muse/opencode/muse-spark-1.3-contributor-free
+L4-Step: 1.1/red/1
+

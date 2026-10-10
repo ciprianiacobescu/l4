@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="0.001"><testcase classname="" name="tests.test_broken" file="tests/test_broken.py" time="0.001"><error message="collection failure">/PATH:508: in importtestmodule
+    mod = import_path(
+/PATH:596: in import_path
+    importlib.import_module(module_name)
+/PYLIB:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;frozen importlib._bootstrap&gt;:1387: in _gcd_import
+    ???
+&lt;frozen importlib._bootstrap&gt;:1360: in _find_and_load
+    ???
+&lt;frozen importlib._bootstrap&gt;:1331: in _find_and_load_unlocked
+    ???
+&lt;frozen importlib._bootstrap&gt;:935: in _load_unlocked
+    ???
+/PATH:179: in exec_module
+    source_stat, co = _rewrite_test(fn, self.config)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/PATH:348: in _rewrite_test
+    tree = ast.parse(source, filename=strfn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/PYLIB:52: in parse
+    return compile(source, filename, mode, flags,
+E     File "/PATH", line 1
+E       def test_never(:
+E                      ^
+E   SyntaxError: invalid syntax</error></testcase></testsuite></testsuites>

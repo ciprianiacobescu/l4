@@ -1,0 +1,4 @@
+{
+  "check": "stubs",
+  "about": "a new exception class with a pass body is an admissible red addition"
+}

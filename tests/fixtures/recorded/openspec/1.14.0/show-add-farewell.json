@@ -1,0 +1,92 @@
+{
+  "id": "add-farewell",
+  "title": "add-farewell",
+  "deltaCount": 3,
+  "deltas": [
+    {
+      "spec": "farewell",
+      "operation": "ADDED",
+      "description": "Add requirement: The system SHALL print `Goodbye, <name>!` for `farewell <name>`.",
+      "requirement": {
+        "name": "Say goodbye",
+        "text": "The system SHALL print `Goodbye, <name>!` for `farewell <name>`.",
+        "scenarios": [
+          {
+            "name": "Named farewell",
+            "rawText": "- **WHEN** the user runs `farewell Ada`\n- **THEN** the output is `Goodbye, Ada!`"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "name": "Say goodbye",
+          "text": "The system SHALL print `Goodbye, <name>!` for `farewell <name>`.",
+          "scenarios": [
+            {
+              "name": "Named farewell",
+              "rawText": "- **WHEN** the user runs `farewell Ada`\n- **THEN** the output is `Goodbye, Ada!`"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "spec": "greeting",
+      "operation": "ADDED",
+      "description": "Add requirement: The system SHALL print the greeting in upper case when `--shout` is given.",
+      "requirement": {
+        "name": "Shout",
+        "text": "The system SHALL print the greeting in upper case when `--shout` is given.",
+        "scenarios": [
+          {
+            "name": "Shouted greeting",
+            "rawText": "- **WHEN** the user runs `greet Ada --shout`\n- **THEN** the output is `HELLO, ADA!`"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "name": "Shout",
+          "text": "The system SHALL print the greeting in upper case when `--shout` is given.",
+          "scenarios": [
+            {
+              "name": "Shouted greeting",
+              "rawText": "- **WHEN** the user runs `greet Ada --shout`\n- **THEN** the output is `HELLO, ADA!`"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "spec": "greeting",
+      "operation": "MODIFIED",
+      "description": "Modify requirement: The system SHALL greet the user by the name given on the command line, trimming surrounding whitespace.",
+      "requirement": {
+        "name": "Greet by name",
+        "text": "The system SHALL greet the user by the name given on the command line, trimming surrounding whitespace.",
+        "scenarios": [
+          {
+            "name": "Named greeting",
+            "rawText": "- **WHEN** the user runs `greet \" Ada \"`\n- **THEN** the output is `Hello, Ada!`"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "name": "Greet by name",
+          "text": "The system SHALL greet the user by the name given on the command line, trimming surrounding whitespace.",
+          "scenarios": [
+            {
+              "name": "Named greeting",
+              "rawText": "- **WHEN** the user runs `greet \" Ada \"`\n- **THEN** the output is `Hello, Ada!`"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

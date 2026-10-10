@@ -1,0 +1,29 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261006T1935Z-1f7a",
+  "harness_version": "0.1.0",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "exit_code": 12,
+  "units": [
+    {
+      "unit": "openspec:add-shelf-code",
+      "phase_before": "none",
+      "phase_after": "waiting_capacity",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": null,
+      "profiles": {
+        "implementer": "f-ling"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": null,
+      "retry_after": "2026-10-06T20:09:44Z",
+      "continuation": "not_needed",
+      "exit_reason": "waiting_capacity: role implementer is unavailable: profile f-ling is cooling until 2026-10-06T20:09Z (retry after 2026-10-06T20:09Z)"
+    }
+  ]
+}

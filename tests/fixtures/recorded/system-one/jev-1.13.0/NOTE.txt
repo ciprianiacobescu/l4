@@ -1,0 +1,1 @@
+Recorded 2026-10-04 from POST https://api.typesafe.ai/v1/systemone (served model jev-1.13.0, requested jev-1.13.0). No credential is in either file. The reply shapes (choice.probabilities, noul, score) are what l4.clarifier.s1_decisions parses.

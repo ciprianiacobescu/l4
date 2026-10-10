@@ -1,0 +1,6 @@
+395882a docs(add-bulk-discount-h2): hand off to review
+f7d1092 docs(add-bulk-discount-h2): verification round 1 [skip ci]
+f22ca4d feat(add-bulk-discount-h2): 1.1. Implement Cart.bulk_savings() with unit tests [skip ci]
+680cf39 test(add-bulk-discount-h2): red for 1.1 [skip ci]
+435c5e6 feat(add-bulk-discount-h2): 2.1. Create bulk_discount.py with calculate_bulk_discount function and unit tests [skip ci]
+6ba8da0 test(add-bulk-discount-h2): red for 2.1 [skip ci]

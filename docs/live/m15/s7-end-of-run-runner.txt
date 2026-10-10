@@ -1,0 +1,6 @@
+2026-10-05T08:39:51Z
+== processes (laya-serve|serena|chrom|codex)
+(none)
+== serena in unit agent dirs
+/home/gitlab-runner/.cache/l4/units/kiro/
+/home/gitlab-runner/.cache/l4/units/openspec/

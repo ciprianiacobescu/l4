@@ -1,0 +1,26 @@
+{
+  "id": "greeting",
+  "title": "greeting",
+  "overview": "The greeting capability produces a friendly greeting for a named user of the CLI.",
+  "requirementCount": 1,
+  "requirements": [
+    {
+      "name": "Greet by name",
+      "text": "The system SHALL greet the user by the name given on the command line.",
+      "scenarios": [
+        {
+          "name": "Named greeting",
+          "rawText": "- **WHEN** the user runs `greet Ada`\n- **THEN** the output is `Hello, Ada!`"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "format": "openspec"
+  },
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

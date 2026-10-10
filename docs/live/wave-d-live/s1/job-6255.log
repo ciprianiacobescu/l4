@@ -1,0 +1,57 @@
+2026-10-08T16:00:21.062038Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)
+2026-10-08T16:00:21.062053Z 00O   on l4-runner XXXXXXXXX, system ID: s_000000000001
+2026-10-08T16:00:21.062055Z 00O   UUID: not supported with this GitLab version
+2026-10-08T16:00:21.062081Z 00O section_start:1791475221:prepare_executor
+2026-10-08T16:00:21.062084Z 00O+Preparing the "shell" executor
+2026-10-08T16:00:21.062199Z 00O Using Shell (bash) executor...
+2026-10-08T16:00:21.062202Z 00O section_end:1791475221:prepare_executor
+2026-10-08T16:00:21.062379Z 00O+section_start:1791475221:prepare_script
+2026-10-08T16:00:21.062383Z 00O+Preparing environment
+2026-10-08T16:00:21.214930Z 01O Running on gitlab-runner...
+2026-10-08T16:00:21.219144Z 00O section_end:1791475221:prepare_script
+2026-10-08T16:00:21.220048Z 00O+section_start:1791475221:get_sources
+2026-10-08T16:00:21.220055Z 00O+Getting source from Git repository
+2026-10-08T16:00:21.278183Z 01O Gitaly correlation ID: 01M4E3WZK97XSKQ0MS4JP7MX1X
+2026-10-08T16:00:21.289554Z 01O Fetching changes with git depth set to 20...
+2026-10-08T16:00:21.292025Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-08T16:00:22.231761Z 01O Checking out 46a68cec as detached HEAD (ref is tmp/wd-live-jobapi-probe)...
+2026-10-08T16:00:22.254341Z 01O Removing .l4-out/
+2026-10-08T16:00:22.254348Z 01O Removing .l4/vendor/.venv/
+2026-10-08T16:00:22.254349Z 01O Removing .l4/vendor/src/l4/__pycache__/
+2026-10-08T16:00:22.254350Z 01O Removing .l4/vendor/src/l4/agents/__pycache__/
+2026-10-08T16:00:22.254350Z 01O Removing .l4/vendor/src/l4/availability/__pycache__/
+2026-10-08T16:00:22.254351Z 01O Removing .l4/vendor/src/l4/ci/__pycache__/
+2026-10-08T16:00:22.254351Z 01O Removing .l4/vendor/src/l4/clarifier/__pycache__/
+2026-10-08T16:00:22.254351Z 01O Removing .l4/vendor/src/l4/config/__pycache__/
+2026-10-08T16:00:22.254352Z 01O Removing .l4/vendor/src/l4/doctor/__pycache__/
+2026-10-08T16:00:22.254352Z 01O Removing .l4/vendor/src/l4/evidence/__pycache__/
+2026-10-08T16:00:22.254353Z 01O Removing .l4/vendor/src/l4/forge/__pycache__/
+2026-10-08T16:00:22.254353Z 01O Removing .l4/vendor/src/l4/gates/__pycache__/
+2026-10-08T16:00:22.254353Z 01O Removing .l4/vendor/src/l4/implementer/__pycache__/
+2026-10-08T16:00:22.254354Z 01O Removing .l4/vendor/src/l4/llm/__pycache__/
+2026-10-08T16:00:22.254354Z 01O Removing .l4/vendor/src/l4/memory/__pycache__/
+2026-10-08T16:00:22.254355Z 01O Removing .l4/vendor/src/l4/provision/__pycache__/
+2026-10-08T16:00:22.254355Z 01O Removing .l4/vendor/src/l4/sandbox/__pycache__/
+2026-10-08T16:00:22.254355Z 01O Removing .l4/vendor/src/l4/security/__pycache__/
+2026-10-08T16:00:22.254356Z 01O Removing .l4/vendor/src/l4/sim/__pycache__/
+2026-10-08T16:00:22.254356Z 01O Removing .l4/vendor/src/l4/specs/__pycache__/
+2026-10-08T16:00:22.254356Z 01O Removing .l4/vendor/src/l4/state/__pycache__/
+2026-10-08T16:00:22.254357Z 01O Removing .l4/vendor/src/l4/vcs/__pycache__/
+2026-10-08T16:00:22.254357Z 01O Removing .l4/vendor/src/l4/verifier/__pycache__/
+2026-10-08T16:00:22.257594Z 01O Skipping Git submodules setup
+2026-10-08T16:00:22.261737Z 00O section_end:1791475222:get_sources
+2026-10-08T16:00:22.262993Z 00O+section_start:1791475222:step_script
+2026-10-08T16:00:22.263009Z 00O+Executing "step_script" stage of the job script
+2026-10-08T16:00:22.311637Z 01O $ echo "api: $CI_API_V4_URL"
+2026-10-08T16:00:22.311654Z 01O api: https://gitlab.example.com/api/v4
+2026-10-08T16:00:22.311655Z 01O $ B="$CI_PROJECT_DIR/.jobapi-body.json"; code=$(curl -s -o "$B" -w "%{http_code}" -H "JOB-TOKEN: $CI_JOB_TOKEN" "$CI_API_V4_URL/job"); st=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]))" "$B" status 2>/dev/null || echo unparsed); rm -f "$B"; echo "curl: http_code=$code status=$st"
+2026-10-08T16:00:22.827280Z 01O curl: http_code=200 status=running
+2026-10-08T16:00:22.827338Z 01O $ python3 ci/jobapi_probe.py system-python3
+2026-10-08T16:00:23.470681Z 01O system-python3 (python 3.10.12, OpenSSL 3.0.2 15 Mar 2022): http_code=200 status=running
+2026-10-08T16:00:23.477352Z 01O $ PATH="$HOME/.local/bin:$PATH" UV_PYTHON_DOWNLOADS=never uv run --no-project --python 3.12 python ci/jobapi_probe.py uv-python-3.12 || echo "uv python 3.12 not runnable"
+2026-10-08T16:00:23.840836Z 01O uv-python-3.12 (python 3.12.15, OpenSSL 3.5.9 29 Sep 2026): http_code=200 status=running
+2026-10-08T16:00:23.851779Z 00O section_end:1791475223:step_script
+2026-10-08T16:00:23.852603Z 00O+section_start:1791475223:cleanup_file_variables
+2026-10-08T16:00:23.852613Z 00O+Cleaning up project directory and file based variables
+2026-10-08T16:00:23.899474Z 00O section_end:1791475223:cleanup_file_variables
+2026-10-08T16:00:23.899600Z 00O Job succeeded

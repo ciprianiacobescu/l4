@@ -1,0 +1,89 @@
+# Scratch config for the Kiro e2e venue H1 (2026-10-08, harness docs/plan/kiro-e2e.md section 5): the dummy's
+# .l4/config.yaml at 6b8500b with forge/ci local (this Mac, no GitLab writes), no sandbox (macOS has no bubblewrap:
+# recorded risk acceptance, agents run as this user), no e2e gate or Playwright (no UI change), System One off, no
+# fix rounds, no audit, Serena off, and kiro-cli as the only implementer. The implementer chain is set per step
+# (kiro-qwen).
+version: 1
+harness:
+  version: 0.1.0
+  commit: bf7b63a9ce2f32917765827933890a2c7fc516cd
+spec:
+  frameworks: auto
+gates:
+  setup:
+  - uv sync --frozen
+  test:
+    command: .venv/bin/python -m pytest --junitxml=.l4-out/junit.xml
+  lint:
+  - .venv/bin/ruff check --extend-exclude .l4 .
+profiles:
+  claude-code:
+    adapter: claude-code
+    vendor: anthropic
+    auth: subscription
+  f-longcat:
+    adapter: opencode
+    model: opencode/longcat-2.5-preview-free
+    vendor: meituan
+  kiro-qwen:                # kiro-cli 2.28.0 logged in (KIRO PRO on this Mac); model pinned so the vendor is known
+    adapter: kiro-cli
+    model: qwen3-coder-next
+    vendor: alibaba          # declared: kiro-cli does not report the served model
+    auth: subscription
+  kiro-glm:                 # after kiro-qwen halted on 2.1 (3 red attempts): a stronger Kiro model, not an Anthropic one
+    adapter: kiro-cli
+    model: glm-5
+    vendor: zhipu            # declared: kiro-cli does not report the served model
+    auth: subscription
+  kiro-unavail:             # G1: the binary check refuses it (version 2.28.0 < 99.0.0), so the chain falls back
+    adapter: kiro-cli
+    model: qwen3-coder-next
+    vendor: alibaba
+    auth: subscription
+    min_version: "99.0.0"
+  kiro-badmodel:            # H2 failure path rehearsal: kiro-cli refuses the model, so the hello fails
+    adapter: kiro-cli
+    model: l4-no-such-model
+    vendor: alibaba
+    auth: subscription
+  kiro-halt:                # G2: a named agent that does not exist, exit 4 at init before any model call (0 credits)
+    adapter: kiro-cli
+    model: qwen3-coder-next
+    vendor: alibaba
+    auth: subscription
+    options:
+      agent: l4-does-not-exist
+roles:
+  implementer: [kiro-badmodel, kiro-qwen]
+  judges: [claude-code]
+  clarifier: [f-longcat, claude-code]
+  s1_judge: []
+  verifier_agent: [claude-code]
+clarifier:
+  s1_standin: none
+  min_confidence: medium
+availability:
+  probe_timeout: 150s
+sdd:
+  scope_check: warn
+sandbox:
+  mode: none
+  allow_none: true
+forge:
+  type: local
+ci:
+  platform: local
+verifier:
+  fix_minor_findings: false
+  max_fix_rounds: 0
+  audit_sample_ratio: 0
+  playwright:
+    enabled: false
+  evidence:
+    diff_coverage: {mode: warn, min_percent: 80, languages: [python]}
+  s1:
+    enabled: false
+    shadow: []
+memory:
+  enabled: true
+  serena: {enabled: false}

@@ -1,0 +1,33 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261005T0007Z-6657",
+  "harness_version": "0.1.0",
+  "harness_commit": "69ef5b42a7cb28294d07181291584c3621624540",
+  "exit_code": 11,
+  "units": [
+    {
+      "unit": "openspec:add-vat",
+      "phase_before": "fixing",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 2,
+        "total": 2
+      },
+      "open_questions": [
+        "Q-003",
+        "Q-004",
+        "Q-005"
+      ],
+      "verdict": "NEEDS_HUMAN",
+      "profiles": {
+        "implementer": "codex",
+        "clarifier": "claude-code"
+      },
+      "cost_usd": 0.529101,
+      "iteration": 5,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/5",
+      "retry_after": null,
+      "continuation": "not_needed"
+    }
+  ]
+}

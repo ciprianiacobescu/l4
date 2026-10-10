@@ -1,0 +1,5 @@
+# codex login status (0.160.0). Output goes to STDERR; stdout is empty.
+## logged in (ChatGPT plan) -> exit 0
+Logged in using ChatGPT
+## logged out (empty CODEX_HOME) -> exit 1
+Not logged in

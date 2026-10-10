@@ -1,0 +1,63 @@
+Running with gitlab-runner 19.4.1 (3c39fceb)
+  on l4-runner XXXXXXXXX, system ID: s_000000000001
+  UUID: not supported with this GitLab version
+section_start:1791073984:prepare_executor
+Preparing the "shell" executor
+Using Shell (bash) executor...
+section_end:1791073984:prepare_executor
+section_start:1791073984:prepare_script
+Preparing environment
+Running on gitlab-runner...
+section_end:1791073984:prepare_script
+section_start:1791073984:get_sources
+Getting source from Git repository
+Gitaly correlation ID: 01M42587AB2ZW4Z43B42621QRB
+Fetching changes with git depth set to 20...
+Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+Checking out 3584bc48 as detached HEAD (ref is l4/probe-gitconf)...
+Removing .l4-out/
+Removing .l4/vendor/.venv/
+Removing .l4/vendor/src/l4/__pycache__/
+Removing .l4/vendor/src/l4/agents/__pycache__/
+Removing .l4/vendor/src/l4/availability/__pycache__/
+Removing .l4/vendor/src/l4/config/__pycache__/
+Removing .l4/vendor/src/l4/doctor/__pycache__/
+Removing .l4/vendor/src/l4/forge/__pycache__/
+Removing .l4/vendor/src/l4/gates/__pycache__/
+Removing .l4/vendor/src/l4/implementer/__pycache__/
+Removing .l4/vendor/src/l4/llm/__pycache__/
+Removing .l4/vendor/src/l4/sandbox/__pycache__/
+Removing .l4/vendor/src/l4/security/__pycache__/
+Removing .l4/vendor/src/l4/specs/__pycache__/
+Removing .l4/vendor/src/l4/state/__pycache__/
+Removing .l4/vendor/src/l4/vcs/__pycache__/
+Removing .l4/vendor/src/l4/verifier/__pycache__/
+Skipping Git submodules setup
+section_end:1791073985:get_sources
+section_start:1791073985:step_script
+Executing "step_script" stage of the job script
+$ bash ci/probe-gitconf.sh
+--- include paths
+file:.git/config	/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf
+--- /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf (keys and masked values)
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	http.extraheader=***(long value masked)
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	transfer.bundleuri=true
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	http.https://gitlab.example.com.sslcainfo=***(long value masked)
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	url.https://gitlab-ci-token:***@gitlab.example.com/example-group/dummy-agentic.git.insteadof=***(long value masked)
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	url.https://gitlab-ci-token:***@gitlab.example.com.insteadof=***(long value masked)
+--- effective credential/url/http config
+file:.git/config	credential.interactive never
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	http.extraheader X-Gitaly-Correlation-ID: 01M42587AB2ZW4Z43B42621QRB
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	http.https://gitlab.example.com.sslcainfo /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/CI_SERVER_TLS_CA_FILE
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	url.https://gitlab-ci-token:***@gitlab.example.com/example-group/dummy-agentic.git.insteadof https://gitlab.example.com/example-group/dummy-agentic.git
+file:/home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic.tmp/.gitlab-runner.ext.conf	url.https://gitlab-ci-token:***@gitlab.example.com.insteadof https://gitlab.example.com
+--- remote
+origin	https://gitlab-ci-token:***@gitlab.example.com/example-group/dummy-agentic.git (fetch)
+origin	https://gitlab-ci-token:***@gitlab.example.com/example-group/dummy-agentic.git (push)
+--- env names
+CI_API_GRAPHQL_URL CI_API_V4_URL CI_BUILDS_DIR CI_COMMIT_AUTHOR CI_COMMIT_BEFORE_SHA CI_COMMIT_BRANCH CI_COMMIT_DESCRIPTION CI_COMMIT_MESSAGE CI_COMMIT_REF_NAME CI_COMMIT_REF_PROTECTED CI_COMMIT_REF_SLUG CI_COMMIT_SHA CI_COMMIT_SHORT_SHA CI_COMMIT_TIMESTAMP CI_COMMIT_TITLE CI_CONCURRENT_ID CI_CONCURRENT_PROJECT_ID CI_CONFIG_PATH CI_DEFAULT_BRANCH CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX CI_DEPENDENCY_PROXY_PASSWORD CI_DEPENDENCY_PROXY_SERVER CI_DEPENDENCY_PROXY_USER CI_JOB_ID CI_JOB_NAME CI_JOB_NAME_SLUG CI_JOB_STAGE CI_JOB_STARTED_AT CI_JOB_STATUS CI_JOB_TIMEOUT CI_JOB_TOKEN CI_JOB_URL CI_NODE_TOTAL CI_PAGES_DOMAIN CI_PAGES_URL CI_PIPELINE_CREATED_AT CI_PIPELINE_ID CI_PIPELINE_IID CI_PIPELINE_NAME CI_PIPELINE_SOURCE CI_PIPELINE_URL CI_PROJECT_CLASSIFICATION_LABEL CI_PROJECT_DESCRIPTION CI_PROJECT_DIR CI_PROJECT_ID CI_PROJECT_NAME CI_PROJECT_NAMESPACE CI_PROJECT_NAMESPACE_ID CI_PROJECT_PATH CI_PROJECT_PATH_SLUG CI_PROJECT_REPOSITORY_LANGUAGES CI_PROJECT_ROOT_NAMESPACE CI_PROJECT_TITLE CI_PROJECT_URL CI_PROJECT_VISIBILITY CI_REGISTRY CI_REGISTRY_IMAGE CI_REGISTRY_PASSWORD CI_REGISTRY_USER CI_REPOSITORY_URL CI_RUNNER_DESCRIPTION CI_RUNNER_EXECUTABLE_ARCH CI_RUNNER_ID CI_RUNNER_REVISION CI_RUNNER_SHORT_TOKEN CI_RUNNER_TAGS CI_RUNNER_VERSION CI_SERVER CI_SERVER_FQDN CI_SERVER_HOST CI_SERVER_NAME CI_SERVER_PORT CI_SERVER_PROTOCOL CI_SERVER_REVISION CI_SERVER_SHELL_SSH_HOST CI_SERVER_SHELL_SSH_PORT CI_SERVER_TLS_CA_FILE CI_SERVER_URL CI_SERVER_VERSION CI_SERVER_VERSION_MAJOR CI_SERVER_VERSION_MINOR CI_SERVER_VERSION_PATCH CI_SHARED_ENVIRONMENT CI_TEMPLATE_REGISTRY_HOST GITLAB_CI GITLAB_ENV GITLAB_FEATURES GITLAB_USER_EMAIL GITLAB_USER_ID GITLAB_USER_LOGIN GITLAB_USER_NAME 
+section_end:1791073985:step_script
+section_start:1791073985:cleanup_file_variables
+Cleaning up project directory and file based variables
+section_end:1791073986:cleanup_file_variables
+Job succeeded

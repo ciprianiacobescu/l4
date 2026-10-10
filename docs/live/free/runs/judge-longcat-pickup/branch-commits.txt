@@ -1,0 +1,38 @@
+ca23a9f l4-bot <l4-bot@users.noreply.invalid> | docs(add-pickup-notice): hand off to review
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T2050Z-424a
+L4-Iteration: 2
+L4-Phase: verified
+
+31196dc l4-bot <l4-bot@users.noreply.invalid> | docs(add-pickup-notice): verification round 1 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T2050Z-424a
+L4-Iteration: 2
+L4-Phase: verifying
+
+238f973 l4-bot <l4-bot@users.noreply.invalid> | chore(add-pickup-notice): merge main@54e8e5b9fe into the unit branch [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T2050Z-424a
+L4-Iteration: 2
+L4-Phase: verifying
+
+e339928 l4-bot <l4-bot@users.noreply.invalid> | feat(add-pickup-notice): 1.1 Add `pricing.pickup.pickup_notice()` returning the exact pickup notice text [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0501Z-be4d
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+e1fea75 l4-bot <l4-bot@users.noreply.invalid> | test(add-pickup-notice): red for 1.1 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0501Z-be4d
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+

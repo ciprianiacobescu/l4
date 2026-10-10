@@ -1,0 +1,213 @@
+"""Step 4 of the ladder (SPEC 10.2, L4-VER-009): `criterion -> tests -> status`, from the reports and the ledger.
+
+A passing test is evidence for a criterion when it traces at most `verifier.max_criteria_per_test` criteria and it
+carries a proof that it discriminates:
+- `zero_value`, `pre_satisfied`, `red_assertion`: the implementer's red phase proved it (`task.red_ok.criteria`), and
+  the criterion has at least one test that failed against the zero values (tests whose right answer is the zero value
+  count together with such a sibling);
+- `audit`: an audit test the verifier accepted in an earlier round (`verify.audit`, so a test cannot claim it by name);
+- `generated`: a test of an extra report (M1.5's end-to-end tests), which M1.5 proved discriminating itself;
+- `human` and `chore` (M1.11): a test that people wrote, or that a test chore added, which the verifier itself saw
+  fail against the zero values or on the base's production code (`verify.extra_proof`, valid while its file's content is
+  the one that was run);
+- `pass_to_pass`: the criterion text is unchanged from the base specs.
+Anything else that carries the criterion id is ignored and listed as a minor finding. The synthetic baseline of
+L4-VER-009 is not rebuilt: the red-phase proofs stand in for it (M1: verifier 3.3).
+"""
+
+import dataclasses
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+
+from l4.config.schema import L4Config
+from l4.gates.junit import TestCase, TestReport
+from l4.specs.base import Criterion
+from l4.specs.criteria import normalise, trace_ids
+from l4.state.ledger import LedgerEvent
+from l4.verifier.types import CriterionEvidence, Finding, Severity, TracingTest
+
+__all__ = [
+    "NO_PROOF", "PASS_TO_PASS", "PROOF_AUDIT", "PROOF_CHORE", "PROOF_GENERATED", "PROOF_HUMAN", "CriterionEvidence",
+    "TracingTest", "apply_adequacy", "extra_candidates", "extra_proofs", "ignored_findings", "inadequate_findings",
+    "new_covered", "red_proofs", "trace_criteria",
+]  # fmt: skip
+
+PASS_TO_PASS = "pass_to_pass"
+PROOF_AUDIT = "audit"
+PROOF_GENERATED = "generated"
+PROOF_HUMAN = "human"
+PROOF_CHORE = "chore"
+NO_PROOF = "no proof that it discriminates"  # the start of the reason of a test that carries a criterion and has none
+_RED_PROOFS = ("zero_value", "pre_satisfied", "red_assertion")
+
+
+def red_proofs(ledger: Iterable[LedgerEvent]) -> dict[str, dict[str, str]]:
+    """criterion -> test id -> proof, from `task.red_ok` (red phase) and accepted `verify.audit` events. A criterion
+    whose red record names no discriminating test has no proofs."""
+    found: dict[str, dict[str, str]] = {}
+    for event in ledger:
+        if event.type == "task.red_ok" and isinstance(event.data.get("criteria"), Mapping):
+            for criterion, info in event.data["criteria"].items():
+                if not isinstance(info, Mapping) or not info.get("discriminating"):
+                    continue
+                proof = str(info.get("proof"))
+                if proof in _RED_PROOFS:
+                    for test in info.get("tests") or []:
+                        found.setdefault(str(criterion), {}).setdefault(str(test), proof)
+        elif event.type == "verify.audit" and event.data.get("status") == "accepted":
+            for test in event.data.get("tests") or []:
+                found.setdefault(str(event.data.get("criterion")), {})[str(test)] = PROOF_AUDIT
+    return found
+
+
+def extra_proofs(ledger: Iterable[LedgerEvent], file_sha: Callable[[str], str | None]) -> dict[str, dict[str, str]]:
+    """criterion -> test id -> `human` or `chore`, from the accepted `verify.extra_proof` events. An event holds only
+    while every file it names still has the content that was run (`file_sha(path)` is its sha10 now): a test edited
+    after the decision is decided again."""
+    found: dict[str, dict[str, str]] = {}
+    for event in ledger:
+        if event.type != "verify.extra_proof":
+            continue
+        files, source = event.data.get("files"), str(event.data.get("source"))
+        if source not in (PROOF_HUMAN, PROOF_CHORE) or not isinstance(files, Mapping) or not files:
+            continue
+        if any(file_sha(str(path)) != str(sha) for path, sha in files.items()):
+            continue
+        for test in event.data.get("tests") or []:
+            found.setdefault(str(event.data.get("criterion")), {}).setdefault(str(test), source)
+    return found
+
+
+def extra_candidates(
+    evidence: Sequence[CriterionEvidence],
+    attribution: Mapping[str, str],
+    chore_files: Collection[str],
+    *,
+    file_of: Callable[[str], str | None],
+) -> dict[str, list[tuple[str, str]]]:
+    """criterion -> [(test, source)]: the tests that carry a criterion and are ignored only for want of a proof, and
+    whose file is a person's (`attribution`: file -> `human`, when every commit of the unit that touches it is not the
+    harness's) or a test chore's (`chore_files`, from `task.tests_added`). Each is a candidate for a discrimination run;
+    none is evidence until it has passed one (decision 8). A test ignored for any other reason is no candidate."""
+    found: dict[str, list[tuple[str, str]]] = {}
+    for item in evidence:
+        for test, why in item.ignored:
+            path = file_of(test) if why.startswith(NO_PROOF) else None
+            if path is None:
+                continue
+            source = (
+                PROOF_HUMAN if attribution.get(path) == PROOF_HUMAN else PROOF_CHORE if path in chore_files else None
+            )
+            if source is not None:
+                found.setdefault(item.criterion, []).append((test, source))
+    return found
+
+
+def _unchanged(criteria: Sequence[Criterion], base: Sequence[Criterion]) -> frozenset[str]:
+    before = {c.id: normalise(c.text) for c in base}
+    return frozenset(c.id for c in criteria if before.get(c.id) == normalise(c.text))
+
+
+def _traced(case: TestCase, known: frozenset[str]) -> frozenset[str]:
+    return trace_ids(case) & known
+
+
+def trace_criteria(
+    criteria: Sequence[Criterion],
+    report: TestReport,
+    ledger: Sequence[LedgerEvent],
+    cfg: L4Config,
+    *,
+    extra_reports: Sequence[TestReport] = (),
+    generated: Mapping[str, Collection[str]] | None = None,
+    base: Sequence[Criterion] = (),
+    extra: Mapping[str, Mapping[str, str]] | None = None,
+    reasons: Mapping[str, str] | None = None,
+) -> list[CriterionEvidence]:
+    """One `CriterionEvidence` per criterion. `base`: the archived specs' criteria (pass-to-pass for the unchanged
+    ones). `extra_reports`: reports of further gates (the end-to-end report); their tests count as `generated`.
+    `generated` (criterion -> accepted generated test ids) narrows that to the tests the generator's accept step
+    named: any other test of an extra report is judged like a main-report test (red proof, or ignored). Without it
+    the caller vouches that the extra reports hold accepted generated tests only (contract C8). `extra`: the proofs of
+    `extra_proofs` (people's and chores' tests the verifier saw fail); `reasons`: test id -> why it is ignored, for a
+    test whose discrimination run decided against it."""
+    known = frozenset(c.id for c in criteria)
+    limit = cfg.verifier.max_criteria_per_test
+    proofs = red_proofs(ledger)
+    for criterion_id, tests_proved in (extra or {}).items():
+        for test_id, source in tests_proved.items():
+            proofs.setdefault(criterion_id, {}).setdefault(test_id, source)
+    unchanged = _unchanged(criteria, base)
+    sources: list[tuple[TestReport, bool]] = [(report, False), *((extra, True) for extra in extra_reports)]
+    out = []
+    for criterion in criteria:
+        tests: list[TracingTest] = []
+        ignored: list[tuple[str, str]] = []
+        for source, extra in sources:
+            for test_id, case in sorted(source.tests.items()):
+                traced = _traced(case, known)
+                if criterion.id not in traced:
+                    continue
+                if len(traced) > limit:
+                    why = f"it traces {len(traced)} criteria (verifier.max_criteria_per_test={limit})"
+                    ignored.append((test_id, why))
+                    continue
+                proof = proofs.get(criterion.id, {}).get(test_id)
+                accepted = extra and (generated is None or test_id in generated.get(criterion.id, ()))
+                proof = proof or (PROOF_GENERATED if accepted else PASS_TO_PASS if criterion.id in unchanged else None)
+                if proof is None:
+                    why = (reasons or {}).get(test_id) or f"{NO_PROOF} (no red, audit or generated record)"
+                    ignored.append((test_id, why))
+                elif case.status == "skipped":
+                    ignored.append((test_id, "it was skipped"))
+                else:
+                    tests.append(TracingTest(test_id, case.status, proof))
+        state = "fail" if any(t.status != "passed" for t in tests) else "covered" if tests else "uncovered"
+        out.append(CriterionEvidence(criterion.id, criterion.alias, state, tuple(tests), tuple(ignored)))  # type: ignore[arg-type]
+    return out
+
+
+def apply_adequacy(
+    evidence: Sequence[CriterionEvidence], adequacy: Iterable[tuple[str, str, bool]]
+) -> list[CriterionEvidence]:
+    """The judge's `test_adequacy` as (test, criterion, adequate): a test it calls inadequate stops being evidence.
+    An entry that names no criterion (or one the test does not trace) applies to the test everywhere."""
+    rejected = [(test, criterion) for test, criterion, adequate in adequacy if not adequate]
+    out = []
+    for item in evidence:
+        tests = tuple(
+            dataclasses.replace(t, adequate=False)
+            if any(t.id == test and criterion in (item.criterion, "") for test, criterion in rejected)
+            else t
+            for t in item.tests
+        )
+        out.append(dataclasses.replace(item, tests=tests))
+    return out
+
+
+def ignored_findings(evidence: Sequence[CriterionEvidence]) -> list[Finding]:
+    """A minor finding for every test that carries a criterion id and is not evidence (L4-VER-009)."""
+    return [
+        Finding(Severity.MINOR, "a test is ignored as evidence", f"{test}: {why}", "deterministic", item.criterion)
+        for item in evidence
+        for test, why in item.ignored
+    ]
+
+
+def inadequate_findings(evidence: Sequence[CriterionEvidence]) -> list[Finding]:
+    """A minor finding for every tracing test the judge called inadequate."""
+    return [
+        Finding(Severity.MINOR, "the judge called a test inadequate", t.id, "judge", item.criterion)
+        for item in evidence
+        for t in item.tests
+        if not t.adequate
+    ]
+
+
+def new_covered(evidence: Sequence[CriterionEvidence]) -> list[CriterionEvidence]:
+    """Covered criteria that rest on a new test (not pass-to-pass, not already audited): the audit sample's pool."""
+    return [
+        e for e in evidence
+        if e.state == "covered"
+        and not any(t.proof == PROOF_AUDIT and t.status == "passed" for t in e.tests)
+        and any(t.proof != PASS_TO_PASS for t in e.tests)
+    ]  # fmt: skip

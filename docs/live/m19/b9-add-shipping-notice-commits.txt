@@ -1,0 +1,13 @@
+cf11e7a l4-bot chore(add-shipping-notice): ledger [skip ci]
+56cf878 l4-bot docs(add-shipping-notice): verification round 4 [skip ci]
+edbfd44 l4-bot docs(add-shipping-notice): questions index [skip ci]
+6b4b7af CiprianSpot Answer Q-001 of add-shipping-notice: reject the waiver, the fix must split the literal under 92 columns
+e2e5315 l4-bot chore(add-shipping-notice): ledger [skip ci]
+dd6ef19 l4-bot docs(add-shipping-notice): verification round 3 [skip ci]
+5be3465 l4-bot fix(add-shipping-notice-fix-1): 1.1 repository CI failed: test (F-2aa04fcb) [skip ci]
+b5a130a l4-bot docs(add-shipping-notice): fix unit 1 [skip ci]
+da041f4 l4-bot docs(add-shipping-notice): verification round 2 [skip ci]
+0272e10 l4-bot docs(add-shipping-notice): hand off to review
+d9fcf46 l4-bot docs(add-shipping-notice): verification round 1 [skip ci]
+215bd02 l4-bot feat(add-shipping-notice): 1.1 Add `pricing.footer.shipping_notice()` returning the exact shipping notice text [skip ci]
+1c36591 l4-bot test(add-shipping-notice): red for 1.1 [skip ci]

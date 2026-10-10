@@ -1,0 +1,10 @@
+[project]
+name = "multi"
+version = "0.1.0"
+description = "Fixture repository of the L4 evidence tests: two packages, shop and inventory"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,31 @@
+# Secret scanning for files and every commit (.github/workflows/checks.yml).
+# The default gitleaks rules apply; the allowlists below cover only reviewed non-secrets.
+#
+# They match content, never paths: gitleaks 8.30 applies an allowlist's `paths` before its other criteria (even
+# with condition = "AND"), so a path entry would hide every finding in that tree, recorded CI logs included.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "digests in recorded evidence: S1 item keys and model file sha256 values"
+regexTarget = "match"
+regexes = [
+  '''^item_key": "[0-9a-f]{32}"$''',
+  '''^tokenizer(_config)?\.json": "[0-9a-f]{64}"$''',
+]
+
+[[allowlists]]
+description = "uv cache keys in recorded cache.seeded events"
+regexTarget = "line"
+regexes = ['''"type": "cache\.seeded", "cache": "[a-z]+", "key": "[0-9a-f]{64}"''']
+
+[[allowlists]]
+description = "credential-shaped fakes in tests and spec examples: obvious runs, a FAKE marker, an unsigned JWT"
+regexTarget = "secret"
+regexes = ['''(?i)fake|supersecret|0123456789|123456|abcdefgh''', '''^eyJhbGciOiJub25lIn0\.''']
+
+[[allowlists]]
+description = "the private-key header the excerpt redaction test assembles around a fake body"
+regexTarget = "secret"
+regexes = ['''""\.join\(f"E''']

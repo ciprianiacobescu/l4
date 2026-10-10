@@ -1,0 +1,42 @@
+{
+  "changeName": "chore-tasks-only",
+  "changeDir": "{{REPO}}/openspec/changes/chore-tasks-only",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "tasks": [
+      "{{REPO}}/openspec/changes/chore-tasks-only/tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 2,
+    "complete": 0,
+    "remaining": 2
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 Bump the linter",
+      "done": false,
+      "sourcePath": "{{REPO}}/openspec/changes/chore-tasks-only/tasks.md",
+      "line": 5
+    },
+    {
+      "id": "2",
+      "description": "1.2 Re-run the formatter",
+      "done": false,
+      "sourcePath": "{{REPO}}/openspec/changes/chore-tasks-only/tasks.md",
+      "line": 6
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "missingPrerequisites": [
+    "proposal",
+    "design"
+  ],
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

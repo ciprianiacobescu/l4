@@ -1,0 +1,54 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261006T0501Z-be4d",
+  "harness_version": "0.1.0",
+  "harness_commit": "692a63946462b82f300c631a09cb815393054825",
+  "exit_code": 11,
+  "units": [
+    {
+      "unit": "openspec:add-gift-note",
+      "phase_before": "none",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [
+        "Q-001"
+      ],
+      "verdict": null,
+      "profiles": {
+        "implementer": "codex",
+        "clarifier": "claude-code",
+        "s1_judge": "laya"
+      },
+      "cost_usd": 0.073724,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/30",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    },
+    {
+      "unit": "openspec:add-pickup-notice",
+      "phase_before": "none",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "codex",
+        "s1_judge": "laya"
+      },
+      "cost_usd": 0.071244,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/31",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

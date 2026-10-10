@@ -1,0 +1,38 @@
+9b82498 l4-bot <l4-bot@users.noreply.invalid> | chore(add-shipping-fee): ledger [skip ci]
+L4-Unit: openspec:add-shipping-fee
+L4-Run: r-20261006T2043Z-8cd2
+L4-Iteration: 2
+L4-Phase: awaiting_human
+
+4c001e0 l4-bot <l4-bot@users.noreply.invalid> | docs(add-shipping-fee): verification round 1 [skip ci]
+L4-Unit: openspec:add-shipping-fee
+L4-Run: r-20261006T2043Z-8cd2
+L4-Iteration: 2
+L4-Phase: verifying
+
+95d8928 l4-bot <l4-bot@users.noreply.invalid> | chore(add-shipping-fee): merge main@54e8e5b9fe into the unit branch [skip ci]
+L4-Unit: openspec:add-shipping-fee
+L4-Run: r-20261006T2043Z-8cd2
+L4-Iteration: 2
+L4-Phase: verifying
+
+231f341 l4-bot <l4-bot@users.noreply.invalid> | feat(add-shipping-fee): 1.1 Add `src/pricing/shipping.py` with `shipping_fee(subtotal, country)` and `UnsupportedShippingCountry`, and export both from `pricing` [skip ci]
+L4-Unit: openspec:add-shipping-fee
+L4-Run: r-20261004T2008Z-5488
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+3319cb2 l4-bot <l4-bot@users.noreply.invalid> | test(add-shipping-fee): red for 1.1 [skip ci]
+L4-Unit: openspec:add-shipping-fee
+L4-Run: r-20261004T2008Z-5488
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+

@@ -1,0 +1,2 @@
+{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}
+{"type":"runError","data":{"sessionId":"c4d2add2-48b9-48ee-9ded-526e46329422","stage":"init","message":"failed to set agent 'l4-does-not-exist': Internal error (code -32603): Mode 'l4-does-not-exist' not found"}}

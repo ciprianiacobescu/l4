@@ -1,0 +1,18 @@
+{
+  "archive": {
+    "change": "add-farewell",
+    "archivedAs": "2026-10-03-add-farewell",
+    "path": "{{REPO}}/openspec/changes/archive/2026-10-03-add-farewell",
+    "specsUpdated": true,
+    "totals": {
+      "added": 2,
+      "modified": 1,
+      "removed": 0,
+      "renamed": 0
+    }
+  },
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

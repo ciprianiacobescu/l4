@@ -1,0 +1,8 @@
+E501 Line too long (106 > 92)
+ --> src/pricing/pickup.py:2:93
+  |
+1 | def pickup_notice() -> str:
+2 |     return "Pickup orders wait at the shop counter for seven days; bring the order number and a photo ID."
+  |                                                                                             ^^^^^^^^^^^^^^
+
+Found 1 error.

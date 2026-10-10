@@ -1,0 +1,10 @@
+{
+  "status": "done",
+  "phase": "green",
+  "task_ids": ["1.1"],
+  "criteria_ids": ["C-540dbbf7", "C-968f19f6", "C-dc5ae7cf", "C-2d8e9905", "C-c5654742"],
+  "summary": "Implemented slugify() in src/slugkit/slug.py using stdlib only (unicodedata NFKD + combining-mark strip, ASCII encode with 'ignore', then split on non [a-z0-9] runs and join with single hyphens). Empty/symbol-only input raises ValueError. All 6 slug tests plus the version test pass: `uv run pytest -q` -> 7 passed. No test files were modified; only src/slugkit/slug.py changed. Scoped strictly to task 1.1 per tasks.md: the 'Maximum length' requirement (truncation without trailing hyphen) is intentionally NOT implemented and the max_length parameter is accepted but currently ignored, since openspec/changes/add-slugify/tasks.md assigns it to task 1.2. No dependencies added.",
+  "tests_added": [],
+  "files_changed": ["src/slugkit/slug.py"],
+  "questions": []
+}

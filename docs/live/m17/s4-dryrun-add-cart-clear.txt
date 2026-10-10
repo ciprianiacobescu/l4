@@ -1,0 +1,13 @@
+$ git rev-parse origin/main origin/l4/openspec/add-cart-clear
+c647207a9619945595ce9d5d13e7c5e1abc596f4
+f96b0fc040e400eac054bfbed983017d6f64556c
+$ l4 run --dry-run --unit openspec:add-cart-clear
+l4 run --dry-run: no lease, worktree, agent, push or forge write
+
+openspec:add-cart-clear  phase=awaiting_human  next=none
+  base moved: step 0 merges main@c647207a9619 (6 commits behind; changed on both sides: openspec/changes/add-cart-clear/questions.md)
+
+UNIT                     PHASE           ACTION  TASK  AVAILABILITY  EXIT
+openspec:add-cart-clear  awaiting_human  none    -     unknown       11
+
+would exit 11

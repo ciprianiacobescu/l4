@@ -1,0 +1,4 @@
+{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}
+{"type":"metadata","data":{"sessionId":"dc8effe3-f3c1-4ae2-9775-7a6bbb162922","contextUsagePercentage":3.638499975204468,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"metadata","data":{"sessionId":"dc8effe3-f3c1-4ae2-9775-7a6bbb162922","contextUsagePercentage":9.98799991607666,"meteringUsage":[{"value":0.1095762305140962,"unit":"credit","unitPlural":"credits"},{"value":0.19826163018242124,"unit":"credit","unitPlural":"credits"},{"value":0.21373383416252073,"unit":"credit","unitPlural":"credits"}],"turnDurationMs":120086,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"runError","data":{"sessionId":"dc8effe3-f3c1-4ae2-9775-7a6bbb162922","stage":"prompt","message":"Internal error (code -32603): Encountered an error in the response stream: The request was throttled by the service (request_id: 6d6ea691-8d4a-4e00-8121-dbd9a81f25a0)"}}

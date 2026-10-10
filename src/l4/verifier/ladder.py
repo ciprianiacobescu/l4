@@ -1,0 +1,1221 @@
+"""The verification ladder (SPEC 10.2) and its glue to the orchestrator: steps 0, 1, 2, 3 (with the end-to-end gate),
+4, 4a, 5 (generated UI tests), 8 (S1, recorded only), 9 and 10, the `verify_hook` the orchestrator resolves lazily, and
+the thin `l4 verify` handler.
+
+Verdict to lifecycle (SPEC 12.0, verifier 1.20): PASS -> `verify_pass` (`verified`); FAIL -> `verify_fail_fix`
+(`fixing`, exit 10, with a fix unit: `fixloop.after_verdict`) or `verify_fail_exhausted` (`escalated`, exit 13);
+NEEDS_HUMAN -> `verify_needs_human` (`awaiting_human`, exit 11, with verdict questions).
+A required role that cannot serve (independence, probes, a usage limit, a judge that cannot run)
+raises `RoleUnavailable`/`RoleLimit`, which the orchestrator turns into `waiting_capacity` (exit 12); any other
+exception leaves the phase at `verifying` with exit 1 and no verdict (L4-VER-010).
+
+Independence is decided before anything runs, by `l4.verifier.selection`: the judge chain is walked with a veto on
+every judge whose vendor (or model) equals that of an implementer profile of the unit, `unknown` is never independent
+(L4-VER-001). A judge that hits a usage limit, or whose served model is not the one its profile names, gives way to the
+next independent judge in the same round (nothing left: `waiting_capacity`, `no independent verifier`). The verdict
+records how the vendors are known (`independence:` in verification.md and verdict.json).
+
+Evidence is committed by the hook itself, on every verdict, as `docs(<unit>): verification round <n> [skip ci]` and
+pushed: the worktree is deleted before the next run, and the orchestrator's last commit carries only the ledger.
+On PASS the hand-off commit (forge-and-ci 1.39) still has the ledger to carry.
+M1: verifier 1.19 (resume per step), steps 6 and 7.
+"""
+
+import dataclasses
+import functools
+import hashlib
+import json
+import logging
+import shutil
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from l4.agents.base import RunResult
+from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
+from l4.availability.vendor import resolve_vendor
+from l4.ci.failing_step import active_ci_steps
+from l4.config.defaults import cache_root
+from l4.config.preflight import preflight_run_config
+from l4.config.redaction import load_app_config
+from l4.config.schema import L4Config
+from l4.context import AppContext
+from l4.evidence.collect import (
+    Evidence,
+    ScopeEvidence,
+    changed_unit_files,
+    collect_evidence,
+    coverage_sources,
+    human_only,
+    scope_evidence,
+)
+from l4.evidence.report import evidence_json
+from l4.exitcodes import ExitCode, L4Exit
+from l4.fsutil import UnsafeFile, reject_symlinks
+from l4.gates.coverage import cov_env
+from l4.gates.junit import TestReport
+from l4.implementer.discrimination import discriminate_extra, file_of_test
+from l4.implementer.prompt import collect_sources
+from l4.implementer.tdd import RoleLimit
+from l4.implementer.workbench import Workbench, clip_subject, make_workbench
+from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, LLMBackend, workbench_request_factory
+from l4.llm.system_one import SystemOneBackend, open_s1_backend
+from l4.memory.round import curate_round
+from l4.orchestrator import run_unit_in_worktree
+from l4.outcome import CommandResult
+from l4.planner import facts_of, next_action
+from l4.s1.items import item_keys_by_subject, items_from_evidence, project_key
+from l4.s1.records import append_records
+from l4.s1.shadow import run_shadow
+from l4.services import HookContext, Services, load_hooks
+from l4.specs.base import Criterion, Framework
+from l4.specs.criteria import base_criteria_at
+from l4.specs.providers import providers_for
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
+from l4.state.fold import fold
+from l4.state.ledger import LedgerEvent, read_ledger
+from l4.state.lifecycle import Trigger
+from l4.state.status import load_snapshot, select_units
+from l4.vcs.git import Git
+from l4.vcs.trailers import CommitTrailers
+from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
+from l4.verifier.audit import choose, run_audit
+from l4.verifier.basemerge import bring_in_base
+from l4.verifier.conventions import test_conventions
+from l4.verifier.evidence import (
+    commit_verifier_tests,
+    read_verdict,
+    restore_round,
+    reusable,
+    stored_finding,
+    subject_sha,
+)
+from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
+from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
+from l4.verifier.generate import generate_ui_tests
+from l4.verifier.integrity import IntegrityContext, run_integrity
+from l4.verifier.judge import (
+    CriterionVerdict,
+    JudgePrompt,
+    JudgeRun,
+    JudgeVerdict,
+    RoundOutput,
+    build_judge_prompt,
+    reply_counts,
+    run_judge,
+)
+from l4.verifier.notes import verdict_section
+from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
+from l4.verifier.preconditions import check_preconditions, record_ci_steps
+from l4.verifier.report import write_round_evidence
+from l4.verifier.s1_labels import record_human_labels
+from l4.verifier.s1_step import S1Step, S1Wiring, evidence_for, record_rows, run_step
+from l4.verifier.selection import (
+    Independence,
+    JudgeSeat,
+    assess_independence,
+    independence_constraint,
+    no_independent_verifier,
+    seat_of,
+    select_judge,
+)
+from l4.verifier.traceability import (
+    PROOF_HUMAN,
+    apply_adequacy,
+    extra_candidates,
+    extra_proofs,
+    ignored_findings,
+    inadequate_findings,
+    new_covered,
+    trace_criteria,
+)
+from l4.verifier.types import (
+    AuditRecord,
+    CounterexampleRun,
+    CriterionEvidence,
+    Finding,
+    Severity,
+    StepRecord,
+    TracingTest,
+    Verdict,
+    VerifyResult,
+)
+from l4.verifier.ui_step import (
+    edited_findings,
+    gap_findings,
+    plan_generation,
+    previously_generated,
+    unclosed_holds,
+    with_generated,
+)
+from l4.verifier.verdicts import (
+    apply_finding_verdicts,
+    carry_rejects,
+    consume_verdicts,
+    effective_verdicts,
+    finding_sha256,
+    hold_covers,
+    hold_id,
+    raise_verdict_questions,
+    regressions,
+    settle_holds,
+    text_sha256,
+    unresolved_holds,
+)
+
+log = logging.getLogger("l4.verify")
+
+TRIGGERS = {Verdict.PASS: Trigger.VERIFY_PASS, Verdict.FAIL: Trigger.VERIFY_FAIL_FIX,
+            Verdict.NEEDS_HUMAN: Trigger.VERIFY_NEEDS_HUMAN}  # fmt: skip
+MAX_DIFF_CHARS = 120_000
+MAX_NOTES_CHARS = 6_000
+UNEXECUTED_NOTE = "not executed in M0: the verifier worktree is M1 (verifier 1.5)"
+JUDGE_TIMEOUT_S = 600  # no config key in SPEC section 5; `claude -p` answers in 15-20 s [V]
+VERIFY_PHASES = ("implemented", "verifying")
+# (id, name, why it did not run when nothing earlier stopped the ladder), in ladder order
+LADDER = (
+    ("0", "preconditions", ""), ("1", "integrity", ""), ("2", "build", ""), ("3", "tests", ""),
+    ("4", "traceability", ""), ("4a", "audit sampling", ""), ("5", "ui test generation", ""), ("6", "quality", ""),
+    ("8", "s1 judge", ""), ("9", "judge", ""), ("10", "aggregation", ""),
+)  # fmt: skip
+
+
+def require_independent_judge(
+    cfg: L4Config, implementer_profiles: Sequence[str], judge: str, *, role: str = "judges"
+) -> None:
+    """`RoleUnavailable` (exit 12) when the judge is not independent of every implementer profile of the unit. The
+    ladder no longer calls it (`select_judge` walks the chain with `independence_constraint`, also for the audit
+    writer); it stays until M1.5 is on `main` (parallel-ownership §4, item 6)."""
+    judge_profile = cfg.profiles[judge]
+    if reason := independence_constraint(cfg, implementer_profiles)(judge, judge_profile):
+        raise RoleUnavailable(role, f"no independent verifier ({reason})")
+
+
+@dataclass(frozen=True)
+class ShadowWiring:
+    cache_file: Path  # $L4_CACHE/s1-calibration.jsonl, next to the criterion rows
+    log_path: Path
+    environ: dict[str, str]
+
+
+@dataclass
+class VerifyContext:
+    wb: Workbench
+    judge: LLMBackend
+    judge_profile: str
+    implementer_profiles: list[str]
+    round: int
+    judge_timeout_s: int
+    independence: Independence | None = None  # the record of the judge that gave the verdict (set by the judge step)
+    seat: JudgeSeat = field(default_factory=JudgeSeat)
+    # the next independent judge, after a usage limit (with its run) or a served-model mismatch (None):
+    # `(reason, limited run) -> (backend, profile name)`; `WaitingCapacity` when none is left
+    next_judge: Callable[[str, RunResult | None], tuple[LLMBackend, str]] | None = None
+    audit_writer: Callable[[], LLMBackend] | None = None  # opens the `verifier_agent` role: only when a sample is drawn
+    verifier_tests: list[Path] = field(default_factory=list)  # the tests the verifier wrote in this round (C9)
+    ui_writer: Callable[[], LLMBackend] | None = None  # the same role for step 5, opened when a UI criterion is a gap
+    s1: S1Wiring | None = None  # step 8: None when `verifier.s1.enabled` is off or `roles.s1_judge` is empty
+    shadow: "ShadowWiring | None" = None  # step 8's record-only engines: set when `verifier.s1.shadow` names profiles
+    base_note: str = ""  # step 0's note about the base: merged now, or already contained (`bring_in_base`)
+
+
+def _git_diff(wb: Workbench, base_sha: str, head: str) -> tuple[str, bool]:
+    """`git diff <base>...<head>` without the harness's own `.l4/` files and the `verification.md` of each unit of the
+    family (the harness's report of an earlier round, not the unit's work: M1.9 live F4), cut at MAX_DIFF_CHARS. A
+    `verification.md` anywhere else is project content and stays."""
+    reports = [f":(literal,exclude){d}/verification.md" for d in _unit_dirs(wb)]
+    raw = wb.git.run_bytes(
+        "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{base_sha}...{head}", "--", ".",
+        ":(glob,exclude)**/.l4/**", *reports,
+    )  # fmt: skip
+    text = raw.decode("utf-8", errors="replace")
+    return text[:MAX_DIFF_CHARS], len(text) > MAX_DIFF_CHARS
+
+
+def _events(wb: Workbench) -> list[LedgerEvent]:
+    return read_ledger(wb.ref.path).events
+
+
+def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
+    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop)."""
+    return {
+        str(t): str(e.data.get("task", "")) for e in events if e.type == "task.red_ok" for t in e.data.get("tests", [])
+    }
+
+
+def _notes(events: Sequence[LedgerEvent]) -> str:
+    parts = [
+        f"Task {e.data.get('task')} ({'red' if e.type == 'task.red_ok' else 'green'}): {e.data['notes']}"
+        for e in events
+        if e.type in ("task.red_ok", "task.done") and e.data.get("notes")
+    ]
+    return "\n\n".join(parts)[:MAX_NOTES_CHARS]
+
+
+def _guards(events: Sequence[LedgerEvent]) -> list[str]:
+    return [
+        f"{e.type}: {e.data.get('path') or e.data.get('rule') or ''}".strip()
+        for e in events
+        if e.type.startswith("guard.")
+    ]
+
+
+def _gate_summary(result: VerifyResult) -> str:
+    lines = [f"- {g.name}: {g.status}" + (f" ({g.reason})" if g.reason else "") for g in result.gates]
+    lines.append("")
+    lines.append("Per-test outcome of the full test gate (test id, status):")
+    lines += [f"  {test}  {status}" for test, status in sorted(result.tests.items())] or ["  (no tests)"]
+    # an accepted audit test ran in the audit gate run, not in the full test gate: it is listed here from the audit
+    # records, so that the matrix below never names a test this list lacks (M1.12, K2)
+    lines += [
+        f"  {test}  passed  (audit test of {a.criterion}, written and run by the verifier this round)"
+        for a in result.audit
+        if a.status == "accepted"
+        for test in a.tests
+    ]
+    if result.trace:
+        lines += ["", "Traceability (criterion, state, tracing tests with status and proof):"]
+        lines += [
+            f"  {e.criterion}  {e.state}  "
+            + ("; ".join(f"{t.id} ({t.status}, {t.proof})" for t in e.tests) or "no discriminating test")
+            for e in result.trace
+        ]
+    if result.audit:
+        lines += ["", "Audit tests written by the verifier agent (criterion, status):"]
+        lines += [f"  {a.criterion}  {a.status}" + (f"  {a.reason}" if a.reason else "") for a in result.audit]
+    if result.generated:
+        lines += ["", "UI tests the verifier generated (criterion, status, outcome at the merge base and at head):"]
+        lines += [
+            f"  {g.criterion}  {g.status}  base {g.base or '-'}  head {g.head or '-'}  {g.path or ''}"
+            for g in result.generated
+        ]
+    if result.integrity is not None and result.integrity.declared:
+        lines += ["", "Suppression comments the implementer declared (review them):"]
+        lines += [f"  {d}" for d in result.integrity.declared]
+    return "\n".join(lines)
+
+
+def _emit_step(vc: VerifyContext, record: StepRecord, subject: str) -> None:
+    evidence = json.dumps(dataclasses.asdict(record), sort_keys=True)
+    vc.wb.emit(
+        "verify.step", round=vc.round, step=record.step, subject_sha=subject, status=record.status,
+        evidence_hash=hashlib.sha256(evidence.encode()).hexdigest(),
+    )  # fmt: skip
+
+
+@dataclass
+class _Run:
+    """Mutable state of one `verify_unit` call."""
+
+    result: VerifyResult
+    records: dict[str, StepRecord] = field(default_factory=dict)
+    judged: JudgeVerdict | None = None
+    e2e: E2eGateOutcome | None = None  # step 3's end-to-end gate, when it ran: step 4 traces it, step 5 reads its page
+    s1: S1Step | None = None  # step 8, until step 9 has spoken and the calibration rows can be written
+    scope: ScopeEvidence | None = None  # step 1: what the unit changed and whether it stays in scope
+    evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
+    report: TestReport | None = None  # step 3's JUnit report
+
+
+def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
+    """Run one step, record it (`verify.step`) and report whether the ladder goes on."""
+    start = time.monotonic()
+    ok, note = body()
+    _record_step(vc, run, StepRecord(step, name, "ok" if ok else "failed", round(time.monotonic() - start, 1), note))
+    return ok
+
+
+def _record_step(vc: VerifyContext, run: _Run, record: StepRecord) -> None:
+    run.records[record.step] = record
+    _emit_step(vc, record, run.result.subject_sha)
+
+
+def _sha10(wb: Workbench, path: str) -> str | None:
+    """The first 10 hex digits of the sha256 of a regular file of the worktree: what an extra proof is tied to."""
+    target = wb.worktree / path
+    if target.is_symlink() or not target.is_file():
+        return None
+    return hashlib.sha256(target.read_bytes()).hexdigest()[:10]
+
+
+@dataclass
+class _ExtraDecision:
+    proofs: dict[str, dict[str, str]] = field(default_factory=dict)  # criterion -> test -> human | chore
+    reasons: dict[str, str] = field(default_factory=dict)  # a rejected test -> why it stays ignored
+
+
+def _extra_proof_step(
+    vc: VerifyContext,
+    run: _Run,
+    trace: Sequence[CriterionEvidence],
+    events: Sequence[LedgerEvent],
+    base: str,
+    head: str,
+) -> _ExtraDecision | None:
+    """Step 4's discrimination of tests that carry a criterion and have no proof, and that only people wrote or a test
+    chore added (L4-VER-009, M1.11 decision 8): at most two gate runs, and only when there is such a test. An accepted
+    one is recorded (`verify.extra_proof`, tied to its file's content) and counts as evidence with the proof `human` or
+    `chore`; a rejected one stays a minor finding, with its reason."""
+    wb = vc.wb
+    chore_files = {str(f) for e in events if e.type == "task.tests_added" for f in e.data.get("files") or []}
+    files = {t: f for item in trace for t, _ in item.ignored if (f := file_of_test(wb, t)) is not None}
+    attribution = {f: PROOF_HUMAN for f in sorted(set(files.values())) if human_only(wb.git, base, head, f)}
+    candidates = extra_candidates(trace, attribution, chore_files, file_of=files.get)
+    if not candidates:
+        return None
+    outcome = discriminate_extra(wb, sorted({t for found in candidates.values() for t, _ in found}), base)
+    decided = _ExtraDecision()
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for criterion, found in candidates.items():
+        for test, source in found:
+            if (via := outcome.accepted.get(test)) is None:
+                decided.reasons[test] = outcome.reasons.get(test) or "passes against the zero values and on the base"
+                continue
+            decided.proofs.setdefault(criterion, {})[test] = source
+            groups.setdefault((criterion, source, via), []).append(test)
+    for (criterion, source, via), tests in sorted(groups.items()):
+        paths = sorted({files[t] for t in tests})
+        wb.emit(
+            "verify.extra_proof", round=vc.round, criterion=criterion, tests=sorted(tests), source=source, via=via,
+            files={p: _sha10(wb, p) for p in paths},
+        )  # fmt: skip
+    return decided
+
+
+def _unit_dirs(wb: Workbench) -> list[str]:
+    """The unit directories of the family (the unit and its fix units), relative to the repository."""
+    root = wb.worktree.resolve()
+    return [u.path.resolve().relative_to(root).as_posix() for u in family_units(wb.provider, wb.ref)]
+
+
+def _family_sources(wb: Workbench) -> tuple[tuple[str, str], ...]:
+    """The unit's spec files, then each fix unit's under its own name: the judge reads the regression scenarios and the
+    findings they answer."""
+    found = list(collect_sources(wb.ref.path))
+    for unit in family_units(wb.provider, wb.ref)[1:]:
+        found += [(f"{unit.name}/{path}", text) for path, text in collect_sources(unit.path)]
+    return tuple(found)
+
+
+def verify_unit(vc: VerifyContext) -> VerifyResult:
+    wb = vc.wb
+    head = wb.head()
+    events = _events(wb)
+    criteria = wb.provider.criteria(wb.ref)
+    subject = subject_sha(wb.git, head, _unit_dirs(wb))
+    prev = read_verdict(wb.ref.path, vc.round - 1) if vc.round > 1 else None
+    if reusable(prev, subject, [c.id for c in criteria]):
+        assert prev is not None
+        return _resume(vc, prev, criteria, events, subject)
+    result = VerifyResult(
+        wb.ref.id, vc.round, Verdict.NEEDS_HUMAN, "", head, judge_profile=vc.judge_profile,
+        implementer_profiles=list(vc.implementer_profiles), red_green=_red_green(events), guards=_guards(events),
+        subject_sha=subject,
+    )  # fmt: skip
+    run = _Run(result)
+    findings = result.findings
+    base_sha = ""
+    report: TestReport | None = None
+
+    def preconditions() -> tuple[bool, str]:
+        nonlocal base_sha
+        pre = check_preconditions(wb)
+        record_ci_steps(wb, pre)
+        base_sha = result.base_sha = pre.base_sha
+        findings.extend(pre.findings)
+        return not pre.findings, "; ".join(filter(None, [vc.base_note, *(f.title for f in pre.findings)]))
+
+    def integrity() -> tuple[bool, str]:
+        tasks = [(u.id, t) for u, t in family_tasks(wb.provider, wb.ref)]
+        ctx = IntegrityContext(wb.git, wb.cfg, base_sha, head, events, tasks, _unit_dirs(wb), wb.ref.id)
+        result.integrity = run_integrity(ctx)
+        findings.extend(result.integrity.findings)
+        blocking = [f.title for f in result.integrity.findings if f.blocking]
+        note = "; ".join(blocking) or f"{len(result.integrity.checks)} sub-checks"
+        if result.integrity.unfrozen:
+            note += f" (+{len(result.integrity.unfrozen)} unfrozen by human answers)"
+        return not result.integrity.blocked, note + _scope_step(vc, run, base_sha)
+
+    def build() -> tuple[bool, str]:
+        out = run_build_gates(wb, active_ci_steps(events))
+        result.gates.extend(out.gates)
+        findings.extend(out.findings)
+        return out.ok, "; ".join(f.detail for f in out.findings)
+
+    def tests() -> tuple[bool, str]:
+        nonlocal report
+        extra, cov_dir = _coverage_env(vc, base_sha)
+        out = run_test_gate(wb, set(result.red_green), extra_env=extra)
+        result.gates.append(out.gate)
+        findings.extend(out.findings)
+        report = run.report = out.report
+        if out.report is not None:
+            result.tests = {i: c.status for i, c in out.report.tests.items()}
+        notes = [f.detail for f in out.findings]
+        gate_ok, seen = out.ok, out.report
+        if out.ok and e2e_gate_configured(wb.cfg):
+            run.e2e = browser = run_e2e_gate(wb)
+            result.gates.append(browser.gate)
+            findings.extend(browser.findings)
+            if browser.report is not None:
+                result.tests |= {i: c.status for i, c in browser.report.tests.items()}
+            notes += [f.detail for f in browser.findings]
+            gate_ok = browser.ok
+            seen = _merged(out.report, browser.report)  # a new e2e test file ran in the e2e gate, not in this one
+        blockers = _collect_step(vc, run, base_sha, seen, gate_ok, extra, cov_dir)
+        return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers)])
+
+    def traceability() -> tuple[bool, str]:
+        assert report is not None
+        # pass-to-pass compares with the archived specs AT THE BASE COMMIT, read from git: the worktree is at the unit's
+        # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
+        archived = base_criteria_at(wb.git, base_sha) if wb.ref.framework is Framework.OPENSPEC else []
+        browser = run.e2e.report if run.e2e is not None else None
+        # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
+        generated, edited = previously_generated(events, wb.worktree, browser)
+        trace = functools.partial(
+            trace_criteria, criteria, report, events, wb.cfg, base=archived,
+            extra_reports=[browser] if browser else [], generated=generated,
+        )  # fmt: skip
+        proved = extra_proofs(events, lambda path: _sha10(wb, path))  # people's and chores' tests seen to discriminate
+        result.trace = trace(extra=proved)
+        decided = _extra_proof_step(vc, run, result.trace, events, base_sha, head)
+        if decided is not None:
+            for criterion, tests_proved in decided.proofs.items():
+                proved.setdefault(criterion, {}).update(tests_proved)
+            result.trace = trace(extra=proved, reasons=decided.reasons)
+        findings.extend(ignored_findings(result.trace))
+        findings.extend(edited_findings(edited))
+        covered = sum(e.state == "covered" for e in result.trace)
+        return True, f"{covered}/{len(criteria)} criteria covered"
+
+    reached = (
+        _step(vc, run, "0", "preconditions", preconditions)
+        and _step(vc, run, "1", "integrity", integrity)
+        and _step(vc, run, "2", "build", build)
+        and _step(vc, run, "3", "tests", tests)
+    )
+    if reached:
+        _step(vc, run, "4", "traceability", traceability)
+        _audit_step(vc, run, criteria, base_sha)
+        _generate_step(vc, run, criteria, base_sha)
+        _quality_step(vc, run)
+        _s1_step(vc, run, criteria, base_sha)
+        _shadow_step(vc, run, base_sha)
+        try:
+            _judge_step(vc, run, base_sha, events)
+        finally:  # step 8's rows survive a judge that raises (their `judge` column stays empty)
+            _calibrate(vc, run)
+        _finalize(vc, run, criteria, events)
+    else:  # a failed step 0-3 is a FAIL (a blocker came with it); no criterion was judged
+        result.verdict = aggregate_unit(findings, result.criteria, result.holds)
+    _publish_evidence(run)
+    run.records["10"] = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
+    _emit_step(vc, run.records["10"], subject)
+    result.steps = [
+        run.records.get(step, StepRecord(step, name, "not_run", note=why or "an earlier step failed"))
+        for step, name, why in LADDER
+    ]
+    return result
+
+
+def _scope_step(vc: VerifyContext, run: _Run, base_sha: str) -> str:
+    """Step 1, second half (M1.6): what the unit changed and whether the spec names it. No test run is needed. The
+    findings (`sdd.scope_check: fail`) and the holds (`warn`) join the round; a check that cannot run is a hold, never
+    a silent pass. Returns the text appended to step 1's note."""
+    wb, result = vc.wb, run.result
+    try:
+        run.scope = scope = scope_evidence(wb, base_sha, result.head_sha, wb.ref)
+    except Exception as exc:  # noqa: BLE001 - the repository content is untrusted: nothing here may end the round
+        log.warning("%s: scope check failed: %s", wb.ref.id, exc)
+        result.holds.append(f"scope: could not be checked ({type(exc).__name__})")
+        return "; scope check did not run"
+    result.findings.extend(scope.outcome.findings)
+    result.holds.extend(h.text for h in scope.holds)
+    held = f", {len(scope.holds)} held" if scope.holds else ""
+    return f"; scope: {len(scope.files)} changed file(s){held}"
+
+
+def _coverage_env(vc: VerifyContext, base_sha: str) -> tuple[dict[str, str] | None, Path | None]:
+    """The environment that loads `l4_cov` into step 3's test run, and the directory it writes (under the worktree, the
+    one place the gate sandbox can write). None when diff coverage is off or no Python code file changed; the directory
+    is None when `.l4-out` or `.l4-out/cov` is a symlink: the worktree is repository content, and clearing or writing
+    through a planted link would delete or write outside the checkout (as `gates.e2e` refuses for `.l4-out/e2e`)."""
+    wb = vc.wb
+    try:
+        reject_symlinks(wb.worktree, ".l4-out", "cov")
+    except UnsafeFile as exc:
+        log.warning("%s: coverage is not set up: %s", wb.ref.id, exc)
+        return None, None
+    cov_dir = wb.worktree / ".l4-out" / "cov"
+    shutil.rmtree(cov_dir, ignore_errors=True)  # an earlier round's output must not stand in for this one's
+    if wb.cfg.verifier.evidence.diff_coverage.mode == "off":
+        return None, cov_dir
+    try:
+        unit_rel = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
+        packages = coverage_sources(wb.git, base_sha, wb.head(), wb.cfg, unit_rel)
+        return (cov_env(cov_dir, packages) if packages else None), cov_dir
+    except (ValueError, OSError) as exc:
+        log.warning("%s: coverage is not set up: %s", wb.ref.id, exc)
+        return None, cov_dir
+
+
+def _merged(unit: TestReport | None, browser: TestReport | None) -> TestReport | None:
+    """The tests of step 3's unit gate and of its end-to-end gate as one report (the tests-ran check reads both)."""
+    if unit is None or browser is None:
+        return unit
+    return TestReport({**unit.tests, **browser.tests}, [*unit.collection_errors, *browser.collection_errors])
+
+
+def _collect_step(
+    vc: VerifyContext,
+    run: _Run,
+    base_sha: str,
+    report: TestReport | None,
+    gate_ok: bool,
+    extra: dict[str, str] | None,
+    cov_dir: Path | None,
+) -> list[Finding]:
+    """Step 3, second half: scope, tests ran and diff coverage from the gate's report and the plugin's output. The
+    tests-ran findings join the round here (the blockers are returned: they stop the ladder like a failed gate);
+    step 6 reports the coverage ones."""
+    wb, result = vc.wb, run.result
+    try:
+        ev = collect_evidence(
+            wb, base_sha, result.head_sha, report, cov_dir, wb.ref, new_tests=set(result.red_green),
+            gate_passed=gate_ok, cov_nonce=(extra or {}).get("L4_COV_NONCE"), step1=run.scope,
+        )  # fmt: skip
+    except Exception as exc:  # noqa: BLE001
+        log.warning("%s: evidence collection failed: %s", wb.ref.id, exc)
+        result.holds.append(f"evidence: could not be collected ({type(exc).__name__})")
+        return []
+    run.evidence = ev
+    ran = ev.ran.findings if ev.ran is not None else []
+    result.findings.extend(ran)
+    return [f for f in ran if f.severity is Severity.BLOCKER]
+
+
+def _quality_step(vc: VerifyContext, run: _Run) -> None:
+    """Step 6 (M1.6): the diff-coverage check. Under `warn` an unmeasured or low coverage is a hold, under `fail` a
+    deterministic major finding (`check_diff_coverage`); the numbers are in the Evidence section."""
+    ev, result = run.evidence, run.result
+    mode = vc.wb.cfg.verifier.evidence.diff_coverage.mode
+    why = (
+        "verifier.evidence.diff_coverage.mode is off" if mode == "off"
+        else "step 3 produced no evidence" if ev is None or ev.coverage is None
+        else ""
+    )  # fmt: skip
+    if why:
+        run.records["6"] = StepRecord("6", "quality", "not_run", note=why)
+        return
+    assert ev is not None and ev.coverage is not None
+    result.findings.extend(ev.coverage_check.findings)
+    result.holds.extend(h.text for h in ev.later_holds)
+    dc = ev.coverage
+    note = ev.coverage_check.note or f"{dc.percent}% of the changed executable lines ran"
+    if dc.status == "ok" and dc.other_files:  # the Python was measured, the rest of the change was not
+        note += f"; not measured: {dc.outside_note}"
+    _record_step(vc, run, StepRecord("6", "quality", "ok", 0.0, note))
+
+
+def _shadow_step(vc: VerifyContext, run: _Run, base_sha: str) -> None:
+    """Step 8, shadow half (M1.6, D12): every item of the unit's evidence is asked of the engines in
+    `verifier.s1.shadow`, and items and answers are recorded. Nothing here reads an answer to decide; whatever fails
+    is logged and the round goes on."""
+    wb, cfg, result = vc.wb, vc.wb.cfg, run.result
+    if vc.shadow is None or run.evidence is None or run.report is None:
+        return
+    try:
+        unit_rel = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
+        items = items_from_evidence(
+            run.evidence, git=wb.git, cfg=cfg, redactor=wb.redactor, project=project_key(wb.git, wb.ref.id),
+            unit_id=wb.ref.id, unit_name=wb.ref.name, spec_dir=unit_rel, base=base_sha, head=result.head_sha,
+            report=run.report, new_tests=set(result.red_green), origin="live", run_id=wb.run_id, round=vc.round,
+        )  # fmt: skip
+        shadow = run_shadow(cfg, items, redactor=wb.redactor, environ=vc.shadow.environ, log_path=vc.shadow.log_path)
+        run.evidence.item_keys = item_keys_by_subject(items)
+        append_records([vc.shadow.cache_file, wb.out_dir / "s1" / f"{wb.run_id}.jsonl"], [*items, *shadow.answers])
+        wb.emit(
+            "verify.s1_shadow", round=vc.round, items=len(items), asked=len(shadow.asked),
+            engines=[f"{e.profile}:{e.status}" for e in shadow.engines],
+        )  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 - S1 decides nothing: its trouble stops nothing
+        log.warning("%s: s1 shadow not recorded: %s", wb.ref.id, exc)
+
+
+def _publish_evidence(run: _Run) -> None:
+    """`VerifyResult.evidence`: the `l4/evidence@1` object of the round, taken last so that it carries the S1 item
+    keys. A round that stopped before step 3 has the scope part only."""
+    if run.evidence is not None:
+        run.result.evidence = run.evidence.to_json()
+    elif run.scope is not None:
+        holds = [h.to_json() for h in run.scope.holds]
+        run.result.evidence = evidence_json(run.scope.outcome, None, None, holds=holds)
+
+
+def _resume(
+    vc: VerifyContext, prev: dict[str, Any], criteria: Sequence[Criterion], events: Sequence[LedgerEvent], subject: str
+) -> VerifyResult:
+    """Resume at aggregation (D4): the previous round ended NEEDS_HUMAN on this subject with these criteria, so its
+    steps 0-9 stand. Only step 10 runs again, with the human verdicts recorded since: no gate run, no judge call."""
+    result = restore_round(prev, vc.wb.ref.id, vc.round)
+    run = _Run(result, judged=JudgeVerdict.model_validate(prev["judge_verdict"]) if prev.get("judge_verdict") else None)
+    for record in result.steps:
+        if record.status == "reused":
+            _emit_step(vc, record, subject)
+    result.subject_sha = subject
+    _finalize(vc, run, criteria, events)
+    last = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
+    _emit_step(vc, last, subject)
+    result.steps.append(last)
+    return result
+
+
+def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], events: Sequence[LedgerEvent]) -> None:
+    """Step 10 (SPEC 10.4), shared by a fresh round and a resumed one: the human verdicts that apply, every criterion
+    aggregated from its evidence, the judge and the human, then the unit."""
+    wb, result = vc.wb, run.result
+    current = {c.id: text_sha256(c) for c in criteria}
+    current |= {f.id: finding_sha256(f.id) for f in result.findings if f.source == "judge" and f.blocking}
+    current |= {hold_id(h): finding_sha256(hold_id(h)) for h in result.holds}
+    effective = effective_verdicts(events, current)
+    result.findings, effective = carry_rejects(
+        result.findings, effective, events, lambda n, target: stored_finding(read_verdict(wb.ref.path, n), target)
+    )
+    result.findings = apply_finding_verdicts(result.findings, effective)
+    result.findings = settle_holds(result.findings, result.holds, effective, hold_covers(events))  # a reject: a FAIL
+    picked = pick_verdicts(run.judged) if run.judged is not None else {}
+    evidence = {e.criterion: e for e in result.trace}
+    required = wb.cfg.sdd.require_traceability
+    result.criteria = [
+        aggregate_criterion(
+            c.id, c.alias, picked.get(c.id), result.cx_runs.get(c.id), trace=evidence.get(c.id),
+            human=effective.get(c.id), require_traceability=required,
+        )
+        for c in criteria
+    ]  # fmt: skip
+    s1_p = {r.criterion: r.p for r in result.s1 if r.p is not None}
+    result.criteria = [  # what each criterion rests on, and S1's p beside it (recorded, never used)
+        dataclasses.replace(c, tests=_evidence_tests(evidence.get(c.id)), s1_p=s1_p.get(c.id)) for c in result.criteria
+    ]
+    ids = [c.id for c in criteria] + [f.id for f in result.findings] + [hold_id(h) for h in result.holds]
+    result.holds = unresolved_holds(result.holds, effective)  # an answered hold, either way, is not asked again
+    result.human = [effective[t] for t in dict.fromkeys(ids) if t in effective]
+    for void in regressions(effective, result.trace):  # a regression voids an accept for good (D3)
+        wb.emit("human.void", question=void.question, target=void.target, reason="a tracing test fails at head")
+    result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
+
+
+def _evidence_tests(e: CriterionEvidence | None) -> tuple[str, ...]:
+    return tuple(t.id for t in e.tests if t.status == "passed" and t.adequate) if e is not None else ()
+
+
+def _no_python(vc: VerifyContext, base_sha: str, head: str) -> bool:
+    """The unit changed files outside the harness, spec and documentation paths and none of them is a `.py` file
+    (tests included: a Python project's unit that only adds a test still audits). A unit that changed nothing there
+    is not judged non-Python."""
+    wb = vc.wb
+    unit_rel = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
+    files = changed_unit_files(wb.git, base_sha, head, wb.cfg, unit_rel)
+    return bool(files) and not any(p.endswith(".py") for p, _ in files)
+
+
+def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
+    """Step 4a (SPEC 10.2). Draws the sample, asks the verifier agent for the tests and judges them; an accepted one
+    becomes evidence (`audit`), a failing one holds its criterion for a human."""
+    wb, result = vc.wb, run.result
+    ratio = wb.cfg.verifier.audit_sample_ratio
+    why = (
+        "roles.verifier_agent is empty" if vc.audit_writer is None
+        else "verifier.audit_sample_ratio is 0" if ratio <= 0
+        else ""
+    )  # fmt: skip
+    if not why and _no_python(vc, base_sha, result.head_sha):
+        why = "audit sampling writes pytest tests only; changed code is not python"
+    if why:
+        run.records["4a"] = StepRecord("4a", "audit sampling", "not_run", note=why)
+        return
+    chosen, skipped = choose(new_covered(result.trace), ratio, wb.ref.id, vc.round)
+    if not chosen:
+        run.records["4a"] = StepRecord("4a", "audit sampling", "ok", note="no covered new criterion to audit")
+        _emit_step(vc, run.records["4a"], result.subject_sha)
+        return
+
+    def body() -> tuple[bool, str]:
+        assert vc.audit_writer is not None
+        out = run_audit(
+            wb, vc.audit_writer(), {c.id: c for c in criteria}, chosen, skipped, base_sha=base_sha,
+            head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit,
+        )  # fmt: skip
+        result.audit = out.records
+        result.findings.extend(out.findings)
+        vc.verifier_tests.extend(out.accepted)
+        if out.cost_usd:
+            result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd
+            wb.emit("budget.cost", usd=out.cost_usd, profile="verifier_agent", role="audit")
+        result.trace = _with_audit(result.trace, out.records)
+        counts = {s: sum(a.status == s for a in out.records) for s in {a.status for a in out.records}}
+        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+
+    _step(vc, run, "4a", "audit sampling", body)
+
+
+def _with_audit(trace: Sequence[CriterionEvidence], records: Sequence[AuditRecord]) -> list[CriterionEvidence]:
+    by_id = {r.criterion: r for r in records}
+    out = []
+    for e in trace:
+        r = by_id.get(e.criterion)
+        if r is not None and r.status == "accepted":
+            e = dataclasses.replace(e, tests=(*e.tests, *(TracingTest(t, "passed", "audit") for t in r.tests)))
+        elif r is not None and r.status == "failed":
+            e = dataclasses.replace(e, held=f"the audit test fails at head: {r.reason}")
+        out.append(e)
+    return out
+
+
+def _ui_diff(wb: Workbench, base_sha: str, head: str, ui: Sequence[str]) -> str:
+    """The unit's diff restricted to the UI files: what the test writer is shown (generate.py cuts it further)."""
+    raw = wb.git.run_bytes(
+        "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{base_sha}...{head}", "--", *ui,
+    )  # fmt: skip
+    return raw.decode("utf-8", errors="replace")[:MAX_DIFF_CHARS]
+
+
+def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
+    """Step 5 (SPEC 10.2, L4-VER-014). The targets are the UI-facing criteria that no test of the end-to-end report
+    traces; each gets a Playwright test from the verifier agent, and the test counts only if it fails at the merge
+    base and passes at head (generate.py). Accepted files stay in the worktree for the round's one test commit;
+    a criterion that stays without one is `needs_human` through aggregation, with a finding that says why."""
+    wb, result, cfg = vc.wb, run.result, vc.wb.cfg
+    browser = run.e2e
+    changed: list[str] = []
+    why = (
+        "verifier.playwright.enabled is off" if not playwright_enabled(cfg)
+        else "verifier.generate_missing_tests is off" if not cfg.verifier.generate_missing_tests
+        else "gates.e2e has no command" if browser is None
+        else ""
+    )  # fmt: skip
+    if not why:
+        assert browser is not None
+        changed = unit_changed_files(wb.git, base_sha, result.head_sha)
+        proven = {e.criterion: {t.id for t in e.tests} for e in result.trace}  # step 4's evidence: the proved tests
+        plan = plan_generation(criteria, browser.report, changed, cfg.verifier.playwright.ui_paths, proven=proven)
+        why = plan.skipped
+    if why:
+        run.records["5"] = StepRecord("5", "ui test generation", "not_run", note=why)
+        return
+    if not plan.gaps:
+        _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note="every UI criterion has an e2e test"))
+        return
+    result.findings.extend(gap_findings(plan.gaps, plan.unproved))
+    if vc.ui_writer is None:
+        result.holds.extend(unclosed_holds(plan.gaps, []))
+        run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
+        return
+
+    def body() -> tuple[bool, str]:
+        assert vc.ui_writer is not None and browser is not None
+        ui = ui_files(changed, cfg.verifier.playwright.ui_paths)
+        out = generate_ui_tests(
+            wb, vc.ui_writer(), plan.gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
+            snapshot=browser.snapshot or "",
+        )  # fmt: skip
+        result.generated = out.outcomes
+        vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
+        if out.cost_usd:
+            result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd
+            wb.emit("budget.cost", usd=out.cost_usd, profile="verifier_agent", role="ui_tests")
+        result.trace = with_generated(result.trace, out.outcomes)
+        result.tests |= {i: "passed" for o in out.outcomes if o.accepted for i in o.tests}
+        result.holds.extend(unclosed_holds(plan.gaps, out.outcomes))
+        counts = {s: sum(o.status == s for o in out.outcomes) for s in {o.status for o in out.outcomes}}
+        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+
+    _step(vc, run, "5", "ui test generation", body)
+
+
+def has_system_one_profile(cfg: L4Config) -> bool:
+    """Step 8 needs a `backend: system-one` profile on `roles.s1_judge`; an adapter profile there serves only the
+    clarifier's `llm_boolean` stand-in (M1.8 A7: it made step 8 `unavailable` on every round)."""
+    return any(getattr(cfg.profiles.get(name), "backend", None) == "system-one" for name in cfg.roles.s1_judge)
+
+
+def _no_s1_reason(cfg: L4Config) -> str:
+    if not cfg.roles.s1_judge:
+        return "roles.s1_judge is empty"
+    return (
+        "no System One profile on roles.s1_judge (an adapter profile there serves only the clarifier's llm_boolean "
+        "stand-in)"
+    )
+
+
+def _s1_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
+    """Step 8 (SPEC 10.2, L4-VER-002 step 8): one S1 question per criterion over its evidence, recorded and never used
+    to decide (D8). A server that is missing or down makes the step `unavailable` and the round goes on (SCN-VER-24)."""
+    wb, result = vc.wb, run.result
+    why = (
+        "verifier.s1.enabled is off" if not wb.cfg.verifier.s1.enabled
+        else _no_s1_reason(wb.cfg) if vc.s1 is None
+        else "the unit has no criteria" if not criteria
+        else ""
+    )  # fmt: skip
+    if why:
+        run.records["8"] = StepRecord("8", "s1 judge", "not_run", note=why)
+        return
+    assert vc.s1 is not None
+    start = time.monotonic()
+    diff, _ = _git_diff(wb, base_sha, result.head_sha)
+    run.s1 = step = run_step(vc.s1, wb.cfg, criteria, evidence_for(criteria, result.trace, diff))
+    result.s1 = step.records
+    for r in step.records:
+        wb.emit(
+            "verify.s1", round=vc.round, criterion=r.criterion, p=r.p, model=r.model, status=r.status,
+            engine=r.engine, reason=r.reason, checkpoint=step.model, server_version=step.server_version,
+        )  # fmt: skip
+    _record_step(vc, run, StepRecord("8", "s1 judge", step.status, round(time.monotonic() - start, 1), step.note))
+
+
+def _calibrate(vc: VerifyContext, run: _Run) -> None:
+    """The calibration rows of step 8, written once the judge has answered: a row pairs S1's `p` with the
+    deterministic state and the judge's word for the same criterion (L4-VER-008)."""
+    wb, result = vc.wb, run.result
+    if run.s1 is None or vc.s1 is None:
+        return
+    picked = pick_verdicts(run.judged) if run.judged is not None else {}
+    try:
+        record_rows(
+            run.s1, vc.s1, run_file=wb.out_dir / "s1" / f"{wb.run_id}.jsonl", unit=wb.ref.id, run_id=wb.run_id,
+            round_no=vc.round, deterministic={e.criterion: e.state for e in result.trace},
+            judge={cid: v.verdict for cid, v in picked.items()},
+        )  # fmt: skip
+    except OSError as exc:  # S1 is corroborating only: a calibration file that cannot be written stops nothing
+        log.warning("%s: s1 calibration rows not written: %s", wb.ref.id, exc)
+
+
+def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[LedgerEvent]) -> None:
+    wb, result = vc.wb, run.result
+    criteria = wb.provider.criteria(wb.ref)
+    if not criteria:
+        result.holds.append("the unit has no scenarios, so there is nothing for the judge to verify")
+        run.records["9"] = StepRecord("9", "judge", "not_run", note="no criteria to judge")
+        return
+    ids = {c.id for c in criteria}
+
+    def judge_body() -> tuple[bool, str]:
+        diff, truncated = _git_diff(wb, base_sha, result.head_sha)
+        prompt = build_judge_prompt(
+            unit_id=wb.ref.id, sources=_family_sources(wb), criteria=criteria, diff=diff,
+            diff_truncated=truncated, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
+            redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
+            owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
+            round_outputs=_round_outputs(wb, result),
+        )  # fmt: skip
+        result.prompt_sha256 = prompt.sha256
+        result.prompt_template = prompt.version
+        if truncated:
+            result.holds.append(f"the diff is longer than {MAX_DIFF_CHARS} characters: the judge saw only the start")
+        judged = _ask_judges(vc, prompt, result)
+        if judged.status == "error":
+            raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
+        if judged.verdict is None:
+            result.holds.append(f"the judge's reply was discarded ({judged.status}: {judged.detail})")
+            return False, f"{judged.status}: {judged.detail}"
+        run.judged = judged.verdict
+        result.judge_verdict = judged.verdict.model_dump(mode="json")
+        verdicts = pick_verdicts(judged.verdict)
+        for c in criteria:
+            _counterexample(wb, result, c.id, verdicts.get(c.id))
+        unknown = sorted(set(verdicts) - ids)
+        if unknown:
+            title = "the judge cited criteria the unit does not have"
+            result.findings.append(Finding(Severity.MINOR, title, ", ".join(unknown[:5]), "judge"))
+        result.findings.extend(judge_findings(judged.verdict, known=ids))
+        reviewed = [(a.test, a.criterion, a.adequate) for a in judged.verdict.test_adequacy]
+        result.trace = apply_adequacy(result.trace, reviewed)
+        result.findings.extend(inadequate_findings(result.trace))
+        return True, f"{judged.calls} call(s)"
+
+    _step(vc, run, "9", "judge", judge_body)
+
+
+def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
+    """The accepted audit tests of this round: in the worktree, committed after the judge has answered
+    (`evidence.commit_verifier_tests`). They passed the audit gate run that accepted them."""
+    found = []
+    for record in result.audit:
+        target = wb.worktree / record.test_path
+        if record.status != "accepted" or not record.test_path or target.is_symlink() or not target.is_file():
+            continue
+        text = target.read_text(encoding="utf-8", errors="replace")
+        found.append(RoundOutput(record.test_path, tuple((t, "passed") for t in record.tests), text))
+    return found
+
+
+def _ask_judges(vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult) -> JudgeRun:
+    """One judge, then the next independent one for as long as the answer is a usage limit, comes from another
+    model than the profile names (SCN-AVL-15) or from a served model whose vendor is not independent of the
+    implementers (L4-VER-001; an unknown vendor never is): that verdict is dropped and never counted. The calls and
+    the cost of every judge asked add up; the profile that gave the final answer is the one the report names."""
+    wb = vc.wb
+    while True:
+        try:
+            judged = run_judge(
+                vc.judge, prompt, timeout_s=vc.judge_timeout_s, redact=wb.redactor.redact_text,
+                expect_model=vc.seat.expect_model,
+            )  # fmt: skip
+        except RoleLimit as exc:
+            limit = exc.result.limit
+            if limit is not None:
+                wb.emit("availability.limit", tool=limit.tool, kind=limit.kind, source=limit.source,
+                        excerpt=limit.raw_excerpt)  # fmt: skip
+            if vc.next_judge is None:
+                raise
+            vc.judge, vc.judge_profile = vc.next_judge("limit", exc.result)
+            continue
+        if judged.status == "ok" and vc.seat.reports_served and judged.model_resolved:
+            served = assess_independence(
+                wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=judged.model_resolved
+            )  # fmt: skip
+            if not served.independent:  # L4-VER-001: the vendor of the model actually served is the one that counts
+                judged.status, judged.verdict = "model_mismatch", None
+                judged.detail = f"served {judged.model_resolved}: vendor {served.judge.vendor} is not independent"
+        result.judge_model, result.judge_calls = judged.model_resolved, result.judge_calls + judged.calls
+        if judged.cost_usd is not None:
+            result.cost_usd = (result.cost_usd or 0.0) + judged.cost_usd
+        wb.emit(
+            "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
+            model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+        )  # fmt: skip
+        if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
+            wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
+        if judged.cost_usd:
+            wb.emit("budget.cost", usd=judged.cost_usd, profile=vc.judge_profile, role="judge")
+        if judged.status not in ("model_mismatch", "error"):
+            break
+        if judged.status == "model_mismatch":
+            wb.emit(
+                "availability.model_mismatch", role="judges", profile=vc.judge_profile,
+                requested=vc.seat.expect_model, served=judged.model_resolved,
+            )  # fmt: skip
+        else:  # a judge that cannot answer (a rejected tool call, an upstream 5xx) must not strand the unit
+            wb.emit("availability.judge_error", role="judges", profile=vc.judge_profile, detail=judged.detail[:200])
+        if vc.next_judge is None:
+            break
+        vc.judge, vc.judge_profile = vc.next_judge(judged.status, None)
+    result.judge_profile = vc.judge_profile
+    result.judge_reply = judged.reply
+    result.judge_replies = reply_counts(_events(wb), vc.judge_profile)
+    served = judged.model_resolved if vc.seat.reports_served and judged.status == "ok" else None
+    vc.independence = result.independence = assess_independence(
+        wb.cfg, vc.implementer_profiles, vc.judge_profile, served_model=served
+    )  # fmt: skip
+    return judged
+
+
+def _counterexample(wb: Workbench, result: VerifyResult, cid: str, verdict: CriterionVerdict | None) -> None:
+    """A judge `fail` is never counted without evidence, and in M0 a counterexample is never executed: it is
+    model-written code and SPEC 10.2 step 9 runs it on a scratch copy of head, not the unit worktree.
+    # M1: verifier 1.5 (the verifier worktree), then run it there"""
+    if verdict is None or verdict.verdict != "fail":
+        return
+    note = "the judge gave no counterexample" if verdict.counterexample is None else UNEXECUTED_NOTE
+    run = CounterexampleRun("unexecuted", note)
+    result.cx_runs[cid] = run
+    wb.emit("verify.counterexample", criterion=cid, status=run.status, note=run.note)
+
+
+def _commit_evidence(wb: Workbench, paths: Sequence[Path], round_no: int) -> None:
+    root = wb.worktree.resolve()
+    wb.git.run("add", "--", *(p.resolve().relative_to(root).as_posix() for p in paths))
+    if wb.git.run("diff", "--cached", "--quiet", check=False).returncode == 0:
+        return
+    trailers = CommitTrailers(unit=wb.ref.id, run_id=wb.run_id, iteration=max(wb.iteration, 1), phase="verifying")
+    wb.git.commit(clip_subject(f"docs({wb.ref.name}): verification round {round_no} [skip ci]"), trailers)
+
+
+class _NoJudge:
+    """The judge of a resumed round: step 9 is not run again, so a call is a bug."""
+
+    def complete_structured(self, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a resumed round makes no judge call")
+
+
+def _resumable(services: Services, family: FamilyProvider, criteria: Sequence[Criterion], round_no: int) -> bool:
+    """Whether `verify_unit` will resume at aggregation, decided before a judge is selected (and probed)."""
+    if round_no <= 1 or (head := services.git.rev_parse("HEAD")) is None:
+        return False
+    root = services.worktree.resolve()
+    subject = subject_sha(services.git, head, [u.path.resolve().relative_to(root).as_posix() for u in family.units()])
+    return reusable(read_verdict(services.ref.path, round_no - 1), subject, [c.id for c in criteria])
+
+
+def _ask_verdicts(
+    ctx: HookContext, wb: Workbench, result: VerifyResult, criteria: Sequence[Criterion], round_no: int
+) -> list[Path]:
+    """NEEDS_HUMAN: one verdict question per criterion and judge-only finding that needs a human (L4-VER-013). The
+    file joins the evidence commit, and the sticky section reaches the orchestrator through `ctx.shared["notes"]`."""
+    services = ctx.services
+    path = services.ref.path / QUESTIONS_FILENAME
+    events = read_ledger(services.ref.path).events
+    consumed = fold(events, services.ref.id).verdicts_consumed
+    raise_verdict_questions(
+        services.ref.path, services.ref.name, outcomes=result.criteria, criteria=criteria, trace=result.trace,
+        findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
+        round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
+    )  # fmt: skip
+    if (section := verdict_section(ctx, consumed)) is not None:
+        ctx.shared["notes"] = (section,)
+    return [path] if path.exists() else []
+
+
+def verify_hook(ctx: HookContext) -> Trigger:
+    """The orchestrator's `verify` hook (resolved as `l4.verifier.ladder:verify_hook`): one round, evidence committed
+    and pushed, then the trigger of the verdict."""
+    cfg, services = ctx.cfg, ctx.services
+    base = bring_in_base(ctx)  # first: the merge is a new subject, so it comes before verdicts and the reuse decision
+    family = family_of(ctx)  # the unit and its fix units are verified as one
+    criteria = family.criteria(services.ref)
+    calibration = cache_root(services.app.environ, repo=services.app.repo) / "s1-calibration.jsonl"
+    before = read_ledger(services.ref.path).events
+    recorded = consume_verdicts(
+        QuestionsFile.load(services.ref.path / QUESTIONS_FILENAME), before, services.ledger, criteria
+    )
+    # a human's verdict on a hold is ground truth: written at once, since the answer is consumed only once and the
+    # round can still end before a judge is found (exit 12)
+    record_human_labels(
+        services.ref.path, recorded, [calibration, services.app.out_dir / "s1" / f"{services.app.run_id}.jsonl"]
+    )
+    state = fold(read_ledger(services.ref.path).events, services.ref.id)
+    implementers = list(state.profiles_used.get("implementer") or cfg.roles.implementer)
+    judges = [name for name in cfg.roles.judges if cfg.profiles[name].adapter in JUDGE_ADAPTERS]
+    if not judges:  # preflight: a chain exists
+        raise L4Exit(ExitCode.USAGE_ERROR, f"roles.judges: no profile of {', '.join(cfg.roles.judges)} can judge")
+    round_no = (state.last_verdict.round if state.last_verdict else 0) + 1
+    resume = _resumable(services, family, criteria, round_no)
+    skip: set[str] = set()  # judges whose verdict was dropped in this round
+    if resume:  # step 9 stands from the last round: no probe, no judge
+        selected = Selected(judges[0], cfg.profiles[judges[0]], services.factory.build(cfg.profiles[judges[0]]))
+    else:
+        selected = select_judge(services.factory, cfg, services.ref.id, implementers, skip=skip)
+    logs: list[tuple[Path, Path]] = []
+
+    def bench(chosen: Selected) -> Workbench:
+        return make_workbench(
+            cfg=cfg, app=services.app, ref=services.ref, provider=family, worktree=services.worktree,
+            git=services.git, ledger=services.ledger, sandbox=services.sandbox, selected=chosen,
+            iteration=state.iteration, push=ctx.push,
+        )  # fmt: skip
+
+    def backend(chosen: Selected, judge_wb: Workbench) -> AgentJudge:
+        stem = f"verify-judge-r{round_no}"
+        return AgentJudge(
+            chosen.impl,
+            workbench_request_factory(judge_wb, chosen.profile, stem=stem, logs=logs, publish_prompts=True),
+            events=services.ledger,
+            role="judge",
+            profile=chosen.profile_name,
+        )
+
+    wb = bench(selected)
+    current = selected
+
+    def next_judge(reason: str, limited: RunResult | None) -> tuple[LLMBackend, str]:
+        """The next independent judge: after a limit the factory cools the profile and walks on, after a mismatch
+        the profile is skipped. The new judge sees its own login only (a workbench built for it)."""
+        nonlocal current
+        try:
+            if limited is not None:
+                current = services.factory.on_limit(current, limited)
+                current.vendor, current.provenance = resolve_vendor(current.profile)
+            else:
+                skip.add(current.profile_name)
+                if reason == "model_mismatch":  # also for the next round: it would pay for another discarded answer
+                    services.factory.cool_down(current, "model_mismatch", "the served model is not the configured one")
+                current = select_judge(services.factory, cfg, services.ref.id, implementers, skip=skip)
+        except WaitingCapacity as exc:
+            raise no_independent_verifier("judges", exc) from None
+        log.warning("%s: judge %s: next independent judge is %s", services.ref.id, reason, current.profile_name)
+        vc.seat = seat_of(current)
+        return backend(current, bench(current)), current.profile_name
+
+    def writer_for(stem: str) -> Callable[[], LLMBackend]:
+        """The `verifier_agent` role, selected when it is needed (the audit sample is drawn, a UI criterion is a gap):
+        the first usable profile of the chain that is independent of the implementers (C1); none is
+        `WaitingCapacity` (`no independent verifier`)."""
+
+        def open_writer() -> LLMBackend:
+            writer = select_judge(services.factory, cfg, services.ref.id, implementers, role="verifier_agent")
+            by_writer = dataclasses.replace(wb, selected=writer)
+            return AgentJudge(
+                writer.impl,
+                workbench_request_factory(
+                    by_writer, writer.profile, stem=f"{stem}-r{round_no}", logs=logs, publish_prompts=True
+                ),
+                events=services.ledger,
+                role="verifier_agent",
+                profile=writer.profile_name,
+            )
+
+        return open_writer
+
+    def s1_backend() -> SystemOneBackend:
+        return open_s1_backend(
+            cfg, "s1_judge", services.ledger, environ=services.app.environ, redactor=services.app.redactor,
+            log_path=services.app.repo / cfg.observability.log_dir / "system-one.jsonl",
+        )  # fmt: skip
+
+    s1 = S1Wiring(s1_backend, calibration)
+
+    vc = VerifyContext(
+        wb, _NoJudge() if resume else backend(selected, wb), selected.profile_name, implementers, round_no,
+        JUDGE_TIMEOUT_S, seat=seat_of(selected), next_judge=None if resume else next_judge,
+        audit_writer=writer_for("verify-audit") if cfg.roles.verifier_agent else None,
+        ui_writer=writer_for("verify-ui") if cfg.roles.verifier_agent else None,
+        s1=s1 if cfg.verifier.s1.enabled and has_system_one_profile(cfg) else None,
+        shadow=ShadowWiring(s1.cache_file, services.app.repo / cfg.observability.log_dir / "system-one.jsonl",
+                            dict(services.app.environ)) if cfg.verifier.s1.enabled and cfg.verifier.s1.shadow else None,
+        base_note=base.note,
+    )  # fmt: skip
+    try:
+        result = verify_unit(vc)
+    finally:
+        for raw, published in logs:
+            wb.publish_agent_logs(raw, published)
+        wb.restore_ledger()
+    decide_fix(ctx, wb, result)  # before the evidence is written, so that the report lists the fix unit
+    paths = write_round_evidence(services.ref.path, round_no, result, services.app.redactor)
+    if result.verdict is Verdict.NEEDS_HUMAN:
+        paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
+    commit_verifier_tests(wb, vc.verifier_tests, round_no)
+    _commit_evidence(wb, paths, round_no)
+    ctx.push()
+    wb.emit(
+        "verify.verdict", round=round_no, verdict=result.verdict.value, findings=len(result.findings),
+        criteria_passed=sum(c.result == "pass" for c in result.criteria), criteria_total=len(result.criteria),
+    )  # fmt: skip
+    trigger = after_verdict(ctx, wb, result, TRIGGERS[result.verdict])
+    curate_round(ctx, wb, result, trigger)  # the final PASS only; the `chore(memory)` commit comes before the hand-off
+    return trigger
+
+
+def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandResult:
+    """`l4 verify --unit U`: the verifier alone, on a unit that is `implemented` or `verifying`. It is the normal run
+    with the hand-off hook left out, so a PASS stops at `verified` (exit 0)."""
+    if dry_run:
+        raise L4Exit(ExitCode.USAGE_ERROR, "verify: --dry-run not yet implemented (M1: verifier)")
+    app, cfg = load_app_config(app)
+    preflight_run_config(app, cfg)
+    git = Git(app.repo, environ=app.environ)
+    ((provider, ref),) = select_units(list(providers_for(cfg, app.repo, app.environ)), (unit,))
+    snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
+    phase = snapshot.state.phase
+    answered = phase == "awaiting_human" and next_action(facts_of(snapshot))[0] == "verify"  # verdicts are in
+    if phase not in VERIFY_PHASES and not answered:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, f"verify: {unit} is {phase or 'new'}; only an implemented unit can be verified"
+        )
+    hooks = dataclasses.replace(load_hooks(), handoff=None, fix=None)
+    result = run_unit_in_worktree(app, cfg, git, provider, ref, hooks=hooks)
+    return CommandResult(result.exit_code, [result.outcome])

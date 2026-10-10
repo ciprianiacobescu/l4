@@ -1,0 +1,4 @@
+LABEL=judge-longcat-pickup KIND=judge UNIT=add-pickup-notice IMPL=codex JUDGES=f-longcat CLAR= VAGENT=f-longcat CLAR_ON=false GENTESTS=false
+START 2026-10-06T20:50:02Z
+origin main 54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b unit branch e33992893813ddcc0e57ebdeef9e9f0642fbda48
+END rc=0 secs=45 at 2026-10-06T20:50:47Z

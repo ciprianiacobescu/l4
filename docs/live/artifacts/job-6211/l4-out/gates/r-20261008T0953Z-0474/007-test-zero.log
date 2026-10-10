@@ -1,0 +1,76 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-small-order-surcharge
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 38 items
+
+tests/test_bulk_discount.py .........                                    [ 23%]
+tests/test_bulk_savings.py .....                                         [ 36%]
+tests/test_cart.py ............                                          [ 68%]
+tests/test_discounts.py ....                                             [ 78%]
+tests/test_stock.py ..                                                   [ 84%]
+tests/test_surcharge.py FFFF                                             [ 94%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_ TestSmallOrderSurchargeBelowThreshold.test_subtotal_5_00_returns_2_00_surcharge _
+
+self = <test_surcharge.TestSmallOrderSurchargeBelowThreshold object at 0x7bed6cbb7610>
+
+    @pytest.mark.l4("C-d8a1740f")
+    def test_subtotal_5_00_returns_2_00_surcharge(self):
+        """WHEN subtotal is below 20.00 (e.g. 5.00) THEN return 2.00 surcharge."""
+        result = small_order_surcharge(Decimal("5.00"))
+>       assert result == Decimal("2.00")
+E       AssertionError: assert None == Decimal('2.00')
+E        +  where Decimal('2.00') = Decimal('2.00')
+
+tests/test_surcharge.py:17: AssertionError
+_ TestSmallOrderSurchargeBelowThreshold.test_subtotal_19_99_returns_2_00_surcharge _
+
+self = <test_surcharge.TestSmallOrderSurchargeBelowThreshold object at 0x7bed6cbb7750>
+
+    @pytest.mark.l4("C-d8a1740f")
+    def test_subtotal_19_99_returns_2_00_surcharge(self):
+        """WHEN subtotal is 19.99 (just below threshold) THEN return 2.00 surcharge."""
+        result = small_order_surcharge(Decimal("19.99"))
+>       assert result == Decimal("2.00")
+E       AssertionError: assert None == Decimal('2.00')
+E        +  where Decimal('2.00') = Decimal('2.00')
+
+tests/test_surcharge.py:23: AssertionError
+_ TestSmallOrderSurchargeAtOrAboveThreshold.test_subtotal_20_00_returns_0_00_surcharge _
+
+self = <test_surcharge.TestSmallOrderSurchargeAtOrAboveThreshold object at 0x7bed6cbb79d0>
+
+    @pytest.mark.l4("C-10bd7471")
+    def test_subtotal_20_00_returns_0_00_surcharge(self):
+        """WHEN subtotal is 20.00 THEN return 0.00 surcharge."""
+        result = small_order_surcharge(Decimal("20.00"))
+>       assert result == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where Decimal('0.00') = Decimal('0.00')
+
+tests/test_surcharge.py:33: AssertionError
+_ TestSmallOrderSurchargeAtOrAboveThreshold.test_subtotal_35_00_returns_0_00_surcharge _
+
+self = <test_surcharge.TestSmallOrderSurchargeAtOrAboveThreshold object at 0x7bed6cbb7b10>
+
+    @pytest.mark.l4("C-10bd7471")
+    def test_subtotal_35_00_returns_0_00_surcharge(self):
+        """WHEN subtotal is above 20.00 (e.g. 35.00) THEN return 0.00 surcharge."""
+        result = small_order_surcharge(Decimal("35.00"))
+>       assert result == Decimal("0.00")
+E       AssertionError: assert None == Decimal('0.00')
+E        +  where Decimal('0.00') = Decimal('0.00')
+
+tests/test_surcharge.py:39: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-small-order-surcharge/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_surcharge.py::TestSmallOrderSurchargeBelowThreshold::test_subtotal_5_00_returns_2_00_surcharge
+FAILED tests/test_surcharge.py::TestSmallOrderSurchargeBelowThreshold::test_subtotal_19_99_returns_2_00_surcharge
+FAILED tests/test_surcharge.py::TestSmallOrderSurchargeAtOrAboveThreshold::test_subtotal_20_00_returns_0_00_surcharge
+FAILED tests/test_surcharge.py::TestSmallOrderSurchargeAtOrAboveThreshold::test_subtotal_35_00_returns_0_00_surcharge
+========================= 4 failed, 34 passed in 0.11s =========================

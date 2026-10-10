@@ -1,0 +1,81 @@
+2026-10-04T01:46:30.668833Z 00O [0KRunning with gitlab-runner 19.4.1 (3c39fceb)[0;m
+2026-10-04T01:46:30.668860Z 00O [0K  on l4-runner XXXXXXXXX, system ID: s_000000000001[0;m
+2026-10-04T01:46:30.668863Z 00O [0K  UUID: not supported with this GitLab version[0;m
+2026-10-04T01:46:30.668918Z 00O section_start:1791078390:prepare_executor[0K
+2026-10-04T01:46:30.668922Z 00O+[0K[36;1mPreparing the "shell" executor[0;m[0;m
+2026-10-04T01:46:30.669025Z 00O [0KUsing Shell (bash) executor...[0;m
+2026-10-04T01:46:30.669028Z 00O section_end:1791078390:prepare_executor[0K
+2026-10-04T01:46:30.669227Z 00O+section_start:1791078390:prepare_script[0K
+2026-10-04T01:46:30.669233Z 00O+[0K[36;1mPreparing environment[0;m[0;m
+2026-10-04T01:46:30.887905Z 01O Running on gitlab-runner...
+2026-10-04T01:46:30.906438Z 00O section_end:1791078390:prepare_script[0K
+2026-10-04T01:46:30.906900Z 00O+section_start:1791078390:get_sources[0K
+2026-10-04T01:46:30.906906Z 00O+[0K[36;1mGetting source from Git repository[0;m[0;m
+2026-10-04T01:46:30.984848Z 01O [32;1mGitaly correlation ID: 01M429EPDCFWH81SJ8WS55KZFA[0;m
+2026-10-04T01:46:30.994178Z 01O [32;1mFetching changes with git depth set to 20...[0;m
+2026-10-04T01:46:30.996249Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-04T01:46:31.794534Z 01O [32;1mChecking out eff29d15 as detached HEAD (ref is l4/probe-refs)...[0;m
+2026-10-04T01:46:31.811592Z 01O Removing .l4-out/
+2026-10-04T01:46:31.811599Z 01O Removing .l4/vendor/.venv/
+2026-10-04T01:46:31.811599Z 01O Removing .l4/vendor/src/l4/__pycache__/
+2026-10-04T01:46:31.811600Z 01O Removing .l4/vendor/src/l4/agents/__pycache__/
+2026-10-04T01:46:31.811600Z 01O Removing .l4/vendor/src/l4/availability/__pycache__/
+2026-10-04T01:46:31.811601Z 01O Removing .l4/vendor/src/l4/config/__pycache__/
+2026-10-04T01:46:31.811601Z 01O Removing .l4/vendor/src/l4/doctor/__pycache__/
+2026-10-04T01:46:31.811602Z 01O Removing .l4/vendor/src/l4/forge/__pycache__/
+2026-10-04T01:46:31.811602Z 01O Removing .l4/vendor/src/l4/gates/__pycache__/
+2026-10-04T01:46:31.811602Z 01O Removing .l4/vendor/src/l4/implementer/__pycache__/
+2026-10-04T01:46:31.811603Z 01O Removing .l4/vendor/src/l4/llm/__pycache__/
+2026-10-04T01:46:31.811603Z 01O Removing .l4/vendor/src/l4/sandbox/__pycache__/
+2026-10-04T01:46:31.811604Z 01O Removing .l4/vendor/src/l4/security/__pycache__/
+2026-10-04T01:46:31.811604Z 01O Removing .l4/vendor/src/l4/specs/__pycache__/
+2026-10-04T01:46:31.811604Z 01O Removing .l4/vendor/src/l4/state/__pycache__/
+2026-10-04T01:46:31.811605Z 01O Removing .l4/vendor/src/l4/vcs/__pycache__/
+2026-10-04T01:46:31.811605Z 01O Removing .l4/vendor/src/l4/verifier/__pycache__/
+2026-10-04T01:46:31.814865Z 01O [32;1mSkipping Git submodules setup[0;m
+2026-10-04T01:46:31.818798Z 00O section_end:1791078391:get_sources[0K
+2026-10-04T01:46:31.819843Z 00O+section_start:1791078391:step_script[0K
+2026-10-04T01:46:31.819860Z 00O+[0K[36;1mExecuting "step_script" stage of the job script[0;m[0;m
+2026-10-04T01:46:31.865080Z 01O [32;1m$ bash scripts/runner/ci-probe-refs.sh[0;m
+2026-10-04T01:46:31.872678Z 01O server https://gitlab.example.com project example-group/dummy-agentic head eff29d15c21b855b584cc540416b6d8a946610ad
+2026-10-04T01:46:31.874519Z 01O git version 2.34.1
+2026-10-04T01:46:31.874523Z 01O === namespace refs/l4/doctor
+2026-10-04T01:46:31.874524Z 01O --- push refs/l4/doctor/1791078391-47246
+2026-10-04T01:46:32.800879Z 01O To https://gitlab.example.com/example-group/dummy-agentic.git
+2026-10-04T01:46:32.800886Z 01O *	eff29d15c21b855b584cc540416b6d8a946610ad:refs/l4/doctor/1791078391-47246	[new reference]
+2026-10-04T01:46:32.800887Z 01O Done
+2026-10-04T01:46:32.801281Z 01O RESULT push refs/l4/doctor/1791078391-47246: ok
+2026-10-04T01:46:32.801371Z 01O --- ls-remote refs/l4/doctor/1791078391-47246
+2026-10-04T01:46:33.353238Z 01O eff29d15c21b855b584cc540416b6d8a946610ad	refs/l4/doctor/1791078391-47246
+2026-10-04T01:46:33.353447Z 01O RESULT ls-remote refs/l4/doctor/1791078391-47246: ok
+2026-10-04T01:46:33.353484Z 01O --- delete refs/l4/doctor/1791078391-47246
+2026-10-04T01:46:34.165424Z 01O To https://gitlab.example.com/example-group/dummy-agentic.git
+2026-10-04T01:46:34.165432Z 01O -	:refs/l4/doctor/1791078391-47246	[deleted]
+2026-10-04T01:46:34.165433Z 01O Done
+2026-10-04T01:46:34.165822Z 01O RESULT delete refs/l4/doctor/1791078391-47246: ok
+2026-10-04T01:46:34.165860Z 01O --- ls-remote after delete refs/l4/doctor/1791078391-47246
+2026-10-04T01:46:34.675443Z 01O []
+2026-10-04T01:46:34.675633Z 01O RESULT ls-remote after delete refs/l4/doctor/1791078391-47246: ok
+2026-10-04T01:46:34.675635Z 01O === namespace refs/l4/locks/probe
+2026-10-04T01:46:34.675718Z 01O --- push refs/l4/locks/probe/1791078391-47246
+2026-10-04T01:46:35.463594Z 01O To https://gitlab.example.com/example-group/dummy-agentic.git
+2026-10-04T01:46:35.463603Z 01O *	eff29d15c21b855b584cc540416b6d8a946610ad:refs/l4/locks/probe/1791078391-47246	[new reference]
+2026-10-04T01:46:35.463604Z 01O Done
+2026-10-04T01:46:35.464030Z 01O RESULT push refs/l4/locks/probe/1791078391-47246: ok
+2026-10-04T01:46:35.464065Z 01O --- ls-remote refs/l4/locks/probe/1791078391-47246
+2026-10-04T01:46:35.968235Z 01O eff29d15c21b855b584cc540416b6d8a946610ad	refs/l4/locks/probe/1791078391-47246
+2026-10-04T01:46:35.968423Z 01O RESULT ls-remote refs/l4/locks/probe/1791078391-47246: ok
+2026-10-04T01:46:35.968428Z 01O --- delete refs/l4/locks/probe/1791078391-47246
+2026-10-04T01:46:36.745492Z 01O To https://gitlab.example.com/example-group/dummy-agentic.git
+2026-10-04T01:46:36.745499Z 01O -	:refs/l4/locks/probe/1791078391-47246	[deleted]
+2026-10-04T01:46:36.745500Z 01O Done
+2026-10-04T01:46:36.745893Z 01O RESULT delete refs/l4/locks/probe/1791078391-47246: ok
+2026-10-04T01:46:36.745897Z 01O --- ls-remote after delete refs/l4/locks/probe/1791078391-47246
+2026-10-04T01:46:37.248567Z 01O []
+2026-10-04T01:46:37.248799Z 01O RESULT ls-remote after delete refs/l4/locks/probe/1791078391-47246: ok
+2026-10-04T01:46:37.248803Z 01O VERDICT custom refs accepted
+2026-10-04T01:46:37.251253Z 00O section_end:1791078397:step_script[0K
+2026-10-04T01:46:37.252049Z 00O+section_start:1791078397:cleanup_file_variables[0K
+2026-10-04T01:46:37.252055Z 00O+[0K[36;1mCleaning up project directory and file based variables[0;m[0;m
+2026-10-04T01:46:37.307220Z 00O section_end:1791078397:cleanup_file_variables[0K
+2026-10-04T01:46:37.307320Z 00O [32;1mJob succeeded[0;m

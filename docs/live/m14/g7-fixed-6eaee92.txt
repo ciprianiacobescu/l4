@@ -1,0 +1,17 @@
+$ L4_LIVE=1 uv run pytest tests/live/test_m1_4_acceptance.py -m live -v -rs   # harness 6eaee92 (G7 live-fix), after step 3, before probe/m14 is deleted
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/USER/src/l4/.venv/bin/python3
+rootdir: /Users/USER/src/l4
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 7 items
+
+tests/live/test_m1_4_acceptance.py::test_probe_pipeline_changes_nothing_and_provisions PASSED [ 14%]
+tests/live/test_m1_4_acceptance.py::test_probe_dry_run_prints_the_first_step_without_touching_anything PASSED [ 28%]
+tests/live/test_m1_4_acceptance.py::test_probe_branch_left_no_mr_and_no_unit_branch PASSED [ 42%]
+tests/live/test_m1_4_acceptance.py::test_p2_doctor_fix_finds_everything_present PASSED [ 57%]
+tests/live/test_m1_4_acceptance.py::test_p2_plan_sweep_lists_the_kiro_unit_and_nothing_else PASSED [ 71%]
+tests/live/test_m1_4_acceptance.py::test_kiro_unit_runs_waves_and_hands_off PASSED [ 85%]
+tests/live/test_m1_4_acceptance.py::test_dry_run_decision_matches_the_real_first_step PASSED [100%]
+
+============================== 7 passed in 43.36s ==============================

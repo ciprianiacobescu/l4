@@ -1,0 +1,105 @@
+{
+  "changeName": "add-farewell",
+  "schemaName": "spec-driven",
+  "planningHome": {
+    "kind": "repo",
+    "root": "{{REPO}}",
+    "changesDir": "{{REPO}}/openspec/changes",
+    "defaultSchema": "spec-driven"
+  },
+  "changeRoot": "{{REPO}}/openspec/changes/add-farewell",
+  "artifactPaths": {
+    "proposal": {
+      "outputPath": "proposal.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/add-farewell/proposal.md",
+      "existingOutputPaths": [
+        "{{REPO}}/openspec/changes/add-farewell/proposal.md"
+      ]
+    },
+    "specs": {
+      "outputPath": "specs/**/*.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/add-farewell/specs/**/*.md",
+      "existingOutputPaths": [
+        "{{REPO}}/openspec/changes/add-farewell/specs/farewell/spec.md",
+        "{{REPO}}/openspec/changes/add-farewell/specs/greeting/spec.md"
+      ]
+    },
+    "design": {
+      "outputPath": "design.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/add-farewell/design.md",
+      "existingOutputPaths": [
+        "{{REPO}}/openspec/changes/add-farewell/design.md"
+      ]
+    },
+    "tasks": {
+      "outputPath": "tasks.md",
+      "resolvedOutputPath": "{{REPO}}/openspec/changes/add-farewell/tasks.md",
+      "existingOutputPaths": [
+        "{{REPO}}/openspec/changes/add-farewell/tasks.md"
+      ]
+    }
+  },
+  "isPlanningComplete": true,
+  "isComplete": true,
+  "applyRequires": [
+    "tasks"
+  ],
+  "nextSteps": [
+    "All planning artifacts are complete. Run openspec instructions apply --change \"add-farewell\" --json to inspect implementation progress."
+  ],
+  "actionContext": {
+    "mode": "repo-local",
+    "sourceOfTruth": "repo",
+    "planningArtifacts": [
+      "proposal",
+      "specs",
+      "design",
+      "tasks"
+    ],
+    "linkedContext": [],
+    "allowedEditRoots": [
+      "{{REPO}}"
+    ],
+    "requiresAffectedAreaSelection": false,
+    "constraints": [
+      "Repo-local change artifacts and implementation edits are scoped to this project."
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "proposal",
+      "outputPath": "proposal.md",
+      "status": "done",
+      "requires": []
+    },
+    {
+      "id": "specs",
+      "outputPath": "specs/**/*.md",
+      "status": "done",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "design",
+      "outputPath": "design.md",
+      "status": "done",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "tasks",
+      "outputPath": "tasks.md",
+      "status": "done",
+      "requires": [
+        "specs",
+        "design"
+      ]
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

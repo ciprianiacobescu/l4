@@ -1,0 +1,14 @@
+{
+  "archive": null,
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  },
+  "status": [
+    {
+      "severity": "error",
+      "code": "archive_target_exists",
+      "message": "Archive '2026-10-03-with-extras' already exists."
+    }
+  ]
+}

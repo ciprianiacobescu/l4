@@ -1,0 +1,40 @@
+M1.5 live exit, step 1 (operator, local), 2026-10-05, on a fresh clone of dummy-agentic main cae4731
+(the merge of archive MR !3, step 0b), lock refs and l4/* branches fetched.
+
+$ uv run --project <harness> l4 upgrade --repo <clone> --harness <harness>      (harness main 2a68eff)
+changed .l4/vendor/ (27 added, 26 changed, 0 removed) to the harness at 2a68effa0377
+changed .l4/config.yaml (harness.version, harness.commit)
+created .serena/project.yml (in Serena's own form, so that its start changes nothing)
+not in .l4/config.yaml, the defaults apply (nothing is written): spec.primary, ... (defaults list as printed)
+-> commit 58215b5 "Upgrade the vendored L4 harness to 2a68eff (M1.5 live exit)": 54 files (.l4/vendor/ 53 incl.
+   .l4/vendor/pyproject.toml and .l4/vendor/uv.lock (coverage joined the harness dev group in M1.6), and the pin in
+   .l4/config.yaml); .l4/ci/ and .l4/bin/l4 unchanged.
+.serena/project.yml: the full Serena 1.7.0 form seeded by l4 upgrade (render_seed_project_yml), project_name edited
+   from the clone directory name to dummy-agentic (the only edited line); the plan's five-key short form was NOT
+   written (Serena rewrites a short file at every start: the M1.7 guard violation).
+
+Seeds (plan "Seed texts", verbatim): src/pricing/web/{__init__,page,app}.py, tests/test_web_page.py,
+e2e/test_smoke.py, .gitattributes (new file: the two lines), .serena/memories/harness/lessons.md (the header line),
+openspec/changes/show-item-count/{.openspec.yaml,proposal.md,specs/cart-page/spec.md,tasks.md}; pyproject dev group
++ playwright==1.63.0, pytest-playwright==0.9.0 (testpaths = ["tests"] was already set).
+Config: see the diff of c453c04 (.l4/config.yaml): gates.e2e, profiles laya + jev, roles.s1_judge [jev, laya,
+claude-code], roles.verifier_agent [claude-code], verifier.fix_minor_findings false, audit_sample_ratio 0,
+verifier.playwright, verifier.s1.shadow [laya], memory.
+
+$ uv lock            -> playwright 1.63.0, pytest-playwright 0.9.0 locked (uv.lock +359 lines)
+$ uv sync --frozen; .venv/bin/python -m pytest -q -p no:cacheprovider
+16 passed in 0.01s                                   (e2e/ not collected)
+$ .venv/bin/ruff check --extend-exclude .l4 .
+All checks passed!
+$ .venv/bin/python -m pricing.web.app --port 8765 &   ; curl /health -> 200
+$ L4_E2E_BASE_URL=http://127.0.0.1:8765 .venv/bin/python -m pytest e2e -q -p no:cacheprovider
+1 passed in 0.50s
+$ l4 plan
+openspec:show-item-count    -          0/1    implement  pending tasks     (every other unit: in_review, none)
+$ l4 doctor (Mac; TYPESAFE_API_KEY set to a dummy value for the probe)  exit 0
+CFG-002 pass; MEM-001 pass "0 lessons, lint clean"; ENV-004/PRV-001 warn-fail (no codex on the Mac);
+ENV-006/007/008, S1-001 warn-fail (no laya-serve, no Chromium under ~/.cache/l4, serena 1.2.0 on the Mac);
+COV-001 warn-fail (coverage.py not in the project venv: diff coverage not_run). All present on the runner (job 5522).
+
+Local Jev smoke (scripts/dev/jev_smoke.py --model jev-1.13.0, key from Mintkey into the process only):
+HTTP 200 in 360 ms; "model": "jev-1.13.0".

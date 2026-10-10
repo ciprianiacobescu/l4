@@ -1,0 +1,43 @@
+# Step 4, read-only, on a checkout of H = 390aa7eacae3abc10b0b3d676b29132c5ef60254
+
+$ openspec validate add-shipping-fee-fix-1 --strict   # pinned 1.14.0
+Change 'add-shipping-fee-fix-1' is valid
+exit=0
+$ openspec validate add-shipping-fee --strict
+Change 'add-shipping-fee' is valid
+exit=0
+
+$ git log --format='%h %(trailers:key=L4-Unit,valueonly,separator=) %(trailers:key=L4-Task,valueonly,separator=) %(trailers:key=L4-TDD,valueonly,separator=) %s' 8ff4f03..H  (oldest first; L4-TDD commits only)
+3319cb2 openspec:add-shipping-fee 1.1 red | test(add-shipping-fee): red for 1.1 [skip ci]
+231f341 openspec:add-shipping-fee 1.1 green | feat(add-shipping-fee): 1.1 Add `src/pricing/shipping.py` with `shipping_fee(subtotal, country)` and `UnsupportedShippingCountry`, and export both from `pricing` [skip ci]
+2e06216 openspec:add-shipping-fee   | test(add-shipping-fee): verifier round 1 [skip ci]
+6d4fee0 openspec:add-shipping-fee   | docs(add-shipping-fee): verification round 1 [skip ci]
+46b01dc openspec:add-shipping-fee   | chore(add-shipping-fee): ledger [skip ci]
+748cf82    | Answer Q-001 and Q-002: reject both, with the scenarios the requirement states
+0de4ab2 openspec:add-shipping-fee   | docs(add-shipping-fee): verification round 2 [skip ci]
+6adf550 openspec:add-shipping-fee   | docs(add-shipping-fee): fix unit 1 [skip ci]
+0051b41 openspec:add-shipping-fee-fix-1 1.1 red | test(add-shipping-fee-fix-1): red for 1.1 [skip ci]
+6080880 openspec:add-shipping-fee-fix-1 1.1 green | feat(add-shipping-fee-fix-1): 1.1 Free shipping at subtotal >= 50.00 not implemented (+1 more) (F-f2c8f81d, F-a0fac71a; C-e25f06d8, C-8cf4dd8e, C-38128a5b) [skip ci]
+bf7fb30 openspec:add-shipping-fee   | test(add-shipping-fee): verifier round 3 [skip ci]
+3ee494b openspec:add-shipping-fee   | docs(add-shipping-fee): verification round 3 [skip ci]
+390aa7e openspec:add-shipping-fee   | docs(add-shipping-fee): hand off to review
+
+$ git log --reverse --format='%h %an | %s' 8ff4f03..H  (all commits)
+3319cb2 l4-bot | test(add-shipping-fee): red for 1.1 [skip ci]
+231f341 l4-bot | feat(add-shipping-fee): 1.1 Add `src/pricing/shipping.py` with `shipping_fee(subtotal, country)` and `UnsupportedShippingCountry`, and export both from `pricing` [skip ci]
+2e06216 l4-bot | test(add-shipping-fee): verifier round 1 [skip ci]
+6d4fee0 l4-bot | docs(add-shipping-fee): verification round 1 [skip ci]
+46b01dc l4-bot | chore(add-shipping-fee): ledger [skip ci]
+748cf82 CiprianSpot | Answer Q-001 and Q-002: reject both, with the scenarios the requirement states
+0de4ab2 l4-bot | docs(add-shipping-fee): verification round 2 [skip ci]
+6adf550 l4-bot | docs(add-shipping-fee): fix unit 1 [skip ci]
+0051b41 l4-bot | test(add-shipping-fee-fix-1): red for 1.1 [skip ci]
+6080880 l4-bot | feat(add-shipping-fee-fix-1): 1.1 Free shipping at subtotal >= 50.00 not implemented (+1 more) (F-f2c8f81d, F-a0fac71a; C-e25f06d8, C-8cf4dd8e, C-38128a5b) [skip ci]
+bf7fb30 l4-bot | test(add-shipping-fee): verifier round 3 [skip ci]
+3ee494b l4-bot | docs(add-shipping-fee): verification round 3 [skip ci]
+390aa7e l4-bot | docs(add-shipping-fee): hand off to review
+
+$ grep -n 'pytest.mark.l4' tests/test_l4_audit_c_1b1fbe16_r1.py
+9:@pytest.mark.l4("C-1b1fbe16")
+$ grep -n 'pytest.mark.l4' tests/test_l4_audit_c_e25f06d8_r3.py
+9:@pytest.mark.l4("C-e25f06d8")

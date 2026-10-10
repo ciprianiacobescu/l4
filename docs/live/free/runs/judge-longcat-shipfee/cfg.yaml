@@ -1,0 +1,108 @@
+# Scratch config for the free-model measurement (2026-10-06): the dummy's .l4/config.yaml at free/seeds-2026-10-06
+# with forge/ci local (runs on the runner outside CI, no GitLab writes), System One off, no fix rounds, and the role
+# chains set per run (codex, f-longcat, f-longcat, ). Vendors of the free models are operator-declared.
+version: 1
+harness:
+  version: 0.1.0
+  commit: 4c922c4db5f35ee08267d95317c51e98f2f27c46
+spec:
+  frameworks: auto
+gates:
+  setup:
+  - uv sync --frozen
+  test:
+    command: .venv/bin/python -m pytest --junitxml=.l4-out/junit.xml
+  lint:
+  - .venv/bin/ruff check --extend-exclude .l4 .
+  e2e:
+    command: .venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure
+    reports: [.l4-out/e2e-junit.xml]
+    format: junit
+    serve:
+      command: .venv/bin/python -m pricing.web.app --port 8765
+      ready_url: http://127.0.0.1:8765/health
+      timeout: 60s
+profiles:
+  codex:
+    adapter: codex
+    vendor: openai
+    auth: subscription
+    model: gpt-6-luna
+    options:
+      reasoning_effort: low
+  claude-code:
+    adapter: claude-code
+    vendor: anthropic
+    auth: subscription
+  f-big-pickle:
+    adapter: opencode
+    model: opencode/big-pickle
+    vendor: undisclosed-big-pickle
+  f-space-bunny:
+    adapter: opencode
+    model: opencode/space-bunny-free
+    vendor: undisclosed-space-bunny
+  f-longcat:
+    adapter: opencode
+    model: opencode/longcat-2.5-preview-free
+    vendor: meituan
+  f-mimo:
+    adapter: opencode
+    model: opencode/mimo-v2.6-flash-free
+    vendor: xiaomi
+  f-ling:
+    adapter: opencode
+    model: opencode/ling-3.1-flash-free
+    vendor: inclusionai
+  f-muse:
+    adapter: opencode
+    model: opencode/muse-spark-1.3-contributor-free
+    vendor: meta
+  f-nemotron-ultra:
+    adapter: opencode
+    model: opencode/nemotron-3-ultra-free
+    vendor: nvidia
+  f-nemotron-lightning:
+    adapter: opencode
+    model: opencode/nemotron-3.5-lightning-free
+    vendor: nvidia
+  f-fledge:
+    adapter: opencode
+    model: opencode/fledge-alpha-free
+    vendor: undisclosed-fledge
+  f-ling-fin:
+    adapter: opencode
+    model: opencode/ling-3.0-flash-fin-free
+    vendor: inclusionai
+roles:
+  implementer: [codex]
+  judges: [f-longcat]
+  clarifier: []
+  s1_judge: []
+  verifier_agent: [f-longcat]
+clarifier:
+  enabled: false
+  s1_standin: none
+  min_confidence: medium
+sdd:
+  scope_check: warn
+forge:
+  type: local
+ci:
+  platform: local
+verifier:
+  fix_minor_findings: false
+  max_fix_rounds: 0
+  audit_sample_ratio: 0
+  generate_missing_tests: false
+  playwright:
+    enabled: true
+    ui_paths: ["src/pricing/web/**"]
+  evidence:
+    diff_coverage: {mode: warn, min_percent: 80, languages: [python]}
+  s1:
+    enabled: false
+    shadow: []
+memory:
+  enabled: true
+  serena: {enabled: true, version: "1.7.0", context: auto}

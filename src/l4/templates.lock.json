@@ -1,0 +1,38 @@
+{
+  "clarifier": {
+    "sha256": "d6e8ad6bf028825850352273d281286c6779f8544149cc6f5ff9e5b5c478fd91",
+    "version": 4
+  },
+  "implementer/contract": {
+    "sha256": "c537085201fc9d04aa778de247a5f9780e75c51ead86a2fea1df87c6e2e9ecb1",
+    "version": 9
+  },
+  "implementer/green": {
+    "sha256": "ea47b9ee600e3ec843da128b892ab4dc87b82fe07472dc7102ebe4dc8778e38a",
+    "version": 4
+  },
+  "implementer/red": {
+    "sha256": "9470113fe548923e6ddd237582f078d8b4920ffee2cac5663219960b1a003bec",
+    "version": 9
+  },
+  "implementer/single": {
+    "sha256": "e3c49b925c35b8de8a9a36df35e8d6886d95cdf0df7ca4b93954f5b6eb38d7a6",
+    "version": 3
+  },
+  "implementer/single_tests": {
+    "sha256": "1f4b48ba0a6b17942ce0d48257ee2898dc901731fbc21c6c4d36cd310ed0770f",
+    "version": 5
+  },
+  "judge": {
+    "sha256": "c674760f99256f2a55df902c98cfbd217dbfcf68451f453d64e14b141ddec32a",
+    "version": 6
+  },
+  "testwriter/audit": {
+    "sha256": "60b28f79c5b7ca34c9e93edab8c32d2846fb1c416a8f1e46c7f65b52ae887970",
+    "version": 5
+  },
+  "testwriter/e2e": {
+    "sha256": "853c5b0d3165bb500dc62488bdc5e792e0cafd0646286476a9280adab0503899",
+    "version": 5
+  }
+}

@@ -1,0 +1,11 @@
+[l4] openspec:add-shelf-code agent red task 1.1 rate_limited (246.8s)
+[l4] openspec:add-shelf-code agent limit: opencode rate_limit (opencode.statusCode)
+[l4] run: openspec:add-shelf-code: f-ling hit a limit (rate_limited); moving on
+[l4] implementer: f-ling skipped — cooling until 2026-10-06T20:09Z (rate_limit); no probe sent
+f7a", "unit": "openspec:add-shelf-code", "seq": 19, "type": "agent.finished", "task": "1.1", "phase": "red", "status": "rate_limited", "exit_code": 1, "detail": null, "model": null, "input_tokens": 32862, "output_tokens": 1260, "permission_denials": 0,
+": "2026-10-06T19:39:44.359+00:00", "level": "INFO", "logger": "l4", "msg": "openspec:add-shelf-code agent red task 1.1 rate_limited (246.8s)"}
+6T1935Z-1f7a", "unit": "openspec:add-shelf-code", "seq": 22, "type": "availability.limit", "tool": "opencode", "kind": "rate_limit", "source": "opencode.statusCode", "excerpt": "Error from provider (Console): Upstream request failed: Endpoint is unav
+26-10-06T19:39:44.368+00:00", "level": "WARNING", "logger": "l4", "msg": "openspec:add-shelf-code agent limit: opencode rate_limit (opencode.statusCode)"}
+10-06T19:39:44.380+00:00", "level": "WARNING", "logger": "l4.run", "msg": "openspec:add-shelf-code: f-ling hit a limit (rate_limited); moving on"}
+file": "f-ling", "tool": "opencode", "model": "opencode/ling-3.1-flash-free", "until": "2026-10-06T20:09:44Z", "kind": "rate_limit", "source": "opencode.statusCode"}}
+9:44.397+00:00", "level": "INFO", "logger": "l4.implementer", "msg": "f-ling skipped — cooling until 2026-10-06T20:09Z (rate_limit); no probe sent"}

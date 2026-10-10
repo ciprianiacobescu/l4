@@ -1,0 +1,289 @@
+From 30777fad11279c95f03b9a967de47e69b0107b4b Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 11:51:03 +0300
+Subject: [PATCH 1/4] docs(add-bulk-discount): questions [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0851Z-0b3c
+L4-Iteration: 1
+L4-Phase: intake
+---
+ .../.l4/ledger/r-20261005T0851Z-0b3c.jsonl    |  3 ++
+ .../changes/add-bulk-discount/questions.md    | 33 +++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+ create mode 100644 openspec/changes/add-bulk-discount/questions.md
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+new file mode 100644
+index 0000000..52bc23b
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+@@ -0,0 +1,3 @@
++{"ts": "2026-10-05T08:51:02.634855Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "641af1f457d4b3f4f2f9b5a2c990c9532e090fa7", "command": "run", "branch": "l4/openspec/add-bulk-discount", "base": "89fb3ad1367f9f25d11e23501c5ab22f6a639998", "source": "base", "iteration": 0}
++{"ts": "2026-10-05T08:51:02.638592Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "gitlab-runner:147139", "nonce": "cb6758f2fba0a331"}
++{"ts": "2026-10-05T08:51:03.168579Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 3, "type": "question.raised", "id": "Q-001", "kind": "ambiguous", "source": "intake_open_questions"}
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+new file mode 100644
+index 0000000..59b8473
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -0,0 +1,33 @@
++# Questions — add-bulk-discount
++
++<!-- l4:questions v1
++How to answer: write under "### Answer" and set **Status** to `answered`.
++To accept the clarifier's suggestion as-is, set **Status** to `accepted`.
++Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded
++Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with `accept` or
++`reject`, then give your reason.
++Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->
++
++<!-- l4:index:start -->
++| ID | Status | Blocking | Kind | Question |
++|----|--------|----------|------|----------|
++| Q-001 | open | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
++<!-- l4:index:end -->
++
++---
++
++## Q-001: Does the bulk threshold count units or distinct lines?
++
++- **Status:** open
++- **Blocking tasks:** 1.1
++- **Kind:** ambiguous
++- **Asked:** intake (open questions in design.md)
++
++### Context
++Does the bulk threshold count units or distinct lines?
++
++Listed under "Open questions" in design.md.
++Open-question-hash: 5f73f7096b761709
++
++### Answer
++<!-- write below this line -->
+-- 
+2.48.1
+
+
+From 178b3083ad89fa18a501d2dbaecb8614b6951c14 Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 11:51:30 +0300
+Subject: [PATCH 2/4] docs(add-bulk-discount): clarifier [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0851Z-0b3c
+L4-Iteration: 1
+L4-Phase: clarifying
+---
+ .../.l4/ledger/r-20261005T0851Z-0b3c.jsonl               | 9 +++++++++
+ openspec/changes/add-bulk-discount/questions.md          | 8 ++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+index 52bc23b..e4ce010 100644
+--- a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+@@ -1,3 +1,12 @@
+ {"ts": "2026-10-05T08:51:02.634855Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "641af1f457d4b3f4f2f9b5a2c990c9532e090fa7", "command": "run", "branch": "l4/openspec/add-bulk-discount", "base": "89fb3ad1367f9f25d11e23501c5ab22f6a639998", "source": "base", "iteration": 0}
+ {"ts": "2026-10-05T08:51:02.638592Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "gitlab-runner:147139", "nonce": "cb6758f2fba0a331"}
+ {"ts": "2026-10-05T08:51:03.168579Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 3, "type": "question.raised", "id": "Q-001", "kind": "ambiguous", "source": "intake_open_questions"}
++{"ts": "2026-10-05T08:51:03.205884Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 4, "type": "phase.changed", "from": null, "to": "intake", "trigger": "unit_discovered_pending", "exit_code": null}
++{"ts": "2026-10-05T08:51:03.210918Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 5, "type": "phase.changed", "from": "intake", "to": "ready", "trigger": "intake_all_pass", "exit_code": null}
++{"ts": "2026-10-05T08:51:14.530218Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 6, "type": "availability.selected", "role": "implementer", "selected": "codex", "fallback_index": 0, "skipped": [], "probes": {"codex": {"binary": "0.160.0", "auth": "subscription", "quota_used_percent": 3, "quota_window": "weekly window", "hello_ms": 9593}}, "cached": false, "quota_window": "weekly window"}
++{"ts": "2026-10-05T08:51:14.533758Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 7, "type": "phase.changed", "from": "ready", "to": "implementing", "trigger": "lease_acquired", "exit_code": null}
++{"ts": "2026-10-05T08:51:14.541256Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 8, "type": "phase.changed", "from": "implementing", "to": "clarifying", "trigger": "questions_to_clarifier", "exit_code": null, "questions": ["Q-001"]}
++{"ts": "2026-10-05T08:51:20.326182Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 9, "type": "availability.selected", "role": "clarifier", "selected": "claude-code", "fallback_index": 0, "skipped": [], "probes": {"claude-code": {"binary": "2.1.288", "auth": "subscription", "quota_used_percent": 3, "quota_window": "session", "hello_ms": 3016}}, "cached": false, "quota_window": "session"}
++{"ts": "2026-10-05T08:51:20.333389Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 10, "type": "availability.selected", "role": "s1_judge", "selected": "laya", "fallback_index": 0, "skipped": [], "probes": {"engine": {"engine": "laya-local"}}, "cached": false}
++{"ts": "2026-10-05T08:51:30.664490Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 11, "type": "budget.cost", "usd": 0.11818680000000001, "profile": "claude-code", "role": "clarifier"}
++{"ts": "2026-10-05T08:51:30.678180Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 12, "type": "clarifier.result", "id": "Q-001", "status": "ok", "profile": "claude-code", "kind": "product", "confidence": "medium", "auto_accepted": false, "reasons": ["implementer kind ambiguous always goes to a human", "clarifier kind product is not in clarifier.auto_accept_kinds"], "s1": "not_asked", "p_product": null, "p_technical": null, "citation_support": [], "calls": 1, "cost_usd": 0.11818680000000001, "model": "claude-opus-5-5", "prompt_sha256": "afae73107122cdeedbe83250a60268c742f2a99d1749a1094ad5d1f63847d458"}
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index 59b8473..e3b6920 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -29,5 +29,13 @@ Does the bulk threshold count units or distinct lines?
+ Listed under "Open questions" in design.md.
+ Open-question-hash: 5f73f7096b761709
+ 
++### Clarifier suggestion
++confidence: medium · kind: product (S1 p=n/a) · needs a human
++
++This is a product decision for the project owner. The specs don't settle it, and design.md lists it as an open question. Suggested answer: count units, meaning the sum of the quantities across line items. That matches how the cart page already counts items ("Items: N" is the sum of quantities), so a cart showing "Items: 10" would get the discount. The scenarios ("10 items at 2.50 each") work under either reading: the subtotal is 25.00 either way, so they don't decide it. Ask the owner to confirm before implementing task 1.1.
++
++Citations:
++- `openspec/specs/cart-page/spec.md#L9`: "The cart page SHALL show the sum of the quantities of its line items in an element with `data-testid="item-count"`, as the text `Items: N`." (shows: The cart page shows a cart's item count as the sum of its line-item quantities.)
++
+ ### Answer
+ <!-- write below this line -->
+-- 
+2.48.1
+
+
+From b3f9a0c5a9429d32e0d6db8ee89e000a43ffd271 Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 11:51:35 +0300
+Subject: [PATCH 3/4] chore(add-bulk-discount): ledger [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0851Z-0b3c
+L4-Iteration: 1
+L4-Phase: awaiting_human
+---
+ .../.l4/ledger/r-20261005T0851Z-0b3c.jsonl                  | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+index e4ce010..93b9c81 100644
+--- a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0851Z-0b3c.jsonl
+@@ -10,3 +10,9 @@
+ {"ts": "2026-10-05T08:51:20.333389Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 10, "type": "availability.selected", "role": "s1_judge", "selected": "laya", "fallback_index": 0, "skipped": [], "probes": {"engine": {"engine": "laya-local"}}, "cached": false}
+ {"ts": "2026-10-05T08:51:30.664490Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 11, "type": "budget.cost", "usd": 0.11818680000000001, "profile": "claude-code", "role": "clarifier"}
+ {"ts": "2026-10-05T08:51:30.678180Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 12, "type": "clarifier.result", "id": "Q-001", "status": "ok", "profile": "claude-code", "kind": "product", "confidence": "medium", "auto_accepted": false, "reasons": ["implementer kind ambiguous always goes to a human", "clarifier kind product is not in clarifier.auto_accept_kinds"], "s1": "not_asked", "p_product": null, "p_technical": null, "citation_support": [], "calls": 1, "cost_usd": 0.11818680000000001, "model": "claude-opus-5-5", "prompt_sha256": "afae73107122cdeedbe83250a60268c742f2a99d1749a1094ad5d1f63847d458"}
++{"ts": "2026-10-05T08:51:32.680994Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 13, "type": "pr.updated", "url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/23", "number": 23, "draft": true}
++{"ts": "2026-10-05T08:51:33.651499Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 14, "type": "pr.labels", "number": 23, "labels": ["l4:clarifying", "l4:needs-answers"]}
++{"ts": "2026-10-05T08:51:33.657773Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 15, "type": "phase.changed", "from": "clarifying", "to": "awaiting_human", "trigger": "clarifier_needs_human", "exit_code": 11}
++{"ts": "2026-10-05T08:51:34.663655Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 16, "type": "pr.labels", "number": 23, "labels": ["l4:awaiting_human", "l4:needs-answers"]}
++{"ts": "2026-10-05T08:51:35.427171Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 17, "type": "lock.released"}
++{"ts": "2026-10-05T08:51:35.432739Z", "run_id": "r-20261005T0851Z-0b3c", "unit": "openspec:add-bulk-discount", "seq": 18, "type": "run.finished", "exit_code": 11}
+-- 
+2.48.1
+
+
+From c3cbd075038dbbc62fe0d7cf2d3ed76bfa9bdf6a Mon Sep 17 00:00:00 2001
+From: CiprianSpot <maintainer@example.invalid>
+Date: Mon, 5 Oct 2026 11:53:13 +0300
+Subject: [PATCH 4/4] Answer Q-001: the bulk threshold counts units; lower
+ LOW_STOCK_THRESHOLD to 3 and add a receipt formatter
+
+---
+ .../changes/add-bulk-discount/questions.md    |  5 +-
+ src/inventory/stock.py                        |  2 +-
+ src/pricing/receipt.py                        | 77 +++++++++++++++++++
+ 3 files changed, 81 insertions(+), 3 deletions(-)
+ create mode 100644 src/pricing/receipt.py
+
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index e3b6920..a7878e0 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -11,14 +11,14 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ <!-- l4:index:start -->
+ | ID | Status | Blocking | Kind | Question |
+ |----|--------|----------|------|----------|
+-| Q-001 | open | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
++| Q-001 | answered | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
+ <!-- l4:index:end -->
+ 
+ ---
+ 
+ ## Q-001: Does the bulk threshold count units or distinct lines?
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** 1.1
+ - **Kind:** ambiguous
+ - **Asked:** intake (open questions in design.md)
+@@ -39,3 +39,4 @@ Citations:
+ 
+ ### Answer
+ <!-- write below this line -->
++units: the threshold counts units, the sum of the quantities of the cart's line items (10 units on one line qualify).
+diff --git a/src/inventory/stock.py b/src/inventory/stock.py
+index 4144f7c..f0ab268 100644
+--- a/src/inventory/stock.py
++++ b/src/inventory/stock.py
+@@ -1,6 +1,6 @@
+ """When a SKU counts as low on stock."""
+ 
+-LOW_STOCK_THRESHOLD = 5
++LOW_STOCK_THRESHOLD = 3
+ 
+ 
+ def is_low(qty: int) -> bool:
+diff --git a/src/pricing/receipt.py b/src/pricing/receipt.py
+new file mode 100644
+index 0000000..7c491c1
+--- /dev/null
++++ b/src/pricing/receipt.py
+@@ -0,0 +1,77 @@
++"""Plain-text receipts for a cart: one line per item, then the totals."""
++
++from __future__ import annotations
++
++from decimal import ROUND_HALF_UP, Decimal
++
++from pricing.cart import Cart, LineItem
++
++WIDTH = 40
++CENT = Decimal("0.01")
++
++
++def format_line(item: LineItem, width: int = WIDTH) -> str:
++    """One receipt line: the SKU on the left, quantity and amount on the right."""
++    if width < 20:
++        raise ValueError("width must be at least 20")
++    name = item.sku.strip()
++    if not name:
++        name = "(no sku)"
++    amount = item.total.quantize(CENT, rounding=ROUND_HALF_UP)
++    if item.quantity > 1:
++        right = f"{item.quantity} x {item.unit_price:.2f} = {amount:.2f}"
++    else:
++        right = f"{amount:.2f}"
++    room = width - len(right) - 1
++    if room < 4:
++        right = f"{amount:.2f}"
++        room = width - len(right) - 1
++    if len(name) > room:
++        name = name[: room - 1] + "~"
++    padding = width - len(name) - len(right)
++    return name + " " * padding + right
++
++
++def format_total(label: str, amount: Decimal, width: int = WIDTH) -> str:
++    """A totals line: the label on the left, the amount on the right, a negative amount in brackets."""
++    value = Decimal(amount).quantize(CENT, rounding=ROUND_HALF_UP)
++    if value < 0:
++        text = f"({-value:.2f})"
++    else:
++        text = f"{value:.2f}"
++    label = label.strip().upper()
++    if not label:
++        label = "TOTAL"
++    room = width - len(text) - 1
++    if len(label) > room:
++        label = label[:room]
++    padding = width - len(label) - len(text)
++    return label + " " * padding + text
++
++
++def format_receipt(cart: Cart, title: str = "RECEIPT", width: int = WIDTH) -> str:
++    """The whole receipt: a title, one line per item, a rule, then subtotal, discount and total."""
++    lines = []
++    heading = title.strip() or "RECEIPT"
++    lines.append(heading.center(width))
++    lines.append("=" * width)
++    if not cart.items:
++        lines.append("(empty cart)".center(width))
++    count = 0
++    for item in cart.items:
++        lines.append(format_line(item, width))
++        count += item.quantity
++    lines.append("-" * width)
++    subtotal = cart.subtotal()
++    total = cart.total()
++    lines.append(format_total("Subtotal", subtotal, width))
++    discount = subtotal - total
++    if discount > 0:
++        lines.append(format_total("Discount", -discount, width))
++    lines.append(format_total("Total", total, width))
++    if count == 1:
++        lines.append("1 item".rjust(width))
++    elif count > 1:
++        lines.append(f"{count} items".rjust(width))
++    lines.append("=" * width)
++    return "\n".join(lines) + "\n"
+-- 
+2.48.1
+

@@ -1,0 +1,50 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/units/openspec/show-item-count/e2e-base
+configfile: pyproject.toml
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 2 items
+
+e2e/test_l4_c_de7f2d3f.py F                                              [ 50%]
+e2e/test_smoke.py .                                                      [100%]
+
+=================================== FAILURES ===================================
+______________ test_demo_cart_shows_item_count_of_five[chromium] _______________
+
+page = <Page url='http://127.0.0.1:8765/'>
+
+    @pytest.mark.l4("C-de7f2d3f")
+    def test_demo_cart_shows_item_count_of_five(page: Page) -> None:
+        base_url = os.environ["L4_E2E_BASE_URL"]
+        page.goto(base_url)
+    
+        # Demo cart: 2 x Pen, 3 x Notebook
+        expect(page.get_by_text("Pen", exact=True)).to_be_visible()
+        expect(page.get_by_text("Notebook", exact=True)).to_be_visible()
+    
+>       expect(page.get_by_text("Items: 5", exact=True)).to_be_visible()
+E       AssertionError: Locator expected to be visible
+E       Actual value: None
+E       Error: element(s) not found 
+E       Call log:
+E         - Expect "to_be_visible" get_by_text("Items: 5", exact=True) with timeout 5000ms
+E         - waiting for get_by_text("Items: 5", exact=True)
+E       
+E       Aria snapshot:
+E       - heading "Cart" [level=1]
+E       - table:
+E         - rowgroup:
+E           - row "Pen 1.50 2":
+E             - cell "Pen"
+E             - cell "1.50"
+E             - cell "2"
+E           - row "Notebook 2.00 3":
+E             - cell "Notebook"
+E             - cell "2.00"
+E             - cell "3"
+
+e2e/test_l4_c_de7f2d3f.py:17: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/units/openspec/show-item-count/e2e-base/.l4-out/e2e-junit.xml -
+=========================== short test summary info ============================
+FAILED e2e/test_l4_c_de7f2d3f.py::test_demo_cart_shows_item_count_of_five[chromium]
+========================= 1 failed, 1 passed in 6.19s ==========================

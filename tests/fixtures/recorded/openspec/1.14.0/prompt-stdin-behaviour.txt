@@ -1,0 +1,5 @@
+# prompt behaviour by stdin kind (cwd = baseline copy; add-farewell has 3/5 open tasks)
+stdin=devnull   openspec archive add-farewell         exit=1 t=0.2s json_code=None stderr="✖ Error: 3 incomplete task(s) found for change 'add-farewell', and no answer could be read from stdin.\nFix: Complete the tasks or rerun with"
+stdin=devnull   openspec archive add-farewell --json  exit=1 t=0.2s json_code=archive_tasks_incomplete stderr=''
+stdin=open-pipe openspec archive add-farewell         HUNG: no exit within 8 s (waiting on the y/N prompt); killed
+stdin=open-pipe openspec archive add-farewell --json  exit=1 t=0.3s json_code=archive_tasks_incomplete stderr=''

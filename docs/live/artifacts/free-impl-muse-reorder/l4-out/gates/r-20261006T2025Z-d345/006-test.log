@@ -1,0 +1,58 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-reorder-quantity
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 22 items
+
+tests/test_cart.py ............                                          [ 54%]
+tests/test_discounts.py ....                                             [ 72%]
+tests/test_reorder.py FF                                                 [ 81%]
+tests/test_stock.py ..                                                   [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_stock_below_target_is_topped_up _____________________
+
+    @pytest.mark.l4("C-97756e71")
+    def test_stock_below_target_is_topped_up():
+>       assert reorder_quantity(4, 10) == 6
+               ^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_reorder.py:8: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+on_hand = 4, target = 10
+
+    def reorder_quantity(on_hand: int, target: int) -> int:
+        """Return the units to order, never below 0."""
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/reorder.py:3: NotImplementedError
+____________________ test_stock_above_target_is_not_ordered ____________________
+
+    @pytest.mark.l4("C-2d2a7548", "C-97756e71")
+    def test_stock_above_target_is_not_ordered():
+>       assert reorder_quantity(12, 10) == 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_reorder.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+on_hand = 12, target = 10
+
+    def reorder_quantity(on_hand: int, target: int) -> int:
+        """Return the units to order, never below 0."""
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/reorder.py:3: NotImplementedError
+- generated xml file: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-reorder-quantity/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_reorder.py::test_stock_below_target_is_topped_up - NotImple...
+FAILED tests/test_reorder.py::test_stock_above_target_is_not_ordered - NotImp...
+========================= 2 failed, 20 passed in 0.08s =========================
+No entry for terminal type "unknown";
+using dumb terminal settings.

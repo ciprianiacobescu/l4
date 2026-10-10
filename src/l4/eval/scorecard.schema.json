@@ -1,0 +1,73 @@
+{
+ "$id": "l4/eval-scorecard@1",
+ "type": "object",
+ "required": ["schema", "complete", "env", "seeds", "cells", "profiles", "scorecard_sha256"],
+ "properties": {
+  "schema": {"enum": ["l4/eval-scorecard@1"]},
+  "complete": {"type": "boolean"},
+  "scorecard_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+  "env": {"type": "object"},
+  "seeds": {
+   "type": "object",
+   "required": ["sha256", "units"],
+   "properties": {"sha256": {"type": "string"}, "units": {"type": "array", "items": {"type": "string"}}}
+  },
+  "cells": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": ["cell_key", "role", "profile", "unit", "k", "status", "wall_s", "errors"],
+    "properties": {
+     "cell_key": {"type": "string"},
+     "role": {"enum": ["implementer", "judge"]},
+     "profile": {"type": "string"},
+     "unit": {"type": "string"},
+     "k": {"type": "integer"},
+     "status": {"enum": ["pass", "fail", "invalid"]},
+     "invalid_reason": {"type": ["string", "null"]},
+     "wall_s": {"type": "number"},
+     "attempts": {"type": ["object", "null"]},
+     "halted_at": {"type": ["string", "null"]},
+     "breaker": {"type": ["string", "null"]},
+     "blocked": {"type": "boolean"},
+     "verdict": {"type": ["string", "null"]},
+     "expected_verdict": {"type": ["string", "null"]},
+     "agreement": {"type": ["boolean", "null"]},
+     "findings": {"type": ["integer", "null"]},
+     "worst_severity": {"type": ["string", "null"]},
+     "missed_defect": {"type": "boolean"},
+     "cost_usd": {"type": ["number", "null"]},
+     "input_tokens": {"type": "integer"},
+     "output_tokens": {"type": "integer"},
+     "errors": {
+      "type": "array",
+      "items": {"type": "object", "required": ["kind", "detail"],
+                "properties": {"kind": {"type": "string"}, "detail": {"type": "string"}}}
+     },
+     "returncode": {"type": ["integer", "null"]}
+    }
+   }
+  },
+  "profiles": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": ["role", "profile", "cells", "pass", "fail", "invalid", "pass_rate", "errors"],
+    "properties": {
+     "role": {"enum": ["implementer", "judge"]},
+     "profile": {"type": "string"},
+     "cells": {"type": "integer"},
+     "pass": {"type": "integer"},
+     "fail": {"type": "integer"},
+     "invalid": {"type": "integer"},
+     "pass_rate": {"type": ["number", "null"]},
+     "median_wall_s": {"type": ["number", "null"]},
+     "attempts_mean": {"type": ["object", "null"]},
+     "agreement_rate": {"type": ["number", "null"]},
+     "cost_usd": {"type": ["number", "null"]},
+     "errors": {"type": "object"}
+    }
+   }
+  }
+ }
+}

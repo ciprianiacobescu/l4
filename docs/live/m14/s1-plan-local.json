@@ -1,0 +1,89 @@
+{
+  "schema": "l4/plan@1",
+  "units": [
+    {
+      "actionable": true,
+      "framework": "kiro",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 4
+      },
+      "unit": "kiro:add-loyalty-points"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-average-price"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "merged",
+      "reason": "merged",
+      "tasks": {
+        "done": 2,
+        "total": 2
+      },
+      "unit": "openspec:add-discount-codes"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-is-empty"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-money-format"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "in_review",
+      "reason": "in_review: waiting for merge",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "unit": "openspec:add-split-amount"
+    },
+    {
+      "actionable": false,
+      "framework": "openspec",
+      "next_action": "none",
+      "phase": "awaiting_human",
+      "reason": "awaiting_human: no new answers",
+      "tasks": {
+        "done": 2,
+        "total": 2
+      },
+      "unit": "openspec:add-vat"
+    }
+  ]
+}

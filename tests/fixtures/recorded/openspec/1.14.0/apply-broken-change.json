@@ -1,0 +1,40 @@
+{
+  "changeName": "broken-change",
+  "changeDir": "{{REPO}}/openspec/changes/broken-change",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "{{REPO}}/openspec/changes/broken-change/proposal.md"
+    ],
+    "specs": [
+      "{{REPO}}/openspec/changes/broken-change/specs/badcap/spec.md"
+    ],
+    "tasks": [
+      "{{REPO}}/openspec/changes/broken-change/tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 1,
+    "complete": 0,
+    "remaining": 1
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 Never runs",
+      "done": false,
+      "sourcePath": "{{REPO}}/openspec/changes/broken-change/tasks.md",
+      "line": 5
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "missingPrerequisites": [
+    "design"
+  ],
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

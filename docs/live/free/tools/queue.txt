@@ -1,0 +1,27 @@
+# LABEL KIND UNIT IMPL JUDGES CLARIFIER VAGENT CLAR_ON GENTESTS
+impl-space-bunny-shelf impl add-shelf-code f-space-bunny claude-code claude-code claude-code true true
+impl-ling-shelf impl add-shelf-code f-ling claude-code claude-code claude-code true true
+impl-nemotron-lightning-shelf impl add-shelf-code f-nemotron-lightning claude-code claude-code claude-code true true
+impl-big-pickle-tip impl add-tip-amount f-big-pickle claude-code claude-code claude-code true true
+impl-mimo-tip impl add-tip-amount f-mimo claude-code claude-code claude-code true true
+impl-nemotron-ultra-tip impl add-tip-amount f-nemotron-ultra claude-code claude-code claude-code true true
+impl-longcat-reorder impl add-reorder-quantity f-longcat claude-code claude-code claude-code true true
+impl-muse-reorder impl add-reorder-quantity f-muse claude-code claude-code claude-code true true
+judge-claude-pickup judge add-pickup-notice codex claude-code - claude-code false false
+judge-claude-shipfee judge add-shipping-fee codex claude-code - claude-code false false
+judge-space-bunny-pickup judge add-pickup-notice codex f-space-bunny - f-space-bunny false false
+judge-space-bunny-shipfee judge add-shipping-fee codex f-space-bunny - f-space-bunny false false
+judge-ling-pickup judge add-pickup-notice codex f-ling - f-ling false false
+judge-ling-shipfee judge add-shipping-fee codex f-ling - f-ling false false
+judge-nemotron-lightning-pickup judge add-pickup-notice codex f-nemotron-lightning - f-nemotron-lightning false false
+judge-nemotron-lightning-shipfee judge add-shipping-fee codex f-nemotron-lightning - f-nemotron-lightning false false
+judge-big-pickle-pickup judge add-pickup-notice codex f-big-pickle - f-big-pickle false false
+judge-big-pickle-shipfee judge add-shipping-fee codex f-big-pickle - f-big-pickle false false
+judge-mimo-pickup judge add-pickup-notice codex f-mimo - f-mimo false false
+judge-mimo-shipfee judge add-shipping-fee codex f-mimo - f-mimo false false
+judge-nemotron-ultra-pickup judge add-pickup-notice codex f-nemotron-ultra - f-nemotron-ultra false false
+judge-nemotron-ultra-shipfee judge add-shipping-fee codex f-nemotron-ultra - f-nemotron-ultra false false
+judge-longcat-pickup judge add-pickup-notice codex f-longcat - f-longcat false false
+judge-longcat-shipfee judge add-shipping-fee codex f-longcat - f-longcat false false
+judge-muse-pickup judge add-pickup-notice codex f-muse - f-muse false false
+judge-muse-shipfee judge add-shipping-fee codex f-muse - f-muse false false

@@ -1,0 +1,50 @@
+{
+  "criteria": [
+    {
+      "id": "C-8fd7d830",
+      "verdict": "pass",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py",
+          "quote": "return f\"Hello, {name.strip()}!\""
+        }
+      ],
+      "reasoning": "the committed code does what the criterion says"
+    },
+    {
+      "id": "C-4e4feccc",
+      "verdict": "pass",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py",
+          "quote": "raise ValueError(\"a greeting needs a name\")"
+        }
+      ],
+      "reasoning": "the committed code does what the criterion says"
+    },
+    {
+      "id": "C-590ae9d1",
+      "verdict": "pass",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py",
+          "quote": "return f\"Goodbye, {name.strip()}!\""
+        }
+      ],
+      "reasoning": "the committed code does what the criterion says"
+    }
+  ],
+  "test_adequacy": [],
+  "findings": [],
+  "riskiest_assumptions": [
+    "the gate runs every test",
+    "the fixture spec is complete",
+    "names are ASCII"
+  ]
+}

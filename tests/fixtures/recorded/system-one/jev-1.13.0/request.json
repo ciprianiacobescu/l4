@@ -1,0 +1,7 @@
+{"state": "Question: Should Cart.is_empty() be a method or a property?\nAnswer: A method, like Cart.subtotal().",
+ "model": "jev-1.13.0",
+ "questions": {
+  "r": {"type": "choice", "instructions": "What kind of decision is this?",
+        "criteria": {"technical": "derivable from code", "product": "owner decision", "ambiguous": "unclear"}},
+  "y": {"type": "noul", "instructions": "Is this derivable from the code?", "criteria": {"true": "yes", "false": "no"}},
+  "s": {"type": "score", "instructions": "How ambiguous?", "criteria": ["0 none", "1 some", "2 lots"]}}}

@@ -1,0 +1,37 @@
+{
+  "changeName": "add-farewell-fix-1",
+  "changeDir": "{{REPO}}/openspec/changes/add-farewell-fix-1",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "{{REPO}}/openspec/changes/add-farewell-fix-1/proposal.md"
+    ],
+    "tasks": [
+      "{{REPO}}/openspec/changes/add-farewell-fix-1/tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 1,
+    "complete": 0,
+    "remaining": 1
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 Fix F-001 (regression test first)",
+      "done": false,
+      "sourcePath": "{{REPO}}/openspec/changes/add-farewell-fix-1/tasks.md",
+      "line": 5
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "missingPrerequisites": [
+    "design"
+  ],
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

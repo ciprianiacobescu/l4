@@ -1,0 +1,43 @@
+# M1.3 live protocol, retry rule (1C) after P1 = pipeline #2658 / job 5478 (Codex reported `blocked` on fix task 1.1).
+# 2026-10-04, operator acting as maintainer. Harness live-fixes first (test-first, on harness main):
+#   ce43a4b  m1.x(live-fix): the live GitLab client lists nothing for a branch that does not exist yet   (G6 acceptance code)
+#   e9735ff  m1.x(live-fix): the red prompt says what to do when the behaviour already exists (red@3)
+#   f0f6524  m1.x(live-fix): each finding of a criterion keeps its own regression scenario in the fix unit
+# Checks before the commits: tests/unit/implementer + sim + verifier + orchestrator + gates + planner +
+#   tests/contract/test_openspec_fix_unit.py: 928 passed, 3 skipped, 2 failed (the two red@2 version pins, updated in
+#   e9735ff); after both fixes: test_check_criteria + test_prompt + verifier + specs + orchestrator + planner + sim:
+#   827 passed, 2 skipped; L4_LIVE=1 tests/contract/test_openspec_fix_unit.py (pinned OpenSpec 1.14.0): 2 passed;
+#   `ruff check .`: clean.
+
+$ uv run --project <harness> l4 upgrade --repo <clone> --harness <harness>     # harness f0f6524
+changed .l4/vendor/ (0 added, 3 changed, 0 removed) to the harness at f0f6524c0db4
+changed .l4/config.yaml (harness.version, harness.commit)
+  M .l4/vendor/src/l4/_commit.py
+  M .l4/vendor/src/l4/implementer/templates/red.md
+  M .l4/vendor/src/l4/verifier/fixunit.py
+  config: harness.commit d1e06319227d... -> f0f6524c0db4...
+
+$ git commit -m "Upgrade the vendored L4 harness to f0f6524 (M1.3 live-fixes) [skip ci]"; git push origin main
+   12f660b..8ff4f03  main -> main
+GET pipelines?sha=8ff4f03 -> #2671 status "skipped", source push (no job)
+
+Reset of the unit (retry rule step 2):
+PUT merge_requests/14 state_event=close            -> MR !14 closed
+DELETE repository/branches/l4%2Fopenspec%2Fadd-shipping-fee -> HTTP 204
+refs/l4/locks/openspec/add-shipping-fee            -> did not exist (P1 released its lock; the ledger lived on the branch)
+
+$ git fetch --prune ...; l4 plan --json   (fresh state)
+kiro:add-loyalty-points in_review none in_review: waiting for merge
+openspec:add-average-price in_review none in_review: waiting for merge
+openspec:add-discount-codes merged none merged
+openspec:add-is-empty in_review none in_review: waiting for merge
+openspec:add-money-format in_review none in_review: waiting for merge
+openspec:add-shipping-fee None implement pending tasks
+openspec:add-split-amount in_review none in_review: waiting for merge
+openspec:add-vat awaiting_human none awaiting_human: no new answers
+
+G6 at ce43a4b on the reset state: 1 passed (step 0), 8 skipped ("has no ledger yet (step 1)" x7, step 5) - at d1e0631 the
+same pre-push state failed 7 tests with httpx.HTTPStatusError 404 on /repository/tree?ref=l4/openspec/add-shipping-fee.
+
+Retry rule step 3: POST projects/118/pipeline ref=main -> #2672 (source "api"; the job rule accepts web|api alike),
+jobs l4 5480, test 5479.

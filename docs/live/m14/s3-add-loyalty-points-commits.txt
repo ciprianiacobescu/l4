@@ -1,0 +1,55 @@
+# unit branch l4/kiro/add-loyalty-points above C1 (b0b384d), oldest first: sha, author, subject, trailers
+f47cc09abc954a37353902e9ee291f8ac9586971 l4-bot | test(add-loyalty-points): red for 2.1 [skip ci]
+L4-Unit: kiro:add-loyalty-points
+L4-Run: r-20261004T1741Z-3ebb
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 2.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 2.1/red/1
+
+1866c9116077dd161293f33dd9100c0e97473d90 l4-bot | feat(add-loyalty-points): 2.1 Add `src/pricing/loyalty.py` with `points_for(subtotal: Decimal) -> int` (one point per whole 10.00) and export it from `pricing` [skip ci]
+L4-Unit: kiro:add-loyalty-points
+L4-Run: r-20261004T1741Z-3ebb
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 2.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 2.1/green/1
+
+dc367463ec2be4415c507aa44ad4a1674b363d1d l4-bot | test(add-loyalty-points): red for 1.1 [skip ci]
+L4-Unit: kiro:add-loyalty-points
+L4-Run: r-20261004T1741Z-3ebb
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+
+3f14b181552079ab52ac1a2c43db9a43dfa36bbe l4-bot | feat(add-loyalty-points): 1.1 Add `Cart.loyalty_points()` returning `points_for` of the cart's subtotal (before any discount code) [skip ci]
+L4-Unit: kiro:add-loyalty-points
+L4-Run: r-20261004T1741Z-3ebb
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+c42ec284fd9790cde94cd0cbad6db5a7fb69020c l4-bot | docs(add-loyalty-points): verification round 1 [skip ci]
+L4-Unit: kiro:add-loyalty-points
+L4-Run: r-20261004T1741Z-3ebb
+L4-Iteration: 1
+L4-Phase: verifying
+
+940c6ff5ebdcf0849eb978a8692a6c7d84a19ca1 l4-bot | docs(add-loyalty-points): hand off to review
+L4-Unit: kiro:add-loyalty-points
+L4-Run: r-20261004T1741Z-3ebb
+L4-Iteration: 1
+L4-Phase: verified
+
+# lock ref refs/l4/locks/kiro/add-loyalty-points
+71d071e85628ffac6b4d78ca4259516993dd3ef7 {"unit": "kiro:add-loyalty-points", "run_id": "r-20261004T1741Z-3ebb", "holder": "gitlab-runner:90536", "acquired_at": "2026-10-04T17:44:22Z", "expires_at": "2026-10-04T17:44:22Z", "nonce": "a5549d6e494fa96e"}

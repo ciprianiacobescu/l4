@@ -1,0 +1,83 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-shelf-code
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 23 items
+
+tests/test_cart.py ............                                          [ 52%]
+tests/test_discounts.py ....                                             [ 69%]
+tests/test_shelf.py FFF                                                  [ 82%]
+tests/test_stock.py ..                                                   [ 91%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_________________________ test_shelf_code_zero_padded __________________________
+
+    def test_shelf_code_zero_padded():
+>       result = shelf_code(3, 7)
+                 ^^^^^^^^^^^^^^^^
+
+tests/test_shelf.py:7: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+aisle = 3, slot = 7
+
+    def shelf_code(aisle: int, slot: int) -> str:
+        """Return the shelf code A<aisle>-S<slot> zero-padded to two digits.
+    
+        Raises ValueError when the aisle or the slot is below 1.
+        """
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/shelf.py:6: NotImplementedError
+____________________ test_shelf_code_aisle_below_1_rejected ____________________
+
+    def test_shelf_code_aisle_below_1_rejected():
+        with pytest.raises(ValueError):
+>           shelf_code(0, 7)
+
+tests/test_shelf.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+aisle = 0, slot = 7
+
+    def shelf_code(aisle: int, slot: int) -> str:
+        """Return the shelf code A<aisle>-S<slot> zero-padded to two digits.
+    
+        Raises ValueError when the aisle or the slot is below 1.
+        """
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/shelf.py:6: NotImplementedError
+____________________ test_shelf_code_slot_below_1_rejected _____________________
+
+    def test_shelf_code_slot_below_1_rejected():
+        with pytest.raises(ValueError):
+>           shelf_code(3, 0)
+
+tests/test_shelf.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+aisle = 3, slot = 0
+
+    def shelf_code(aisle: int, slot: int) -> str:
+        """Return the shelf code A<aisle>-S<slot> zero-padded to two digits.
+    
+        Raises ValueError when the aisle or the slot is below 1.
+        """
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/inventory/shelf.py:6: NotImplementedError
+- generated xml file: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-shelf-code/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_shelf.py::test_shelf_code_zero_padded - NotImplementedError
+FAILED tests/test_shelf.py::test_shelf_code_aisle_below_1_rejected - NotImple...
+FAILED tests/test_shelf.py::test_shelf_code_slot_below_1_rejected - NotImplem...
+========================= 3 failed, 20 passed in 0.08s =========================
+No entry for terminal type "unknown";
+using dumb terminal settings.

@@ -1,0 +1,32 @@
+$ L4_LIVE=1 uv run pytest tests/live/test_m1_4_acceptance.py -m live -q -rs   # harness c9e2c0d (G7 as committed), after step 3
+..F.F..                                                                  [100%]
+=================================== FAILURES ===================================
+_______________ test_probe_branch_left_no_mr_and_no_unit_branch ________________
+
+gl = <tests.live.gitlab_client.LiveGitLab object at 0x10af173e0>
+remote = <tests.live.gitlab_client.LiveRemote object at 0x10b017f50>
+
+    def test_probe_branch_left_no_mr_and_no_unit_branch(gl, remote):
+        probe_artifacts(gl)  # skips until P1 has run
+>       assert not gl.merge_requests(state="all", source_branch=BRANCH), "P1 opened a merge request for the Kiro unit"
+E       AssertionError: P1 opened a merge request for the Kiro unit
+E       assert not [{'id': 394, 'iid': 13, 'project_id': 118, 'title': '[l4] add-loyalty-points', ...}]
+E        +  where [{'id': 394, 'iid': 13, 'project_id': 118, 'title': '[l4] add-loyalty-points', ...}] = merge_requests(state='all', source_branch='l4/kiro/add-loyalty-points')
+E        +    where merge_requests = <tests.live.gitlab_client.LiveGitLab object at 0x10af173e0>.merge_requests
+
+tests/live/test_m1_4_acceptance.py:194: AssertionError
+___________ test_p2_plan_sweep_lists_the_kiro_unit_and_nothing_else ____________
+
+gl = <tests.live.gitlab_client.LiveGitLab object at 0x10af173e0>
+
+    def test_p2_plan_sweep_lists_the_kiro_unit_and_nothing_else(gl):
+        _, _, log = p2(gl)
+        row = next((ln for ln in log.splitlines() if ln.lstrip().startswith(UNIT)), "")
+>       assert re.search(r"implement", row), f"plan --sweep: no `implement` row for {UNIT}"
+E       AssertionError: plan --sweep: no `implement` row for kiro:add-loyalty-points
+E       assert None
+E        +  where None = <function search at 0x104ee3420>('implement', '')
+E        +    where <function search at 0x104ee3420> = re.search
+
+tests/live/test_m1_4_acceptance.py:216: AssertionError
+2 failed, 5 passed in 42.37s

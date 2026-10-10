@@ -1,0 +1,79 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-gift-wrap-fee
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 46 items
+
+tests/test_bulk_discount.py .........                                    [ 19%]
+tests/test_bulk_savings.py .....                                         [ 30%]
+tests/test_cart.py ............                                          [ 56%]
+tests/test_cart_surcharge.py ....                                        [ 65%]
+tests/test_discounts.py ....                                             [ 73%]
+tests/test_gift_wrap.py FFF                                              [ 80%]
+tests/test_stock.py ..                                                   [ 84%]
+tests/test_surcharge.py .....                                            [ 95%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+___________________ test_gift_wrap_fee_3_units_returns_4_50 ____________________
+
+    @pytest.mark.l4("C-90db6a39", "C-e913fc60")
+    def test_gift_wrap_fee_3_units_returns_4_50():
+        """WHEN gift_wrap_fee(3) is called THEN return 4.50."""
+>       assert gift_wrap_fee(3) == Decimal("4.50")
+               ^^^^^^^^^^^^^^^^
+
+tests/test_gift_wrap.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+units = 3
+
+    def gift_wrap_fee(units: int) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/gift_wrap.py:7: NotImplementedError
+___________________ test_gift_wrap_fee_0_units_returns_0_00 ____________________
+
+    @pytest.mark.l4("C-e913fc60")
+    def test_gift_wrap_fee_0_units_returns_0_00():
+        """WHEN gift_wrap_fee(0) is called THEN return 0.00."""
+>       assert gift_wrap_fee(0) == Decimal("0.00")
+               ^^^^^^^^^^^^^^^^
+
+tests/test_gift_wrap.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+units = 0
+
+    def gift_wrap_fee(units: int) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/gift_wrap.py:7: NotImplementedError
+_____________ test_gift_wrap_fee_negative_units_raises_value_error _____________
+
+    @pytest.mark.l4("C-fdf8070a")
+    def test_gift_wrap_fee_negative_units_raises_value_error():
+        """WHEN gift_wrap_fee is called with -1 THEN raise ValueError."""
+        with pytest.raises(ValueError):
+>           gift_wrap_fee(-1)
+
+tests/test_gift_wrap.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+units = -1
+
+    def gift_wrap_fee(units: int) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/gift_wrap.py:7: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-gift-wrap-fee/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_gift_wrap.py::test_gift_wrap_fee_3_units_returns_4_50 - Not...
+FAILED tests/test_gift_wrap.py::test_gift_wrap_fee_0_units_returns_0_00 - Not...
+FAILED tests/test_gift_wrap.py::test_gift_wrap_fee_negative_units_raises_value_error
+========================= 3 failed, 43 passed in 0.13s =========================

@@ -1,0 +1,12 @@
+# TEMPORARY (wave D live check, step 1): does GET $CI_API_V4_URL/job answer a running job's own token with 200 and
+# "running"? It is the call the l4 watchdog (src/l4/cancel.py) makes. Prints only HTTP codes and the status field.
+stages: [test]
+
+jobapi-probe:
+  stage: test
+  tags: [agentic]
+  script:
+    - 'echo "api: $CI_API_V4_URL"'
+    - 'B="$CI_PROJECT_DIR/.jobapi-body.json"; code=$(curl -s -o "$B" -w "%{http_code}" -H "JOB-TOKEN: $CI_JOB_TOKEN" "$CI_API_V4_URL/job"); st=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]))" "$B" status 2>/dev/null || echo unparsed); rm -f "$B"; echo "curl: http_code=$code status=$st"'
+    - 'python3 ci/jobapi_probe.py system-python3'
+    - 'PATH="$HOME/.local/bin:$PATH" UV_PYTHON_DOWNLOADS=never uv run --no-project --python 3.12 python ci/jobapi_probe.py uv-python-3.12 || echo "uv python 3.12 not runnable"'

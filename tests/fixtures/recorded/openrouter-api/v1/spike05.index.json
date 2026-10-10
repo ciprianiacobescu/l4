@@ -1,0 +1,16 @@
+{
+ "recorded": "2026-10-03",
+ "spike": "docs/spikes/05-availability-probes.md",
+ "cases": {
+  "get_key.json": {
+   "http": "GET https://openrouter.ai/api/v1/key",
+   "status": 200,
+   "wall_s": 0.06
+  },
+  "get_credits.json": {
+   "http": "GET https://openrouter.ai/api/v1/credits",
+   "status": 200,
+   "wall_s": 0.04
+  }
+ }
+}

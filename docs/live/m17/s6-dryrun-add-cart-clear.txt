@@ -1,0 +1,14 @@
+$ git rev-parse origin/main origin/l4/openspec/add-cart-clear  # right after the push of M4
+703a7768d6731c56dc253e3f12e14ba865e516fd
+3441ffa8ba2a48fb7becf0a1e66308b86563b16d
+2026-10-05T05:05:24Z
+$ l4 run --dry-run --unit openspec:add-cart-clear
+l4 run --dry-run: no lease, worktree, agent, push or forge write
+
+openspec:add-cart-clear  phase=verifying  next=verify
+  base moved: step 0 merges main@703a7768d673 (7 commits behind; changed on both sides: openspec/changes/add-cart-clear/questions.md, src/pricing/cart.py)
+
+UNIT                     PHASE      ACTION  TASK  AVAILABILITY  EXIT
+openspec:add-cart-clear  verifying  verify  -     unknown       0
+
+would exit 0

@@ -1,0 +1,78 @@
+{
+ "base": {
+  "name": "typed-decisions",
+  "repo": "convaiinnovations/laya",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148"
+ },
+ "dataset_sha256": "eb2d21b05d61221a226edb51ac139b8e3e78dadacfc5cb16d3cde9f413a6a382",
+ "device": "mps",
+ "files": {
+  "checkpoint_meta.json": "5b3898b77c1356db7508135bf26523f3d51d6ec2cc74db825b95b8a2bb5d8bc0",
+  "encoder/config.json": "a56af00b9a5fb01e046d4b62ccb357767f27df5a20d05716e88090a4aca6bdb6",
+  "model.safetensors": "36f10ca8b21dd60bab633925e9610882847afb1393e6df8ef105187b6acbaf6b",
+  "rl_agent_config.json": "9447260f15cd88097cf0bac47bad8bd2fd04898775283e16a1afd945a4ecc029",
+  "thresholds.json": "8fad5e2d41d420a619ff1d454616115c2676826d51c597cbc6934d19bfb7213a",
+  "tokenizer/tokenizer.json": "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30",
+  "tokenizer/tokenizer_config.json": "08d4cf3ac4dca381759441b85b91a6d40e688471dcd33d15d6649eb0a9a854d1"
+ },
+ "gate": {
+  "dataset_sha256": "eb2d21b05d61221a226edb51ac139b8e3e78dadacfc5cb16d3cde9f413a6a382",
+  "document_sha256": "5f334875ed183d6e045f1df7b6d5da1b6452b3d1b9c84262910f451a6f5b7397",
+  "failures": [
+   "slice gate rule 3 (qid=exercised, noul_accuracy): candidate=0.8393 (n=56), min=0.8500 failed",
+   "slice gate rule 4 (qid=untested, noul_accuracy): candidate=0.8393 (n=56), min=0.8500 failed",
+   "slice mutation:add_passing_test on exercised: tuned accuracy 0.50 (n=12) is below base Laya's 1.00 (n=12)",
+   "slice mutation:add_passing_test on untested: tuned accuracy 0.50 (n=12) is below base Laya's 1.00 (n=12)",
+   "slice mutation:none on exercised: tuned accuracy 0.33 (n=3) is below base Laya's 1.00 (n=3)",
+   "slice mutation:none on untested: tuned accuracy 0.33 (n=3) is below base Laya's 1.00 (n=3)",
+   "slice mutation:skip_old_test on unrelated: tuned accuracy 0.67 (n=6) is below base Laya's 0.83 (n=6)",
+   "question exercised, label true: recall 0.68 (n=25) is below 0.8",
+   "question untested, label false: recall 0.68 (n=25) is below 0.8",
+   "temperature[1] sits on Laya's clamp (6.23): the confidences are uncalibrated",
+   "temperature[2] sits on Laya's clamp (7.04): the confidences are uncalibrated"
+  ],
+  "passed": false,
+  "ran": true,
+  "test_sha256": "6c4bedce043c7ad5a79e6094b1bae7dfa216bda3cbf3528ffb3c55ee9380864c"
+ },
+ "hyperparameters": {
+  "calib_items": 324,
+  "encoder_lr": 2.5e-05,
+  "epochs": 2,
+  "grad_accum": 16,
+  "head_lr": 0.0001,
+  "max_rows": null,
+  "micro_batch": 1,
+  "selection": "final-epoch",
+  "train_items": 2035
+ },
+ "label_sources": {
+  "deterministic:diff-coverage": 544,
+  "deterministic:scope": 324,
+  "deterministic:tests-ran": 168
+ },
+ "peak_rss_gb": 7.87,
+ "schema": "l4/s1-train@1",
+ "seed": 1606,
+ "split_sha256": {
+  "calib": "702ce63bfac051c1482a58c7abea92bc614ad45feeb090b922f65e63226dce95",
+  "test": "6c4bedce043c7ad5a79e6094b1bae7dfa216bda3cbf3528ffb3c55ee9380864c",
+  "train": "e314ef9ce0d3c941d002ac05bd8f2b46a540293447abbd38e09a4a9c90ccdaa5"
+ },
+ "temperatures": [
+  1.0,
+  5.0,
+  5.0
+ ],
+ "temperatures_on_bound": [
+  1,
+  2
+ ],
+ "temperatures_raw": [
+  1.0,
+  6.22902774810791,
+  7.042766571044922
+ ],
+ "thresholds": "thresholds.json",
+ "wall_seconds": 2263.2
+}

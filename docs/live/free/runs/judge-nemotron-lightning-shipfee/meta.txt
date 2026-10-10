@@ -1,0 +1,4 @@
+LABEL=judge-nemotron-lightning-shipfee KIND=judge UNIT=add-shipping-fee IMPL=codex JUDGES=f-nemotron-lightning CLAR= VAGENT=f-nemotron-lightning CLAR_ON=false GENTESTS=false
+START 2026-10-06T20:36:17Z
+origin main 54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b unit branch 231f3413ed0e7e66cb466075e51d5bbfcac20705
+END rc=11 secs=390 at 2026-10-06T20:42:47Z

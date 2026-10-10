@@ -1,0 +1,161 @@
+{
+ "recorded": "2026-10-03",
+ "spike": "docs/spikes/05-availability-probes.md",
+ "cases": {
+  "version.stdout.txt": {
+   "argv": [
+    "claude",
+    "--version"
+   ],
+   "exit": 0,
+   "wall_s": 0.01
+  },
+  "auth_status_logged_in.stdout.json": {
+   "argv": [
+    "claude",
+    "auth",
+    "status"
+   ],
+   "exit": 0,
+   "wall_s": 0.72,
+   "note": "email/orgId/orgName redacted; keep only loggedIn/authMethod/subscriptionType"
+  },
+  "auth_status_logged_out.stdout.json": {
+   "argv": [
+    "claude",
+    "auth",
+    "status"
+   ],
+   "env": {
+    "CLAUDE_CONFIG_DIR": "<empty dir>"
+   },
+   "exit": 1,
+   "wall_s": 0.66
+  },
+  "auth_status_api_key_env_unvalidated.stdout.json": {
+   "argv": [
+    "claude",
+    "auth",
+    "status"
+   ],
+   "env": {
+    "CLAUDE_CONFIG_DIR": "<empty dir>",
+    "ANTHROPIC_API_KEY": "<dummy, invalid>"
+   },
+   "exit": 0,
+   "wall_s": 0.65,
+   "note": "loggedIn:true for an INVALID key - not validated"
+  },
+  "auth_status_oauth_token_env_unvalidated.stdout.json": {
+   "argv": [
+    "claude",
+    "auth",
+    "status"
+   ],
+   "env": {
+    "CLAUDE_CONFIG_DIR": "<empty dir>",
+    "CLAUDE_CODE_OAUTH_TOKEN": "<dummy, invalid>"
+   },
+   "exit": 0,
+   "wall_s": 0.66,
+   "note": "loggedIn:true, authMethod oauth_token, no subscriptionType"
+  },
+  "usage_subscription_local_tz.json": {
+   "argv": [
+    "claude",
+    "-p",
+    "/usage",
+    "--output-format",
+    "json"
+   ],
+   "exit": 0,
+   "wall_s": 3.66,
+   "note": "TZ=Europe/Bucharest (machine default)",
+   "truncated": "result text cut after the 'What's contributing to your limits usage?' header (local analytics block)"
+  },
+  "usage_subscription_utc.json": {
+   "argv": [
+    "claude",
+    "-p",
+    "--safe-mode",
+    "--no-session-persistence",
+    "--output-format",
+    "json",
+    "/usage"
+   ],
+   "env": {
+    "TZ": "UTC"
+   },
+   "exit": 0,
+   "wall_s": 2.79,
+   "truncated": "result text cut after the 'What's contributing to your limits usage?' header (local analytics block)"
+  },
+  "usage_api_key.json": {
+   "argv": [
+    "claude",
+    "-p",
+    "--safe-mode",
+    "--no-session-persistence",
+    "--output-format",
+    "json",
+    "/usage"
+   ],
+   "env": {
+    "TZ": "UTC",
+    "CLAUDE_CONFIG_DIR": "<empty dir>",
+    "ANTHROPIC_API_KEY": "<dummy>"
+   },
+   "exit": 0,
+   "wall_s": 2.51,
+   "note": "no windows: cost summary only"
+  },
+  "hello_haiku_cold.stream.jsonl": {
+   "argv": [
+    "claude",
+    "-p",
+    "--safe-mode",
+    "--no-session-persistence",
+    "--model",
+    "haiku",
+    "--tools",
+    "",
+    "--max-turns",
+    "1",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "Reply with exactly: L4-OK"
+   ],
+   "exit": 0,
+   "wall_s": 2.87,
+   "cost_usd": 0.010912
+  },
+  "hello_haiku_warm.stream.jsonl": {
+   "argv": "same as hello_haiku_cold",
+   "exit": 0,
+   "wall_s": 2.83,
+   "cost_usd": 0.0007886
+  },
+  "hello_sonnet_cold.stream.jsonl": {
+   "argv": "as hello_haiku_cold with --model sonnet",
+   "exit": 0,
+   "wall_s": 3.42,
+   "cost_usd": 0.009219
+  },
+  "hello_sonnet_warm.stream.jsonl": {
+   "argv": "as hello_haiku_cold with --model sonnet",
+   "exit": 0,
+   "wall_s": 3.32,
+   "cost_usd": 0.0008058
+  },
+  "hello_bad_model.stream.jsonl": {
+   "argv": "as hello_haiku_cold with --model claude-nonexistent-9",
+   "exit": 1,
+   "wall_s": 2.59,
+   "note": "result.subtype=success but is_error=true, api_error_status=404"
+  },
+  "hello_bad_model.stderr.txt": {
+   "exit": 1
+  }
+ }
+}

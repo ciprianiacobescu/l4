@@ -1,0 +1,69 @@
+2026-10-06T00:19:21.033476Z 00O Running with gitlab-runner 18.9.0 (07e534ba)
+2026-10-06T00:19:21.033497Z 00O   on docker-runner YYYYYYYYY, system ID: s_000000000002
+2026-10-06T00:19:21.033524Z 00O 
+2026-10-06T00:19:21.033526Z 00O+Preparing the "docker" executor
+2026-10-06T00:19:21.046448Z 00O Using Docker executor with image ghcr.io/astral-sh/uv:python3.12-bookworm-slim ...
+2026-10-06T00:19:22.276649Z 00O Using effective pull policy of [always] for container ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+2026-10-06T00:19:22.278007Z 00O Pulling docker image ghcr.io/astral-sh/uv:python3.12-bookworm-slim ...
+2026-10-06T00:19:22.695919Z 00O Using docker image sha256:08337aba8295f5652056fbd3e6f64cb908e8ce2624990ce147995aa34e24a7b1 for ghcr.io/astral-sh/uv:python3.12-bookworm-slim with digest ghcr.io/astral-sh/uv@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 ...
+2026-10-06T00:19:22.695944Z 00O 
+2026-10-06T00:19:22.695947Z 00O+
+2026-10-06T00:19:22.696078Z 00O+Preparing environment
+2026-10-06T00:19:22.696998Z 00O Using effective pull policy of [always] for container sha256:e053ca0e83378a229aab01dad54ce89ec487c1ca1c9cddd293c59fa50cd3d424
+2026-10-06T00:19:22.974585Z 01O Running on runner-YYYYYYYYY-project-118-concurrent-0 via docker-host.example.test...
+2026-10-06T00:19:23.205713Z 00O 
+2026-10-06T00:19:23.205725Z 00O+
+2026-10-06T00:19:23.206245Z 00O+Getting source from Git repository
+2026-10-06T00:19:23.483350Z 01O Gitaly correlation ID: 01M4798HF36K8W1DHVWXK1BXCN
+2026-10-06T00:19:23.487330Z 01O Fetching changes with git depth set to 20...
+2026-10-06T00:19:23.489465Z 01O Reinitialized existing Git repository in /builds/example-group/dummy-agentic/.git/
+2026-10-06T00:19:23.491733Z 01O Created fresh repository.
+2026-10-06T00:19:23.892193Z 01O Checking out 0272e10c as detached HEAD (ref is l4/openspec/add-shipping-notice)...
+2026-10-06T00:19:23.947443Z 01O Removing .pytest_cache/
+2026-10-06T00:19:23.947459Z 01O Removing .ruff_cache/
+2026-10-06T00:19:23.947460Z 01O Removing .venv/
+2026-10-06T00:19:23.947461Z 01O Removing src/inventory/__pycache__/
+2026-10-06T00:19:23.947463Z 01O Removing src/pricing/__pycache__/
+2026-10-06T00:19:23.947464Z 01O Removing src/pricing/web/__pycache__/
+2026-10-06T00:19:23.947465Z 01O Removing tests/__pycache__/
+2026-10-06T00:19:24.004481Z 01O 
+2026-10-06T00:19:24.004497Z 01O Skipping Git submodules setup
+2026-10-06T00:19:24.265874Z 00O 
+2026-10-06T00:19:24.265891Z 00O+
+2026-10-06T00:19:24.267133Z 00O+Executing "step_script" stage of the job script
+2026-10-06T00:19:24.267162Z 00O Using effective pull policy of [always] for container ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+2026-10-06T00:19:24.268495Z 00O Using docker image sha256:08337aba8295f5652056fbd3e6f64cb908e8ce2624990ce147995aa34e24a7b1 for ghcr.io/astral-sh/uv:python3.12-bookworm-slim with digest ghcr.io/astral-sh/uv@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 ...
+2026-10-06T00:19:24.556604Z 01O $ uv run pytest -q
+2026-10-06T00:19:24.752412Z 01E Using CPython 3.12.12 interpreter at: /usr/local/bin/python3
+2026-10-06T00:19:24.752431Z 01E Creating virtual environment at: .venv
+2026-10-06T00:19:24.759350Z 01E    Building pricing @ file:///builds/example-group/dummy-agentic
+2026-10-06T00:19:24.778801Z 01E Downloading ruff (9.9MiB)
+2026-10-06T00:19:24.779771Z 01E Downloading pygments (1.2MiB)
+2026-10-06T00:19:24.779789Z 01E Downloading playwright (46.0MiB)
+2026-10-06T00:19:24.990261Z 01E  Downloaded pygments
+2026-10-06T00:19:25.277522Z 01E  Downloaded ruff
+2026-10-06T00:19:25.978140Z 01E       Built pricing @ file:///builds/example-group/dummy-agentic
+2026-10-06T00:19:26.036567Z 01E  Downloaded playwright
+2026-10-06T00:19:26.038073Z 01E warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+2026-10-06T00:19:26.038083Z 01E          If the cache and target directories are on different filesystems, hardlinking may not be supported.
+2026-10-06T00:19:26.038084Z 01E          If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+2026-10-06T00:19:26.109174Z 01E Installed 21 packages in 72ms
+2026-10-06T00:19:26.955773Z 01O ....................                                                     [100%]
+2026-10-06T00:19:27.007359Z 01O 20 passed in 0.04s
+2026-10-06T00:19:27.090942Z 01O $ uv run ruff check --extend-exclude .l4 .
+2026-10-06T00:19:27.149688Z 01O All checks passed!
+2026-10-06T00:19:27.153382Z 01O $ uv run ruff check --select E501 --line-length 92 src
+2026-10-06T00:19:27.171745Z 01O E501 Line too long (108 > 92)
+2026-10-06T00:19:27.171761Z 01O  --> src/pricing/footer.py:2:93
+2026-10-06T00:19:27.171763Z 01O   |
+2026-10-06T00:19:27.171763Z 01O 1 | def shipping_notice() -> str:
+2026-10-06T00:19:27.171764Z 01O 2 |     return "Orders placed before 2 pm on a working day leave our warehouse the same day by tracked courier."
+2026-10-06T00:19:27.171766Z 01O   |                                                                                             ^^^^^^^^^^^^^^^^
+2026-10-06T00:19:27.171766Z 01O 
+2026-10-06T00:19:27.171767Z 01O Found 1 error.
+2026-10-06T00:19:27.510781Z 00O 
+2026-10-06T00:19:27.510793Z 00O+
+2026-10-06T00:19:27.511447Z 00O+Cleaning up project directory and file based variables
+2026-10-06T00:19:27.959040Z 00O 
+2026-10-06T00:19:27.959052Z 00O+
+2026-10-06T00:19:28.014291Z 00O ERROR: Job failed: exit code 1

@@ -1,0 +1,32 @@
+{
+  "status": "blocked",
+  "phase": "red",
+  "task_ids": ["1.1"],
+  "criteria_ids": ["C-510ef532", "C-0da6dc41"],
+  "summary": "BLOCKED before writing tests: the two criteria are mutually exclusive as written. openspec/changes/add-joiner/specs/joiner/spec.md defines Requirement 'Underscore joining' (line 3-8) and Requirement 'Hyphen joining' (line 10-15). Both scenarios invoke the IDENTICAL call `join_words([\"alpha\", \"beta\"])` -- no separator argument, no module-level config, no keyword parameter, and nothing else in the repo distinguishes them. They assert two different return values for that single deterministic call: \"alpha_beta\" (C-510ef532) and \"alpha-beta\" (C-0da6dc41). A pure function of one argument cannot return two different strings for the same input. Both requirements additionally state the system 'SHALL NOT use any other separator', so each requirement explicitly forbids the other requirement's output; no implementation can satisfy both simultaneously. Writing RED tests for this task would require guessing which separator is intended, and the harness contract forbids guessing on contradictions. No files were created or modified; the repo is untouched (verified `git status` clean apart from pre-existing state). Baseline `uv run pytest -q` was run once and reported 1 passed (tests/test_version.py) -- no new tests were added, so that result reflects the pre-existing suite only.",
+  "tests_added": [],
+  "files_changed": [],
+  "questions": [
+    {
+      "title": "How should the separator be selected, given both criteria call join_words with the same single argument?",
+      "context": "Criterion C-510ef532 (Underscore joining) requires join_words([\"alpha\", \"beta\"]) == \"alpha_beta\"; criterion C-0da6dc41 (Hyphen joining) requires join_words([\"alpha\", \"beta\"]) == \"alpha-beta\". The proposal fixes the signature as `slugkit.join_words(words: list[str]) -> str` with no separator parameter, so the two scenarios describe conflicting behaviour for one pure function. Note the sibling change add-slugify already owns hyphen joining for slugify(), so it is possible one requirement was copy-pasted from that capability.",
+      "options": [
+        "Add a separator parameter, e.g. join_words(words: list[str], sep: str = \"_\") or *, separator: str, and update the hyphen scenario to pass it explicitly -- changes the documented signature.",
+        "Keep join_words(words: list[str]) -> str, implement underscore joining only, and drop or correct the 'Hyphen joining' requirement as a copy-paste from add-slugify (which already hyphenates).",
+        "Keep join_words(words: list[str]) -> str, implement hyphen joining only, and drop or correct the 'Underscore joining' requirement.",
+        "Split into two named entry points, e.g. join_words(words) -> underscore and a separate hyphen function, so each requirement maps to its own symbol."
+      ],
+      "kind": "ambiguous"
+    },
+    {
+      "title": "If only one separator is intended, should the spec be amended before RED tests are written?",
+      "context": "Task 1.1 in openspec/changes/add-joiner/tasks.md bundles both requirements into one implementation task, and both acceptance criteria are assigned to this RED phase. Tests must be written per criterion, but any test I write for the losing criterion would encode behaviour the spec explicitly forbids ('SHALL NOT use any other separator'). Editing openspec/** is prohibited for me, so the spec change has to come from you.",
+      "options": [
+        "Amend the spec/proposal/tasks yourself, then re-run this RED task with the corrected criteria list.",
+        "Tell me which single requirement is authoritative and treat the other criterion as void -- I will still need your confirmation that writing a test asserting its removal is not expected, so I may report the criterion as un-traceable rather than invent a test for it.",
+        "Direct me to write both tests as specified anyway (they would then be mutually unsatisfiable and could never both go green)."
+      ],
+      "kind": "technical"
+    }
+  ]
+}

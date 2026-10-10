@@ -1,0 +1,7 @@
+probe T1 2026-10-04T17:03:23Z on Darwin arm64; laya 0.3.24
+a) vendored script imports under the pinned laya: ok
+b) laya.load(<dir>) answers (max_len 1024 checkpoint): ok (answers 3 state_tokens 120 input_tokens 523)
+c) no: ValueError: unknown model '/tmp/claude/s/ckpt2'; choose one of ['english', 'multilingual', 'typed-decisions'] (or an alias: ['decisions', 'default',
+d) HF_HOME overlay + HF_HUB_OFFLINE=1 laya-serve: ok ({"status":"ok","loaded":["typed-decisions"],"revisions":{"typed-decisions":"probe-t1"},"device":"cpu","device_is_preference":false,"checkpoint_dev
+e) no: ValueError: unknown model '/tmp/claude/s/ckpt2'; choose one of ['english', 'multilingual', 'typed-decisions'] (or an alias: ['decisions', 'default',
+f) tiny training run (12 rows, 1 epoch): exit 0 in 45 s, 3.8 GB peak RSS, checkpoint 807M

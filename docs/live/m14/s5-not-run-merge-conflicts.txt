@@ -1,0 +1,13 @@
+# Step 5 (optional, HUMAN: merge the Kiro MR !13 with a merge commit) was NOT run.
+# Local trial merges in a scratch clone (nothing pushed): main (b0b384d) + l4/kiro/add-loyalty-points (940c6ff), then
+# each open unit branch on top of that. MR !13 adds `from pricing.loyalty import points_for` + "points_for" to
+# src/pricing/__init__.py and `Cart.loyalty_points()` + the import to src/pricing/cart.py, the same hunks the other
+# open unit MRs edit.
+add-average-price (!4):  CONFLICT: src/pricing/cart.py tests/test_cart.py
+add-is-empty (!8):       CONFLICT: src/pricing/cart.py
+add-money-format (!10):  CONFLICT: src/pricing/__init__.py
+add-split-amount (!12):  CONFLICT: src/pricing/__init__.py
+add-vat (!5):            CONFLICT: src/pricing/__init__.py src/pricing/cart.py
+# Control: add-average-price and add-is-empty merge cleanly onto the current main (b0b384d).
+# Merging !13 would put every other open unit MR into conflict, which a later protocol's human-merge step may need
+# (M1.1 G13 / M1.2 step 7 merge A and B). The merge is left to the maintainer.

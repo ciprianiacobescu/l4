@@ -1,0 +1,48 @@
+commit 748cf82c9ff9b71e7b14571802298521ff7ada00
+Author: CiprianSpot <maintainer@example.invalid>
+Date:   Sun Oct 4 23:13:11 2026 +0300
+
+    Answer Q-001 and Q-002: reject both, with the scenarios the requirement states
+
+diff --git a/openspec/changes/add-shipping-fee/questions.md b/openspec/changes/add-shipping-fee/questions.md
+index 20cd327..485cc4b 100644
+--- a/openspec/changes/add-shipping-fee/questions.md
++++ b/openspec/changes/add-shipping-fee/questions.md
+@@ -11,15 +11,15 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ <!-- l4:index:start -->
+ | ID | Status | Blocking | Kind | Question |
+ |----|--------|----------|------|----------|
+-| Q-001 | open | none | verdict | Finding F-f2c8f81d: Free shipping at subtotal >= 50.00 not implemented |
+-| Q-002 | open | none | verdict | Finding F-a0fac71a: Negative subtotal does not raise ValueError |
++| Q-001 | answered | none | verdict | Finding F-f2c8f81d: Free shipping at subtotal >= 50.00 not implemented |
++| Q-002 | answered | none | verdict | Finding F-a0fac71a: Negative subtotal does not raise ValueError |
+ <!-- l4:index:end -->
+ 
+ ---
+ 
+ ## Q-001: Finding F-f2c8f81d: Free shipping at subtotal >= 50.00 not implemented
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -39,11 +39,12 @@ Answer `accept` to waive the finding, or `reject` and say why: a rejected findin
+ 
+ ### Answer
+ <!-- write below this line -->
++reject: WHEN an order with a subtotal of 50.00 ships to RO THEN the shipping fee is 0.00
+ ---
+ 
+ ## Q-002: Finding F-a0fac71a: Negative subtotal does not raise ValueError
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -63,3 +64,4 @@ Answer `accept` to waive the finding, or `reject` and say why: a rejected findin
+ 
+ ### Answer
+ <!-- write below this line -->
++reject: WHEN an order with a subtotal of -1.00 ships to RO THEN a ValueError is raised

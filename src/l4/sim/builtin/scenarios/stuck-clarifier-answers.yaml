@@ -1,0 +1,49 @@
+# The implementer asks a technical question. The clarifier answers it from the spec, S1 agrees, so the answer is
+# accepted without a person and the same run carries on to review (the "blocked, clarified" case).
+name: stuck-clarifier-answers
+fixture: openspec-basic
+config:
+  roles: {clarifier: [clarifier]}
+  clarifier: {s1_standin: llm_boolean}
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        result:
+          status: blocked
+          questions:
+            - title: Should a greeting trim the name?
+              context: The scenario says "Hello, <name>!" but does not say what happens to surrounding spaces.
+              kind: technical
+              options: ["trim it", "keep it as given"]
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:
+    verdict: "@fixture:pass_all.json"
+  clarifier:
+    verdict: "@fixture:clarifier_answer.json"
+s1:
+  default_p: 1.0  # S1 sides with the clarifier: not a product decision, and the citation supports the answer
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: question.raised, id: Q-001}
+    - {type: phase.changed, to: clarifying}
+    - {type: phase.changed, from: clarifying, to: implementing, trigger: clarifier_answered_all}
+    - {type: task.done, task: "1.1"}
+    - {type: task.done, task: "1.2"}
+    - {type: phase.changed, to: in_review}

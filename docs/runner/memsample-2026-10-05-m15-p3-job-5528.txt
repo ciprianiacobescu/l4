@@ -1,0 +1,25 @@
+peak used 3350 MB, peak swap used 2047 MB (total 3801 MB)
+peak rss laya-serve 2079 MB
+peak rss serena 283 MB
+peak rss claude 222 MB
+peak rss MainThread 138 MB
+peak rss codex 128 MB
+peak rss chromium 102 MB
+peak rss node 89 MB
+peak rss l4 63 MB
+peak rss uv 53 MB
+peak rss python 46 MB
+peak rss snap 33 MB
+peak rss web-app 22 MB
+peak rss git-remote-http 14 MB
+peak rss systemd 9 MB
+peak rss xdg-document-po 7 MB
+peak rss pulseaudio 7 MB
+peak rss pipewire-media- 7 MB
+peak rss xdg-permission- 6 MB
+peak rss user-session-he 6 MB
+peak rss pipewire 6 MB
+peak rss (sd-pam) 5 MB
+peak rss git 4 MB
+peak rss dbus-daemon 4 MB
+peak rss bash 3 MB

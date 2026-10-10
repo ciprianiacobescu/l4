@@ -1,0 +1,43 @@
+{
+  "0": {
+    "seeded": true
+  },
+  "1": {
+    "audit": [
+      "accepted",
+      "accepted"
+    ],
+    "criteria": [
+      "C-1b1fbe16",
+      "C-e25f06d8"
+    ],
+    "red_sha": "3319cb24a7d5ee0b7c7fc82196d83570ef21729c",
+    "round_1": "NEEDS_HUMAN"
+  },
+  "1B": {
+    "mr": 15,
+    "questions": [
+      "Q-001",
+      "Q-002"
+    ]
+  },
+  "2": {
+    "verdicts": [
+      [
+        "F-f2c8f81d",
+        "reject"
+      ],
+      [
+        "F-a0fac71a",
+        "reject"
+      ]
+    ]
+  },
+  "3": {
+    "checkpoints": 11
+  },
+  "4": {
+    "head": "390aa7eacae3abc10b0b3d676b29132c5ef60254",
+    "mr": 15
+  }
+}

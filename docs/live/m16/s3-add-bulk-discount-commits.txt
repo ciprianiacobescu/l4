@@ -1,0 +1,66 @@
+ad2000c l4-bot chore(add-bulk-discount): ledger [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0930Z-1874
+L4-Iteration: 3
+L4-Phase: awaiting_human
+
+ac17235 l4-bot docs(add-bulk-discount): verification round 2 [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0930Z-1874
+L4-Iteration: 3
+L4-Phase: verifying
+
+21caaea CiprianSpot Answer the verdict questions Q-002 to Q-005: reject the inventory scope hold, accept the receipt coverage hold
+
+a8000ac l4-bot chore(add-bulk-discount): ledger [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: awaiting_human
+
+57dc844 l4-bot docs(add-bulk-discount): verification round 1 [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: verifying
+
+790d85b l4-bot feat(add-bulk-discount): 1.1 Add `bulk_discount(cart)` in `src/pricing/discounts.py`: 10 % of the cart subtotal (whole cents, half up) when the cart holds at least 10 items, else 0.00 [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+4a611d0 l4-bot test(add-bulk-discount): red for 1.1 [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+
+f7e75d7 CiprianSpot Answer Q-001: the bulk threshold counts units; lower LOW_STOCK_THRESHOLD to 3 and add a receipt formatter
+
+20f87dc l4-bot chore(add-bulk-discount): ledger [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0919Z-b5be
+L4-Iteration: 1
+L4-Phase: awaiting_human
+
+2b39997 l4-bot docs(add-bulk-discount): clarifier [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0919Z-b5be
+L4-Iteration: 1
+L4-Phase: clarifying
+
+6233a8e l4-bot docs(add-bulk-discount): questions [skip ci]
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0919Z-b5be
+L4-Iteration: 1
+L4-Phase: intake
+

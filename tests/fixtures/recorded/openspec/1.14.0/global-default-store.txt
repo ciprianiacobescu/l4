@@ -1,0 +1,11 @@
+# global defaultStore hijack: runner user registered store 'other' and set defaultStore; cwd = git repo with no openspec/
+--- register store
+Next: run normal OpenSpec commands against this store, for example:
+  openspec new change <change-id> --store other
+Share this store by committing and pushing it like any Git repo.
+Set defaultStore = "other"
+--- repo WITHOUT openspec/ (e.g. Kiro-only repo) runs list --json:
+root: {'path': '{{W}}/store-repo', 'source': 'global_default', 'store_id': 'other'} changes: ['task-grammar', 'task-grammar-crlf', 'no-shall'] status: None
+exit=0
+--- same with XDG_CONFIG_HOME/XDG_DATA_HOME pointed at empty harness dirs:
+root: None status: [{'severity': 'error', 'code': 'no_openspec_root', 'message': 'No OpenSpec root found from the current directory.', 'target': 'openspec.root', 'fix': 'Run openspec init to create a root here.'}] n changes: 0

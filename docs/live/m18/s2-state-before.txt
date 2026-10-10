@@ -1,0 +1,4 @@
+tokens: [(63, 'l4-bot', True, False, '2027-10-05')]
+variables: [('L4_FORGE_TOKEN', 'l4', True, False, True), ('TYPESAFE_API_KEY', 'l4', True, False, True)]
+schedules: []
+newest pipeline: 2848 push success

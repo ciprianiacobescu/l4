@@ -1,0 +1,90 @@
+"""M1.12 line 1 (L4-AVL-005): a failed hello carries a class that decides how long the failure is remembered."""
+
+import dataclasses
+import json
+
+import pytest
+
+from l4.agents.base import ProbeResult
+from l4.agents.claude_code import ClaudeCodeAdapter
+from l4.agents.codex import CodexAdapter
+from l4.availability.probes import LadderReport
+from l4.config.schema import Profile
+from l4.doctor.context import CmdResult
+
+from .conftest import RECORDED
+
+CLAUDE = RECORDED / "claude-code" / "2.1.288"
+claude_profile = Profile(adapter="claude-code", model="claude-haiku-4-5", auth="subscription", vendor="anthropic")
+codex_profile = Profile(adapter="codex", model="gpt-6-luna", auth="subscription", vendor="openai")
+VERSION = {("--version",): CmdResult(0, "2.1.288 (Claude Code)\n", "")}
+
+
+def claude_hello(make_ctx, result: dict | None, *, code: int = 1) -> ProbeResult:
+    stdout = json.dumps(result) if result is not None else ""
+    ctx, _ = make_ctx({("-p",): CmdResult(code, stdout, ""), **VERSION})
+    return ClaudeCodeAdapter().probe(claude_profile, "hello", dataclasses.replace(ctx, sleep=lambda _s: None))
+
+
+def error_result(status):
+    return {"type": "result", "is_error": True, "api_error_status": status}
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_claude_401_or_403_is_an_auth_failure_without_a_limit(make_ctx, status):
+    out = claude_hello(make_ctx, error_result(status))
+    assert not out.ok and out.failure_class == "auth" and out.limit is None
+    assert out.reason == f"claude reported an error (api_error_status {status})"
+
+
+def test_a_429_is_a_limit_and_a_wrong_reply_or_a_bad_model_is_other(make_ctx):
+    assert claude_hello(make_ctx, error_result(429)).failure_class == "limit"
+    assert claude_hello(make_ctx, error_result(404)).failure_class == "other"
+    wrong = claude_hello(make_ctx, {"type": "result", "is_error": False, "result": "hello there"}, code=0)
+    assert wrong.reason == "unexpected reply" and wrong.failure_class == "other"
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 529])
+def test_a_5xx_is_transient(make_ctx, status):
+    assert claude_hello(make_ctx, error_result(status)).failure_class == "transient"
+
+
+def test_a_timeout_and_a_missing_result_are_transient(make_ctx):
+    assert claude_hello(make_ctx, None, code=124).failure_class == "transient"
+    silent = claude_hello(make_ctx, None, code=1)
+    assert silent.reason == "claude printed no result" and silent.failure_class == "transient"
+
+
+def test_a_passing_hello_has_no_class(make_ctx):
+    stream = (CLAUDE / "hello_haiku_warm.stream.jsonl").read_text()
+    ctx, _ = make_ctx({("-p",): CmdResult(0, stream, ""), **VERSION})
+    out = ClaudeCodeAdapter().probe(claude_profile, "hello", ctx)
+    assert out.ok and out.failure_class is None
+
+
+def test_codex_hello_failures_are_classified(make_ctx):
+    def run(stdout: str, code: int = 1) -> ProbeResult:
+        ctx, _ = make_ctx(
+            {("exec",): CmdResult(code, stdout, ""), ("--version",): CmdResult(0, "codex-cli 0.160.0", "")}
+        )
+        return CodexAdapter().probe(codex_profile, "hello", ctx)
+
+    def failed(message: str) -> str:
+        return json.dumps({"type": "turn.failed", "error": {"message": message}})
+
+    assert run(failed("unexpected status 401 Unauthorized: token expired")).failure_class == "auth"
+    assert run(failed("403 Forbidden: your organization has no access")).failure_class == "auth"
+    assert run(failed("stream error: 503 service unavailable")).failure_class == "transient"
+    assert run(failed("the model gave up")).failure_class == "other"
+    assert run("", code=124).failure_class == "transient"
+    assert run("", code=2).failure_class == "transient"  # no result at all
+
+
+def test_the_class_survives_the_probe_cache(make_ctx):
+    report = LadderReport({"hello": ProbeResult("hello", False, reason="x", failure_class="auth")})
+    again = LadderReport.from_json(json.loads(json.dumps(report.to_json())))
+    assert again.steps["hello"].failure_class == "auth"
+    plain = LadderReport({"binary": ProbeResult("binary", True)})
+    assert LadderReport.from_json(plain.to_json()).steps["binary"].failure_class is None
+    old = {"steps": [{"name": "hello", "ok": False, "skipped": False, "reason": "x", "detail": {}, "limit": None}]}
+    assert LadderReport.from_json(old).steps["hello"].failure_class is None  # an entry written before M1.12

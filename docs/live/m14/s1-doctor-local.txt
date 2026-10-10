@@ -1,0 +1,16 @@
+id        severity  status  message                                                                           fix
+--------  --------  ------  --------------------------------------------------------------------------------
+CI-001    error     skip    not a GitLab CI job                                                               -
+CFG-002   error     pass    role chains and profiles are consistent                                           -
+ENV-001   error     pass    Python 3.12.12, uv present                                                        -
+ENV-002   error     pass    git 2.48                                                                          -
+ENV-003   error     pass    OpenSpec 1.14.0 via /Users/USER/.hermes/node/bin/node               -
+ENV-004   error     fail    implementer head `codex`: codex not found                                         `l4 doctor --fix` installs agent CLIs user-locally (L4-DOC-002)
+SPEC-001  error     pass    openspec, kiro                                                                    -
+SPEC-002  error     pass    1 Kiro unit(s) validate                                                           -
+SPEC-004  warn      pass    1 Kiro unit(s): every leaf cites a requirement                                    -
+PRV-001   warn      fail    claude-code claude-code ready; codex codex missing; opencode-free opencode ready  run `l4 doctor --fix` for missing CLIs
+PRV-002   warn      pass    no root-only prerequisite is missing                                              -
+
+cache: /Users/USER/.cache/l4
+home:  /Users/USER/.local/share/l4

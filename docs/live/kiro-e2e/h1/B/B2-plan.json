@@ -1,0 +1,17 @@
+{
+  "schema": "l4/plan@1",
+  "units": [
+    {
+      "actionable": true,
+      "framework": "kiro",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 10
+      },
+      "unit": "kiro:add-bulk-discount"
+    }
+  ]
+}

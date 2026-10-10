@@ -1,0 +1,57 @@
+{
+ "base": {
+  "name": "typed-decisions",
+  "repo": "convaiinnovations/laya",
+  "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148"
+ },
+ "dataset_sha256": "a2e66d6e17950c261f582131fa647408f1c7b0faf034117bdbe8641521d76715",
+ "device": "mps",
+ "files": {
+  "model.safetensors": "d57200498ad1840a1ed34476e1879d938c07e90c4248de4aae3d11571d79a5d5",
+  "rl_agent_config.json": "b2b6daf0f424f1cc6fe83e519c5e88d4acda553f6cb18bfea358eea71d78b84e"
+ },
+ "gate": {
+  "dataset_sha256": "a2e66d6e17950c261f582131fa647408f1c7b0faf034117bdbe8641521d76715",
+  "failures": [],
+  "passed": true,
+  "ran": true,
+  "test_sha256": "a8fe5c49610640a8c2cfb31deac670c166f5d13c5d0cb1bf2e58b990e07957dd"
+ },
+ "hyperparameters": {
+  "calib_items": 195,
+  "encoder_lr": 2.5e-05,
+  "epochs": 2,
+  "grad_accum": 16,
+  "head_lr": 0.0001,
+  "max_rows": null,
+  "micro_batch": 1,
+  "selection": "final-epoch",
+  "train_items": 874
+ },
+ "label_sources": {
+  "deterministic:diff-coverage": 265,
+  "deterministic:scope": 212,
+  "deterministic:tests-ran": 24
+ },
+ "peak_rss_gb": 6.85,
+ "schema": "l4/s1-train@1",
+ "seed": 1606,
+ "split_sha256": {
+  "calib": "b237279fcb0cad9a9e65e4936f4d22317db9cb8a9122f62190f0519c889dcc92",
+  "test": "a8fe5c49610640a8c2cfb31deac670c166f5d13c5d0cb1bf2e58b990e07957dd",
+  "train": "dece0dac8223338cd6391b8a8278461a12dad138a6d365f6f6f54a407ba309e1"
+ },
+ "temperatures": [
+  1.0,
+  3.7998805046081543,
+  4.385597229003906
+ ],
+ "temperatures_on_bound": [],
+ "temperatures_raw": [
+  1.0,
+  3.7998805046081543,
+  4.385597229003906
+ ],
+ "thresholds": "thresholds.json",
+ "wall_seconds": 1059.3
+}

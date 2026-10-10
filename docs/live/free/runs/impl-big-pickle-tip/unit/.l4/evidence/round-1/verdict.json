@@ -1,0 +1,497 @@
+{
+  "schema": "l4/verdict@1",
+  "round": 1,
+  "verdict": "PASS",
+  "base_sha": "54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b",
+  "head_sha": "390104ce77c33fecd8d9e796d9adca331581a09d",
+  "steps": [
+    {
+      "step": "0",
+      "name": "preconditions",
+      "status": "ok",
+      "seconds": 0.6,
+      "note": "base main@54e8e5b9fe contained"
+    },
+    {
+      "step": "1",
+      "name": "integrity",
+      "status": "ok",
+      "seconds": 0.1,
+      "note": "6 sub-checks; scope: 4 changed file(s)"
+    },
+    {
+      "step": "2",
+      "name": "build",
+      "status": "ok",
+      "seconds": 0.3,
+      "note": ""
+    },
+    {
+      "step": "3",
+      "name": "tests",
+      "status": "ok",
+      "seconds": 3.7,
+      "note": ""
+    },
+    {
+      "step": "4",
+      "name": "traceability",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "2/2 criteria covered"
+    },
+    {
+      "step": "4a",
+      "name": "audit sampling",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.audit_sample_ratio is 0"
+    },
+    {
+      "step": "5",
+      "name": "ui test generation",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "the unit changed no file under verifier.playwright.ui_paths"
+    },
+    {
+      "step": "6",
+      "name": "quality",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "100.0% of the changed executable lines ran"
+    },
+    {
+      "step": "8",
+      "name": "s1 judge",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.s1.enabled is off"
+    },
+    {
+      "step": "9",
+      "name": "judge",
+      "status": "ok",
+      "seconds": 19.7,
+      "note": "1 call(s)"
+    },
+    {
+      "step": "10",
+      "name": "aggregation",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "PASS"
+    }
+  ],
+  "gates": [
+    {
+      "name": "setup",
+      "command": "uv sync --frozen",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2010Z-de51/014-setup.log"
+    },
+    {
+      "name": "lint",
+      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2010Z-de51/015-lint.log"
+    },
+    {
+      "name": "test",
+      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2010Z-de51/016-test.log"
+    },
+    {
+      "name": "e2e",
+      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2010Z-de51/017-e2e.log"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "C-ce541739",
+      "alias": "tip-amount › Tip in whole cents › A tip that is already whole cents",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_tips::test_tip_that_is_already_whole_cents"
+      ],
+      "s1_p": null
+    },
+    {
+      "id": "C-c0f2ea95",
+      "alias": "tip-amount › Tip in whole cents › A half cent rounds up",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_tips::test_half_cent_rounds_up"
+      ],
+      "s1_p": null
+    }
+  ],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "Negative half-cent tips round away from zero",
+      "detail": "Decimal's ROUND_HALF_UP rounds ties away from zero, so tip_cents(-1005, 10) gives -101. Another reasonable reading of 'half up' rounds toward +infinity and would give -100. No scenario covers negative totals or percentages, and the code does not reject them.",
+      "source": "judge",
+      "criterion": "C-c0f2ea95",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN the checkout calls `pricing.tips.tip_cents(-1005, 10)` THEN it returns `-101`.",
+      "id": "F-2c3804c2"
+    },
+    {
+      "severity": "minor",
+      "title": "Very large totals raise decimal.InvalidOperation",
+      "detail": "The code uses the default decimal context, which has 28 digits of precision. When the tip has more than 28 integer digits, quantize(Decimal('1')) raises decimal.InvalidOperation instead of returning an int. For example, tip_cents(10**30, 10) should be 10**29 (30 digits) but raises. A plain integer implementation would return the exact value. The spec does not limit the input range.",
+      "source": "judge",
+      "criterion": "C-ce541739",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN the checkout calls `pricing.tips.tip_cents(10**30, 10)` THEN it raises `decimal.InvalidOperation`.",
+      "id": "F-82c2b137"
+    }
+  ],
+  "holds": [],
+  "subject_sha": "390104ce77c33fecd8d9e796d9adca331581a09d",
+  "family_criteria": [
+    "C-ce541739",
+    "C-c0f2ea95"
+  ],
+  "reused_from": null,
+  "integrity": {
+    "checks": [
+      {
+        "name": "protected paths",
+        "status": "ok",
+        "note": "no protected path differs from the base"
+      },
+      {
+        "name": "pre-existing tests",
+        "status": "ok",
+        "note": "1 test file(s) compared with the base"
+      },
+      {
+        "name": "red-green freeze",
+        "status": "ok",
+        "note": "1 task(s): red and green compared"
+      },
+      {
+        "name": "content scan",
+        "status": "ok",
+        "note": "no result-manipulating construct in the changed support and runner files"
+      },
+      {
+        "name": "suppressions",
+        "status": "skipped",
+        "note": "no new suppression comment"
+      },
+      {
+        "name": "tdd history",
+        "status": "ok",
+        "note": "1 task(s); red tests passing at head: step 3"
+      }
+    ],
+    "findings": [],
+    "declared": [],
+    "human_protected": [],
+    "human_tests": [],
+    "unfrozen": []
+  },
+  "trace": [
+    {
+      "criterion": "C-ce541739",
+      "alias": "tip-amount › Tip in whole cents › A tip that is already whole cents",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_tips::test_tip_that_is_already_whole_cents",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    },
+    {
+      "criterion": "C-c0f2ea95",
+      "alias": "tip-amount › Tip in whole cents › A half cent rounds up",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_tips::test_half_cent_rounds_up",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    }
+  ],
+  "audit": [],
+  "generated": [],
+  "s1": [],
+  "evidence": {
+    "schema": "l4/evidence@1",
+    "holds": [],
+    "items": {},
+    "scope": {
+      "declared": [
+        "src/pricing/tips.py",
+        "tests",
+        "module pricing"
+      ],
+      "skipped": false,
+      "note": "",
+      "holds": [],
+      "files": [
+        {
+          "path": "openspec/changes/add-tip-amount/.l4/ledger/r-20261006T2010Z-de51.jsonl",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "openspec/changes/add-tip-amount/tasks.md",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "src/pricing/tips.py",
+          "module": "pricing",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "tests/test_tips.py",
+          "module": null,
+          "kind": "test",
+          "label": "relevant",
+          "reason": "new test file"
+        }
+      ]
+    },
+    "diff_coverage": {
+      "status": "ok",
+      "reason": "",
+      "percent": 100.0,
+      "unmeasured_files": [],
+      "functions": [
+        {
+          "path": "src/pricing/tips.py",
+          "qualname": "<module>",
+          "status": "covered",
+          "executable": 2,
+          "executed": 2,
+          "tests": [],
+          "label": true
+        },
+        {
+          "path": "src/pricing/tips.py",
+          "qualname": "tip_cents",
+          "status": "covered",
+          "executable": 2,
+          "executed": 2,
+          "tests": [
+            "test_tips.test_half_cent_rounds_up",
+            "test_tips.test_tip_that_is_already_whole_cents"
+          ],
+          "label": true
+        }
+      ]
+    },
+    "tests_ran": {
+      "tests_ok": true,
+      "summary": {
+        "total": 24,
+        "passed": 24,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "new": 2,
+        "new_passed": 2,
+        "skipped_unchanged": []
+      },
+      "findings": []
+    }
+  },
+  "human": [],
+  "fix": null,
+  "judge_verdict": {
+    "criteria": [
+      {
+        "id": "C-ce541739",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/tips.py",
+            "quote": "result = Decimal(total_cents) * Decimal(percent) / Decimal(100)\n    return int(result.quantize(Decimal(\"1\"), rounding=ROUND_HALF_UP))"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_tips::test_tip_that_is_already_whole_cents",
+            "quote": "assert tip_cents(1000, 15) == 150"
+          }
+        ],
+        "reasoning": "Decimal(1000)*Decimal(15)/Decimal(100) is exactly 150; quantizing to whole units leaves it at 150 and int() gives 150. The tracing test asserts this exact value and passed in the gate.",
+        "counterexample": null
+      },
+      {
+        "id": "C-c0f2ea95",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/tips.py",
+            "quote": "return int(result.quantize(Decimal(\"1\"), rounding=ROUND_HALF_UP))"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_tips::test_half_cent_rounds_up",
+            "quote": "assert tip_cents(1005, 10) == 101"
+          }
+        ],
+        "reasoning": "1005*10/100 is exactly Decimal('100.5'). Exact decimal arithmetic means no float error, and ROUND_HALF_UP takes it to 101. The tracing test asserts 101 and passed.",
+        "counterexample": null
+      }
+    ],
+    "test_adequacy": [
+      {
+        "test": "tests.test_tips::test_tip_that_is_already_whole_cents",
+        "criterion": "C-ce541739",
+        "adequate": true,
+        "reason": "Calls tip_cents(1000, 15) exactly as the scenario says and checks that the return value equals 150.",
+        "generated_test_misreads_criterion": false
+      },
+      {
+        "test": "tests.test_tips::test_half_cent_rounds_up",
+        "criterion": "C-c0f2ea95",
+        "adequate": true,
+        "reason": "Calls tip_cents(1005, 10) and checks the exact value 101, which is the half-up case the scenario is about.",
+        "generated_test_misreads_criterion": false
+      }
+    ],
+    "findings": [
+      {
+        "severity": "minor",
+        "criterion": "C-c0f2ea95",
+        "title": "Negative half-cent tips round away from zero",
+        "detail": "Decimal's ROUND_HALF_UP rounds ties away from zero, so tip_cents(-1005, 10) gives -101. Another reasonable reading of 'half up' rounds toward +infinity and would give -100. No scenario covers negative totals or percentages, and the code does not reject them.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/tips.py",
+            "quote": "rounding=ROUND_HALF_UP"
+          }
+        ],
+        "suggested_fix": "WHEN the checkout calls `pricing.tips.tip_cents(-1005, 10)` THEN it returns `-101`.",
+        "spec_gap": true
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-ce541739",
+        "title": "Very large totals raise decimal.InvalidOperation",
+        "detail": "The code uses the default decimal context, which has 28 digits of precision. When the tip has more than 28 integer digits, quantize(Decimal('1')) raises decimal.InvalidOperation instead of returning an int. For example, tip_cents(10**30, 10) should be 10**29 (30 digits) but raises. A plain integer implementation would return the exact value. The spec does not limit the input range.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/tips.py",
+            "quote": "result.quantize(Decimal(\"1\"), rounding=ROUND_HALF_UP)"
+          }
+        ],
+        "suggested_fix": "WHEN the checkout calls `pricing.tips.tip_cents(10**30, 10)` THEN it raises `decimal.InvalidOperation`.",
+        "spec_gap": true
+      }
+    ],
+    "riskiest_assumptions": [
+      "That the module under test is src/pricing/tips.py as shown in the diff and that `pricing` imports from src on the test path, which the passing test gate suggests.",
+      "That the default decimal context (precision 28, no traps changed elsewhere in the project) is the one active when tip_cents runs.",
+      "That the gate report's per-test outcomes really come from running the committed head, including tests/test_tips.py as shown."
+    ]
+  },
+  "cx_runs": {},
+  "tests": {
+    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
+    "tests.test_cart::test_empty_cart_is_free_and_cart_with_amount_due_is_not_free": "passed",
+    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
+    "tests.test_cart::test_negative_price_rejected": "passed",
+    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
+    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
+    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
+    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
+    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
+    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
+    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
+    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
+    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
+    "tests.test_tips::test_tip_that_is_already_whole_cents": "passed",
+    "tests.test_tips::test_half_cent_rounds_up": "passed",
+    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
+    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
+    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
+    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
+  },
+  "red_green": {
+    "tests.test_tips::test_half_cent_rounds_up": "1.1",
+    "tests.test_tips::test_tip_that_is_already_whole_cents": "1.1"
+  },
+  "guards": [],
+  "prompt_sha256": "fde450a23ec49c8825c786b5c1bcffd22dd119b4346308f93eff13eea66fd98d",
+  "template": "judge@5",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "judge_calls": 1,
+  "profiles": {
+    "judge": "claude-code",
+    "implementer": [
+      "f-big-pickle"
+    ]
+  },
+  "judge_model": "claude-opus-5-5",
+  "independence": {
+    "mode": "different_vendor",
+    "status": "declared (unverified)",
+    "verified": false,
+    "judge": {
+      "profile": "claude-code",
+      "vendor": "anthropic",
+      "model": null,
+      "provenance": "served",
+      "served": "claude-opus-5-5"
+    },
+    "implementers": [
+      {
+        "profile": "f-big-pickle",
+        "vendor": "undisclosed-big-pickle",
+        "model": "opencode/big-pickle",
+        "provenance": "declared",
+        "served": null
+      }
+    ]
+  },
+  "cost_usd": 0.0741294
+}

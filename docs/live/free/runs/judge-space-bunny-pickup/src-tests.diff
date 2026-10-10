@@ -1,0 +1,25 @@
+diff --git a/src/pricing/pickup.py b/src/pricing/pickup.py
+new file mode 100644
+index 0000000..0a02041
+--- /dev/null
++++ b/src/pricing/pickup.py
+@@ -0,0 +1,2 @@
++def pickup_notice() -> str:
++    return "Pickup orders wait at the shop counter for seven days; bring the order number and a photo ID."
+diff --git a/tests/test_pickup.py b/tests/test_pickup.py
+new file mode 100644
+index 0000000..2852507
+--- /dev/null
++++ b/tests/test_pickup.py
+@@ -0,0 +1,11 @@
++import pytest
++
++from pricing.pickup import pickup_notice
++
++
++@pytest.mark.l4("C-f14cf915")
++def test_pickup_notice_text_is_exact():
++    assert pickup_notice() == (
++        "Pickup orders wait at the shop counter for seven days; "
++        "bring the order number and a photo ID."
++    )

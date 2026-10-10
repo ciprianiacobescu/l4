@@ -1,0 +1,1 @@
+2026-10-03T14:39:31.339620Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`/bin/zsh -lc 'printf x > \\\"$HOME/.l4-sandbox-probe\\\"; echo \\\"home_write_exit=$?\\\"; rm -f \\\"$HOME/.l4-sandbox-probe\\\"'` rejected: rm -f style commands are not permitted. Use a safer approach\")" }

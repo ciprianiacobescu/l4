@@ -1,0 +1,5 @@
+{
+  "check": "suppressions",
+  "severity": "major",
+  "about": "a new noqa the implementer never declared"
+}

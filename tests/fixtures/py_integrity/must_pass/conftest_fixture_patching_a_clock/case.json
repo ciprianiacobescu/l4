@@ -1,0 +1,4 @@
+{
+  "check": "scan",
+  "about": "a fixture that freezes the clock is a collaborator patch, not a result hook"
+}

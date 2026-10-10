@@ -1,0 +1,8 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261005T1029Z-2009",
+  "harness_version": "0.1.0",
+  "harness_commit": "7c7d7c95202c70c8c06b2a886b2c0266c0b6d849",
+  "exit_code": 0,
+  "units": []
+}

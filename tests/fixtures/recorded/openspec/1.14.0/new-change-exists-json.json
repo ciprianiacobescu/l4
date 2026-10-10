@@ -1,0 +1,10 @@
+{
+  "change": null,
+  "status": [
+    {
+      "severity": "error",
+      "code": "change_error",
+      "message": "Change 'add-farewell-fix-1' already exists at {{REPO}}/openspec/changes/add-farewell-fix-1"
+    }
+  ]
+}

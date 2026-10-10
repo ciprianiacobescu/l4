@@ -1,0 +1,69 @@
+{
+  "criteria": [
+    {
+      "id": "C-9618b9f5",
+      "verdict": "fail",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py",
+          "quote": "return f\"Hello, {name.strip()}!\""
+        }
+      ],
+      "reasoning": "the greeting keeps a space the caller put before the name",
+      "counterexample": {
+        "call": "greet(\"  Ada\")",
+        "expected": "Hello, Ada!",
+        "actual": "Hello,   Ada!"
+      }
+    },
+    {
+      "id": "C-6057a7e3",
+      "verdict": "pass",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py",
+          "quote": "raise ValueError(\"a greeting needs a name\")"
+        }
+      ],
+      "reasoning": "the committed code does what the criterion says"
+    },
+    {
+      "id": "C-49a0a655",
+      "verdict": "pass",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py",
+          "quote": "return f\"Goodbye, {name.strip()}!\""
+        }
+      ],
+      "reasoning": "the committed code does what the criterion says"
+    }
+  ],
+  "test_adequacy": [],
+  "findings": [
+    {
+      "severity": "blocker",
+      "criterion": "C-9618b9f5",
+      "title": "leading space is kept in the greeting",
+      "detail": "greet(\"  Ada\") returns 'Hello,   Ada!' although the requirement shows the name without padding",
+      "evidence": [
+        {
+          "kind": "file",
+          "ref": "src/greeter.py"
+        }
+      ],
+      "suggested_fix": "strip the name before formatting"
+    }
+  ],
+  "riskiest_assumptions": [
+    "the gate runs every test",
+    "the fixture spec is complete",
+    "names are ASCII"
+  ]
+}

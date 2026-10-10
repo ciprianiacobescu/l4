@@ -1,0 +1,80 @@
+{
+  "changes": [
+    {
+      "name": "2026-10-03-with-extras",
+      "completedTasks": 2,
+      "totalTasks": 2,
+      "lastModified": "2026-10-03T14:41:42.047Z",
+      "status": "complete",
+      "archived": true
+    },
+    {
+      "name": "add-farewell",
+      "completedTasks": 2,
+      "totalTasks": 5,
+      "lastModified": "2026-10-03T14:41:42.052Z",
+      "status": "in-progress",
+      "archived": false
+    },
+    {
+      "name": "broken-change",
+      "completedTasks": 0,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:42.056Z",
+      "status": "in-progress",
+      "archived": false
+    },
+    {
+      "name": "chore-tasks-only",
+      "completedTasks": 0,
+      "totalTasks": 2,
+      "lastModified": "2026-10-03T14:41:42.049Z",
+      "status": "in-progress",
+      "archived": false
+    },
+    {
+      "name": "modify-missing",
+      "completedTasks": 1,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:42.053Z",
+      "status": "complete",
+      "archived": false
+    },
+    {
+      "name": "no-purpose",
+      "completedTasks": 1,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:42.044Z",
+      "status": "complete",
+      "archived": false
+    },
+    {
+      "name": "no-shall",
+      "completedTasks": 1,
+      "totalTasks": 1,
+      "lastModified": "2026-10-03T14:41:42.048Z",
+      "status": "complete",
+      "archived": false
+    },
+    {
+      "name": "task-grammar",
+      "completedTasks": 8,
+      "totalTasks": 29,
+      "lastModified": "2026-10-03T14:41:42.054Z",
+      "status": "in-progress",
+      "archived": false
+    },
+    {
+      "name": "task-grammar-crlf",
+      "completedTasks": 8,
+      "totalTasks": 29,
+      "lastModified": "2026-10-03T14:41:42.054Z",
+      "status": "in-progress",
+      "archived": false
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "add-farewell-fix-1",
+  "title": "add-farewell-fix-1",
+  "deltaCount": 0,
+  "deltas": [],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

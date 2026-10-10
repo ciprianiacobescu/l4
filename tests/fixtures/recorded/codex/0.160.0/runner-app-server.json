@@ -1,0 +1,95 @@
+{
+ "timings": {
+  "total_s": 1.315
+ },
+ "initialize": {
+  "id": 1,
+  "result": {
+   "platformFamily": "unix",
+   "platformOs": "linux"
+  }
+ },
+ "account_read": {
+  "id": 2,
+  "result": {
+   "account": {
+    "type": "chatgpt",
+    "planType": "plus"
+   },
+   "requiresOpenaiAuth": true,
+   "workspaceRouting": {
+    "backendOrigin": "https://chatgpt.com",
+    "accountRoutingOverride": "NO_CONSTRAINT"
+   }
+  }
+ },
+ "rate_limits_read": {
+  "id": 3,
+  "result": {
+   "ordinaryUsageAllowed": true,
+   "rateLimits": {
+    "limitId": "codex",
+    "limitName": null,
+    "normalModelSlug": null,
+    "primary": {
+     "usedPercent": 0,
+     "windowDurationMins": 300,
+     "resetsAt": 1791123773
+    },
+    "secondary": {
+     "usedPercent": 3,
+     "windowDurationMins": 10080,
+     "resetsAt": 1791636743
+    },
+    "credits": {
+     "hasCredits": false,
+     "unlimited": false,
+     "balance": "0"
+    },
+    "individualLimit": null,
+    "spendControlReached": false,
+    "planType": "plus",
+    "rateLimitReachedType": null
+   },
+   "rateLimitsByLimitId": {
+    "codex": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": {
+      "usedPercent": 0,
+      "windowDurationMins": 300,
+      "resetsAt": 1791123773
+     },
+     "secondary": {
+      "usedPercent": 3,
+      "windowDurationMins": 10080,
+      "resetsAt": 1791636743
+     },
+     "credits": {
+      "hasCredits": false,
+      "unlimited": false,
+      "balance": "0"
+     },
+     "individualLimit": null,
+     "spendControlReached": false,
+     "planType": "plus",
+     "rateLimitReachedType": null
+    }
+   },
+   "rateLimitResetCredits": {
+    "availableCount": 1,
+    "credits": [
+     {
+      "id": "<redacted>",
+      "resetType": "codexRateLimits",
+      "status": "available",
+      "grantedAt": 1790700349,
+      "expiresAt": 1793292349
+     }
+    ]
+   },
+   "rateLimitUpsell": null
+  }
+ }
+}

@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-loyalty-points
+configfile: pyproject.toml
+testpaths: tests
+collected 24 items
+
+tests/test_cart.py ................                                      [ 66%]
+tests/test_discounts.py ....                                             [ 83%]
+tests/test_loyalty.py ....                                               [100%]
+
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-loyalty-points/.l4-out/junit.xml -
+============================== 24 passed in 0.03s ==============================

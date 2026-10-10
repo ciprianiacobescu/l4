@@ -1,0 +1,63 @@
+Running with gitlab-runner 19.4.1 (3c39fceb)
+  on l4-runner XXXXXXXXX, system ID: s_000000000001
+  UUID: not supported with this GitLab version
+section_start:1791123181:prepare_executor
+Preparing the "shell" executor
+Using Shell (bash) executor...
+section_end:1791123181:prepare_executor
+section_start:1791123181:prepare_script
+Preparing environment
+Running on gitlab-runner...
+section_end:1791123181:prepare_script
+section_start:1791123181:get_sources
+Getting source from Git repository
+Gitaly correlation ID: 01M43M5K7RXNZ29CX5W2880STF
+Fetching changes with git depth set to 20...
+Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+Checking out 9152a0a4 as detached HEAD (ref is probe/jev)...
+Skipping Git submodules setup
+section_end:1791123182:get_sources
+section_start:1791123182:step_script
+Executing "step_script" stage of the job script
+$ python3 ci/jev-smoke.py
+JEV_SMOKE PASS HTTP 200 in 272 ms model=jev-1.13.0 usage={"input_tokens": 523, "output_tokens": 77}
+{
+ "is_product_decision": {
+  "type": "noul",
+  "noul": 0.25
+ },
+ "finding_severity": {
+  "type": "choice",
+  "choice": "major",
+  "confidence": 0.66,
+  "probabilities": {
+   "blocker": 0.22,
+   "major": 0.78,
+   "minor": 0.0
+  }
+ },
+ "citation_support": {
+  "type": "score",
+  "score": 2.71,
+  "confidence": 0.58,
+  "legend": {
+   "0": "unrelated",
+   "1": "weak",
+   "2": "partial",
+   "3": "strong",
+   "4": "states it directly"
+  },
+  "probabilities": {
+   "0": 0.0,
+   "1": 0.05,
+   "2": 0.29,
+   "3": 0.55,
+   "4": 0.11
+  }
+ }
+}
+section_end:1791123182:step_script
+section_start:1791123182:cleanup_file_variables
+Cleaning up project directory and file based variables
+section_end:1791123182:cleanup_file_variables
+Job succeeded

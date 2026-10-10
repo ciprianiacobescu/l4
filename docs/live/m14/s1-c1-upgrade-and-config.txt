@@ -1,0 +1,50 @@
+$ uv run --project <harness> l4 upgrade --repo <clone> --harness <harness>   # harness c9e2c0d
+changed .l4/vendor/ (0 added, 1 changed, 0 removed) to the harness at c9e2c0d900c3
+changed .l4/config.yaml (harness.version, harness.commit)
+
+$ git show --stat b0b384d   # C1 on main
+b0b384ddaf81a69cd4754150af7ccfaf36c6f21e
+CiprianSpot <maintainer@example.invalid>
+M1.4: upgrade the harness, detect Kiro, seed add-loyalty-points
+
+Harness pinned at c9e2c0d (l4 upgrade). spec.frameworks: auto; M1.3's levers reset (verifier.fix_minor_findings: false, roles.verifier_agent: []); profiles.kiro kept from M1.2. Seed .kiro/specs/add-loyalty-points (waves put 2.1 before 1.1; 1.2 is optional).
+
+
+ .kiro/specs/add-loyalty-points/design.md       | 15 +++++++++++++++
+ .kiro/specs/add-loyalty-points/requirements.md | 19 +++++++++++++++++++
+ .kiro/specs/add-loyalty-points/tasks.md        | 16 ++++++++++++++++
+ .l4/config.yaml                                |  8 +++++---
+ .l4/vendor/src/l4/_commit.py                   |  2 +-
+ 5 files changed, 56 insertions(+), 4 deletions(-)
+$ git show b0b384d -- .l4/config.yaml
+diff --git a/.l4/config.yaml b/.l4/config.yaml
+index ac1ea4f..a075e52 100644
+--- a/.l4/config.yaml
++++ b/.l4/config.yaml
+@@ -2,10 +2,9 @@
+ version: 1
+ harness:
+   version: 0.1.0
+-  commit: 0fa4ad1a932bc430fc1aeca08c857325657b8086
++  commit: c9e2c0d900c36e498a94015364bed74f4c64b16a
+ spec:
+-  frameworks:
+-  - openspec
++  frameworks: auto      # was [openspec]: detection now finds openspec/ and .kiro/specs/ (M1.4 live protocol)
+ gates:
+   setup:
+   - uv sync --frozen
+@@ -37,6 +36,7 @@ roles:
+   judges: [claude-code, opencode-free, codex]
+   clarifier: [claude-code, codex, opencode-free]
+   s1_judge: [claude-code]
++  verifier_agent: []       # M1.4 live protocol: M1.3's lever reset (parallel-ownership 5.3)
+ clarifier:
+   s1_standin: llm_boolean
+   min_confidence: medium   # live variant 2026-10-04: the default 'high' escalated a repo-answerable technical question
+@@ -44,3 +44,5 @@ forge:
+   type: gitlab
+ ci:
+   platform: gitlab
++verifier:
++  fix_minor_findings: false   # M1.4 live protocol: M1.3's lever reset (parallel-ownership 5.3)

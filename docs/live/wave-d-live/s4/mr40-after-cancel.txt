@@ -1,0 +1,1 @@
+{'iid': 40, 'state': 'closed', 'draft': True, 'labels': ['l4:verifying'], 'source_branch': 'l4/openspec/add-three-for-two', 'detailed_merge_status': 'not_open', 'sha': '2b841b96ad269f7176e87068a7bf57fa5295d5d5'}

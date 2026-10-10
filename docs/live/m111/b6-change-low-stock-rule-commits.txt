@@ -1,0 +1,11 @@
+cdfacea l4-bot docs(change-low-stock-rule): hand off to review
+db969a4 l4-bot docs(change-low-stock-rule): verification round 1 [skip ci]
+dda86b6 l4-bot chore(change-low-stock-rule): merge main@2ca856e1c3 into the unit branch [skip ci]
+74194be l4-bot feat(change-low-stock-rule): 1.1 Make `inventory.stock.is_low(LOW_STOCK_THRESHOLD)` return `True`: add a test of the threshold scenario (the old rule's test is already replaced by `test_a_qu [skip ci]
+aacda42 l4-bot test(change-low-stock-rule): red for 1.1 [skip ci]
+4d602c9 l4-bot chore(change-low-stock-rule): resume [skip ci]
+eb66e39 CiprianSpot change-low-stock-rule: replace the old rule's test with one that holds under both rules, and drop the task's request to edit it (the person's fix after the halt)
+d0300b5 l4-bot chore(change-low-stock-rule): ledger [skip ci]
+949e321 l4-bot chore(change-low-stock-rule): resume [skip ci]
+2ca856e CiprianSpot Upgrade the vendored L4 harness to 28b8cc3 (M1.11 live-fix: a red that edits an existing test in place is named with its failure)
+e5b57e0 l4-bot chore(change-low-stock-rule): ledger [skip ci]

@@ -1,0 +1,32 @@
+# The verifier fails a criterion with a counterexample, a fix unit repairs it, the next verification passes. Pending:
+# it needs fix units (M1.3) and a judge that answers differently the second time.
+name: verify-fail-fix-pass
+fixture: openspec-basic
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:
+    verdict: "@fixture:fail_greet.json"
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: verify.verdict, verdict: FAIL}
+    - {type: phase.changed, to: fixing}
+    - {type: verify.verdict, verdict: PASS}
+    - {type: phase.changed, to: in_review}

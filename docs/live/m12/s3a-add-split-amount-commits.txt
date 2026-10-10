@@ -1,0 +1,7 @@
+# git log --format='%h %an %s%n%(trailers)' 861e6ffe1db786b1b355f98a1d0e7052952a582c..origin/l4/openspec/add-split-amount  (branch l4/openspec/add-split-amount)
+f867e55 l4-bot chore(add-split-amount): ledger [skip ci]
+L4-Unit: openspec:add-split-amount
+L4-Run: r-20261004T1653Z-6780
+L4-Iteration: 1
+L4-Phase: halted
+

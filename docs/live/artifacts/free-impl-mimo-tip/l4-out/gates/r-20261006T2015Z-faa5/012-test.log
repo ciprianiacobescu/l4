@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-tip-amount
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 22 items
+
+tests/test_cart.py ............                                          [ 54%]
+tests/test_discounts.py ....                                             [ 72%]
+tests/test_stock.py ..                                                   [ 81%]
+tests/test_tips.py ..                                                    [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+- generated xml file: /home/gitlab-runner/l4-free-20261006/cache/worktrees/openspec/add-tip-amount/.l4-out/junit.xml -
+============================== 22 passed in 0.06s ==============================
+No entry for terminal type "unknown";
+using dumb terminal settings.

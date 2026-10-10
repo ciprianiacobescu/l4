@@ -1,0 +1,24 @@
+# sandbox-probe.sh on l4-runner, 2026-10-05, harness main 1aa6f36 (hb + fu)
+# Invocation (from the harness repo on the Mac; env vars go in the remote command because --script does not forward them):
+#   scripts/runner/mk-ssh.sh -- 'CLIS="codex opencode" SANDBOX=m0 bash -s' < scripts/runner/sandbox-probe.sh
+# The ssh user is the admin user `admin`; the script runs each CLI as gitlab-runner (`sudo -n -u gitlab-runner -H env -i ... bash --login`).
+# SANDBOX=m0 builds the production agent argv (l4.sandbox.bwrap; tests/unit/sandbox/test_probe_parity.py) and runs the
+# canaries inside it: no inherited env, no ancestor /proc/*/environ, other adapters' logins hidden, planted .claude/ and
+# .agents/ guidance dirs empty (HB-X1), main .git not writable, no docker/containerd/podman/dbus socket visible,
+# /run/containerd and /run/dbus empty, connect()+GET /_ping on /var/run/docker.sock fails, DNS (pypi.org) resolves (HB-1).
+# canary=ok means every one of those held. claude is left out of CLIS on purpose: the runner's Claude login is dead
+# ("OAuth session expired"), so it would only FAIL spuriously, and the probe binds its login dir read-write.
+#
+host gitlab-runner user admin date 2026-10-05T15:36:09Z
+SANDBOX codex (m0) | PASS | 20.8s | exit=0 edit=yes tests=pass testdiff=none canary=ok result=yes | 
+SANDBOX opencode (m0) | PASS | 11.0s | exit=0 edit=yes tests=pass testdiff=none canary=ok result=n/a | 
+probe exit 0
+#
+# Control, same host, as gitlab-runner OUTSIDE any sandbox (read-only; shows the canaries are not vacuous):
+control (outside the sandbox) as gitlab-runner groups: gitlab-runner docker
+  socket present: /var/run/docker.sock
+  socket present: /run/containerd/containerd.sock
+  socket present: /run/dbus/system_bus_socket
+  docker /_ping outside the sandbox: HTTP/1.0 200 OK
+  DNS pypi.org resolves outside the sandbox
+bubblewrap 0.6.1

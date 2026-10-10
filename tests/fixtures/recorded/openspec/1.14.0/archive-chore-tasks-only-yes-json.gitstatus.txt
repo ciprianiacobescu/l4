@@ -1,0 +1,3 @@
+# git status --porcelain=v1 after: openspec archive chore-tasks-only-yes-json (git add -A first; empty = repo unchanged)
+R  openspec/changes/chore-tasks-only/.openspec.yaml -> openspec/changes/archive/2026-10-03-chore-tasks-only/.openspec.yaml
+R  openspec/changes/chore-tasks-only/tasks.md -> openspec/changes/archive/2026-10-03-chore-tasks-only/tasks.md

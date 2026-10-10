@@ -1,0 +1,10 @@
+{
+  "change": null,
+  "status": [
+    {
+      "severity": "error",
+      "code": "change_error",
+      "message": "Change name must be lowercase (use kebab-case)"
+    }
+  ]
+}

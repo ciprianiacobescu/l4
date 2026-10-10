@@ -1,0 +1,20 @@
+# Offline: the gate command repository-ci:test on MR !29's head (the wrong M1.9 B9 fix), laptop, 2026-10-06T05:11:08Z
+$ git -C <clone> worktree add --detach <wt> origin/l4/openspec/add-shipping-notice   # cf11e7afe6
+$ cat src/pricing/footer.py
+def shipping_notice() -> str:
+    return (
+        "Orders placed before 2 pm on a working day leave our warehouse the same day by tracked courier."
+    )
+$ uv run ruff check --select E501 --line-length 92 src
+E501 Line too long (105 > 92)
+ --> src/pricing/footer.py:3:93
+  |
+1 | def shipping_notice() -> str:
+2 |     return (
+3 |         "Orders placed before 2 pm on a working day leave our warehouse the same day by tracked courier."
+  |                                                                                             ^^^^^^^^^^^^^
+4 |     )
+  |
+
+Found 1 error.
+exit 1

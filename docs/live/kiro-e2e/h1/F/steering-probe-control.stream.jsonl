@@ -1,0 +1,8 @@
+{"type":"runStarted","data":{"payloadSchema":"acp","acpProtocolVersion":1,"engine":"v2"}}
+{"type":"metadata","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","contextUsagePercentage":3.5909998416900635,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"metadata","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","contextUsagePercentage":0.8265624642372131,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"sessionUpdate","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":""}}}}
+{"type":"sessionUpdate","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"L4-OK"}}}}
+{"type":"metadata","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","contextUsagePercentage":2.541796922683716,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"metadata","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","contextUsagePercentage":2.541796922683716,"meteringUsage":[{"value":0.008804162520729682,"unit":"credit","unitPlural":"credits"}],"turnDurationMs":871,"reasoning":{"support":"unavailable","effortLevels":[]}}}
+{"type":"runFinished","data":{"sessionId":"5a8b589f-6a41-4cfd-a5e5-beaab036694c","status":"success","stopReason":"end_turn","finalText":"L4-OK","finalTextTruncated":false}}

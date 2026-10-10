@@ -1,0 +1,72 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-loyalty-points
+configfile: pyproject.toml
+testpaths: tests
+collected 24 items
+
+tests/test_cart.py ..FFFFF.........                                      [ 66%]
+tests/test_discounts.py ....                                             [ 83%]
+tests/test_loyalty.py ....                                               [100%]
+
+=================================== FAILURES ===================================
+___________ test_loyalty_points_for_subtotal_of_25_awards_two_points ___________
+
+    def test_loyalty_points_for_subtotal_of_25_awards_two_points():
+        cart = Cart([LineItem("item", Decimal("25.00"))])
+    
+>       assert cart.loyalty_points() == 2
+               ^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Cart' object has no attribute 'loyalty_points'
+
+tests/test_cart.py:29: AttributeError
+_______________ test_loyalty_points_below_10_awards_zero_points ________________
+
+    def test_loyalty_points_below_10_awards_zero_points():
+        cart = Cart([LineItem("item", Decimal("9.99"))])
+    
+>       assert cart.loyalty_points() == 0
+               ^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Cart' object has no attribute 'loyalty_points'
+
+tests/test_cart.py:35: AttributeError
+____________ test_loyalty_points_for_empty_cart_awards_zero_points _____________
+
+    def test_loyalty_points_for_empty_cart_awards_zero_points():
+>       assert Cart().loyalty_points() == 0
+               ^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Cart' object has no attribute 'loyalty_points'
+
+tests/test_cart.py:39: AttributeError
+_____________ test_loyalty_points_for_exact_30_awards_three_points _____________
+
+    def test_loyalty_points_for_exact_30_awards_three_points():
+        cart = Cart([LineItem("item", Decimal("30.00"))])
+    
+>       assert cart.loyalty_points() == 3
+               ^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Cart' object has no attribute 'loyalty_points'
+
+tests/test_cart.py:45: AttributeError
+__________ test_loyalty_points_are_based_on_subtotal_before_discount ___________
+
+    def test_loyalty_points_are_based_on_subtotal_before_discount():
+        cart = Cart([LineItem("item", Decimal("25.00"))])
+        registry = DiscountRegistry()
+        registry.register("TAKE20", AmountOff(20))
+        cart.apply_code("TAKE20", registry)
+    
+        assert cart.total() == Decimal("5.00")
+>       assert cart.loyalty_points() == 2
+               ^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'Cart' object has no attribute 'loyalty_points'
+
+tests/test_cart.py:55: AttributeError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/kiro/add-loyalty-points/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_cart.py::test_loyalty_points_for_subtotal_of_25_awards_two_points
+FAILED tests/test_cart.py::test_loyalty_points_below_10_awards_zero_points - ...
+FAILED tests/test_cart.py::test_loyalty_points_for_empty_cart_awards_zero_points
+FAILED tests/test_cart.py::test_loyalty_points_for_exact_30_awards_three_points
+FAILED tests/test_cart.py::test_loyalty_points_are_based_on_subtotal_before_discount
+========================= 5 failed, 19 passed in 0.05s =========================

@@ -1,0 +1,377 @@
+{
+  "schema": "l4/verdict@1",
+  "round": 1,
+  "verdict": "PASS",
+  "base_sha": "54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b",
+  "head_sha": "8ef25e889c592807d748f44d94251e30fbaeb103",
+  "steps": [
+    {
+      "step": "0",
+      "name": "preconditions",
+      "status": "ok",
+      "seconds": 0.4,
+      "note": "base merged: main@54e8e5b9fe as 8ef25e889c (7 commits)"
+    },
+    {
+      "step": "1",
+      "name": "integrity",
+      "status": "ok",
+      "seconds": 0.1,
+      "note": "6 sub-checks; scope: 4 changed file(s)"
+    },
+    {
+      "step": "2",
+      "name": "build",
+      "status": "ok",
+      "seconds": 10.9,
+      "note": ""
+    },
+    {
+      "step": "3",
+      "name": "tests",
+      "status": "ok",
+      "seconds": 2.8,
+      "note": ""
+    },
+    {
+      "step": "4",
+      "name": "traceability",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "1/1 criteria covered"
+    },
+    {
+      "step": "4a",
+      "name": "audit sampling",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.audit_sample_ratio is 0"
+    },
+    {
+      "step": "5",
+      "name": "ui test generation",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.generate_missing_tests is off"
+    },
+    {
+      "step": "6",
+      "name": "quality",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "100.0% of the changed executable lines ran"
+    },
+    {
+      "step": "8",
+      "name": "s1 judge",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.s1.enabled is off"
+    },
+    {
+      "step": "9",
+      "name": "judge",
+      "status": "ok",
+      "seconds": 11.9,
+      "note": "1 call(s)"
+    },
+    {
+      "step": "10",
+      "name": "aggregation",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "PASS"
+    }
+  ],
+  "gates": [
+    {
+      "name": "setup",
+      "command": "uv sync --frozen",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2042Z-506a/001-setup.log"
+    },
+    {
+      "name": "lint",
+      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2042Z-506a/002-lint.log"
+    },
+    {
+      "name": "test",
+      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2042Z-506a/003-test.log"
+    },
+    {
+      "name": "e2e",
+      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2042Z-506a/004-e2e.log"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "C-f14cf915",
+      "alias": "receipt-pickup › Pickup notice › The pickup notice text is exact",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_pickup::test_pickup_notice_text_is_exact"
+      ],
+      "s1_p": null
+    }
+  ],
+  "findings": [],
+  "holds": [],
+  "subject_sha": "8ef25e889c592807d748f44d94251e30fbaeb103",
+  "family_criteria": [
+    "C-f14cf915"
+  ],
+  "reused_from": null,
+  "integrity": {
+    "checks": [
+      {
+        "name": "protected paths",
+        "status": "ok",
+        "note": "no protected path differs from the base"
+      },
+      {
+        "name": "pre-existing tests",
+        "status": "ok",
+        "note": "1 test file(s) compared with the base"
+      },
+      {
+        "name": "red-green freeze",
+        "status": "ok",
+        "note": "1 task(s): red and green compared"
+      },
+      {
+        "name": "content scan",
+        "status": "ok",
+        "note": "no result-manipulating construct in the changed support and runner files"
+      },
+      {
+        "name": "suppressions",
+        "status": "skipped",
+        "note": "no new suppression comment"
+      },
+      {
+        "name": "tdd history",
+        "status": "ok",
+        "note": "1 task(s); red tests passing at head: step 3"
+      }
+    ],
+    "findings": [],
+    "declared": [],
+    "human_protected": [],
+    "human_tests": [],
+    "unfrozen": []
+  },
+  "trace": [
+    {
+      "criterion": "C-f14cf915",
+      "alias": "receipt-pickup › Pickup notice › The pickup notice text is exact",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_pickup::test_pickup_notice_text_is_exact",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    }
+  ],
+  "audit": [],
+  "generated": [],
+  "s1": [],
+  "evidence": {
+    "schema": "l4/evidence@1",
+    "holds": [],
+    "items": {},
+    "scope": {
+      "declared": [
+        "src/pricing/pickup.py",
+        "tests",
+        "module pricing"
+      ],
+      "skipped": false,
+      "note": "",
+      "holds": [],
+      "files": [
+        {
+          "path": "openspec/changes/add-pickup-notice/.l4/ledger/r-20261006T0501Z-be4d.jsonl",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "openspec/changes/add-pickup-notice/tasks.md",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "src/pricing/pickup.py",
+          "module": "pricing",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "tests/test_pickup.py",
+          "module": null,
+          "kind": "test",
+          "label": "relevant",
+          "reason": "new test file"
+        }
+      ]
+    },
+    "diff_coverage": {
+      "status": "ok",
+      "reason": "",
+      "percent": 100.0,
+      "unmeasured_files": [],
+      "functions": [
+        {
+          "path": "src/pricing/pickup.py",
+          "qualname": "pickup_notice",
+          "status": "covered",
+          "executable": 1,
+          "executed": 1,
+          "tests": [
+            "test_pickup.test_pickup_notice_text_is_exact"
+          ],
+          "label": true
+        }
+      ]
+    },
+    "tests_ran": {
+      "tests_ok": true,
+      "summary": {
+        "total": 23,
+        "passed": 23,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "new": 1,
+        "new_passed": 1,
+        "skipped_unchanged": []
+      },
+      "findings": []
+    }
+  },
+  "human": [],
+  "fix": null,
+  "judge_verdict": {
+    "criteria": [
+      {
+        "id": "C-f14cf915",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/pricing/pickup.py",
+            "quote": "def pickup_notice() -> str:\n    return \"Pickup orders wait at the shop counter for seven days; bring the order number and a photo ID.\""
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_pickup::test_pickup_notice_text_is_exact",
+            "quote": "C-f14cf915  covered  tests.test_pickup::test_pickup_notice_text_is_exact (passed, zero_value)"
+          }
+        ],
+        "reasoning": "The committed function returns a str that is character-for-character equal to the string required by the criterion (semicolon and punctuation included). The dedicated test asserts equality against the same literal (split across two adjacent string literals that concatenate to the required text) and the gate report shows it passing with the criterion traced as covered.",
+        "counterexample": null
+      }
+    ],
+    "test_adequacy": [
+      {
+        "test": "tests.test_pickup::test_pickup_notice_text_is_exact",
+        "criterion": "C-f14cf915",
+        "adequate": true,
+        "reason": "Asserts pickup_notice() == the exact required string, checking the observable return value of the criterion directly; the marker @pytest.mark.l4(\"C-f14cf915\") links it to the criterion.",
+        "generated_test_misreads_criterion": false
+      }
+    ],
+    "findings": [],
+    "riskiest_assumptions": [
+      "The gate report accurately reflects the committed head, so tests.test_pickup::test_pickup_notice_text_is_exact actually ran and passed on the committed code",
+      "No encoding or whitespace subtleties (e.g. non-ASCII lookalikes) exist in src/pricing/pickup.py beyond what the diff display shows; the printed diff shows only plain ASCII characters",
+      "The traceability matrix entry correctly links the passing test to criterion C-f14cf915 and no suppressed or skipped assertions hide a mismatch"
+    ]
+  },
+  "cx_runs": {},
+  "tests": {
+    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
+    "tests.test_cart::test_empty_cart_is_free_and_cart_with_amount_due_is_not_free": "passed",
+    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
+    "tests.test_cart::test_negative_price_rejected": "passed",
+    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
+    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
+    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
+    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
+    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
+    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
+    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
+    "tests.test_pickup::test_pickup_notice_text_is_exact": "passed",
+    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
+    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
+    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
+    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
+    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
+    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
+  },
+  "red_green": {
+    "tests.test_pickup::test_pickup_notice_text_is_exact": "1.1"
+  },
+  "guards": [],
+  "prompt_sha256": "342c7502d3ac9f937305d42e0bcacc767a4f2d61727f1e29cdec393dd8fef1c7",
+  "template": "judge@5",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "judge_calls": 1,
+  "profiles": {
+    "judge": "f-big-pickle",
+    "implementer": [
+      "codex"
+    ]
+  },
+  "judge_model": null,
+  "independence": {
+    "mode": "different_vendor",
+    "status": "declared (unverified)",
+    "verified": false,
+    "judge": {
+      "profile": "f-big-pickle",
+      "vendor": "undisclosed-big-pickle",
+      "model": "opencode/big-pickle",
+      "provenance": "declared",
+      "served": null
+    },
+    "implementers": [
+      {
+        "profile": "codex",
+        "vendor": "openai",
+        "model": "gpt-6-luna",
+        "provenance": "tool",
+        "served": null
+      }
+    ]
+  },
+  "cost_usd": 0.0
+}

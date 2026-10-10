@@ -1,0 +1,28 @@
+{
+  "changeName": "add-farewell-fix-1",
+  "changeDir": "{{REPO}}/openspec/changes/add-farewell-fix-1",
+  "schemaName": "spec-driven",
+  "contextFiles": {},
+  "progress": {
+    "total": 0,
+    "complete": 0,
+    "remaining": 0
+  },
+  "tasks": [],
+  "taskTrackingConfigured": true,
+  "state": "blocked",
+  "missingArtifacts": [
+    "tasks"
+  ],
+  "missingPrerequisites": [
+    "proposal",
+    "specs",
+    "design",
+    "tasks"
+  ],
+  "instruction": "Cannot apply this change yet. Missing artifacts: tasks.\nNot created yet, in build order: proposal, specs, design, tasks. Build the ones this change needs before applying - the schema says which are conditional.\nCreate each with `openspec instructions <artifact> --change add-farewell-fix-1` (`openspec status --change add-farewell-fix-1` shows what is left).",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

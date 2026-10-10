@@ -1,0 +1,10 @@
+
+/Users/USER/src/l4/scripts/s1/.venv/lib/python3.12/site-packages/laya/agent.py:1945: RuntimeWarning: laya: this checkpoint ships invalid temperatures or values outside [0.5, 5]; using choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected entries as uncalibrated.
+  return Agent(model_id_or_path, device=device, token=token, subfolder=subfolder, fast=fast,
+FAIL: slice mutation:add_passing_test on exercised: tuned accuracy 0.88 (n=17) is below base Laya's 1.00 (n=17)
+FAIL: slice mutation:add_passing_test on untested: tuned accuracy 0.76 (n=17) is below base Laya's 0.94 (n=17)
+FAIL: slice mutation:none on exercised: tuned accuracy 0.67 (n=6) is below base Laya's 1.00 (n=6)
+FAIL: slice mutation:none on untested: tuned accuracy 0.50 (n=6) is below base Laya's 1.00 (n=6)
+FAIL: temperature[2] sits on Laya's clamp (5.47): the confidences are uncalibrated
+gate failed: tuned {'noul_accuracy': 0.9325396825396826, 'score_mae': 0.36078333333333334, 'mean_confidence': 0.9504347953216374, 'ece': 0.03764761904761895, 'brier': 0.057098312777777785, 'aurc': 0.030566776015266542, 'selective_accuracy@50': 0.9920634920634921, 'selective_accuracy@80': 0.9801980198019802, 'latency_p50_ms': 230.35541700664908, 'latency_p95_ms': 348.58820802764967, 'cost_per_decision_p50_ms': 230.35541700664908, 'cost_per_decision_p95_ms': 348.58820802764967} vs base {'noul_accuracy': 0.5515873015873016, 'score_mae': 1.400808888888889, 'mean_confidence': 0.5179669590643274, 'ece': 0.08090555555555552, 'brier': 0.24512961293650795, 'aurc': 0.3903802816359458, 'selective_accuracy@50': 0.6190476190476191, 'selective_accuracy@80': 0.5396039603960396, 'latency_p50_ms': 203.05658300640061, 'latency_p95_ms': 306.18833302287385, 'cost_per_decision_p50_ms': 203.05658300640061, 'cost_per_decision_p95_ms': 306.18833302287385}
+EXIT 1

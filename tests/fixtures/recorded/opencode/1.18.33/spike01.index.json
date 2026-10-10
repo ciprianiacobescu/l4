@@ -1,0 +1,135 @@
+{
+ "recorded": "2026-10-03",
+ "spike": "docs/spikes/01-loop-claude-code.md",
+ "cli": "opencode 1.18.33",
+ "cases": {
+  "hello-google.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "google/gemini-3.5-flash"
+   ],
+   "env": {
+    "OPENCODE_CONFIG_CONTENT": {
+     "permission": {
+      "*": "deny"
+     }
+    }
+   },
+   "stdin": "Reply with exactly: L4-OK",
+   "exit": 0,
+   "wall_s": 6
+  },
+  "auth-error-openai-oauth.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "openai/gpt-5.4-mini"
+   ],
+   "stdin": "Reply with exactly: L4-OK",
+   "exit": 1,
+   "wall_s": 4,
+   "note": "Token refresh failed: 401 only at first call"
+  },
+  "error-openrouter-credits-max-tokens.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "openrouter/openai/gpt-5.4-mini"
+   ],
+   "exit": 1,
+   "wall_s": 3,
+   "note": "default 32000 max_tokens reservation rejected on low-credit key"
+  },
+  "hello-openrouter-output-limit.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "openrouter/openai/gpt-5.4-mini"
+   ],
+   "env": {
+    "OPENCODE_CONFIG_CONTENT": {
+     "permission": {
+      "*": "deny"
+     },
+     "provider": {
+      "openrouter": {
+       "models": {
+        "openai/gpt-5.4-mini": {
+         "limit": {
+          "context": 400000,
+          "output": 4000
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "exit": 0,
+   "wall_s": 3
+  },
+  "judge-ok-openrouter-gpt-5.4-mini.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "openrouter/openai/gpt-5.4-mini"
+   ],
+   "env": {
+    "OPENCODE_CONFIG_CONTENT": "permission * deny + limit.output 6000"
+   },
+   "stdin": "judge prompt (spec deltas + criteria + diff)",
+   "exit": 0,
+   "wall_s": 5.8,
+   "note": "valid JSON, all 8 criterion ids; verdict fail on C-bfda99fd is a false positive (brute-force verified)"
+  },
+  "judge-ok-openrouter-gpt-5.4-mini-run2.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "openrouter/openai/gpt-5.4-mini"
+   ],
+   "exit": 0,
+   "wall_s": 8.2,
+   "note": "second implementation; same false-positive fail plus speculative fail on C-a0d79e4d"
+  },
+  "judge-error-429-google-free-tier.jsonl": {
+   "argv": [
+    "opencode",
+    "run",
+    "--pure",
+    "--format",
+    "json",
+    "-m",
+    "google/gemini-3.5-flash"
+   ],
+   "exit": 1,
+   "wall_s": 74.8,
+   "note": "429 RESOURCE_EXHAUSTED retry in 9h; opencode exited after ~75 s"
+  }
+ }
+}

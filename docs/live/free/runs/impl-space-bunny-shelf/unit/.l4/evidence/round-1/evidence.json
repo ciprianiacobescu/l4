@@ -1,0 +1,88 @@
+{
+  "schema": "l4/evidence@1",
+  "holds": [],
+  "items": {},
+  "scope": {
+    "declared": [
+      "src/inventory/shelf.py",
+      "tests",
+      "module inventory"
+    ],
+    "skipped": false,
+    "note": "",
+    "holds": [],
+    "files": [
+      {
+        "path": "openspec/changes/add-shelf-code/.l4/ledger/r-20261006T1933Z-124c.jsonl",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "openspec/changes/add-shelf-code/tasks.md",
+        "module": null,
+        "kind": "exempt",
+        "label": null,
+        "reason": "exempt: harness, spec or documentation path"
+      },
+      {
+        "path": "src/inventory/shelf.py",
+        "module": "inventory",
+        "kind": "code",
+        "label": "relevant",
+        "reason": "named in the spec"
+      },
+      {
+        "path": "tests/test_shelf.py",
+        "module": null,
+        "kind": "test",
+        "label": "relevant",
+        "reason": "new test file"
+      }
+    ]
+  },
+  "diff_coverage": {
+    "status": "ok",
+    "reason": "",
+    "percent": 80.0,
+    "unmeasured_files": [],
+    "functions": [
+      {
+        "path": "src/inventory/shelf.py",
+        "qualname": "<module>",
+        "status": "n/a",
+        "executable": 0,
+        "executed": 0,
+        "tests": [],
+        "label": null
+      },
+      {
+        "path": "src/inventory/shelf.py",
+        "qualname": "shelf_code",
+        "status": "partly",
+        "executable": 5,
+        "executed": 4,
+        "tests": [
+          "test_shelf.test_an_aisle_below_1_is_rejected",
+          "test_shelf.test_the_code_is_zero_padded"
+        ],
+        "label": null
+      }
+    ]
+  },
+  "tests_ran": {
+    "tests_ok": true,
+    "summary": {
+      "total": 24,
+      "passed": 24,
+      "failed": 0,
+      "errored": 0,
+      "skipped": 0,
+      "new": 2,
+      "new_passed": 2,
+      "skipped_unchanged": []
+    },
+    "findings": []
+  }
+}

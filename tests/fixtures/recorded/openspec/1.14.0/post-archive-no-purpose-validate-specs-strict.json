@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "id": "greeting",
+      "type": "spec",
+      "valid": true,
+      "issues": [],
+      "durationMs": 4
+    },
+    {
+      "id": "notify",
+      "type": "spec",
+      "valid": false,
+      "issues": [
+        {
+          "level": "WARNING",
+          "path": "overview",
+          "line": 4,
+          "message": "Purpose section is still a placeholder rather than a Purpose anyone wrote (the sentence `openspec archive` writes for a new capability, or a `TBD`/`TODO` marker left in its place). Replace it with what this capability is for, editing the main spec directly: a `## Purpose` in a delta is read only when the capability is created, so it cannot replace this one."
+        }
+      ],
+      "durationMs": 1
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 2,
+      "passed": 1,
+      "failed": 1
+    },
+    "byType": {
+      "spec": {
+        "items": 2,
+        "passed": 1,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

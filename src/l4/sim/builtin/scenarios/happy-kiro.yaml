@@ -1,0 +1,34 @@
+# The same path on a Kiro spec: the dependency graph runs the farewell leaf (wave 0) before the greeting leaf (wave 1),
+# the optional leaf 1.2 is never started, and both parents are ticked once their required leaves are done.
+name: happy-kiro
+fixture: kiro-basic
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "2.1"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "2.1"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+judges:
+  judge:
+    verdict: "@fixture:pass_all.json"
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: task.started, task: "2.1"}
+    - {type: task.done, task: "2.1"}
+    - {type: task.started, task: "1.1"}
+    - {type: task.done, task: "1.1"}
+    - {type: verify.verdict, verdict: PASS}
+    - {type: phase.changed, to: in_review}

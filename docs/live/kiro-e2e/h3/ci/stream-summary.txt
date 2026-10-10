@@ -1,0 +1,9 @@
+a6211 2.1-green-1.jsonl {'read': 6, 'glob': 1, 'shell': 4, 'write': 2} mcp [] denied 0 credits 2.537 ('runFinished', 'success', 'end_turn')
+a6211 2.1-red-1.jsonl {'read': 8, 'glob': 1, 'shell': 7, 'write': 4} mcp [] denied 0 credits 4.365 ('runFinished', 'success', 'end_turn')
+a6211 2.2-red-1.jsonl {} mcp [] denied 0 credits 0.0 ('runError', 'prompt', 'Internal error (code -32603): Encountered an error in the response stream: The request was throttled by the se')
+a6213 1.1-green-1.jsonl {'read': 4, 'glob': 1, 'shell': 4, 'write': 2} mcp [] denied 0 credits 0.0 ('runError', 'prompt', 'Internal error (code -32603): Encountered an error in the response stream: The request was throttled by the se')
+a6213 1.1-red-1.jsonl {'glob': 1, 'read': 5, 'grep': 1, 'write': 3, 'shell': 4} mcp [] denied 0 credits 3.45 ('runFinished', 'success', 'end_turn')
+a6213 2.2-red-1.jsonl {'read': 4, 'shell': 4, 'write': 2} mcp [] denied 0 credits 1.679 ('runFinished', 'success', 'end_turn')
+a6217 1.1-green-1.jsonl {'read': 3, 'glob': 1, 'shell': 4, 'write': 2} mcp [] denied 0 credits 1.509 ('runFinished', 'success', 'end_turn')
+a6217 verify-judge-r1-1.jsonl {} mcp [] denied 0 credits 0.0 None
+total tools {'read': 30, 'glob': 5, 'shell': 27, 'write': 15, 'grep': 1} denied 0

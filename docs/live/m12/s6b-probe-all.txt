@@ -1,0 +1,191 @@
+exit=0
+[l4] probe: codex ok (binary 0.160.0 · auth subscription · quota 3% used (weekly window) · hello 5.8s · cached)
+[l4] probe: opencode-free ok (binary 1.18.34 · auth skipped · quota skipped · hello 8.4s · cached)
+[l4] probe: claude-code ok (binary 2.1.288 · auth subscription · quota 2% used (weekly (all models)) · hello 4.1s · cached)
+[l4] probe: availability file /home/gitlab-runner/.cache/l4/availability.json
+exit=0
+{
+ "cooldowns": {},
+ "probes": {
+  "claude-code|bfebfc6bda696ba8-eb7afc813156": {
+   "at": "2026-10-04T17:12:56Z",
+   "payload": {
+    "steps": [
+     {
+      "detail": {
+       "version": "2.1.288"
+      },
+      "limit": null,
+      "name": "binary",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "auth_method": "claude.ai",
+       "logged_in": true,
+       "plan": "pro"
+      },
+      "limit": null,
+      "name": "auth",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "quota_used_percent": 2,
+       "quota_window": "weekly (all models)",
+       "windows": [
+        {
+         "name": "session",
+         "resets_at": "2026-10-04T21:50:00Z",
+         "used_percent": 0,
+         "window_minutes": 300
+        },
+        {
+         "name": "weekly (all models)",
+         "resets_at": "2026-10-08T12:00:00Z",
+         "used_percent": 2,
+         "window_minutes": 10080
+        }
+       ]
+      },
+      "limit": null,
+      "name": "quota",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "ms": 4108
+      },
+      "limit": null,
+      "name": "hello",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     }
+    ]
+   }
+  },
+  "codex|2832a1f24bd7b07a-2f5ec26cc5d7": {
+   "at": "2026-10-04T17:17:02Z",
+   "payload": {
+    "steps": [
+     {
+      "detail": {
+       "version": "0.160.0"
+      },
+      "limit": null,
+      "name": "binary",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "auth_method": "chatgpt",
+       "logged_in": true,
+       "plan": "plus"
+      },
+      "limit": null,
+      "name": "auth",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "quota_used_percent": 3,
+       "quota_window": "weekly window",
+       "windows": [
+        {
+         "name": "5h window",
+         "resets_at": "2026-10-04T21:44:07Z",
+         "used_percent": 0,
+         "window_minutes": 300
+        },
+        {
+         "name": "weekly window",
+         "resets_at": "2026-10-10T12:52:23Z",
+         "used_percent": 3,
+         "window_minutes": 10080
+        }
+       ]
+      },
+      "limit": null,
+      "name": "quota",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "ms": 5760
+      },
+      "limit": null,
+      "name": "hello",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     }
+    ]
+   }
+  },
+  "opencode-free|31ed6fa1c7c4a003-0b24b72a4ee2": {
+   "at": "2026-10-04T17:10:52Z",
+   "payload": {
+    "steps": [
+     {
+      "detail": {
+       "version": "1.18.34"
+      },
+      "limit": null,
+      "name": "binary",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     },
+     {
+      "detail": {
+       "login": "not needed",
+       "provider": "opencode"
+      },
+      "limit": null,
+      "name": "auth",
+      "ok": true,
+      "reason": null,
+      "skipped": true
+     },
+     {
+      "detail": {},
+      "limit": null,
+      "name": "quota",
+      "ok": true,
+      "reason": null,
+      "skipped": true
+     },
+     {
+      "detail": {
+       "ms": 8363
+      },
+      "limit": null,
+      "name": "hello",
+      "ok": true,
+      "reason": null,
+      "skipped": false
+     }
+    ]
+   }
+  }
+ },
+ "version": 1
+}
+total 239984
+drwxrwxr-x 2 gitlab-runner gitlab-runner      4096 oct  4 19:39 .
+drwxrwxr-x 3 gitlab-runner gitlab-runner      4096 oct  3 17:46 ..
+-rwxr-xr-x 1 gitlab-runner gitlab-runner 245734584 oct  3 17:46 2.1.288
+-rw-rw-r-- 1 gitlab-runner gitlab-runner         0 oct  4 19:39 99.0.0

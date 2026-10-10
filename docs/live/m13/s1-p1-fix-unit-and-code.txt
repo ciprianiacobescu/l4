@@ -1,0 +1,135 @@
+===== openspec/changes/add-shipping-fee-fix-1/.l4/fix.json (at 5f85b9a)
+{
+  "schema": "l4/fix-unit@1",
+  "parent": "openspec:add-shipping-fee",
+  "round": 1,
+  "findings": [
+    "F-2fd15459",
+    "F-264d8803",
+    "F-a18826d5"
+  ],
+  "chores": []
+}
+
+===== openspec/changes/add-shipping-fee-fix-1/.openspec.yaml (at 5f85b9a)
+schema: spec-driven
+created: 2026-10-04
+
+===== openspec/changes/add-shipping-fee-fix-1/proposal.md (at 5f85b9a)
+# Proposal: fix 1 for add-shipping-fee
+
+## Why
+The verifier found problems in `add-shipping-fee` that this change fixes. The findings are listed below with their ids; each task of this change names the ones it answers.
+
+## What Changes
+- F-2fd15459, F-264d8803, F-a18826d5 (minor): Subtotal just below the threshold is not rounded before the comparison (+2 more): `subtotal >= Decimal("50.00")` compares the raw subtotal. A subtotal of 49.995 is therefore charged the fee, even though it would round to 50.00 at cent precision. An implementation that quantizes the subtotal first would ship it free. No scenario pins this down. | A NaN subtotal raises decimal.InvalidOperation instead of ValueError or a fee: `Decimal('NaN') < Decimal('0')` raises InvalidOperation in Python 3. A NaN subtotal therefore never reaches the ValueError branch or the country check. Other implementations might treat it as invalid (ValueError) or as a non-negative value. The spec do...
+
+## Impact
+The code and the tests of `add-shipping-fee`.
+
+===== openspec/changes/add-shipping-fee-fix-1/tasks.md (at 5f85b9a)
+# Tasks
+
+## 1. Fix
+
+- [ ] 1.1 Subtotal just below the threshold is not rounded before the comparison (+2 more) (F-2fd15459, F-264d8803, F-a18826d5; C-e25f06d8, C-d5eca516)
+
+===== openspec/changes/add-shipping-fee-fix-1/specs/shipping/spec.md (at 5f85b9a)
+# Spec Delta
+
+## Purpose
+Shipping fees charged on an order, by destination country.
+
+## ADDED Requirements
+
+### Requirement: Shipping fee — regression 1
+The behaviour pinned by the scenarios below SHALL hold.
+
+#### Scenario: Subtotal just below the threshold is not rounded before the comparison
+- **WHEN** an order with a subtotal of 49.995 ships to `RO`
+- **THEN** the shipping fee is 4.99.
+
+===== openspec/changes/add-shipping-fee-fix-1/questions.md (at 5f85b9a)
+# Questions — add-shipping-fee-fix-1
+
+<!-- l4:questions v1
+How to answer: write under "### Answer" and set **Status** to `answered`.
+To accept the clarifier's suggestion as-is, set **Status** to `accepted`.
+Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded
+Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with `accept` or
+`reject`, then give your reason.
+Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->
+
+<!-- l4:index:start -->
+| ID | Status | Blocking | Kind | Question |
+|----|--------|----------|------|----------|
+| Q-001 | open | 1.1 | ambiguous | RED test for existing behavior |
+<!-- l4:index:end -->
+
+---
+
+## Q-001: RED test for existing behavior
+
+- **Status:** open
+- **Blocking tasks:** 1.1
+- **Kind:** ambiguous
+- **Asked:** 2026-10-04T19:36Z by codex, run r-20261004T1934Z-f30b, task 1.1
+
+### Context
+The criterion requires a 4.99 fee for a 49.995 subtotal shipped to RO, and the current code already returns 4.99. Should the task instead target a specific implementation change or regression setup so a test can fail against the current baseline?
+
+### Answer
+<!-- write below this line -->
+
+===== tests/test_l4_audit_c_1b1fbe16_r1.py (at 5f85b9a)
+# l4: generated test (l4/generated-test@1); rewritten by the harness
+from decimal import Decimal
+
+import pytest
+
+from pricing import shipping_fee
+
+
+@pytest.mark.l4("C-1b1fbe16")
+def test_german_order_below_free_shipping_threshold_pays_9_99():
+    fee = shipping_fee(Decimal("20.00"), "DE")
+
+    assert fee == Decimal("9.99")
+    assert str(fee) == "9.99"
+===== tests/test_shipping.py (at 5f85b9a)
+from decimal import Decimal
+
+import pytest
+
+from pricing import shipping_fee
+
+
+@pytest.mark.l4("C-e25f06d8")
+def test_romanian_order_below_free_shipping_threshold():
+    assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
+
+
+@pytest.mark.l4("C-1b1fbe16")
+def test_german_order_below_free_shipping_threshold():
+    assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")
+===== src/pricing/shipping.py (at 5f85b9a)
+from decimal import ROUND_HALF_UP, Decimal
+
+
+class UnsupportedShippingCountry(Exception):
+    pass
+
+
+def shipping_fee(subtotal: Decimal, country: str) -> Decimal:
+    if subtotal < Decimal("0"):
+        raise ValueError("subtotal cannot be negative")
+
+    fees = {
+        "RO": Decimal("4.99"),
+        "DE": Decimal("9.99"),
+    }
+    if country not in fees:
+        raise UnsupportedShippingCountry(country)
+
+    fee = Decimal("0.00") if subtotal >= Decimal("50.00") else fees[country]
+    return fee.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

@@ -1,0 +1,58 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-bulk-discount
+configfile: pyproject.toml
+testpaths: tests
+plugins: playwright-0.9.0, base-url-2.1.0
+collected 21 items
+
+tests/test_bulk_discount.py FF                                           [  9%]
+tests/test_cart.py ...........                                           [ 61%]
+tests/test_discounts.py ....                                             [ 80%]
+tests/test_stock.py ..                                                   [ 90%]
+tests/test_web_page.py ..                                                [100%]
+
+=================================== FAILURES ===================================
+_________________ test_cart_with_ten_units_gets_bulk_discount __________________
+
+    @pytest.mark.l4("C-534a6caa")
+    def test_cart_with_ten_units_gets_bulk_discount() -> None:
+        cart = Cart([LineItem("item", Decimal("2.50"), 10)])
+    
+>       assert bulk_discount(cart) == Decimal("2.50")
+               ^^^^^^^^^^^^^^^^^^^
+
+tests/test_bulk_discount.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cart = Cart(items=[LineItem(sku='item', unit_price=Decimal('2.50'), quantity=10)])
+
+    def bulk_discount(cart: Cart) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/discounts.py:51: NotImplementedError
+_______________ test_cart_with_nine_units_gets_no_bulk_discount ________________
+
+    @pytest.mark.l4("C-5de37e46")
+    def test_cart_with_nine_units_gets_no_bulk_discount() -> None:
+        cart = Cart([LineItem("item", Decimal("2.50"), 9)])
+    
+>       assert bulk_discount(cart) == Decimal("0.00")
+               ^^^^^^^^^^^^^^^^^^^
+
+tests/test_bulk_discount.py:20: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cart = Cart(items=[LineItem(sku='item', unit_price=Decimal('2.50'), quantity=9)])
+
+    def bulk_discount(cart: Cart) -> Decimal:
+>       raise NotImplementedError
+E       NotImplementedError
+
+src/pricing/discounts.py:51: NotImplementedError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-bulk-discount/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_bulk_discount.py::test_cart_with_ten_units_gets_bulk_discount
+FAILED tests/test_bulk_discount.py::test_cart_with_nine_units_gets_no_bulk_discount
+========================= 2 failed, 19 passed in 0.08s =========================

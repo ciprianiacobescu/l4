@@ -1,0 +1,24 @@
+2026-10-08T16:49:08.694Z watching job 6273
+2026-10-08T16:51:01.986Z trace shows the first push: 2026-10-08T16:50:17.512766Z 01E [l4] openspec:add-three-for-two pushed l4/openspec/add-three-for-two 40f005f0a2..7d25fa77de https://gitlab.example.com/example-group/dummy-agentic/-/compare/40f005f0a2
+2026-10-08T16:51:02.013Z trace shows the next step's lint-baseline after the push (the green agent starts): 2026-10-08T16:50:20.571711Z 01E [l4] openspec:add-three-for-two gate lint-baseline pass (exit 0)
+2026-10-08T16:51:08.040Z CANCEL POST projects/118/jobs/6273/cancel
+cancel response: 6273 canceling
+2026-10-08T16:51:08.548Z DELETE projects/118/repository/branches/l4%2Fopenspec%2Fadd-three-for-two
+2026-10-08T16:51:09.163Z delete: ok (2xx)
+2026-10-08T16:51:09.473Z branch GET after delete: absent (404)
+2026-10-08T16:51:09.876Z job status right after: canceling 2026-10-08T16:48:57.337Z None 132.395018387
+2026-10-08T16:51:10.336Z job status: canceling 2026-10-08T16:48:57.337Z None 132.892391104
+2026-10-08T16:51:15.708Z job status: canceling 2026-10-08T16:48:57.337Z None 138.289328456
+2026-10-08T16:51:21.091Z job status: canceling 2026-10-08T16:48:57.337Z None 143.659179913
+2026-10-08T16:51:26.491Z job status: canceling 2026-10-08T16:48:57.337Z None 149.059291151
+2026-10-08T16:51:31.822Z job status: canceling 2026-10-08T16:48:57.337Z None 154.404675903
+2026-10-08T16:51:37.184Z job status: canceling 2026-10-08T16:48:57.337Z None 159.771716972
+2026-10-08T16:51:39.917Z runner snapshot plus30 starts
+2026-10-08T16:51:40.910Z runner snapshot plus30 done
+2026-10-08T16:51:42.551Z job status: canceled 2026-10-08T16:48:57.337Z 2026-10-08T16:51:42.277Z 164.939421
+2026-10-08T16:52:10.290Z runner snapshot plus60 starts
+2026-10-08T16:52:11.112Z runner snapshot plus60 done
+2026-10-08T16:53:40.002Z runner snapshot plus150 starts
+2026-10-08T16:53:40.833Z runner snapshot plus150 done
+2026-10-08T16:53:41.136Z branch GET at end: absent (404)
+2026-10-08T16:53:41.743Z done

@@ -1,0 +1,9 @@
+6ef97f8 l4-bot docs(add-gift-wrap-fee): hand off to review
+bb061de l4-bot docs(add-gift-wrap-fee): verification round 2 [skip ci]
+d03302a CiprianSpot Add a gift-wrap check that also runs from a plain checkout (human test; the import follows a sys.path line, hence the noqa)
+68aac2e l4-bot docs(add-gift-wrap-fee): hand off to review
+3939dd6 l4-bot docs(add-gift-wrap-fee): verification round 1 [skip ci]
+5a30ada l4-bot feat(add-gift-wrap-fee): 2.1 Implement `Cart.gift_wrap_fee(skus)` with unit tests [skip ci]
+f176f9e l4-bot test(add-gift-wrap-fee): red for 2.1 [skip ci]
+6447f06 l4-bot feat(add-gift-wrap-fee): 1.1 Create `src/pricing/gift_wrap.py` with `GIFT_WRAP_FEE_PER_UNIT` and `gift_wrap_fee()`, and unit tests [skip ci]
+9347a43 l4-bot test(add-gift-wrap-fee): red for 1.1 [skip ci]

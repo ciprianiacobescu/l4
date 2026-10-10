@@ -1,0 +1,18 @@
+2026-10-06T00:03:38.402Z system marked this merge request as **draft**
+2026-10-06T00:03:40.471Z note <!-- l4:sticky --> | Nothing is waiting for a human answer.
+2026-10-06T00:03:43.005Z system added 1 commit |  | <ul><li>923ada73 - docs(add-return-notice): verification round 2 [skip ci]</li></ul> |  | [Compare with previous version](/example-group/dummy-agentic/-/merge_requests/28/diffs?diff_id=973&start_sha=2320b4e3d26a339702b46c96a011c4a4078f2a8f)
+2026-10-06T00:03:44.323Z system added 1 commit |  | <ul><li>4cc06e6d - docs(add-return-notice): fix unit 1 [skip ci]</li></ul> |  | [Compare with previous version](/example-group/dummy-agentic/-/merge_requests/28/diffs?diff_id=974&start_sha=923ada730177118699dd69eac9f96232de354fa4)
+2026-10-06T00:04:41.955Z system added 1 commit |  | <ul><li>69822d64 - fix(add-return-notice-fix-1): 1.1 repository CI failed: test (F-2aa04fcb) [skip ci]</li></ul> |  | [Compare with previous version](/example-group/dummy-agentic/-/merge_requests/28/diffs?diff_id=976&start_sha=4cc06e6d09337497be7bc49ef155db4f5d17597c)
+2026-10-06T00:06:28.201Z system added 1 commit |  | <ul><li>a65ed956 - docs(add-return-notice): verification round 3 [skip ci]</li></ul> |  | [Compare with previous version](/example-group/dummy-agentic/-/merge_requests/28/diffs?diff_id=978&start_sha=69822d64141b57b0c66fc6b059b0b4c72d8d91a6)
+2026-10-06T00:06:30.093Z system added 1 commit |  | <ul><li>c8dfcd95 - docs(add-return-notice): hand off to review</li></ul> |  | [Compare with previous version](/example-group/dummy-agentic/-/merge_requests/28/diffs?diff_id=980&start_sha=a65ed956b84fe4b37b17864b2fdba3029c4aff0a)
+2026-10-06T00:06:30.250Z system marked this merge request as **ready**
+2026-10-06T00:03:39.494Z add l4:verifying
+2026-10-06T00:03:39.494Z remove l4:in_review
+2026-10-06T00:03:44.622Z add l4:fixing
+2026-10-06T00:03:44.622Z remove l4:verifying
+2026-10-06T00:04:41.804Z add l4:verifying
+2026-10-06T00:04:41.804Z remove l4:fixing
+2026-10-06T00:06:28.282Z add l4:verified
+2026-10-06T00:06:28.282Z remove l4:verifying
+2026-10-06T00:06:31.308Z add l4:in_review
+2026-10-06T00:06:31.308Z remove l4:verified

@@ -1,0 +1,23 @@
+{
+  "source": "docs/runner/ci-jev-smoke-2026-10-04-pipeline-2612.txt (scripts/runner/ci-jev-smoke.py, CI job on l4-runner, HTTP 200 in 272 ms)",
+  "served_model": "jev-1.13.0",
+  "questions": {
+    "is_product_decision": {"type": "noul", "instructions": "Is `question` a product or business decision rather than a technical question the repository can answer?"},
+    "finding_severity": {"type": "choice", "instructions": "How severe is `finding` for a shop's invoices?",
+      "criteria": {"blocker": "wrong money charged to every customer", "major": "wrong amounts in a common case", "minor": "cosmetic or rare edge case"}},
+    "citation_support": {"type": "score", "instructions": "How strongly does `cited_code` support `answer`?",
+      "criteria": ["unrelated", "weak", "partial", "strong", "states it directly"]}
+  },
+  "reply": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "is_product_decision": {"type": "noul", "noul": 0.25},
+      "finding_severity": {"type": "choice", "choice": "major", "confidence": 0.66,
+        "probabilities": {"blocker": 0.22, "major": 0.78, "minor": 0.0}},
+      "citation_support": {"type": "score", "score": 2.71, "confidence": 0.58,
+        "legend": {"0": "unrelated", "1": "weak", "2": "partial", "3": "strong", "4": "states it directly"},
+        "probabilities": {"0": 0.0, "1": 0.05, "2": 0.29, "3": 0.55, "4": 0.11}}
+    },
+    "usage": {"input_tokens": 523, "output_tokens": 77}
+  }
+}

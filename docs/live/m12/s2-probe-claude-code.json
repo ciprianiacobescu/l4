@@ -1,0 +1,72 @@
+{
+  "schema": "l4/probe@1",
+  "availability_file": "/home/gitlab-runner/.cache/l4/availability.json",
+  "profiles": [
+    {
+      "profile": "claude-code",
+      "adapter": "claude-code",
+      "model": null,
+      "status": "ok",
+      "cached": false,
+      "reason": null,
+      "steps": [
+        {
+          "step": "binary",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "version": "2.1.288"
+          }
+        },
+        {
+          "step": "auth",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "logged_in": true,
+            "auth_method": "claude.ai",
+            "plan": "pro"
+          }
+        },
+        {
+          "step": "quota",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "quota_used_percent": 2,
+            "quota_window": "weekly (all models)",
+            "windows": [
+              {
+                "name": "session",
+                "used_percent": 0,
+                "window_minutes": 300,
+                "resets_at": null
+              },
+              {
+                "name": "weekly (all models)",
+                "used_percent": 2,
+                "window_minutes": 10080,
+                "resets_at": "2026-10-08T11:59:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "step": "hello",
+          "ok": true,
+          "skipped": false,
+          "reason": null,
+          "detail": {
+            "ms": 3380
+          }
+        }
+      ],
+      "cooling_until": null,
+      "cooldown_cleared": false
+    }
+  ],
+  "cooldowns": []
+}

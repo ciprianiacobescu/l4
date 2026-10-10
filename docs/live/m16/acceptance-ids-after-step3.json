@@ -1,0 +1,38 @@
+{
+  "1": {
+    "job": 5535,
+    "mr": 24,
+    "pipeline": 2787,
+    "status": "failed"
+  },
+  "2": {
+    "answers": 24,
+    "coverage_percent": 7.9,
+    "engines": [
+      "jev",
+      "laya-local"
+    ],
+    "guard_violation_paths": [],
+    "holds": [
+      "H-f427d7fb",
+      "H-2426ce7a"
+    ],
+    "items": 12,
+    "job": 5541,
+    "pipeline": 2800,
+    "round": 2
+  },
+  "3": {
+    "label_item": "27cf4d6a6ace08e74307bc2dca843668",
+    "verdicts": [
+      "accept",
+      "accept",
+      "accept",
+      "reject"
+    ]
+  },
+  "7": {
+    "p2_peak_memory_lines": [],
+    "skip_ci_commits": 9
+  }
+}

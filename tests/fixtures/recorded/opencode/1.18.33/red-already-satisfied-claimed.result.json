@@ -1,0 +1,15 @@
+{
+  "status": "done",
+  "phase": "red",
+  "task_ids": ["1.2"],
+  "criteria_ids": ["C-31395b1a", "C-646c6823"],
+  "summary": "Added tests for Maximum length requirement (C-31395b1a: long input truncated to 64 chars; C-646c6823: no trailing hyphen after truncation). All tests pass because the implementation already satisfies these criteria.",
+  "tests_added": [
+    "tests/test_slug.py::TestMaximumLength::test_long_input_is_truncated_to_max_length",
+    "tests/test_slug.py::TestMaximumLength::test_no_trailing_hyphen_after_truncation"
+  ],
+  "files_changed": ["tests/test_slug.py"],
+  "tdd_exemption": {
+    "reason": "already_satisfied by existing slugify implementation in src/slugkit/slug.py"
+  }
+}

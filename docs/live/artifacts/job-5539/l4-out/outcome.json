@@ -1,0 +1,33 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261005T0919Z-b5be",
+  "harness_version": "0.1.0",
+  "harness_commit": "7c7d7c95202c70c8c06b2a886b2c0266c0b6d849",
+  "exit_code": 11,
+  "units": [
+    {
+      "unit": "openspec:add-bulk-discount",
+      "phase_before": "none",
+      "phase_after": "awaiting_human",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "open_questions": [
+        "Q-001"
+      ],
+      "verdict": null,
+      "profiles": {
+        "implementer": "codex",
+        "clarifier": "claude-code",
+        "s1_judge": "laya"
+      },
+      "cost_usd": 0.022705,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/24",
+      "retry_after": null,
+      "continuation": "not_needed",
+      "exit_reason": null
+    }
+  ]
+}

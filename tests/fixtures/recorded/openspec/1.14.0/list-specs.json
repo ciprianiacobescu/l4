@@ -1,0 +1,12 @@
+{
+  "specs": [
+    {
+      "id": "greeting",
+      "requirementCount": 1
+    }
+  ],
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

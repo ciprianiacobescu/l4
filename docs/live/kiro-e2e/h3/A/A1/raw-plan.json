@@ -1,0 +1,245 @@
+{
+  "schema": "l4/plan@1",
+  "units": [
+    {
+      "actionable": true,
+      "framework": "kiro",
+      "next_action": "hand_off",
+      "phase": "verified",
+      "reason": "verified: ready for hand-off",
+      "tasks": {
+        "done": 4,
+        "total": 4
+      },
+      "unit": "kiro:add-bulk-discount-h2"
+    },
+    {
+      "actionable": true,
+      "framework": "kiro",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 4
+      },
+      "unit": "kiro:add-loyalty-points"
+    },
+    {
+      "actionable": true,
+      "framework": "kiro",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 5
+      },
+      "unit": "kiro:add-small-order-surcharge"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-average-price"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-cart-clear"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-cent-rounding"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-is-empty"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-item-count"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-money-format"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-pallet-count"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-pickup-notice"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-restock-label"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-return-notice"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-shipping-fee"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-shipping-notice"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-split-amount"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:add-tip-amount"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 2
+      },
+      "unit": "openspec:add-vat"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:change-low-stock-rule"
+    },
+    {
+      "actionable": true,
+      "framework": "openspec",
+      "next_action": "implement",
+      "phase": null,
+      "reason": "pending tasks",
+      "tasks": {
+        "done": 0,
+        "total": 1
+      },
+      "unit": "openspec:show-subtotal"
+    }
+  ]
+}

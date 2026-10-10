@@ -1,0 +1,43 @@
+{
+  "items": [
+    {
+      "id": "banner",
+      "type": "spec",
+      "valid": false,
+      "issues": [
+        {
+          "level": "WARNING",
+          "path": "requirements[0]",
+          "message": "Requirement \"Banner line\" should contain SHALL or MUST (RFC 2119 best practice for English specs)"
+        }
+      ],
+      "durationMs": 4
+    },
+    {
+      "id": "greeting",
+      "type": "spec",
+      "valid": true,
+      "issues": [],
+      "durationMs": 1
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 2,
+      "passed": 1,
+      "failed": 1
+    },
+    "byType": {
+      "spec": {
+        "items": 2,
+        "passed": 1,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "{{REPO}}",
+    "source": "nearest"
+  }
+}

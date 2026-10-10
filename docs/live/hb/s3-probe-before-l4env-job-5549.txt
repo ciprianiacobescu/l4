@@ -1,0 +1,32 @@
+2026-10-05T15:37:40.257511Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)
+2026-10-05T15:37:40.257521Z 00O   on l4-runner XXXXXXXXX, system ID: s_000000000001
+2026-10-05T15:37:40.257523Z 00O   UUID: not supported with this GitLab version
+2026-10-05T15:37:40.257546Z 00O 
+2026-10-05T15:37:40.257548Z 00O+Preparing the "shell" executor
+2026-10-05T15:37:40.257646Z 00O Using Shell (bash) executor...
+2026-10-05T15:37:40.257648Z 00O 
+2026-10-05T15:37:40.257797Z 00O+
+2026-10-05T15:37:40.257800Z 00O+Preparing environment
+2026-10-05T15:37:40.283046Z 01O Running on gitlab-runner...
+2026-10-05T15:37:40.287722Z 00O 
+2026-10-05T15:37:40.288583Z 00O+
+2026-10-05T15:37:40.288589Z 00O+Getting source from Git repository
+2026-10-05T15:37:40.350306Z 01O Gitaly correlation ID: 01M46BDA6189TJ3VS9GV25R4QW
+2026-10-05T15:37:40.359808Z 01O Fetching changes with git depth set to 20...
+2026-10-05T15:37:40.362380Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-05T15:37:40.924871Z 01O Checking out 816c0d35 as detached HEAD (ref is l4-probe/scope)...
+2026-10-05T15:37:40.934836Z 01O Skipping Git submodules setup
+2026-10-05T15:37:40.938857Z 00O 
+2026-10-05T15:37:40.941190Z 00O+
+2026-10-05T15:37:40.941211Z 00O+Executing "step_script" stage of the job script
+2026-10-05T15:37:40.987597Z 01O $ echo "job $CI_JOB_NAME environment=${CI_ENVIRONMENT_NAME:-none}"
+2026-10-05T15:37:40.987612Z 01O job scope-probe-l4env environment=l4
+2026-10-05T15:37:40.987617Z 01O $ for v in L4_SCOPE_PROBE L4_FORGE_TOKEN TYPESAFE_API_KEY; do if [ -n "$(printenv "$v")" ]; then echo "$v PRESENT"; else echo "$v ABSENT"; fi; done
+2026-10-05T15:37:40.989070Z 01O L4_SCOPE_PROBE PRESENT
+2026-10-05T15:37:40.990534Z 01O L4_FORGE_TOKEN PRESENT
+2026-10-05T15:37:40.991927Z 01O TYPESAFE_API_KEY PRESENT
+2026-10-05T15:37:40.994606Z 00O 
+2026-10-05T15:37:40.997625Z 00O+
+2026-10-05T15:37:40.997638Z 00O+Cleaning up project directory and file based variables
+2026-10-05T15:37:41.047521Z 00O 
+2026-10-05T15:37:41.047620Z 00O Job succeeded

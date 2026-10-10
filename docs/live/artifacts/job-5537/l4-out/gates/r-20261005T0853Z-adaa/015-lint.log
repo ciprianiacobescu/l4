@@ -1,0 +1,24 @@
+F401 [*] `typing.TYPE_CHECKING` imported but unused
+ --> src/pricing/discounts.py:5:20
+  |
+3 | from dataclasses import dataclass
+4 | from decimal import Decimal
+5 | from typing import TYPE_CHECKING
+  |                    ^^^^^^^^^^^^^
+help: Remove unused import: `typing.TYPE_CHECKING`
+  |
+4 | from decimal import Decimal
+  - from typing import TYPE_CHECKING
+5 |
+  |
+
+F821 Undefined name `Cart`
+  --> src/pricing/discounts.py:50:25
+   |
+50 | def bulk_discount(cart: Cart) -> Decimal:
+   |                         ^^^^
+51 |     raise NotImplementedError
+   |
+
+Found 2 errors.
+[*] 1 fixable with the `--fix` option.

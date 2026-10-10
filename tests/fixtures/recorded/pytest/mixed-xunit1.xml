@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="2" skipped="1" tests="6" time="0.001"><testcase classname="tests.test_mix" name="test_pass" file="tests/test_mix.py" line="8" time="0.001" /><testcase classname="tests.test_mix" name="test_fail" file="tests/test_mix.py" line="12" time="0.001"><failure message="assert 1 == 2">def test_fail():
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+tests/test_mix.py:14: AssertionError</failure></testcase><testcase classname="tests.test_mix" name="test_param[1]" file="tests/test_mix.py" line="16" time="0.001" /><testcase classname="tests.test_mix" name="test_param[2]" file="tests/test_mix.py" line="16" time="0.001"><failure message="assert 2 == 1">n = 2
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param(n):
+&gt;       assert n == 1
+E       assert 2 == 1
+
+tests/test_mix.py:19: AssertionError</failure></testcase><testcase classname="tests.test_mix" name="test_skipped" file="tests/test_mix.py" line="21" time="0.001"><skipped type="pytest.skip" message="later">/PATH:22: later</skipped></testcase><testcase classname="tests.test_mix" name="test_error" file="tests/test_mix.py" line="26" time="0.001"><error message="failed on setup with &quot;RuntimeError: fixture exploded&quot;">@pytest.fixture
+    def boom():
+&gt;       raise RuntimeError("fixture exploded")
+E       RuntimeError: fixture exploded
+
+tests/test_mix.py:6: RuntimeError</error></testcase></testsuite></testsuites>

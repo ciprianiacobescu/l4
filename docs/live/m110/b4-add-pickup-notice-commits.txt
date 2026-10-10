@@ -1,0 +1,75 @@
+939d100f49306898d1f2b1dcc4760a4cce9bb416 l4-bot <l4-bot@users.noreply.invalid>
+  docs(add-pickup-notice): hand off to review
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0505Z-0bdf
+L4-Iteration: 2
+L4-Phase: verified
+
+1d17620cbcbff0729410153f2a536f12e711a324 l4-bot <l4-bot@users.noreply.invalid>
+  docs(add-pickup-notice): verification round 3 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0505Z-0bdf
+L4-Iteration: 2
+L4-Phase: verifying
+
+4bee00c16f66aec90c0bcaa4bd2ba68a7f133aaa l4-bot <l4-bot@users.noreply.invalid>
+  fix(add-pickup-notice-fix-1): 1.1 repository CI failed: test (F-2aa04fcb) [skip ci]
+L4-Unit: openspec:add-pickup-notice-fix-1
+L4-Run: r-20261006T0505Z-0bdf
+L4-Iteration: 2
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: exempt
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/single/1
+
+f6546fcc6ce0255c5589cc9bdcb8f14cd7f9b484 l4-bot <l4-bot@users.noreply.invalid>
+  docs(add-pickup-notice): fix unit 1 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0505Z-0bdf
+L4-Iteration: 2
+L4-Phase: verifying
+
+e79ca59950f82d54a8cdb6d9a94dcb26b1cd82e4 l4-bot <l4-bot@users.noreply.invalid>
+  docs(add-pickup-notice): verification round 2 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0505Z-0bdf
+L4-Iteration: 2
+L4-Phase: verifying
+
+222e60b307534173b7a344a8cc609e319d490047 l4-bot <l4-bot@users.noreply.invalid>
+  docs(add-pickup-notice): hand off to review
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0501Z-be4d
+L4-Iteration: 1
+L4-Phase: verified
+
+b46782081ed24554245b8e78285175558b0e3810 l4-bot <l4-bot@users.noreply.invalid>
+  docs(add-pickup-notice): verification round 1 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0501Z-be4d
+L4-Iteration: 1
+L4-Phase: verifying
+
+e33992893813ddcc0e57ebdeef9e9f0642fbda48 l4-bot <l4-bot@users.noreply.invalid>
+  feat(add-pickup-notice): 1.1 Add `pricing.pickup.pickup_notice()` returning the exact pickup notice text [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0501Z-be4d
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+
+e1fea75e6f9af2b020acd9294d195197ffa4a885 l4-bot <l4-bot@users.noreply.invalid>
+  test(add-pickup-notice): red for 1.1 [skip ci]
+L4-Unit: openspec:add-pickup-notice
+L4-Run: r-20261006T0501Z-be4d
+L4-Iteration: 1
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+

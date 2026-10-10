@@ -1,0 +1,89 @@
+{
+ "source": "recorded with laya-serve 0.3.24 (scripts/s1/.venv), base typed-decisions at HF revision 7b928d828b7b0e022f929d9bd2e44165aa270148, CPU, through l4.llm.system_one.LayaServe on the Mac; the state is a made-up one",
+ "served_model": "laya-rl-agent",
+ "questions": {
+  "is_product_decision": {
+   "type": "noul",
+   "instructions": "Is `question` a product or business decision rather than a technical question the repository can answer?"
+  },
+  "finding_severity": {
+   "type": "choice",
+   "instructions": "How severe is `finding` for a shop's invoices?",
+   "criteria": {
+    "blocker": "wrong money charged to every customer",
+    "major": "wrong amounts in a common case",
+    "minor": "cosmetic or rare edge case"
+   }
+  },
+  "citation_support": {
+   "type": "score",
+   "instructions": "How strongly does `cited_code` support `answer`?",
+   "criteria": [
+    "unrelated",
+    "weak",
+    "partial",
+    "strong",
+    "states it directly"
+   ]
+  }
+ },
+ "reply": {
+  "model": "laya-rl-agent",
+  "answers": {
+   "is_product_decision": {
+    "type": "noul",
+    "noul": 0.4111,
+    "confidence": 0.5889,
+    "answer_confidence": 0.5889,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "finding_severity": {
+    "type": "choice",
+    "choice": "major",
+    "probabilities": {
+     "blocker": 0.3106,
+     "major": 0.3474,
+     "minor": 0.342
+    },
+    "confidence": 0.0011,
+    "answer_confidence": 0.3474,
+    "action": {
+     "act_probability": 1.0
+    }
+   },
+   "citation_support": {
+    "type": "score",
+    "score": 3.0438,
+    "legend": {
+     "0": "unrelated",
+     "1": "weak",
+     "2": "partial",
+     "3": "strong",
+     "4": "states it directly"
+    },
+    "probabilities": {
+     "0": 0.0284,
+     "1": 0.0628,
+     "2": 0.1473,
+     "3": 0.3596,
+     "4": 0.4019
+    },
+    "confidence": 0.1977,
+    "answer_confidence": 0.4019,
+    "action": {
+     "act_probability": 1.0
+    }
+   }
+  },
+  "usage": {
+   "input_tokens": 313,
+   "output_tokens": 0,
+   "state_tokens": 58,
+   "state_tokens_dropped": 0,
+   "truncated": false,
+   "truncated_questions": []
+  }
+ }
+}

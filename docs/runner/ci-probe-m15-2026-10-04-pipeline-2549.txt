@@ -1,0 +1,73 @@
+2026-10-04T09:46:54.164282Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)
+2026-10-04T09:46:54.164841Z 00O   on l4-runner XXXXXXXXX, system ID: s_000000000001
+2026-10-04T09:46:54.164843Z 00O   UUID: not supported with this GitLab version
+2026-10-04T09:46:54.164880Z 00O section_start:1791107214:prepare_executor
+2026-10-04T09:46:54.164885Z 00O+Preparing the "shell" executor
+2026-10-04T09:46:54.165490Z 00O Using Shell (bash) executor...
+2026-10-04T09:46:54.165493Z 00O section_end:1791107214:prepare_executor
+2026-10-04T09:46:54.166630Z 00O+section_start:1791107214:prepare_script
+2026-10-04T09:46:54.166634Z 00O+Preparing environment
+2026-10-04T09:46:54.405320Z 01O Running on gitlab-runner...
+2026-10-04T09:46:54.413067Z 00O section_end:1791107214:prepare_script
+2026-10-04T09:46:54.418957Z 00O+section_start:1791107214:get_sources
+2026-10-04T09:46:54.418967Z 00O+Getting source from Git repository
+2026-10-04T09:46:54.503820Z 01O Gitaly correlation ID: 01M434YA47NC4D6VV8J846R5GK
+2026-10-04T09:46:54.514512Z 01O Fetching changes with git depth set to 1...
+2026-10-04T09:46:54.514520Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/XXXXXXXXX/0/example-group/dummy-agentic/.git/
+2026-10-04T09:46:55.335821Z 01O Checking out 7bfb616f as detached HEAD (ref is probe/m15)...
+2026-10-04T09:46:55.358579Z 01O Skipping Git submodules setup
+2026-10-04T09:46:55.365751Z 00O section_end:1791107215:get_sources
+2026-10-04T09:46:55.367128Z 00O+section_start:1791107215:step_script
+2026-10-04T09:46:55.367146Z 00O+Executing "step_script" stage of the job script
+2026-10-04T09:46:55.412067Z 01O $ bash scripts/runner/ci-probe-m15.sh
+2026-10-04T09:46:55.417999Z 01O 
+2026-10-04T09:46:55.418005Z 01O === host
+2026-10-04T09:46:55.422240Z 01O date 2026-10-04T09:46:55Z host gitlab-runner user gitlab-runner cpus 4
+2026-10-04T09:46:56.790055Z 01O bwrap bubblewrap 0.6.1 | uv uv 0.12.22 (x86_64-unknown-linux-gnu) | serena Serena 1.7.0
+2026-10-04T09:46:56.792316Z 01O                total        used        free      shared  buff/cache   available
+2026-10-04T09:46:56.792320Z 01O Mem:            5254        1701        1574           7        1977        3238
+2026-10-04T09:46:56.801738Z 01O heaviest processes now (name, RSS kB): 574280 opencode;536180 opencode;86128 snap-store;73172 gnome-shell;61204 codex;
+2026-10-04T09:46:56.802866Z 01O load: 0.38 0.35 0.23
+2026-10-04T09:46:56.802907Z 01O 
+2026-10-04T09:46:56.802908Z 01O === (e) cache_root as this job resolves it
+2026-10-04T09:46:56.804365Z 01O L4_CACHE=unset XDG_CACHE_HOME=unset PLAYWRIGHT_BROWSERS_PATH=unset
+2026-10-04T09:46:56.806456Z 01O RESULT (e): cache_root=/home/gitlab-runner/.cache/l4 (from HOME) gate_playwright_mount=/home/gitlab-runner/.cache/l4/shared/ms-playwright browsers=present prq14_path=/home/gitlab-runner/.cache/l4/shared/ms-playwright same=yes
+2026-10-04T09:46:56.822793Z 01O 
+2026-10-04T09:46:56.822801Z 01O === (a) pytest-playwright in one gate spawn (--unshare-net), without and with --tmpfs /dev/shm
+2026-10-04T09:46:57.209101Z 01O setup: venv with playwright 1.63.0, pytest-playwright 0.9.0
+2026-10-04T09:47:00.105953Z 01O RESULT (a) no-shm-tmpfs: PASS | exit=0 timeout=no secs=2.8 child_maxrss_kb=19072 tree_peak_kb=541048 procs=MainThread,bwrap,chrome-headless,launch.sh,python,python3,sleep
+2026-10-04T09:47:01.545848Z 01O RESULT (a) with-shm-tmpfs: PASS | exit=0 timeout=no secs=1.4 child_maxrss_kb=19200 tree_peak_kb=645532 procs=MainThread,bwrap,chrome-headless,launch.sh,python,python3,sleep
+2026-10-04T09:47:01.545861Z 01O RESULT P1: Chromium works in the gate argv without --tmpfs /dev/shm -> do NOT change bwrap.base_flags
+2026-10-04T09:47:01.546006Z 01O 
+2026-10-04T09:47:01.546007Z 01O === (b) serena start-mcp-server --context codex inside the agent argv
+2026-10-04T09:47:04.893151Z 01O RESULT (b): initialize=ok initialize_s=1.4 server=Serena server_version=1.28.1 tools=23 memory_tools=6 symbols_overview=ok_in_1.9s secs=3.3 child_maxrss_kb=18944 tree_peak_kb=293968 procs=bwrap,node,python,python3.13,serena,uv
+2026-10-04T09:47:04.895431Z 01O   note: UV_CACHE_DIR is the empty per-unit cache and UV_TOOL_DIR a writable temp dir (without it uvx cannot create
+2026-10-04T09:47:04.895435Z 01O         its tool environment under the read-only HOME and the language server dies). symbols_overview starts the
+2026-10-04T09:47:04.895435Z 01O         language server (Pyright via uvx); pyright/node/uv in procs= show it ran, and its time includes any download.
+2026-10-04T09:47:04.895614Z 01O 
+2026-10-04T09:47:04.895616Z 01O === (c) laya-serve (typed-decisions), 5 noul calls, tokenizer budget
+2026-10-04T09:47:04.975772Z 01O laya 0.3.24, port 52019, threads 2
+2026-10-04T09:47:04.978573Z 01O Mem:            5154        1847         970           7        2336        2992
+2026-10-04T09:47:15.317944Z 01O RESULT (c): ready=yes load_s=5.5 calls=5 p50_ms=864 identical=yes hash=be885303ea39 noul=0.528 served_model=laya-rl-agent error=- secs=10.3 child_maxrss_kb=2549808 tree_peak_kb=2483888 procs=laya-serve
+2026-10-04T09:47:15.323090Z 01O RESULT P2: peak tree RSS 2483888 kB > 1.2 GB (1258291 kB) -> Laya runs on the Mac (engine remote), unless (d) fails
+2026-10-04T09:47:21.479509Z 01O RESULT (c) tokens: text=prose approx450_tokens=386 largest_approx_within_463=540
+2026-10-04T09:47:21.479519Z 01O RESULT (c) tokens: text=json approx450_tokens=613 largest_approx_within_463=340
+2026-10-04T09:47:21.479520Z 01O RESULT (c) tokens: text=code approx450_tokens=683 largest_approx_within_463=300
+2026-10-04T09:47:21.479521Z 01O RESULT (c) tokens: budget_P3=300 window=463 tokenizer=typed-decisions
+2026-10-04T09:47:21.480979Z 01O RESULT P3: the S1 state budget is 300 approx-tokens (chars / 4), the largest whose Laya token count fits the window
+2026-10-04T09:47:21.489050Z 01O Mem:            5154        1728        1948           7        1477        3111
+2026-10-04T09:47:21.489298Z 01O 
+2026-10-04T09:47:21.489300Z 01O === (d) TCP connect from the runner to 192.0.2.10
+2026-10-04T09:47:21.529977Z 01O RESULT (d): 192.0.2.10:8000 connect ok in 0.01s
+2026-10-04T09:47:21.555800Z 01O RESULT (d): 192.0.2.10:8765 connect refused (the host answers, nothing listens) in 0.00s
+2026-10-04T09:47:21.581832Z 01O RESULT (d): 192.0.2.10:22 connect refused (the host answers, nothing listens) in 0.00s
+2026-10-04T09:47:21.581843Z 01O 
+2026-10-04T09:47:21.581844Z 01O === end
+2026-10-04T09:47:21.584300Z 01O                total        used        free      shared  buff/cache   available
+2026-10-04T09:47:21.584305Z 01O Mem:            5154        1732        1944           7        1478        3108
+2026-10-04T09:47:21.585001Z 01O VERDICT all measurements ran
+2026-10-04T09:47:21.744054Z 00O section_end:1791107241:step_script
+2026-10-04T09:47:21.745764Z 00O+section_start:1791107241:cleanup_file_variables
+2026-10-04T09:47:21.746419Z 00O+Cleaning up project directory and file based variables
+2026-10-04T09:47:21.815248Z 00O section_end:1791107241:cleanup_file_variables
+2026-10-04T09:47:21.815387Z 00O Job succeeded

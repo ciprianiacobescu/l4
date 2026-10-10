@@ -1,0 +1,18 @@
+c8dfcd9 l4-bot <l4-bot@users.noreply.invalid> docs(add-return-notice): hand off to review
+    L4-Run: r-20261006T0003Z-a64f; L4-Phase: verified
+a65ed95 l4-bot <l4-bot@users.noreply.invalid> docs(add-return-notice): verification round 3 [skip ci]
+    L4-Run: r-20261006T0003Z-a64f; L4-Phase: verifying
+69822d6 l4-bot <l4-bot@users.noreply.invalid> fix(add-return-notice-fix-1): 1.1 repository CI failed: test (F-2aa04fcb) [skip ci]
+    L4-Run: r-20261006T0003Z-a64f; L4-Phase: implementing; L4-TDD: exempt
+4cc06e6 l4-bot <l4-bot@users.noreply.invalid> docs(add-return-notice): fix unit 1 [skip ci]
+    L4-Run: r-20261006T0003Z-a64f; L4-Phase: verifying
+923ada7 l4-bot <l4-bot@users.noreply.invalid> docs(add-return-notice): verification round 2 [skip ci]
+    L4-Run: r-20261006T0003Z-a64f; L4-Phase: verifying
+2320b4e l4-bot <l4-bot@users.noreply.invalid> docs(add-return-notice): hand off to review
+    L4-Run: r-20261005T2354Z-361c; L4-Phase: verified
+e550b59 l4-bot <l4-bot@users.noreply.invalid> docs(add-return-notice): verification round 1 [skip ci]
+    L4-Run: r-20261005T2354Z-361c; L4-Phase: verifying
+17c9f31 l4-bot <l4-bot@users.noreply.invalid> feat(add-return-notice): 1.1 Add `pricing.notices.return_policy()` returning the exact return policy text [skip ci]
+    L4-Run: r-20261005T2354Z-361c; L4-Phase: implementing; L4-TDD: green
+4be3251 l4-bot <l4-bot@users.noreply.invalid> test(add-return-notice): red for 1.1 [skip ci]
+    L4-Run: r-20261005T2354Z-361c; L4-Phase: implementing; L4-TDD: red

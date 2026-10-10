@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee
+configfile: pyproject.toml
+testpaths: tests
+collected 17 items
+
+tests/test_cart.py ...........                                           [ 64%]
+tests/test_discounts.py ....                                             [ 88%]
+tests/test_shipping.py FF                                                [100%]
+
+=================================== FAILURES ===================================
+________ test_romanian_order_below_free_shipping_threshold_has_4_99_fee ________
+
+    @pytest.mark.l4("C-e25f06d8")
+    def test_romanian_order_below_free_shipping_threshold_has_4_99_fee():
+>       assert shipping_fee(Decimal("20.00"), "RO") == Decimal("4.99")
+E       AssertionError: assert None == Decimal('4.99')
+E        +  where None = shipping_fee(Decimal('20.00'), 'RO')
+E        +    where Decimal('20.00') = Decimal('20.00')
+E        +  and   Decimal('4.99') = Decimal('4.99')
+
+tests/test_shipping.py:10: AssertionError
+_________ test_german_order_below_free_shipping_threshold_has_9_99_fee _________
+
+    @pytest.mark.l4("C-1b1fbe16")
+    def test_german_order_below_free_shipping_threshold_has_9_99_fee():
+>       assert shipping_fee(Decimal("20.00"), "DE") == Decimal("9.99")
+E       AssertionError: assert None == Decimal('9.99')
+E        +  where None = shipping_fee(Decimal('20.00'), 'DE')
+E        +    where Decimal('20.00') = Decimal('20.00')
+E        +  and   Decimal('9.99') = Decimal('9.99')
+
+tests/test_shipping.py:15: AssertionError
+- generated xml file: /home/gitlab-runner/.cache/l4/worktrees/openspec/add-shipping-fee/.l4-out/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_shipping.py::test_romanian_order_below_free_shipping_threshold_has_4_99_fee
+FAILED tests/test_shipping.py::test_german_order_below_free_shipping_threshold_has_9_99_fee
+========================= 2 failed, 15 passed in 0.05s =========================

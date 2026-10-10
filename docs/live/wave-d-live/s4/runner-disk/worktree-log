@@ -1,0 +1,7 @@
+
+2b841b96ad269f7176e87068a7bf57fa5295d5d5 l4-bot feat(add-three-for-two): 1.1 Add `pricing.offers.three_for_two(unit_price, quantity)` returning the price of the units with every third one free [skip ci]
+7d25fa77de2b41c11a7e2452d04a00b65716a070 l4-bot test(add-three-for-two): red for 1.1 [skip ci]
+40f005f0a2d64c9869caaa95f711a657696fee16 CiprianSpot Seed the OpenSpec change add-three-for-two (wave D live check: the job is cancelled mid-run and its branch deleted)
+29ce2e78cddecd957f8d4e5ee29bb9263409e43c Maintainer Two Merge branch 'l4/kiro/add-gift-wrap-fee' into 'main'
+refs/heads/l4/openspec/add-three-for-two 2b841b96ad269f7176e87068a7bf57fa5295d5d5
+refs/remotes/origin/l4/openspec/add-three-for-two 2b841b96ad269f7176e87068a7bf57fa5295d5d5

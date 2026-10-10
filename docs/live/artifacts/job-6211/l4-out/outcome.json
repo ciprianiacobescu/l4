@@ -1,0 +1,29 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261008T0953Z-0474",
+  "harness_version": "0.1.0",
+  "harness_commit": "9bcfb9c8ccf3bf0bafb7976b1fb2853285fce447",
+  "exit_code": 12,
+  "units": [
+    {
+      "unit": "kiro:add-small-order-surcharge",
+      "phase_before": "none",
+      "phase_after": "waiting_capacity",
+      "tasks": {
+        "done": 1,
+        "total": 5
+      },
+      "open_questions": [],
+      "verdict": null,
+      "profiles": {
+        "implementer": "kiro"
+      },
+      "cost_usd": 0.0,
+      "iteration": 1,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/38",
+      "retry_after": "2026-10-08T10:01:45Z",
+      "continuation": "not_needed",
+      "exit_reason": "waiting_capacity: role implementer is unavailable: profile kiro is cooling until 2026-10-08T10:01Z (retry after 2026-10-08T10:01Z)"
+    }
+  ]
+}

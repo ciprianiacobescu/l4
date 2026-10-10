@@ -1,0 +1,514 @@
+{
+  "schema": "l4/verdict@1",
+  "round": 1,
+  "verdict": "PASS",
+  "base_sha": "54e8e5b9fe604dfb1addb5a04a754ee0a1b7ed9b",
+  "head_sha": "713cf17db1bc6c95066778ef507f572cb79cd17d",
+  "steps": [
+    {
+      "step": "0",
+      "name": "preconditions",
+      "status": "ok",
+      "seconds": 1.0,
+      "note": "base main@54e8e5b9fe contained"
+    },
+    {
+      "step": "1",
+      "name": "integrity",
+      "status": "ok",
+      "seconds": 0.1,
+      "note": "6 sub-checks; scope: 4 changed file(s)"
+    },
+    {
+      "step": "2",
+      "name": "build",
+      "status": "ok",
+      "seconds": 0.3,
+      "note": ""
+    },
+    {
+      "step": "3",
+      "name": "tests",
+      "status": "ok",
+      "seconds": 2.8,
+      "note": ""
+    },
+    {
+      "step": "4",
+      "name": "traceability",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "2/2 criteria covered"
+    },
+    {
+      "step": "4a",
+      "name": "audit sampling",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.audit_sample_ratio is 0"
+    },
+    {
+      "step": "5",
+      "name": "ui test generation",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "the unit changed no file under verifier.playwright.ui_paths"
+    },
+    {
+      "step": "6",
+      "name": "quality",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "100.0% of the changed executable lines ran"
+    },
+    {
+      "step": "8",
+      "name": "s1 judge",
+      "status": "not_run",
+      "seconds": 0.0,
+      "note": "verifier.s1.enabled is off"
+    },
+    {
+      "step": "9",
+      "name": "judge",
+      "status": "ok",
+      "seconds": 18.1,
+      "note": "1 call(s)"
+    },
+    {
+      "step": "10",
+      "name": "aggregation",
+      "status": "ok",
+      "seconds": 0.0,
+      "note": "PASS"
+    }
+  ],
+  "gates": [
+    {
+      "name": "setup",
+      "command": "uv sync --frozen",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2021Z-f04e/014-setup.log"
+    },
+    {
+      "name": "lint",
+      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2021Z-f04e/015-lint.log"
+    },
+    {
+      "name": "test",
+      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2021Z-f04e/016-test.log"
+    },
+    {
+      "name": "e2e",
+      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
+      "status": "pass",
+      "reason": "",
+      "log": ".l4-out/gates/r-20261006T2021Z-f04e/017-e2e.log"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "C-97756e71",
+      "alias": "reorder-quantity › Reorder quantity › Stock below the target is topped up",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_reorder::test_stock_below_the_target_is_topped_up"
+      ],
+      "s1_p": null
+    },
+    {
+      "id": "C-2d2a7548",
+      "alias": "reorder-quantity › Reorder quantity › Stock above the target is not ordered",
+      "result": "pass",
+      "judge": "pass",
+      "reason": "the judge passed it and a discriminating test passes",
+      "counterexample": null,
+      "tests": [
+        "tests.test_reorder::test_stock_above_the_target_is_not_ordered"
+      ],
+      "s1_p": null
+    }
+  ],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "Negative stock on hand is not pinned by any scenario",
+      "detail": "If on_hand is negative (for example, a backorder), the code returns target - on_hand, which is more than target. Another reasonable implementation would treat negative stock as 0, or raise an error. No scenario fixes which behaviour is intended.",
+      "source": "judge",
+      "criterion": "C-97756e71",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN the weekly order asks for inventory.reorder.reorder_quantity(-2, 10) THEN it returns 12.",
+      "id": "F-e3b4db5d"
+    },
+    {
+      "severity": "minor",
+      "title": "The at-target case is only in the requirement text, not in a scenario",
+      "detail": "The requirement says on_hand equal to target gives 0, but neither scenario covers that case. A strict '<' versus '<=' boundary could differ between implementations. The committed code returns 0, and the test asserts it.",
+      "source": "judge",
+      "criterion": "C-2d2a7548",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN the weekly order asks for inventory.reorder.reorder_quantity(10, 10) THEN it returns 0.",
+      "id": "F-211b0c9c"
+    },
+    {
+      "severity": "minor",
+      "title": "Negative target is not pinned by any scenario",
+      "detail": "If target is negative and on_hand is 0 or more, the code returns 0. Another implementation might reject a negative target instead. No scenario covers this.",
+      "source": "judge",
+      "criterion": "C-2d2a7548",
+      "log": null,
+      "spec_gap": true,
+      "suggested_fix": "WHEN the weekly order asks for inventory.reorder.reorder_quantity(0, -5) THEN it returns 0.",
+      "id": "F-ec2050ee"
+    }
+  ],
+  "holds": [],
+  "subject_sha": "713cf17db1bc6c95066778ef507f572cb79cd17d",
+  "family_criteria": [
+    "C-97756e71",
+    "C-2d2a7548"
+  ],
+  "reused_from": null,
+  "integrity": {
+    "checks": [
+      {
+        "name": "protected paths",
+        "status": "ok",
+        "note": "no protected path differs from the base"
+      },
+      {
+        "name": "pre-existing tests",
+        "status": "ok",
+        "note": "1 test file(s) compared with the base"
+      },
+      {
+        "name": "red-green freeze",
+        "status": "ok",
+        "note": "1 task(s): red and green compared"
+      },
+      {
+        "name": "content scan",
+        "status": "ok",
+        "note": "no result-manipulating construct in the changed support and runner files"
+      },
+      {
+        "name": "suppressions",
+        "status": "skipped",
+        "note": "no new suppression comment"
+      },
+      {
+        "name": "tdd history",
+        "status": "ok",
+        "note": "1 task(s); red tests passing at head: step 3"
+      }
+    ],
+    "findings": [],
+    "declared": [],
+    "human_protected": [],
+    "human_tests": [],
+    "unfrozen": []
+  },
+  "trace": [
+    {
+      "criterion": "C-97756e71",
+      "alias": "reorder-quantity › Reorder quantity › Stock below the target is topped up",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_reorder::test_stock_below_the_target_is_topped_up",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    },
+    {
+      "criterion": "C-2d2a7548",
+      "alias": "reorder-quantity › Reorder quantity › Stock above the target is not ordered",
+      "state": "covered",
+      "tests": [
+        {
+          "id": "tests.test_reorder::test_stock_above_the_target_is_not_ordered",
+          "status": "passed",
+          "proof": "zero_value",
+          "adequate": true
+        }
+      ],
+      "ignored": [],
+      "held": ""
+    }
+  ],
+  "audit": [],
+  "generated": [],
+  "s1": [],
+  "evidence": {
+    "schema": "l4/evidence@1",
+    "holds": [],
+    "items": {},
+    "scope": {
+      "declared": [
+        "src/inventory/reorder.py",
+        "tests",
+        "module inventory"
+      ],
+      "skipped": false,
+      "note": "",
+      "holds": [],
+      "files": [
+        {
+          "path": "openspec/changes/add-reorder-quantity/.l4/ledger/r-20261006T2021Z-f04e.jsonl",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "openspec/changes/add-reorder-quantity/tasks.md",
+          "module": null,
+          "kind": "exempt",
+          "label": null,
+          "reason": "exempt: harness, spec or documentation path"
+        },
+        {
+          "path": "src/inventory/reorder.py",
+          "module": "inventory",
+          "kind": "code",
+          "label": "relevant",
+          "reason": "named in the spec"
+        },
+        {
+          "path": "tests/test_reorder.py",
+          "module": null,
+          "kind": "test",
+          "label": "relevant",
+          "reason": "new test file"
+        }
+      ]
+    },
+    "diff_coverage": {
+      "status": "ok",
+      "reason": "",
+      "percent": 100.0,
+      "unmeasured_files": [],
+      "functions": [
+        {
+          "path": "src/inventory/reorder.py",
+          "qualname": "reorder_quantity",
+          "status": "covered",
+          "executable": 1,
+          "executed": 1,
+          "tests": [
+            "test_reorder.test_stock_above_the_target_is_not_ordered",
+            "test_reorder.test_stock_below_the_target_is_topped_up"
+          ],
+          "label": true
+        }
+      ]
+    },
+    "tests_ran": {
+      "tests_ok": true,
+      "summary": {
+        "total": 24,
+        "passed": 24,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "new": 2,
+        "new_passed": 2,
+        "skipped_unchanged": []
+      },
+      "findings": []
+    }
+  },
+  "human": [],
+  "fix": null,
+  "judge_verdict": {
+    "criteria": [
+      {
+        "id": "C-97756e71",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/reorder.py:3",
+            "quote": "return max(target - on_hand, 0)"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_reorder::test_stock_below_the_target_is_topped_up",
+            "quote": "assert reorder_quantity(4, 10) == 6"
+          }
+        ],
+        "reasoning": "max(10 - 4, 0) = 6. The traced test asserts exactly this call and result, and it passed in the test gate.",
+        "counterexample": null
+      },
+      {
+        "id": "C-2d2a7548",
+        "verdict": "pass",
+        "confidence": "high",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/reorder.py:3",
+            "quote": "return max(target - on_hand, 0)"
+          },
+          {
+            "kind": "test",
+            "ref": "tests.test_reorder::test_stock_above_the_target_is_not_ordered",
+            "quote": "assert reorder_quantity(12, 10) == 0"
+          }
+        ],
+        "reasoning": "max(10 - 12, 0) = max(-2, 0) = 0. The traced test asserts this call, plus the at-target case and a non-zero case so a stub that always returns zero cannot pass. It passed in the test gate.",
+        "counterexample": null
+      }
+    ],
+    "test_adequacy": [
+      {
+        "test": "tests.test_reorder::test_stock_below_the_target_is_topped_up",
+        "criterion": "C-97756e71",
+        "adequate": true,
+        "reason": "Calls reorder_quantity(4, 10) directly and asserts the return value is 6, which is the observable outcome the scenario requires.",
+        "generated_test_misreads_criterion": false
+      },
+      {
+        "test": "tests.test_reorder::test_stock_above_the_target_is_not_ordered",
+        "criterion": "C-2d2a7548",
+        "adequate": true,
+        "reason": "Asserts reorder_quantity(12, 10) == 0 as the scenario requires. The extra assertion (4, 10) == 6 rules out a stub that always returns zero, and (10, 10) == 0 covers the at-target case from the requirement text.",
+        "generated_test_misreads_criterion": false
+      }
+    ],
+    "findings": [
+      {
+        "severity": "minor",
+        "criterion": "C-97756e71",
+        "title": "Negative stock on hand is not pinned by any scenario",
+        "detail": "If on_hand is negative (for example, a backorder), the code returns target - on_hand, which is more than target. Another reasonable implementation would treat negative stock as 0, or raise an error. No scenario fixes which behaviour is intended.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/reorder.py:3",
+            "quote": "return max(target - on_hand, 0)"
+          }
+        ],
+        "suggested_fix": "WHEN the weekly order asks for inventory.reorder.reorder_quantity(-2, 10) THEN it returns 12.",
+        "spec_gap": true
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-2d2a7548",
+        "title": "The at-target case is only in the requirement text, not in a scenario",
+        "detail": "The requirement says on_hand equal to target gives 0, but neither scenario covers that case. A strict '<' versus '<=' boundary could differ between implementations. The committed code returns 0, and the test asserts it.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "tests/test_reorder.py:14",
+            "quote": "assert reorder_quantity(10, 10) == 0"
+          }
+        ],
+        "suggested_fix": "WHEN the weekly order asks for inventory.reorder.reorder_quantity(10, 10) THEN it returns 0.",
+        "spec_gap": true
+      },
+      {
+        "severity": "minor",
+        "criterion": "C-2d2a7548",
+        "title": "Negative target is not pinned by any scenario",
+        "detail": "If target is negative and on_hand is 0 or more, the code returns 0. Another implementation might reject a negative target instead. No scenario covers this.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "src/inventory/reorder.py:3",
+            "quote": "return max(target - on_hand, 0)"
+          }
+        ],
+        "suggested_fix": "WHEN the weekly order asks for inventory.reorder.reorder_quantity(0, -5) THEN it returns 0.",
+        "spec_gap": true
+      }
+    ],
+    "riskiest_assumptions": [
+      "That the module imports as inventory.reorder under the test configuration. The diff adds no __init__.py, but the gate report shows the reorder tests passed, which suggests the inventory package already exists.",
+      "That the gate report's per-test outcomes come from running the committed head shown in this diff and not some other revision.",
+      "That the int type annotation is enough for the 'returns the int' clause. With int inputs, max(int, 0) returns an int, but nothing enforces int inputs."
+    ]
+  },
+  "cx_runs": {},
+  "tests": {
+    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
+    "tests.test_cart::test_empty_cart_is_free_and_cart_with_amount_due_is_not_free": "passed",
+    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
+    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
+    "tests.test_cart::test_negative_price_rejected": "passed",
+    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
+    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
+    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
+    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
+    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
+    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
+    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
+    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
+    "tests.test_reorder::test_stock_below_the_target_is_topped_up": "passed",
+    "tests.test_reorder::test_stock_above_the_target_is_not_ordered": "passed",
+    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
+    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
+    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
+    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
+    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
+    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
+  },
+  "red_green": {
+    "tests.test_reorder::test_stock_above_the_target_is_not_ordered": "1.1",
+    "tests.test_reorder::test_stock_below_the_target_is_topped_up": "1.1"
+  },
+  "guards": [],
+  "prompt_sha256": "fa8181566af70e10dc5ad939df3daa29714fce8beebdc287e3701afb6fffa070",
+  "template": "judge@5",
+  "harness_commit": "4c922c4db5f35ee08267d95317c51e98f2f27c46",
+  "judge_calls": 1,
+  "profiles": {
+    "judge": "claude-code",
+    "implementer": [
+      "f-longcat"
+    ]
+  },
+  "judge_model": "claude-opus-5-5",
+  "independence": {
+    "mode": "different_vendor",
+    "status": "declared (unverified)",
+    "verified": false,
+    "judge": {
+      "profile": "claude-code",
+      "vendor": "anthropic",
+      "model": null,
+      "provenance": "served",
+      "served": "claude-opus-5-5"
+    },
+    "implementers": [
+      {
+        "profile": "f-longcat",
+        "vendor": "meituan",
+        "model": "opencode/longcat-2.5-preview-free",
+        "provenance": "declared",
+        "served": null
+      }
+    ]
+  },
+  "cost_usd": 0.0715294
+}

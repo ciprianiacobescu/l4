@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "l4harness"
+dynamic = ["version"]
+description = "CI-native harness for level-4 agentic development"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.5.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+l4 = "l4.cli:main"
+
+[dependency-groups]
+dev = [
+    "coverage>=7.16.2",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.hatch.version]
+path = "src/l4/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/l4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+markers = ["live: needs real tools or network; runs only with L4_LIVE=1"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src", "tests"]
+extend-exclude = ["scripts", "tests/eval/seeds", "docs/live"]  # standalone dev scripts and recorded live evidence (repros keep their defects)
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

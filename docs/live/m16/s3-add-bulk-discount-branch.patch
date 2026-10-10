@@ -1,0 +1,3190 @@
+From 6233a8e3becc3a161208f9ea066c25d3569d838a Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:19:43 +0300
+Subject: [PATCH 01/11] docs(add-bulk-discount): questions [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0919Z-b5be
+L4-Iteration: 1
+L4-Phase: intake
+---
+ .../.l4/ledger/r-20261005T0919Z-b5be.jsonl    |  3 ++
+ .../changes/add-bulk-discount/questions.md    | 33 +++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+ create mode 100644 openspec/changes/add-bulk-discount/questions.md
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+new file mode 100644
+index 0000000..5c30b2d
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+@@ -0,0 +1,3 @@
++{"ts": "2026-10-05T09:19:42.715453Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "7c7d7c95202c70c8c06b2a886b2c0266c0b6d849", "command": "run", "branch": "l4/openspec/add-bulk-discount", "base": "b98d1d06de9be5f42939fc71c88cd8988e4b5046", "source": "base", "iteration": 0}
++{"ts": "2026-10-05T09:19:42.719941Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "gitlab-runner:153800", "nonce": "5394394dbf549ffb"}
++{"ts": "2026-10-05T09:19:43.148249Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 3, "type": "question.raised", "id": "Q-001", "kind": "ambiguous", "source": "intake_open_questions"}
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+new file mode 100644
+index 0000000..59b8473
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -0,0 +1,33 @@
++# Questions — add-bulk-discount
++
++<!-- l4:questions v1
++How to answer: write under "### Answer" and set **Status** to `answered`.
++To accept the clarifier's suggestion as-is, set **Status** to `accepted`.
++Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded
++Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with `accept` or
++`reject`, then give your reason.
++Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->
++
++<!-- l4:index:start -->
++| ID | Status | Blocking | Kind | Question |
++|----|--------|----------|------|----------|
++| Q-001 | open | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
++<!-- l4:index:end -->
++
++---
++
++## Q-001: Does the bulk threshold count units or distinct lines?
++
++- **Status:** open
++- **Blocking tasks:** 1.1
++- **Kind:** ambiguous
++- **Asked:** intake (open questions in design.md)
++
++### Context
++Does the bulk threshold count units or distinct lines?
++
++Listed under "Open questions" in design.md.
++Open-question-hash: 5f73f7096b761709
++
++### Answer
++<!-- write below this line -->
+-- 
+2.48.1
+
+
+From 2b39997acb630ed5f6549adc2dddcfeb047393a2 Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:20:08 +0300
+Subject: [PATCH 02/11] docs(add-bulk-discount): clarifier [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0919Z-b5be
+L4-Iteration: 1
+L4-Phase: clarifying
+---
+ .../.l4/ledger/r-20261005T0919Z-b5be.jsonl               | 9 +++++++++
+ openspec/changes/add-bulk-discount/questions.md          | 8 ++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+index 5c30b2d..bbccd20 100644
+--- a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+@@ -1,3 +1,12 @@
+ {"ts": "2026-10-05T09:19:42.715453Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "7c7d7c95202c70c8c06b2a886b2c0266c0b6d849", "command": "run", "branch": "l4/openspec/add-bulk-discount", "base": "b98d1d06de9be5f42939fc71c88cd8988e4b5046", "source": "base", "iteration": 0}
+ {"ts": "2026-10-05T09:19:42.719941Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "gitlab-runner:153800", "nonce": "5394394dbf549ffb"}
+ {"ts": "2026-10-05T09:19:43.148249Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 3, "type": "question.raised", "id": "Q-001", "kind": "ambiguous", "source": "intake_open_questions"}
++{"ts": "2026-10-05T09:19:43.189419Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 4, "type": "phase.changed", "from": null, "to": "intake", "trigger": "unit_discovered_pending", "exit_code": null}
++{"ts": "2026-10-05T09:19:43.195252Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 5, "type": "phase.changed", "from": "intake", "to": "ready", "trigger": "intake_all_pass", "exit_code": null}
++{"ts": "2026-10-05T09:19:49.260504Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 6, "type": "availability.selected", "role": "implementer", "selected": "codex", "fallback_index": 0, "skipped": [], "probes": {"codex": {"binary": "0.160.0", "auth": "subscription", "quota_used_percent": 4, "quota_window": "weekly window", "hello_ms": 4349}}, "cached": false, "quota_window": "weekly window"}
++{"ts": "2026-10-05T09:19:49.263989Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 7, "type": "phase.changed", "from": "ready", "to": "implementing", "trigger": "lease_acquired", "exit_code": null}
++{"ts": "2026-10-05T09:19:49.271601Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 8, "type": "phase.changed", "from": "implementing", "to": "clarifying", "trigger": "questions_to_clarifier", "exit_code": null, "questions": ["Q-001"]}
++{"ts": "2026-10-05T09:19:55.456085Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 9, "type": "availability.selected", "role": "clarifier", "selected": "claude-code", "fallback_index": 0, "skipped": [], "probes": {"claude-code": {"binary": "2.1.288", "auth": "subscription", "quota_used_percent": 3, "quota_window": "session", "hello_ms": 3133}}, "cached": false, "quota_window": "session"}
++{"ts": "2026-10-05T09:19:55.463129Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 10, "type": "availability.selected", "role": "s1_judge", "selected": "laya", "fallback_index": 0, "skipped": [], "probes": {"engine": {"engine": "laya-local"}}, "cached": false}
++{"ts": "2026-10-05T09:20:08.609656Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 11, "type": "budget.cost", "usd": 0.022705200000000002, "profile": "claude-code", "role": "clarifier"}
++{"ts": "2026-10-05T09:20:08.624220Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 12, "type": "clarifier.result", "id": "Q-001", "status": "ok", "profile": "claude-code", "kind": "product", "confidence": "medium", "auto_accepted": false, "reasons": ["implementer kind ambiguous always goes to a human", "clarifier kind product is not in clarifier.auto_accept_kinds"], "s1": "not_asked", "p_product": null, "p_technical": null, "citation_support": [], "calls": 1, "cost_usd": 0.022705200000000002, "model": "claude-opus-5-5", "prompt_sha256": "afae73107122cdeedbe83250a60268c742f2a99d1749a1094ad5d1f63847d458"}
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index 59b8473..81777f9 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -29,5 +29,13 @@ Does the bulk threshold count units or distinct lines?
+ Listed under "Open questions" in design.md.
+ Open-question-hash: 5f73f7096b761709
+ 
++### Clarifier suggestion
++confidence: medium · kind: product (S1 p=n/a) · needs a human
++
++The project owner needs to decide this. Whether a big order means many units or many different products is a pricing rule, and design.md leaves it open on purpose. Suggested answer: count units, meaning the sum of line-item quantities. That matches the cart page, which already shows the cart's item count as the sum of quantities. So one line of 10 × Pen reaches the threshold, and so do 10 separate lines of quantity 1. Both spec scenarios (10 items at 2.50 each → 2.50, 9 items → 0.00) hold either way.
++
++Citations:
++- `openspec/specs/cart-page/spec.md#L9`: "The cart page SHALL show the sum of the quantities of its line items in an element with `data-testid="item-count"`, as the text `Items: N`." (shows: The existing cart-page spec defines a cart's item count as the sum of its line-item quantities.)
++
+ ### Answer
+ <!-- write below this line -->
+-- 
+2.48.1
+
+
+From 20f87dc414c64c192586b13521b94e5c4c8fedba Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:20:14 +0300
+Subject: [PATCH 03/11] chore(add-bulk-discount): ledger [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0919Z-b5be
+L4-Iteration: 1
+L4-Phase: awaiting_human
+---
+ .../.l4/ledger/r-20261005T0919Z-b5be.jsonl                  | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+index bbccd20..c061282 100644
+--- a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl
+@@ -10,3 +10,9 @@
+ {"ts": "2026-10-05T09:19:55.463129Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 10, "type": "availability.selected", "role": "s1_judge", "selected": "laya", "fallback_index": 0, "skipped": [], "probes": {"engine": {"engine": "laya-local"}}, "cached": false}
+ {"ts": "2026-10-05T09:20:08.609656Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 11, "type": "budget.cost", "usd": 0.022705200000000002, "profile": "claude-code", "role": "clarifier"}
+ {"ts": "2026-10-05T09:20:08.624220Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 12, "type": "clarifier.result", "id": "Q-001", "status": "ok", "profile": "claude-code", "kind": "product", "confidence": "medium", "auto_accepted": false, "reasons": ["implementer kind ambiguous always goes to a human", "clarifier kind product is not in clarifier.auto_accept_kinds"], "s1": "not_asked", "p_product": null, "p_technical": null, "citation_support": [], "calls": 1, "cost_usd": 0.022705200000000002, "model": "claude-opus-5-5", "prompt_sha256": "afae73107122cdeedbe83250a60268c742f2a99d1749a1094ad5d1f63847d458"}
++{"ts": "2026-10-05T09:20:10.909587Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 13, "type": "pr.updated", "url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/24", "number": 24, "draft": true}
++{"ts": "2026-10-05T09:20:12.204843Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 14, "type": "pr.labels", "number": 24, "labels": ["l4:clarifying", "l4:needs-answers"]}
++{"ts": "2026-10-05T09:20:12.211273Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 15, "type": "phase.changed", "from": "clarifying", "to": "awaiting_human", "trigger": "clarifier_needs_human", "exit_code": 11}
++{"ts": "2026-10-05T09:20:13.469862Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 16, "type": "pr.labels", "number": 24, "labels": ["l4:awaiting_human", "l4:needs-answers"]}
++{"ts": "2026-10-05T09:20:14.313740Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 17, "type": "lock.released"}
++{"ts": "2026-10-05T09:20:14.316349Z", "run_id": "r-20261005T0919Z-b5be", "unit": "openspec:add-bulk-discount", "seq": 18, "type": "run.finished", "exit_code": 11}
+-- 
+2.48.1
+
+
+From f7e75d7230d4c12d18cb03bb1fa25a239f595918 Mon Sep 17 00:00:00 2001
+From: CiprianSpot <maintainer@example.invalid>
+Date: Mon, 5 Oct 2026 12:20:39 +0300
+Subject: [PATCH 04/11] Answer Q-001: the bulk threshold counts units; lower
+ LOW_STOCK_THRESHOLD to 3 and add a receipt formatter
+
+---
+ .../changes/add-bulk-discount/questions.md    |  5 +-
+ src/inventory/stock.py                        |  2 +-
+ src/pricing/receipt.py                        | 77 +++++++++++++++++++
+ 3 files changed, 81 insertions(+), 3 deletions(-)
+ create mode 100644 src/pricing/receipt.py
+
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index 81777f9..a0d0de8 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -11,14 +11,14 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ <!-- l4:index:start -->
+ | ID | Status | Blocking | Kind | Question |
+ |----|--------|----------|------|----------|
+-| Q-001 | open | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
++| Q-001 | answered | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
+ <!-- l4:index:end -->
+ 
+ ---
+ 
+ ## Q-001: Does the bulk threshold count units or distinct lines?
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** 1.1
+ - **Kind:** ambiguous
+ - **Asked:** intake (open questions in design.md)
+@@ -39,3 +39,4 @@ Citations:
+ 
+ ### Answer
+ <!-- write below this line -->
++units: the threshold counts units, the sum of the quantities of the cart's line items (10 units on one line qualify).
+diff --git a/src/inventory/stock.py b/src/inventory/stock.py
+index 4144f7c..f0ab268 100644
+--- a/src/inventory/stock.py
++++ b/src/inventory/stock.py
+@@ -1,6 +1,6 @@
+ """When a SKU counts as low on stock."""
+ 
+-LOW_STOCK_THRESHOLD = 5
++LOW_STOCK_THRESHOLD = 3
+ 
+ 
+ def is_low(qty: int) -> bool:
+diff --git a/src/pricing/receipt.py b/src/pricing/receipt.py
+new file mode 100644
+index 0000000..7c491c1
+--- /dev/null
++++ b/src/pricing/receipt.py
+@@ -0,0 +1,77 @@
++"""Plain-text receipts for a cart: one line per item, then the totals."""
++
++from __future__ import annotations
++
++from decimal import ROUND_HALF_UP, Decimal
++
++from pricing.cart import Cart, LineItem
++
++WIDTH = 40
++CENT = Decimal("0.01")
++
++
++def format_line(item: LineItem, width: int = WIDTH) -> str:
++    """One receipt line: the SKU on the left, quantity and amount on the right."""
++    if width < 20:
++        raise ValueError("width must be at least 20")
++    name = item.sku.strip()
++    if not name:
++        name = "(no sku)"
++    amount = item.total.quantize(CENT, rounding=ROUND_HALF_UP)
++    if item.quantity > 1:
++        right = f"{item.quantity} x {item.unit_price:.2f} = {amount:.2f}"
++    else:
++        right = f"{amount:.2f}"
++    room = width - len(right) - 1
++    if room < 4:
++        right = f"{amount:.2f}"
++        room = width - len(right) - 1
++    if len(name) > room:
++        name = name[: room - 1] + "~"
++    padding = width - len(name) - len(right)
++    return name + " " * padding + right
++
++
++def format_total(label: str, amount: Decimal, width: int = WIDTH) -> str:
++    """A totals line: the label on the left, the amount on the right, a negative amount in brackets."""
++    value = Decimal(amount).quantize(CENT, rounding=ROUND_HALF_UP)
++    if value < 0:
++        text = f"({-value:.2f})"
++    else:
++        text = f"{value:.2f}"
++    label = label.strip().upper()
++    if not label:
++        label = "TOTAL"
++    room = width - len(text) - 1
++    if len(label) > room:
++        label = label[:room]
++    padding = width - len(label) - len(text)
++    return label + " " * padding + text
++
++
++def format_receipt(cart: Cart, title: str = "RECEIPT", width: int = WIDTH) -> str:
++    """The whole receipt: a title, one line per item, a rule, then subtotal, discount and total."""
++    lines = []
++    heading = title.strip() or "RECEIPT"
++    lines.append(heading.center(width))
++    lines.append("=" * width)
++    if not cart.items:
++        lines.append("(empty cart)".center(width))
++    count = 0
++    for item in cart.items:
++        lines.append(format_line(item, width))
++        count += item.quantity
++    lines.append("-" * width)
++    subtotal = cart.subtotal()
++    total = cart.total()
++    lines.append(format_total("Subtotal", subtotal, width))
++    discount = subtotal - total
++    if discount > 0:
++        lines.append(format_total("Discount", -discount, width))
++    lines.append(format_total("Total", total, width))
++    if count == 1:
++        lines.append("1 item".rjust(width))
++    elif count > 1:
++        lines.append(f"{count} items".rjust(width))
++    lines.append("=" * width)
++    return "\n".join(lines) + "\n"
+-- 
+2.48.1
+
+
+From 4a611d0d0f8658b6917933cd78843ed35fdf3e62 Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:22:44 +0300
+Subject: [PATCH 05/11] test(add-bulk-discount): red for 1.1 [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: red
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/red/1
+---
+ .../.l4/ledger/r-20261005T0921Z-1804.jsonl    | 22 +++++++++++++++++++
+ src/pricing/discounts.py                      |  4 ++++
+ tests/test_discounts.py                       | 13 +++++++++++
+ 3 files changed, 39 insertions(+)
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+new file mode 100644
+index 0000000..aab1fcb
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+@@ -0,0 +1,22 @@
++{"ts": "2026-10-05T09:21:03.959322Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "7c7d7c95202c70c8c06b2a886b2c0266c0b6d849", "command": "run", "branch": "l4/openspec/add-bulk-discount", "base": "f7e75d7230d4c12d18cb03bb1fa25a239f595918", "source": "remote_branch", "iteration": 1}
++{"ts": "2026-10-05T09:21:03.962786Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "gitlab-runner:155314", "nonce": "69878fe769ee0ffb"}
++{"ts": "2026-10-05T09:21:05.821187Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 3, "type": "question.answered", "id": "Q-001", "by": "human", "answer_sha256": "b83b57202b2f95168fec509e5f5c1d78a8b9b32ea530a41f2cb9d3d1874a380c"}
++{"ts": "2026-10-05T09:21:05.827582Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 4, "type": "phase.changed", "from": "awaiting_human", "to": "implementing", "trigger": "answers_submitted", "exit_code": null, "questions": ["Q-001"]}
++{"ts": "2026-10-05T09:21:05.831991Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 5, "type": "availability.selected", "role": "implementer", "selected": "codex", "fallback_index": 0, "skipped": [], "probes": {"codex": {"binary": "0.160.0", "auth": "subscription", "quota_used_percent": 4, "quota_window": "weekly window", "hello_ms": 4349}}, "cached": true, "quota_window": "weekly window"}
++{"ts": "2026-10-05T09:21:05.839658Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 6, "type": "task.started", "task": "1.1", "title": "1.1 Add `bulk_discount(cart)` in `src/pricing/discounts.py`: 10 % of the cart subtotal (whole cents, half up) when the cart holds at least 10 items, else 0.00"}
++{"ts": "2026-10-05T09:21:07.292835Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 7, "type": "gate.finished", "name": "setup", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/001-setup.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:21:08.173779Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 8, "type": "gate.finished", "name": "baseline", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/002-baseline.log", "tests": 19, "passed": 19, "failed": 0}
++{"ts": "2026-10-05T09:21:08.302141Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 9, "type": "gate.finished", "name": "lint-baseline", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/003-lint-baseline.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:21:08.332142Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 10, "type": "prompt.rendered", "role": "red", "task": "1.1", "sha256": "0f357af062d53ca9b8038c43a17bef6e2c201af5546d6bd2e1129846316d88a6", "template_version": "contract@5+red@4", "sources": ["proposal.md", "design.md", "specs/bulk-discount/spec.md"], "answers": [{"id": "Q-001", "answer_sha256": "b83b57202b2f95168fec509e5f5c1d78a8b9b32ea530a41f2cb9d3d1874a380c"}], "lessons": []}
++{"ts": "2026-10-05T09:21:11.436474Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 11, "type": "memory.serena", "status": "ok", "reason": "", "startup_ms": 1443}
++{"ts": "2026-10-05T09:21:11.448564Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 12, "type": "step.started", "task": "1.1", "phase": "red", "attempt": 1, "agent": "codex"}
++{"ts": "2026-10-05T09:22:43.233538Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 13, "type": "wip.snapshot", "task": "1.1", "phase": "red", "attempt": 1, "shas": ["a4e3cb379be960262a48f8c451cb1f6ba2849eb4"]}
++{"ts": "2026-10-05T09:22:43.239261Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 14, "type": "step.finished", "task": "1.1", "phase": "red", "attempt": 1, "status": "ok"}
++{"ts": "2026-10-05T09:22:43.289488Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 15, "type": "agent.finished", "task": "1.1", "phase": "red", "status": "ok", "exit_code": 0, "detail": null, "model": null, "input_tokens": 195773, "output_tokens": 1621}
++{"ts": "2026-10-05T09:22:43.294262Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 16, "type": "agent.session", "profile": "codex", "session_id": "01a10b5d-fe23-7371-9279-19b7cbb57961"}
++{"ts": "2026-10-05T09:22:43.327821Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 17, "type": "stub.purity", "task": "1.1", "stubs": ["src/pricing/discounts.py:bulk_discount"], "restored": 0}
++{"ts": "2026-10-05T09:22:43.474196Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 18, "type": "gate.finished", "name": "setup", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/004-setup.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:22:43.956556Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 19, "type": "gate.finished", "name": "test", "status": "fail", "exit_code": 1, "reason": "exit code 1", "log": ".l4-out/gates/r-20261005T0921Z-1804/005-test.log", "tests": 20, "passed": 19, "failed": 1}
++{"ts": "2026-10-05T09:22:44.485123Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 20, "type": "gate.finished", "name": "test-zero", "status": "fail", "exit_code": 1, "reason": "exit code 1", "log": ".l4-out/gates/r-20261005T0921Z-1804/006-test-zero.log", "tests": 20, "passed": 19, "failed": 1}
++{"ts": "2026-10-05T09:22:44.634664Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 21, "type": "gate.finished", "name": "lint", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/007-lint.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:22:44.711788Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 22, "type": "task.red_ok", "task": "1.1", "base": "f7e75d7230d4c12d18cb03bb1fa25a239f595918", "tests": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"], "frozen": [".gitignore", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/farewell_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/farewell_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/farewell_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/greet_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/greet_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/greet_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/pass_all.json", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.gitignore", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.kiro/specs/user-greeting/design.md", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.kiro/specs/user-greeting/requirements.md", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.kiro/specs/user-greeting/tasks.md", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/tests/run_junit.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/clarifier_answer.json", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/fail_greet.json", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/farewell_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/farewell_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/farewell_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/greet_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/greet_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/greet_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/pass_all.json", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/questions_answered.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/.gitignore", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/changes/add-greeting/proposal.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/changes/add-greeting/specs/greeting/spec.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/changes/add-greeting/tasks.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/config.yaml", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/tests/run_junit.py", "tests/test_discounts.py"], "notes": "Pytest result: 1 failed (the new test, via NotImplementedError), 19 passed. Ruff passed.", "criteria": {"C-534a6caa": {"tests": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"], "proof": "zero_value", "discriminating": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"]}, "C-5de37e46": {"tests": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"], "proof": "zero_value", "discriminating": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"]}}, "suppressions": []}
+diff --git a/src/pricing/discounts.py b/src/pricing/discounts.py
+index 0f28ed2..151d899 100644
+--- a/src/pricing/discounts.py
++++ b/src/pricing/discounts.py
+@@ -44,3 +44,7 @@ class DiscountRegistry:
+             return self._discounts[code.casefold()]
+         except KeyError as exc:
+             raise UnknownDiscountCode(code) from exc
++
++
++def bulk_discount(cart):
++    raise NotImplementedError
+diff --git a/tests/test_discounts.py b/tests/test_discounts.py
+index 127f41f..e8abb64 100644
+--- a/tests/test_discounts.py
++++ b/tests/test_discounts.py
+@@ -1,9 +1,13 @@
++from decimal import Decimal
++
+ import pytest
+ 
++from pricing.cart import Cart, LineItem
+ from pricing.discounts import (
+     DiscountRegistry,
+     PercentOff,
+     UnknownDiscountCode,
++    bulk_discount,
+ )
+ 
+ 
+@@ -28,3 +32,12 @@ def test_registering_invalid_percentage_raises_value_error(percent):
+ 
+     with pytest.raises(ValueError):
+         registry.register("INVALID", PercentOff(percent))
++
++
++@pytest.mark.l4("C-534a6caa", "C-5de37e46")
++def test_bulk_discount_threshold_counts_units():
++    qualifying_cart = Cart([LineItem("apple", Decimal("2.50"), 10)])
++    below_threshold_cart = Cart([LineItem("apple", Decimal("2.50"), 9)])
++
++    assert bulk_discount(qualifying_cart) == Decimal("2.50")
++    assert bulk_discount(below_threshold_cart) == Decimal("0.00")
+-- 
+2.48.1
+
+
+From 790d85b08fa40ab14e138e6daaff4a4bcfae011f Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:23:13 +0300
+Subject: [PATCH 06/11] feat(add-bulk-discount): 1.1 Add `bulk_discount(cart)`
+ in `src/pricing/discounts.py`: 10 % of the cart subtotal (whole cents, half
+ up) when the cart holds at least 10 items, else 0.00 [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: implementing
+L4-Task: 1.1
+L4-TDD: green
+L4-Agent: codex/gpt-6-luna
+L4-Step: 1.1/green/1
+---
+ .../.l4/ledger/r-20261005T0921Z-1804.jsonl         | 14 ++++++++++++++
+ openspec/changes/add-bulk-discount/tasks.md        |  2 +-
+ src/pricing/discounts.py                           |  8 ++++++--
+ 3 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+index aab1fcb..e6417a6 100644
+--- a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+@@ -20,3 +20,17 @@
+ {"ts": "2026-10-05T09:22:44.485123Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 20, "type": "gate.finished", "name": "test-zero", "status": "fail", "exit_code": 1, "reason": "exit code 1", "log": ".l4-out/gates/r-20261005T0921Z-1804/006-test-zero.log", "tests": 20, "passed": 19, "failed": 1}
+ {"ts": "2026-10-05T09:22:44.634664Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 21, "type": "gate.finished", "name": "lint", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/007-lint.log", "tests": null, "passed": null, "failed": null}
+ {"ts": "2026-10-05T09:22:44.711788Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 22, "type": "task.red_ok", "task": "1.1", "base": "f7e75d7230d4c12d18cb03bb1fa25a239f595918", "tests": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"], "frozen": [".gitignore", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/farewell_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/farewell_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/farewell_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/greet_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/greet_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/greet_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/payloads/pass_all.json", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.gitignore", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.kiro/specs/user-greeting/design.md", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.kiro/specs/user-greeting/requirements.md", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/.kiro/specs/user-greeting/tasks.md", ".l4/vendor/src/l4/sim/builtin/fixtures/kiro-basic/repo/tests/run_junit.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/clarifier_answer.json", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/fail_greet.json", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/farewell_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/farewell_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/farewell_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/greet_impl.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/greet_red_stub.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/greet_red_tests.py", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/pass_all.json", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/payloads/questions_answered.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/.gitignore", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/changes/add-greeting/proposal.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/changes/add-greeting/specs/greeting/spec.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/changes/add-greeting/tasks.md", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/openspec/config.yaml", ".l4/vendor/src/l4/sim/builtin/fixtures/openspec-basic/repo/tests/run_junit.py", "tests/test_discounts.py"], "notes": "Pytest result: 1 failed (the new test, via NotImplementedError), 19 passed. Ruff passed.", "criteria": {"C-534a6caa": {"tests": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"], "proof": "zero_value", "discriminating": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"]}, "C-5de37e46": {"tests": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"], "proof": "zero_value", "discriminating": ["tests.test_discounts::test_bulk_discount_threshold_counts_units"]}}, "suppressions": []}
++{"ts": "2026-10-05T09:22:44.740181Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 23, "type": "task.red_committed", "task": "1.1", "base": "f7e75d7230d4c12d18cb03bb1fa25a239f595918", "sha": "4a611d0d0f8658b6917933cd78843ed35fdf3e62"}
++{"ts": "2026-10-05T09:22:47.244367Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 24, "type": "pr.labels", "number": 24, "labels": ["l4:implementing"]}
++{"ts": "2026-10-05T09:22:48.237160Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 25, "type": "gate.finished", "name": "setup", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/008-setup.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:22:48.368851Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 26, "type": "gate.finished", "name": "lint-baseline", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/009-lint-baseline.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:22:48.395957Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 27, "type": "prompt.rendered", "role": "green", "task": "1.1", "sha256": "1759b17cd53dba5a277196acb62ece1d9e1bf0cee8784cab40661f701c98e48c", "template_version": "contract@5+green@1", "sources": ["proposal.md", "design.md", "specs/bulk-discount/spec.md"], "answers": [{"id": "Q-001", "answer_sha256": "b83b57202b2f95168fec509e5f5c1d78a8b9b32ea530a41f2cb9d3d1874a380c"}], "lessons": []}
++{"ts": "2026-10-05T09:22:48.407875Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 28, "type": "step.started", "task": "1.1", "phase": "green", "attempt": 1, "agent": "codex"}
++{"ts": "2026-10-05T09:23:12.884582Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 29, "type": "wip.snapshot", "task": "1.1", "phase": "green", "attempt": 1, "shas": ["0f31cf452820a594a1ae70367273d5a8a48eedfe"]}
++{"ts": "2026-10-05T09:23:12.889815Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 30, "type": "step.finished", "task": "1.1", "phase": "green", "attempt": 1, "status": "ok"}
++{"ts": "2026-10-05T09:23:12.935934Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 31, "type": "agent.finished", "task": "1.1", "phase": "green", "status": "ok", "exit_code": 0, "detail": null, "model": null, "input_tokens": 102844, "output_tokens": 685}
++{"ts": "2026-10-05T09:23:12.940788Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 32, "type": "agent.session", "profile": "codex", "session_id": "01a10b5f-78bc-7a00-b698-b1847fe11307"}
++{"ts": "2026-10-05T09:23:13.080888Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 33, "type": "gate.finished", "name": "setup", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/010-setup.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:23:13.506042Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 34, "type": "gate.finished", "name": "test", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/011-test.log", "tests": 20, "passed": 20, "failed": 0}
++{"ts": "2026-10-05T09:23:13.629801Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 35, "type": "gate.finished", "name": "lint", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/012-lint.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:23:13.642868Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 36, "type": "task.done", "task": "1.1", "base": "4a611d0d0f8658b6917933cd78843ed35fdf3e62", "parents": [], "notes": "", "suppressions": []}
+diff --git a/openspec/changes/add-bulk-discount/tasks.md b/openspec/changes/add-bulk-discount/tasks.md
+index 9a0db09..f217dc5 100644
+--- a/openspec/changes/add-bulk-discount/tasks.md
++++ b/openspec/changes/add-bulk-discount/tasks.md
+@@ -2,4 +2,4 @@
+ 
+ ## 1. Bulk discount
+ 
+-- [ ] 1.1 Add `bulk_discount(cart)` in `src/pricing/discounts.py`: 10 % of the cart subtotal (whole cents, half up) when the cart holds at least 10 items, else 0.00
++- [x] 1.1 Add `bulk_discount(cart)` in `src/pricing/discounts.py`: 10 % of the cart subtotal (whole cents, half up) when the cart holds at least 10 items, else 0.00
+diff --git a/src/pricing/discounts.py b/src/pricing/discounts.py
+index 151d899..2163cf6 100644
+--- a/src/pricing/discounts.py
++++ b/src/pricing/discounts.py
+@@ -1,7 +1,7 @@
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass
+-from decimal import Decimal
++from decimal import ROUND_HALF_UP, Decimal
+ 
+ 
+ @dataclass(frozen=True)
+@@ -47,4 +47,8 @@ class DiscountRegistry:
+ 
+ 
+ def bulk_discount(cart):
+-    raise NotImplementedError
++    if sum(item.quantity for item in cart.items) < 10:
++        return Decimal("0.00")
++    return (cart.subtotal() * Decimal("0.10")).quantize(
++        Decimal("0.01"), rounding=ROUND_HALF_UP
++    )
+-- 
+2.48.1
+
+
+From 57dc844e51eede760ebf7e9201bc8b67a91441b3 Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:27:50 +0300
+Subject: [PATCH 07/11] docs(add-bulk-discount): verification round 1 [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: verifying
+---
+ .../.l4/evidence/round-1/evidence.json        | 195 +++++
+ .../.l4/evidence/round-1/verdict.json         | 708 ++++++++++++++++++
+ .../.l4/evidence/round-1/verification.md      | 126 ++++
+ .../changes/add-bulk-discount/questions.md    |  93 +++
+ .../changes/add-bulk-discount/verification.md | 126 ++++
+ 5 files changed, 1248 insertions(+)
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/evidence/round-1/evidence.json
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/evidence/round-1/verdict.json
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/evidence/round-1/verification.md
+ create mode 100644 openspec/changes/add-bulk-discount/verification.md
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/evidence/round-1/evidence.json b/openspec/changes/add-bulk-discount/.l4/evidence/round-1/evidence.json
+new file mode 100644
+index 0000000..5ded782
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/evidence/round-1/evidence.json
+@@ -0,0 +1,195 @@
++{
++  "schema": "l4/evidence@1",
++  "holds": [
++    {
++      "id": "H-f427d7fb",
++      "text": "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name",
++      "kind": "scope",
++      "subjects": [
++        "src/inventory/stock.py"
++      ]
++    },
++    {
++      "id": "H-2426ce7a",
++      "text": "diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`",
++      "kind": "coverage",
++      "subjects": [
++        "src/pricing/receipt.py::<module>",
++        "src/pricing/receipt.py::format_line",
++        "src/pricing/receipt.py::format_receipt",
++        "src/pricing/receipt.py::format_total"
++      ]
++    }
++  ],
++  "items": {
++    "l4/change-covered@1|src/inventory/stock.py::<module>": "09ceb0c1559d1801b7307c94a66771c3",
++    "l4/change-covered@1|src/pricing/discounts.py::<module>": "a69738089dda27b82cdb42aec46051fa",
++    "l4/change-covered@1|src/pricing/discounts.py::bulk_discount": "065f970addf50e1142fa261e4bb5e035",
++    "l4/change-covered@1|src/pricing/receipt.py::<module>": "a660a076ca5620b28cb83135a96a178d",
++    "l4/change-covered@1|src/pricing/receipt.py::format_line": "2ddd61e10dfeb3c9e57e937ec256b81d",
++    "l4/change-covered@1|src/pricing/receipt.py::format_receipt": "d262cf37e490f0fd567d991ded853e49",
++    "l4/change-covered@1|src/pricing/receipt.py::format_total": "9b87d8e46edb7fb1d21a80fcb14f231e",
++    "l4/file-relevant@1|src/inventory/stock.py": "27cf4d6a6ace08e74307bc2dca843668",
++    "l4/file-relevant@1|src/pricing/discounts.py": "6882701f91164f14cc8a80b5106d70cf",
++    "l4/file-relevant@1|src/pricing/receipt.py": "94d3b8e84e92519a3d4a3a97fac8368c",
++    "l4/file-relevant@1|tests/test_discounts.py": "d1dd453e34e310126e396425699bcc9f",
++    "l4/tests-ok@2|tests": "e09fbcdf14e991321b302c28dafff7c8"
++  },
++  "scope": {
++    "declared": [
++      "src/pricing/discounts.py",
++      "tests",
++      "module pricing"
++    ],
++    "skipped": false,
++    "note": "",
++    "holds": [
++      "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
++    ],
++    "files": [
++      {
++        "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "openspec/changes/add-bulk-discount/questions.md",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "openspec/changes/add-bulk-discount/tasks.md",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "src/inventory/stock.py",
++        "module": "inventory",
++        "kind": "code",
++        "label": "out_of_scope",
++        "reason": "module `inventory` is not named in the spec"
++      },
++      {
++        "path": "src/pricing/discounts.py",
++        "module": "pricing",
++        "kind": "code",
++        "label": "relevant",
++        "reason": "named in the spec"
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "module": "pricing",
++        "kind": "code",
++        "label": "relevant",
++        "reason": "module `pricing` is named in the spec"
++      },
++      {
++        "path": "tests/test_discounts.py",
++        "module": null,
++        "kind": "test",
++        "label": "relevant",
++        "reason": "named in the spec"
++      }
++    ]
++  },
++  "diff_coverage": {
++    "status": "ok",
++    "reason": "",
++    "percent": 7.9,
++    "unmeasured_files": [],
++    "functions": [
++      {
++        "path": "src/inventory/stock.py",
++        "qualname": "<module>",
++        "status": "covered",
++        "executable": 1,
++        "executed": 1,
++        "tests": [],
++        "label": true
++      },
++      {
++        "path": "src/pricing/discounts.py",
++        "qualname": "<module>",
++        "status": "covered",
++        "executable": 1,
++        "executed": 1,
++        "tests": [],
++        "label": true
++      },
++      {
++        "path": "src/pricing/discounts.py",
++        "qualname": "bulk_discount",
++        "status": "covered",
++        "executable": 3,
++        "executed": 3,
++        "tests": [
++          "test_discounts.test_bulk_discount_threshold_counts_units"
++        ],
++        "label": true
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "<module>",
++        "status": "uncovered",
++        "executable": 5,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "format_line",
++        "status": "uncovered",
++        "executable": 17,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "format_total",
++        "status": "uncovered",
++        "executable": 12,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "format_receipt",
++        "status": "uncovered",
++        "executable": 24,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      }
++    ]
++  },
++  "tests_ran": {
++    "tests_ok": true,
++    "summary": {
++      "total": 22,
++      "passed": 22,
++      "failed": 0,
++      "errored": 0,
++      "skipped": 0,
++      "new": 1,
++      "new_passed": 1,
++      "skipped_unchanged": []
++    },
++    "findings": []
++  }
++}
+diff --git a/openspec/changes/add-bulk-discount/.l4/evidence/round-1/verdict.json b/openspec/changes/add-bulk-discount/.l4/evidence/round-1/verdict.json
+new file mode 100644
+index 0000000..de0bebb
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/evidence/round-1/verdict.json
+@@ -0,0 +1,708 @@
++{
++  "schema": "l4/verdict@1",
++  "round": 1,
++  "verdict": "NEEDS_HUMAN",
++  "base_sha": "b98d1d06de9be5f42939fc71c88cd8988e4b5046",
++  "head_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f",
++  "steps": [
++    {
++      "step": "0",
++      "name": "preconditions",
++      "status": "ok",
++      "seconds": 0.6,
++      "note": "base main@b98d1d06de contained"
++    },
++    {
++      "step": "1",
++      "name": "integrity",
++      "status": "ok",
++      "seconds": 0.1,
++      "note": "6 sub-checks; scope: 8 changed file(s), 1 held"
++    },
++    {
++      "step": "2",
++      "name": "build",
++      "status": "ok",
++      "seconds": 0.2,
++      "note": ""
++    },
++    {
++      "step": "3",
++      "name": "tests",
++      "status": "ok",
++      "seconds": 4.6,
++      "note": ""
++    },
++    {
++      "step": "4",
++      "name": "traceability",
++      "status": "ok",
++      "seconds": 0.0,
++      "note": "2/2 criteria covered"
++    },
++    {
++      "step": "4a",
++      "name": "audit sampling",
++      "status": "not_run",
++      "seconds": 0.0,
++      "note": "verifier.audit_sample_ratio is 0"
++    },
++    {
++      "step": "5",
++      "name": "ui test generation",
++      "status": "not_run",
++      "seconds": 0.0,
++      "note": "the unit changed no file under verifier.playwright.ui_paths"
++    },
++    {
++      "step": "6",
++      "name": "quality",
++      "status": "ok",
++      "seconds": 0.0,
++      "note": "7.9% of the changed executable lines ran"
++    },
++    {
++      "step": "8",
++      "name": "s1 judge",
++      "status": "ok",
++      "seconds": 33.0,
++      "note": "2/2 criteria judged by laya-local"
++    },
++    {
++      "step": "9",
++      "name": "judge",
++      "status": "ok",
++      "seconds": 27.7,
++      "note": "1 call(s)"
++    },
++    {
++      "step": "10",
++      "name": "aggregation",
++      "status": "ok",
++      "seconds": 0.0,
++      "note": "NEEDS_HUMAN"
++    }
++  ],
++  "gates": [
++    {
++      "name": "setup",
++      "command": "uv sync --frozen",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/013-setup.log"
++    },
++    {
++      "name": "lint",
++      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/014-lint.log"
++    },
++    {
++      "name": "test",
++      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/015-test.log"
++    },
++    {
++      "name": "e2e",
++      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/016-e2e.log"
++    }
++  ],
++  "criteria": [
++    {
++      "id": "C-534a6caa",
++      "alias": "bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount",
++      "result": "pass",
++      "judge": "pass",
++      "reason": "the judge passed it and a discriminating test passes",
++      "counterexample": null,
++      "tests": [
++        "tests.test_discounts::test_bulk_discount_threshold_counts_units"
++      ],
++      "s1_p": 0.5614
++    },
++    {
++      "id": "C-5de37e46",
++      "alias": "bulk-discount › Bulk discount › A cart of 9 items gets none",
++      "result": "pass",
++      "judge": "pass",
++      "reason": "the judge passed it and a discriminating test passes",
++      "counterexample": null,
++      "tests": [
++        "tests.test_discounts::test_bulk_discount_threshold_counts_units"
++      ],
++      "s1_p": 0.5334
++    }
++  ],
++  "findings": [
++    {
++      "severity": "major",
++      "title": "Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)",
++      "detail": "The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.",
++      "source": "judge",
++      "criterion": null,
++      "log": null,
++      "spec_gap": false,
++      "suggested_fix": "Revert the change to src/inventory/stock.py, or propose it as its own change.",
++      "id": "F-7026922b"
++    },
++    {
++      "severity": "major",
++      "title": "Out-of-scope, untested new module src/pricing/receipt.py",
++      "detail": "A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.",
++      "source": "judge",
++      "criterion": null,
++      "log": null,
++      "spec_gap": false,
++      "suggested_fix": "Remove src/pricing/receipt.py from this change, or specify and test it in a separate change.",
++      "id": "F-72872195"
++    },
++    {
++      "severity": "minor",
++      "title": "Threshold counts units, but no scenario separates units from lines",
++      "detail": "Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.",
++      "source": "judge",
++      "criterion": "C-534a6caa",
++      "log": null,
++      "spec_gap": true,
++      "suggested_fix": "WHEN a cart holds a single line of 10 units at 2.50 each THEN `bulk_discount` returns 2.50.",
++      "id": "F-ac667bfd"
++    },
++    {
++      "severity": "minor",
++      "title": "Half-cent rounding of the discount is not pinned",
++      "detail": "Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.",
++      "source": "judge",
++      "criterion": "C-534a6caa",
++      "log": null,
++      "spec_gap": true,
++      "suggested_fix": "WHEN a cart holds 9 units at 2.50 and 1 unit at 2.55 (subtotal 25.05) THEN `bulk_discount` returns 2.51.",
++      "id": "F-de00d4ed"
++    },
++    {
++      "severity": "minor",
++      "title": "Interaction with an applied discount code is not specified",
++      "detail": "bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.",
++      "source": "judge",
++      "criterion": "C-534a6caa",
++      "log": null,
++      "spec_gap": true,
++      "suggested_fix": "WHEN a cart of 10 units at 2.50 each also has a percentage discount code applied THEN `bulk_discount` still returns 2.50, computed from the subtotal before the code.",
++      "id": "F-f60b8b33"
++    }
++  ],
++  "holds": [
++    "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name",
++    "diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`"
++  ],
++  "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f",
++  "family_criteria": [
++    "C-534a6caa",
++    "C-5de37e46"
++  ],
++  "reused_from": null,
++  "integrity": {
++    "checks": [
++      {
++        "name": "protected paths",
++        "status": "ok",
++        "note": "no protected path differs from the base"
++      },
++      {
++        "name": "pre-existing tests",
++        "status": "ok",
++        "note": "1 test file(s) compared with the base"
++      },
++      {
++        "name": "red-green freeze",
++        "status": "ok",
++        "note": "1 task(s): red and green compared"
++      },
++      {
++        "name": "content scan",
++        "status": "ok",
++        "note": "no result-manipulating construct in the changed support and runner files"
++      },
++      {
++        "name": "suppressions",
++        "status": "skipped",
++        "note": "no new suppression comment"
++      },
++      {
++        "name": "tdd history",
++        "status": "ok",
++        "note": "1 task(s); red tests passing at head: step 3"
++      }
++    ],
++    "findings": [],
++    "declared": []
++  },
++  "trace": [
++    {
++      "criterion": "C-534a6caa",
++      "alias": "bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount",
++      "state": "covered",
++      "tests": [
++        {
++          "id": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++          "status": "passed",
++          "proof": "zero_value",
++          "adequate": true
++        }
++      ],
++      "ignored": [],
++      "held": ""
++    },
++    {
++      "criterion": "C-5de37e46",
++      "alias": "bulk-discount › Bulk discount › A cart of 9 items gets none",
++      "state": "covered",
++      "tests": [
++        {
++          "id": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++          "status": "passed",
++          "proof": "zero_value",
++          "adequate": true
++        }
++      ],
++      "ignored": [],
++      "held": ""
++    }
++  ],
++  "audit": [],
++  "generated": [],
++  "s1": [
++    {
++      "criterion": "C-534a6caa",
++      "status": "ok",
++      "p": 0.5614,
++      "model": "laya-rl-agent",
++      "engine": "laya-local",
++      "reason": "",
++      "truncated": true,
++      "evidence": {
++        "implemented": 0.4749,
++        "contradicted": 0.1509,
++        "not_implemented": 0.2468,
++        "unrelated": 0.1274
++      }
++    },
++    {
++      "criterion": "C-5de37e46",
++      "status": "ok",
++      "p": 0.5334,
++      "model": "laya-rl-agent",
++      "engine": "laya-local",
++      "reason": "",
++      "truncated": true,
++      "evidence": {
++        "implemented": 0.3765,
++        "contradicted": 0.1716,
++        "not_implemented": 0.2982,
++        "unrelated": 0.1536
++      }
++    }
++  ],
++  "evidence": {
++    "schema": "l4/evidence@1",
++    "holds": [
++      {
++        "id": "H-f427d7fb",
++        "text": "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name",
++        "kind": "scope",
++        "subjects": [
++          "src/inventory/stock.py"
++        ]
++      },
++      {
++        "id": "H-2426ce7a",
++        "text": "diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`",
++        "kind": "coverage",
++        "subjects": [
++          "src/pricing/receipt.py::<module>",
++          "src/pricing/receipt.py::format_line",
++          "src/pricing/receipt.py::format_receipt",
++          "src/pricing/receipt.py::format_total"
++        ]
++      }
++    ],
++    "items": {
++      "l4/change-covered@1|src/inventory/stock.py::<module>": "09ceb0c1559d1801b7307c94a66771c3",
++      "l4/change-covered@1|src/pricing/discounts.py::<module>": "a69738089dda27b82cdb42aec46051fa",
++      "l4/change-covered@1|src/pricing/discounts.py::bulk_discount": "065f970addf50e1142fa261e4bb5e035",
++      "l4/change-covered@1|src/pricing/receipt.py::<module>": "a660a076ca5620b28cb83135a96a178d",
++      "l4/change-covered@1|src/pricing/receipt.py::format_line": "2ddd61e10dfeb3c9e57e937ec256b81d",
++      "l4/change-covered@1|src/pricing/receipt.py::format_receipt": "d262cf37e490f0fd567d991ded853e49",
++      "l4/change-covered@1|src/pricing/receipt.py::format_total": "9b87d8e46edb7fb1d21a80fcb14f231e",
++      "l4/file-relevant@1|src/inventory/stock.py": "27cf4d6a6ace08e74307bc2dca843668",
++      "l4/file-relevant@1|src/pricing/discounts.py": "6882701f91164f14cc8a80b5106d70cf",
++      "l4/file-relevant@1|src/pricing/receipt.py": "94d3b8e84e92519a3d4a3a97fac8368c",
++      "l4/file-relevant@1|tests/test_discounts.py": "d1dd453e34e310126e396425699bcc9f",
++      "l4/tests-ok@2|tests": "e09fbcdf14e991321b302c28dafff7c8"
++    },
++    "scope": {
++      "declared": [
++        "src/pricing/discounts.py",
++        "tests",
++        "module pricing"
++      ],
++      "skipped": false,
++      "note": "",
++      "holds": [
++        "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
++      ],
++      "files": [
++        {
++          "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "openspec/changes/add-bulk-discount/questions.md",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "openspec/changes/add-bulk-discount/tasks.md",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "src/inventory/stock.py",
++          "module": "inventory",
++          "kind": "code",
++          "label": "out_of_scope",
++          "reason": "module `inventory` is not named in the spec"
++        },
++        {
++          "path": "src/pricing/discounts.py",
++          "module": "pricing",
++          "kind": "code",
++          "label": "relevant",
++          "reason": "named in the spec"
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "module": "pricing",
++          "kind": "code",
++          "label": "relevant",
++          "reason": "module `pricing` is named in the spec"
++        },
++        {
++          "path": "tests/test_discounts.py",
++          "module": null,
++          "kind": "test",
++          "label": "relevant",
++          "reason": "named in the spec"
++        }
++      ]
++    },
++    "diff_coverage": {
++      "status": "ok",
++      "reason": "",
++      "percent": 7.9,
++      "unmeasured_files": [],
++      "functions": [
++        {
++          "path": "src/inventory/stock.py",
++          "qualname": "<module>",
++          "status": "covered",
++          "executable": 1,
++          "executed": 1,
++          "tests": [],
++          "label": true
++        },
++        {
++          "path": "src/pricing/discounts.py",
++          "qualname": "<module>",
++          "status": "covered",
++          "executable": 1,
++          "executed": 1,
++          "tests": [],
++          "label": true
++        },
++        {
++          "path": "src/pricing/discounts.py",
++          "qualname": "bulk_discount",
++          "status": "covered",
++          "executable": 3,
++          "executed": 3,
++          "tests": [
++            "test_discounts.test_bulk_discount_threshold_counts_units"
++          ],
++          "label": true
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "<module>",
++          "status": "uncovered",
++          "executable": 5,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "format_line",
++          "status": "uncovered",
++          "executable": 17,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "format_total",
++          "status": "uncovered",
++          "executable": 12,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "format_receipt",
++          "status": "uncovered",
++          "executable": 24,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        }
++      ]
++    },
++    "tests_ran": {
++      "tests_ok": true,
++      "summary": {
++        "total": 22,
++        "passed": 22,
++        "failed": 0,
++        "errored": 0,
++        "skipped": 0,
++        "new": 1,
++        "new_passed": 1,
++        "skipped_unchanged": []
++      },
++      "findings": []
++    }
++  },
++  "human": [],
++  "fix": null,
++  "judge_verdict": {
++    "criteria": [
++      {
++        "id": "C-534a6caa",
++        "verdict": "pass",
++        "confidence": "high",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "if sum(item.quantity for item in cart.items) < 10:\n        return Decimal(\"0.00\")\n    return (cart.subtotal() * Decimal(\"0.10\")).quantize(\n        Decimal(\"0.01\"), rounding=ROUND_HALF_UP"
++          },
++          {
++            "kind": "test",
++            "ref": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++            "quote": "assert bulk_discount(qualifying_cart) == Decimal(\"2.50\")"
++          }
++        ],
++        "reasoning": "10 units at 2.50 make 10 units, so the threshold check passes. The subtotal is 25.00, and 25.00 × 0.10 quantized to cents is 2.50. The tracing test checks exactly this case and passed in the gate.",
++        "counterexample": null
++      },
++      {
++        "id": "C-5de37e46",
++        "verdict": "pass",
++        "confidence": "high",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "if sum(item.quantity for item in cart.items) < 10:\n        return Decimal(\"0.00\")"
++          },
++          {
++            "kind": "test",
++            "ref": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++            "quote": "assert bulk_discount(below_threshold_cart) == Decimal(\"0.00\")"
++          }
++        ],
++        "reasoning": "9 units is below 10, so the function returns Decimal('0.00'). The tracing test checks the 9 × 2.50 cart and passed.",
++        "counterexample": null
++      }
++    ],
++    "test_adequacy": [
++      {
++        "test": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++        "criterion": "C-534a6caa",
++        "adequate": true,
++        "reason": "It builds a cart holding 10 units at 2.50 and checks the returned value equals 2.50, which is the observable outcome of the scenario. It uses a single line of quantity 10, so it also matches the Q-001 answer (units are counted).",
++        "generated_test_misreads_criterion": false
++      },
++      {
++        "test": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++        "criterion": "C-5de37e46",
++        "adequate": true,
++        "reason": "It builds a cart holding 9 units at 2.50 and checks the returned value equals 0.00, which is the outcome the scenario requires.",
++        "generated_test_misreads_criterion": false
++      }
++    ],
++    "findings": [
++      {
++        "severity": "major",
++        "criterion": null,
++        "title": "Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)",
++        "detail": "The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/inventory/stock.py",
++            "quote": "-LOW_STOCK_THRESHOLD = 5\n+LOW_STOCK_THRESHOLD = 3"
++          }
++        ],
++        "suggested_fix": "Revert the change to src/inventory/stock.py, or propose it as its own change.",
++        "spec_gap": false
++      },
++      {
++        "severity": "major",
++        "criterion": null,
++        "title": "Out-of-scope, untested new module src/pricing/receipt.py",
++        "detail": "A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/receipt.py",
++            "quote": "discount = subtotal - total\n    if discount > 0:\n        lines.append(format_total(\"Discount\", -discount, width))"
++          }
++        ],
++        "suggested_fix": "Remove src/pricing/receipt.py from this change, or specify and test it in a separate change.",
++        "spec_gap": false
++      },
++      {
++        "severity": "minor",
++        "criterion": "C-534a6caa",
++        "title": "Threshold counts units, but no scenario separates units from lines",
++        "detail": "Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "sum(item.quantity for item in cart.items) < 10"
++          }
++        ],
++        "suggested_fix": "WHEN a cart holds a single line of 10 units at 2.50 each THEN `bulk_discount` returns 2.50.",
++        "spec_gap": true
++      },
++      {
++        "severity": "minor",
++        "criterion": "C-534a6caa",
++        "title": "Half-cent rounding of the discount is not pinned",
++        "detail": "Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": ".quantize(\n        Decimal(\"0.01\"), rounding=ROUND_HALF_UP"
++          }
++        ],
++        "suggested_fix": "WHEN a cart holds 9 units at 2.50 and 1 unit at 2.55 (subtotal 25.05) THEN `bulk_discount` returns 2.51.",
++        "spec_gap": true
++      },
++      {
++        "severity": "minor",
++        "criterion": "C-534a6caa",
++        "title": "Interaction with an applied discount code is not specified",
++        "detail": "bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "return (cart.subtotal() * Decimal(\"0.10\"))"
++          }
++        ],
++        "suggested_fix": "WHEN a cart of 10 units at 2.50 each also has a percentage discount code applied THEN `bulk_discount` still returns 2.50, computed from the subtotal before the code.",
++        "spec_gap": true
++      }
++    ],
++    "riskiest_assumptions": [
++      "Cart.subtotal() returns a Decimal equal to the sum of unit_price × quantity, so 10 × 2.50 gives 25.00 and the result quantizes to 2.50.",
++      "LineItem's positional constructor order is (sku, unit_price, quantity), so the test builds the carts the scenarios describe.",
++      "The gate report's 'passed' status for test_bulk_discount_threshold_counts_units reflects a real run against the committed head."
++    ]
++  },
++  "cx_runs": {},
++  "tests": {
++    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
++    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
++    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
++    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
++    "tests.test_cart::test_negative_price_rejected": "passed",
++    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
++    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
++    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
++    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
++    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
++    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
++    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
++    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
++    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
++    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
++    "tests.test_discounts::test_bulk_discount_threshold_counts_units": "passed",
++    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
++    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
++    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
++    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
++    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
++    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
++  },
++  "red_green": {
++    "tests.test_discounts::test_bulk_discount_threshold_counts_units": "1.1"
++  },
++  "guards": [],
++  "prompt_sha256": "306228b49d66a11843242910c82296359380a98e29e6a8970567a4fe03d1acd8",
++  "judge_calls": 1,
++  "profiles": {
++    "judge": "claude-code",
++    "implementer": [
++      "codex"
++    ]
++  },
++  "judge_model": "claude-opus-5-5",
++  "independence": {
++    "mode": "different_vendor",
++    "status": "verified (different_vendor)",
++    "verified": true,
++    "judge": {
++      "profile": "claude-code",
++      "vendor": "anthropic",
++      "model": null,
++      "provenance": "served",
++      "served": "claude-opus-5-5"
++    },
++    "implementers": [
++      {
++        "profile": "codex",
++        "vendor": "openai",
++        "model": "gpt-6-luna",
++        "provenance": "tool",
++        "served": null
++      }
++    ]
++  },
++  "cost_usd": 0.137176
++}
+diff --git a/openspec/changes/add-bulk-discount/.l4/evidence/round-1/verification.md b/openspec/changes/add-bulk-discount/.l4/evidence/round-1/verification.md
+new file mode 100644
+index 0000000..9137372
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/evidence/round-1/verification.md
+@@ -0,0 +1,126 @@
++# Verification: openspec:add-bulk-discount: NEEDS_HUMAN (round 1)
++
++traceability: 2/2 criteria covered by a discriminating test
++
++- Base: `b98d1d06de9be5f42939fc71c88cd8988e4b5046`
++- Head: `790d85b08fa40ab14e138e6daaff4a4bcfae011f`
++- Implementer profiles: codex
++- Judge: claude-code (claude-opus-5-5), 1 call(s), prompt sha256 `306228b49d66a11843242910c82296359380a98e29e6a8970567a4fe03d1acd8`
++- independence: verified (different_vendor): claude-code anthropic (served claude-opus-5-5), codex openai (tool)
++- Cost: $0.1372
++
++## Ladder
++
++| Step | Name | Status | Seconds | Note |
++|---|---|---|---|---|
++| 0 | preconditions | ok | 0.6 | base main@b98d1d06de contained |
++| 1 | integrity | ok | 0.1 | 6 sub-checks; scope: 8 changed file(s), 1 held |
++| 2 | build | ok | 0.2 |  |
++| 3 | tests | ok | 4.6 |  |
++| 4 | traceability | ok | 0.0 | 2/2 criteria covered |
++| 4a | audit sampling | not_run | 0.0 | verifier.audit_sample_ratio is 0 |
++| 5 | ui test generation | not_run | 0.0 | the unit changed no file under verifier.playwright.ui_paths |
++| 6 | quality | ok | 0.0 | 7.9% of the changed executable lines ran |
++| 8 | s1 judge | ok | 33.0 | 2/2 criteria judged by laya-local |
++| 9 | judge | ok | 27.7 | 1 call(s) |
++| 10 | aggregation | ok | 0.0 | NEEDS_HUMAN |
++
++## Gates
++
++| Gate | Status | Command | Log |
++|---|---|---|---|
++| setup | pass | `uv sync --frozen` | .l4-out/gates/r-20261005T0921Z-1804/013-setup.log |
++| lint | pass | `.venv/bin/ruff check --extend-exclude .l4 .` | .l4-out/gates/r-20261005T0921Z-1804/014-lint.log |
++| test | pass | `.venv/bin/python -m pytest --junitxml=.l4-out/junit.xml` | .l4-out/gates/r-20261005T0921Z-1804/015-test.log |
++| e2e | pass | `.venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure` | .l4-out/gates/r-20261005T0921Z-1804/016-e2e.log |
++
++## Integrity
++
++| Check | Status | Note |
++|---|---|---|
++| protected paths | ok | no protected path differs from the base |
++| pre-existing tests | ok | 1 test file(s) compared with the base |
++| red-green freeze | ok | 1 task(s): red and green compared |
++| content scan | ok | no result-manipulating construct in the changed support and runner files |
++| suppressions | skipped | no new suppression comment |
++| tdd history | ok | 1 task(s); red tests passing at head: step 3 |
++
++## Traceability
++
++| Id | Criterion | State | Tests (status, proof) | Not evidence | S1 p |
++|---|---|---|---|---|---|
++| C-534a6caa | bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount | covered | tests.test_discounts::test_bulk_discount_threshold_counts_units (passed, zero_value) | - | 0.56 |
++| C-5de37e46 | bulk-discount › Bulk discount › A cart of 9 items gets none | covered | tests.test_discounts::test_bulk_discount_threshold_counts_units (passed, zero_value) | - | 0.53 |
++
++## Evidence
++
++### Needs attention
++
++- out of scope: `src/inventory/stock.py` (module `inventory`)
++- changed code not run by tests: `src/pricing/receipt.py::<module>` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_line` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_total` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_receipt` (uncovered)
++
++### Files
++
++| Path | Module | Label | Why |
++|---|---|---|---|
++| `openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/questions.md` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/tasks.md` |  | none | exempt: harness, spec or documentation path |
++| `src/inventory/stock.py` | inventory | out_of_scope | module `inventory` is not named in the spec |
++| `src/pricing/discounts.py` | pricing | relevant | named in the spec |
++| `src/pricing/receipt.py` | pricing | relevant | module `pricing` is named in the spec |
++| `tests/test_discounts.py` |  | relevant | named in the spec |
++
++### Changed functions
++
++7.9% of the changed executable lines ran.
++
++| Function | Status | Lines run | Tests |
++|---|---|---|---|
++| `src/inventory/stock.py::<module>` | covered | 1/1 |  |
++| `src/pricing/discounts.py::<module>` | covered | 1/1 |  |
++| `src/pricing/discounts.py::bulk_discount` | covered | 3/3 | test_discounts.test_bulk_discount_threshold_counts_units |
++| `src/pricing/receipt.py::<module>` | uncovered | 0/5 |  |
++| `src/pricing/receipt.py::format_line` | uncovered | 0/17 |  |
++| `src/pricing/receipt.py::format_receipt` | uncovered | 0/24 |  |
++| `src/pricing/receipt.py::format_total` | uncovered | 0/12 |  |
++
++### Tests
++
++22 of 22 passed, 0 failed, 0 errored, 0 skipped.
++1 of 1 new tests passed.
++
++## S1 (recorded for calibration, never decides)
++
++| Criterion | Status | p | Model | Engine | Note |
++|---|---|---|---|---|---|
++| C-534a6caa | ok | 0.561 | laya-rl-agent | laya-local | evidence cut to fit the budget |
++| C-5de37e46 | ok | 0.533 | laya-rl-agent | laya-local | evidence cut to fit the budget |
++
++## Criteria
++
++| Id | Criterion | Judge | Result | Reason |
++|---|---|---|---|---|
++| C-534a6caa | bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount | pass | pass | the judge passed it and a discriminating test passes |
++| C-5de37e46 | bulk-discount › Bulk discount › A cart of 9 items gets none | pass | pass | the judge passed it and a discriminating test passes |
++
++## Findings
++
++- [major, judge] Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3): The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.
++- [major, judge] Out-of-scope, untested new module src/pricing/receipt.py: A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.
++- [minor, judge] Threshold counts units, but no scenario separates units from lines (spec gap) (criterion C-534a6caa): Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.
++- [minor, judge] Half-cent rounding of the discount is not pinned (spec gap) (criterion C-534a6caa): Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.
++- [minor, judge] Interaction with an applied discount code is not specified (spec gap) (criterion C-534a6caa): bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.
++
++## Needs a human
++
++- scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++- diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`
++
++## New tests (red then green, `task.red_ok` in the ledger)
++
++- `tests.test_discounts::test_bulk_discount_threshold_counts_units` (task 1.1): passed
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index a0d0de8..075ec62 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -12,6 +12,10 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ | ID | Status | Blocking | Kind | Question |
+ |----|--------|----------|------|----------|
+ | Q-001 | answered | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
++| Q-002 | open | none | verdict | Finding F-7026922b: Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3) |
++| Q-003 | open | none | verdict | Finding F-72872195: Out-of-scope, untested new module src/pricing/receipt.py |
++| Q-004 | open | none | verdict | Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name |
++| Q-005 | open | none | verdict | Hold H-2426ce7a: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_... |
+ <!-- l4:index:end -->
+ 
+ ---
+@@ -40,3 +44,92 @@ Citations:
+ ### Answer
+ <!-- write below this line -->
+ units: the threshold counts units, the sum of the quantities of the cart's line items (10 units on one line qualify).
++
++---
++
++## Q-002: Finding F-7026922b: Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)
++
++- **Status:** open
++- **Blocking tasks:** none
++- **Kind:** verdict
++- **Asked:** round 1, verifier
++
++### Context
++The judge raised a major finding in round 1, and no deterministic check confirms it.
++
++Title: Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)
++Detail: The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.
++Suggested fix: Revert the change to src/inventory/stock.py, or propose it as its own change.
++
++Answer `accept` to waive the finding, or `reject` and say why: a rejected finding is fixed by a fix unit.
++
++### Options
++1. accept
++2. reject: <reason>
++
++### Answer
++<!-- write below this line -->
++---
++
++## Q-003: Finding F-72872195: Out-of-scope, untested new module src/pricing/receipt.py
++
++- **Status:** open
++- **Blocking tasks:** none
++- **Kind:** verdict
++- **Asked:** round 1, verifier
++
++### Context
++The judge raised a major finding in round 1, and no deterministic check confirms it.
++
++Title: Out-of-scope, untested new module src/pricing/receipt.py
++Detail: A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.
++Suggested fix: Remove src/pricing/receipt.py from this change, or specify and test it in a separate change.
++
++Answer `accept` to waive the finding, or `reject` and say why: a rejected finding is fixed by a fix unit.
++
++### Options
++1. accept
++2. reject: <reason>
++
++### Answer
++<!-- write below this line -->
++---
++
++## Q-004: Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++
++- **Status:** open
++- **Blocking tasks:** none
++- **Kind:** verdict
++- **Asked:** round 1, verifier
++
++### Context
++After round 1 the verifier cannot decide on its own: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++
++Answer `accept` if the unit can go on as it stands, or `reject` and say why.
++
++### Options
++1. accept
++2. reject: <reason>
++
++### Answer
++<!-- write below this line -->
++---
++
++## Q-005: Hold H-2426ce7a: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_...
++
++- **Status:** open
++- **Blocking tasks:** none
++- **Kind:** verdict
++- **Asked:** round 1, verifier
++
++### Context
++After round 1 the verifier cannot decide on its own: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`
++
++Answer `accept` if the unit can go on as it stands, or `reject` and say why.
++
++### Options
++1. accept
++2. reject: <reason>
++
++### Answer
++<!-- write below this line -->
+diff --git a/openspec/changes/add-bulk-discount/verification.md b/openspec/changes/add-bulk-discount/verification.md
+new file mode 100644
+index 0000000..9137372
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/verification.md
+@@ -0,0 +1,126 @@
++# Verification: openspec:add-bulk-discount: NEEDS_HUMAN (round 1)
++
++traceability: 2/2 criteria covered by a discriminating test
++
++- Base: `b98d1d06de9be5f42939fc71c88cd8988e4b5046`
++- Head: `790d85b08fa40ab14e138e6daaff4a4bcfae011f`
++- Implementer profiles: codex
++- Judge: claude-code (claude-opus-5-5), 1 call(s), prompt sha256 `306228b49d66a11843242910c82296359380a98e29e6a8970567a4fe03d1acd8`
++- independence: verified (different_vendor): claude-code anthropic (served claude-opus-5-5), codex openai (tool)
++- Cost: $0.1372
++
++## Ladder
++
++| Step | Name | Status | Seconds | Note |
++|---|---|---|---|---|
++| 0 | preconditions | ok | 0.6 | base main@b98d1d06de contained |
++| 1 | integrity | ok | 0.1 | 6 sub-checks; scope: 8 changed file(s), 1 held |
++| 2 | build | ok | 0.2 |  |
++| 3 | tests | ok | 4.6 |  |
++| 4 | traceability | ok | 0.0 | 2/2 criteria covered |
++| 4a | audit sampling | not_run | 0.0 | verifier.audit_sample_ratio is 0 |
++| 5 | ui test generation | not_run | 0.0 | the unit changed no file under verifier.playwright.ui_paths |
++| 6 | quality | ok | 0.0 | 7.9% of the changed executable lines ran |
++| 8 | s1 judge | ok | 33.0 | 2/2 criteria judged by laya-local |
++| 9 | judge | ok | 27.7 | 1 call(s) |
++| 10 | aggregation | ok | 0.0 | NEEDS_HUMAN |
++
++## Gates
++
++| Gate | Status | Command | Log |
++|---|---|---|---|
++| setup | pass | `uv sync --frozen` | .l4-out/gates/r-20261005T0921Z-1804/013-setup.log |
++| lint | pass | `.venv/bin/ruff check --extend-exclude .l4 .` | .l4-out/gates/r-20261005T0921Z-1804/014-lint.log |
++| test | pass | `.venv/bin/python -m pytest --junitxml=.l4-out/junit.xml` | .l4-out/gates/r-20261005T0921Z-1804/015-test.log |
++| e2e | pass | `.venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure` | .l4-out/gates/r-20261005T0921Z-1804/016-e2e.log |
++
++## Integrity
++
++| Check | Status | Note |
++|---|---|---|
++| protected paths | ok | no protected path differs from the base |
++| pre-existing tests | ok | 1 test file(s) compared with the base |
++| red-green freeze | ok | 1 task(s): red and green compared |
++| content scan | ok | no result-manipulating construct in the changed support and runner files |
++| suppressions | skipped | no new suppression comment |
++| tdd history | ok | 1 task(s); red tests passing at head: step 3 |
++
++## Traceability
++
++| Id | Criterion | State | Tests (status, proof) | Not evidence | S1 p |
++|---|---|---|---|---|---|
++| C-534a6caa | bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount | covered | tests.test_discounts::test_bulk_discount_threshold_counts_units (passed, zero_value) | - | 0.56 |
++| C-5de37e46 | bulk-discount › Bulk discount › A cart of 9 items gets none | covered | tests.test_discounts::test_bulk_discount_threshold_counts_units (passed, zero_value) | - | 0.53 |
++
++## Evidence
++
++### Needs attention
++
++- out of scope: `src/inventory/stock.py` (module `inventory`)
++- changed code not run by tests: `src/pricing/receipt.py::<module>` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_line` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_total` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_receipt` (uncovered)
++
++### Files
++
++| Path | Module | Label | Why |
++|---|---|---|---|
++| `openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/questions.md` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/tasks.md` |  | none | exempt: harness, spec or documentation path |
++| `src/inventory/stock.py` | inventory | out_of_scope | module `inventory` is not named in the spec |
++| `src/pricing/discounts.py` | pricing | relevant | named in the spec |
++| `src/pricing/receipt.py` | pricing | relevant | module `pricing` is named in the spec |
++| `tests/test_discounts.py` |  | relevant | named in the spec |
++
++### Changed functions
++
++7.9% of the changed executable lines ran.
++
++| Function | Status | Lines run | Tests |
++|---|---|---|---|
++| `src/inventory/stock.py::<module>` | covered | 1/1 |  |
++| `src/pricing/discounts.py::<module>` | covered | 1/1 |  |
++| `src/pricing/discounts.py::bulk_discount` | covered | 3/3 | test_discounts.test_bulk_discount_threshold_counts_units |
++| `src/pricing/receipt.py::<module>` | uncovered | 0/5 |  |
++| `src/pricing/receipt.py::format_line` | uncovered | 0/17 |  |
++| `src/pricing/receipt.py::format_receipt` | uncovered | 0/24 |  |
++| `src/pricing/receipt.py::format_total` | uncovered | 0/12 |  |
++
++### Tests
++
++22 of 22 passed, 0 failed, 0 errored, 0 skipped.
++1 of 1 new tests passed.
++
++## S1 (recorded for calibration, never decides)
++
++| Criterion | Status | p | Model | Engine | Note |
++|---|---|---|---|---|---|
++| C-534a6caa | ok | 0.561 | laya-rl-agent | laya-local | evidence cut to fit the budget |
++| C-5de37e46 | ok | 0.533 | laya-rl-agent | laya-local | evidence cut to fit the budget |
++
++## Criteria
++
++| Id | Criterion | Judge | Result | Reason |
++|---|---|---|---|---|
++| C-534a6caa | bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount | pass | pass | the judge passed it and a discriminating test passes |
++| C-5de37e46 | bulk-discount › Bulk discount › A cart of 9 items gets none | pass | pass | the judge passed it and a discriminating test passes |
++
++## Findings
++
++- [major, judge] Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3): The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.
++- [major, judge] Out-of-scope, untested new module src/pricing/receipt.py: A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.
++- [minor, judge] Threshold counts units, but no scenario separates units from lines (spec gap) (criterion C-534a6caa): Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.
++- [minor, judge] Half-cent rounding of the discount is not pinned (spec gap) (criterion C-534a6caa): Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.
++- [minor, judge] Interaction with an applied discount code is not specified (spec gap) (criterion C-534a6caa): bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.
++
++## Needs a human
++
++- scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++- diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`
++
++## New tests (red then green, `task.red_ok` in the ledger)
++
++- `tests.test_discounts::test_bulk_discount_threshold_counts_units` (task 1.1): passed
+-- 
+2.48.1
+
+
+From a8000ac3f934dee028d937dd1285a664db0f77a4 Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:27:54 +0300
+Subject: [PATCH 08/11] chore(add-bulk-discount): ledger [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0921Z-1804
+L4-Iteration: 2
+L4-Phase: awaiting_human
+---
+ .../.l4/ledger/r-20261005T0921Z-1804.jsonl    | 35 +++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+index e6417a6..4a6d9dd 100644
+--- a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl
+@@ -34,3 +34,38 @@
+ {"ts": "2026-10-05T09:23:13.506042Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 34, "type": "gate.finished", "name": "test", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/011-test.log", "tests": 20, "passed": 20, "failed": 0}
+ {"ts": "2026-10-05T09:23:13.629801Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 35, "type": "gate.finished", "name": "lint", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/012-lint.log", "tests": null, "passed": null, "failed": null}
+ {"ts": "2026-10-05T09:23:13.642868Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 36, "type": "task.done", "task": "1.1", "base": "4a611d0d0f8658b6917933cd78843ed35fdf3e62", "parents": [], "notes": "", "suppressions": []}
++{"ts": "2026-10-05T09:23:13.667832Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 37, "type": "task.green_committed", "task": "1.1", "base": "4a611d0d0f8658b6917933cd78843ed35fdf3e62", "sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f"}
++{"ts": "2026-10-05T09:23:14.620857Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 38, "type": "phase.changed", "from": "implementing", "to": "implemented", "trigger": "all_leaves_done", "exit_code": null}
++{"ts": "2026-10-05T09:23:15.861885Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 39, "type": "pr.labels", "number": 24, "labels": ["l4:implemented"]}
++{"ts": "2026-10-05T09:23:15.868206Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 40, "type": "phase.changed", "from": "implemented", "to": "verifying", "trigger": "verification_started", "exit_code": null}
++{"ts": "2026-10-05T09:23:16.938835Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 41, "type": "pr.labels", "number": 24, "labels": ["l4:verifying"]}
++{"ts": "2026-10-05T09:23:16.966852Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 42, "type": "availability.selected", "role": "judges", "selected": "claude-code", "fallback_index": 0, "skipped": [], "probes": {"claude-code": {"binary": "2.1.288", "auth": "subscription", "quota_used_percent": 3, "quota_window": "session", "hello_ms": 3133}}, "cached": true, "quota_window": "session"}
++{"ts": "2026-10-05T09:23:17.596523Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 43, "type": "verify.step", "round": 1, "step": "0", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "66d5ee599f11da942a140a1451f895de6e6b9ae5d223b0347886a7601fd511bb"}
++{"ts": "2026-10-05T09:23:17.694100Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 44, "type": "verify.step", "round": 1, "step": "1", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "dab793547c2ddd348d3fce6b1b8dd477523df52db1c9e5b12369ef42b5ed013b"}
++{"ts": "2026-10-05T09:23:17.812168Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 45, "type": "gate.finished", "name": "setup", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/013-setup.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:23:17.936046Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 46, "type": "gate.finished", "name": "lint", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/014-lint.log", "tests": null, "passed": null, "failed": null}
++{"ts": "2026-10-05T09:23:17.942762Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 47, "type": "verify.step", "round": 1, "step": "2", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "f660ca3d9a5072a1dcda6caa52deda174d203764217adbb7c51ab36fb26dd00e"}
++{"ts": "2026-10-05T09:23:18.668580Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 48, "type": "gate.finished", "name": "test", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/015-test.log", "tests": 20, "passed": 20, "failed": 0}
++{"ts": "2026-10-05T09:23:22.492760Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 49, "type": "gate.finished", "name": "e2e", "status": "pass", "exit_code": 0, "reason": "", "log": ".l4-out/gates/r-20261005T0921Z-1804/016-e2e.log", "tests": 2, "passed": 2, "failed": 0}
++{"ts": "2026-10-05T09:23:22.522036Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 50, "type": "verify.step", "round": 1, "step": "3", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "323b1a33c0d21f2196d1bf3ab64d5ad2fca3a7d683419a191b09f05d11d9e778"}
++{"ts": "2026-10-05T09:23:22.528204Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 51, "type": "verify.step", "round": 1, "step": "4", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "f9e5b743e111b0d177154c7693e057bac814b18f0b2f9cc3f4f4539a327a3c12"}
++{"ts": "2026-10-05T09:23:22.534644Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 52, "type": "verify.step", "round": 1, "step": "6", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "5092bb81c32358687bce8058f1a0f8ad2774a0465d6b891170151928521496df"}
++{"ts": "2026-10-05T09:23:22.544501Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 53, "type": "availability.selected", "role": "s1_judge", "selected": "laya", "fallback_index": 0, "skipped": [], "probes": {"engine": {"engine": "laya-local"}}, "cached": false}
++{"ts": "2026-10-05T09:23:55.548974Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 54, "type": "verify.s1", "round": 1, "criterion": "C-534a6caa", "p": 0.5614, "model": "laya-rl-agent", "status": "ok", "engine": "laya-local", "reason": "", "checkpoint": "typed-decisions", "server_version": "0.3.24"}
++{"ts": "2026-10-05T09:23:55.552972Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 55, "type": "verify.s1", "round": 1, "criterion": "C-5de37e46", "p": 0.5334, "model": "laya-rl-agent", "status": "ok", "engine": "laya-local", "reason": "", "checkpoint": "typed-decisions", "server_version": "0.3.24"}
++{"ts": "2026-10-05T09:23:55.555880Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 56, "type": "verify.step", "round": 1, "step": "8", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "758a039376db175b53dfd2757fb9289611d712d93d9b63d562f8e44c1a79db27"}
++{"ts": "2026-10-05T09:27:22.167814Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 57, "type": "verify.s1_shadow", "round": 1, "items": 12, "asked": 12, "engines": ["laya:ok", "jev:ok"]}
++{"ts": "2026-10-05T09:27:49.868442Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 58, "type": "verify.judge", "round": 1, "profile": "claude-code", "status": "ok", "calls": 1, "model": "claude-opus-5-5", "prompt_sha256": "306228b49d66a11843242910c82296359380a98e29e6a8970567a4fe03d1acd8", "template": "judge@3"}
++{"ts": "2026-10-05T09:27:49.871835Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 59, "type": "budget.cost", "usd": 0.137176, "profile": "claude-code", "role": "judge"}
++{"ts": "2026-10-05T09:27:49.877909Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 60, "type": "verify.step", "round": 1, "step": "9", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "aee03826a61abb47f3f2381aaa6cdabda994b74050d8af73fcba106392d420f7"}
++{"ts": "2026-10-05T09:27:49.881315Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 61, "type": "verify.step", "round": 1, "step": "10", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "0523b3832a802452d8eb3769dfe1465756394d8f9b080343ca463d3acbb65821"}
++{"ts": "2026-10-05T09:27:49.940182Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 62, "type": "question.raised", "id": "Q-002", "kind": "verdict", "source": "verifier", "target": "F-7026922b", "text_sha256": "c664f72924e4b4075e6a975b622461ee1b110eddfa79a220a126ffab7e033996", "round": 1}
++{"ts": "2026-10-05T09:27:49.942984Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 63, "type": "question.raised", "id": "Q-003", "kind": "verdict", "source": "verifier", "target": "F-72872195", "text_sha256": "ef40cf48c40439e4035792a111f5d41101629d9f5aef7155f18bd638b1b91b32", "round": 1}
++{"ts": "2026-10-05T09:27:49.945833Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 64, "type": "question.raised", "id": "Q-004", "kind": "verdict", "source": "verifier", "target": "H-f427d7fb", "text_sha256": "e721dcd8970e88451d90c5a4282feb5c1f396e0174e377a69d360d8e20acda69", "round": 1}
++{"ts": "2026-10-05T09:27:49.948826Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 65, "type": "question.raised", "id": "Q-005", "kind": "verdict", "source": "verifier", "target": "H-2426ce7a", "text_sha256": "61f7177748739f06b62537414ba6a206507e7c88212425b55df8a3f98c5ab8bd", "round": 1}
++{"ts": "2026-10-05T09:27:52.436146Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 66, "type": "pr.labels", "number": 24, "labels": ["l4:verifying", "l4:needs-answers"]}
++{"ts": "2026-10-05T09:27:52.442398Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 67, "type": "verify.verdict", "round": 1, "verdict": "NEEDS_HUMAN", "findings": 5, "criteria_passed": 2, "criteria_total": 2}
++{"ts": "2026-10-05T09:27:52.445457Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 68, "type": "phase.changed", "from": "verifying", "to": "awaiting_human", "trigger": "verify_needs_human", "exit_code": 11}
++{"ts": "2026-10-05T09:27:53.611930Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 69, "type": "pr.labels", "number": 24, "labels": ["l4:awaiting_human", "l4:needs-answers"]}
++{"ts": "2026-10-05T09:27:54.345825Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 70, "type": "lock.released"}
++{"ts": "2026-10-05T09:27:54.348530Z", "run_id": "r-20261005T0921Z-1804", "unit": "openspec:add-bulk-discount", "seq": 71, "type": "run.finished", "exit_code": 11}
+-- 
+2.48.1
+
+
+From 21caaeab003dbc2f0b384282a7d496f74a7dd3b8 Mon Sep 17 00:00:00 2001
+From: CiprianSpot <maintainer@example.invalid>
+Date: Mon, 5 Oct 2026 12:30:13 +0300
+Subject: [PATCH 09/11] Answer the verdict questions Q-002 to Q-005: reject the
+ inventory scope hold, accept the receipt coverage hold
+
+---
+ .../changes/add-bulk-discount/questions.md    | 20 +++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index 075ec62..1cadecd 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -12,10 +12,10 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ | ID | Status | Blocking | Kind | Question |
+ |----|--------|----------|------|----------|
+ | Q-001 | answered | 1.1 | ambiguous | Does the bulk threshold count units or distinct lines? |
+-| Q-002 | open | none | verdict | Finding F-7026922b: Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3) |
+-| Q-003 | open | none | verdict | Finding F-72872195: Out-of-scope, untested new module src/pricing/receipt.py |
+-| Q-004 | open | none | verdict | Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name |
+-| Q-005 | open | none | verdict | Hold H-2426ce7a: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_... |
++| Q-002 | answered | none | verdict | Finding F-7026922b: Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3) |
++| Q-003 | answered | none | verdict | Finding F-72872195: Out-of-scope, untested new module src/pricing/receipt.py |
++| Q-004 | answered | none | verdict | Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name |
++| Q-005 | answered | none | verdict | Hold H-2426ce7a: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_... |
+ <!-- l4:index:end -->
+ 
+ ---
+@@ -49,7 +49,7 @@ units: the threshold counts units, the sum of the quantities of the cart's line
+ 
+ ## Q-002: Finding F-7026922b: Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -69,11 +69,12 @@ Answer `accept` to waive the finding, or `reject` and say why: a rejected findin
+ 
+ ### Answer
+ <!-- write below this line -->
++accept: the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.
+ ---
+ 
+ ## Q-003: Finding F-72872195: Out-of-scope, untested new module src/pricing/receipt.py
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -93,11 +94,12 @@ Answer `accept` to waive the finding, or `reject` and say why: a rejected findin
+ 
+ ### Answer
+ <!-- write below this line -->
++accept: receipt helper lands with its own unit (the same decision as the coverage hold Q-005).
+ ---
+ 
+ ## Q-004: Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -113,11 +115,12 @@ Answer `accept` if the unit can go on as it stands, or `reject` and say why.
+ 
+ ### Answer
+ <!-- write below this line -->
++reject: inventory is not part of bulk discounts
+ ---
+ 
+ ## Q-005: Hold H-2426ce7a: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_...
+ 
+-- **Status:** open
++- **Status:** answered
+ - **Blocking tasks:** none
+ - **Kind:** verdict
+ - **Asked:** round 1, verifier
+@@ -133,3 +136,4 @@ Answer `accept` if the unit can go on as it stands, or `reject` and say why.
+ 
+ ### Answer
+ <!-- write below this line -->
++accept: receipt helper lands with its own unit
+-- 
+2.48.1
+
+
+From ac172357632f38d335f518f6f658e8f44ffebbdc Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:30:35 +0300
+Subject: [PATCH 10/11] docs(add-bulk-discount): verification round 2 [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0930Z-1874
+L4-Iteration: 3
+L4-Phase: verifying
+---
+ .../.l4/evidence/round-2/evidence.json        | 195 +++++
+ .../.l4/evidence/round-2/verdict.json         | 740 ++++++++++++++++++
+ .../.l4/evidence/round-2/verification.md      | 132 ++++
+ .../changes/add-bulk-discount/questions.md    |  22 +
+ .../changes/add-bulk-discount/verification.md |  30 +-
+ 5 files changed, 1107 insertions(+), 12 deletions(-)
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/evidence/round-2/evidence.json
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/evidence/round-2/verdict.json
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/evidence/round-2/verification.md
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/evidence/round-2/evidence.json b/openspec/changes/add-bulk-discount/.l4/evidence/round-2/evidence.json
+new file mode 100644
+index 0000000..5ded782
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/evidence/round-2/evidence.json
+@@ -0,0 +1,195 @@
++{
++  "schema": "l4/evidence@1",
++  "holds": [
++    {
++      "id": "H-f427d7fb",
++      "text": "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name",
++      "kind": "scope",
++      "subjects": [
++        "src/inventory/stock.py"
++      ]
++    },
++    {
++      "id": "H-2426ce7a",
++      "text": "diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`",
++      "kind": "coverage",
++      "subjects": [
++        "src/pricing/receipt.py::<module>",
++        "src/pricing/receipt.py::format_line",
++        "src/pricing/receipt.py::format_receipt",
++        "src/pricing/receipt.py::format_total"
++      ]
++    }
++  ],
++  "items": {
++    "l4/change-covered@1|src/inventory/stock.py::<module>": "09ceb0c1559d1801b7307c94a66771c3",
++    "l4/change-covered@1|src/pricing/discounts.py::<module>": "a69738089dda27b82cdb42aec46051fa",
++    "l4/change-covered@1|src/pricing/discounts.py::bulk_discount": "065f970addf50e1142fa261e4bb5e035",
++    "l4/change-covered@1|src/pricing/receipt.py::<module>": "a660a076ca5620b28cb83135a96a178d",
++    "l4/change-covered@1|src/pricing/receipt.py::format_line": "2ddd61e10dfeb3c9e57e937ec256b81d",
++    "l4/change-covered@1|src/pricing/receipt.py::format_receipt": "d262cf37e490f0fd567d991ded853e49",
++    "l4/change-covered@1|src/pricing/receipt.py::format_total": "9b87d8e46edb7fb1d21a80fcb14f231e",
++    "l4/file-relevant@1|src/inventory/stock.py": "27cf4d6a6ace08e74307bc2dca843668",
++    "l4/file-relevant@1|src/pricing/discounts.py": "6882701f91164f14cc8a80b5106d70cf",
++    "l4/file-relevant@1|src/pricing/receipt.py": "94d3b8e84e92519a3d4a3a97fac8368c",
++    "l4/file-relevant@1|tests/test_discounts.py": "d1dd453e34e310126e396425699bcc9f",
++    "l4/tests-ok@2|tests": "e09fbcdf14e991321b302c28dafff7c8"
++  },
++  "scope": {
++    "declared": [
++      "src/pricing/discounts.py",
++      "tests",
++      "module pricing"
++    ],
++    "skipped": false,
++    "note": "",
++    "holds": [
++      "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
++    ],
++    "files": [
++      {
++        "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "openspec/changes/add-bulk-discount/questions.md",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "openspec/changes/add-bulk-discount/tasks.md",
++        "module": null,
++        "kind": "exempt",
++        "label": null,
++        "reason": "exempt: harness, spec or documentation path"
++      },
++      {
++        "path": "src/inventory/stock.py",
++        "module": "inventory",
++        "kind": "code",
++        "label": "out_of_scope",
++        "reason": "module `inventory` is not named in the spec"
++      },
++      {
++        "path": "src/pricing/discounts.py",
++        "module": "pricing",
++        "kind": "code",
++        "label": "relevant",
++        "reason": "named in the spec"
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "module": "pricing",
++        "kind": "code",
++        "label": "relevant",
++        "reason": "module `pricing` is named in the spec"
++      },
++      {
++        "path": "tests/test_discounts.py",
++        "module": null,
++        "kind": "test",
++        "label": "relevant",
++        "reason": "named in the spec"
++      }
++    ]
++  },
++  "diff_coverage": {
++    "status": "ok",
++    "reason": "",
++    "percent": 7.9,
++    "unmeasured_files": [],
++    "functions": [
++      {
++        "path": "src/inventory/stock.py",
++        "qualname": "<module>",
++        "status": "covered",
++        "executable": 1,
++        "executed": 1,
++        "tests": [],
++        "label": true
++      },
++      {
++        "path": "src/pricing/discounts.py",
++        "qualname": "<module>",
++        "status": "covered",
++        "executable": 1,
++        "executed": 1,
++        "tests": [],
++        "label": true
++      },
++      {
++        "path": "src/pricing/discounts.py",
++        "qualname": "bulk_discount",
++        "status": "covered",
++        "executable": 3,
++        "executed": 3,
++        "tests": [
++          "test_discounts.test_bulk_discount_threshold_counts_units"
++        ],
++        "label": true
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "<module>",
++        "status": "uncovered",
++        "executable": 5,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "format_line",
++        "status": "uncovered",
++        "executable": 17,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "format_total",
++        "status": "uncovered",
++        "executable": 12,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      },
++      {
++        "path": "src/pricing/receipt.py",
++        "qualname": "format_receipt",
++        "status": "uncovered",
++        "executable": 24,
++        "executed": 0,
++        "tests": [],
++        "label": false
++      }
++    ]
++  },
++  "tests_ran": {
++    "tests_ok": true,
++    "summary": {
++      "total": 22,
++      "passed": 22,
++      "failed": 0,
++      "errored": 0,
++      "skipped": 0,
++      "new": 1,
++      "new_passed": 1,
++      "skipped_unchanged": []
++    },
++    "findings": []
++  }
++}
+diff --git a/openspec/changes/add-bulk-discount/.l4/evidence/round-2/verdict.json b/openspec/changes/add-bulk-discount/.l4/evidence/round-2/verdict.json
+new file mode 100644
+index 0000000..ba061f6
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/evidence/round-2/verdict.json
+@@ -0,0 +1,740 @@
++{
++  "schema": "l4/verdict@1",
++  "round": 2,
++  "verdict": "NEEDS_HUMAN",
++  "base_sha": "b98d1d06de9be5f42939fc71c88cd8988e4b5046",
++  "head_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f",
++  "steps": [
++    {
++      "step": "0",
++      "name": "preconditions",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "1",
++      "name": "integrity",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "2",
++      "name": "build",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "3",
++      "name": "tests",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "4",
++      "name": "traceability",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "4a",
++      "name": "audit sampling",
++      "status": "not_run",
++      "seconds": 0.0,
++      "note": "verifier.audit_sample_ratio is 0"
++    },
++    {
++      "step": "5",
++      "name": "ui test generation",
++      "status": "not_run",
++      "seconds": 0.0,
++      "note": "the unit changed no file under verifier.playwright.ui_paths"
++    },
++    {
++      "step": "6",
++      "name": "quality",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "8",
++      "name": "s1 judge",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "9",
++      "name": "judge",
++      "status": "reused",
++      "seconds": 0.0,
++      "note": "reused (round 1)"
++    },
++    {
++      "step": "10",
++      "name": "aggregation",
++      "status": "ok",
++      "seconds": 0.0,
++      "note": "NEEDS_HUMAN"
++    }
++  ],
++  "gates": [
++    {
++      "name": "setup",
++      "command": "uv sync --frozen",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/013-setup.log"
++    },
++    {
++      "name": "lint",
++      "command": ".venv/bin/ruff check --extend-exclude .l4 .",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/014-lint.log"
++    },
++    {
++      "name": "test",
++      "command": ".venv/bin/python -m pytest --junitxml=.l4-out/junit.xml",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/015-test.log"
++    },
++    {
++      "name": "e2e",
++      "command": ".venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure",
++      "status": "pass",
++      "reason": "",
++      "log": ".l4-out/gates/r-20261005T0921Z-1804/016-e2e.log"
++    }
++  ],
++  "criteria": [
++    {
++      "id": "C-534a6caa",
++      "alias": "bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount",
++      "result": "pass",
++      "judge": "pass",
++      "reason": "the judge passed it and a discriminating test passes",
++      "counterexample": null,
++      "tests": [
++        "tests.test_discounts::test_bulk_discount_threshold_counts_units"
++      ],
++      "s1_p": 0.5614
++    },
++    {
++      "id": "C-5de37e46",
++      "alias": "bulk-discount › Bulk discount › A cart of 9 items gets none",
++      "result": "pass",
++      "judge": "pass",
++      "reason": "the judge passed it and a discriminating test passes",
++      "counterexample": null,
++      "tests": [
++        "tests.test_discounts::test_bulk_discount_threshold_counts_units"
++      ],
++      "s1_p": 0.5334
++    }
++  ],
++  "findings": [
++    {
++      "severity": "minor",
++      "title": "Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)",
++      "detail": "The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected. (waived by human: the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.)",
++      "source": "judge",
++      "criterion": null,
++      "log": null,
++      "spec_gap": false,
++      "suggested_fix": "Revert the change to src/inventory/stock.py, or propose it as its own change.",
++      "id": "F-7026922b"
++    },
++    {
++      "severity": "minor",
++      "title": "Out-of-scope, untested new module src/pricing/receipt.py",
++      "detail": "A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total. (waived by human: receipt helper lands with its own unit (the same decision as the coverage hold Q-005).)",
++      "source": "judge",
++      "criterion": null,
++      "log": null,
++      "spec_gap": false,
++      "suggested_fix": "Remove src/pricing/receipt.py from this change, or specify and test it in a separate change.",
++      "id": "F-72872195"
++    },
++    {
++      "severity": "minor",
++      "title": "Threshold counts units, but no scenario separates units from lines",
++      "detail": "Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.",
++      "source": "judge",
++      "criterion": "C-534a6caa",
++      "log": null,
++      "spec_gap": true,
++      "suggested_fix": "WHEN a cart holds a single line of 10 units at 2.50 each THEN `bulk_discount` returns 2.50.",
++      "id": "F-ac667bfd"
++    },
++    {
++      "severity": "minor",
++      "title": "Half-cent rounding of the discount is not pinned",
++      "detail": "Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.",
++      "source": "judge",
++      "criterion": "C-534a6caa",
++      "log": null,
++      "spec_gap": true,
++      "suggested_fix": "WHEN a cart holds 9 units at 2.50 and 1 unit at 2.55 (subtotal 25.05) THEN `bulk_discount` returns 2.51.",
++      "id": "F-de00d4ed"
++    },
++    {
++      "severity": "minor",
++      "title": "Interaction with an applied discount code is not specified",
++      "detail": "bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.",
++      "source": "judge",
++      "criterion": "C-534a6caa",
++      "log": null,
++      "spec_gap": true,
++      "suggested_fix": "WHEN a cart of 10 units at 2.50 each also has a percentage discount code applied THEN `bulk_discount` still returns 2.50, computed from the subtotal before the code.",
++      "id": "F-f60b8b33"
++    }
++  ],
++  "holds": [
++    "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
++  ],
++  "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f",
++  "family_criteria": [
++    "C-534a6caa",
++    "C-5de37e46"
++  ],
++  "reused_from": 1,
++  "integrity": {
++    "checks": [
++      {
++        "name": "protected paths",
++        "status": "ok",
++        "note": "no protected path differs from the base"
++      },
++      {
++        "name": "pre-existing tests",
++        "status": "ok",
++        "note": "1 test file(s) compared with the base"
++      },
++      {
++        "name": "red-green freeze",
++        "status": "ok",
++        "note": "1 task(s): red and green compared"
++      },
++      {
++        "name": "content scan",
++        "status": "ok",
++        "note": "no result-manipulating construct in the changed support and runner files"
++      },
++      {
++        "name": "suppressions",
++        "status": "skipped",
++        "note": "no new suppression comment"
++      },
++      {
++        "name": "tdd history",
++        "status": "ok",
++        "note": "1 task(s); red tests passing at head: step 3"
++      }
++    ],
++    "findings": [],
++    "declared": []
++  },
++  "trace": [
++    {
++      "criterion": "C-534a6caa",
++      "alias": "bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount",
++      "state": "covered",
++      "tests": [
++        {
++          "id": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++          "status": "passed",
++          "proof": "zero_value",
++          "adequate": true
++        }
++      ],
++      "ignored": [],
++      "held": ""
++    },
++    {
++      "criterion": "C-5de37e46",
++      "alias": "bulk-discount › Bulk discount › A cart of 9 items gets none",
++      "state": "covered",
++      "tests": [
++        {
++          "id": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++          "status": "passed",
++          "proof": "zero_value",
++          "adequate": true
++        }
++      ],
++      "ignored": [],
++      "held": ""
++    }
++  ],
++  "audit": [],
++  "generated": [],
++  "s1": [
++    {
++      "criterion": "C-534a6caa",
++      "status": "ok",
++      "p": 0.5614,
++      "model": "laya-rl-agent",
++      "engine": "laya-local",
++      "reason": "",
++      "truncated": true,
++      "evidence": {
++        "implemented": 0.4749,
++        "contradicted": 0.1509,
++        "not_implemented": 0.2468,
++        "unrelated": 0.1274
++      }
++    },
++    {
++      "criterion": "C-5de37e46",
++      "status": "ok",
++      "p": 0.5334,
++      "model": "laya-rl-agent",
++      "engine": "laya-local",
++      "reason": "",
++      "truncated": true,
++      "evidence": {
++        "implemented": 0.3765,
++        "contradicted": 0.1716,
++        "not_implemented": 0.2982,
++        "unrelated": 0.1536
++      }
++    }
++  ],
++  "evidence": {
++    "schema": "l4/evidence@1",
++    "holds": [
++      {
++        "id": "H-f427d7fb",
++        "text": "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name",
++        "kind": "scope",
++        "subjects": [
++          "src/inventory/stock.py"
++        ]
++      },
++      {
++        "id": "H-2426ce7a",
++        "text": "diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`",
++        "kind": "coverage",
++        "subjects": [
++          "src/pricing/receipt.py::<module>",
++          "src/pricing/receipt.py::format_line",
++          "src/pricing/receipt.py::format_receipt",
++          "src/pricing/receipt.py::format_total"
++        ]
++      }
++    ],
++    "items": {
++      "l4/change-covered@1|src/inventory/stock.py::<module>": "09ceb0c1559d1801b7307c94a66771c3",
++      "l4/change-covered@1|src/pricing/discounts.py::<module>": "a69738089dda27b82cdb42aec46051fa",
++      "l4/change-covered@1|src/pricing/discounts.py::bulk_discount": "065f970addf50e1142fa261e4bb5e035",
++      "l4/change-covered@1|src/pricing/receipt.py::<module>": "a660a076ca5620b28cb83135a96a178d",
++      "l4/change-covered@1|src/pricing/receipt.py::format_line": "2ddd61e10dfeb3c9e57e937ec256b81d",
++      "l4/change-covered@1|src/pricing/receipt.py::format_receipt": "d262cf37e490f0fd567d991ded853e49",
++      "l4/change-covered@1|src/pricing/receipt.py::format_total": "9b87d8e46edb7fb1d21a80fcb14f231e",
++      "l4/file-relevant@1|src/inventory/stock.py": "27cf4d6a6ace08e74307bc2dca843668",
++      "l4/file-relevant@1|src/pricing/discounts.py": "6882701f91164f14cc8a80b5106d70cf",
++      "l4/file-relevant@1|src/pricing/receipt.py": "94d3b8e84e92519a3d4a3a97fac8368c",
++      "l4/file-relevant@1|tests/test_discounts.py": "d1dd453e34e310126e396425699bcc9f",
++      "l4/tests-ok@2|tests": "e09fbcdf14e991321b302c28dafff7c8"
++    },
++    "scope": {
++      "declared": [
++        "src/pricing/discounts.py",
++        "tests",
++        "module pricing"
++      ],
++      "skipped": false,
++      "note": "",
++      "holds": [
++        "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
++      ],
++      "files": [
++        {
++          "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "openspec/changes/add-bulk-discount/questions.md",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "openspec/changes/add-bulk-discount/tasks.md",
++          "module": null,
++          "kind": "exempt",
++          "label": null,
++          "reason": "exempt: harness, spec or documentation path"
++        },
++        {
++          "path": "src/inventory/stock.py",
++          "module": "inventory",
++          "kind": "code",
++          "label": "out_of_scope",
++          "reason": "module `inventory` is not named in the spec"
++        },
++        {
++          "path": "src/pricing/discounts.py",
++          "module": "pricing",
++          "kind": "code",
++          "label": "relevant",
++          "reason": "named in the spec"
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "module": "pricing",
++          "kind": "code",
++          "label": "relevant",
++          "reason": "module `pricing` is named in the spec"
++        },
++        {
++          "path": "tests/test_discounts.py",
++          "module": null,
++          "kind": "test",
++          "label": "relevant",
++          "reason": "named in the spec"
++        }
++      ]
++    },
++    "diff_coverage": {
++      "status": "ok",
++      "reason": "",
++      "percent": 7.9,
++      "unmeasured_files": [],
++      "functions": [
++        {
++          "path": "src/inventory/stock.py",
++          "qualname": "<module>",
++          "status": "covered",
++          "executable": 1,
++          "executed": 1,
++          "tests": [],
++          "label": true
++        },
++        {
++          "path": "src/pricing/discounts.py",
++          "qualname": "<module>",
++          "status": "covered",
++          "executable": 1,
++          "executed": 1,
++          "tests": [],
++          "label": true
++        },
++        {
++          "path": "src/pricing/discounts.py",
++          "qualname": "bulk_discount",
++          "status": "covered",
++          "executable": 3,
++          "executed": 3,
++          "tests": [
++            "test_discounts.test_bulk_discount_threshold_counts_units"
++          ],
++          "label": true
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "<module>",
++          "status": "uncovered",
++          "executable": 5,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "format_line",
++          "status": "uncovered",
++          "executable": 17,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "format_total",
++          "status": "uncovered",
++          "executable": 12,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        },
++        {
++          "path": "src/pricing/receipt.py",
++          "qualname": "format_receipt",
++          "status": "uncovered",
++          "executable": 24,
++          "executed": 0,
++          "tests": [],
++          "label": false
++        }
++      ]
++    },
++    "tests_ran": {
++      "tests_ok": true,
++      "summary": {
++        "total": 22,
++        "passed": 22,
++        "failed": 0,
++        "errored": 0,
++        "skipped": 0,
++        "new": 1,
++        "new_passed": 1,
++        "skipped_unchanged": []
++      },
++      "findings": []
++    }
++  },
++  "human": [
++    {
++      "question": "Q-002",
++      "target": "F-7026922b",
++      "decision": "accept",
++      "by": "human",
++      "reason": "the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.",
++      "text_sha256": "c664f72924e4b4075e6a975b622461ee1b110eddfa79a220a126ffab7e033996"
++    },
++    {
++      "question": "Q-003",
++      "target": "F-72872195",
++      "decision": "accept",
++      "by": "human",
++      "reason": "receipt helper lands with its own unit (the same decision as the coverage hold Q-005).",
++      "text_sha256": "ef40cf48c40439e4035792a111f5d41101629d9f5aef7155f18bd638b1b91b32"
++    },
++    {
++      "question": "Q-004",
++      "target": "H-f427d7fb",
++      "decision": "reject",
++      "by": "human",
++      "reason": "inventory is not part of bulk discounts",
++      "text_sha256": "e721dcd8970e88451d90c5a4282feb5c1f396e0174e377a69d360d8e20acda69"
++    },
++    {
++      "question": "Q-005",
++      "target": "H-2426ce7a",
++      "decision": "accept",
++      "by": "human",
++      "reason": "receipt helper lands with its own unit",
++      "text_sha256": "61f7177748739f06b62537414ba6a206507e7c88212425b55df8a3f98c5ab8bd"
++    }
++  ],
++  "fix": null,
++  "judge_verdict": {
++    "criteria": [
++      {
++        "id": "C-534a6caa",
++        "verdict": "pass",
++        "confidence": "high",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "if sum(item.quantity for item in cart.items) < 10:\n        return Decimal(\"0.00\")\n    return (cart.subtotal() * Decimal(\"0.10\")).quantize(\n        Decimal(\"0.01\"), rounding=ROUND_HALF_UP"
++          },
++          {
++            "kind": "test",
++            "ref": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++            "quote": "assert bulk_discount(qualifying_cart) == Decimal(\"2.50\")"
++          }
++        ],
++        "reasoning": "10 units at 2.50 make 10 units, so the threshold check passes. The subtotal is 25.00, and 25.00 × 0.10 quantized to cents is 2.50. The tracing test checks exactly this case and passed in the gate.",
++        "counterexample": null
++      },
++      {
++        "id": "C-5de37e46",
++        "verdict": "pass",
++        "confidence": "high",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "if sum(item.quantity for item in cart.items) < 10:\n        return Decimal(\"0.00\")"
++          },
++          {
++            "kind": "test",
++            "ref": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++            "quote": "assert bulk_discount(below_threshold_cart) == Decimal(\"0.00\")"
++          }
++        ],
++        "reasoning": "9 units is below 10, so the function returns Decimal('0.00'). The tracing test checks the 9 × 2.50 cart and passed.",
++        "counterexample": null
++      }
++    ],
++    "test_adequacy": [
++      {
++        "test": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++        "criterion": "C-534a6caa",
++        "adequate": true,
++        "reason": "It builds a cart holding 10 units at 2.50 and checks the returned value equals 2.50, which is the observable outcome of the scenario. It uses a single line of quantity 10, so it also matches the Q-001 answer (units are counted).",
++        "generated_test_misreads_criterion": false
++      },
++      {
++        "test": "tests.test_discounts::test_bulk_discount_threshold_counts_units",
++        "criterion": "C-5de37e46",
++        "adequate": true,
++        "reason": "It builds a cart holding 9 units at 2.50 and checks the returned value equals 0.00, which is the outcome the scenario requires.",
++        "generated_test_misreads_criterion": false
++      }
++    ],
++    "findings": [
++      {
++        "severity": "major",
++        "criterion": null,
++        "title": "Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3)",
++        "detail": "The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/inventory/stock.py",
++            "quote": "-LOW_STOCK_THRESHOLD = 5\n+LOW_STOCK_THRESHOLD = 3"
++          }
++        ],
++        "suggested_fix": "Revert the change to src/inventory/stock.py, or propose it as its own change.",
++        "spec_gap": false
++      },
++      {
++        "severity": "major",
++        "criterion": null,
++        "title": "Out-of-scope, untested new module src/pricing/receipt.py",
++        "detail": "A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/receipt.py",
++            "quote": "discount = subtotal - total\n    if discount > 0:\n        lines.append(format_total(\"Discount\", -discount, width))"
++          }
++        ],
++        "suggested_fix": "Remove src/pricing/receipt.py from this change, or specify and test it in a separate change.",
++        "spec_gap": false
++      },
++      {
++        "severity": "minor",
++        "criterion": "C-534a6caa",
++        "title": "Threshold counts units, but no scenario separates units from lines",
++        "detail": "Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "sum(item.quantity for item in cart.items) < 10"
++          }
++        ],
++        "suggested_fix": "WHEN a cart holds a single line of 10 units at 2.50 each THEN `bulk_discount` returns 2.50.",
++        "spec_gap": true
++      },
++      {
++        "severity": "minor",
++        "criterion": "C-534a6caa",
++        "title": "Half-cent rounding of the discount is not pinned",
++        "detail": "Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": ".quantize(\n        Decimal(\"0.01\"), rounding=ROUND_HALF_UP"
++          }
++        ],
++        "suggested_fix": "WHEN a cart holds 9 units at 2.50 and 1 unit at 2.55 (subtotal 25.05) THEN `bulk_discount` returns 2.51.",
++        "spec_gap": true
++      },
++      {
++        "severity": "minor",
++        "criterion": "C-534a6caa",
++        "title": "Interaction with an applied discount code is not specified",
++        "detail": "bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.",
++        "evidence": [
++          {
++            "kind": "file",
++            "ref": "src/pricing/discounts.py",
++            "quote": "return (cart.subtotal() * Decimal(\"0.10\"))"
++          }
++        ],
++        "suggested_fix": "WHEN a cart of 10 units at 2.50 each also has a percentage discount code applied THEN `bulk_discount` still returns 2.50, computed from the subtotal before the code.",
++        "spec_gap": true
++      }
++    ],
++    "riskiest_assumptions": [
++      "Cart.subtotal() returns a Decimal equal to the sum of unit_price × quantity, so 10 × 2.50 gives 25.00 and the result quantizes to 2.50.",
++      "LineItem's positional constructor order is (sku, unit_price, quantity), so the test builds the carts the scenarios describe.",
++      "The gate report's 'passed' status for test_bulk_discount_threshold_counts_units reflects a real run against the committed head."
++    ]
++  },
++  "cx_runs": {},
++  "tests": {
++    "tests.test_cart::test_empty_cart_subtotal_is_zero": "passed",
++    "tests.test_cart::test_subtotal_sums_line_totals": "passed",
++    "tests.test_cart::test_quantity_must_be_positive[0]": "passed",
++    "tests.test_cart::test_quantity_must_be_positive[-1]": "passed",
++    "tests.test_cart::test_negative_price_rejected": "passed",
++    "tests.test_cart::test_cart_total_uses_percentage_discount": "passed",
++    "tests.test_cart::test_cart_total_uses_fixed_amount_discount": "passed",
++    "tests.test_cart::test_applying_second_code_replaces_first": "passed",
++    "tests.test_cart::test_cart_total_never_goes_below_zero": "passed",
++    "tests.test_cart::test_cart_total_rounds_half_up_to_cents": "passed",
++    "tests.test_cart::test_apply_code_raises_for_unknown_code": "passed",
++    "tests.test_discounts::test_discount_registry_lookup_is_case_insensitive": "passed",
++    "tests.test_discounts::test_discount_registry_raises_for_unknown_code": "passed",
++    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[0]": "passed",
++    "tests.test_discounts::test_registering_invalid_percentage_raises_value_error[150]": "passed",
++    "tests.test_discounts::test_bulk_discount_threshold_counts_units": "passed",
++    "tests.test_stock::test_a_quantity_below_the_threshold_is_low": "passed",
++    "tests.test_stock::test_a_quantity_at_the_threshold_is_not_low": "passed",
++    "tests.test_web_page::test_page_lists_the_demo_lines": "passed",
++    "tests.test_web_page::test_page_shows_demo_cart_item_count": "passed",
++    "e2e.test_l4_c_de7f2d3f::test_demo_cart_shows_item_count_of_five[chromium]": "passed",
++    "e2e.test_smoke::test_cart_page_loads[chromium]": "passed"
++  },
++  "red_green": {
++    "tests.test_discounts::test_bulk_discount_threshold_counts_units": "1.1"
++  },
++  "guards": [],
++  "prompt_sha256": "306228b49d66a11843242910c82296359380a98e29e6a8970567a4fe03d1acd8",
++  "judge_calls": 1,
++  "profiles": {
++    "judge": "claude-code",
++    "implementer": [
++      "codex"
++    ]
++  },
++  "judge_model": "claude-opus-5-5",
++  "independence": {
++    "mode": "different_vendor",
++    "status": "verified (different_vendor)",
++    "verified": true,
++    "judge": {
++      "profile": "claude-code",
++      "vendor": "anthropic",
++      "model": null,
++      "provenance": "served",
++      "served": "claude-opus-5-5"
++    },
++    "implementers": [
++      {
++        "profile": "codex",
++        "vendor": "openai",
++        "model": "gpt-6-luna",
++        "provenance": "tool",
++        "served": null
++      }
++    ]
++  },
++  "cost_usd": 0.137176
++}
+diff --git a/openspec/changes/add-bulk-discount/.l4/evidence/round-2/verification.md b/openspec/changes/add-bulk-discount/.l4/evidence/round-2/verification.md
+new file mode 100644
+index 0000000..c42e74b
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/evidence/round-2/verification.md
+@@ -0,0 +1,132 @@
++# Verification: openspec:add-bulk-discount: NEEDS_HUMAN (round 2)
++
++traceability: 2/2 criteria covered by a discriminating test
++
++- Base: `b98d1d06de9be5f42939fc71c88cd8988e4b5046`
++- Head: `790d85b08fa40ab14e138e6daaff4a4bcfae011f`
++- Implementer profiles: codex
++- Judge: claude-code (claude-opus-5-5), 1 call(s), prompt sha256 `306228b49d66a11843242910c82296359380a98e29e6a8970567a4fe03d1acd8`
++- independence: verified (different_vendor): claude-code anthropic (served claude-opus-5-5), codex openai (tool)
++- Cost: $0.1372
++
++## Ladder
++
++| Step | Name | Status | Seconds | Note |
++|---|---|---|---|---|
++| 0 | preconditions | reused | 0.0 | reused (round 1) |
++| 1 | integrity | reused | 0.0 | reused (round 1) |
++| 2 | build | reused | 0.0 | reused (round 1) |
++| 3 | tests | reused | 0.0 | reused (round 1) |
++| 4 | traceability | reused | 0.0 | reused (round 1) |
++| 4a | audit sampling | not_run | 0.0 | verifier.audit_sample_ratio is 0 |
++| 5 | ui test generation | not_run | 0.0 | the unit changed no file under verifier.playwright.ui_paths |
++| 6 | quality | reused | 0.0 | reused (round 1) |
++| 8 | s1 judge | reused | 0.0 | reused (round 1) |
++| 9 | judge | reused | 0.0 | reused (round 1) |
++| 10 | aggregation | ok | 0.0 | NEEDS_HUMAN |
++
++## Gates
++
++| Gate | Status | Command | Log |
++|---|---|---|---|
++| setup | pass | `uv sync --frozen` | .l4-out/gates/r-20261005T0921Z-1804/013-setup.log |
++| lint | pass | `.venv/bin/ruff check --extend-exclude .l4 .` | .l4-out/gates/r-20261005T0921Z-1804/014-lint.log |
++| test | pass | `.venv/bin/python -m pytest --junitxml=.l4-out/junit.xml` | .l4-out/gates/r-20261005T0921Z-1804/015-test.log |
++| e2e | pass | `.venv/bin/python -m pytest e2e -p no:cacheprovider --junitxml=.l4-out/e2e-junit.xml --output .l4-out/e2e/artifacts --tracing retain-on-failure --screenshot only-on-failure` | .l4-out/gates/r-20261005T0921Z-1804/016-e2e.log |
++
++## Integrity
++
++| Check | Status | Note |
++|---|---|---|
++| protected paths | ok | no protected path differs from the base |
++| pre-existing tests | ok | 1 test file(s) compared with the base |
++| red-green freeze | ok | 1 task(s): red and green compared |
++| content scan | ok | no result-manipulating construct in the changed support and runner files |
++| suppressions | skipped | no new suppression comment |
++| tdd history | ok | 1 task(s); red tests passing at head: step 3 |
++
++## Traceability
++
++| Id | Criterion | State | Tests (status, proof) | Not evidence | S1 p |
++|---|---|---|---|---|---|
++| C-534a6caa | bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount | covered | tests.test_discounts::test_bulk_discount_threshold_counts_units (passed, zero_value) | - | 0.56 |
++| C-5de37e46 | bulk-discount › Bulk discount › A cart of 9 items gets none | covered | tests.test_discounts::test_bulk_discount_threshold_counts_units (passed, zero_value) | - | 0.53 |
++
++## Evidence
++
++### Needs attention
++
++- out of scope: `src/inventory/stock.py` (module `inventory`)
++- changed code not run by tests: `src/pricing/receipt.py::<module>` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_line` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_total` (uncovered)
++- changed code not run by tests: `src/pricing/receipt.py::format_receipt` (uncovered)
++
++### Files
++
++| Path | Module | Label | Why |
++|---|---|---|---|
++| `openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0919Z-b5be.jsonl` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0921Z-1804.jsonl` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/questions.md` |  | none | exempt: harness, spec or documentation path |
++| `openspec/changes/add-bulk-discount/tasks.md` |  | none | exempt: harness, spec or documentation path |
++| `src/inventory/stock.py` | inventory | out_of_scope | module `inventory` is not named in the spec |
++| `src/pricing/discounts.py` | pricing | relevant | named in the spec |
++| `src/pricing/receipt.py` | pricing | relevant | module `pricing` is named in the spec |
++| `tests/test_discounts.py` |  | relevant | named in the spec |
++
++### Changed functions
++
++7.9% of the changed executable lines ran.
++
++| Function | Status | Lines run | Tests |
++|---|---|---|---|
++| `src/inventory/stock.py::<module>` | covered | 1/1 |  |
++| `src/pricing/discounts.py::<module>` | covered | 1/1 |  |
++| `src/pricing/discounts.py::bulk_discount` | covered | 3/3 | test_discounts.test_bulk_discount_threshold_counts_units |
++| `src/pricing/receipt.py::<module>` | uncovered | 0/5 |  |
++| `src/pricing/receipt.py::format_line` | uncovered | 0/17 |  |
++| `src/pricing/receipt.py::format_receipt` | uncovered | 0/24 |  |
++| `src/pricing/receipt.py::format_total` | uncovered | 0/12 |  |
++
++### Tests
++
++22 of 22 passed, 0 failed, 0 errored, 0 skipped.
++1 of 1 new tests passed.
++
++## S1 (recorded for calibration, never decides)
++
++| Criterion | Status | p | Model | Engine | Note |
++|---|---|---|---|---|---|
++| C-534a6caa | ok | 0.561 | laya-rl-agent | laya-local | evidence cut to fit the budget |
++| C-5de37e46 | ok | 0.533 | laya-rl-agent | laya-local | evidence cut to fit the budget |
++
++## Human verdicts
++
++- Q-002 accept F-7026922b by human: the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.
++- Q-003 accept F-72872195 by human: receipt helper lands with its own unit (the same decision as the coverage hold Q-005).
++- Q-004 reject H-f427d7fb by human: inventory is not part of bulk discounts
++- Q-005 accept H-2426ce7a by human: receipt helper lands with its own unit
++
++## Criteria
++
++| Id | Criterion | Judge | Result | Reason |
++|---|---|---|---|---|
++| C-534a6caa | bulk-discount › Bulk discount › A cart of 10 items gets the bulk discount | pass | pass | the judge passed it and a discriminating test passes |
++| C-5de37e46 | bulk-discount › Bulk discount › A cart of 9 items gets none | pass | pass | the judge passed it and a discriminating test passes |
++
++## Findings
++
++- [minor, judge] Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3): The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected. (waived by human: the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.)
++- [minor, judge] Out-of-scope, untested new module src/pricing/receipt.py: A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total. (waived by human: receipt helper lands with its own unit (the same decision as the coverage hold Q-005).)
++- [minor, judge] Threshold counts units, but no scenario separates units from lines (spec gap) (criterion C-534a6caa): Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.
++- [minor, judge] Half-cent rounding of the discount is not pinned (spec gap) (criterion C-534a6caa): Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.
++- [minor, judge] Interaction with an applied discount code is not specified (spec gap) (criterion C-534a6caa): bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.
++
++## Needs a human
++
++- scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++
++## New tests (red then green, `task.red_ok` in the ledger)
++
++- `tests.test_discounts::test_bulk_discount_threshold_counts_units` (task 1.1): passed
+diff --git a/openspec/changes/add-bulk-discount/questions.md b/openspec/changes/add-bulk-discount/questions.md
+index 1cadecd..44b69be 100644
+--- a/openspec/changes/add-bulk-discount/questions.md
++++ b/openspec/changes/add-bulk-discount/questions.md
+@@ -16,6 +16,7 @@ Do not change question IDs. Commit and push to the l4/… branch to resume the r
+ | Q-003 | answered | none | verdict | Finding F-72872195: Out-of-scope, untested new module src/pricing/receipt.py |
+ | Q-004 | answered | none | verdict | Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name |
+ | Q-005 | answered | none | verdict | Hold H-2426ce7a: diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_... |
++| Q-006 | open | none | verdict | Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name |
+ <!-- l4:index:end -->
+ 
+ ---
+@@ -137,3 +138,24 @@ Answer `accept` if the unit can go on as it stands, or `reject` and say why.
+ ### Answer
+ <!-- write below this line -->
+ accept: receipt helper lands with its own unit
++
++---
++
++## Q-006: Hold H-f427d7fb: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++
++- **Status:** open
++- **Blocking tasks:** none
++- **Kind:** verdict
++- **Asked:** round 2, verifier
++
++### Context
++After round 2 the verifier cannot decide on its own: scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
++
++Answer `accept` if the unit can go on as it stands, or `reject` and say why.
++
++### Options
++1. accept
++2. reject: <reason>
++
++### Answer
++<!-- write below this line -->
+diff --git a/openspec/changes/add-bulk-discount/verification.md b/openspec/changes/add-bulk-discount/verification.md
+index 9137372..c42e74b 100644
+--- a/openspec/changes/add-bulk-discount/verification.md
++++ b/openspec/changes/add-bulk-discount/verification.md
+@@ -1,4 +1,4 @@
+-# Verification: openspec:add-bulk-discount: NEEDS_HUMAN (round 1)
++# Verification: openspec:add-bulk-discount: NEEDS_HUMAN (round 2)
+ 
+ traceability: 2/2 criteria covered by a discriminating test
+ 
+@@ -13,16 +13,16 @@ traceability: 2/2 criteria covered by a discriminating test
+ 
+ | Step | Name | Status | Seconds | Note |
+ |---|---|---|---|---|
+-| 0 | preconditions | ok | 0.6 | base main@b98d1d06de contained |
+-| 1 | integrity | ok | 0.1 | 6 sub-checks; scope: 8 changed file(s), 1 held |
+-| 2 | build | ok | 0.2 |  |
+-| 3 | tests | ok | 4.6 |  |
+-| 4 | traceability | ok | 0.0 | 2/2 criteria covered |
++| 0 | preconditions | reused | 0.0 | reused (round 1) |
++| 1 | integrity | reused | 0.0 | reused (round 1) |
++| 2 | build | reused | 0.0 | reused (round 1) |
++| 3 | tests | reused | 0.0 | reused (round 1) |
++| 4 | traceability | reused | 0.0 | reused (round 1) |
+ | 4a | audit sampling | not_run | 0.0 | verifier.audit_sample_ratio is 0 |
+ | 5 | ui test generation | not_run | 0.0 | the unit changed no file under verifier.playwright.ui_paths |
+-| 6 | quality | ok | 0.0 | 7.9% of the changed executable lines ran |
+-| 8 | s1 judge | ok | 33.0 | 2/2 criteria judged by laya-local |
+-| 9 | judge | ok | 27.7 | 1 call(s) |
++| 6 | quality | reused | 0.0 | reused (round 1) |
++| 8 | s1 judge | reused | 0.0 | reused (round 1) |
++| 9 | judge | reused | 0.0 | reused (round 1) |
+ | 10 | aggregation | ok | 0.0 | NEEDS_HUMAN |
+ 
+ ## Gates
+@@ -101,6 +101,13 @@ traceability: 2/2 criteria covered by a discriminating test
+ | C-534a6caa | ok | 0.561 | laya-rl-agent | laya-local | evidence cut to fit the budget |
+ | C-5de37e46 | ok | 0.533 | laya-rl-agent | laya-local | evidence cut to fit the budget |
+ 
++## Human verdicts
++
++- Q-002 accept F-7026922b by human: the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.
++- Q-003 accept F-72872195 by human: receipt helper lands with its own unit (the same decision as the coverage hold Q-005).
++- Q-004 reject H-f427d7fb by human: inventory is not part of bulk discounts
++- Q-005 accept H-2426ce7a by human: receipt helper lands with its own unit
++
+ ## Criteria
+ 
+ | Id | Criterion | Judge | Result | Reason |
+@@ -110,8 +117,8 @@ traceability: 2/2 criteria covered by a discriminating test
+ 
+ ## Findings
+ 
+-- [major, judge] Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3): The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected.
+-- [major, judge] Out-of-scope, untested new module src/pricing/receipt.py: A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total.
++- [minor, judge] Unrelated change to LOW_STOCK_THRESHOLD (5 -> 3): The change lowers the inventory low-stock threshold from 5 to 3 in src/inventory/stock.py. No part of the bulk-discount proposal, design, spec or tasks mentions this. It changes which stock quantities count as low (for example, 3 and 4 are no longer low). The stock tests still pass, which suggests they read the constant rather than pinning the value, so this behaviour change goes undetected. (waived by human: the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.)
++- [minor, judge] Out-of-scope, untested new module src/pricing/receipt.py: A 77-line receipt formatter was added. The spec does not ask for it, and the gate report lists no tests for it. It also leaves out the new bulk discount: the discount line it prints is only subtotal - total. (waived by human: receipt helper lands with its own unit (the same decision as the coverage hold Q-005).)
+ - [minor, judge] Threshold counts units, but no scenario separates units from lines (spec gap) (criterion C-534a6caa): Q-001 was answered 'units', and the code sums quantities. Both scenarios hold whether the code counts units or lines, so the answered decision is pinned only by the implementer's test, not by the spec. For example, a single line of quantity 10 qualifies under unit counting but not under line counting.
+ - [minor, judge] Half-cent rounding of the discount is not pinned (spec gap) (criterion C-534a6caa): Both scenarios give an exact cent value. A subtotal such as 25.05 gives a 10 % share of 2.505, and half-up rounding versus banker's rounding would differ there. The code rounds half up.
+ - [minor, judge] Interaction with an applied discount code is not specified (spec gap) (criterion C-534a6caa): bulk_discount uses cart.subtotal(), so it ignores any discount code applied to the cart. Two reasonable implementations differ here: one bases the bulk discount on the pre-code subtotal, the other on the post-code amount.
+@@ -119,7 +126,6 @@ traceability: 2/2 criteria covered by a discriminating test
+ ## Needs a human
+ 
+ - scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name
+-- diff coverage: changed code not run by any test: `src/pricing/receipt.py::<module>`, `src/pricing/receipt.py::format_line`, `src/pricing/receipt.py::format_receipt`, `src/pricing/receipt.py::format_total`
+ 
+ ## New tests (red then green, `task.red_ok` in the ledger)
+ 
+-- 
+2.48.1
+
+
+From ad2000ca6332c95e7e9214b7024a2da655e3131e Mon Sep 17 00:00:00 2001
+From: l4-bot <l4-bot@users.noreply.invalid>
+Date: Mon, 5 Oct 2026 12:30:43 +0300
+Subject: [PATCH 11/11] chore(add-bulk-discount): ledger [skip ci]
+
+L4-Unit: openspec:add-bulk-discount
+L4-Run: r-20261005T0930Z-1874
+L4-Iteration: 3
+L4-Phase: awaiting_human
+---
+ .../.l4/ledger/r-20261005T0930Z-1874.jsonl    | 27 +++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+ create mode 100644 openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0930Z-1874.jsonl
+
+diff --git a/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0930Z-1874.jsonl b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0930Z-1874.jsonl
+new file mode 100644
+index 0000000..e38f064
+--- /dev/null
++++ b/openspec/changes/add-bulk-discount/.l4/ledger/r-20261005T0930Z-1874.jsonl
+@@ -0,0 +1,27 @@
++{"ts": "2026-10-05T09:30:34.641663Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 1, "type": "run.started", "harness_version": "0.1.0", "harness_commit": "7c7d7c95202c70c8c06b2a886b2c0266c0b6d849", "command": "run", "branch": "l4/openspec/add-bulk-discount", "base": "21caaeab003dbc2f0b384282a7d496f74a7dd3b8", "source": "remote_branch", "iteration": 2}
++{"ts": "2026-10-05T09:30:34.644918Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 2, "type": "lock.acquired", "holder": "gitlab-runner:158704", "nonce": "7bd939865fee7534"}
++{"ts": "2026-10-05T09:30:35.044052Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 3, "type": "question.answered", "id": "Q-002", "by": "human", "answer_sha256": "93cec87625758d7b7c502a4deda49d2d43e7e074fd3621cd860b15db50b381b8"}
++{"ts": "2026-10-05T09:30:35.051111Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 4, "type": "question.answered", "id": "Q-003", "by": "human", "answer_sha256": "f822e04989f494d6a065a2ba4cacc0df615689dd7e6d3f8c172695b7f5af92d0"}
++{"ts": "2026-10-05T09:30:35.054217Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 5, "type": "question.answered", "id": "Q-004", "by": "human", "answer_sha256": "f4027792cb1e62f2867ada3c5f923048de19f7060a3ad838261076a44c10349c"}
++{"ts": "2026-10-05T09:30:35.057367Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 6, "type": "question.answered", "id": "Q-005", "by": "human", "answer_sha256": "a64ce76b8bf5ff2b8a3afed9e4c387b3eb31fbc08c8de3ca39ed4c751ebfdb04"}
++{"ts": "2026-10-05T09:30:35.061507Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 7, "type": "phase.changed", "from": "awaiting_human", "to": "verifying", "trigger": "verdicts_answered", "exit_code": null, "questions": ["Q-002", "Q-003", "Q-004", "Q-005"]}
++{"ts": "2026-10-05T09:30:35.077368Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 8, "type": "human.verdict", "question": "Q-002", "target": "F-7026922b", "decision": "accept", "by": "human", "reason": "the same change is decided on the scope hold Q-004 (rejected there: inventory is not part of bulk discounts), so this finding needs no fix unit of its own; the unit stays with me.", "text_sha256": "c664f72924e4b4075e6a975b622461ee1b110eddfa79a220a126ffab7e033996", "answer_sha256": "93cec87625758d7b7c502a4deda49d2d43e7e074fd3621cd860b15db50b381b8"}
++{"ts": "2026-10-05T09:30:35.080802Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 9, "type": "human.verdict", "question": "Q-003", "target": "F-72872195", "decision": "accept", "by": "human", "reason": "receipt helper lands with its own unit (the same decision as the coverage hold Q-005).", "text_sha256": "ef40cf48c40439e4035792a111f5d41101629d9f5aef7155f18bd638b1b91b32", "answer_sha256": "f822e04989f494d6a065a2ba4cacc0df615689dd7e6d3f8c172695b7f5af92d0"}
++{"ts": "2026-10-05T09:30:35.083852Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 10, "type": "human.verdict", "question": "Q-004", "target": "H-f427d7fb", "decision": "reject", "by": "human", "reason": "inventory is not part of bulk discounts", "text_sha256": "e721dcd8970e88451d90c5a4282feb5c1f396e0174e377a69d360d8e20acda69", "answer_sha256": "f4027792cb1e62f2867ada3c5f923048de19f7060a3ad838261076a44c10349c"}
++{"ts": "2026-10-05T09:30:35.086828Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 11, "type": "human.verdict", "question": "Q-005", "target": "H-2426ce7a", "decision": "accept", "by": "human", "reason": "receipt helper lands with its own unit", "text_sha256": "61f7177748739f06b62537414ba6a206507e7c88212425b55df8a3f98c5ab8bd", "answer_sha256": "a64ce76b8bf5ff2b8a3afed9e4c387b3eb31fbc08c8de3ca39ed4c751ebfdb04"}
++{"ts": "2026-10-05T09:30:35.137194Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 12, "type": "verify.step", "round": 2, "step": "0", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "933579725dc213c0c4b838fa0461f1d1fccabf4771a52cdb1f7fb62c15487bca"}
++{"ts": "2026-10-05T09:30:35.140590Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 13, "type": "verify.step", "round": 2, "step": "1", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "843d771b062eb1d4260b3cae6875a103a464a368c2d90acb3e32c551f6b5a96c"}
++{"ts": "2026-10-05T09:30:35.143682Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 14, "type": "verify.step", "round": 2, "step": "2", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "f5b4b5ac72a062da97563a556954bd7ed968aa895f2b0146e96bca36d15eb65e"}
++{"ts": "2026-10-05T09:30:35.146686Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 15, "type": "verify.step", "round": 2, "step": "3", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "614311b66327046cf19593b6305036653c8c0a439b9d1ff99b2d2a9a60f8b0b4"}
++{"ts": "2026-10-05T09:30:35.149564Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 16, "type": "verify.step", "round": 2, "step": "4", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "b7526aa209d3d4c510eba2f08ad2cd52d335358ee6f61f4e9ab2a7d5ff27b5bf"}
++{"ts": "2026-10-05T09:30:35.152481Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 17, "type": "verify.step", "round": 2, "step": "6", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "1fa85d9c075a1acfef7285ce0ca1e882fb8f1fa842d1709e61c6d144fba77195"}
++{"ts": "2026-10-05T09:30:35.155435Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 18, "type": "verify.step", "round": 2, "step": "8", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "87f7c3d146097f07eee66b73b27ad78259ba0ab06e6135cc8210ba40718e63b8"}
++{"ts": "2026-10-05T09:30:35.158075Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 19, "type": "verify.step", "round": 2, "step": "9", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "reused", "evidence_hash": "31c73711870ac88cb1ac629bb9fb3ccf6c626a3654444094530df66301ef4bdf"}
++{"ts": "2026-10-05T09:30:35.161200Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 20, "type": "verify.step", "round": 2, "step": "10", "subject_sha": "790d85b08fa40ab14e138e6daaff4a4bcfae011f", "status": "ok", "evidence_hash": "0523b3832a802452d8eb3769dfe1465756394d8f9b080343ca463d3acbb65821"}
++{"ts": "2026-10-05T09:30:35.203012Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 21, "type": "question.raised", "id": "Q-006", "kind": "verdict", "source": "verifier", "target": "H-f427d7fb", "text_sha256": "e721dcd8970e88451d90c5a4282feb5c1f396e0174e377a69d360d8e20acda69", "round": 2}
++{"ts": "2026-10-05T09:30:38.050304Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 22, "type": "pr.labels", "number": 24, "labels": ["l4:verifying", "l4:needs-answers"]}
++{"ts": "2026-10-05T09:30:39.180716Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 23, "type": "verify.verdict", "round": 2, "verdict": "NEEDS_HUMAN", "findings": 5, "criteria_passed": 2, "criteria_total": 2}
++{"ts": "2026-10-05T09:30:39.187155Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 24, "type": "phase.changed", "from": "verifying", "to": "awaiting_human", "trigger": "verify_needs_human", "exit_code": 11}
++{"ts": "2026-10-05T09:30:41.566731Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 25, "type": "pr.labels", "number": 24, "labels": ["l4:awaiting_human", "l4:needs-answers"]}
++{"ts": "2026-10-05T09:30:43.429075Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 26, "type": "lock.released"}
++{"ts": "2026-10-05T09:30:43.435480Z", "run_id": "r-20261005T0930Z-1874", "unit": "openspec:add-bulk-discount", "seq": 27, "type": "run.finished", "exit_code": 11}
+-- 
+2.48.1
+

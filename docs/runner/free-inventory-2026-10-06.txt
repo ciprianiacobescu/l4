@@ -1,0 +1,113 @@
+# Free-resource inventory for L4 roles — l4-runner, 2026-10-06 (UTC times)
+# Model calls made: 10 OpenCode Zen hellos + 2 magnitude hellos + 3 harness-shape magnitude attempts (2 by mistake with
+# output discarded, 1 recorded below; the recorded one failed in 2.3 s with no reply)
+# + 2 keyless Jev-free calls (Mac, runner) + 1 dummy-key Jev-free call (401) + 1 paid Jev smoke. No 429 seen.
+
+## 1. CPU (Laya / AVX), 18:32Z, as admin via mk-ssh.sh
+grep -c avx2 /proc/cpuinfo -> 0 ; grep -c -w avx -> 0
+Vendor ID: GenuineIntel ; Model name: QEMU Virtual CPU version 2.5+ ; Hypervisor vendor: KVM ; uptime 3 days 23:06
+Flags include vmx (Intel VT-x nested), no svm/avx/avx2/fma/f16c
+
+## 2. OpenCode models on the runner (opencode 1.18.34, as gitlab-runner, models cache not refreshed)
+$ opencode models            -> 14 lines: 4 magnitude/*, 10 opencode/*
+$ opencode models opencode --verbose   (summary: id | name | api.npm | cost in/out | limit | toolcall | release)
+opencode/big-pickle | Big Pickle | @ai-sdk/openai-compatible | 0/0 | {'context': 200000, 'input': 160000, 'output': 32000} | True | 2025-10-17
+opencode/fledge-alpha-free | Fledge Alpha Free | @ai-sdk/openai-compatible | 0/0 | {'context': 1048576, 'output': 131072} | True | 2026-10-01
+opencode/ling-3.0-flash-fin-free | Ling 3.0 Flash Fin Free | @ai-sdk/openai-compatible | 0/0 | {'context': 262144, 'output': 32768} | True | 2026-08-27
+opencode/ling-3.1-flash-free | Ling 3.1 Flash Free | @ai-sdk/openai-compatible | 0/0 | {'context': 262144, 'output': 32768} | True | 2026-09-29
+opencode/longcat-2.5-preview-free | LongCat 2.5 Preview Free | @ai-sdk/openai-compatible | 0/0 | {'context': 1000000, 'output': 131072} | True | 2026-09-25
+opencode/mimo-v2.6-flash-free | MiMo-V2.6-Flash Free | @ai-sdk/openai-compatible | 0/0 | {'context': 200000, 'output': 32000} | True | 2026-09-22
+opencode/muse-spark-1.3-contributor-free | Muse Spark 1.3 Free | @ai-sdk/openai | 0/0 | {'context': 1048576, 'output': 131072} | True | 2026-09-02
+opencode/nemotron-3-ultra-free | Nemotron 3 Ultra Free | @ai-sdk/openai-compatible | 0/0 | {'context': 1000000, 'output': 128000} | True | 2026-06-04
+opencode/nemotron-3.5-lightning-free | Nemotron 3.5 Lightning Free | @ai-sdk/openai-compatible | 0/0 | {'context': 262144, 'output': 262144} | True | 2026-08-11
+opencode/space-bunny-free | Space Bunny Free | @ai-sdk/openai-compatible | 0/0 | {'context': 1048576, 'input': 524288, 'output': 524288} | True | 2026-09-23
+
+models.dev (https://models.dev/api.json, fetched from the Mac): the same 10 opencode/* free models are non-deprecated;
+  26 more zero-cost ids are marked deprecated (e.g. mimo-v2.5-free, deepseek-v4-flash-free, muse-spark-1.2-contributor-free).
+Zen gateway list (GET https://opencode.ai/zen/v1/models, no auth): free/pickle/jev ids =
+   ['big-pickle', 'deepseek-v4-flash-free', 'fledge-alpha-free', 'jev-1.13', 'jev-1.13-free', 'ling-3.0-flash-fin-free', 'ling-3.1-flash-free', 'longcat-2.5-preview-free', 'mimo-v2.5-free', 'mimo-v2.6-flash-free', 'muse-spark-1.2-contributor-free', 'muse-spark-1.3-contributor-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free', 'space-bunny-free']
+
+## 3. Hello per free model (harness _hello shape: empty cwd + XDG_CONFIG_HOME, 4 OPENCODE_DISABLE_*=1,
+##    OPENCODE_CONFIG_CONTENT = judge config (free variant), env -i PATH/HOME/USER/LANG, prompt 'Reply with exactly: L4-OK')
+## verdict = l4.agents.opencode._scan + l4.availability.limits.normalise_limit + l4.availability.probes._hello_verdict
+opencode/fledge-alpha-free | FAIL | 4.1s | reply=None | reason=auth | tokens in/out=0/0 cost=None | other=[]
+opencode/ling-3.0-flash-fin-free | FAIL | 81.3s | reply=None | reason=error status=400 msg='Error from provider (Console): Upstream request failed: Endpoint is unavailable.' | tokens in/out=0/0 cost=None | other=[]
+opencode/ling-3.1-flash-free | PASS | 8.3s | reply='L4-OK' | reason=None | tokens in/out=2107/5 cost=0.0 | other=[]
+opencode/longcat-2.5-preview-free | PASS | 7.2s | reply='L4-OK' | reason=None | tokens in/out=2510/7 cost=0.0 | other=[]
+opencode/mimo-v2.6-flash-free | PASS | 9.0s | reply='L4-OK' | reason=None | tokens in/out=1850/6 cost=0.0 | other=[]
+opencode/muse-spark-1.3-contributor-free | PASS | 5.0s | reply='L4-OK' | reason=None | tokens in/out=3932/14 cost=0.0 | other=[]
+opencode/nemotron-3-ultra-free | PASS | 10.1s | reply='L4-OK' | reason=None | tokens in/out=3941/5 cost=0.0 | other=[]
+opencode/nemotron-3.5-lightning-free | PASS | 4.8s | reply='L4-OK' | reason=None | tokens in/out=3944/4 cost=0.0 | other=[]
+opencode/space-bunny-free | PASS | 3.9s | reply='L4-OK' | reason=None | tokens in/out=1956/6 cost=0.0 | other=[]
+opencode/big-pickle | PASS | 6.6s | reply='L4-OK' | reason=None | tokens in/out=2212/11 cost=0.0 | other=[]
+magnitude (runner user's own opencode config dir for the provider block, MCP servers disabled, non-free judge config):
+magnitude/qwen3.6-35b-a3b:gguf:q5 | PASS | 7.3s | reply='L4-OK' | reason=None | tokens in/out=1978/29 cost=0.0 | other=[]
+magnitude/minicpm5-2b:gguf:q8 | PASS | 95.0s | reply='L4-OK' | reason=None | tokens in/out=1948/29 cost=0.0 | other=[]
+magnitude in the exact harness shape (empty XDG_CONFIG_HOME, so no provider block): exit 1 after 2.3 s, no reply:
+"error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_746d468a"}}}
+
+Raw error events of the two failures:
+   403 {"type":"error","error":{"type":"FreeTierError","message":"Error from provider (Console): This model is not available in your country"}}
+   400 {"error":{"type":"server_error","message":"Error from provider (Console): Upstream request failed: Endpoint is unavailable."}}
+Hello timings (START stamps): opencode/fledge-alpha-free@2026-10-06T18:43:36Z opencode/ling-3.0-flash-fin-free@2026-10-06T18:43:40Z opencode/ling-3.1-flash-free@2026-10-06T18:45:02Z opencode/longcat-2.5-preview-free@2026-10-06T18:45:10Z opencode/mimo-v2.6-flash-free@2026-10-06T18:45:17Z opencode/muse-spark-1.3-contributor-free@2026-10-06T18:45:26Z opencode/nemotron-3-ultra-free@2026-10-06T18:45:31Z opencode/nemotron-3.5-lightning-free@2026-10-06T18:45:42Z opencode/space-bunny-free@2026-10-06T18:45:46Z magnitude/qwen3.6-35b-a3b:gguf:q5@2026-10-06T18:46:26Z magnitude/minicpm5-2b:gguf:q8@2026-10-06T18:46:33Z opencode/big-pickle@2026-10-06T18:48:53Z 
+
+## 4. Jev (System One)
+a) Zen free, no API key, from the Mac 18:42Z: POST https://opencode.ai/zen/v1/systemone model jev-1.13-free -> HTTP 200
+   {"model":"jev-1.13-free","answers":{"q":{"type":"noul","noul":0.95}},"usage":{"input_tokens":278,"output_tokens":20},"cost":"0"}
+b) same with 'Authorization: Bearer not-a-real-key' -> HTTP 401 {"type":"AuthError","message":"Invalid API key."}
+c) Zen free, no API key, from the runner 18:48Z (noul + choice) -> HTTP 200 in 0.81 s, no rate-limit headers:
+   {"model":"jev-1.13-free","answers":{"has_test":{"type":"noul","noul":0.96},"risk":{"type":"choice","choice":"low","confidence":1,"probabilities":{"low":1,"high":0}}},"usage":{"input_tokens":335,"output_tokens":48},"cost":"0"}
+d) GET https://opencode.ai/zen/health -> 404 ; GET https://opencode.ai/zen/v1/health -> 404
+e) TypeSafe, key from Mintkey typesafe-jev-api-key (never printed): GET https://api.typesafe.ai/v1/models -> 200 (jev-latest, jev-preview);
+   GET /v1/usage, /v1/credits, /v1/balance, /v1/account, /v1/billing -> 404 each (no usage/credits endpoint).
+f) scripts/dev/jev_smoke.py (paid, 2 nouls): HTTP 200 in 296 ms, model jev-1.13.0, 364 in / 42 out tokens (~$0.000015 at $0.042/Mtok input).
+
+## 5. Subscription quota windows, zero model calls, as gitlab-runner 18:49Z (the harness quota step's own requests)
+codex app-server account/rateLimits/read (account id and credit id redacted):
+{"ordinaryUsageAllowed": true, "rateLimits": {"limitId": "codex", "limitName": null, "normalModelSlug": null, "primary": {"usedPercent": 1, "windowDurationMins": 300, "resetsAt": 1791322529}, "secondary": {"usedPercent": 4, "windowDurationMins": 10080, "resetsAt": 1791636743}, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "individualLimit": null, "spendControlReached": false, "planType": "plus", "rateLimitReachedType": null}, "rateLimitsByLimitId": {"codex": {"limitId": "codex", "limitName": null, "normalModelSlug": null, "primary": {"usedPercent": 1, "windowDurationMins": 300, "resetsAt": 1791322529}, "secondary": {"usedPercent": 4, "windowDurationMins": 10080, "resetsAt": 1791636743}, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "individualLimit": null, "spendControlReached": false, "planType": "plus", "rateLimitReachedType": null}}, "rateLimitResetCredits": {"availableCount": 1, "credits": [{"id": "<redacted>", "resetType": "codexRateLimits", "status": "available", "grantedAt": 1790700349, "expiresAt": 1793292349, "title": "Full reset (Weekly + 5 hr)", "description": "Thanks for using Codex! You've been granted one free rate limit reset."}]}, "rateLimitUpsell": null}
+  primary 300-min window used 1%, resets 2026-10-06T21:35:29Z; secondary 10080-min (weekly) used 4%, resets 2026-10-10T12:52:23Z;
+  planType plus; one unused 'Full reset (Weekly + 5 hr)' credit, expires 2026-10-29T16:45:49Z (the harness never redeems it).
+claude -p --safe-mode --no-session-persistence --output-format json /usage (TZ=UTC):
+{"is_error": false, "result": "You are currently using your subscription to power your Claude Code usage", "subtype": "success", "api_error_status": null}
+  -> no usage windows in the reply: l4.availability.quota.parse_usage finds none on claude 2.1.288.
+
+## 6. Other providers (no model call)
+OpenRouter GET /api/v1/key with Mintkey OPENROUTER_API_KEY (used by remote Hermes; never printed): is_free_tier false,
+  usage_daily 0, free_model_daily_requests {used 0, limit 1000, remaining 1000}. GET /api/v1/models: 16 ':free' models.
+magnitude: OpenAI-compatible server on the maintainer's Mac (192.0.2.10:10100, process 'magnitude', Apple M4 Max, 128 GB);
+  GET /inference/v1/models lists qwen3.6-35b-a3b:gguf:q5, minicpm5-2b:gguf:q8 and two HF-cache GGUFs.
+
+## 7. The hello script used (scratch copy, run with mk-ssh.sh --script <file> -- <model>...)
+    #!/usr/bin/env bash
+    # free-hello.sh MODEL... — one tiny hello per model, as the runner user, in the L4 harness's opencode probe shape
+    # (src/l4/agents/opencode.py `_hello`): empty cwd and XDG_CONFIG_HOME, the four OPENCODE_DISABLE_* switches, the
+    # judge-mode OPENCODE_CONFIG_CONTENT (free-tier variant: read/bash "ask"), env -i with PATH/HOME/USER/LANG only,
+    # argv `opencode run --pure --format json -m <model> --title "l4 hello" "Reply with exactly: L4-OK"`.
+    # Prints the raw JSON stream between markers. Stops after the first 429 / rate-limit error.
+    # MAGNITUDE=1 runs instead with the runner user's own config dir (the `magnitude` provider lives there), its MCP
+    # servers disabled and the non-free judge config (tools off, permission deny) overlaid.
+    set -u
+    RUNNER_USER=gitlab-runner
+    RHOME=$(getent passwd "$RUNNER_USER" | cut -d: -f6)
+    PROMPT='Reply with exactly: L4-OK'
+    FREE_CFG='{"$schema":"https://opencode.ai/config.json","snapshot":false,"share":"disabled","autoupdate":false,"permission":{"*":"deny","read":"ask","bash":"ask"}}'
+    MAG_CFG='{"$schema":"https://opencode.ai/config.json","snapshot":false,"share":"disabled","autoupdate":false,"tools":{"*":false},"permission":{"*":"deny"},"mcp":{"firecrawl":{"type":"local","command":["true"],"enabled":false},"context7":{"type":"local","command":["true"],"enabled":false}}}'
+    for model in "$@"; do
+      echo "=== MODEL $model START $(date -u +%FT%TZ)"
+      if [ "${MAGNITUDE:-0}" = 1 ]; then
+        out=$(sudo -n -u "$RUNNER_USER" -H env -i HOME="$RHOME" USER="$RUNNER_USER" LANG=C.UTF-8 \
+          PATH="$RHOME/.local/bin:/usr/local/bin:/usr/bin:/bin" OPENCODE_CONFIG_CONTENT="$MAG_CFG" \
+          OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+          bash -c 'd=$(mktemp -d) && cd "$d" && s=$(date +%s%N); timeout 180 opencode run --pure --format json -m "$1" --title "l4 hello" "$2"; rc=$?; echo "__EXIT=$rc MS=$(( ($(date +%s%N)-s)/1000000 ))"; cd / && rm -rf "$d"' _ "$model" "$PROMPT" 2>&1)
+      else
+        out=$(sudo -n -u "$RUNNER_USER" -H env -i HOME="$RHOME" USER="$RUNNER_USER" LANG=C.UTF-8 \
+          PATH="$RHOME/.local/bin:/usr/local/bin:/usr/bin:/bin" OPENCODE_CONFIG_CONTENT="$FREE_CFG" \
+          OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+          bash -c 'd=$(mktemp -d) && mkdir "$d/cwd" "$d/config" && cd "$d/cwd" && s=$(date +%s%N); XDG_CONFIG_HOME="$d/config" timeout 180 opencode run --pure --format json -m "$1" --title "l4 hello" "$2"; rc=$?; echo "__EXIT=$rc MS=$(( ($(date +%s%N)-s)/1000000 ))"; cd / && rm -rf "$d"' _ "$model" "$PROMPT" 2>&1)
+      fi
+      printf '%s\n' "$out"
+      echo "=== MODEL $model END"
+      if printf '%s' "$out" | grep -q '"type":"error"' && printf '%s' "$out" | grep -q -i -E '429|rate.?limit|too many requests'; then
+        echo "=== STOP: rate limit on $model"; break
+      fi
+    done

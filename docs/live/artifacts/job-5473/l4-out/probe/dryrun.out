@@ -1,0 +1,14 @@
+l4 run --dry-run: no lease, worktree, agent, push or forge write
+
+kiro:add-loyalty-points  phase=none  next=implement  task=2.1 (red)
+  prompt:  .l4-out/dry-run/r-20261004T1731Z-2cf2/kiro-add-loyalty-points/2.1-red.prompt.md
+  command: codex exec --json -m gpt-6-luna -c model_reasoning_effort=low -s workspace-write --ignore-user-config --ignore-rules --output-schema '<output-schema>' -o '<agent-tmp>/result.json' -
+  env:     HOME L4_RESULT_PATH LANG PATH TMPDIR USER  (names only)
+  gate setup: uv sync --frozen
+  gate test: .venv/bin/python -m pytest --junitxml=.l4-out/junit.xml
+  gate lint: .venv/bin/ruff check --extend-exclude .l4 .
+
+UNIT                     PHASE  ACTION     TASK  AVAILABILITY  EXIT
+kiro:add-loyalty-points  none   implement  2.1   unknown       0
+
+would exit 0

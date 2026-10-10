@@ -1,0 +1,48 @@
+# HB-2 on example-group/dummy-agentic (project 118), GitLab 17.5.2 CE, 2026-10-05 ~15:37-15:39Z. No secret value was read or
+# printed: presence is shown by HTTP status of a scope-filtered GET with the body sent to /dev/null; the scripts hold
+# values in memory only.
+
+## 1. Does CE 17.5 support environment-scoped variables? (harmless probe variable)
+POST projects/118/variables {key: L4_SCOPE_PROBE, value: hello, environment_scope: l4}            -> HTTP 201
+GET  projects/118/variables/L4_SCOPE_PROBE -> {"key":"L4_SCOPE_PROBE","value":"hello","masked":false,"raw":true,"environment_scope":"l4",...} HTTP 200
+GET  ...L4_SCOPE_PROBE?filter[environment_scope]=*                                                -> HTTP 404
+Probe pipeline #2816 (push of l4-probe/scope 816c0d3, before any secret was touched):
+  job 5548 scope-probe-plain  (no environment): L4_SCOPE_PROBE ABSENT, L4_FORGE_TOKEN PRESENT, TYPESAFE_API_KEY PRESENT
+  job 5549 scope-probe-l4env  (environment l4): L4_SCOPE_PROBE PRESENT, L4_FORGE_TOKEN PRESENT, TYPESAFE_API_KEY PRESENT
+DELETE projects/118/variables/L4_SCOPE_PROBE?filter[environment_scope]=l4                          -> HTTP 204 (GET after: 404)
+=> supported: the scope is stored and enforced by the runner side of CE 17.5.
+
+## 2. State before
+token 62 l4-bot active  2026-10-03T18:37:34.556Z 2027-10-03 ['api', 'write_repository'] 30
+L4_FORGE_TOKEN scope=%2A: HTTP 200
+L4_FORGE_TOKEN scope=l4: HTTP 404
+TYPESAFE_API_KEY scope=%2A: HTTP 200
+TYPESAFE_API_KEY scope=l4: HTTP 404
+
+## 3. Changes
+$ scripts/forge/mk-gitlab-bot-token.sh --project 118 --rotate --environment-scope l4
+NEW  token 'l4-bot' id=63 scopes=['api', 'write_repository'] level=30 expires=2027-10-05 bot_user_id=61
+SET  variable L4_FORGE_TOKEN created (masked, not protected, raw, environment scope l4)
+WARN an unscoped variable L4_FORGE_TOKEN (scope *) still exists: every job of the project can read it. Delete it once the scoped one is verified (not deleted here)
+OK   new token can read project 'example-group/dummy-agentic' as the bot user
+$ python3 scripts/forge/gitlab_ci_var_from_mintkey.py --secret typesafe-jev-api-key --project 118 --variable TYPESAFE_API_KEY --environment-scope l4
+created TYPESAFE_API_KEY on project 118: environment scope l4 masked=True protected=False raw=True (value not shown)
+WARN an unscoped variable TYPESAFE_API_KEY (scope *) still exists: every job of the project can read it. Delete it once the scoped one is verified (not deleted here)
+# only after both scoped variables answered HTTP 200:
+delete L4_FORGE_TOKEN scope=*: HTTP 204
+delete TYPESAFE_API_KEY scope=*: HTTP 204
+
+## 4. State after
+token 62 l4-bot active  2026-10-03T18:37:34.556Z 2027-10-03 ['api', 'write_repository'] 30
+token 63 l4-bot active  2026-10-05T15:38:19.837Z 2027-10-05 ['api', 'write_repository'] 30
+L4_FORGE_TOKEN scope=%2A: HTTP 404
+L4_FORGE_TOKEN scope=l4: HTTP 200
+TYPESAFE_API_KEY scope=%2A: HTTP 404
+TYPESAFE_API_KEY scope=l4: HTTP 200
+Old token id 62 (created 2026-10-03) is still ACTIVE: --rotate is revoke-free and docs/runner/README.md leaves the
+revocation to the maintainer. Nothing uses it any more (no CI variable holds it).
+
+## 5. Proof (API pipeline #2817 on l4-probe/scope 816c0d3, after the change)
+  job 5550 scope-probe-plain  (no environment): L4_SCOPE_PROBE ABSENT, L4_FORGE_TOKEN ABSENT, TYPESAFE_API_KEY ABSENT
+  job 5551 scope-probe-l4env  (environment l4): L4_SCOPE_PROBE ABSENT, L4_FORGE_TOKEN PRESENT, TYPESAFE_API_KEY PRESENT
+Branch l4-probe/scope deleted afterwards (git ls-remote refs/heads/l4-probe/*: 0).

@@ -1,0 +1,40 @@
+F.F....                                                                  [100%]
+=================================== FAILURES ===================================
+_ test_step1_codex_implements_and_the_judge_falls_back_to_the_declared_opencode_profile _
+
+gl = <tests.live.gitlab_client.LiveGitLab object at 0x1073ae090>
+
+    def test_step1_codex_implements_and_the_judge_falls_back_to_the_declared_opencode_profile(gl):
+        commit, pipeline, log, job = step_run(gl, STEP1)
+        record("1", commit=commit["id"], pipeline=pipeline["id"], job=job["id"])
+        assert job["status"] == "success", job["status"]
+        # implementer: codex, no fallback
+        line = selected_line(log, "implementer", "codex")
+        assert line is not None and fallback_number(line) is None, line
+        # judges: claude-judge skipped at the binary step, opencode-free is fallback #1
+        skipped = skipped_line(log, "judges", "claude-judge")
+>       assert skipped is not None and re.search(r"binary: version \S+ < min_version 99\.0\.0", skipped), skipped
+E       AssertionError: [l4] judges: claude-judge skipped — auth: auth: api_key is not supported in M0 (the sandbox passes no credential variable)
+E       assert ('[l4] judges: claude-judge skipped — auth: auth: api_key is not supported in M0 (the sandbox passes no credential variable)' is not None and None)
+E        +  where None = <function search at 0x100877420>('binary: version \\S+ < min_version 99\\.0\\.0', '[l4] judges: claude-judge skipped — auth: auth: api_key is not supported in M0 (the sandbox passes no credential variable)')
+E        +    where <function search at 0x100877420> = re.search
+
+tests/live/test_m1_2_acceptance.py:163: AssertionError
+__ test_step3_the_implementer_falls_back_past_codex_and_kiro_to_opencode_free __
+
+gl = <tests.live.gitlab_client.LiveGitLab object at 0x1073ae090>
+capsys = <_pytest.capture.CaptureFixture object at 0x10743b2c0>
+
+    def test_step3_the_implementer_falls_back_past_codex_and_kiro_to_opencode_free(gl, capsys):
+        commit, pipeline, log, job = step_run(gl, STEP3)
+        record("3", commit=commit["id"], pipeline=pipeline["id"], job=job["id"])
+        assert job["status"] == "success", job["status"]
+        codex = skipped_line(log, "implementer", "codex") or ""
+>       assert re.search(r"quota: \S+ window \d+(\.\d+)?% used, \d+(\.\d+)?% remaining", codex), codex
+E       AssertionError: [l4] implementer: codex skipped — cooling until 2026-10-10T12:52Z (usage_limit); no probe sent
+E       assert None
+E        +  where None = <function search at 0x100877420>('quota: \\S+ window \\d+(\\.\\d+)?% used, \\d+(\\.\\d+)?% remaining', '[l4] implementer: codex skipped — cooling until 2026-10-10T12:52Z (usage_limit); no probe sent')
+E        +    where <function search at 0x100877420> = re.search
+
+tests/live/test_m1_2_acceptance.py:214: AssertionError
+2 failed, 5 passed in 6.70s

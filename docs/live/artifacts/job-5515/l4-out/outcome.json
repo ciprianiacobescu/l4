@@ -1,0 +1,28 @@
+{
+  "schema": "l4/outcome@1",
+  "run_id": "r-20261005T0505Z-6a6f",
+  "harness_version": "0.1.0",
+  "harness_commit": "12cc82066796d7d4392f79c841bcdf976c1b32e3",
+  "exit_code": 0,
+  "units": [
+    {
+      "unit": "openspec:add-cart-clear",
+      "phase_before": "verifying",
+      "phase_after": "in_review",
+      "tasks": {
+        "done": 1,
+        "total": 1
+      },
+      "open_questions": [],
+      "verdict": "PASS",
+      "profiles": {
+        "implementer": "codex"
+      },
+      "cost_usd": 0.079393,
+      "iteration": 3,
+      "pr_url": "https://gitlab.example.com/example-group/dummy-agentic/-/merge_requests/16",
+      "retry_after": null,
+      "continuation": "not_needed"
+    }
+  ]
+}

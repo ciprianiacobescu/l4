@@ -1,0 +1,125 @@
+{
+  "schema": "l4/doctor@1",
+  "ok": true,
+  "exit_code": 0,
+  "checks": [
+    {
+      "id": "CI-001",
+      "severity": "error",
+      "status": "pass",
+      "message": "the runner rewrites the origin URL; pushes go to oauth2@ with L4_FORGE_TOKEN instead",
+      "fix": null
+    },
+    {
+      "id": "CFG-002",
+      "severity": "error",
+      "status": "pass",
+      "message": "role chains and profiles are consistent",
+      "fix": null
+    },
+    {
+      "id": "ENV-001",
+      "severity": "error",
+      "status": "pass",
+      "message": "Python 3.13.16, uv present",
+      "fix": null
+    },
+    {
+      "id": "ENV-002",
+      "severity": "error",
+      "status": "pass",
+      "message": "git 2.34",
+      "fix": null
+    },
+    {
+      "id": "ENV-003",
+      "severity": "error",
+      "status": "pass",
+      "message": "OpenSpec 1.14.0 via /usr/bin/node",
+      "fix": null
+    },
+    {
+      "id": "ENV-004",
+      "severity": "error",
+      "status": "pass",
+      "message": "3 agent CLI(s) present",
+      "fix": null
+    },
+    {
+      "id": "SPEC-001",
+      "severity": "error",
+      "status": "pass",
+      "message": "openspec, kiro",
+      "fix": null
+    },
+    {
+      "id": "SPEC-002",
+      "severity": "error",
+      "status": "pass",
+      "message": "1 Kiro unit(s) validate",
+      "fix": null
+    },
+    {
+      "id": "SPEC-004",
+      "severity": "warn",
+      "status": "pass",
+      "message": "1 Kiro unit(s): every leaf cites a requirement",
+      "fix": null
+    },
+    {
+      "id": "PRV-001",
+      "severity": "warn",
+      "status": "pass",
+      "message": "claude-code claude-code ready; codex codex ready; opencode-free opencode ready",
+      "fix": null
+    },
+    {
+      "id": "PRV-002",
+      "severity": "warn",
+      "status": "pass",
+      "message": "no root-only prerequisite is missing",
+      "fix": null
+    }
+  ],
+  "probe_cost_usd": 0.0,
+  "fixes": [
+    {
+      "tool": "uv",
+      "status": "already present",
+      "message": "uv 0.12.22",
+      "commands": []
+    },
+    {
+      "tool": "node",
+      "status": "already present",
+      "message": "node 22.23.3",
+      "commands": []
+    },
+    {
+      "tool": "openspec",
+      "status": "applied",
+      "message": "openspec 1.14.0",
+      "commands": [
+        "npm install --prefix /home/gitlab-runner/builds/.l4-m14-5473/home/npm --save-exact @fission-ai/openspec@1.14.0"
+      ]
+    },
+    {
+      "tool": "claude",
+      "status": "already present",
+      "message": "claude 2.1.288",
+      "commands": []
+    },
+    {
+      "tool": "codex",
+      "status": "already present",
+      "message": "codex 0.160.0",
+      "commands": []
+    },
+    {
+      "tool": "opencode",
+      "status": "already present",
+      "message": "opencode 1.18.34",
+      "commands": []
+    }
+  ]
+}

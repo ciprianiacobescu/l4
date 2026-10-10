@@ -1,0 +1,1 @@
+2026-10-03T14:59:58.862103Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`/bin/zsh -lc 'touch scratch.tmp && rm -f scratch.tmp; echo rm_exit=$?'` rejected: rm -f style commands are not permitted. Use a safer approach\")" }
