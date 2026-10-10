@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from l4.agents.fake import Step
 from l4.implementer.loop import run_task
 from l4.specs.base import Task
@@ -269,7 +271,7 @@ def test_a_hang_in_a_test_that_is_not_frozen_is_retried_with_the_test_named(make
     writes = {"src/pytdd/pricing.py": hanging_impl, "tests/test_extra.py": extra}
     green = Step(writes=writes, structured=result("green"))
     bench = make_bench([red_step(), green, blocked_step()], test_timeout="2s")
-    outcome = run_task(bench.wb, TASK)
+    outcome = run_task(bench.wb, replace(TASK, title=f"{TASK.title} [test-infra]"))  # may add a test file
     assert outcome.status == "blocked"  # the second attempt's own blocked result: the first was a retry, not a question
     second_prompt = bench.adapter.requests[2].prompt
     assert "hung" in second_prompt and "tests.test_extra::test_extra_waits" in second_prompt

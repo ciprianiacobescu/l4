@@ -12,13 +12,13 @@ import ast
 import hashlib
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from l4.agents.base import EventSink
-from l4.security.protected import glob_match, untracked_files
+from l4.security.protected import changed_paths, glob_match, untracked_files
 from l4.vcs.git import Git
 
 Kind = Literal["test", "support"]
@@ -249,4 +249,43 @@ def restore_frozen(
     if events is not None:
         for path, event in touched:
             events.append(event, path=path, phase=phase)
+    return [path for path, _ in touched]
+
+
+TEST_PATH_RULE = "test path freeze"
+
+
+def restore_test_paths(
+    git: Git,
+    base: str,
+    *,
+    test_globs: Sequence[str],
+    support_globs: Sequence[str],
+    keep: Collection[str] = (),
+    events: EventSink | None = None,
+    excludes: Path | None = None,
+    phase: str = "green",
+) -> list[str]:
+    """The test-path freeze (SPEC L4-IMP-006 (7)): a step that may not write tests (green, a fix chore) leaves every
+    path that matches the test or support globs as it was at `base` (HEAD, the work tree after the step). A changed
+    or deleted tracked path is checked out again (`restored`), a new one is removed (`removed`), each as one
+    `guard.test_tamper`; the `keep` paths (a human answer unfroze them) are left. Untracked files are found with the
+    ignore rules of `base` (`changed_paths`), so a `.venv` is no test path. Returns the paths touched."""
+    root, globs = git.repo, (*test_globs, *support_globs)
+    touched: list[tuple[str, bool]] = []
+    for path, existed in sorted(changed_paths(git, base, excludes=excludes).items()):
+        if path in keep or not _matches(globs, path):
+            continue
+        target = root / path
+        if target.is_symlink() or (not existed and target.exists()):
+            target.unlink()
+        if existed:
+            git.run("checkout", base, "--", f":(literal){path}")
+        touched.append((path, existed))
+    if events is not None:
+        for path, existed in touched:
+            events.append(
+                "guard.test_tamper", path=path, phase=phase, action="restored" if existed else "removed",
+                rule=TEST_PATH_RULE,
+            )  # fmt: skip
     return [path for path, _ in touched]
