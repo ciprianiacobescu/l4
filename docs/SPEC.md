@@ -1246,7 +1246,16 @@ added skip markers such as `.skip`/`xit`/`@pytest.mark.skip`/`t.Skip`, removed o
 package.json `eslintConfig`) — unless the task carries a human-written `[config]` or `[test-infra]` tag; (4) run the
 redaction filter over every file the harness itself writes; (5) detect test tamper per test function on the AST (a
 trailing newline is not tamper) [V, spikes/02]; (6) treat adapter permission rules as no freeze: shell redirects write
-files under `Edit(./**)` [V, spikes/01], so the hash freeze and revert are mandatory for every adapter.
+files under `Edit(./**)` [V, spikes/01], so the hash freeze and revert are mandatory for every adapter;
+(7) **test-path freeze:** a step that may not write tests, `green` (`L4-TDD: green`) and a fix chore of kind `fix`
+(`L4-TDD: exempt`), may not add, change, delete or rename any path that matches `tdd.test_globs` or
+`tdd.test_support_globs` (both include their `extra_*` lists), whatever the language: after the step the harness puts
+each such path back (a changed or deleted file is restored from the step's base, a new one removed) and records one
+`guard.test_tamper` with `rule: "test path freeze"` and `action` `restored` or `removed`, which the next attempt's
+prompt carries. Three exceptions: the paths a `task.unfrozen` event names for that unit and task (a human answer freed
+them, L4-IMP-002); the files a test chore (`kind=tests`) keeps (`task.tests_added.files`), whose own review is
+unchanged; and every path of a task whose title carries the human `[test-infra]` tag. The steps that write tests stay
+free: `red`, `already-satisfied` and the test chore. The verifier checks the same rule on the commits (§10.2 step 1).
 `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in depth [I].
 
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
@@ -1910,7 +1919,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | Step | Name | Requirement |
 |---|---|---|
 | 0 | preconditions | done-gate passes; branch contains base head (else merge first, §12.3); unit validates strict |
-| 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
+| 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen`, the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered* |
@@ -4218,6 +4227,39 @@ scenario is a spec defect (§26).
 - **When** the base run confirms, is skipped, or its gate raises
 - **Then** every file, content and mode, and `git status` are as before the run.
 
+#### SCN-IMP-150 (−) Green adds a new test file → removed · L4-IMP-006
+- **Given** a green step that makes the red tests pass and also adds `tests/test_more.py`, which matches `tdd.test_globs`
+- **When** the post-step guard runs
+- **Then** the file is removed, one `guard.test_tamper` with `rule: "test path freeze"`, `action: "removed"` and
+  `phase: "green"` is logged, and the retry note says `green may not change test files: tests/test_more.py was put back
+  (tests belong in the red step; ask a question if a test is wrong)`.
+
+#### SCN-IMP-151 (−) Green changes a pre-existing test that is not this task's red file → restored · L4-IMP-006
+- **Given** a green step that weakens an assertion of `tests/test_pricing.py`, which exists at the base and is no file
+  that this task's red step wrote
+- **When** the post-step guard runs
+- **Then** the file is back to its content at the step's base and one `guard.test_tamper` with `action: "restored"` and
+  `rule: "test path freeze"` is logged.
+
+#### SCN-IMP-152 (+) A path a `task.unfrozen` names, or a `[test-infra]` task, keeps its test change · L4-IMP-006, L4-IMP-002
+- **Given** a human answer that names `tests/test_discount.py` (a `task.unfrozen` event for this unit and task), or a
+  task whose title carries the human tag `[test-infra]` (in green, and in a fix chore)
+- **When** green or the fix chore changes that path, or any test or support path
+- **Then** the change stays and no `guard.test_tamper` with `rule: "test path freeze"` is logged.
+
+#### SCN-IMP-153 (−) A fix chore loses a test file it adds, a test chore keeps it · L4-IMP-006
+- **Given** a fix chore (`kind=fix`) that adds `tests/test_more.py`, and a test chore (`kind=tests`) that adds the same
+- **When** each step's guard runs
+- **Then** the fix chore's file is removed with one `guard.test_tamper` (`action: "removed"`, `phase: "single"`), and the
+  test chore keeps its file and records it in `task.tests_added` exactly as before.
+
+#### SCN-IMP-154 (−) Test folders of other stacks are frozen by configuration · L4-IMP-006
+- **Given** `tdd.extra_test_globs` covering `**/*.Tests/**` and `web/tests/**`, and a green step that changes
+  `Api/Shop.Tests/PriceTests.cs` and `web/tests/price.test.ts`
+- **When** the post-step guard runs
+- **Then** both files are restored and two `guard.test_tamper` events with `action: "restored"` are logged; no parsing of
+  C# or TypeScript is involved.
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -4715,6 +4757,28 @@ scenario is a spec defect (§26).
 - **Given** an agent or a gate environment built by the sandbox
 - **When** its variables are listed
 - **Then** they include `PYTHONDONTWRITEBYTECODE=1`, and so does the runner's sandbox probe (the two lists are equal).
+
+#### SCN-VER-61 (−) A green commit that changes a test path is a blocker, a person's commit is not walked · L4-VER-002, L4-IMP-006
+- **Given** a harness commit with `L4-TDD: green` that adds `tests/test_new.py` and edits `tests/test_a.py`, and, in
+  another history, a person's commit that makes the same changes
+- **When** the integrity check `test path freeze` runs
+- **Then** the first is one blocker `a test file changed in a step that may not change tests` listing both paths with
+  `(task <t>, green commit <sha10>)`, and the note reads `1 harness step commit(s) checked`; the second raises no finding
+  and the check is skipped (the pre-existing-tests check lists people's changes).
+
+#### SCN-VER-62 (+) An exempt commit may change the files its `task.tests_added` lists, a `[test-infra]` task its support files · L4-VER-002, L4-IMP-006
+- **Given** an `L4-TDD: exempt` commit that changes `tests/test_new.py`, listed in a `task.tests_added` of the same unit
+  and task, and `tests/test_other.py`, listed nowhere; and a commit of a task tagged `[test-infra]` that changes
+  `tests/conftest.py`
+- **When** the check runs
+- **Then** `tests/test_new.py` and the `[test-infra]` commit's support file are allowed, and `tests/test_other.py` is the
+  one blocker; a green commit gets no allowance from a `task.tests_added`.
+
+#### SCN-VER-63 (+) A path a `task.unfrozen` names, changed by green, is allowed · L4-VER-002, L4-IMP-002
+- **Given** a green commit that changes `tests/test_a.py`, which a `task.unfrozen` of the same unit and task names
+- **When** the check runs
+- **Then** no finding is raised from the test path freeze (the red-green freeze check still lists the path as unfrozen by
+  a human answer, as today); a `task.unfrozen` of another task does not allow it.
 
 ### 23.10 Archive and PR lifecycle (ARC)
 

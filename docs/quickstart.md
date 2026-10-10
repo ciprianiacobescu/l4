@@ -72,6 +72,17 @@ Fix what it lists (config edits), run it again, and go on. `--no-gates` runs onl
 A laptop cannot see a failure that exists only on the runner's platform (a module missing on Linux): section 4 ends with a
 check pipeline on the runner for that reason.
 
+### Test paths
+
+The red-green freeze, the integrity checks and the red manifest all read `tdd.test_globs` (and `tdd.test_support_globs`);
+a green step or a fix chore may not change any path they match, whatever the language. The defaults cover Python layouts
+and `l4 doctor` does not guess other stacks yet, so for a .NET or JS project add their test folders in `.l4/config.yaml`:
+
+```yaml
+tdd:
+  extra_test_globs: ["**/*.Tests/**", "**/*.Test/**", "**/*.IntegrationTests/**", "web/tests/**"]
+```
+
 ## 2. Commit and push
 
 Commit exactly what the adoption wrote: `--commit` does it for you (only the paths the adoption added or changed; your own
