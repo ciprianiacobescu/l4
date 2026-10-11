@@ -29,8 +29,9 @@ gates, and prints the exact remaining steps. A second run is safe. The runner an
 
 ## How a unit moves
 
-A unit is one spec change. The harness moves it through the phases below; each move is a ledger event and only the
-orchestrator makes it. Waiting for capacity, halt, escalation and resume are left out here.
+A unit is one spec change. The harness moves it through the phases below; each move is one `phase.changed` ledger
+event, written only by `transition()` in `src/l4/state/lifecycle.py`, which refuses an edge its table does not have.
+Waiting for capacity, halt, escalation and resume are left out here.
 
 ```mermaid
 stateDiagram-v2
@@ -57,7 +58,6 @@ stateDiagram-v2
   in_review --> verifying: repository CI failed
   in_review --> implementing: spec edit after hand-off
   merged --> [*]
-  abandoned --> [*]
 ```
 
 The full diagram, with the parking edges and a table of every phase, is in [docs/state-diagram.md](docs/state-diagram.md).
