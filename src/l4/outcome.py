@@ -61,6 +61,9 @@ class Outcome(_Model):
     harness_commit: str | None = None  # set when running a vendored copy (`l4 init --vendor`)
     exit_code: ExitCode
     units: list[UnitOutcome] = Field(default_factory=list)
+    # github-parity D4: what the forge answered to the continuation request of a run that left units at the soft
+    # deadline. Not part of the model dump (the key is absent otherwise): `write_outcome` adds it when set.
+    continuation: Literal["dispatched", "already_queued", "unsupported"] | None = Field(None, exclude=True)
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,7 @@ class CommandResult:
     code: ExitCode | int  # a plain int only from `ci map-exit`, which passes a foreign code through
     units: Sequence[UnitOutcome] = ()
     actionable: Sequence[str] = ()  # unit ids with a next action (`plan`, `run --dry-run`); `L4_UNITS_ACTIONABLE`
+    continuation: Literal["dispatched", "already_queued", "unsupported"] | None = None  # `run` only (L4-GHP-004)
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:
@@ -86,6 +90,8 @@ def write_outcome(outcome: Outcome, out_dir: Path, redactor: Redactor) -> Path:
     seal_out_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = redactor.redact_obj(outcome.model_dump(mode="json", by_alias=True))
+    if outcome.continuation is not None:
+        payload["continuation"] = outcome.continuation
     target = out_dir / OUTCOME_FILENAME
     fd, tmp_name = tempfile.mkstemp(dir=out_dir, prefix=".outcome-", suffix=".tmp")
     try:
@@ -170,6 +176,7 @@ def with_outcome(app: AppContext, call: Callable[[], CommandResult]) -> CommandR
             harness_commit=harness_commit(),
             exit_code=result.code,
             units=list(result.units),
+            continuation=result.continuation,
         )
         write_outcome(outcome, app.out_dir, app.redactor)
         try:

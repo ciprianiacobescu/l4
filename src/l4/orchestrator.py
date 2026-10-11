@@ -36,7 +36,7 @@ import contextlib
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -55,7 +55,7 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
-from l4.forge.base import fetch_auth_config
+from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure
 from l4.forge.urls import app_forge_urls
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
@@ -1130,8 +1130,30 @@ def run_command(
     ):
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
+    result = continue_left_units(app, cfg, result)
     log_artefacts(app.out_dir, app.run_id)
     return result
+
+
+def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:
+    """github-parity D4 (L4-GHP-004): once per `l4 run`, when the run ends with exit 10 because units were left at the
+    soft deadline, `ci.continuation` is `dispatch` and the run is in CI, ask the forge for one more run of the harness's
+    CI on the base branch. The answer is logged and recorded in `outcome.json`. No forge, or a forge error, is a warning
+    at most: the exit code does not change."""
+    left = any((u.exit_reason or "").startswith("not started: soft deadline") for u in result.units)
+    in_ci = app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true"
+    if result.code != ExitCode.CONTINUE or not left or cfg.ci.continuation != "dispatch" or not in_ci:
+        return result
+    base = cfg.forge.base_branch
+    try:
+        answer = make_forge(cfg, app.environ).dispatch_continuation(base)
+    except ForgeUnavailable:
+        return result  # a local run without credentials: nothing to ask
+    except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run
+        log.warning("[l4] continuation: not requested (%s)", app.redactor.redact_text(str(exc)))
+        return result
+    log.info("[l4] continuation: %s (l4.yml on %s)", answer, base)
+    return replace(result, continuation=answer)
 
 
 def job_remaining_s(cfg: L4Config, environ: Mapping[str, str], now: datetime, began: datetime | None) -> float | None:
