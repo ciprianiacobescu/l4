@@ -399,8 +399,9 @@ def run_init(
         click.echo(INCLUDE_SNIPPET, nl=False)
     if ci in ("github", "both"):
         click.echo(
-            f"note: commit {WORKFLOW_RELPATH} and .l4/, and add the repository secret L4_FORGE_TOKEN "
-            "(a token that can push branches and open pull requests)",
+            f"note: commit {WORKFLOW_RELPATH} and .l4/, push, then run `.l4/bin/l4 setup github`: it creates the "
+            "environment `l4` whose secrets the job reads (agent keys with `--secret NAME=ENVVAR`; the forge token is "
+            "L4_FORGE_TOKEN there, or the workflow's own GITHUB_TOKEN with `forge.token_env: GITHUB_TOKEN`)",
             err=True,
         )
     for note in plan.notes:
