@@ -106,3 +106,13 @@ def test_heading_repeating_the_name_without_why_gives_the_bare_title(tmp_path: P
 
 def test_a_different_heading_is_kept_with_the_name_given(tmp_path: Path):
     assert proposal_title(write(tmp_path, "# Proposal: average unit price\n"), "add-x") == "average unit price"
+
+
+def test_github_evidence_link():
+    """L4-GHP-009, SCN-GHP-12: GitHub has no `/-/` in its blob URLs; GitLab keeps it."""
+    args = ("openspec:x", "l4/openspec/x", "openspec/changes/x/verification.md", "https://github.com/o/r")
+    github = render_pr_body(*args, platform="github")
+    assert "(https://github.com/o/r/blob/l4/openspec/x/openspec/changes/x/verification.md)" in github
+    assert "/-/blob/" not in github
+    assert "/-/blob/" in render_pr_body(*args, platform="gitlab")
+    assert "/-/blob/" in render_pr_body(*args)  # GitLab by default

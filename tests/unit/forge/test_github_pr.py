@@ -211,3 +211,25 @@ def test_github_has_no_label_events_yet(github, make):
     forge.create_pr(BRANCH, "main", "t", "b")
     assert forge.label_events(1) == []
     assert forge.member_access(7) is None
+
+
+def test_create_pr_403_names_the_setting(github, make):
+    """L4-GHP-002, SCN-GHP-03: a refused pull request says which repository setting allows it."""
+    original = github.handle
+
+    def refuse_post(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/pulls"):
+            return httpx.Response(
+                403, json={"message": "GitHub Actions is not permitted to create or approve pull requests."}
+            )
+        return original(request)
+
+    forge = GitHubForge(REPO, TOKEN, api_url=API, transport=httpx.MockTransport(refuse_post), sleep=lambda s: None)
+    with pytest.raises(ForgeAuthError) as err:
+        forge.create_pr(BRANCH, "main", "t", "b")
+    message = str(err.value)
+    assert err.value.status == 403
+    assert "Allow GitHub Actions to create and approve pull requests" in message
+    assert "Settings > Actions > General > Workflow permissions" in message
+    assert "l4 setup github" in message
+    assert TOKEN not in message

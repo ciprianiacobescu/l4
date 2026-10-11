@@ -7,15 +7,17 @@ GraphQL mutation `markPullRequestReadyForReview`; REST has no endpoint for it.
 M1: forge-and-ci 2.9 rest (statuses, check runs, approvals, collaborator permission), 2.10 (workflow_dispatch).
 """
 
+import os
 import re
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from urllib.parse import quote, urlsplit
 
 import httpx
 
 from l4 import cancel
+from l4.ci.github import WORKFLOW_RELPATH
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
     STICKY_MARKER,
@@ -38,6 +40,9 @@ from l4.forge.base import (
 DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
+WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
+ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
+ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
 MAX_WAIT_S = 60.0
 MAX_PAGES = 100
@@ -50,6 +55,11 @@ _READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequest
 _DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { id } } }"
 
 
+_ROLE_LEVELS = {"admin": 50, "maintain": 40, "write": 30, "triage": 20, "read": 10}  # GitLab access levels
+_PR_REFUSED = (
+    "GitHub refused to create the pull request (403). Allow GitHub Actions to create and approve pull requests "
+    "(Settings > Actions > General > Workflow permissions), or run `l4 setup github`"
+)
 _CHECK_CONCLUSIONS = {
     "success": "success", "failure": "failed", "timed_out": "failed", "startup_failure": "failed",
     "cancelled": "canceled", "skipped": "skipped", "neutral": "skipped", "stale": "skipped",
@@ -87,6 +97,7 @@ class GitHubForge:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.time,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         if not _REPO.match(repo):
             raise ValueError("the GitHub repository must be written owner/name")
@@ -97,7 +108,8 @@ class GitHubForge:
         self._transport = transport
         self._sleep = sleep
         self._now = now
-        self._login: str | None = None
+        self._environ = os.environ if environ is None else environ
+        self._who: tuple[str, int] | None = None
 
     # --- HTTP core ----------------------------------------------------------------------------------------------
 
@@ -267,10 +279,16 @@ class GitHubForge:
         if existing is not None:
             return existing
         payload = {"head": head, "base": base, "title": title, "body": body, "draft": draft}
-        return post_once(
-            lambda: self._pr(self._request("POST", f"/repos/{self._repo}/pulls", json=payload).json()),
-            lambda: self.find_pr(head), self._pause,
-        )  # fmt: skip
+
+        def post() -> PullRequest:
+            try:
+                return self._pr(self._request("POST", f"/repos/{self._repo}/pulls", json=payload).json())
+            except ForgeAuthError as exc:
+                if exc.status != 403:
+                    raise
+                raise ForgeAuthError(self._scrub(f"{_PR_REFUSED} [{exc}]"), status=403) from None
+
+        return post_once(post, lambda: self.find_pr(head), self._pause)
 
     def _pause(self) -> None:
         self._sleep(self._wait(None, 0))
@@ -364,17 +382,58 @@ class GitHubForge:
         return JobLog(self.job_log_tail(job_id, max_lines), None)
 
     def label_events(self, number: int) -> list[LabelEvent]:
-        """M1: GitHub label events are not read, so the `l4:resume` label is never honoured here (fail closed)."""
-        return []
+        """`issues/:n/events`, the `labeled` and `unlabeled` ones as `LabelEvent`s, oldest first (a pull request is an
+        issue here). An entry of an unknown shape is no evidence."""
+        events = []
+        for item in self._pages(f"/repos/{self._repo}/issues/{number}/events"):
+            try:
+                if item.get("event") not in ("labeled", "unlabeled"):
+                    continue
+                actor = item.get("actor") or {}
+                events.append(
+                    LabelEvent(
+                        id=int(item["id"]),
+                        label=str((item.get("label") or {}).get("name") or ""),
+                        action="remove" if item["event"] == "unlabeled" else "add",
+                        user_id=int(actor["id"]) if actor.get("id") is not None else None,
+                        created_at=str(item.get("created_at") or ""),
+                    )  # fmt: skip
+                )
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+        return sorted(events, key=lambda e: e.id)
 
     def member_access(self, user_id: int) -> int | None:
-        return None
+        """The user's repository role as GitLab's access level (`_ROLE_LEVELS`): `GET /user/:id` for the login, then
+        the collaborator permission. None for a user who is no collaborator (404) or a role this does not know."""
+        try:
+            login = str(self._request("GET", f"/user/{int(user_id)}").json()["login"])
+            permission = self._request(
+                "GET", f"/repos/{self._repo}/collaborators/{quote(login, safe='')}/permission"
+            ).json()
+        except ForgeNotFound:
+            return None
+        except (ValueError, KeyError, TypeError):
+            return None
+        role = permission.get("role_name") or permission.get("permission") if isinstance(permission, dict) else None
+        return _ROLE_LEVELS.get(str(role))
 
     def own_user_id(self) -> int | None:
-        return None
+        """The user the token acts as; None when it cannot be told (`resume_label` then honours no label)."""
+        try:
+            return self._identity()[1]
+        except ForgeError:
+            return None
 
     def dispatch_continuation(self, ref: str) -> Continuation:
-        return "unsupported"  # github-parity 1.4 (L4-GHP-004) replaces this with workflow_dispatch
+        """One more run of the `l4` workflow on `ref`, unless one is already waiting (L4-GHP-004). The dispatch event
+        starts a run even when the GITHUB_TOKEN sends it (the only event type besides repository_dispatch that does)."""
+        base = f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}"
+        queued = self._request("GET", f"{base}/runs", params={"branch": ref, "status": "queued", "per_page": 1}).json()
+        if isinstance(queued, dict) and int(queued.get("total_count") or 0) > 0:
+            return "already_queued"
+        self._request("POST", f"{base}/dispatches", json={"ref": ref})
+        return "dispatched"
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:
         """`actions/jobs/:id/logs` answers with a redirect to a pre-signed URL; it is followed without the token
@@ -398,26 +457,38 @@ class GitHubForge:
 
     # --- the sticky comment -------------------------------------------------------------------------------------
 
-    def _me(self) -> str:
-        if self._login is None:
+    def _identity(self) -> tuple[str, int]:
+        """(login, id) of the token's user: `GET /user`; for a job's GITHUB_TOKEN, which that answers with 403, the
+        Actions bot (L4-GHP-001). Anything else is an error: the sticky note is never matched without an author."""
+        if self._who is None:
             try:
-                self._login = str(self._request("GET", "/user").json()["login"])
+                user = self._request("GET", "/user").json()
+                self._who = (str(user["login"]), int(user["id"]))
+            except ForgeAuthError as exc:
+                if exc.status == 403 and self._environ.get("GITHUB_ACTIONS") == "true":
+                    self._who = (ACTIONS_BOT_LOGIN, ACTIONS_BOT_ID)
+                else:
+                    raise ForgeError("GitHub: cannot tell which user the token belongs to (GET /user failed)") from None
             except (ForgeError, KeyError, TypeError, ValueError):
                 raise ForgeError("GitHub: cannot tell which user the token belongs to (GET /user failed)") from None
-        return self._login
+        return self._who
+
+    def _me(self) -> str:
+        return self._identity()[0]
 
     def upsert_sticky_note(self, number: int, body: str) -> None:
-        """An issue comment by the token's own login that starts with the marker: a marker quoted or planted by someone
-        else is never rewritten."""
+        """An issue comment by the token's own user (login and id together) that starts with the marker: a marker quoted
+        or planted by someone else is never rewritten."""
         text = f"{STICKY_MARKER}\n{body}"
-        me = self._me()
+        me, my_id = self._identity()
         path = f"/repos/{self._repo}/issues/{number}/comments"
 
         def find() -> dict[str, Any] | None:
             return next(
                 (
                     c for c in self._pages(path)
-                    if (c.get("user") or {}).get("login") == me and str(c.get("body", "")).startswith(STICKY_MARKER)
+                    if (c.get("user") or {}).get("login") == me and (c.get("user") or {}).get("id") == my_id
+                    and str(c.get("body", "")).startswith(STICKY_MARKER)
                 ),
                 None,
             )  # fmt: skip
