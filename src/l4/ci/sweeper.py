@@ -63,6 +63,7 @@ from l4.forge.base import (
     JobResult,
     PullRequest,
     fetch_auth_config,
+    forge_platform,
     make_forge,
     require_token_in_ci,
 )
@@ -97,12 +98,18 @@ MAX_TAIL_CHARS = 3000
 MAX_STEP_CHARS = 300
 
 
+NO_CHECK_RUN = (
+    "no workflow ran on the hand-off commit; pushes made with GITHUB_TOKEN start no runs "
+    "(use a token that does, or a GitHub App)"
+)
+
+
 @dataclass(frozen=True)
 class SweepAction:
     unit: str
     what: Literal[
         "merged", "archive_opened", "archive_existing", "archive_pending", "archive_failed", "skipped", "retired",
-        "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "resumed", "resume_refused",
+        "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "not_run", "resumed", "resume_refused",
         "resume_hint",
     ]  # fmt: skip
     detail: str = ""
@@ -545,6 +552,9 @@ class Sweeper:
             jobs = self.forge.list_pipeline_jobs(head)
             if unfinished(jobs):
                 return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running")
+            if not jobs and forge_platform(self.cfg, self.app.environ) == "github":
+                # L4-GHP-008: never green. A push made with the workflow's GITHUB_TOKEN starts no run.
+                return SweepAction(snapshot.ref.id, "not_run", f"H {short}: {NO_CHECK_RUN}")
             if not red_jobs(jobs):
                 return SweepAction(snapshot.ref.id, "ci_green", f"H {short} green")
             base = self.git.rev_parse(f"refs/remotes/origin/{self.cfg.forge.base_branch}")
