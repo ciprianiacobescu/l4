@@ -162,13 +162,14 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "ci render": ("Print generated CI files.", lambda: [
         _opt("--platform", "platform", required=True, type=click.Choice(["github", "gitlab"])),
     ]),
-    "ci watch": ("Follow a GitLab pipeline to its end.", lambda: [
-        _opt("--project", "project", required=True, help="Project id or path (group/name)."),
+    "ci watch": ("Follow a GitLab pipeline or a GitHub run to its end.", lambda: [
+        _opt("--project", "project", help="GitLab project id or path (group/name)."),
+        _opt("--repo", "github_repo", help="GitHub owner/name: follow the newest run of l4.yml on --ref."),
+        _opt("--api-url", "api_url", help="GitHub API base (default: GITHUB_API_URL, else api.github.com)."),
         _opt("--pipeline", "pipeline", type=int, help="Pipeline id (default: the latest of --ref)."),
         _opt("--ref", "ref", help="Branch whose latest pipeline to follow (default: the default branch)."),
         _opt("--api-base", "api_base", help="GitLab API base (default: forge.gitlab.api_url, else from `origin`)."),
-        _opt("--auth-env", "auth_env", default="GITLAB_TOKEN", show_default=True,
-             help="Environment variable that holds the credential."),
+        _opt("--auth-env", "auth_env", help="Credential variable (default GITLAB_TOKEN; GH_TOKEN for --repo)."),
         _opt("--auth-scheme", "auth_scheme", type=click.Choice(["private-token", "bearer"]), default="private-token",
              show_default=True, help="How the credential is sent."),
         _opt("--interval", "interval", default="15s", show_default=True),

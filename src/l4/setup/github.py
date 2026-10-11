@@ -346,7 +346,15 @@ def run_setup_github(
     forge = GitHubForge(name, token, api_url=base_url, transport=transport)
     setup = Setup(api, forge, options, emit, app.environ)
     try:
-        setup.run_steps()
+        before = setup.run_steps()
+        if before is not None and watch:
+            from l4.ci.watch import watch_github_run
+
+            result = watch_github_run(
+                api, forge, name, options.base, after=before, say=emit.raw, tail=tail, sleep=sleep, clock=clock
+            )
+            if result.exit_code:
+                emit.row("FAILED", f"workflow run {result.run_id}", result.conclusion)
     except (GhError, ForgeError) as exc:
         click.echo(app.redactor.redact_text(f"ERROR {exc}"))
         emit.summary(ExitCode.INTERNAL_ERROR)
