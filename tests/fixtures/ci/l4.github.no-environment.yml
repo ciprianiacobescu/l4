@@ -1,0 +1,48 @@
+# Written by `l4 init --ci github` (forge-and-ci 2.14, the M1.1 routed job for GitHub). One job, `l4`, decides for itself
+# whether there is work: `l4 run` plans every unit and runs the actionable ones, and exits 0 with "nothing to do" before
+# any lease, worktree or probe when there are none. It starts on a push to the base branch (a merge), on a push to the
+# unit-branch prefix (a human's answer or spec edit), on a schedule and by hand. There is no pull_request trigger, so
+# a fork never runs it (L4-CI-003). A push whose message has an `L4-Run: ` trailer is the harness's own and starts
+# nothing. Checkout keeps no credentials: the harness hands git the token per command (L4-SEC-005).
+name: l4
+on:
+  push:
+    branches: ["main", "l4/**"]
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+  actions: write
+jobs:
+  l4:
+    if: "${{ !contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    runs-on: ["self-hosted", "agentic"]
+    timeout-minutes: 180
+    concurrency:
+      group: l4
+      cancel-in-progress: false
+    env:
+      L4_FORGE_TOKEN: ${{ secrets.L4_FORGE_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: doctor
+        run: .l4/bin/l4 doctor --ci || .l4/bin/l4 ci map-exit $?
+      - name: plan
+        run: .l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?
+      - name: run
+        run: .l4/bin/l4 run || .l4/bin/l4 ci map-exit $?
+      - name: status
+        if: ${{ always() }}
+        run: .l4/bin/l4 status
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: l4-out
+          path: .l4-out/
+          retention-days: 7

@@ -77,11 +77,17 @@ def find_tool(name: str, paths: Paths, env: Mapping[str, str], *, forbid: Sequen
 
 def resolve_self_provision(cfg: L4Config, env: Mapping[str, str]) -> bool:
     """`auto` provisions on a persistent runner and not on a disposable or GitHub-hosted one (L4-PRV-010).
-    SPIKE: `L4_SELF_PROVISION` = true | false | auto (any case; anything else is ignored) overrides the config."""
+    `L4_SELF_PROVISION` = true | false | auto (any case) replaces the configured value (L4-PRV-019); any other
+    non-empty value is ignored with one warning and the configured value applies."""
     setting = cfg.ci.self_provision
-    override = env.get("L4_SELF_PROVISION", "").strip().lower()
+    raw = env.get("L4_SELF_PROVISION", "")
+    override = raw.strip().lower()
     if override in ("true", "false", "auto"):
         setting = {"true": True, "false": False, "auto": "auto"}[override]
+    elif override:
+        log.warning(
+            "ignoring L4_SELF_PROVISION=%r: not true, false or auto; the configured ci.self_provision applies", raw
+        )
     if setting != "auto":
         return setting
     return env.get("CI_DISPOSABLE_ENVIRONMENT") != "true" and env.get("RUNNER_ENVIRONMENT") != "github-hosted"

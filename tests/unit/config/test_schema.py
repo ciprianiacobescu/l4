@@ -18,8 +18,8 @@ MODELLED_DEFAULTS = (
     "verifier", "forge", "locks", "ci", "budgets", "observability",
 )  # fmt: skip
 NOT_YET_MODELLED: set[tuple[str, str]] = set()  # `ci.self_provision` arrived with M1.4 (runner-provisioning 1.2)
-# keys SPEC 3.2 does not have: forge.gitlab (M0, C2)
-ADDED_BEYOND_SPEC = {("forge", "gitlab")}
+# keys SPEC 3.2 does not have: forge.gitlab (M0, C2), ci.github_environment (hosted-runner-setup)
+ADDED_BEYOND_SPEC = {("forge", "gitlab"), ("ci", "github_environment")}  # SPEC 3.2 owes ci.github_environment
 
 
 def reference_config() -> dict[str, Any]:

@@ -12,11 +12,13 @@ def test_python_repo_gets_exact_file_set(target: Path, harness_repo: Path, git_e
     assert [f.path for f in plan.files] == [
         ".l4/config.yaml",
         ".l4/bin/l4",
+        ".l4/bin/l4-setup",
         ".l4/ci/l4.gitlab-ci.yml",
         ".gitlab-ci.yml",
         ".serena/project.yml",
     ]
     assert {f.path: f.mode for f in plan.files}[".l4/bin/l4"] == 0o755
+    assert {f.path: f.mode for f in plan.files}[".l4/bin/l4-setup"] == 0o755
     assert plan.gitignore == b".l4-out/\n.l4/vendor/.venv/\n"
     assert not plan.vendor_exists and plan.overwrites == ()
     assert plan.vendor.commit == raw(harness_repo, "rev-parse", "HEAD").strip()

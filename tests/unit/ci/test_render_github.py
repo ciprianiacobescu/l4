@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -7,9 +8,14 @@ import yaml
 
 from l4.ci.github import doctor_command, render_github_ci
 from l4.ci.lint import lint_github_yaml
+from l4.config.defaults import CREDENTIAL_PATHS
 from l4.config.schema import L4Config
 
-GOLDEN = Path(__file__).resolve().parents[2] / "fixtures" / "ci" / "l4.github.default.yml"
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ci"
+GOLDEN = FIXTURES / "l4.github.default.yml"
+BEFORE_ENVIRONMENT = (
+    FIXTURES / "l4.github.no-environment.yml"
+)  # the self-hosted file as it was before ci.github_environment
 
 
 def cfg(**sections) -> L4Config:
@@ -24,10 +30,119 @@ def test_workflow_golden():
     assert render_github_ci(L4Config()) == GOLDEN.read_text()
 
 
+def test_self_hosted_default_differs_from_before_only_by_the_environment_line():
+    before = BEFORE_ENVIRONMENT.read_text()
+    now = render_github_ci(L4Config())
+    assert "environment:" not in before and now != before
+    lines = now.splitlines(keepends=True)
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("    runs-on:"))
+    assert lines[at + 1].lstrip().startswith("#")  # a comment: the secrets belong in the environment
+    env_line = next(i for i, ln in enumerate(lines) if ln.startswith("    environment:"))
+    assert lines[env_line] == '    environment: "l4"\n'
+    assert "".join(ln for i, ln in enumerate(lines) if not at < i <= env_line) == before
+
+
+def test_environment_null_is_byte_identical_to_before():
+    assert render_github_ci(cfg(ci={"github_environment": None})) == BEFORE_ENVIRONMENT.read_text()
+
+
+def test_environment_follows_config_as_a_json_string_for_both_runner_kinds():
+    for tags in (["agentic"], []):
+        job = parsed(cfg(ci={"runner_tags": tags}))["jobs"]["l4"]
+        assert job["environment"] == "l4"
+        job = parsed(cfg(ci={"runner_tags": tags, "github_environment": "pipeline.prod-1"}))["jobs"]["l4"]
+        assert job["environment"] == "pipeline.prod-1"
+        assert "environment" not in parsed(cfg(ci={"runner_tags": tags, "github_environment": None}))["jobs"]["l4"]
+
+
+def hosted_job(**ci) -> dict:
+    return parsed(cfg(ci={"runner_tags": [], **ci}))["jobs"]["l4"]
+
+
+def step_index(steps: list[dict], match: Callable[[dict], bool]) -> int:
+    return next(i for i, st in enumerate(steps) if match(st))
+
+
+def test_hosted_job_runs_setup_between_cache_steps():
+    job = hosted_job()
+    steps = job["steps"]
+    restore = step_index(steps, lambda s: s.get("uses", "").startswith("actions/cache/restore@"))
+    setup = step_index(steps, lambda s: s.get("run") == ".l4/bin/l4-setup")
+    doctor = step_index(steps, lambda s: "doctor" in s.get("run", ""))
+    save = step_index(steps, lambda s: s.get("uses", "").startswith("actions/cache/save@"))
+    plan = step_index(steps, lambda s: "plan --sweep" in s.get("run", ""))
+    assert step_index(steps, lambda s: s.get("uses", "").startswith("actions/checkout@")) == 0
+    assert restore < setup < doctor < save < plan
+    assert steps[doctor]["run"] == ".l4/bin/l4 doctor --ci --fix || .l4/bin/l4 ci map-exit $?"
+    for index in (restore, save):
+        assert len(steps[index]["uses"].split("@")[1].split()[0]) == 40  # pinned to a commit
+    assert steps[restore]["id"] == "l4cache" and steps[restore]["with"]["path"] == steps[save]["with"]["path"]
+    assert steps[restore]["with"]["key"] == steps[save]["with"]["key"]
+    assert steps[save]["if"] == (
+        "${{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4cache.outputs.cache-hit != 'true' }}"
+    )
+    key_step = steps[step_index(steps, lambda s: s.get("id") == "l4key")]
+    assert key_step["run"] == 'echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"'
+    assert steps[restore]["with"]["key"].startswith(
+        "l4-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.l4key.outputs.image }}-${{ hashFiles("
+    )
+    assert ".l4/vendor/src/l4/provision/catalog.py" in steps[restore]["with"]["key"]
+    assert ".l4/vendor/src/l4/ci/templates/l4-setup.sh" in steps[restore]["with"]["key"]
+
+
+def test_hosted_job_env_has_the_flag_and_the_base_branch():
+    env = hosted_job()["env"]
+    assert env["L4_SELF_PROVISION"] == "${{ vars.L4_SELF_PROVISION || 'auto' }}"
+    assert env["L4_BASE_BRANCH"] == "main"
+    assert hosted_job(self_provision=True)["env"]["L4_SELF_PROVISION"] == "${{ vars.L4_SELF_PROVISION || 'true' }}"
+    for value in ("auto", False):
+        assert hosted_job(self_provision=value)["env"]["L4_SELF_PROVISION"].endswith("|| 'auto' }}")
+    doc = parsed(cfg(ci={"runner_tags": []}, forge={"base_branch": 'rel", evil: [x'}))
+    assert doc["jobs"]["l4"]["env"]["L4_BASE_BRANCH"] == 'rel", evil: [x'
+    assert "L4_FORGE_TOKEN" in doc["jobs"]["l4"]["env"]
+
+
+def test_hosted_doctor_always_fixes_because_the_harness_decides_whether_to_install():
+    for value in ("auto", False, True):
+        runs = [s["run"] for s in hosted_job(self_provision=value)["steps"] if "doctor" in s.get("run", "")]
+        assert runs == [".l4/bin/l4 doctor --ci --fix || .l4/bin/l4 ci map-exit $?"]
+
+
+def test_self_hosted_job_has_no_hosted_steps_or_env():
+    job = parsed(L4Config())["jobs"]["l4"]
+    assert set(job["env"]) == {"L4_FORGE_TOKEN"}
+    assert not [s for s in job["steps"] if "l4-setup" in s.get("run", "") or "cache" in s.get("uses", "")]
+
+
+def test_no_credential_path_is_cached():
+    home = Path("/home/runner")
+
+    def expand(raw: str) -> Path:
+        return home / raw[2:] if raw.startswith("~/") else Path(raw)
+
+    cache_step = next(s for s in hosted_job()["steps"] if s.get("uses", "").startswith("actions/cache/restore@"))
+    cached = [expand(p) for p in cache_step["with"]["path"].split("\n") if p.strip()]
+    assert cached, "the cache has paths"
+    secrets = [expand(p) for paths in CREDENTIAL_PATHS.values() for p in paths]
+    for path in cached:
+        for secret in secrets:
+            assert path != secret and path not in secret.parents, f"{path} caches {secret}"
+    assert {str(p) for p in cached} == {
+        f"/home/runner/{p}"
+        for p in (".local/bin", ".local/share/l4", ".local/share/claude", ".local/share/uv", ".cache/l4", ".cache/uv")
+    }
+
+
 @pytest.mark.skipif(shutil.which("actionlint") is None, reason="actionlint is not installed")
 @pytest.mark.parametrize(
     "config",
-    [L4Config(), cfg(ci={"runner_tags": []}), cfg(ci={"self_provision": True}, forge={"base_branch": "release/1.x"})],
+    [
+        L4Config(),
+        cfg(ci={"github_environment": None}),
+        cfg(ci={"runner_tags": []}),
+        cfg(ci={"runner_tags": [], "github_environment": None, "self_provision": True}),
+        cfg(ci={"self_provision": True}, forge={"base_branch": "release/1.x"}),
+    ],
 )
 def test_actionlint_is_clean(config, tmp_path):
     workflow = tmp_path / ".github" / "workflows" / "l4.yml"
@@ -73,7 +188,7 @@ def test_config_values_cannot_add_keys():
     doc = parsed(hostile)
     assert doc[True]["push"]["branches"] == ['main", evil: [x', "l4/**"]
     assert doc["jobs"]["l4"]["runs-on"] == ["self-hosted", "a, b]\nevil: yes"]
-    assert set(doc["jobs"]["l4"]) == {"if", "runs-on", "timeout-minutes", "concurrency", "env", "steps"}
+    assert set(doc["jobs"]["l4"]) == {"if", "runs-on", "environment", "timeout-minutes", "concurrency", "env", "steps"}
 
 
 def test_runner_tags_and_the_hosted_fallback():

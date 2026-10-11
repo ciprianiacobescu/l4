@@ -26,7 +26,15 @@ def paths(plan) -> list[str]:
 
 def test_ci_both_writes_gitlab_and_github_files(target: Path, harness_repo: Path, git_environ):
     plan = plan_init(target, git_environ, force=False, harness=harness_repo, ci="both")
-    assert paths(plan) == [".l4/config.yaml", ".l4/bin/l4", GITLAB_FILE, ".gitlab-ci.yml", WORKFLOW, SEED]
+    assert paths(plan) == [
+        ".l4/config.yaml",
+        ".l4/bin/l4",
+        ".l4/bin/l4-setup",
+        GITLAB_FILE,
+        ".gitlab-ci.yml",
+        WORKFLOW,
+        SEED,
+    ]
     by_path = {f.path: f for f in plan.files}
     assert by_path[GITLAB_FILE].data.decode() == render_gitlab_ci()
     (target / ".l4").mkdir()
@@ -39,14 +47,14 @@ def test_ci_both_writes_gitlab_and_github_files(target: Path, harness_repo: Path
 
 def test_ci_github_writes_the_workflow_beside_the_shim_and_no_gitlab_file(target, harness_repo, git_environ):
     plan = plan_init(target, git_environ, force=False, harness=harness_repo, ci="github")
-    assert paths(plan) == [".l4/config.yaml", ".l4/bin/l4", WORKFLOW, SEED]
+    assert paths(plan) == [".l4/config.yaml", ".l4/bin/l4", ".l4/bin/l4-setup", WORKFLOW, SEED]
     config = yaml.safe_load(next(f for f in plan.files if f.path == ".l4/config.yaml").data)
     assert config["forge"] == {"type": "github"} and config["ci"] == {"platform": "github"}
 
 
 def test_the_gitlab_form_is_unchanged(target, harness_repo, git_environ):
     plan = plan_init(target, git_environ, force=False, harness=harness_repo)
-    assert paths(plan) == [".l4/config.yaml", ".l4/bin/l4", GITLAB_FILE, ".gitlab-ci.yml", SEED]
+    assert paths(plan) == [".l4/config.yaml", ".l4/bin/l4", ".l4/bin/l4-setup", GITLAB_FILE, ".gitlab-ci.yml", SEED]
     assert yaml.safe_load(render_config("c" * 40))["forge"] == {"type": "gitlab"}
 
 

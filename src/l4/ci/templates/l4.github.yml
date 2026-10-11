@@ -20,19 +20,23 @@ jobs:
   l4:
     if: "${{ !contains(github.event.head_commit.message, 'L4-Run: ') }}"
     runs-on: @@RUNS_ON@@
+@@ENVIRONMENT@@
     timeout-minutes: 180
     concurrency:
       group: l4
       cancel-in-progress: false
     env:
       @@TOKEN_ENV@@: ${{ secrets.@@TOKEN_ENV@@ }}
+@@HOSTED_ENV@@
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+@@HOSTED_SETUP@@
       - name: doctor
         run: .l4/bin/l4 @@DOCTOR@@ || .l4/bin/l4 ci map-exit $?
+@@HOSTED_SAVE@@
       - name: plan
         run: .l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?
       - name: run
