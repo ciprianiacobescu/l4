@@ -17,6 +17,7 @@ from l4.verifier.integrity import (
     check_scan,
     check_suppressions,
     check_tdd_history,
+    check_test_paths,
     check_tests,
     run_integrity,
 )
@@ -291,7 +292,8 @@ def test_integrity_blocker_stops_ladder_and_every_sub_check_has_a_row(tmp_path, 
     report = run_integrity(repo.context(base, repo.commit("hook")))
     assert report.blocked
     assert [c.name for c in report.checks] == [
-        "protected paths", "pre-existing tests", "red-green freeze", "content scan", "suppressions", "tdd history",
+        "protected paths", "pre-existing tests", "red-green freeze", "test path freeze", "content scan",
+        "suppressions", "tdd history",
     ]  # fmt: skip
     assert {c.name: c.status for c in report.checks}["content scan"] == "failed"
     assert raw_git  # the helpers import stays used by the module
@@ -527,6 +529,78 @@ def test_an_unfrozen_path_of_another_task_is_still_a_blocker(tmp_path, git_envir
         out = check_freeze(repo.context(base, green))
         [finding] = out.findings
         assert "tests/test_a.py" in finding.detail and out.unfrozen == [], other
+
+
+# --- L4-IMP-006 (7): a green or fix-chore commit changes no path of the test globs ---------------------------------
+
+
+def _step_commit(tmp_path, git_environ, files: dict[str, str], *, tdd: str = "green", events=(), tasks=None):
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write(files)
+    head = repo.commit("step", task="1.1", tdd=tdd)
+    repo.events = [event(kind, n, **data) for n, (kind, data) in enumerate(events, 1)]
+    return repo, repo.context(base, head, tasks=tasks), head
+
+
+def test_a_green_commit_that_adds_or_edits_a_test_path_is_a_blocker_but_a_person_is_not_walked(tmp_path, git_environ):
+    """SCN-VER-61"""
+    files = {"tests/test_new.py": "def test_new():\n    assert 1\n", "tests/test_a.py": "def test_a():\n    pass\n"}
+    repo, ctx, head = _step_commit(tmp_path, git_environ, files)
+    out = check_test_paths(ctx)
+    [finding] = out.findings
+    assert finding.severity is Severity.BLOCKER and finding.source == "deterministic"
+    assert finding.title == "a test file changed in a step that may not change tests"
+    assert f"tests/test_new.py (task 1.1, green commit {head[:10]})" in finding.detail
+    assert f"tests/test_a.py (task 1.1, green commit {head[:10]})" in finding.detail
+    assert out.note == "1 harness step commit(s) checked"
+    assert [c.name for c in run_integrity(ctx).checks][:4] == [
+        "protected paths", "pre-existing tests", "red-green freeze", "test path freeze"
+    ]  # fmt: skip
+    folder = tmp_path / "person"
+    folder.mkdir()
+    repo, base = new_repo(folder, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write(files)
+    out = check_test_paths(repo.context(base, repo.commit_as_human("a person's tests")))
+    assert out.findings == [] and out.skipped
+
+
+def test_an_exempt_commit_may_change_the_files_its_tests_added_event_lists(tmp_path, git_environ):
+    """SCN-VER-62"""
+    body = "def test_x():\n    assert 1\n"
+    files = {"tests/test_new.py": body, "tests/test_other.py": body}
+    events = [("task.tests_added", {"task": "1.1", "files": ["tests/test_new.py"]})]
+    _, ctx, _ = _step_commit(tmp_path, git_environ, files, tdd="exempt", events=events)
+    [finding] = check_test_paths(ctx).findings
+    assert "tests/test_other.py" in finding.detail and "tests/test_new.py" not in finding.detail
+    folder = tmp_path / "green"
+    folder.mkdir()
+    _, ctx, _ = _step_commit(folder, git_environ, {"tests/test_new.py": "def test_n():\n    assert 1\n"}, events=events)
+    assert check_test_paths(ctx).findings  # a green commit gets no such allowance
+
+
+def test_a_test_infra_task_may_change_a_support_file_in_its_commits(tmp_path, git_environ):
+    """SCN-VER-62 (the human `[test-infra]` tag)"""
+    files = {"tests/conftest.py": "import pytest\n"}
+    tagged = [(UNIT, task("1.1", "Share a fixture [test-infra]"))]
+    _, ctx, _ = _step_commit(tmp_path, git_environ, files, tasks=tagged)
+    assert check_test_paths(ctx).findings == []
+    folder = tmp_path / "other"
+    folder.mkdir()
+    _, ctx, _ = _step_commit(folder, git_environ, files, tasks=[(UNIT, task("1.1", "Share a fixture"))])
+    assert check_test_paths(ctx).findings
+
+
+def test_a_path_a_task_unfrozen_event_names_is_allowed_in_green(tmp_path, git_environ):
+    """SCN-VER-63"""
+    files = {"tests/test_a.py": "def test_a():\n    assert 2\n"}
+    unfrozen = [("task.unfrozen", {"task": "1.1", "paths": ["tests/test_a.py"], "question": "Q-002", "red_sha": "r"})]
+    _, ctx, _ = _step_commit(tmp_path, git_environ, files, events=unfrozen)
+    assert check_test_paths(ctx).findings == []
+    other = [("task.unfrozen", {"task": "1.2", "paths": ["tests/test_a.py"], "question": "Q-002", "red_sha": "r"})]
+    folder = tmp_path / "other"
+    folder.mkdir()
+    _, ctx, _ = _step_commit(folder, git_environ, files, events=other)
+    assert check_test_paths(ctx).findings
 
 
 # --- W-D6: a suppression a person added is listed for information, not counted against the unit ---------

@@ -14,6 +14,8 @@ These reports were produced by research agents during the design session and are
 | [05-serena-memory.md](05-serena-memory.md) | Serena 1.7.0 memories, MCP wiring per CLI, CI gotchas, reproducible lessons design |
 | [06-ci-orchestration.md](06-ci-orchestration.md) | Prior art (gh-aw, bmad-loop, Ralph loop…), definitions of L4, GitHub Actions and GitLab CI mechanics, state/locking/loop safety |
 | [07-paper-2609.00006.md](07-paper-2609.00006.md) | arXiv 2609.00006 "Harness Engineering": vetted findings for the harness, guidance-file protection, tool-less calls in an empty directory, per-step caps |
+| [08-understanding-harness-engineering.md](08-understanding-harness-engineering.md) | "Understanding Harness Engineering" (@techNmak): what it means for the harness, from four read-only audits and a skeptical re-check |
+| [09-agentic-evals-and-judges.md](09-agentic-evals-and-judges.md) | How Anthropic, OpenAI and Cursor evaluate coding agents and judges: six candidates measured on Python, C#/xUnit and TS/Jest with a pre-registered score; the test-path freeze (L4-IMP-006 (7)) adopted |
 
 ## Claims re-verified independently by the orchestrator
 

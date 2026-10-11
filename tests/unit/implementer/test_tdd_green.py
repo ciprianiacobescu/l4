@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from l4.agents.fake import Step
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
@@ -9,11 +11,11 @@ from .conftest import IMPL, KNOWN, STUB, TESTS, UNKNOWN, blocked_step, green_ste
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 
 
-def red_green(make_bench, green: Step, *, attempt: int = 1):
+def red_green(make_bench, green: Step, task: Task = TASK, *, attempt: int = 1):
     bench = make_bench([red_step(), green])
-    red = run_red(bench.wb, TASK, attempt=1)
+    red = run_red(bench.wb, task, attempt=1)
     assert red.status == "ok", red.reason
-    return bench, red, run_green(bench.wb, TASK, red, attempt=attempt)
+    return bench, red, run_green(bench.wb, task, red, attempt=attempt)
 
 
 def test_green_marks_task_done_and_commits_with_trailer(make_bench):
@@ -66,7 +68,8 @@ def test_green_that_breaks_an_existing_test_fails(make_bench):
 def test_green_that_adds_a_failing_test_of_its_own_fails(make_bench):
     extra = "def test_extra():\n    assert False\n"
     sneaky = Step(writes={"src/pytdd/pricing.py": IMPL, "tests/test_extra.py": extra}, structured=result("green"))
-    _, _, green = red_green(make_bench, sneaky)
+    # the human `[test-infra]` tag lets the task add a test file; without it the file is removed (test path freeze)
+    _, _, green = red_green(make_bench, sneaky, replace(TASK, title=f"{TASK.title} [test-infra]"))
     assert green.status == "failed" and green.reason == "new failing tests added in green: tests.test_extra::test_extra"
 
 

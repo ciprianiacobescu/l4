@@ -64,6 +64,7 @@ from l4.implementer.guards import (
     build_manifest,
     manifest_at_head,
     restore_frozen,
+    restore_test_paths,
 )
 from l4.implementer.prompt import PromptContext, collect_sources, defuse, render_prompt, result_values_line
 from l4.implementer.result import (
@@ -88,6 +89,7 @@ from l4.security.protected import glob_match, revert_protected
 from l4.specs.base import Marker, Task
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.ledger import LedgerEvent, read_ledger
+from l4.verifier.scan import task_tags
 
 log = logging.getLogger("l4.implementer")
 Phase = Literal["red", "green", "single"]
@@ -893,6 +895,7 @@ def run_green(
             return GreenOutcome("blocked", questions=step.result.questions, summary=step.result.summary)
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
+    freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
     run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate)
@@ -919,6 +922,18 @@ def run_green(
     wb.emit("task.green_committed", task=task.key, base=base, sha=sha)  # contract C22
     wb.push()
     return GreenOutcome("ok", sha=sha)
+
+
+def freeze_test_paths(wb: Workbench, task: Task, base: str, *, keep: Collection[str] = (), phase: str) -> list[str]:
+    """L4-IMP-006 (7): after green or a fix chore no path of the test or support globs differs from `base`, but the
+    `keep` paths a human answer unfroze. A task with the human `[test-infra]` tag is exempt."""
+    if "test-infra" in task_tags(task.title):
+        return []
+    tdd = wb.cfg.tdd
+    return restore_test_paths(
+        wb.git, base, test_globs=tdd.test_globs, support_globs=tdd.test_support_globs, keep=keep, events=wb,
+        excludes=wb.excludes, phase=phase,
+    )  # fmt: skip
 
 
 def proved_test_files(wb: Workbench) -> list[str]:
@@ -1164,6 +1179,7 @@ def run_single(
         kept = review.kept
     else:  # a chore has no red phase: the tests that carry the family's proofs are put back, as green does for its own
         restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
+        freeze_test_paths(wb, task, base, phase="single")
     run_setup(wb)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
     reason, named = green_failures(base_report, [], gate)
