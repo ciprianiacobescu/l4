@@ -47,7 +47,9 @@ for an automatic escalation from a weak model to a stronger one (for example fro
 - Limits keep their own fallback. A `blocked` result with questions still goes to a person and never up the ladder.
 - When two rungs fail with the same fingerprint, escalation stops. The person gets one question with the trail,
   because two models failing the same way points at the spec or a test.
-- The vendor veto is checked again, so a judge never shares a vendor with any profile whose work was accepted.
+- The vendor veto covers every profile that ran an implementer step of the unit, the escalated rungs included. A
+  failed rung's edits can survive into the next attempt. So a ladder spanning two vendors needs a judge chain with a
+  third vendor.
 - A per-unit cap and the existing cost budget bound it.
 - The unit halts for a person only when the top rung also fails, and the trail says so.
 

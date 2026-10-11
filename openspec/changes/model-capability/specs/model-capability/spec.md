@@ -91,7 +91,8 @@ When a unit needs a person, the trail SHALL go with it:
 ### Requirement: L4-CAP-005 The scoreboard across units
 `l4 models [--since DATE] [--role R] [--phase P] [--json]` SHALL fold every ledger in the local clone: the spec
 folders of the checked-out branch, archived changes included, and every fetched unit branch under
-`forge.branch_prefix`, read without a checkout. It prints one row per profile, role and phase with:
+`forge.branch_prefix`, read without a checkout. Without `--since` every ledger counts, so the output depends on the
+clone alone. It prints one row per profile, role and phase with:
 - phases started;
 - accepted at the first attempt;
 - the mean attempts to accept;
@@ -101,7 +102,7 @@ folders of the checked-out branch, archived changes included, and every fetched 
 - last seen;
 - and, when `docs/eval/<date>/scorecard.json` exists, that profile's eval pass rate.
 
-It reads git only and writes nothing. Each CI run SHALL write `.l4-out/models.json` in the same shape for the units it
+It reads git only and writes nothing. It never uses the clock, except to resolve a relative `--since`. Each CI run SHALL write `.l4-out/models.json` in the same shape for the units it
 ran.
 
 #### Scenario: SCN-CAP-09 (+) Two units add up
@@ -118,7 +119,8 @@ ran.
 For each profile in a role chain, the doctor SHALL compute the capability failure rate per role and phase over its last
 `capability.window` phases (default 10) that fall inside `capability.lookback` (default 14d). It SHALL report CAP-001
 `warn` when the rate is at least `capability.warn_at` (default 0.5). The row names the profile, role, phase, rate,
-sample size and most common class, and the next stronger rung of the chain when there is one. CAP-001 never fails.
+sample size and most common class, and the next stronger rung of the chain when there is one. A clone that holds
+fewer than `capability.window` phases for the profile shows the smaller sample. CAP-001 never fails.
 
 #### Scenario: SCN-CAP-11 (+) A weak free model is flagged, the job goes on
 - **GIVEN** `oc-free` with 6 capability failures in its last 10 green phases
@@ -139,7 +141,10 @@ The outcomes `asked`, `limit`, `unavailable` and `error` MUST NOT escalate. An e
    fingerprint and never a transcript.
 
 Budgets:
+- The attempt counter and the `max_task_attempts` breaker (L4-IMP-008) are per rung.
 - A lower rung has `escalation.after` attempts; the top rung has `max_task_attempts`.
+- The L4-IMP-008 "state your blocking questions" call fires only on the top rung, or at the shared-fingerprint stop.
+- `budgets.max_iterations_per_unit` bounds the total across rungs.
 - The unit halts only when the top rung is exhausted.
 - After `escalation.max_per_unit` escalations (default 3), the current rung continues with `max_task_attempts`.
 - Every step counts against `budgets.max_cost_usd_per_unit`.
@@ -149,6 +154,11 @@ to the person, kind `ambiguous`, blocking the task, saying that two models faile
 and the trail.
 
 With `escalation.enabled` false or unset, behaviour is as before this change, apart from L4-CAP-001..006.
+
+#### Scenario: SCN-CAP-20 (+) The next rung starts at attempt 1
+- **GIVEN** `escalation.after: 2`, `max_task_attempts: 3`, and `oc-free` failing green twice
+- **WHEN** green escalates to `codex` and codex fails once
+- **THEN** codex's attempt is recorded as attempt 1 of its rung, no breaker trips, and codex gets 2 more attempts
 
 #### Scenario: SCN-CAP-12 (+) A weak model is replaced within the task
 - **GIVEN** `escalation.enabled: true`, `roles.implementer: [oc-free, codex, claude-sonnet]` with `claude-sonnet` on `model: claude-sonnet-5-5`, and `oc-free` failing green twice with two different fingerprints
@@ -172,7 +182,7 @@ With `escalation.enabled` false or unset, behaviour is as before this change, ap
 
 ### Requirement: L4-CAP-008 Escalation keeps verification independent
 An escalated rung SHALL become an implementer profile of the unit for L4-VER-001, recorded the same way as a fallback
-profile. So no judge that shares a vendor (or model, by `verifier.independence`) with it may judge the unit. When that
+profile. Every rung that ran an implementer step counts, whether or not its work was accepted. So no judge that shares a vendor (or model, by `verifier.independence`) with it may judge the unit. When that
 leaves no judge, the unit goes to `required_role_unavailable` as before, and the trail and the note name the escalated
 rung as the cause.
 

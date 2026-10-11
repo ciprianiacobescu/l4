@@ -24,8 +24,9 @@ From the code, on `amaster` at c9ce1fe [V]:
   `workbench.PreviousAttempt`).
 - **The vendor veto counts every implementer profile of the unit**, not only the first (`verifier/selection.py:44`,
   SCN-AVL-13).
-- **Ledgers live in git.** Each run appends to `<unit>/.l4/ledger/<run-id>.jsonl` in the unit's spec folder (L4-STA-001),
-  which stays on the base branch after the merge.
+- **Ledgers live in git.** Each run appends to `<unit>/.l4/ledger/<run-id>.jsonl` in the unit's spec folder
+  (L4-STA-001). After the merge the pending ledger is folded into that folder's `.l4/ledger/` before `openspec archive`
+  moves the folder (`postmerge.py:136`), so archived changes keep their ledgers.
 - **`l4 eval`** measures implementer and judge profiles offline on 4 seed units. The 2026-10-08 scorecard rates three
   free or local implementers at 100 % and shows `magnitude-qwen` needing 2.67 red attempts on average.
 
@@ -109,7 +110,8 @@ So a person reading a question can tell at once whether the model failed or the 
 
 ### D5. The scoreboard, from git only
 
-`l4 models [--since DATE] [--role R] [--phase P] [--json]` folds the ledgers in the local clone:
+`l4 models [--since DATE] [--role R] [--phase P] [--json]` folds every ledger in the local clone; only `--since`
+narrows by time, so the default output depends on the clone alone:
 - every spec folder's `.l4/ledger/` on the checked-out base branch, archived changes included;
 - every fetched unit branch under `forge.branch_prefix`, read with `git show` without checking it out.
 
@@ -132,8 +134,9 @@ consistency rules.
 
 For each profile in a role chain, CAP-001 looks at its last `capability.window` phases (default 10) inside
 `capability.lookback` (default 14d). It warns when the capability failure rate is at least `capability.warn_at`
-(default 0.5). The row names the profile, role, phase, rate and most common class, and suggests the next stronger
-rung or `l4 eval`.
+(default 0.5). The row names the profile, role, phase, rate, sample size and most common class, and suggests the
+next stronger rung or `l4 eval`. A CI job often has a shallow clone with one ref (GitLab `GIT_DEPTH`), so its sample may
+be a single unit. The row says so instead of hiding it, and `l4 models` on a full clone is the reference.
 
 ### D7. Escalation up the implementer chain (M2, opt-in)
 
@@ -170,12 +173,19 @@ raises one question to the person, kind `ambiguous`, blocking the task, with the
 models failed with the same fingerprint, names the fingerprint, and asks whether the spec or the test is wrong. Higher
 rungs are not tried, which saves their quota.
 
+**Attempt accounting.** With escalation on, the attempt counter and the `max_task_attempts` breaker of L4-IMP-008 are
+per rung: a phase that escalates after 2 failures starts the next rung at attempt 1. The L4-IMP-008 "state your
+blocking questions" call fires only on the top rung, or at the shared-fingerprint stop. `budgets.max_iterations_per_unit`
+still bounds the unit's total, across rungs. With escalation off, counting is as today.
+
 **Session.** The escalated rung keeps the phase until it is accepted. The next task starts again at the bottom rung,
 unless M3 demoted it.
 
 **Independence.** The escalated rung becomes an implementer profile of the unit (the same record as a fallback). So
-the existing veto (L4-VER-001, SCN-AVL-13) keeps any judge of its vendor out. When that leaves no judge, the unit goes
-to `required_role_unavailable`, as today, and the trail says why.
+the existing veto (L4-VER-001, SCN-AVL-13) keeps any judge of its vendor out. Every rung that ran counts, not only the
+one whose work was accepted, because a failed rung's edits can survive into the next attempt. A ladder that spans two
+vendors (Codex, then Claude) therefore needs a judge from a third vendor. The SPEC's `opencode-gemini` profile is that
+pattern. When no judge is left, the unit goes to `required_role_unavailable`, as today, and the trail says why.
 
 ### D8. Demotion (M3, opt-in)
 
@@ -194,7 +204,8 @@ starts. The task starts on the next rung that is not demoted.
 ## SPEC amendments required by this change
 
 1. §7.6 L4-IMP-008: the failure fingerprint is recorded on `task.attempt_failed`. A capability failure is an outcome
-   class of D1.
+   class of D1. With escalation on, the attempt counter and the `max_task_attempts` breaker are per rung, and the stuck
+   call fires only on the top rung or at the shared-fingerprint stop (D7).
 2. L4-STA-001's event list: the new fields of D2, and `capability.escalated`.
 3. L4-QMD-001: the `Tried:` line of D4.
 4. The halted and escalated sections of the MR/PR note: the `Tried:` line. The note gets a "Models tried" section (D3).
