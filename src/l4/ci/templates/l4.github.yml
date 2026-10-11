@@ -43,6 +43,7 @@ jobs:
         if: ${{ github.ref_name != env.L4_BASE_BRANCH }}
         run: |
           git fetch --quiet origin "+refs/heads/$L4_BASE_BRANCH:refs/remotes/origin/$L4_BASE_BRANCH" && git checkout --quiet --detach "origin/$L4_BASE_BRANCH" && echo "l4: base checkout $(git rev-parse HEAD)"
+@@HARNESS_KEY@@
 @@HOSTED_SETUP@@
       - name: doctor
         run: .l4/bin/l4 @@DOCTOR@@ || .l4/bin/l4 ci map-exit $?

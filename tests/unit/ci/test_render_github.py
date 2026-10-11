@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from l4.ci.github import JOB_TIMEOUT_MINUTES, doctor_command, expression_string, render_github_ci
+from l4.ci.github import HOST_KEYS, JOB_TIMEOUT_MINUTES, doctor_command, expression_string, render_github_ci
 from l4.ci.lint import lint_github_yaml
 from l4.config.defaults import CREDENTIAL_PATHS
 from l4.config.schema import L4Config
@@ -150,6 +150,10 @@ def test_no_credential_path_is_cached():
         cfg(ci={"runner_tags": []}),
         cfg(ci={"runner_tags": [], "github_environment": None, "self_provision": True}),
         cfg(ci={"self_provision": True}, forge={"base_branch": "release/1.x"}),
+        cfg(
+            harness={"repository": "ssh://git@github.com/owner/harness.git", "commit": "ab" * 20},
+            ci={"runner_tags": []},
+        ),
     ],
 )
 def test_actionlint_is_clean(config, tmp_path):
@@ -312,3 +316,59 @@ def test_skip_rule_exempts_the_base():
     assert parsed(L4Config())["jobs"]["l4"]["if"] == want
     quoted = parsed(cfg(forge={"base_branch": "o'brien"}))["jobs"]["l4"]["if"]
     assert "github.ref_name == 'o''brien' ||" in quoted
+
+
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+SSH_HARNESS = {"repository": "ssh://git@github.com/owner/harness.git", "commit": COMMIT}
+
+
+def fetched(repository: str = SSH_HARNESS["repository"], *, tags: list[str] | None = None) -> L4Config:
+    return cfg(harness={"repository": repository, "commit": COMMIT}, ci={"runner_tags": tags or []})
+
+
+def test_fetched_harness_key_step_and_cache_key():
+    """SCN-GHP-14 (L4-GHP-010): an ssh harness gets a deploy-key step before the first `.l4/bin/` command, the secret
+    only in that step's env, and the hosted cache key is the pinned commit, not the vendored files."""
+    for tags in ([], ["agentic"]):
+        job = parsed(fetched(tags=tags))["jobs"]["l4"]
+        steps = job["steps"]
+        at = step_index(steps, lambda st: st.get("name") == "harness deploy key")
+        assert at < step_index(steps, lambda st: ".l4/bin/" in st.get("run", ""))
+        step = steps[at]
+        assert step["env"] == {"L4_HARNESS_SSH_KEY": "${{ secrets.L4_HARNESS_SSH_KEY }}"}
+        assert "L4_HARNESS_SSH_KEY" not in job["env"]  # never the job env: only this step sees the key
+        run = step["run"]
+        assert run.count("L4_HARNESS_SSH_KEY") == 2 and 'echo "$L4_HARNESS_SSH_KEY"' not in run  # never echoed
+        assert 'if [ -n "$L4_HARNESS_SSH_KEY" ]' in run and "umask 077" in run
+        assert 'chmod 600 "$RUNNER_TEMP/l4-harness-key"' in run
+        for host_key in HOST_KEYS:
+            assert host_key in run
+        assert len(HOST_KEYS) == 3 and all(k.startswith("github.com ssh-") or " ecdsa-" in k for k in HOST_KEYS)
+        assert (
+            'echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/l4-harness-key -o IdentitiesOnly=yes '
+            '-o UserKnownHostsFile=$RUNNER_TEMP/l4-known-hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"'
+        ) in run
+    hosted = parsed(fetched())["jobs"]["l4"]["steps"]
+    key = next(st for st in hosted if st.get("uses", "").startswith("actions/cache/restore@"))["with"]["key"]
+    assert key.endswith(f"-harness-{COMMIT}") and "hashFiles" not in key
+    save = next(st for st in hosted if st.get("uses", "").startswith("actions/cache/save@"))
+    assert save["with"]["key"] == key
+
+
+def test_an_https_or_vendored_harness_has_no_key_step():
+    for config in (fetched("https://github.com/owner/harness.git"), L4Config(), cfg(ci={"runner_tags": []})):
+        steps = parsed(config)["jobs"]["l4"]["steps"]
+        assert not [st for st in steps if st.get("name") == "harness deploy key"]
+        assert "L4_HARNESS_SSH_KEY" not in render_github_ci(config)
+    https = parsed(fetched("https://github.com/owner/harness.git"))["jobs"]["l4"]["steps"]
+    assert next(st for st in https if st.get("uses", "").startswith("actions/cache/restore@"))["with"]["key"].endswith(
+        f"-harness-{COMMIT}"
+    )
+    vendored = parsed(cfg(ci={"runner_tags": []}))["jobs"]["l4"]["steps"]
+    key = next(st for st in vendored if st.get("uses", "").startswith("actions/cache/restore@"))["with"]["key"]
+    assert "hashFiles('.l4/vendor/src/l4/provision/catalog.py'" in key and "harness-" not in key
+
+
+def test_the_pinned_host_keys_are_githubs_published_ones():
+    assert HOST_KEYS[0] == "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+    assert [k.split()[1] for k in HOST_KEYS] == ["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"]

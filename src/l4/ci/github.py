@@ -24,11 +24,25 @@ CACHE_ACTION = "actions/cache/{op}@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
 CACHE_PATHS = (
     "~/.local/bin", "~/.local/share/l4", "~/.local/share/claude", "~/.local/share/uv", "~/.cache/l4", "~/.cache/uv",
 )  # fmt: skip
-# the harness is vendored under .l4/vendor/ in a consumer repository: a new pin or a new uv version is a new key
-CACHE_KEY = (
-    "l4-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.l4key.outputs.image }}-"
-    "${{ hashFiles('.l4/vendor/src/l4/provision/catalog.py', '.l4/vendor/src/l4/ci/templates/l4-setup.sh') }}"
-)
+# GitHub's published SSH host keys (api.github.com/meta, 2026-10-11), pinned for the fetched harness's deploy key
+# (L4-GHP-010): the clone checks the host against these and nothing else.
+HOST_KEYS = (
+    "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+    "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=",  # noqa: E501
+    "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=",  # noqa: E501
+)  # fmt: skip
+_CACHE_KEY_PREFIX = "l4-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.l4key.outputs.image }}-"
+
+
+def cache_key(cfg: L4Config) -> str:
+    """The tool cache key. A vendored harness (under .l4/vendor/ in the repository): a new pin or a new uv version is a
+    new key. A fetched one is in no file of the checkout: its pinned commit stands in for the hash."""
+    if cfg.harness.repository is not None:
+        return f"{_CACHE_KEY_PREFIX}harness-{cfg.harness.commit}"
+    return (
+        _CACHE_KEY_PREFIX
+        + "${{ hashFiles('.l4/vendor/src/l4/provision/catalog.py', '.l4/vendor/src/l4/ci/templates/l4-setup.sh') }}"
+    )
 
 
 def expression_string(text: str) -> str:
@@ -82,6 +96,31 @@ def _environment_block(name: str | None) -> str:
     )
 
 
+def _harness_key_step(cfg: L4Config) -> str:
+    """The deploy-key step of a harness fetched over ssh (L4-GHP-010): with the secret set, the key goes to
+    `$RUNNER_TEMP` (0600, which the sandbox hides), GitHub's host keys beside it, and `GIT_SSH_COMMAND` to the later
+    steps. The secret is in this step's env alone and is never echoed."""
+    if cfg.harness.repository is None or not cfg.harness.repository.startswith("ssh://"):
+        return ""
+    hosts = " ".join(f"'{key}'" for key in HOST_KEYS)
+    ssh = (
+        "ssh -i $RUNNER_TEMP/l4-harness-key -o IdentitiesOnly=yes "
+        "-o UserKnownHostsFile=$RUNNER_TEMP/l4-known-hosts -o StrictHostKeyChecking=yes"
+    )
+    return f"""\
+      - name: harness deploy key
+        env:
+          L4_HARNESS_SSH_KEY: ${{{{ secrets.L4_HARNESS_SSH_KEY }}}}
+        run: |
+          if [ -n "$L4_HARNESS_SSH_KEY" ]; then
+            umask 077
+            printf '%s\\n' "$L4_HARNESS_SSH_KEY" > "$RUNNER_TEMP/l4-harness-key"
+            chmod 600 "$RUNNER_TEMP/l4-harness-key"
+            printf '%s\\n' {hosts} > "$RUNNER_TEMP/l4-known-hosts"
+            echo "GIT_SSH_COMMAND={ssh}" >> "$GITHUB_ENV"
+          fi"""
+
+
 def _hosted_blocks(cfg: L4Config) -> dict[str, str]:
     """The pieces only a GitHub-hosted job has (L4-PRV-023). `doctor --ci --fix` is always on here: it installs only
     when `resolve_self_provision` says so (`L4_SELF_PROVISION`, from the repository variable), so the line is the
@@ -92,7 +131,7 @@ def _hosted_blocks(cfg: L4Config) -> dict[str, str]:
         with:
           path: |
 {paths}
-          key: {CACHE_KEY}"""
+          key: {cache_key(cfg)}"""
     return {
         "HOSTED_ENV": (f"      L4_SELF_PROVISION: ${{{{ vars.L4_SELF_PROVISION || '{rendered}' }}}}"),
         "HOSTED_SETUP": f"""\
@@ -128,6 +167,7 @@ def render_github_ci(cfg: L4Config) -> str:
         "DOCTOR": "doctor --ci --fix" if hosted else doctor_command(cfg, "github"),
         "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
         "CREDENTIAL_ENV": "\n".join(f"      {name}: ${{{{ secrets.{name} }}}}" for name in credential_secrets(cfg)),
+        "HARNESS_KEY": _harness_key_step(cfg),
         "HOSTED_ENV": "", "HOSTED_SETUP": "", "HOSTED_SAVE": "",
         **(_hosted_blocks(cfg) if hosted else {}),
     }  # fmt: skip
