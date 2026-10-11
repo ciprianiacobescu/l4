@@ -47,6 +47,7 @@ jobs:
 
   publication:
     runs-on: ubuntu-latest
+    environment: publication   # L4_PUBLICATION_RULES is an environment secret, not a repository one
     env:
       L4_PUBLICATION_RULES: ${{ secrets.L4_PUBLICATION_RULES }}
     steps:
