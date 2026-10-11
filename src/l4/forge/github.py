@@ -7,9 +7,10 @@ GraphQL mutation `markPullRequestReadyForReview`; REST has no endpoint for it.
 M1: forge-and-ci 2.9 rest (statuses, check runs, approvals, collaborator permission), 2.10 (workflow_dispatch).
 """
 
+import os
 import re
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -38,6 +39,8 @@ from l4.forge.base import (
 DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
+ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
+ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
 MAX_WAIT_S = 60.0
 MAX_PAGES = 100
@@ -87,6 +90,7 @@ class GitHubForge:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.time,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         if not _REPO.match(repo):
             raise ValueError("the GitHub repository must be written owner/name")
@@ -97,7 +101,8 @@ class GitHubForge:
         self._transport = transport
         self._sleep = sleep
         self._now = now
-        self._login: str | None = None
+        self._environ = os.environ if environ is None else environ
+        self._who: tuple[str, int] | None = None
 
     # --- HTTP core ----------------------------------------------------------------------------------------------
 
@@ -371,7 +376,11 @@ class GitHubForge:
         return None
 
     def own_user_id(self) -> int | None:
-        return None
+        """The user the token acts as; None when it cannot be told (`resume_label` then honours no label)."""
+        try:
+            return self._identity()[1]
+        except ForgeError:
+            return None
 
     def dispatch_continuation(self, ref: str) -> Continuation:
         return "unsupported"  # github-parity 1.4 (L4-GHP-004) replaces this with workflow_dispatch
@@ -398,26 +407,38 @@ class GitHubForge:
 
     # --- the sticky comment -------------------------------------------------------------------------------------
 
-    def _me(self) -> str:
-        if self._login is None:
+    def _identity(self) -> tuple[str, int]:
+        """(login, id) of the token's user: `GET /user`; for a job's GITHUB_TOKEN, which that answers with 403, the
+        Actions bot (L4-GHP-001). Anything else is an error: the sticky note is never matched without an author."""
+        if self._who is None:
             try:
-                self._login = str(self._request("GET", "/user").json()["login"])
+                user = self._request("GET", "/user").json()
+                self._who = (str(user["login"]), int(user["id"]))
+            except ForgeAuthError as exc:
+                if exc.status == 403 and self._environ.get("GITHUB_ACTIONS") == "true":
+                    self._who = (ACTIONS_BOT_LOGIN, ACTIONS_BOT_ID)
+                else:
+                    raise ForgeError("GitHub: cannot tell which user the token belongs to (GET /user failed)") from None
             except (ForgeError, KeyError, TypeError, ValueError):
                 raise ForgeError("GitHub: cannot tell which user the token belongs to (GET /user failed)") from None
-        return self._login
+        return self._who
+
+    def _me(self) -> str:
+        return self._identity()[0]
 
     def upsert_sticky_note(self, number: int, body: str) -> None:
-        """An issue comment by the token's own login that starts with the marker: a marker quoted or planted by someone
-        else is never rewritten."""
+        """An issue comment by the token's own user (login and id together) that starts with the marker: a marker quoted
+        or planted by someone else is never rewritten."""
         text = f"{STICKY_MARKER}\n{body}"
-        me = self._me()
+        me, my_id = self._identity()
         path = f"/repos/{self._repo}/issues/{number}/comments"
 
         def find() -> dict[str, Any] | None:
             return next(
                 (
                     c for c in self._pages(path)
-                    if (c.get("user") or {}).get("login") == me and str(c.get("body", "")).startswith(STICKY_MARKER)
+                    if (c.get("user") or {}).get("login") == me and (c.get("user") or {}).get("id") == my_id
+                    and str(c.get("body", "")).startswith(STICKY_MARKER)
                 ),
                 None,
             )  # fmt: skip

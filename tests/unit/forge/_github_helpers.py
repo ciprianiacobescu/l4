@@ -12,6 +12,7 @@ API = "https://api.github.test"
 REPO = "acme/widgets"
 TOKEN = "ghp_FAKE0123456789abcdefghijklmnopqrstuv"
 LOGIN = "l4-bot"
+USER_ID = 777
 
 
 @dataclass
@@ -105,7 +106,9 @@ class FakeGitHub:
         if path == "/graphql":
             return self._graphql(body)
         if path == "/user":
-            return httpx.Response(self.user_status, json={"login": LOGIN} if self.user_status == 200 else {})
+            return httpx.Response(
+                self.user_status, json={"login": LOGIN, "id": USER_ID} if self.user_status == 200 else {}
+            )
         if m := re.fullmatch(rf"/repos/{REPO}", path):
             return httpx.Response(200, json={"html_url": f"https://github.test/{REPO}"})
         if m := re.fullmatch(rf"/repos/{REPO}/pulls", path):
@@ -175,7 +178,7 @@ class FakeGitHub:
         items = self.comments.setdefault(number, [])
         if request.method == "POST":
             self._next_comment += 1
-            comment = {"id": self._next_comment, "body": body["body"], "user": {"login": LOGIN}}
+            comment = {"id": self._next_comment, "body": body["body"], "user": {"login": LOGIN, "id": USER_ID}}
             items.append(comment)
             return httpx.Response(201, json=comment)
         return self._page(request, items)
