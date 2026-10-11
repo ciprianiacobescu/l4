@@ -41,11 +41,19 @@ variable can switch without a commit.
 - **GitHub template.** It restores a tool cache before `l4-setup`, keyed on the runner OS, the image and the pinned
   versions, and saves it after doctor. The order becomes: `l4-setup`, `doctor --ci --fix`, `plan --sweep`, `run`.
 - **Credentials from the environment for Claude Code, Codex and Kiro.**
-  - The probe and the agent sandbox receive exactly the credential variable of the step's own profile: claude-code
-    `CLAUDE_CODE_OAUTH_TOKEN` (subscription) or `ANTHROPIC_API_KEY` (api_key), codex `CODEX_API_KEY`, kiro-cli
-    `KIRO_API_KEY`. It is redacted from every output.
+  - The probe and the agent process receive exactly the credential variable of the step's own profile:
+    - claude-code: `CLAUDE_CODE_OAUTH_TOKEN` (subscription) or `ANTHROPIC_API_KEY` (api_key);
+    - codex: `CODEX_API_KEY` (api_key);
+    - kiro-cli: `KIRO_API_KEY`.
+  - Into the sandbox the value travels through a 0600 file and a loader, never bwrap's argv. Claude Code works that way
+    on both hosted images [V, run 38156758955].
+  - The value is redacted from every output.
   - Codex `auth: api_key` stops being refused by the probe.
   - A missing credential is reported by its variable name.
+- **Pipeline secrets in a GitHub Environment.** The new key `ci.github_environment` (default `l4`) puts
+  `environment: <name>` on the generated GitHub job. The forge token and agent credentials are then environment secrets.
+  This repository's own pipelines already use the environments `hosted-agents` and `publication`, and it has no
+  repository secrets left.
 - **Pinned harness Python.** On a hosted image whose Python is older than 3.11, uv chose 3.14.8. The shim now pins the
   harness's Python, so hosted runs use the version the reference runner and the test suite use.
 - **Documentation.** The quickstart gets a "GitHub-hosted runner" path, and the runner README gets the root-step policy.
@@ -68,6 +76,7 @@ L4-PRV-026 next to it and names the SPEC lines it amends in design.md.
 
 - Code:
   - `src/l4/provision/runner.py`: the override.
+  - `src/l4/config/schema.py`: `ci.github_environment`.
   - `src/l4/ci/render.py`, `src/l4/ci/github.py` and `src/l4/ci/templates/`: `l4-setup`, the GitHub template and the
     shim's Python pin.
   - `src/l4/init/init.py` and `src/l4/init/upgrade.py`: write `l4-setup`.

@@ -19,9 +19,23 @@ prototype is `scripts/runner/hosted-setup.sh` on branch `spike/hosted-agent-setu
   harness's bwrap (`select_sandbox` plus an agent `SandboxSpec`). The call was a standalone script, not the adapter's
   argv.
 - [V] `l4 simulate --all` gives 5 passed, 0 failed, 16 pending, as locally.
-- [V] On 22.04, ENV-001 reported Python 3.14.8: uv provisioned a newer interpreter for the vendored harness.
+- [V] On 22.04, ENV-001 reported Python 3.14.8: uv provisioned a newer interpreter for the vendored harness. The
+  persistent GitLab runner drifts too: its vendored harness reports Python 3.13.16 (ENV-001,
+  `docs/live/kiro-e2e/h2/ci/job-6146.log`), while CI's checks and `prereqs.sh` PRQ-06 use 3.12.
 - [I, code] `availability/probes.py:75` refuses `api_key` profiles. The probe and sandbox environments forward no
-  credential variable, and no probe line names a missing variable.
+  credential variable, and no probe line names a missing variable. `l4.sandbox.env.build_agent_env` forbids `--setenv`
+  for a credential, because bwrap's argv is readable by any local user.
+- [V] Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` alone on both hosted images (run 38156758955, jobs
+  114521218781 and 114521218926):
+  - `claude auth status` reports `loggedIn: true, authMethod: oauth_token`;
+  - `claude -p` answered OK outside the sandbox, and inside the harness's bwrap. Inside, the token came from a 0600 file
+    through a `/bin/sh` loader and was in neither bwrap's argv nor its environment;
+  - no artifact held the value;
+  - `l4 probe` still said `claude is not logged in`, because the probe drops the variable.
+- [V] GitHub Environments work on this private repository on the Free plan (2026-10-11):
+  - environment `hosted-agents` holds `CLAUDE_CODE_OAUTH_TOKEN`, deployable from `spike/*` only;
+  - environment `publication` holds `L4_PUBLICATION_RULES`;
+  - the repository has no repository-level secret left.
 - [D] GitHub deprecates the ubuntu-22.04 image with brownouts from 2026-09-17 and removes it on 2027-04-17.
 
 ## Goals
@@ -32,6 +46,7 @@ prototype is `scripts/runner/hosted-setup.sh` on branch `spike/hosted-agent-setu
   only with an opt-out.
 - A cached job pays seconds, not minutes.
 - Claude Code, Codex and Kiro can authenticate from secrets alone, with no login command.
+- Pipeline secrets are secrets of a GitHub Environment, not repository secrets.
 
 ## Non-Goals
 
@@ -68,14 +83,24 @@ style of `prereqs.sh`, and never reads or prints a credential. The root step liv
 L4-DOC-002 ("never sudo") stays true of the harness's Python as written. Keeping that separation is the point of this
 design.
 
+The script cannot read the config, so it acts on `L4_SELF_PROVISION` alone:
+- `true` acts;
+- `auto` acts on a persistent runner and not on a disposable one, exactly as `resolve_self_provision` does;
+- any other value, unset included, prints one `SKIP` line.
+
+The generated GitHub job always sets the variable (D1).
+
 Steps:
 
-1. Facts: the runner environment, the image, sudo, whether uv and bwrap are present, the sysctl value.
+1. Facts: the runner environment, the image, whether uv and bwrap are present, the sysctl value. No `sudo` call.
 2. uv, pinned at the harness's uv version, with `UV_NO_MODIFY_PATH=1`, into `~/.local/bin`. It is skipped when present.
-3. bwrap in user space: `apt-get download bubblewrap` into a temporary directory, then `dpkg -x` into `$L4_HOME/bwrap`,
-   linked from `~/.local/bin/bwrap`.
-   - Skipped when that binary exists and passes the self-test.
-   - With no `apt-get` or `dpkg`, it reports `manual` and continues.
+3. bwrap in user space, `$L4_HOME/bwrap/usr/bin/bwrap`, linked from `~/.local/bin/bwrap`:
+   - That binary exists and passes the self-test: `already present`, no download.
+   - It does not exist, and another bwrap on PATH passes: nothing is installed.
+   - It does not exist: `apt-get download bubblewrap` into a temporary directory, then `dpkg -x`. With no `apt-get` or
+     `dpkg`, it reports `manual` and continues.
+   - It exists but fails (a cached binary on a kernel that blocks user namespaces): no download; on to the root step.
+   - A link to a failing binary is removed, so it cannot shadow a working system bwrap.
 4. The root step (D3).
 5. On GitHub, append `~/.local/bin` to `$GITHUB_PATH`.
 
@@ -91,7 +116,9 @@ The step runs when all of these hold:
 - the user-space bwrap fails its self-test;
 - `kernel.apparmor_restrict_unprivileged_userns` is `1`.
 
-It then runs `sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` and tests again. It never runs
+The conditions are checked in that order, and `sudo -n true` is the last check. So a persistent runner, an opt-out or a
+working bwrap never runs `sudo` at all. It then runs `sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
+and tests again. It never runs
 `apt-get install`: on 24.04 the apt-installed bwrap fails exactly like the user-space one [V].
 
 Cost, stated plainly: the setting lowers a kernel hardening measure for the whole VM for the rest of the job. That is
@@ -106,39 +133,80 @@ Rejected alternatives:
 
 ### D4. The hosted tool cache
 
-The GitHub template has two cache steps:
-- `actions/cache/restore` before `l4-setup`;
-- `actions/cache/save` after doctor, on success only.
+The GitHub template has two cache steps. Both are pinned by commit, like the template's other actions:
+`actions/cache/restore` and `actions/cache/save` v6.1.0, `55cc8345863c7cc4c66a329aec7e433d2d1c52a9`.
+- The restore runs before `l4-setup`.
+- The save runs after doctor, only when every earlier step succeeded, the restore missed, and the job is on the base
+  branch.
 
 The cached paths are:
 - `~/.local/bin`;
-- `$L4_HOME` (`~/.local/share/l4`, which holds Node, the npm prefix and bwrap);
+- `$L4_HOME` (`~/.local/share/l4`, which holds Node, the npm prefix with codex and opencode, and bwrap);
+- `~/.local/share/claude`;
+- `~/.local/share/uv` (uv-managed Pythons);
 - `$L4_CACHE` (`~/.cache/l4`);
-- `~/.local/share/claude`, `~/.local/share/kiro-cli` and `~/.local/share/opencode`;
-- uv's cache.
+- uv's cache (`~/.cache/uv`).
 
-The key is `l4-tools-<runner.os>-<ImageOS>-<hash of the vendored pins>`. Credentials are never in these paths:
-`~/.claude`, `~/.codex` and `~/.kiro` are left out. Kiro's installer has no version argument, so the cached kiro-cli is
+The key is `l4-tools-<runner.os>-<runner.arch>-<ImageOS>-<hash of the vendored catalog.py and l4-setup.sh>`. `ImageOS` is
+a runner variable, not part of the `env` context, so a step writes it to an output first. No path of
+`sandbox.credential_paths` is cached. That leaves out `~/.claude`, `~/.codex` and `~/.kiro`, and also
+`~/.local/share/opencode` and `~/.local/share/kiro-cli`. The spike's cache held those last two; this design drops them. Kiro's installer has no version argument, so the cached kiro-cli is
 whichever version landed first. The doctor line records it.
 
 ### D5. Credentials from the environment
 
-Per adapter, the credential variable is:
-- claude-code: `CLAUDE_CODE_OAUTH_TOKEN` (`auth: subscription`), or `ANTHROPIC_API_KEY` (`auth: api_key`, with `--bare`);
-- codex: `CODEX_API_KEY`, inline on `codex exec`. `codex login --with-api-key` is never run, because it is a login
-  command (L4-PRV-007);
-- kiro-cli: `KIRO_API_KEY` (Pro tier and up).
+The variable of a profile:
+- claude-code: `CLAUDE_CODE_OAUTH_TOKEN` (`auth: subscription`), or `ANTHROPIC_API_KEY` (`auth: api_key`).
+- codex: `CODEX_API_KEY`, for `auth: api_key` only.
+  - A subscription profile keeps its ChatGPT file login and is never given an API key.
+  - `codex login --with-api-key` is never run, because it is a login command (L4-PRV-007).
+- kiro-cli: `KIRO_API_KEY`, for `auth: subscription` or `api_key`. It is the headless form of the Kiro login (Pro tier
+  and up).
 
-Only the step's own profile variable enters its probe and its agent sandbox (`--setenv`). It is redacted like the other
-`DEFAULT_REDACT_ENV` names. A missing variable is reported as `<profile>: <VARIABLE> is not set`, in the probe line and
-in PRV-001.
+**Probe.** With the variable set:
+- the auth step passes without a status command (`auth_method: env`);
+- the hello step proves that the credential works;
+- the variable is in that profile's probe environment only, which is a child's process environment, never argv.
 
-This is the least proven part. It is labelled unproven until a hosted run with the three secrets passes D'.
+With the variable unset:
+- an `api_key` profile fails auth with `<VARIABLE> is not set`;
+- a subscription profile runs today's file-login check, and a failure adds `(or set <VARIABLE>)`.
+
+**Agent sandbox: never `--setenv`.** `build_agent_env` gives bwrap's child no credential, because a `--setenv` value is
+in bwrap's argv, which any local user can read through /proc. Instead:
+1. The adapter writes the value to a new 0600 file in the step's private directory.
+2. It prefixes the command with a loader:
+   `/bin/sh -c 'v=$(cat -- "$1") || exit 97; rm -f -- "$1"; export NAME="$v"; shift; exec "$@"'`.
+3. The value then reaches only the agent's own process environment, which only the same user can read. The file is
+   gone before the agent starts.
+
+This is how `opencode_provider` already delivers a provider key. It is [V] for claude-code (run 38156758955). The value
+is redacted like the other `DEFAULT_REDACT_ENV` names, and PRV-001 names a missing variable.
+
+Rejected: `--setenv`. The text of this change said so until 2026-10-11, which contradicted the sandbox's own invariant.
+
+Codex and Kiro with a key stay unproven until a hosted run with `CODEX_API_KEY` and `KIRO_API_KEY` passes.
 
 ### D6. Pin the harness's Python
 
-The shim runs `uv run --python <pin> ...`, with the pin taken from the vendored harness (3.12, the reference runner's
-version). A hosted image with a too-old system Python then gets a uv-managed 3.12, not whatever uv finds newest.
+The shim runs `uv run --python <pin> ...`, with the pin taken from the vendored harness.
+- The pin is 3.12: the version that CI's checks and `prereqs.sh` PRQ-06 install.
+- The reference runner's harness has drifted to 3.13.16 [V]. With the pin it goes back to the 3.12 that PRQ-06 already
+  installed.
+- A hosted image with a too-old system Python gets a uv-managed 3.12, not whatever uv finds newest.
+- A persistent runner with no 3.12 downloads one on the first run, which needs the network.
+
+### D7. Pipeline secrets live in a GitHub Environment
+
+`ci.github_environment` (default `l4`; null turns it off) puts `environment: <name>` on the generated GitHub job, hosted
+or self-hosted.
+- The forge token and the agent credentials then become secrets of that environment.
+- A deployment branch policy can limit them to the base branch and the unit-branch prefix.
+- Repository secrets still resolve, so nothing breaks while a repository moves its secrets.
+- GitHub creates a missing environment on the first run. Every run is recorded as a deployment of that environment.
+
+The harness repository's own pipelines follow the same rule, with the environments `hosted-agents` and `publication`
+[V].
 
 ## SPEC amendments required by this change
 
@@ -154,10 +222,13 @@ The text below is proposed. SPEC.md gets only the delivery-table row and the fac
 4. The generated-CI sentence of L4-DOC-002 gains: "On GitHub, the job runs `.l4/bin/l4-setup`, then `l4 doctor --ci
    --fix`, when `L4_SELF_PROVISION` (the repository variable, else the rendered config value) resolves true, between a
    tool-cache restore and save (L4-PRV-023)."
-5. The adapter auth rows of §8 (claude-code, codex, kiro-cli): the credential variable reaches the probe and the agent
-   sandbox of its own profile only (L4-PRV-024).
+5. The adapter auth rows of §8 (claude-code, codex, kiro-cli): the credential variable reaches its own profile only. It
+   goes into that profile's probe environment, and into its agent process through a 0600 file and a loader, never
+   bwrap's argv (L4-PRV-024).
 6. §15: PRV-001 names the missing variable.
 7. §21: add the row for change 14 `hosted-runner-setup`.
+8. §3.2 `ci:` gains `github_environment: l4` (L4-PRV-027): "the GitHub Environment whose secrets the generated job
+   reads; null: none"; the GitHub part of §14 says the forge token and agent credentials belong there.
 
 ## Risks
 
@@ -167,5 +238,7 @@ The text below is proposed. SPEC.md gets only the delivery-table row and the fac
   every run, so the script adapts and records the facts.
 - **Free models are slow and change.** The hello took 4.5 s cold and 43 s warm on the same image [V]. Probe timeouts and
   free-model choices are config, not code.
+- **Deployment noise.** Each run of a job with `environment:` is a deployment record, about one every 30 minutes with the
+  schedule. `ci.github_environment: null` turns it off.
 - **Cache poisoning across branches.** Caches are scoped per branch by GitHub, and the key includes the pins. The cache
   holds binaries the job runs, so it is saved only from the base branch's job.

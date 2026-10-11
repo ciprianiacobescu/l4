@@ -100,7 +100,9 @@ installed-not-authenticated; oc-free opencode ready".
 3. **The bwrap extraction is not idempotent in the prototype.** The warm run extracted it again. It needs an
    `already present` check like the other tools.
 4. **Python drifts on 22.04.** The image has 3.10, so uv provisioned 3.14.8 for the vendored harness (ENV-001
-   "Python 3.14.8") [V]. The reference runner and the test suite use 3.12. The shim should pin it.
+   "Python 3.14.8") [V]. The test suite, CI's checks and `prereqs.sh` PRQ-06 use 3.12. The GitLab reference runner has
+   drifted too: its harness reports 3.13.16 (ENV-001, `docs/live/kiro-e2e/h2/ci/job-6146.log`) [V]. The shim should pin
+   3.12.
 5. **Kiro installs whatever version is current**: 2.29.1 against the 2.28.0 floor [V]. With the cache, the version that
    lands first stays until the cache key changes.
 6. **Auth from environment variables is not wired for the three paid CLIs**, from reading the code [I]:
@@ -116,16 +118,37 @@ installed-not-authenticated; oc-free opencode ready".
    [V, local Docker rehearsal of the same script, arm64 `ubuntu:24.04`].
 9. **Free-model latency varies.** The probe hello took 4.5 s cold and 43 s warm on the same image [V]. A probe timeout
    must allow for it.
+10. **Claude Code works from `CLAUDE_CODE_OAUTH_TOKEN` alone, in the sandbox too** [V, run 38156758955, jobs
+    114521218781 (24.04) and 114521218926 (22.04), commit 1a92dd8]. The token came from `claude setup-token`, was stored
+    by the maintainer in Mintkey, and was copied into a GitHub secret without being printed. Both images gave the same
+    lines:
+    ```
+    auth_status {'loggedIn': True, 'authMethod': 'oauth_token', 'subscriptionType': None}
+    outside_sandbox {'is_error': False, 'api_error_status': None, 'result': 'OK'}
+    sandbox=bwrap rc=0 seconds=2.3 token_in_bwrap_argv=False token_in_bwrap_env=False value_file_removed_by_loader=True
+    token_leak_check=clean
+    [l4] probe: claude-code skipped — auth: claude is not logged in
+    ```
+    Inside bwrap, the token was delivered by `scripts/runner/spike-hosted/sandboxed-claude.py`: a 0600 file in the step's
+    private directory and a `/bin/sh` loader that reads it, deletes it, exports the variable and execs `claude`. It never
+    went through `--setenv`, whose values are in bwrap's argv and readable by any local user. The last line is finding
+    6: `l4 probe` drops the variable.
+11. **Pipeline secrets are environment secrets** (2026-10-11). The maintainer asked for GitHub Environments instead of
+    repository secrets. They work on this private repository on the Free plan [V]:
+    - environment `hosted-agents` holds `CLAUDE_CODE_OAUTH_TOKEN`, with a deployment branch policy of `spike/*`;
+    - environment `publication` holds `L4_PUBLICATION_RULES`, for `checks.yml`;
+    - the repository has no repository-level secret.
 
 ## 5. Reproduce
 
 Push to any `spike/**` branch of the harness repository. The workflow runs the cold job on both images and the warm
 job on 24.04, and uploads `spike-cold-<os>` and `spike-warm-ubuntu-24.04` artifacts. Each artifact holds `facts.txt`,
-`setup-flag-off.txt`, `setup-flag-on.txt`, `doctor-fix.txt`, `probe.txt`, `sandboxed-hello.txt`, `simulate.txt`,
-`timings.txt` and `results.json`.
+`setup-flag-off.txt`, `setup-flag-on.txt`, `doctor-fix.txt`, `probe.txt`, `sandboxed-hello.txt`, `claude-token.txt`,
+`simulate.txt`, `timings.txt` and `results.json`.
 
 Optional secrets complete D' for the three paid CLIs: `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_API_KEY` and `KIRO_API_KEY`.
-The run uses them only in the probe step.
+They are secrets of the GitHub environment `hosted-agents`, which both jobs name. The run uses them in the probe step and
+in the Claude Code step. A step before the upload fails the job if an artifact file contains the token.
 
 ## 6. Sources [D]
 
