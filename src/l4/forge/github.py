@@ -53,6 +53,10 @@ _READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequest
 _DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { id } } }"
 
 
+_PR_REFUSED = (
+    "GitHub refused to create the pull request (403). Allow GitHub Actions to create and approve pull requests "
+    "(Settings > Actions > General > Workflow permissions), or run `l4 setup github`"
+)
 _CHECK_CONCLUSIONS = {
     "success": "success", "failure": "failed", "timed_out": "failed", "startup_failure": "failed",
     "cancelled": "canceled", "skipped": "skipped", "neutral": "skipped", "stale": "skipped",
@@ -272,10 +276,16 @@ class GitHubForge:
         if existing is not None:
             return existing
         payload = {"head": head, "base": base, "title": title, "body": body, "draft": draft}
-        return post_once(
-            lambda: self._pr(self._request("POST", f"/repos/{self._repo}/pulls", json=payload).json()),
-            lambda: self.find_pr(head), self._pause,
-        )  # fmt: skip
+
+        def post() -> PullRequest:
+            try:
+                return self._pr(self._request("POST", f"/repos/{self._repo}/pulls", json=payload).json())
+            except ForgeAuthError as exc:
+                if exc.status != 403:
+                    raise
+                raise ForgeAuthError(self._scrub(f"{_PR_REFUSED} [{exc}]"), status=403) from None
+
+        return post_once(post, lambda: self.find_pr(head), self._pause)
 
     def _pause(self) -> None:
         self._sleep(self._wait(None, 0))
