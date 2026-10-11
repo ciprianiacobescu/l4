@@ -23,7 +23,16 @@ import yaml
 
 from l4 import __version__
 from l4.ci.github import WORKFLOW_RELPATH, render_github_ci
-from l4.ci.render import INCLUDE_SNIPPET, SHIM_RELPATH, TEMPLATE_RELPATH, VENDOR_RELPATH, render_gitlab_ci, render_shim
+from l4.ci.render import (
+    INCLUDE_SNIPPET,
+    SETUP_RELPATH,
+    SHIM_RELPATH,
+    TEMPLATE_RELPATH,
+    VENDOR_RELPATH,
+    render_gitlab_ci,
+    render_setup,
+    render_shim,
+)
 from l4.config.loader import CONFIG_RELPATH, load_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -179,6 +188,7 @@ def plan_init(
     files = [
         PlannedFile(str(CONFIG_RELPATH), config_text.encode(), 0o644),
         PlannedFile(SHIM_RELPATH, render_shim().encode(), 0o755),
+        PlannedFile(SETUP_RELPATH, render_setup().encode(), 0o755),
     ]
     ci_notes: tuple[str, ...] = ()
     edited: PlannedFile | None = None
