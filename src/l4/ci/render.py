@@ -13,10 +13,13 @@ TEMPLATE_RELPATH = ".l4/ci/l4.gitlab-ci.yml"
 SHIM_RELPATH = ".l4/bin/l4"
 SETUP_RELPATH = ".l4/bin/l4-setup"
 VENDOR_RELPATH = ".l4/vendor"
+# the interpreter the vendored harness runs on (L4-PRV-025): the version checks.yml and scripts/runner/prereqs.sh use
+HARNESS_PYTHON = "3.12"
 INCLUDE_SNIPPET = f"include:\n  - local: {TEMPLATE_RELPATH}\n"
 
 # `--frozen` runs the vendored uv.lock as it is (never relocks the tracked file), `--no-dev` leaves pytest and ruff
-# out; ~/.local/bin is where the runner's uv lives (runner-provisioning PRQ-05).
+# out, `--python` pins the interpreter (a bare image's system Python may be older, uv's newest may be too new);
+# ~/.local/bin is where the runner's uv lives (runner-provisioning PRQ-05).
 _SHIM = f"""#!/bin/sh
 # Starts the vendored l4 harness. Run it from the repository root, as the CI template does.
 PATH="$HOME/.local/bin:$PATH"
@@ -25,7 +28,7 @@ if ! command -v uv >/dev/null 2>&1; then
   echo "l4: uv was not found on PATH or in ~/.local/bin; install uv first" >&2
   exit 3
 fi
-exec uv run --frozen --no-dev --project {VENDOR_RELPATH} l4 "$@"
+exec uv run --frozen --no-dev --python {HARNESS_PYTHON} --project {VENDOR_RELPATH} l4 "$@"
 """
 
 

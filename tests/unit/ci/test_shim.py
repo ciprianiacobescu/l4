@@ -30,7 +30,7 @@ def test_shim_execs_uv_run_project_vendor_with_the_arguments(tmp_path: Path):
     env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "UV_LOG": str(log)}
     done = subprocess.run([str(shim), "run", "--unit", "openspec:x"], cwd=shim.parents[2], env=env, check=False)
     assert done.returncode == 0
-    expected = "run --frozen --no-dev --project .l4/vendor l4 run --unit openspec:x"
+    expected = "run --frozen --no-dev --python 3.12 --project .l4/vendor l4 run --unit openspec:x"
     assert log.read_text().strip() == f"{shim.parents[2].resolve()}|{expected}"
 
 
@@ -54,3 +54,21 @@ def test_a_missing_uv_is_exit_3_with_a_hint(tmp_path: Path):
     done = subprocess.run([str(shim), "doctor"], cwd=shim.parents[2], env=env, capture_output=True, text=True)
     assert done.returncode == 3 and "uv was not found" in done.stderr
     assert os.access(shim, os.X_OK)
+
+
+def test_shim_pins_python():
+    import re
+    import tomllib
+
+    from l4.ci.render import HARNESS_PYTHON
+
+    root = Path(__file__).resolve().parents[3]
+    assert f"--python {HARNESS_PYTHON} " in render_shim()
+    requires = tomllib.loads((root / "pyproject.toml").read_text())["project"]["requires-python"]
+    minimum = re.fullmatch(r">=\s*(\d+)\.(\d+)", requires)
+    assert minimum, requires
+    assert tuple(map(int, HARNESS_PYTHON.split("."))) >= (int(minimum[1]), int(minimum[2]))
+    checks = (root / ".github/workflows/checks.yml").read_text()
+    assert set(re.findall(r'python-version: "([\d.]+)"', checks)) == {HARNESS_PYTHON}
+    prereqs = (root / "scripts/runner/prereqs.sh").read_text()
+    assert re.search(r"^PYTHON_VERSION=\$\{PYTHON_VERSION:-([\d.]+)\}", prereqs, re.M)[1] == HARNESS_PYTHON
