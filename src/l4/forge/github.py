@@ -53,6 +53,7 @@ _READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequest
 _DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { id } } }"
 
 
+_ROLE_LEVELS = {"admin": 50, "maintain": 40, "write": 30, "triage": 20, "read": 10}  # GitLab access levels
 _PR_REFUSED = (
     "GitHub refused to create the pull request (403). Allow GitHub Actions to create and approve pull requests "
     "(Settings > Actions > General > Workflow permissions), or run `l4 setup github`"
@@ -379,11 +380,41 @@ class GitHubForge:
         return JobLog(self.job_log_tail(job_id, max_lines), None)
 
     def label_events(self, number: int) -> list[LabelEvent]:
-        """M1: GitHub label events are not read, so the `l4:resume` label is never honoured here (fail closed)."""
-        return []
+        """`issues/:n/events`, the `labeled` and `unlabeled` ones as `LabelEvent`s, oldest first (a pull request is an
+        issue here). An entry of an unknown shape is no evidence."""
+        events = []
+        for item in self._pages(f"/repos/{self._repo}/issues/{number}/events"):
+            try:
+                if item.get("event") not in ("labeled", "unlabeled"):
+                    continue
+                actor = item.get("actor") or {}
+                events.append(
+                    LabelEvent(
+                        id=int(item["id"]),
+                        label=str((item.get("label") or {}).get("name") or ""),
+                        action="remove" if item["event"] == "unlabeled" else "add",
+                        user_id=int(actor["id"]) if actor.get("id") is not None else None,
+                        created_at=str(item.get("created_at") or ""),
+                    )  # fmt: skip
+                )
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+        return sorted(events, key=lambda e: e.id)
 
     def member_access(self, user_id: int) -> int | None:
-        return None
+        """The user's repository role as GitLab's access level (`_ROLE_LEVELS`): `GET /user/:id` for the login, then
+        the collaborator permission. None for a user who is no collaborator (404) or a role this does not know."""
+        try:
+            login = str(self._request("GET", f"/user/{int(user_id)}").json()["login"])
+            permission = self._request(
+                "GET", f"/repos/{self._repo}/collaborators/{quote(login, safe='')}/permission"
+            ).json()
+        except ForgeNotFound:
+            return None
+        except (ValueError, KeyError, TypeError):
+            return None
+        role = permission.get("role_name") or permission.get("permission") if isinstance(permission, dict) else None
+        return _ROLE_LEVELS.get(str(role))
 
     def own_user_id(self) -> int | None:
         """The user the token acts as; None when it cannot be told (`resume_label` then honours no label)."""

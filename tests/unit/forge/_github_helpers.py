@@ -30,6 +30,9 @@ class FakeGitHub:
     check_runs: list[dict] = field(default_factory=list)  # {id, name, status, conclusion, sha, ...}
     logs: dict[int, str] = field(default_factory=dict)  # check run id -> the text behind the log redirect
     redirect_to: str = "https://logs.example.test/blob"  # where `actions/jobs/:id/logs` sends the client
+    issue_events: dict[int, list[dict]] = field(default_factory=dict)  # issue number -> /issues/:n/events entries
+    users: dict[int, str] = field(default_factory=dict)  # user id -> login (GET /user/:id)
+    permissions: dict[str, dict] = field(default_factory=dict)  # login -> collaborator permission body
     hosts_seen: list[tuple[str, bool]] = field(default_factory=list)  # (host, request carried a token)
 
     def transport(self) -> httpx.MockTransport:
@@ -109,6 +112,14 @@ class FakeGitHub:
             return httpx.Response(
                 self.user_status, json={"login": LOGIN, "id": USER_ID} if self.user_status == 200 else {}
             )
+        if m := re.fullmatch(r"/user/(\d+)", path):
+            login = self.users.get(int(m.group(1)))
+            return httpx.Response(200, json={"login": login}) if login else httpx.Response(404, json={"message": "x"})
+        if m := re.fullmatch(rf"/repos/{REPO}/collaborators/([^/]+)/permission", path):
+            body_ = self.permissions.get(m.group(1))
+            return httpx.Response(200, json=body_) if body_ else httpx.Response(404, json={"message": "Not Found"})
+        if m := re.fullmatch(rf"/repos/{REPO}/issues/(\d+)/events", path):
+            return self._page(request, self.issue_events.get(int(m.group(1)), []))
         if m := re.fullmatch(rf"/repos/{REPO}", path):
             return httpx.Response(200, json={"html_url": f"https://github.test/{REPO}"})
         if m := re.fullmatch(rf"/repos/{REPO}/pulls", path):
