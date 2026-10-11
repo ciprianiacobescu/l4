@@ -3091,6 +3091,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 11 | `sandbox-security` | bubblewrap agent and gate sandboxes (L4-SEC-005), environment allow-lists (L4-SEC-001), adapter isolation flags (L4-SEC-002), protected paths, hardened harness-side tools (L4-SEC-006), doctor `SANDBOX-001`; M2: `user`/`container` modes, pairwise probes | `SANDBOX-001` passes on the reference runner; SCN-SEC-* scenarios |
 | 12 | `runner-provisioning` | self-provisioning of shell runners (L4-DOC-002): `install.sh`, `l4 doctor --fix` user-local installs, adapter readiness and printed human steps (PRV-001/002), `ci.self_provision`, the `.bash_logout` runner notice | its SCN-PRV scenarios; a fresh shell-runner user reaches a green `l4 doctor --ci` with only the printed human steps |
 | 13 | `live-validation` | live runs on the reference GitLab + a GitHub repo; `doctor --live` | the live scenario of §20.4 passes end to end |
+| 15 | `model-capability` | which model fails which task, visible everywhere: outcome classes and self-contained step events, the unit's model trail in `l4 status` and the MR/PR note, a `Tried:` line on every question and halt, the `l4 models` scoreboard from the ledgers in git, doctor CAP-001; opt-in escalation up the implementer chain (a shared failure asks the person) and demotion (L4-CAP-001..010; proposed, `openspec/changes/model-capability/`; follows row 14 `hosted-runner-setup`, on its own branch) | the dummy-repository runs of L4-CAP-010 |
 
 ---
 
