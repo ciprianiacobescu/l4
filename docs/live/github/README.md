@@ -1,7 +1,7 @@
 # GitHub parity, live (change `github-parity`, L4-GHP-013)
 
 **Dates:** 2026-10-11 and 2026-10-12 · **Repository:** public dummy `ciprianiacobescu/l4-dummy-public` (default branch
-`amaster`), created for this test and deleted after it · **Harness:** fetched at run time from the private
+`amaster`), created for this test. It was made private on 2026-10-12 and the maintainer deletes it · **Harness:** fetched at run time from the private
 `ciprianiacobescu/agent-supervisor` at `4ce89efc` (then `80b9f6de`), never committed to the dummy repository ·
 **Runners:** GitHub-hosted `ubuntu-24.04` · **Forge token:** the workflow's own `GITHUB_TOKEN` · **Agents:**
 implementer `oc-free` (OpenCode `opencode/mimo-v2.6-flash-free`), judge `claude-judge` (Claude Code, subscription token
@@ -103,6 +103,11 @@ the repository was deleted. The full logs went with the repository.
 
 ## Clean-up
 
-The repository and its environment secrets go with the deletion. Deploy key 166118772 is removed from the harness
-repository. The Mintkey token used for the setup cannot delete repositories (no `delete_repo` scope), so the maintainer
+Done on 2026-10-12:
+- deploy key 166118772 removed from the harness repository;
+- the dummy repository's two environment secrets deleted;
+- the repository made private;
+- its Actions disabled, so the 30-minute schedule no longer bills runs on a private repository.
+
+Still to do: delete the repository. The Mintkey token used for the setup cannot delete repositories (no `delete_repo` scope), so the maintainer
 deletes the repository.

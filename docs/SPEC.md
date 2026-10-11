@@ -2777,7 +2777,7 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
     host keys.
   - `l4 setup github` and `l4 ci watch --repo` cover setup and watching.
   - [V: the public dummy repository `ciprianiacobescu/l4-dummy-public`, runs 38173604230, 38173836160, 38175544040,
-    38175559320, deleted after the test.]
+    38175559320; the repository was made private on 2026-10-12, and the maintainer deletes it.]
 * Permissions: `contents: write`, `pull-requests: write`, `statuses: write`, `actions: write` (continuations via
   `workflow_dispatch`). The harness mints the App installation token itself right before each hand-off push; the App
   private key never enters an agent or gate sandbox.
@@ -3171,7 +3171,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 12 | `runner-provisioning` | self-provisioning of shell runners (L4-DOC-002): `install.sh`, `l4 doctor --fix` user-local installs, adapter readiness and printed human steps (PRV-001/002), `ci.self_provision`, the `.bash_logout` runner notice | its SCN-PRV scenarios; a fresh shell-runner user reaches a green `l4 doctor --ci` with only the printed human steps |
 | 13 | `live-validation` | live runs on the reference GitLab + a GitHub repo; `doctor --live` | the live scenario of §20.4 passes end to end |
 | 14 | `hosted-runner-setup` | runners nobody customized (GitHub-hosted): `L4_SELF_PROVISION` override, the pre-shim `.l4/bin/l4-setup` (uv, user-space bwrap, the one AppArmor sysctl on disposable runners only), the hosted tool cache, agent credentials from the environment (a 0600 file and a loader, never bwrap's argv), pipeline secrets in a GitHub Environment, the pinned harness Python (L4-PRV-019..027; approved 2026-10-11, `openspec/changes/hosted-runner-setup/`) | the evidence workflow passes cold and warm on `ubuntu-24.04` and `ubuntu-22.04` (docs/spikes/06) |
-| 16 | `github-parity` | a full run on GitHub-hosted runners with the workflow's `GITHUB_TOKEN`: the bot identity, the GitHub soft deadline and `workflow_dispatch` continuation, the base-branch harness on other branches, resume by label, honest hand-off CI, the harness fetched at run time instead of vendored (only config, shims and evidence stay in the repository), `l4 setup github`, `l4 ci watch` on GitHub (L4-GHP-001..013; proposed, `openspec/changes/github-parity/`) | the public dummy-repository run of L4-GHP-013 |
+| 16 | `github-parity` | a full run on GitHub-hosted runners with the workflow's `GITHUB_TOKEN`: the bot identity, the GitHub soft deadline and `workflow_dispatch` continuation, the base-branch harness on other branches, resume by label, honest hand-off CI, the harness fetched at run time instead of vendored (only config, shims and evidence stay in the repository), `l4 setup github`, `l4 ci watch` on GitHub (L4-GHP-001..013; implemented and live-tested, `openspec/changes/github-parity/`, `docs/live/github/`) | the public dummy-repository run of L4-GHP-013 |
 
 ---
 
