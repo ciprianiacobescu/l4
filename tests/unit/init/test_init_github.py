@@ -26,7 +26,15 @@ def paths(plan) -> list[str]:
 
 def test_ci_both_writes_gitlab_and_github_files(target: Path, harness_repo: Path, git_environ):
     plan = plan_init(target, git_environ, force=False, harness=harness_repo, ci="both")
-    assert paths(plan) == [".l4/config.yaml", ".l4/bin/l4", ".l4/bin/l4-setup", GITLAB_FILE, ".gitlab-ci.yml", WORKFLOW, SEED]
+    assert paths(plan) == [
+        ".l4/config.yaml",
+        ".l4/bin/l4",
+        ".l4/bin/l4-setup",
+        GITLAB_FILE,
+        ".gitlab-ci.yml",
+        WORKFLOW,
+        SEED,
+    ]
     by_path = {f.path: f for f in plan.files}
     assert by_path[GITLAB_FILE].data.decode() == render_gitlab_ci()
     (target / ".l4").mkdir()
