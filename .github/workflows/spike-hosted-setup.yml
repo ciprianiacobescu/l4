@@ -91,6 +91,27 @@ jobs:
           cat "$OUT/sandboxed-hello.txt"
         continue-on-error: true
 
+      - name: Claude Code with CLAUDE_CODE_OAUTH_TOKEN only, outside and inside the harness's bwrap (question D')
+        working-directory: ${{ runner.temp }}/target
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          {
+            if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "CLAUDE_CODE_OAUTH_TOKEN=not set"; exit 0; fi
+            echo "CLAUDE_CODE_OAUTH_TOKEN=set (value not shown) claude_version=$(claude --version 2>&1 | head -1)"
+            claude auth status 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print("auth_status", {k: d.get(k) for k in ("loggedIn", "authMethod", "subscriptionType")})' || echo "auth_status unreadable"
+            s=$(date +%s)
+            rc=0; claude -p --no-session-persistence --max-turns 1 --output-format json "Reply with the single word OK and nothing else." > "$RUNNER_TEMP/claude-out.json" 2>/dev/null || rc=$?
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("outside_sandbox", {k: d.get(k) for k in ("is_error", "api_error_status", "result")})' "$RUNNER_TEMP/claude-out.json" || echo "outside_sandbox unreadable"
+            echo "claude_outside_rc=$rc claude_outside_seconds=$(( $(date +%s) - s ))"
+            rm -f "$RUNNER_TEMP/claude-out.json"
+            mkdir -p "$HOME/.claude"
+            src=0; uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-claude.py" || src=$?
+            echo "claude_sandboxed_rc=$src"
+          } 2>&1 | tee "$OUT/claude-token.txt"
+        continue-on-error: true
+
       - name: simulate --all in the harness checkout (question E)
         run: |
           uv sync --frozen
@@ -121,12 +142,24 @@ jobs:
               "probe_lines": [l[:300] for l in read("probe.txt").splitlines() if l.startswith("[l4] probe")],
               "simulate_tail": read("simulate.txt").splitlines()[-5:],
               "sandboxed_hello": read("sandboxed-hello.txt").splitlines()[:3],
+              "claude_token": read("claude-token.txt").splitlines()[:12],
           }
           (out / "results.json").write_text(json.dumps(res, indent=2))
           print(json.dumps(res, indent=2))
           PY
         env:
           MATRIX_OS: ${{ matrix.os }}
+
+      - name: no token value in any artifact file
+        if: ${{ always() }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "token_leak_check=skipped (not set)" | tee -a "$OUT/timings.txt"; exit 0; fi
+          if grep -rlF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$OUT" "$RUNNER_TEMP/target/.l4-out" 2>/dev/null; then
+            echo "token_leak_check=FOUND" | tee -a "$OUT/timings.txt"; exit 1
+          fi
+          echo "token_leak_check=clean" | tee -a "$OUT/timings.txt"
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
