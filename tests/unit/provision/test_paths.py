@@ -51,6 +51,19 @@ def test_auto_resolution_matrix():
     assert L4Config().ci.self_provision == "auto"
 
 
+def test_env_override_beats_the_config_setting():
+    hosted = {"RUNNER_ENVIRONMENT": "github-hosted"}
+    assert resolve_self_provision(cfg("auto"), {**hosted, "L4_SELF_PROVISION": "true"}) is True
+    assert resolve_self_provision(cfg("auto"), {**hosted, "L4_SELF_PROVISION": "TRUE"}) is True
+    assert resolve_self_provision(cfg(True), {"L4_SELF_PROVISION": "false"}) is False
+    assert resolve_self_provision(cfg(False), {"L4_SELF_PROVISION": "auto"}) is True  # auto: the usual rule
+    assert resolve_self_provision(cfg(True), {**hosted, "L4_SELF_PROVISION": "auto"}) is False
+    for ignored in ("", "yes", "1", "garbage"):
+        assert resolve_self_provision(cfg(False), {"L4_SELF_PROVISION": ignored}) is False
+        assert resolve_self_provision(cfg(True), {"L4_SELF_PROVISION": ignored}) is True
+        assert resolve_self_provision(cfg("auto"), {**hosted, "L4_SELF_PROVISION": ignored}) is False
+
+
 def test_forge_and_agent_secrets_never_reach_installer(paths):
     env = {
         "HOME": "/h", "LANG": "C", "LC_ALL": "C", "TMPDIR": "/t", "HTTPS_PROXY": "http://proxy:3128",
