@@ -205,6 +205,10 @@ or self-hosted.
 - A deployment branch policy can limit them to the base branch and the unit-branch prefix.
 - Repository secrets still resolve, so nothing breaks while a repository moves its secrets.
 - GitHub creates a missing environment on the first run. Every run is recorded as a deployment of that environment.
+- A GitHub secret reaches a job only when its `env` names it. Unlike GitLab, where CI variables are environment
+  variables of every job, the template must name each one. It maps exactly the forge token and the credential variable
+  of each profile that a role chain uses (SCN-PRV-74). An unset secret maps to an empty value, which the harness treats
+  as unset.
 
 The harness repository's own pipelines follow the same rule, with the environments `hosted-agents` and `publication`
 [V].

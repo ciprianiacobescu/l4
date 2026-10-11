@@ -103,6 +103,28 @@ Decisions:
 * **P3: the S1 state budget is 300 approx-tokens.** It is the largest count that fits 463 Laya tokens for the worst text
   type (code); prose would allow 540. The effective cap is `min(verifier.s1.max_state_tokens, 300)`.
 
+## Root steps on runners nobody prepared
+
+On a persistent runner (this one), every root step is a human step. `prereqs.sh` runs them, and `l4 doctor --fix` never
+escalates (L4-DOC-002).
+
+On a disposable runner, a GitHub-hosted VM that serves one job and is then destroyed, the generated job first runs the
+vendored `.l4/bin/l4-setup` (L4-PRV-020..022). It installs uv and a user-space bubblewrap without root. It may run
+exactly one root command, `sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, and only when all of these
+hold:
+- the runner is disposable (`RUNNER_ENVIRONMENT=github-hosted` or `CI_DISPOSABLE_ENVIRONMENT=true`);
+- the user-space bwrap fails its self-test;
+- the setting is `1`;
+- `L4_PROVISION_ROOT` is not `0`;
+- `sudo -n true` works.
+
+Ubuntu 24.04's AppArmor default blocks unprivileged user namespaces even for an apt-installed bwrap. 22.04 needs no root
+at all [V, docs/spikes/06].
+
+The setting lowers a kernel hardening measure for the rest of that VM's life, which is acceptable only because the VM is
+thrown away. Set `L4_PROVISION_ROOT=0` to forbid the command on hosted runners too. On this runner `l4-setup` never
+runs the command: it prints it, with the reason. It never runs `apt-get install`.
+
 ## Authentication (human steps)
 
 The harness and these scripts never log in. Pick per adapter (decision Q3: subscription for Codex/Claude, API keys
@@ -110,7 +132,7 @@ for OpenCode/OpenRouter and the judges):
 
 | Adapter | Option | Where |
 |---|---|---|
-| claude-code | `claude setup-token` on your workstation → masked CI variable `CLAUDE_CODE_OAUTH_TOKEN` | GitLab → project → Settings → CI/CD → Variables |
+| claude-code | `claude setup-token` on your workstation → masked CI variable `CLAUDE_CODE_OAUTH_TOKEN` (on GitHub: a secret of the environment `l4`) | GitLab → project → Settings → CI/CD → Variables; GitHub → Settings → Environments |
 | codex | as the runner user on the host: `sudo -u gitlab-runner -H codex login --device-auth` (stores `~/.codex/auth.json`) | host |
 | opencode | already configured with provider `magnitude`; for hosted models add `OPENROUTER_API_KEY` as a masked CI variable | host / CI variables |
 | kiro-cli | `sudo -u gitlab-runner -H kiro-cli login`, or `KIRO_API_KEY` (Pro tier+) as a masked CI variable | host / CI variables |

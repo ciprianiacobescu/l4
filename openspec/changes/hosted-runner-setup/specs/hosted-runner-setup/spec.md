@@ -187,7 +187,14 @@ NOT use a forge token. It MUST NOT push. It MUST run only on `spike/**` branches
 ### Requirement: L4-PRV-027 Pipeline secrets in a GitHub Environment
 The generated GitHub job SHALL declare `environment: <ci.github_environment>` when that key is set (default `l4`),
 hosted or self-hosted. The forge token and the agent credentials are then read as secrets of that environment. When
-the key is null, the job MUST have no `environment:` key, and its rendering MUST be unchanged from the version before
+the key is null, the job MUST have no `environment:` key.
+
+A GitHub secret reaches a job only when the job's `env` names it. So the job's `env` SHALL map, as
+`NAME: ${{ secrets.NAME }}`, the forge token and the credential variable of every profile that a role chain uses:
+- the L4-PRV-024 variable of claude-code, codex and kiro-cli profiles;
+- `options.provider.api_key_env` of an opencode profile with a custom provider.
+
+It MUST NOT map any other secret. When no role chain uses such a profile, the `env` is the forge token alone, as before
 this change.
 
 #### Scenario: SCN-PRV-72 (+) The default reads secrets from the `l4` environment
@@ -199,3 +206,8 @@ this change.
 - **GIVEN** `ci.github_environment: null`
 - **WHEN** the workflow is rendered for a self-hosted runner
 - **THEN** it has no `environment:` key and is byte-identical to the rendering before this change
+
+#### Scenario: SCN-PRV-74 (+) Exactly the chains' credential secrets reach the job
+- **GIVEN** roles whose chains use a claude-code subscription profile and a codex api_key profile, and an unused kiro-cli profile
+- **WHEN** the workflow is rendered
+- **THEN** the job env maps `L4_FORGE_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and `CODEX_API_KEY` from `secrets`, and not `KIRO_API_KEY`
