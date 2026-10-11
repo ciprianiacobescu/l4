@@ -158,9 +158,10 @@ def test_step1_codex_implements_and_the_judge_falls_back_to_the_declared_opencod
     # implementer: codex, no fallback
     line = selected_line(log, "implementer", "codex")
     assert line is not None and fallback_number(line) is None, line
-    # judges: claude-judge (auth: api_key) skipped at the auth step, opencode-free is fallback #1
+    # judges: claude-judge (auth: api_key) skipped at the auth step (no ANTHROPIC_API_KEY on the runner, L4-PRV-024),
+    # opencode-free is fallback #1
     skipped = skipped_line(log, "judges", "claude-judge")
-    assert skipped is not None and re.search(r"auth: api_key is not supported", skipped), skipped
+    assert skipped is not None and re.search(r"auth: ANTHROPIC_API_KEY is not set", skipped), skipped
     assert "auth: auth:" not in skipped, skipped
     judge = selected_line(log, "judges", "opencode-free")
     assert judge is not None and fallback_number(judge) == 1, judge

@@ -158,7 +158,7 @@ variable and execs the agent. The harness removes the file after the step.
 #### Scenario: SCN-PRV-68 (−) A missing secret is named
 - **GIVEN** a codex profile with `auth: api_key` and no `CODEX_API_KEY`
 - **WHEN** `l4 probe` runs
-- **THEN** the codex line reads `codex: CODEX_API_KEY is not set` and not "api_key is not supported"
+- **THEN** the codex line reads `[l4] probe: codex skipped — auth: CODEX_API_KEY is not set`, and not "api_key is not supported"
 
 #### Scenario: SCN-PRV-69 (−) Another profile's credential does not leak
 - **GIVEN** `KIRO_API_KEY` and `CODEX_API_KEY` both set

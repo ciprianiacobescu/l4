@@ -106,7 +106,7 @@ installed-not-authenticated; oc-free opencode ready".
 5. **Kiro installs whatever version is current**: 2.29.1 against the 2.28.0 floor [V]. With the cache, the version that
    lands first stays until the cache key changes.
 6. **Auth from environment variables is not wired for the three paid CLIs**, from reading the code [I]:
-   - `availability/probes.py:75` refuses `api_key` profiles ("api_key is not supported in M0 (the sandbox passes no
+   - `availability/probes.py:75` refused `api_key` profiles (until change 14, L4-PRV-024) ("api_key is not supported in M0 (the sandbox passes no
      credential variable)").
    - The probe and sandbox environments forward no credential variable.
    - The probe lines never name the missing variable. Only PRV-001's fix hint does ("run `claude setup-token`...").
