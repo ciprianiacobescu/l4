@@ -72,11 +72,16 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--no-ci-edit", "no_ci_edit", help="Print the .gitlab-ci.yml include instead of writing it."),
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
+        _opt("--harness-repo", "harness_repo", help="Fetch the harness at run time from this git URL, no .l4/vendor/."),
+        _opt("--harness-commit", "harness_commit_pin",
+             help="With --harness-repo: the commit to fetch (default: the running harness's)."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
         _flag("--dry-run", "dry_run"),
+        _opt("--harness-commit", "harness_commit_pin",
+             help="Fetched adoption: the commit to pin (default: the running harness's)."),
     ]),
     "doctor": ("Check environment, config, specs, git, forge, CI and state.", lambda: [
         _flag("--ci", "ci"), _flag("--live", "live"), _flag("--fix", "fix"), _unit(), _flag("--json", "as_json"),

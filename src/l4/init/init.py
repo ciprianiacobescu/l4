@@ -20,8 +20,10 @@ from pathlib import Path
 
 import click
 import yaml
+from pydantic import ValidationError
 
 from l4 import __version__
+from l4.buildinfo import harness_commit
 from l4.ci.github import WORKFLOW_RELPATH, render_github_ci
 from l4.ci.render import (
     INCLUDE_SNIPPET,
@@ -29,12 +31,13 @@ from l4.ci.render import (
     SHIM_RELPATH,
     TEMPLATE_RELPATH,
     VENDOR_RELPATH,
+    render_fetched_shim,
     render_gitlab_ci,
     render_setup,
     render_shim,
 )
 from l4.config.loader import CONFIG_RELPATH, load_config
-from l4.config.schema import L4Config
+from l4.config.schema import HarnessCfg, L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
@@ -53,16 +56,24 @@ MAX_GITIGNORE_BYTES = 1024 * 1024
 GATES = M0_GATES  # the gates of a repository without a readable pyproject.toml (L4-GAT-003)
 
 
-def render_config(commit: str, ci: str = "gitlab", *, memory: bool = True, proposal: Proposal | None = None) -> str:
+def render_config(
+    commit: str,
+    ci: str = "gitlab",
+    *,
+    memory: bool = True,
+    proposal: Proposal | None = None,
+    repository: str | None = None,
+) -> str:
     """The M0 pair of SPEC 3.2: Codex implements, Claude Code judges, a different vendor each. Models are left to the
     CLIs' defaults; set `model` and `options.reasoning_effort` on a profile to pin them. `ci`: the platform, or `both`
     (two CI files: the environment decides which forge a run talks to). `memory=False` writes `memory.enabled: false`
     (the repository ignores the paths memory would commit, M1.8 A5). `proposal`: the gates read from pyproject.toml,
-    with a `# TODO:` line for each assumption (M1.8 A2, L4-INS-003); without it the M0 gates."""
+    with a `# TODO:` line for each assumption (M1.8 A2, L4-INS-003); without it the M0 gates. `repository`: the
+    harness is fetched at run time from that URL at `commit` (L4-GHP-010), not vendored."""
     platform = "auto" if ci == "both" else ci
     body = {
         "version": 1,
-        "harness": {"version": __version__, "commit": commit},
+        "harness": {"version": __version__, "commit": commit, **({"repository": repository} if repository else {})},
         "spec": {"frameworks": ["openspec"]},
         "gates": proposal.gates if proposal else GATES,
         "profiles": {
@@ -90,7 +101,7 @@ class PlannedFile:
 @dataclass(frozen=True)
 class InitPlan:
     files: tuple[PlannedFile, ...]
-    vendor: VendorSource
+    vendor: VendorSource | None  # None: the harness is fetched at run time, nothing is vendored
     vendor_exists: bool
     gitignore: bytes | None  # the new content, None when nothing needs adding
     overwrites: tuple[str, ...] = field(default=())
@@ -113,7 +124,7 @@ def validated_config(config_text: str) -> str:
     return config_text
 
 
-def _extend_gitignore(repo: Path) -> bytes | None:
+def _extend_gitignore(repo: Path, entries: tuple[str, ...] = GITIGNORE_ENTRIES) -> bytes | None:
     path = repo / ".gitignore"
     try:
         reject_symlinks(repo, ".gitignore")
@@ -123,7 +134,7 @@ def _extend_gitignore(repo: Path) -> bytes | None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"init: cannot extend .gitignore: {exc}") from None
     eol = "\r\n" if "\r\n" in text else "\n"
     present = {line.strip() for line in text.splitlines()}
-    missing = [entry for entry in GITIGNORE_ENTRIES if entry not in present]
+    missing = [entry for entry in entries if entry not in present]
     if not missing:
         return None
     lead = "" if not text or text.endswith("\n") else eol
@@ -170,6 +181,17 @@ def _ci_edit(repo: Path, cfg: L4Config, proposal: Proposal) -> tuple[PlannedFile
     return PlannedFile(CI_FILE, edit.text.encode("utf-8"), mode), (f"{CI_FILE} {verb}", *edit.warnings)
 
 
+def _fetched_pins(repository: str, commit: str) -> tuple[str, str]:
+    """The repository (scp form normalised) and the commit, checked by the rules the config applies to them."""
+    try:
+        pins = HarnessCfg(repository=repository, commit=commit)
+    except ValidationError as exc:
+        reasons = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+        raise L4Exit(ExitCode.USAGE_ERROR, f"init: --harness-repo/--harness-commit: {reasons}") from None
+    assert pins.repository is not None and pins.commit is not None
+    return pins.repository, pins.commit
+
+
 def plan_init(
     repo: Path,
     environ: Mapping[str, str],
@@ -178,16 +200,24 @@ def plan_init(
     harness: Path | None = None,
     ci: str = "gitlab",
     ci_edit: bool = True,
+    fetched: tuple[str, str] | None = None,
 ) -> InitPlan:
-    """Everything init will write, or an exit-2 refusal naming what is in the way."""
-    vendor = collect_vendor_source(harness_root(harness), environ)
+    """Everything init will write, or an exit-2 refusal naming what is in the way. `fetched`: (repository, commit) of a
+    harness fetched at run time (L4-GHP-010): the fetched shim, and no vendored copy."""
+    vendor: VendorSource | None = None
+    repository: str | None = None
+    if fetched is None:
+        vendor = collect_vendor_source(harness_root(harness), environ)
+        commit = vendor.commit
+    else:
+        repository, commit = _fetched_pins(*fetched)
     ignored = ignored_harness_paths(repo, environ)  # `.serena/` in .gitignore: neither the seed nor lessons commit
     proposal = propose_gates(detect_python(repo))
-    config_text = render_config(vendor.commit, ci, memory=not ignored, proposal=proposal)
+    config_text = render_config(commit, ci, memory=not ignored, proposal=proposal, repository=repository)
     cfg = loaded_config(config_text)
     files = [
         PlannedFile(str(CONFIG_RELPATH), config_text.encode(), 0o644),
-        PlannedFile(SHIM_RELPATH, render_shim().encode(), 0o755),
+        PlannedFile(SHIM_RELPATH, (render_shim() if fetched is None else render_fetched_shim()).encode(), 0o755),
         PlannedFile(SETUP_RELPATH, render_setup().encode(), 0o755),
     ]
     ci_notes: tuple[str, ...] = ()
@@ -200,14 +230,14 @@ def plan_init(
                 files.append(edited)
     if ci in ("github", "both"):
         files.append(PlannedFile(WORKFLOW_RELPATH, render_github_ci(cfg).encode(), 0o644))
-    for planned in (*files, PlannedFile(VENDOR_RELPATH, b"", 0o644)):
+    for planned in (*files, *([PlannedFile(VENDOR_RELPATH, b"", 0o644)] if vendor else [])):
         try:
             reject_symlinks(repo, *Path(planned.path).parts)
         except UnsafeFile as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, f"init: {exc}") from None
     seed = _serena_seed(repo, cfg)
     existing = tuple(p.path for p in files if p is not edited and (repo / p.path).exists())
-    vendor_exists = (repo / VENDOR_RELPATH).exists()
+    vendor_exists = vendor is not None and (repo / VENDOR_RELPATH).exists()
     in_the_way = (*existing, *([VENDOR_RELPATH] if vendor_exists else ()))
     if in_the_way and not force:
         raise L4Exit(ExitCode.USAGE_ERROR, f"init: would overwrite {', '.join(in_the_way)}; pass --force to replace")
@@ -217,7 +247,14 @@ def plan_init(
     notes += (*ci_notes, *proposal.notes)
     marker = register_l4_marker(repo) if "pytest" in cfg.gates.test.command else None
     return InitPlan(
-        (*files, *seed), vendor, vendor_exists, _extend_gitignore(repo), in_the_way, notes, marker, proposal.todos
+        (*files, *seed),
+        vendor,
+        vendor_exists,
+        _extend_gitignore(repo, GITIGNORE_ENTRIES if vendor else GITIGNORE_ENTRIES[:1]),
+        in_the_way,
+        notes,
+        marker,
+        proposal.todos,
     )
 
 
@@ -270,7 +307,8 @@ def swap_in_vendor(repo: Path, source: VendorSource) -> None:
 
 
 def apply_plan(repo: Path, plan: InitPlan) -> None:
-    swap_in_vendor(repo, plan.vendor)  # the step most likely to fail goes first: nothing else is written then
+    if plan.vendor is not None:
+        swap_in_vendor(repo, plan.vendor)  # the step most likely to fail goes first: nothing else is written then
     for planned in plan.files:
         write_planned_file(repo, planned)
     if plan.gitignore is not None:
@@ -299,15 +337,17 @@ def marker_message(marker: MarkerEdit | MarkerRefusal | None, *, dry_run: bool =
     return None
 
 
-def _require_m0_form(ci: str | None, framework: str | None, vendor: bool, dry_run: bool) -> None:
+def _require_m0_form(ci: str | None, framework: str | None, vendor: bool, dry_run: bool, fetched: bool) -> None:
     deferred = {"--dry-run": dry_run, "--framework kiro": framework == "kiro"}
     for flag, used in deferred.items():
         if used:
             raise L4Exit(ExitCode.USAGE_ERROR, f"init: {flag} not yet implemented (M1: forge-and-ci)")
-    if ci is None or not vendor:
+    if vendor and fetched:
+        raise L4Exit(ExitCode.USAGE_ERROR, "init: --vendor and --harness-repo exclude each other")
+    if ci is None or not (vendor or fetched):
         raise L4Exit(
             ExitCode.USAGE_ERROR,
-            "init: M0 needs `--ci gitlab|github|both --vendor` (M1: forge-and-ci 1.14 adds the uvx form of the shim)",
+            "init: needs `--ci gitlab|github|both` and either `--vendor` or `--harness-repo URL`",
         )
 
 
@@ -321,20 +361,37 @@ def run_init(
     force: bool = False,
     harness: Path | None = None,
     no_ci_edit: bool = False,
+    harness_repo: str | None = None,
+    harness_commit_pin: str | None = None,
 ) -> ExitCode:
-    _require_m0_form(ci, framework, vendor, dry_run)
+    _require_m0_form(ci, framework, vendor, dry_run, harness_repo is not None)
+    if harness_repo is None and harness_commit_pin is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-commit needs --harness-repo")
+    fetched: tuple[str, str] | None = None
+    if harness_repo is not None:
+        pin = harness_commit_pin or harness_commit()
+        if pin is None:
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                "init: the running harness's commit is unknown (it is neither vendored nor installed from git); "
+                "pass --harness-commit SHA",
+            )
+        fetched = (harness_repo, pin)
     plan = plan_init(
-        app.repo, app.environ, force=force, harness=harness, ci=ci or "gitlab", ci_edit=not no_ci_edit
+        app.repo, app.environ, force=force, harness=harness, ci=ci or "gitlab", ci_edit=not no_ci_edit, fetched=fetched
     )  # None was refused
     apply_plan(app.repo, plan)
     for planned in plan.files:
         log.info("wrote %s", planned.path)
-    log.info(
-        "vendored the harness at %s into %s/ (%d files)",
-        plan.vendor.commit[:12],
-        VENDOR_RELPATH,
-        len(plan.vendor.files),
-    )
+    if plan.vendor is not None:
+        log.info(
+            "vendored the harness at %s into %s/ (%d files)",
+            plan.vendor.commit[:12],
+            VENDOR_RELPATH,
+            len(plan.vendor.files),
+        )
+    else:
+        log.info("the harness is fetched at run time (harness.repository, harness.commit in %s)", CONFIG_RELPATH)
     if plan.gitignore is not None:
         log.info("extended .gitignore")
     if ci in ("gitlab", "both") and no_ci_edit:
@@ -357,9 +414,10 @@ def run_init(
         + _listed(files_to_commit(plan)),
         err=True,
     )
-    click.echo(
-        f"note: the harness lint gate skips {VENDOR_RELPATH}/; exclude `.l4/` from the repo's own lint too "
-        "(for example `ruff check --extend-exclude .l4 .` in .gitlab-ci.yml)",
-        err=True,
-    )
+    if plan.vendor is not None:
+        click.echo(
+            f"note: the harness lint gate skips {VENDOR_RELPATH}/; exclude `.l4/` from the repo's own lint too "
+            "(for example `ruff check --extend-exclude .l4 .` in .gitlab-ci.yml)",
+            err=True,
+        )
     return ExitCode.OK
