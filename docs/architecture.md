@@ -314,7 +314,9 @@ Key mechanics ([SPEC §7](SPEC.md#7-implementer)):
   fail individually. Red is valid only if every new test fails, and also fails *by assertion* against **zero-value
   stubs** derived by the harness — a test that merely calls the new function is rejected as vacuous. Between red and
   green, the red tests, support files and test-runner settings are frozen, and green is checked by running the red
-  tests **as committed in the red commit** against the new code. The verifier additionally scans for result-forcing
+  tests **as committed in the red commit** against the new code. Green and a fix chore may not add, change or delete
+  any path of the test globs at all (the test path freeze: tests belong in the red step, a human answer or a
+  `[test-infra]` task frees one), whatever the language. The verifier additionally scans for result-forcing
   hooks, support files that patch production code, and new lint/type suppressions. The per-language details of these
   rules are settled by fixture repos in delivery change 0, which contain both the known gaming cases (must catch) and
   ordinary correct work such as zero-value edge-case tests and clock patching (must pass).
@@ -426,7 +428,7 @@ aggregation** of the ladder below ([SPEC §10](SPEC.md#10-verifier)).
 | Step | Check | Kind | Can fail the unit alone? |
 |---|---|---|---|
 | 0 | Preconditions: all tasks `[x]`, branch up to date with base, spec validates strict | deterministic | yes |
-| 1 | Integrity & scope: protected files untouched, pre-existing tests not deleted/skipped/weakened, no snapshot mass-updates, no secrets (gitleaks), diff within declared scope, TDD history (red before green, assertions not weakened) | deterministic | yes |
+| 1 | Integrity & scope: protected files untouched, pre-existing tests not deleted/skipped/weakened, no snapshot mass-updates, no secrets (gitleaks), diff within declared scope, TDD history (red before green, assertions not weakened), test and support paths unchanged by green and fix-chore commits (test path freeze) | deterministic | yes |
 | 2 | Build, type-check, lint (repo commands from config) | deterministic | yes |
 | 3 | Full test suite re-run, reports parsed (JUnit/JSON); **non-vacuous** (tests executed > 0, new tests executed); new tests repeated for flakiness | deterministic | yes |
 | 4 | **Traceability**: every scenario / acceptance criterion has a stable ID and ≥ 1 passing, **discriminating** test tagged with it (it failed at its baseline — the task's red commit, the pre-fix head for fix units, or the merge-base), tracing at most three criteria; a tagged test that asserts nothing is not evidence. 4a: **audit sampling** — independent verifier tests for ~30 % of covered new criteria, written without access to the implementer's tests | deterministic | uncovered → step 5; still uncovered → human verdict |

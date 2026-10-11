@@ -86,6 +86,15 @@ has no completed L4 unit yet, so C# false alarms are unmeasured until its trial 
 recall a detector adds to the configured baseline; adopt at ≥ 45 with a gain on at least two stacks; record-only
 signals also need fp ≤ 5 %.
 
+**Where the evidence lives.** The measurement scripts, the seeded scenarios and their result files are not in this
+repository: the C# and TypeScript scenarios are built on the private consumer's export, and the clean corpus is the git
+history of three projects. The numbers in §4 come from that run (2026-10-11) and cannot be reproduced from this
+repository alone. What the repository keeps is the adopted rule and the tests of its behaviour:
+`tests/unit/implementer/test_test_path_freeze.py` (SCN-IMP-150..154: green and a fix chore put test paths back, a
+`task.unfrozen` path and a `[test-infra]` task keep their change, test folders of other stacks are frozen by
+configuration) and the SCN-VER-61..63 tests in `tests/unit/verifier/test_integrity.py` (the integrity blocker and its
+allowances).
+
 ## 4. Results
 
 | candidate | gain py / cs / ts | portability | fp | cost | score | adopted |
