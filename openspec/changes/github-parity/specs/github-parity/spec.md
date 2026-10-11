@@ -101,7 +101,7 @@ When the hand-off commit has no check run, the repository-CI duty SHALL be `not_
 #### Scenario: SCN-GHP-11 (−) A silent hand-off is reported
 - **GIVEN** a hand-off pushed with `GITHUB_TOKEN`, and no check run on its commit
 - **WHEN** the sweeper checks repository CI
-- **THEN** the duty is `not_run` with that reason, and the note shows it
+- **THEN** the duty is `ci_not_run` with that reason, never green, and `l4 plan --sweep` prints it in the job log (`<unit>: ci: H <sha>: no workflow ran ...`) on every sweep, without a ledger event, as for `ci_green`
 
 ### Requirement: L4-GHP-009 Links and wording per platform
 On GitHub:

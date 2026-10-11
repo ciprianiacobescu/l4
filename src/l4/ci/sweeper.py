@@ -109,7 +109,7 @@ class SweepAction:
     unit: str
     what: Literal[
         "merged", "archive_opened", "archive_existing", "archive_pending", "archive_failed", "skipped", "retired",
-        "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "not_run", "resumed", "resume_refused",
+        "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "ci_not_run", "resumed", "resume_refused",
         "resume_hint",
     ]  # fmt: skip
     detail: str = ""
@@ -554,7 +554,7 @@ class Sweeper:
                 return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running")
             if not jobs and forge_platform(self.cfg, self.app.environ) == "github":
                 # L4-GHP-008: never green. A push made with the workflow's GITHUB_TOKEN starts no run.
-                return SweepAction(snapshot.ref.id, "not_run", f"H {short}: {NO_CHECK_RUN}")
+                return SweepAction(snapshot.ref.id, "ci_not_run", f"H {short}: {NO_CHECK_RUN}")
             if not red_jobs(jobs):
                 return SweepAction(snapshot.ref.id, "ci_green", f"H {short} green")
             base = self.git.rev_parse(f"refs/remotes/origin/{self.cfg.forge.base_branch}")

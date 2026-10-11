@@ -14,7 +14,7 @@ def test_no_check_run_is_not_run(review):  # noqa: F811
     """SCN-GHP-11: GitHub lists no check run at H: the duty is `not_run` with the reason, never `ci_green`."""
     review.cfg.forge.type = "github"
     (action,) = ci_sweep(review, "r-20261005T1000Z-0001")
-    assert action.what == "not_run" and REASON in action.detail and review.handoff[:10] in action.detail
+    assert action.what == "ci_not_run" and REASON in action.detail and review.handoff[:10] in action.detail
 
 
 def test_gitlab_without_a_pipeline_keeps_its_behaviour(review):  # noqa: F811
