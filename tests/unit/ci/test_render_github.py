@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from l4.ci.github import doctor_command, render_github_ci
+from l4.ci.github import JOB_TIMEOUT_MINUTES, doctor_command, render_github_ci
 from l4.ci.lint import lint_github_yaml
 from l4.config.defaults import CREDENTIAL_PATHS
 from l4.config.schema import L4Config
@@ -108,9 +108,17 @@ def test_hosted_doctor_always_fixes_because_the_harness_decides_whether_to_insta
         assert runs == [".l4/bin/l4 doctor --ci --fix || .l4/bin/l4 ci map-exit $?"]
 
 
+def test_job_timeout_env_comes_from_the_same_constant_as_timeout_minutes():
+    """SCN-GHP-04 (L4-GHP-003): the soft deadline reads what the job is cut off at."""
+    for tags in ([], ["agentic"]):
+        job = parsed(cfg(ci={"runner_tags": tags}))["jobs"]["l4"]
+        assert job["timeout-minutes"] == JOB_TIMEOUT_MINUTES
+        assert job["env"]["L4_JOB_TIMEOUT_MINUTES"] == str(JOB_TIMEOUT_MINUTES)
+
+
 def test_self_hosted_job_has_no_hosted_steps_or_env():
     job = parsed(L4Config())["jobs"]["l4"]
-    assert set(job["env"]) == {"L4_FORGE_TOKEN"}
+    assert set(job["env"]) == {"L4_FORGE_TOKEN", "L4_JOB_TIMEOUT_MINUTES"}
     assert not [s for s in job["steps"] if "l4-setup" in s.get("run", "") or "cache" in s.get("uses", "")]
 
 
@@ -201,7 +209,9 @@ def test_runner_tags_and_the_hosted_fallback():
 def test_branch_prefix_and_token_env_follow_config():
     doc = parsed(cfg(forge={"branch_prefix": "bots/", "token_env": "MY_TOKEN"}))
     assert doc[True]["push"]["branches"][1] == "bots/**"
-    assert doc["jobs"]["l4"]["env"] == {"MY_TOKEN": "${{ secrets.MY_TOKEN }}"}
+    assert doc["jobs"]["l4"]["env"] == {
+        "MY_TOKEN": "${{ secrets.MY_TOKEN }}", "L4_JOB_TIMEOUT_MINUTES": "180",
+    }  # fmt: skip
 
 
 def test_doctor_line_follows_self_provision():

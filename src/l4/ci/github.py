@@ -16,6 +16,8 @@ from l4.provision.catalog import adapters_in_use
 
 WORKFLOW_RELPATH = ".github/workflows/l4.yml"
 HOSTED_RUNNER = "ubuntu-24.04"
+# one number for `timeout-minutes` and the job env `L4_JOB_TIMEOUT_MINUTES` the soft deadline reads (L4-GHP-003)
+JOB_TIMEOUT_MINUTES = 180
 CACHE_ACTION = "actions/cache/{op}@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0"
 # Only user-local tool directories. Never a credential path (`l4.config.defaults.CREDENTIAL_PATHS`): the login of
 # opencode and kiro-cli lives under ~/.local/share/<tool>, so those two directories are left out on purpose.
@@ -104,6 +106,7 @@ def render_github_ci(cfg: L4Config) -> str:
     hosted = not tags
     runs_on = json.dumps(["self-hosted", *tags]) if tags else HOSTED_RUNNER
     values = {
+        "JOB_TIMEOUT": str(JOB_TIMEOUT_MINUTES),
         "BASE": json.dumps(cfg.forge.base_branch),
         "PREFIX": json.dumps(f"{cfg.forge.branch_prefix}**"),
         "RUNS_ON": runs_on,

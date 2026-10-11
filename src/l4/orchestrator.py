@@ -1137,13 +1137,15 @@ def run_command(
 def job_remaining_s(cfg: L4Config, environ: Mapping[str, str], now: datetime, began: datetime | None) -> float | None:
     """Seconds of the CI job left before the soft deadline (L4-IMP-012): `ci.time_budget` minus
     `soft_deadline_margin`, minus what has passed since the job started; None when the budget is unknown (`auto`
-    outside GitLab's `CI_JOB_TIMEOUT`). The start is `CI_JOB_STARTED_AT` when set, else `began` (the run's start)."""
+    without GitLab's `CI_JOB_TIMEOUT` or GitHub's `L4_JOB_TIMEOUT_MINUTES`).
+    The start is `CI_JOB_STARTED_AT` when set, else `began` (the run's start)."""
     budget = cfg.ci.time_budget
     if budget != "auto":
         total: int | None = duration_seconds(budget)
     else:
-        raw = environ.get("CI_JOB_TIMEOUT", "")
-        total = int(raw) if raw.isdigit() else None
+        raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
+        minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: the template's `timeout-minutes`, as a job env
+        total = int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
     if total is None:
         return None
     started = began or now
