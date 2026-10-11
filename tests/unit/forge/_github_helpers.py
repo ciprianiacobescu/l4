@@ -33,6 +33,7 @@ class FakeGitHub:
     issue_events: dict[int, list[dict]] = field(default_factory=dict)  # issue number -> /issues/:n/events entries
     users: dict[int, str] = field(default_factory=dict)  # user id -> login (GET /user/:id)
     permissions: dict[str, dict] = field(default_factory=dict)  # login -> collaborator permission body
+    queued_runs: int = 0  # workflow runs the `status=queued` listing finds
     hosts_seen: list[tuple[str, bool]] = field(default_factory=list)  # (host, request carried a token)
 
     def transport(self) -> httpx.MockTransport:
@@ -120,6 +121,10 @@ class FakeGitHub:
             return httpx.Response(200, json=body_) if body_ else httpx.Response(404, json={"message": "Not Found"})
         if m := re.fullmatch(rf"/repos/{REPO}/issues/(\d+)/events", path):
             return self._page(request, self.issue_events.get(int(m.group(1)), []))
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/workflows/([^/]+)/runs", path):
+            return httpx.Response(200, json={"total_count": self.queued_runs, "workflow_runs": []})
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/workflows/([^/]+)/dispatches", path):
+            return httpx.Response(204)
         if m := re.fullmatch(rf"/repos/{REPO}", path):
             return httpx.Response(200, json={"html_url": f"https://github.test/{REPO}"})
         if m := re.fullmatch(rf"/repos/{REPO}/pulls", path):

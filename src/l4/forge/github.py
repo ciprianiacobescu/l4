@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from l4 import cancel
+from l4.ci.github import WORKFLOW_RELPATH
 from l4.forge.base import (
     AMBIGUOUS_ERRORS,
     STICKY_MARKER,
@@ -39,6 +40,7 @@ from l4.forge.base import (
 DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
+WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
 ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
@@ -424,7 +426,14 @@ class GitHubForge:
             return None
 
     def dispatch_continuation(self, ref: str) -> Continuation:
-        return "unsupported"  # github-parity 1.4 (L4-GHP-004) replaces this with workflow_dispatch
+        """One more run of the `l4` workflow on `ref`, unless one is already waiting (L4-GHP-004). The dispatch event
+        starts a run even when the GITHUB_TOKEN sends it (the only event type besides repository_dispatch that does)."""
+        base = f"/repos/{self._repo}/actions/workflows/{WORKFLOW_FILE}"
+        queued = self._request("GET", f"{base}/runs", params={"branch": ref, "status": "queued", "per_page": 1}).json()
+        if isinstance(queued, dict) and int(queued.get("total_count") or 0) > 0:
+            return "already_queued"
+        self._request("POST", f"{base}/dispatches", json={"ref": ref})
+        return "dispatched"
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:
         """`actions/jobs/:id/logs` answers with a redirect to a pre-signed URL; it is followed without the token
