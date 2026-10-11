@@ -32,6 +32,7 @@ from l4.agents.base import (
     wrap_command,
 )
 from l4.agents.claude_code import STRUCTURED_DETAIL
+from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import parse_reset
 from l4.availability.probes import probe_codex
@@ -235,13 +236,14 @@ class CodexAdapter:
             schema_path.write_text(json.dumps(strictify_schema(req.result_schema)), encoding="utf-8")
         argv = self.build_command(req, exe=exe, schema_path=schema_path)
         workdir = judge_workdir(req) if req.permission_policy.mode == "judge" else req.cwd
-        cmd = wrap_command(req, argv, req.env, workdir)
         stderr_path = req.raw_events_path.with_suffix(".stderr")
-        outcome = self._proc.run(
-            cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path, stderr_path=stderr_path,
-            stdin=req.prompt, timeout_s=req.timeout_s, interrupt=req.interrupt,
-            stall_timeout_s=req.stall_timeout_s,
-        )  # fmt: skip
+        with credential_loader(req) as load:
+            cmd = wrap_command(req, load(argv), req.env, workdir)
+            outcome = self._proc.run(
+                cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path, stderr_path=stderr_path,
+                stdin=req.prompt, timeout_s=req.timeout_s, interrupt=req.interrupt,
+                stall_timeout_s=req.stall_timeout_s,
+            )  # fmt: skip
         result_text = read_result_file(req.result_path)
         result = self.parse(
             req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines(),

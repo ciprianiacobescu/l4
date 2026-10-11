@@ -17,3 +17,34 @@ def test_steps_printed_only_for_unauthenticated_profiles():
     ready = AdapterReadiness("p", "codex", AdapterState.READY)
     assert ready.steps == ()
     assert all(isinstance(text, str) and text for steps in HUMAN_STEPS.values() for text in steps)
+
+
+def _unauthenticated(adapter: str, auth: str | None, environ: dict[str, str]):
+    from pathlib import Path
+
+    from l4.agents.base import ProbeCtx, ProbeResult
+    from l4.agents.factory import Factory
+    from l4.config.schema import L4Config, Profile
+    from l4.provision.readiness import adapter_readiness
+
+    class Scripted:
+        def probe(self, profile, step, ctx):
+            return ProbeResult(step, step == "binary", reason=None if step == "binary" else "not logged in")
+
+    ctx = ProbeCtx(environ, Path("."), lambda *a: None)
+    profile = Profile(adapter=adapter, auth=auth) if auth else Profile(adapter=adapter)
+    return adapter_readiness("p", profile, Factory(L4Config(), ctx, adapters={adapter: Scripted()}), ctx)
+
+
+def test_prv001_names_the_missing_variable():
+    row = _unauthenticated("codex", "api_key", {})
+    assert row.state is AdapterState.INSTALLED_NOT_AUTHENTICATED
+    assert row.detail == "p: CODEX_API_KEY is not set"
+    assert "CODEX_API_KEY" in row.steps[0]  # the human steps text is kept
+    assert _unauthenticated("claude-code", "subscription", {"CLAUDE_CODE_OAUTH_TOKEN": " "}).detail == (
+        "p: CLAUDE_CODE_OAUTH_TOKEN is not set"
+    )
+    assert _unauthenticated("kiro-cli", "subscription", {}).detail == "p: KIRO_API_KEY is not set"
+    # no variable for this profile (codex file login), or the variable is set: nothing to name
+    assert _unauthenticated("codex", "subscription", {"CODEX_API_KEY": "x"}).detail is None
+    assert _unauthenticated("kiro-cli", "subscription", {"KIRO_API_KEY": "x"}).detail is None
