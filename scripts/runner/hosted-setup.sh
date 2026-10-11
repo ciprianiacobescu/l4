@@ -27,7 +27,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 vof() { if have "$1"; then ver "$@" --version; else echo "absent"; fi; }
 
 # HSU-01 facts
-line HSU-01 INFO "runner facts" "RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT:-unset} CI_DISPOSABLE_ENVIRONMENT=${CI_DISPOSABLE_ENVIRONMENT:-unset} ImageOS=${ImageOS:-unset} ImageVersion=${ImageVersion:-unset} kernel=$(uname -r) user=$(id -un) sudo_n=$SUDO_OK git=\"$(vof git)\" python3=\"$(vof python3)\" node=\"$(vof node)\" uv_on_path=$(have uv && echo yes || echo no) bwrap_on_path=$(have bwrap && echo yes || echo no) apparmor_restrict_unprivileged_userns=$(sysctl_val kernel.apparmor_restrict_unprivileged_userns) unprivileged_userns_clone=$(sysctl_val kernel.unprivileged_userns_clone)"
+line HSU-01 INFO "runner facts" "RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT:-unset} CI_DISPOSABLE_ENVIRONMENT=${CI_DISPOSABLE_ENVIRONMENT:-unset} ImageOS=${ImageOS:-unset} ImageVersion=${ImageVersion:-unset} kernel=$(uname -r) user=$(id -un) sudo_n=$SUDO_OK git=\"$(vof git)\" python3=\"$(vof python3)\" node=\"$(vof node)\" uv_on_path=$(have uv && echo yes || echo no) unzip_on_path=$(have unzip && echo yes || echo no) bwrap_on_path=$(have bwrap && echo yes || echo no) apparmor_restrict_unprivileged_userns=$(sysctl_val kernel.apparmor_restrict_unprivileged_userns) unprivileged_userns_clone=$(sysctl_val kernel.unprivileged_userns_clone)"
 
 # HSU-02 uv
 if have uv; then
