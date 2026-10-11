@@ -243,6 +243,11 @@ The text below is proposed. SPEC.md gets only the delivery-table row and the fac
   every run, so the script adapts and records the facts.
 - **Free models are slow and change.** The hello took 4.5 s cold and 43 s warm on the same image [V]. Probe timeouts and
   free-model choices are config, not code.
+- **The agent's own tools see its credential.** A variable in the agent's process environment is inherited by the
+  commands it runs, such as the gate prefix running tests it wrote. Today a file login is just as visible to them: the
+  adapter's credential paths are bound into its sandbox. This change does not widen what the agent's process tree can
+  read; it narrows what other local users can read (no argv). Redaction and the secret scan still guard the diff and the
+  logs.
 - **Deployment noise.** Each run of a job with `environment:` is a deployment record, about one every 30 minutes with the
   schedule. `ci.github_environment: null` turns it off.
 - **Cache poisoning across branches.** Caches are scoped per branch by GitHub, and the key includes the pins. The cache
