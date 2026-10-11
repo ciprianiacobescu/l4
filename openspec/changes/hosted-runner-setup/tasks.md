@@ -16,6 +16,8 @@
 - [ ] 2.3 PRV-001 names the variable per unauthenticated profile [L4-PRV-024] — test: tests/unit/provision/test_human_steps.py::test_prv001_names_the_missing_variable (write first, see it fail) — code: src/l4/provision/readiness.py — verify: uv run pytest tests/unit/provision -q
 - [ ] 2.4 Live, hosted, with secrets of the GitHub environment `hosted-agents`: `CLAUDE_CODE_OAUTH_TOKEN` is set (2026-10-11); `CODEX_API_KEY` and `KIRO_API_KEY` when the maintainer adds them. The probe's auth and hello pass for each set variable, an unset one reads `<VARIABLE> is not set`, and no value appears in any artifact [L4-PRV-024] [SCN-PRV-67] [SCN-PRV-68] — test: the evidence workflow's `probe.txt` and a `grep` of every artifact for each set value — code: none — verify: an `ok` probe line per set variable; the grep finds nothing
 
+- [ ] 2.5 PRV-001's human steps name the GitHub environment secret on GitHub ("a secret of the GitHub environment `<ci.github_environment>`") instead of GitLab's "masked CI variable" (spike 06 finding 13) [L4-PRV-024] — test: tests/unit/provision/test_human_steps.py::test_github_steps_name_the_environment_secret (write first, see it fail) — code: src/l4/provision/readiness.py — verify: uv run pytest tests/unit/provision -q
+
 ## 3. Specification and documentation (M2)
 
 - [ ] 3.1 Apply the SPEC amendments listed in design.md (L4-DOC-002 carve-out for `l4-setup`, the §3.2 override comment, the [D] to [V] fact, the generated-CI sentence, §8 adapter auth rows, §15 PRV-001) once this change is approved [L4-PRV-019..025] — test: python scripts/check_spec.py docs/SPEC.md — code: docs/SPEC.md — verify: check_spec passes and `grep -n "L4-PRV-02[0-6]" docs/SPEC.md` lists every new requirement

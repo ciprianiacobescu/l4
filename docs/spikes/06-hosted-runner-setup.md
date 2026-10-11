@@ -24,7 +24,12 @@ This took under two minutes per job cold. With the cache, the install step drops
 - 22.04 is not a long-term way around the root step. GitHub deprecates the ubuntu-22.04 image with brownouts from
   2026-09-17 and removes it on 2027-04-17 [D, sources in §6].
 - Claude Code, Codex and Kiro install and are reported `installed-not-authenticated`. Their login from environment
-  variables is **unproven**: no secrets were set, and the harness has gaps there (§4).
+  variables was **unproven** in this run: no secrets were set, and the harness had gaps there (§4).
+- **Update after change 14 was implemented (§7):**
+  - the real `l4-setup` reproduces all of this;
+  - `l4 probe` passes Claude Code from `CLAUDE_CODE_OAUTH_TOKEN`;
+  - the harness Python is pinned to 3.12;
+  - Codex and Kiro now report their missing variable by name.
 
 ## 1. Questions and results (pre-registered before the run)
 
@@ -159,3 +164,72 @@ in the Claude Code step. A step before the upload fails the job if an artifact f
   https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
   - A narrower alternative to the sysctl is the `bwrap-userns-restrict` profile from `apparmor-profiles`. It also needs
     root, and it attaches to `/usr/bin/bwrap` only. Not tested here [U].
+
+## 7. The implementation, on hosted runners (change 14 task 1.6; run 38164195347)
+
+The run is GitHub Actions run 38164195347 at `28b9902`, with jobs `cold (ubuntu-24.04)` 114543217276,
+`cold (ubuntu-22.04)` 114543217108 and `warm` 114543691451. All three succeeded. The workflow first renders
+`src/l4/ci/templates/l4-setup.sh` from the checkout, which is the uv bootstrap: `l4 init` needs uv first. After
+`l4 init` it runs the vendored `.l4/bin/l4-setup` that init wrote, and the two files are byte-identical in all three jobs
+(`setup_identical=yes`) [V].
+
+**Flag off and `auto` on a hosted runner** change nothing. Each prints one line:
+```
+[HSU-00] SKIP hosted setup — L4_SELF_PROVISION is not set; the shell cannot read ci.self_provision from the config, so only true or auto act
+[HSU-00] SKIP hosted setup — L4_SELF_PROVISION=auto on a disposable runner means off; set it to true to run
+```
+
+**24.04, cold.** One root command, the sysctl. No package is installed:
+```
+[HSU-04] FIXED bwrap — bubblewrap_0.9.0-1ubuntu0.3_amd64.deb extracted to /home/runner/.local/share/l4/bwrap but fails the self-test: bwrap: setting up uid map: Permission denied
+[HSU-05] FIXED root step — kernel.apparmor_restrict_unprivileged_userns set to 0 (was 1; now 0)
+[HSU-06] INFO bwrap after the sysctl — self-test passes via user-space
+```
+
+**22.04, cold.** No root at all:
+```
+[HSU-04] FIXED bwrap — bubblewrap_0.6.1-1ubuntu0.3_amd64.deb extracted to /home/runner/.local/share/l4/bwrap in 2 s, linked from ~/.local/bin/bwrap
+[HSU-05] SKIP root step — would run: sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; not run: not needed, bwrap already works
+```
+
+**24.04, warm** (`cache_hit=true`). The cached binary fails on a fresh VM and is not downloaded again. The sysctl runs,
+then the binary passes:
+```
+[HSU-04] INFO bwrap link — removed ~/.local/bin/bwrap, it failed the self-test: bwrap: setting up uid map: Permission denied
+[HSU-04] INFO bwrap — cached /home/runner/.local/share/l4/bwrap/usr/bin/bwrap fails the self-test, not downloading again: bwrap: setting up uid map: Permission denied
+[HSU-05] FIXED root step — kernel.apparmor_restrict_unprivileged_userns set to 0 (was 1; now 0)
+```
+
+**Doctor.**
+- Cold, `doctor --ci --fix` took 46–47 s.
+- Warm, it took 5 s, with every `fix` line `already present`, kiro-cli 2.29.1 included. So the binaries need neither
+  `~/.local/share/opencode` nor `~/.local/share/kiro-cli`, and the cache leaves both login directories out.
+- ENV-001 reports **Python 3.12.3** on 24.04 and **3.12.15** on 22.04. The spike's 3.14.8 is gone (L4-PRV-025).
+
+**Probe** (the same lines in all three jobs):
+```
+[l4] probe: oc-free ok (binary 1.18.34 · auth skipped · quota skipped · hello 4.3s)
+[l4] probe: kiro skipped — auth: KIRO_API_KEY is not set
+[l4] probe: codex skipped — auth: CODEX_API_KEY is not set
+[l4] probe: claude-code ok (binary 2.1.288 · auth subscription · quota skipped · hello 2.3s)
+```
+- Claude Code authenticates from the environment secret alone (SCN-PRV-67).
+- Codex and Kiro name the variable they lack (SCN-PRV-68). Their secrets do not exist yet, so task 2.4 stays open for
+  those two.
+- The doctor step of this evidence workflow has no secrets in its environment, so PRV-001 names all three variables:
+  `claude-code: CLAUDE_CODE_OAUTH_TOKEN is not set; codex: CODEX_API_KEY is not set; kiro: KIRO_API_KEY is not set`.
+  The generated job maps them into the job's env (SCN-PRV-74).
+
+**Agent calls inside the harness's bwrap.**
+- OpenCode's free model answered `OK` in 5.5 s (24.04), 12.5 s (22.04) and 9.3 s (warm).
+- Claude Code answered `OK` in 2.3 s with `token_in_bwrap_argv=False token_in_bwrap_env=False
+  value_file_removed_by_loader=True`.
+- `token_leak_check=clean` in both cold jobs. `l4 simulate --all` exit 0 in both cold jobs.
+
+**Findings.**
+12. **Each step appends `~/.local/bin` to `$GITHUB_PATH` again.** GitHub gives every step its own `$GITHUB_PATH`
+    file, so the "already listed" check cannot see the earlier step's line. A duplicate PATH entry is harmless.
+13. **PRV-001's human steps say "masked CI variable" on GitHub too.** That is GitLab's wording. On GitHub it should say
+    "a secret of the GitHub environment `l4`". This is open, a text fix in `provision/readiness.py`.
+14. **The generated `l4.yml` itself did not run on a hosted runner here.** The evidence workflow runs the same commands
+    in the same order. A real `l4 run` against a GitHub forge stays change 13 (`live-validation`).
