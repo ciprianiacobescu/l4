@@ -17,6 +17,8 @@ from l4.agents.factory import Factory
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
 from l4.exitcodes import ExitCode, L4Exit
+from l4.forge.base import forge_platform
+from l4.forge.urls import origin_url
 from l4.proc import run_process
 from l4.provision.catalog import ADAPTER_BINARIES, adapters_in_use
 
@@ -92,18 +94,26 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
     return CheckResult("pass", f"{len(checked)} profile(s) at a recorded version")
 
 
-LIVE_005 = register(
-    Check("LIVE-005", "CLI versions have recorded fixtures", "warn", _live_005, frozenset({"live"}))
-)
+LIVE_005 = register(Check("LIVE-005", "CLI versions have recorded fixtures", "warn", _live_005, frozenset({"live"})))
 
 
 RUNNER_USER = "gitlab-runner"
 # a login shell (`-i`): the runner user's PATH finds a CLI installed in its own ~/.local/bin, which sudo's would not
-RELOGIN = {
-    "claude-code": f"sudo -iu {RUNNER_USER} claude, then type /login",
-    "codex": f"sudo -iu {RUNNER_USER} codex login --device-auth",
-    "kiro-cli": f"sudo -iu {RUNNER_USER} kiro-cli login",
+RELOGIN_COMMAND = {
+    "claude-code": "claude, then type /login",
+    "codex": "codex login --device-auth",
+    "kiro-cli": "kiro-cli login",
 }
+# GitHub's runner service has no fixed user name (L4-GHP-009): the hint names the user it runs as
+GITHUB_RUNNER_USER = "<the user the runner service runs as>"
+
+
+def relogin(adapter: str, platform: str = "gitlab") -> str:
+    user = GITHUB_RUNNER_USER if platform == "github" else RUNNER_USER
+    return f"sudo -iu {user} {RELOGIN_COMMAND[adapter]}"
+
+
+RELOGIN = {adapter: relogin(adapter) for adapter in RELOGIN_COMMAND}
 
 
 def _json_file(path: Path) -> dict | None:
@@ -171,6 +181,7 @@ def _env_014(ctx: DoctorContext) -> CheckResult:
     refresh token and the loser wrote empty credentials: runner incident 2026-10-07). Reads the credential store of
     each subscription profile in a role chain for emptiness only; nothing is printed from it and nothing is sent."""
     home = Path(ctx.env["HOME"]) if ctx.env.get("HOME") else Path.home()
+    platform = forge_platform(ctx.cfg, ctx.env, origin_url(ctx.repo, ctx.env))
     found: list[str] = []
     hints: list[str] = []
     for adapter, names in adapters_in_use(ctx.cfg).items():
@@ -181,7 +192,7 @@ def _env_014(ctx: DoctorContext) -> CheckResult:
                 continue
             if (why := detect(ctx.env, home)) is not None:
                 found.append(f"profile `{name}` ({adapter}): the stored login looks wiped ({why})")
-                hints.append(RELOGIN[adapter])
+                hints.append(relogin(adapter, platform))
     if not found:
         return CheckResult("pass", "no stored login looks wiped")
     return CheckResult("fail", "; ".join(found), " | ".join(dict.fromkeys(hints)), severity="warn")
