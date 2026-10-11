@@ -17,20 +17,23 @@ from typing import Any
 
 import click
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from l4 import __version__
+from l4.buildinfo import harness_commit
+from l4.ci.github import WORKFLOW_RELPATH, render_github_ci
 from l4.ci.render import (
     SETUP_RELPATH,
     SHIM_RELPATH,
     TEMPLATE_RELPATH,
     VENDOR_RELPATH,
+    render_fetched_shim,
     render_gitlab_ci,
     render_setup,
     render_shim,
 )
 from l4.config.loader import CONFIG_RELPATH, load_config
-from l4.config.schema import L4Config
+from l4.config.schema import L4Config, Sha
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
@@ -38,6 +41,7 @@ from l4.init.init import (
     PlannedFile,
     _serena_seed,
     apply_marker,
+    loaded_config,
     marker_message,
     swap_in_vendor,
     validated_config,
@@ -62,11 +66,12 @@ def _refuse(message: str) -> L4Exit:
     return L4Exit(ExitCode.USAGE_ERROR, f"upgrade: {message}")
 
 
-def rewrite_pins(text: str, *, version: str, commit: str) -> str:
+def rewrite_pins(text: str, *, version: str | None, commit: str) -> str:
     """Replace the scalars of `harness.version` and `harness.commit` and nothing else: the quotes of each value, a
     trailing comment, the line endings and every other line stay. Refuses a file where either is not a plain
-    `key: value` line of the `harness:` block (a flow mapping, an anchor): the human edits that one."""
-    wanted = {"version": version, "commit": commit}
+    `key: value` line of the `harness:` block (a flow mapping, an anchor): the human edits that one. `version=None`
+    (a fetched harness, L4-GHP-010) leaves `harness.version` alone."""
+    wanted = {"commit": commit} if version is None else {"version": version, "commit": commit}
     lines = text.splitlines(keepends=True)
     inside = False
     done: set[str] = set()
@@ -79,7 +84,7 @@ def rewrite_pins(text: str, *, version: str, commit: str) -> str:
         if inside and body.strip() and not body.startswith((" ", "\t", "#")):
             inside = False
         match = _PIN.match(body) if inside else None
-        if match and match["key"] not in done:
+        if match and match["key"] in wanted and match["key"] not in done:
             value = match["value"]
             quote = value[0] if value[0] in "\"'" else ""
             lines[index] = f"{match['lead']}{quote}{wanted[match['key']]}{quote}{match['tail']}{eol}"
@@ -95,7 +100,11 @@ def rewrite_pins(text: str, *, version: str, commit: str) -> str:
         pins = yaml.safe_load(new)["harness"]
     except (yaml.YAMLError, KeyError, TypeError):
         pins = {}
-    if not isinstance(pins, dict) or str(pins.get("version")) != version or str(pins.get("commit")) != commit:
+    if (
+        not isinstance(pins, dict)
+        or (version is not None and str(pins.get("version")) != version)
+        or str(pins.get("commit")) != commit
+    ):
         raise _refuse("the rewritten pins do not read back as the new version and commit; set them by hand")
     return new
 
@@ -148,20 +157,21 @@ def missing_keys(config: Mapping[str, Any]) -> list[str]:
 @dataclass(frozen=True)
 class UpgradePlan:
     files: tuple[PlannedFile, ...]  # the shim, the setup script, the template and the config, whose bytes differ
-    vendor: VendorSource
+    vendor: VendorSource | None  # None: a fetched harness, nothing is vendored
     vendor_added: tuple[str, ...]
     vendor_changed: tuple[str, ...]
     vendor_removed: tuple[str, ...]
     missing: tuple[str, ...]
     seeded: tuple[PlannedFile, ...] = ()  # files created only when absent (`.serena/project.yml`), never overwritten
     marker: MarkerEdit | MarkerRefusal | None = None  # registers the `l4` pytest marker (P4)
+    commit: str = ""  # the harness commit the plan pins or vendors
 
     @property
     def vendor_differs(self) -> bool:
         return bool(self.vendor_added or self.vendor_changed or self.vendor_removed)
 
 
-def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None) -> UpgradePlan:
+def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None, pin: str | None = None) -> UpgradePlan:
     config_path = repo / CONFIG_RELPATH
     for relative in (str(CONFIG_RELPATH), SHIM_RELPATH, SETUP_RELPATH, TEMPLATE_RELPATH, VENDOR_RELPATH):
         try:
@@ -175,6 +185,10 @@ def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None) -
     except (UnsafeFile, UnicodeDecodeError) as exc:
         raise _refuse(f"cannot read {CONFIG_RELPATH}: {exc}") from None
     loaded = load_config(repo)  # it must load as it is, or the human has a problem that an upgrade should not hide
+    if loaded.harness.repository is not None:
+        return _plan_fetched(repo, loaded, old_config, harness, pin)
+    if pin is not None:
+        raise _refuse("--harness-commit is for a fetched harness (harness.repository); this adoption is vendored")
     vendor = collect_vendor_source(harness_root(harness), environ)
     new_config = rewrite_pins(old_config, version=_vendor_version(vendor), commit=vendor.commit)
     validated_config(new_config)
@@ -195,6 +209,38 @@ def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None) -
         vendor_removed=tuple(sorted(old.keys() - new.keys())),
         missing=tuple(missing_keys(yaml.safe_load(new_config) or {})), seeded=seeded,
         marker=register_l4_marker(repo) if "pytest" in loaded.gates.test.command else None,
+        commit=vendor.commit,
+    )  # fmt: skip
+
+
+def _plan_fetched(repo: Path, loaded: L4Config, old_config: str, harness: Path | None, pin: str | None) -> UpgradePlan:
+    """A fetched adoption (L4-GHP-010): only `harness.commit` moves; the shim, the setup script and the CI file are
+    re-rendered from the harness that runs; nothing is vendored."""
+    if harness is not None:
+        raise _refuse("--harness vendors a checkout; this adoption fetches its harness (harness.repository)")
+    commit = pin or harness_commit()
+    if commit is None:
+        raise _refuse("the running harness's commit is unknown; pass --harness-commit SHA")
+    try:
+        TypeAdapter(Sha).validate_python(commit)
+    except ValidationError:
+        raise _refuse(f"--harness-commit must be 40 lowercase hex characters, not {commit!r}") from None
+    new_config = rewrite_pins(old_config, version=None, commit=commit)
+    new_cfg = loaded_config(new_config)
+    wanted = [
+        PlannedFile(str(CONFIG_RELPATH), new_config.encode("utf-8"), 0o644),
+        PlannedFile(SHIM_RELPATH, render_fetched_shim().encode(), 0o755),
+        PlannedFile(SETUP_RELPATH, render_setup().encode(), 0o755),
+    ]
+    platform = loaded.ci.platform
+    if platform in ("gitlab", "auto") and (repo / TEMPLATE_RELPATH).exists():
+        wanted.append(PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644))
+    if platform in ("github", "auto") and (repo / WORKFLOW_RELPATH).exists():
+        wanted.append(PlannedFile(WORKFLOW_RELPATH, render_github_ci(new_cfg).encode(), 0o644))
+    return UpgradePlan(
+        tuple(p for p in wanted if not _same(repo / p.path, p.data)), None, (), (), (),
+        missing=tuple(missing_keys(yaml.safe_load(new_config) or {})), seeded=tuple(_serena_seed(repo, loaded)),
+        marker=register_l4_marker(repo) if "pytest" in loaded.gates.test.command else None, commit=commit,
     )  # fmt: skip
 
 
@@ -206,7 +252,7 @@ def _same(path: Path, data: bytes) -> bool:
 
 
 def apply_upgrade(repo: Path, plan: UpgradePlan) -> None:
-    if plan.vendor_differs:
+    if plan.vendor is not None and plan.vendor_differs:
         swap_in_vendor(repo, plan.vendor)  # the step most likely to fail goes first
     for planned in plan.files:
         if planned.path == str(CONFIG_RELPATH):
@@ -219,16 +265,26 @@ def apply_upgrade(repo: Path, plan: UpgradePlan) -> None:
     load_config(repo)  # the upgraded file must load
 
 
-def run_upgrade(app: AppContext, *, harness: Path | None = None, dry_run: bool = False) -> ExitCode:
-    plan = plan_upgrade(app.repo, app.environ, harness)
+def run_upgrade(
+    app: AppContext,
+    *,
+    harness: Path | None = None,
+    dry_run: bool = False,
+    harness_commit_pin: str | None = None,
+) -> ExitCode:
+    plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin)
     verb = "would change" if dry_run else "changed"
-    if plan.vendor_differs:
+    if plan.vendor is not None and plan.vendor_differs:
         click.echo(
             f"{verb} {VENDOR_RELPATH}/ ({len(plan.vendor_added)} added, {len(plan.vendor_changed)} changed, "
             f"{len(plan.vendor_removed)} removed) to the harness at {plan.vendor.commit[:12]}"
         )
     for planned in plan.files:
-        pins = " (harness.version, harness.commit)" if planned.path == str(CONFIG_RELPATH) else ""
+        pins = (
+            (" (harness.commit)" if plan.vendor is None else " (harness.version, harness.commit)")
+            if planned.path == str(CONFIG_RELPATH)
+            else ""
+        )
         click.echo(f"{verb} {planned.path}{pins}")
     for planned in plan.seeded:
         verb_new = "would create" if dry_run else "created"
@@ -237,7 +293,9 @@ def run_upgrade(app: AppContext, *, harness: Path | None = None, dry_run: bool =
     if said is not None:
         click.echo(said)
     if not plan.vendor_differs and not plan.files and not plan.seeded and said is None:
-        click.echo(f"up to date: the harness at {plan.vendor.commit[:12]} is already vendored")
+        click.echo(
+            f"up to date: the harness at {plan.commit[:12]} is already {'vendored' if plan.vendor else 'pinned'}"
+        )
     if plan.missing:
         click.echo(f"not in {CONFIG_RELPATH}, the defaults apply (nothing is written): {', '.join(plan.missing)}")
     if not dry_run:
