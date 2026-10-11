@@ -9,10 +9,11 @@ exports the variable and execs the agent. The value is then in the agent process
 
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
-from l4.agents.base import AdapterError
+from l4.agents.base import AdapterError, RunRequest
 
 CREDENTIAL_FILE = "credential"
 LOADER_NAME = "l4-credential"  # $0 of the loader
@@ -54,3 +55,22 @@ def loader_argv(variable: str, value_file: Path, argv: Sequence[str]) -> list[st
         raise AdapterError("the credential variable name is not a valid environment variable name")
     loader = f'v=$(cat -- "$1") || exit 97; rm -f -- "$1"; export {variable}="$v"; shift; exec "$@"'
     return ["/bin/sh", "-c", loader, LOADER_NAME, str(value_file), *argv]
+
+
+@contextmanager
+def credential_loader(req: RunRequest) -> Iterator[Callable[[list[str]], list[str]]]:
+    """For one agent run: yields the function that puts the loader in front of the agent argv (the identity when the
+    profile has no variable or the harness environment has none set). The value file lives only inside the block."""
+    variable = credential_variable(req.profile.adapter, req.profile.auth)
+    value = credential_in(req.host_env, variable)
+    if variable is None or value is None:
+        yield list
+        return
+    directory = req.result_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / CREDENTIAL_FILE).unlink(missing_ok=True)  # O_EXCL below: a leftover must not be reused
+    path = write_credential_file(directory, value)
+    try:
+        yield lambda argv: loader_argv(variable, path, argv)
+    finally:
+        path.unlink(missing_ok=True)  # the credential does not outlive the step

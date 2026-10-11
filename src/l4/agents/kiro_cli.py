@@ -38,6 +38,7 @@ from l4.agents.base import (
     wrap_command,
 )
 from l4.agents.contract import attach_file_result
+from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import excerpt, parse_reset
 from l4.availability.probes import (
@@ -124,12 +125,13 @@ class KiroCliAdapter:
             env["KIRO_HOME"] = str(write_harness_agent(req.result_path.parent / KIRO_HOME_DIR, agent))
         argv = self.build_command(req, exe=exe, harness_agent=agent)
         workdir = judge_workdir(req) if req.permission_policy.mode == "judge" else req.cwd  # HB-13, as codex
-        cmd = wrap_command(req, argv, env, workdir)
-        outcome = self._proc.run(
-            cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
-            stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=None, timeout_s=req.timeout_s,
-            interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
-        )  # fmt: skip
+        with credential_loader(req) as load:
+            cmd = wrap_command(req, load(argv), env, workdir)
+            outcome = self._proc.run(
+                cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
+                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=None, timeout_s=req.timeout_s,
+                interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
+            )  # fmt: skip
         try:
             lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:

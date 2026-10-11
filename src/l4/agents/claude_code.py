@@ -28,6 +28,7 @@ from l4.agents.base import (
     judge_workdir,
     wrap_command,
 )
+from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
 from l4.availability.probes import claude_windows_of, probe_claude
 from l4.availability.quota import Window
@@ -159,14 +160,15 @@ class ClaudeCodeAdapter:
         mcp_config = self._write_mcp_config(req) if armed else None
         argv = self.build_command(req, exe=exe, mcp_config=mcp_config)
         workdir = judge_workdir(req) if req.permission_policy.mode == "judge" else req.cwd
-        cmd = wrap_command(req, argv, req.env, workdir)
-        outcome = self._proc.run(
-            cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
-            stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
-            interrupt=req.interrupt,
-            # the judge's `--output-format json` prints once, at the end: silence is normal there
-            stall_timeout_s=None if req.permission_policy.mode == "judge" else req.stall_timeout_s,
-        )  # fmt: skip
+        with credential_loader(req) as load:
+            cmd = wrap_command(req, load(argv), req.env, workdir)
+            outcome = self._proc.run(
+                cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
+                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
+                interrupt=req.interrupt,
+                # the judge's `--output-format json` prints once, at the end: silence is normal there
+                stall_timeout_s=None if req.permission_policy.mode == "judge" else req.stall_timeout_s,
+            )  # fmt: skip
         text = req.raw_events_path.read_text(encoding="utf-8", errors="replace")
         if windows := claude_windows_of(text):
             _LATEST_WINDOWS[req.profile.auth] = (time.monotonic(), windows)
