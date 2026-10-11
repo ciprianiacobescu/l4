@@ -214,3 +214,40 @@ def test_doctor_line_follows_self_provision():
 
 def test_the_rendered_workflow_passes_the_policy_lint():
     assert lint_github_yaml(render_github_ci(L4Config())) == []
+
+
+def test_job_env_maps_exactly_the_chains_credentials():
+    """SCN-PRV-74: a GitHub secret reaches the job only when its env names it, so the job names the forge token and the
+    credential variable of every profile a role chain uses, and no other secret (L4-PRV-027)."""
+    config = cfg(
+        profiles={
+            "claude": {"adapter": "claude-code", "auth": "subscription"},
+            "claude-key": {"adapter": "claude-code", "auth": "api_key"},
+            "codex-key": {"adapter": "codex", "auth": "api_key"},
+            "codex-sub": {"adapter": "codex", "auth": "subscription"},
+            "kiro": {"adapter": "kiro-cli", "auth": "api_key"},  # in no chain
+            "free": {"adapter": "opencode", "model": "opencode/big-pickle"},
+            "local": {
+                "adapter": "opencode", "model": "magnitude/qwen",
+                "options": {"provider": {
+                    "id": "magnitude", "base_url": "http://10.0.0.5:10100/v1", "api_key_env": "MAGNITUDE_API_KEY",
+                    "models": {"qwen": {"context": 32768, "output": 4096}},
+                }},
+            },
+        },
+        roles={"implementer": ["free", "codex-key", "codex-sub", "local"], "judges": ["claude", "claude-key"]},
+    )  # fmt: skip
+    env = parsed(config)["jobs"]["l4"]["env"]
+    secrets = {name: value for name, value in env.items() if "secrets." in str(value)}
+    assert secrets == {
+        name: f"${{{{ secrets.{name} }}}}"
+        for name in (
+            "L4_FORGE_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CODEX_API_KEY",
+            "MAGNITUDE_API_KEY",
+        )
+    }
+    assert "KIRO_API_KEY" not in env  # its profile is in no chain
+    assert render_github_ci(cfg()) == GOLDEN.read_text()  # no chain, no credential: the env is the forge token alone

@@ -27,6 +27,7 @@ jobs:
       cancel-in-progress: false
     env:
       @@TOKEN_ENV@@: ${{ secrets.@@TOKEN_ENV@@ }}
+@@CREDENTIAL_ENV@@
 @@HOSTED_ENV@@
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

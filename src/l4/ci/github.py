@@ -10,7 +10,9 @@ import json
 from importlib.resources import files
 from typing import Literal
 
+from l4.agents.credentials import credential_variable
 from l4.config.schema import L4Config
+from l4.provision.catalog import adapters_in_use
 
 WORKFLOW_RELPATH = ".github/workflows/l4.yml"
 HOSTED_RUNNER = "ubuntu-24.04"
@@ -33,6 +35,24 @@ def doctor_command(cfg: L4Config, platform: Literal["github", "gitlab"]) -> str:
     setting = cfg.ci.self_provision
     fix = setting is True or (setting == "auto" and platform == "gitlab")
     return "doctor --ci --fix" if fix else "doctor --ci"
+
+
+def credential_secrets(cfg: L4Config) -> list[str]:
+    """The secrets the job must name besides the forge token (L4-PRV-027, SCN-PRV-74): the credential variable of every
+    profile a role chain uses (L4-PRV-024) and an opencode provider's `api_key_env`. A GitHub secret reaches a job
+    only through its `env`; an unset one maps to an empty value, which the harness treats as unset."""
+    names: set[str] = set()
+    for adapter, profiles in adapters_in_use(cfg).items():
+        for name in profiles:
+            profile = cfg.profiles[name]
+            variable = credential_variable(adapter, profile.auth)
+            if variable:
+                names.add(variable)
+            options = profile.opencode_options() if adapter == "opencode" else None
+            if options is not None and options.provider is not None:  # a free model has no options at all
+                names.add(options.provider.api_key_env)
+    names.discard(cfg.forge.token_env)
+    return sorted(names)
 
 
 def _environment_block(name: str | None) -> str:
@@ -90,6 +110,7 @@ def render_github_ci(cfg: L4Config) -> str:
         "TOKEN_ENV": cfg.forge.token_env,  # an environment variable name: the schema admits letters, digits, _
         "DOCTOR": "doctor --ci --fix" if hosted else doctor_command(cfg, "github"),
         "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
+        "CREDENTIAL_ENV": "\n".join(f"      {name}: ${{{{ secrets.{name} }}}}" for name in credential_secrets(cfg)),
         "HOSTED_ENV": "", "HOSTED_SETUP": "", "HOSTED_SAVE": "",
         **(_hosted_blocks(cfg) if hosted else {}),
     }  # fmt: skip
