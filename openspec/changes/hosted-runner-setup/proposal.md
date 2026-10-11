@@ -83,8 +83,8 @@ L4-PRV-026 next to it and names the SPEC lines it amends in design.md.
   - `src/l4/availability/probes.py` and `src/l4/agents/{claude_code,codex,kiro_cli}.py`: credential variables.
   - `src/l4/doctor/checks_provision.py`: readiness lines that name variables.
 - Docs: `docs/SPEC.md` (the amendments and the delivery-table row 14), `docs/quickstart.md`, `docs/runner/README.md`.
-- Evidence and prototype: `docs/spikes/06-hosted-runner-setup.md`, `scripts/runner/hosted-setup.sh` (becomes
-  `l4-setup`), `.github/workflows/spike-hosted-setup.yml`, `scripts/runner/spike-hosted/`.
+- Evidence and prototype: `docs/spikes/06-hosted-runner-setup.md`, `scripts/runner/hosted-setup.sh` (replaced
+  by `src/l4/ci/templates/l4-setup.sh`), `.github/workflows/spike-hosted-setup.yml`, `scripts/runner/spike-hosted/`.
 - Unchanged:
   - GitLab shell runners: never disposable, so no root step ever runs there.
   - GitLab Docker executors: out of scope, because bwrap cannot create a user namespace in an unprivileged container

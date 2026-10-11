@@ -37,20 +37,28 @@ jobs:
             echo "ImageOS=${ImageOS:-unset} ImageVersion=${ImageVersion:-unset}"
             echo "uv_before_anything=$(command -v uv || echo absent)"
             echo "unzip=$(command -v unzip || echo absent) node=$(node --version 2>&1 | head -1)"
-            echo "apparmor_files_bwrap=$(ls /etc/apparmor.d 2>/dev/null | grep -i bwrap | tr '\n' ' ')"
+            echo "apparmor_files_bwrap=$(find /etc/apparmor.d -maxdepth 1 -iname '*bwrap*' -printf '%f ' 2>/dev/null)"
           } | tee "$OUT/facts.txt"
 
-      - name: flag off (question F)
+      - name: render l4-setup from the checkout (the bootstrap; `l4 init` needs uv first)
         run: |
-          L4_SELF_PROVISION= bash scripts/runner/hosted-setup.sh | tee "$OUT/setup-flag-off.txt"
+          pin=$(sed -n 's/^UV_VERSION = "\(.*\)"$/\1/p' src/l4/provision/catalog.py)
+          sed "s/@@UV_VERSION@@/$pin/g" src/l4/ci/templates/l4-setup.sh > "$RUNNER_TEMP/l4-setup"
+          chmod 0755 "$RUNNER_TEMP/l4-setup"
+          echo "uv_pin=$pin"
+
+      - name: flag off and auto (question F; auto on a hosted runner acts as off)
+        run: |
+          L4_SELF_PROVISION='' "$RUNNER_TEMP/l4-setup" | tee "$OUT/setup-flag-off.txt"
+          L4_SELF_PROVISION=auto "$RUNNER_TEMP/l4-setup" | tee "$OUT/setup-flag-auto.txt"
           { echo "uv_after_flag_off=$(command -v uv || echo absent)"
             echo "bwrap_after_flag_off=$(command -v bwrap || echo absent)"
-            echo "local_bin_after_flag_off=$(ls ~/.local/bin 2>/dev/null | tr '\n' ' ')"; } | tee "$OUT/flag-off-state.txt"
+            echo "local_bin_after_flag_off=$(find ~/.local/bin -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null)"; } | tee "$OUT/flag-off-state.txt"
 
       - name: flag on (setup step)
         run: |
           s=$(date +%s)
-          L4_SELF_PROVISION=true bash scripts/runner/hosted-setup.sh 2>&1 | tee "$OUT/setup-flag-on.txt"
+          L4_SELF_PROVISION=true "$RUNNER_TEMP/l4-setup" 2>&1 | tee "$OUT/setup-flag-on.txt"
           echo "setup_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
 
       - name: build the target project
@@ -59,11 +67,18 @@ jobs:
           bash scripts/runner/spike-hosted/make-target.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/target" 2>&1 | tee "$OUT/make-target.txt"
           echo "make_target_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
 
+      - name: the vendored .l4/bin/l4-setup, as the generated job runs it (task 1.6)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          if cmp -s .l4/bin/l4-setup "$RUNNER_TEMP/l4-setup"; then same=yes; else same=no; fi
+          echo "setup_identical=$same" | tee -a "$OUT/timings.txt"
+          L4_SELF_PROVISION=true .l4/bin/l4-setup 2>&1 | tee "$OUT/setup-vendored.txt"
+
       - name: doctor --ci --fix with the flag on (question B)
         working-directory: ${{ runner.temp }}/target
         run: |
           s=$(date +%s)
-          L4_SELF_PROVISION=true .l4/bin/l4 doctor --ci --fix > "$OUT/doctor-fix.txt" 2>&1; rc=$?
+          rc=0; L4_SELF_PROVISION=true .l4/bin/l4 doctor --ci --fix > "$OUT/doctor-fix.txt" 2>&1 || rc=$?
           echo "doctor_fix_seconds=$(( $(date +%s) - s )) doctor_fix_rc=$rc" | tee -a "$OUT/timings.txt"
           .l4/bin/l4 doctor --ci --json > "$OUT/doctor-after.json" 2>&1 || true
           cat "$OUT/doctor-fix.txt" | cut -c1-300
@@ -80,7 +95,7 @@ jobs:
             if [ -z "${!v}" ]; then unset "$v"; echo "$v=not set"; else echo "$v=set (value not shown)"; fi
           done | tee "$OUT/probe-secrets-present.txt"
           s=$(date +%s)
-          .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1; echo "probe_rc=$?" | tee -a "$OUT/timings.txt"
+          rc=0; .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1 || rc=$?; echo "probe_rc=$rc" | tee -a "$OUT/timings.txt"
           .l4/bin/l4 probe --json > "$OUT/probe.json" 2>&1 || true
           echo "probe_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
           cat "$OUT/probe.txt" | cut -c1-300
@@ -89,7 +104,7 @@ jobs:
       - name: sandboxed OpenCode call (question D, inside the harness's bwrap)
         working-directory: ${{ runner.temp }}/target
         run: |
-          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1; echo "sandboxed_hello_rc=$?" | tee -a "$OUT/timings.txt"
+          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1 || rc=$?; echo "sandboxed_hello_rc=${rc:-0}" | tee -a "$OUT/timings.txt"
           cat "$OUT/sandboxed-hello.txt"
         continue-on-error: true
 
@@ -117,7 +132,7 @@ jobs:
       - name: simulate --all in the harness checkout (question E)
         run: |
           uv sync --frozen
-          uv run --frozen l4 simulate --all > "$OUT/simulate.txt" 2>&1; echo "simulate_rc=$?" | tee -a "$OUT/timings.txt"
+          rc=0; uv run --frozen l4 simulate --all > "$OUT/simulate.txt" 2>&1 || rc=$?; echo "simulate_rc=$rc" | tee -a "$OUT/timings.txt"
           tail -15 "$OUT/simulate.txt"
         continue-on-error: true
 
@@ -140,6 +155,8 @@ jobs:
               "kv": kv,
               "hsu_lines_on": [l for l in read("setup-flag-on.txt").splitlines() if l.startswith("[HSU-")],
               "hsu_lines_off": [l for l in read("setup-flag-off.txt").splitlines() if l.startswith("[HSU-")],
+              "hsu_lines_auto": [l for l in read("setup-flag-auto.txt").splitlines() if l.startswith("[HSU-")],
+              "hsu_lines_vendored": [l for l in read("setup-vendored.txt").splitlines() if l.startswith("[HSU-")],
               "doctor_fix_rows": [l[:300] for l in read("doctor-fix.txt").splitlines() if re.match(r"^(fix|ENV|PRV|SANDBOX)", l)],
               "probe_lines": [l[:300] for l in read("probe.txt").splitlines() if l.startswith("[l4] probe")],
               "simulate_tail": read("simulate.txt").splitlines()[-5:],
@@ -179,11 +196,10 @@ jobs:
             ~/.local/bin
             ~/.local/share/l4
             ~/.local/share/claude
-            ~/.local/share/kiro-cli
-            ~/.local/share/opencode
+            ~/.local/share/uv
             ~/.cache/l4
             ~/.cache/uv
-          key: l4-hosted-${{ matrix.os }}-${{ hashFiles('src/l4/provision/catalog.py', 'scripts/runner/prereqs.sh') }}
+          key: l4-tools-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('src/l4/provision/catalog.py', 'src/l4/ci/templates/l4-setup.sh') }}
 
   warm:
     needs: cold
@@ -204,21 +220,27 @@ jobs:
             ~/.local/bin
             ~/.local/share/l4
             ~/.local/share/claude
-            ~/.local/share/kiro-cli
-            ~/.local/share/opencode
+            ~/.local/share/uv
             ~/.cache/l4
             ~/.cache/uv
-          key: l4-hosted-ubuntu-24.04-${{ hashFiles('src/l4/provision/catalog.py', 'scripts/runner/prereqs.sh') }}
+          key: l4-tools-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('src/l4/provision/catalog.py', 'src/l4/ci/templates/l4-setup.sh') }}
 
       - name: warm facts
         run: |
           mkdir -p "$OUT"
           echo "cache_hit=${{ steps.cache.outputs.cache-hit }}" | tee -a "$OUT/timings.txt"
 
+      - name: render l4-setup from the checkout (the bootstrap; `l4 init` needs uv first)
+        run: |
+          pin=$(sed -n 's/^UV_VERSION = "\(.*\)"$/\1/p' src/l4/provision/catalog.py)
+          sed "s/@@UV_VERSION@@/$pin/g" src/l4/ci/templates/l4-setup.sh > "$RUNNER_TEMP/l4-setup"
+          chmod 0755 "$RUNNER_TEMP/l4-setup"
+          echo "uv_pin=$pin"
+
       - name: flag on (setup step)
         run: |
           s=$(date +%s)
-          L4_SELF_PROVISION=true bash scripts/runner/hosted-setup.sh 2>&1 | tee "$OUT/setup-flag-on.txt"
+          L4_SELF_PROVISION=true "$RUNNER_TEMP/l4-setup" 2>&1 | tee "$OUT/setup-flag-on.txt"
           echo "setup_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
 
       - name: build the target project
@@ -227,11 +249,18 @@ jobs:
           bash scripts/runner/spike-hosted/make-target.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/target" 2>&1 | tee "$OUT/make-target.txt"
           echo "make_target_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
 
+      - name: the vendored .l4/bin/l4-setup, as the generated job runs it (task 1.6)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          if cmp -s .l4/bin/l4-setup "$RUNNER_TEMP/l4-setup"; then same=yes; else same=no; fi
+          echo "setup_identical=$same" | tee -a "$OUT/timings.txt"
+          L4_SELF_PROVISION=true .l4/bin/l4-setup 2>&1 | tee "$OUT/setup-vendored.txt"
+
       - name: doctor --ci --fix with the flag on
         working-directory: ${{ runner.temp }}/target
         run: |
           s=$(date +%s)
-          L4_SELF_PROVISION=true .l4/bin/l4 doctor --ci --fix > "$OUT/doctor-fix.txt" 2>&1; rc=$?
+          rc=0; L4_SELF_PROVISION=true .l4/bin/l4 doctor --ci --fix > "$OUT/doctor-fix.txt" 2>&1 || rc=$?
           echo "doctor_fix_seconds=$(( $(date +%s) - s )) doctor_fix_rc=$rc" | tee -a "$OUT/timings.txt"
           grep -E '^fix ' "$OUT/doctor-fix.txt" | cut -c1-200
         continue-on-error: true
@@ -247,7 +276,7 @@ jobs:
             if [ -z "${!v}" ]; then unset "$v"; fi
           done
           s=$(date +%s)
-          .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1; echo "probe_rc=$?" | tee -a "$OUT/timings.txt"
+          rc=0; .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1 || rc=$?; echo "probe_rc=$rc" | tee -a "$OUT/timings.txt"
           echo "probe_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
           cut -c1-300 "$OUT/probe.txt"
         continue-on-error: true
@@ -255,7 +284,7 @@ jobs:
       - name: sandboxed OpenCode call (question D, inside the harness's bwrap)
         working-directory: ${{ runner.temp }}/target
         run: |
-          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1; echo "sandboxed_hello_rc=$?" | tee -a "$OUT/timings.txt"
+          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1 || rc=$?; echo "sandboxed_hello_rc=${rc:-0}" | tee -a "$OUT/timings.txt"
           cat "$OUT/sandboxed-hello.txt"
         continue-on-error: true
 

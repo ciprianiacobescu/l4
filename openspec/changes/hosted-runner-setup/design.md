@@ -2,7 +2,8 @@
 
 Evidence for everything labelled [V] is `docs/spikes/06-hosted-runner-setup.md`: GitHub Actions run 38144352581, with jobs
 114484478622 (`ubuntu-24.04`, cold), 114484478868 (`ubuntu-22.04`, cold) and 114484850081 (`ubuntu-24.04`, warm). The
-prototype is `scripts/runner/hosted-setup.sh` on branch `spike/hosted-agent-setup`.
+prototype was `scripts/runner/hosted-setup.sh` (commit 1c45eac of branch `spike/hosted-agent-setup`); task 1.2 replaced it
+with `src/l4/ci/templates/l4-setup.sh`.
 
 - [V] Both hosted images set `RUNNER_ENVIRONMENT=github-hosted`. This answers runner-provisioning design's "confirm in
   spike 19". Jobs run as `runner` with passwordless sudo. The images have git 2.55.0, Node 22.23.3 and `unzip`, and they
