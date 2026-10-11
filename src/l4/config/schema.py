@@ -79,9 +79,35 @@ def _list(values: tuple[str, ...]) -> Any:
     return Field(default_factory=lambda: list(values))
 
 
+_SCP_REPO = re.compile(r"^(?P<user>[A-Za-z0-9._-]+)@(?P<host>[A-Za-z0-9.-]+):(?P<path>[A-Za-z0-9._/-]+)$")
+_HARNESS_REPO = re.compile(r"^(https|ssh)://(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(?::[0-9]+)?/[A-Za-z0-9._/-]+$")
+
+
 class HarnessCfg(_Strict):
     version: str | None = None
     commit: Sha | None = None
+    # A fetched harness (github-parity L4-GHP-010): the shim runs `uvx --from git+<repository>@<commit>`. https or ssh
+    # only, no credential in the URL (a private repository is reached with a deploy key); the scp form
+    # `git@host:owner/repo.git` is written as `ssh://git@host/owner/repo.git`, which uv understands. None: vendored.
+    repository: str | None = None
+
+    @field_validator("repository")
+    @classmethod
+    def _repository(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        scp = _SCP_REPO.match(value)
+        if scp:
+            value = f"ssh://{scp['user']}@{scp['host']}/{scp['path']}"
+        if not _HARNESS_REPO.match(value) or (value.startswith("https://") and "@" in value):
+            raise ValueError("must be an https:// or ssh:// git URL (or git@host:owner/repo.git) without a credential")
+        return value
+
+    @model_validator(mode="after")
+    def _commit_with_repository(self) -> "HarnessCfg":
+        if self.repository is not None and self.commit is None:
+            raise ValueError("harness.repository needs harness.commit: the fetched harness is pinned by commit SHA")
+        return self
 
 
 class OpenSpecCfg(_Strict):

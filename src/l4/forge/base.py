@@ -198,8 +198,13 @@ class Forge(Protocol):
     def own_user_id(self) -> int | None:
         """The user the token acts as (the harness's own bot), None when the forge cannot say."""
 
+    def dispatch_continuation(self, ref: str) -> "Continuation":
+        """Start one more run of the harness's CI on `ref` for units a run left at its soft deadline (github-parity
+        L4-GHP-004): `dispatched`, `already_queued` (one is waiting: nothing sent) or `unsupported`."""
+
 
 Platform = Literal["gitlab", "github", "local"]
+Continuation = Literal["dispatched", "already_queued", "unsupported"]
 GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 GIT_USERNAMES = {"gitlab": "oauth2", "github": "x-access-token"}  # what git sends with the token as the password
 _SCP_URL = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[A-Za-z0-9.-]+):(?P<path>[^/\s][^\s]*)$")

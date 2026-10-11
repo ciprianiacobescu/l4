@@ -21,6 +21,7 @@ from l4.forge.base import (
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    Continuation,
     ForgeAuthError,
     ForgeError,
     ForgeNotFound,
@@ -371,6 +372,9 @@ class GitHubForge:
 
     def own_user_id(self) -> int | None:
         return None
+
+    def dispatch_continuation(self, ref: str) -> Continuation:
+        return "unsupported"  # github-parity 1.4 (L4-GHP-004) replaces this with workflow_dispatch
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:
         """`actions/jobs/:id/logs` answers with a redirect to a pre-signed URL; it is followed without the token

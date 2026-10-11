@@ -21,6 +21,7 @@ from l4.forge.base import (
     STICKY_MARKER,
     UNFINISHED,
     AmbiguousWrite,
+    Continuation,
     ForgeAuthError,
     ForgeError,
     ForgeNotFound,
@@ -351,6 +352,10 @@ class GitLabForge:
     def own_user_id(self) -> int | None:
         """The user the token acts as (`_author_id`)."""
         return self._author_id()
+
+    def dispatch_continuation(self, ref: str) -> Continuation:
+        """Not on GitLab yet (forge-and-ci 2.6, a trigger token): the next push or the schedule continues."""
+        return "unsupported"
 
     # --- the sticky note --------------------------------------------------------------------------------------
 
