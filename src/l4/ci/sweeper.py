@@ -724,7 +724,10 @@ def sweep(
     fetch = fetch_auth_config(cfg, app.environ)
     archiver = PostMergeArchiver(cfg, app, git, forge, fetch_config=fetch)
     detector = MergeDetector(
-        git, base_branch=cfg.forge.base_branch, changes_dir=f"{cfg.spec.openspec.root}/changes",
-        kiro_root=cfg.spec.kiro.root, fetch_config=fetch,
+        git,
+        base_branch=cfg.forge.base_branch,
+        changes_dir=f"{cfg.spec.openspec.root}/changes",
+        kiro_root=cfg.spec.kiro.root,
+        fetch_config=fetch,
     )
     return Sweeper(app, cfg, git, forge, archiver, detector, retry=retry, ci=ci).run(snapshots)

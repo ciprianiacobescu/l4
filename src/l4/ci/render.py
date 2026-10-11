@@ -7,8 +7,11 @@ M1: forge-and-ci 1.14's `uvx --from git+URL@SHA` branch waits for SPEC Q1; 1.16/
 
 from importlib.resources import files
 
+from l4.provision.catalog import UV_VERSION
+
 TEMPLATE_RELPATH = ".l4/ci/l4.gitlab-ci.yml"
 SHIM_RELPATH = ".l4/bin/l4"
+SETUP_RELPATH = ".l4/bin/l4-setup"
 VENDOR_RELPATH = ".l4/vendor"
 INCLUDE_SNIPPET = f"include:\n  - local: {TEMPLATE_RELPATH}\n"
 
@@ -32,3 +35,9 @@ def render_gitlab_ci() -> str:
 
 def render_shim() -> str:
     return _SHIM
+
+
+def render_setup() -> str:
+    """`.l4/bin/l4-setup` (L4-PRV-020): bash, run before the shim; uv's pin is the catalog's."""
+    text = files("l4.ci").joinpath("templates", "l4-setup.sh").read_text(encoding="utf-8")
+    return text.replace("@@UV_VERSION@@", UV_VERSION)
