@@ -191,7 +191,8 @@ def test_triggers_job_shape_and_steps():
         ".l4/bin/l4 status",
     ]
     assert doc["permissions"] == {
-        "contents": "write", "pull-requests": "write", "statuses": "write", "actions": "write",
+        "contents": "write", "pull-requests": "write", "issues": "write", "checks": "read", "statuses": "write",
+        "actions": "write",
     }  # fmt: skip
 
 
@@ -372,3 +373,13 @@ def test_an_https_or_vendored_harness_has_no_key_step():
 def test_the_pinned_host_keys_are_githubs_published_ones():
     assert HOST_KEYS[0] == "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
     assert [k.split()[1] for k in HOST_KEYS] == ["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"]
+
+
+def test_permissions_cover_every_api_the_harness_calls_with_github_token():
+    """With an explicit `permissions:` block every scope not named is `none` for GITHUB_TOKEN: the harness reads check
+    runs (`checks: read`) and writes labels, comments and issue events through the Issues API (`issues: write`)."""
+    permissions = parsed(cfg())["permissions"]
+    assert permissions == {
+        "contents": "write", "pull-requests": "write", "issues": "write", "checks": "read", "statuses": "write",
+        "actions": "write",
+    }  # fmt: skip
