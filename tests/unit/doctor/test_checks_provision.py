@@ -34,6 +34,19 @@ def test_prv_001_reports_each_profile_in_one_of_three_states(make_ctx, monkeypat
         assert "codex login --device-auth" in (result.fix_hint or "")
 
 
+def test_prv_001_row_names_the_unset_credential_variable(make_ctx, monkeypatch):
+    from l4.agents import factory
+
+    monkeypatch.setitem(factory.ADAPTERS, "codex", lambda: Scripted(True, False))
+    cfg = L4Config.model_validate(
+        {"profiles": {"cx": {"adapter": "codex", "auth": "api_key"}}, "roles": {"implementer": ["cx"]}}
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    result = checks_provision._prv_001(ctx)
+    assert result.status == "fail" and "cx: CODEX_API_KEY is not set" in result.message
+    assert "CODEX_API_KEY" in (result.fix_hint or "")
+
+
 def test_prv_001_skips_without_agent_cli_profiles_and_prv_002_prints_the_root_command(make_ctx, monkeypatch):
     ctx, _ = make_ctx()
     assert checks_provision._prv_001(ctx).status == "skip"

@@ -85,7 +85,8 @@ def _prv_001(ctx: DoctorContext) -> CheckResult:
         probe_ctx = ProbeCtx(environ=ctx.env, cwd=Path(scratch), run=run_process, forbid=(ctx.repo,))
         factory = Factory(ctx.cfg, probe_ctx)
         rows = [adapter_readiness(name, ctx.cfg.profiles[name], factory, probe_ctx) for name in sorted(names)]
-    message = "; ".join([*(row.line() for row in rows), *_provider_notes(ctx, names)])
+    unset = [row.detail for row in rows if row.detail]  # L4-PRV-024: the variable that would authenticate the profile
+    message = "; ".join([*(row.line() for row in rows), *unset, *_provider_notes(ctx, names)])
     if all(row.state in (AdapterState.READY, AdapterState.BUSY) for row in rows):
         return CheckResult("pass", message)
     steps = [step for row in rows for step in row.steps]
