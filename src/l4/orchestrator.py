@@ -1162,9 +1162,9 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
     except ForgeUnavailable:
         return result  # a local run without credentials: nothing to ask
     except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run
-        log.warning("[l4] continuation: not requested (%s)", app.redactor.redact_text(str(exc)))
+        log.warning("continuation: not requested (%s)", app.redactor.redact_text(str(exc)))
         return result
-    log.info("[l4] continuation: %s (l4.yml on %s)", answer, base)
+    log.info("continuation: %s (l4.yml on %s)", answer, base)
     return replace(result, continuation=answer)
 
 

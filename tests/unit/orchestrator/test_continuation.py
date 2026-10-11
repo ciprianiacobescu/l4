@@ -55,7 +55,8 @@ def test_exit_10_with_units_left_dispatches_once_and_records_the_answer(forge, c
     out = _go(CommandResult(ExitCode.CONTINUE, [DONE, LEFT]), _cfg(base="release/1"))
     assert forge.calls == ["release/1"]
     assert out.continuation == "dispatched" and out.code == ExitCode.CONTINUE and list(out.units) == [DONE, LEFT]
-    assert "[l4] continuation: dispatched (l4.yml on release/1)" in caplog.text
+    assert "continuation: dispatched (l4.yml on release/1)" in caplog.text
+    assert "[l4] continuation" not in caplog.text  # the console handler adds the prefix once (run 38173604230)
 
 
 def test_an_already_queued_run_is_reported_as_such(forge, caplog):
