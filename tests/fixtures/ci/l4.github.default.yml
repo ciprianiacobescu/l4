@@ -20,6 +20,9 @@ jobs:
   l4:
     if: "${{ !contains(github.event.head_commit.message, 'L4-Run: ') }}"
     runs-on: ["self-hosted", "agentic"]
+    # The forge token and the agent credentials are secrets of this GitHub Environment;
+    # repository secrets resolve too. Set ci.github_environment to null in .l4/config.yaml to leave it out.
+    environment: "l4"
     timeout-minutes: 180
     concurrency:
       group: l4
