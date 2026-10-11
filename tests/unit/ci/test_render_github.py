@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from l4.ci.github import JOB_TIMEOUT_MINUTES, doctor_command, render_github_ci
+from l4.ci.github import JOB_TIMEOUT_MINUTES, doctor_command, expression_string, render_github_ci
 from l4.ci.lint import lint_github_yaml
 from l4.config.defaults import CREDENTIAL_PATHS
 from l4.config.schema import L4Config
@@ -118,7 +118,7 @@ def test_job_timeout_env_comes_from_the_same_constant_as_timeout_minutes():
 
 def test_self_hosted_job_has_no_hosted_steps_or_env():
     job = parsed(L4Config())["jobs"]["l4"]
-    assert set(job["env"]) == {"L4_FORGE_TOKEN", "L4_JOB_TIMEOUT_MINUTES"}
+    assert set(job["env"]) == {"L4_FORGE_TOKEN", "L4_JOB_TIMEOUT_MINUTES", "L4_BASE_BRANCH"}
     assert not [s for s in job["steps"] if "l4-setup" in s.get("run", "") or "cache" in s.get("uses", "")]
 
 
@@ -169,14 +169,18 @@ def test_triggers_job_shape_and_steps():
     assert set(triggers) == {"push", "schedule", "workflow_dispatch"}
     assert triggers["push"]["branches"] == ["main", "l4/**"]
     job = doc["jobs"]["l4"]
-    assert job["if"] == "${{ !contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    assert job["if"] == (
+        "${{ github.event_name != 'push' || github.ref_name == 'main' || "
+        "!contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    )
     assert job["concurrency"] == {"group": "l4", "cancel-in-progress": False}
     assert job["timeout-minutes"] == 180
     assert job["runs-on"] == ["self-hosted", "agentic"]
     checkout = job["steps"][0]
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     assert len(checkout["uses"].split("@")[1]) == 40  # pinned to a commit
-    assert [s["run"] for s in job["steps"] if "run" in s] == [
+    assert [s["run"].strip() for s in job["steps"] if "run" in s] == [
+        BASE_CHECKOUT,
         ".l4/bin/l4 doctor --ci || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 run || .l4/bin/l4 ci map-exit $?",
@@ -210,7 +214,7 @@ def test_branch_prefix_and_token_env_follow_config():
     doc = parsed(cfg(forge={"branch_prefix": "bots/", "token_env": "MY_TOKEN"}))
     assert doc[True]["push"]["branches"][1] == "bots/**"
     assert doc["jobs"]["l4"]["env"] == {
-        "MY_TOKEN": "${{ secrets.MY_TOKEN }}", "L4_JOB_TIMEOUT_MINUTES": "180",
+        "MY_TOKEN": "${{ secrets.MY_TOKEN }}", "L4_JOB_TIMEOUT_MINUTES": "180", "L4_BASE_BRANCH": "main",
     }  # fmt: skip
 
 
@@ -261,3 +265,50 @@ def test_job_env_maps_exactly_the_chains_credentials():
     }
     assert "KIRO_API_KEY" not in env  # its profile is in no chain
     assert render_github_ci(cfg()) == GOLDEN.read_text()  # no chain, no credential: the env is the forge token alone
+
+
+BASE_CHECKOUT = (
+    'git fetch --quiet origin "+refs/heads/$L4_BASE_BRANCH:refs/remotes/origin/$L4_BASE_BRANCH" '
+    '&& git checkout --quiet --detach "origin/$L4_BASE_BRANCH" '
+    '&& echo "l4: base checkout $(git rev-parse HEAD)"'
+)
+
+
+def test_other_branches_check_out_the_base():
+    """SCN-GHP-07 (L4-GHP-005): "when `github.ref_name` is not the base branch, it fetches ... and runs `git checkout
+    --detach origin/<base>`", the GitLab rule. The base reaches the shell only through the job env."""
+    for tags in ([], ["agentic"]):
+        for environment in ("l4", None):
+            job = parsed(cfg(ci={"runner_tags": tags, "github_environment": environment}))["jobs"]["l4"]
+            steps = job["steps"]
+            at = step_index(steps, lambda st: "base checkout" in st.get("run", ""))
+            assert "actions/checkout" in steps[at - 1]["uses"]  # right after the checkout
+            assert at < step_index(steps, lambda st: ".l4/bin/" in st.get("run", ""))
+            assert steps[at]["if"] == "${{ github.ref_name != env.L4_BASE_BRANCH }}"
+            assert steps[at]["run"].strip() == BASE_CHECKOUT
+            assert job["env"]["L4_BASE_BRANCH"] == "main"
+
+
+def test_the_base_branch_is_never_interpolated_into_a_script():
+    hostile = 'x"; curl evil #'
+    doc = yaml.safe_load(render_github_ci(cfg(forge={"base_branch": hostile}, ci={"runner_tags": []})))
+    assert doc["jobs"]["l4"]["env"]["L4_BASE_BRANCH"] == hostile
+    for step in doc["jobs"]["l4"]["steps"]:
+        assert hostile not in step.get("run", "")
+
+
+def test_expression_string_doubles_quotes():
+    assert expression_string("main") == "'main'"
+    assert expression_string("it's") == "'it''s'"
+    assert expression_string("a''b") == "'a''''b'"
+
+
+def test_skip_rule_exempts_the_base():
+    """SCN-GHP-08 (L4-GHP-006): the `L4-Run:` skip applies to every branch but the base."""
+    want = (
+        "${{ github.event_name != 'push' || github.ref_name == 'main' || "
+        "!contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    )
+    assert parsed(L4Config())["jobs"]["l4"]["if"] == want
+    quoted = parsed(cfg(forge={"base_branch": "o'brien"}))["jobs"]["l4"]["if"]
+    assert "github.ref_name == 'o''brien' ||" in quoted

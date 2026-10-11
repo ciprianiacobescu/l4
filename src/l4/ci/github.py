@@ -31,6 +31,21 @@ CACHE_KEY = (
 )
 
 
+def expression_string(text: str) -> str:
+    """`text` as a GitHub expression string literal: single quotes, a `'` inside doubled."""
+    return "'" + text.replace("'", "''") + "'"
+
+
+def _job_condition(base: str) -> str:
+    """The job `if:` (L4-GHP-006): the `L4-Run:` skip applies to a push on any branch but the base, where a merge or
+    archive commit that carries the trailer must still reach the sweeper. Written as a JSON string (valid YAML)."""
+    return json.dumps(
+        "${{ github.event_name != 'push' || github.ref_name == "
+        + expression_string(base)
+        + " || !contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    )
+
+
 def doctor_command(cfg: L4Config, platform: Literal["github", "gitlab"]) -> str:
     """The doctor line of the generated CI file (L4-DOC-002): `--fix` when `ci.self_provision` is true, or `auto` on a
     GitLab runner (persistent shell executors); a GitHub-hosted runner is disposable, so `auto` leaves it out."""
@@ -79,10 +94,7 @@ def _hosted_blocks(cfg: L4Config) -> dict[str, str]:
 {paths}
           key: {CACHE_KEY}"""
     return {
-        "HOSTED_ENV": (
-            f"      L4_SELF_PROVISION: ${{{{ vars.L4_SELF_PROVISION || '{rendered}' }}}}\n"
-            f"      L4_BASE_BRANCH: {json.dumps(cfg.forge.base_branch)}"
-        ),
+        "HOSTED_ENV": (f"      L4_SELF_PROVISION: ${{{{ vars.L4_SELF_PROVISION || '{rendered}' }}}}"),
         "HOSTED_SETUP": f"""\
       - name: tool cache key
         id: l4key
@@ -108,6 +120,8 @@ def render_github_ci(cfg: L4Config) -> str:
     values = {
         "JOB_TIMEOUT": str(JOB_TIMEOUT_MINUTES),
         "BASE": json.dumps(cfg.forge.base_branch),
+        "BASE_ENV": json.dumps(cfg.forge.base_branch),
+        "IF": _job_condition(cfg.forge.base_branch),
         "PREFIX": json.dumps(f"{cfg.forge.branch_prefix}**"),
         "RUNS_ON": runs_on,
         "TOKEN_ENV": cfg.forge.token_env,  # an environment variable name: the schema admits letters, digits, _
