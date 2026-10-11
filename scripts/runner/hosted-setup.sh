@@ -117,9 +117,12 @@ else
     else
       line HSU-08 FAILED "root fallback: apparmor userns sysctl" "$(tail -1 /tmp/hsu-sysctl.log)"
     fi
-    for b in "$HOME/.local/bin/bwrap" /usr/bin/bwrap; do
-      [ -x "$b" ] && bwrap_test "$b" "root fallback: bwrap after sysctl" && { SANDBOX_VIA=root-sysctl; break; }
-    done
+    # the user-space binary first (its ~/.local/bin link was removed when it failed): does the sysctl alone suffice?
+    if [ -x "$L4H/bwrap/usr/bin/bwrap" ] && bwrap_test "$L4H/bwrap/usr/bin/bwrap" "root fallback: user-space bwrap after sysctl"; then
+      ln -sf "$L4H/bwrap/usr/bin/bwrap" "$HOME/.local/bin/bwrap"; hash -r; SANDBOX_VIA=user-space-after-sysctl
+    elif [ -x /usr/bin/bwrap ] && bwrap_test /usr/bin/bwrap "root fallback: /usr/bin/bwrap after sysctl"; then
+      SANDBOX_VIA=root-sysctl
+    fi
   elif [ "$SANDBOX_VIA" = none ]; then
     line HSU-08 SKIP "root fallback: apparmor userns sysctl" "sysctl value is $AA, not 1"
   fi

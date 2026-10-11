@@ -84,6 +84,13 @@ jobs:
           cat "$OUT/probe.txt" | cut -c1-300
         continue-on-error: true
 
+      - name: sandboxed OpenCode call (question D, inside the harness's bwrap)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1; echo "sandboxed_hello_rc=$?" | tee -a "$OUT/timings.txt"
+          cat "$OUT/sandboxed-hello.txt"
+        continue-on-error: true
+
       - name: simulate --all in the harness checkout (question E)
         run: |
           uv sync --frozen
@@ -113,6 +120,7 @@ jobs:
               "doctor_fix_rows": [l[:300] for l in read("doctor-fix.txt").splitlines() if re.match(r"^(fix|ENV|PRV|SANDBOX)", l)],
               "probe_lines": [l[:300] for l in read("probe.txt").splitlines() if l.startswith("[l4] probe")],
               "simulate_tail": read("simulate.txt").splitlines()[-5:],
+              "sandboxed_hello": read("sandboxed-hello.txt").splitlines()[:3],
           }
           (out / "results.json").write_text(json.dumps(res, indent=2))
           print(json.dumps(res, indent=2))
@@ -206,6 +214,13 @@ jobs:
           .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1; echo "probe_rc=$?" | tee -a "$OUT/timings.txt"
           echo "probe_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
           cut -c1-300 "$OUT/probe.txt"
+        continue-on-error: true
+
+      - name: sandboxed OpenCode call (question D, inside the harness's bwrap)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1; echo "sandboxed_hello_rc=$?" | tee -a "$OUT/timings.txt"
+          cat "$OUT/sandboxed-hello.txt"
         continue-on-error: true
 
       - uses: actions/upload-artifact@v4
