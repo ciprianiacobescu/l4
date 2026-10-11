@@ -589,6 +589,9 @@ class CiCfg(_Strict):
     runner_tags: list[str] = Field(default_factory=lambda: ["agentic"])
     continuation: Literal["dispatch", "schedule-only"] = "dispatch"
     self_provision: Literal["auto"] | bool = "auto"
+    # the GitHub Environment the generated job runs in: the forge token and the agent credentials are secrets of it
+    # (repository secrets still resolve); null leaves `environment:` out of the workflow
+    github_environment: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._-]{1,255}$")] | None = "l4"
 
 
 class PriceEntry(_Strict):
