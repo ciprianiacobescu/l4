@@ -103,3 +103,18 @@ def test_the_capacity_note_already_lists_the_profiles_and_the_return_time():
         exc, base="main", now=datetime(2026, 10, 7, 11, 0, tzinfo=UTC), retry_after="2026-10-07T12:00:00Z"
     )
     assert "`claude-opus`" in note and "hello: refused" in note and "2026-10-07T12:00Z" in note
+
+
+def test_capacity_note_speaks_github_on_github():
+    """L4-GHP-009: the waiting-for-capacity note's login steps use the GitHub words on GitHub."""
+    from datetime import UTC, datetime
+
+    from l4.availability.errors import Unready, WaitingCapacity
+    from l4.orchestrator import capacity_section
+
+    exc = WaitingCapacity("judges", "x", None, (Unready("cc", "claude-code", "subscription", "auth", "not set"),))
+    now = datetime(2026, 10, 7, 11, 0, tzinfo=UTC)
+    note = capacity_section(exc, base="main", now=now, retry_after=None, platform="github", environment="l4")
+    assert "a secret of the GitHub environment `l4`" in note and "masked CI variable" not in note
+    gitlab = capacity_section(exc, base="main", now=now, retry_after=None)
+    assert "masked CI variable" in gitlab

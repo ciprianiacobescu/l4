@@ -57,7 +57,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure
-from l4.forge.urls import app_forge_urls
+from l4.forge.urls import app_forge_urls, origin_url
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
 from l4.implementer.tasks import (
@@ -73,7 +73,7 @@ from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
-from l4.provision.readiness import steps_for
+from l4.provision.readiness import platform_of, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -137,7 +137,15 @@ def base_conflict_section(exc: BaseMergeConflict, branch: str) -> str:
     )
 
 
-def capacity_section(exc: Exception, *, base: str, now: datetime, retry_after: str | None) -> str:
+def capacity_section(
+    exc: Exception,
+    *,
+    base: str,
+    now: datetime,
+    retry_after: str | None,
+    platform: str = "gitlab",
+    environment: str | None = None,
+) -> str:
     """The sticky note of a unit that parked for capacity (L4-ARC-002; live job 5561: the MR stayed silent): what
     is missing, the human steps for a login, and when the unit comes back. `bring_in_base`'s sibling: the next
     `CAPACITY_RESTORED` clears it, a re-park writes it again."""
@@ -150,7 +158,8 @@ def capacity_section(exc: Exception, *, base: str, now: datetime, retry_after: s
         for u in unready:
             lines.append(f"- `{u.profile}` ({u.adapter or 'backend'}): {u.step}: {u.reason}")
             if u.step == "auth" and u.adapter:
-                lines += [f"  - {step}" for step in steps_for(u.adapter, u.auth)]
+                steps = steps_for(u.adapter, u.auth, platform=platform, environment=environment)
+                lines += [f"  - {step}" for step in steps]
         lines.append("")
     else:
         lines += [f"{str(exc)[:300]}", ""]
@@ -435,9 +444,12 @@ class Orchestrator:
             log.warning("%s", exc)
         redact = self.services.app.redactor.redact_text
         self._exit_reason = redact(f"waiting_capacity: {exc}")[:300]
+        app = self.services.app
+        platform, environment = platform_of(self.cfg, app.environ, origin_url(app.repo, app.environ))
         section = capacity_section(
-            exc, base=self.cfg.forge.base_branch, now=self.services.factory.now(), retry_after=retry_after
-        )
+            exc, base=self.cfg.forge.base_branch, now=self.services.factory.now(), retry_after=retry_after,
+            platform=platform, environment=environment,
+        )  # fmt: skip
         self._notes = _sections(redact(section))  # before the phase change, which syncs the mirror
         edge = self._go(Trigger.REQUIRED_ROLE_UNAVAILABLE, **context)
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.WAITING_CAPACITY)

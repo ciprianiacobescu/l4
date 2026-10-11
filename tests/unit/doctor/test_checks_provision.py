@@ -107,3 +107,18 @@ def test_prv_001_a_missing_provider_key_names_the_variable_in_the_steps(make_ctx
     result = checks_provision._prv_001(ctx)
     assert result.status == "fail" and "installed-not-authenticated" in result.message
     assert "MAGNITUDE_API_KEY" in (result.fix_hint or "") and "OPENROUTER" not in (result.fix_hint or "")
+
+
+def test_prv_001_speaks_github_for_a_github_origin_with_platform_auto(make_ctx, monkeypatch):
+    """L4-GHP-009: with `ci.platform: auto` the origin decides; github.com gets the environment-secret words."""
+    from l4.agents import factory
+
+    monkeypatch.setitem(factory.ADAPTERS, "claude-code", lambda: Scripted(True, False))
+    monkeypatch.setattr(checks_provision, "origin_url", lambda repo, env: "https://github.com/o/r.git")
+    cfg = L4Config.model_validate(
+        {"profiles": {"cc": {"adapter": "claude-code", "auth": "subscription"}}, "roles": {"implementer": ["cc"]}}
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    result = checks_provision._prv_001(ctx)
+    assert "a secret of the GitHub environment `l4`" in (result.fix_hint or "")
+    assert "masked CI variable" not in (result.fix_hint or "")

@@ -11,6 +11,7 @@ from l4.agents.opencode_provider import provider_host, reachable
 from l4.doctor.checks_agents import scratch_dir
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, Fix, attach_fix, register
+from l4.forge.urls import origin_url
 from l4.proc import Runner as CommandRunner
 from l4.proc import run_process
 from l4.provision.catalog import adapters_in_use
@@ -84,7 +85,11 @@ def _prv_001(ctx: DoctorContext) -> CheckResult:
     with scratch_dir(ctx.repo) as scratch:
         probe_ctx = ProbeCtx(environ=ctx.env, cwd=Path(scratch), run=run_process, forbid=(ctx.repo,))
         factory = Factory(ctx.cfg, probe_ctx)
-        rows = [adapter_readiness(name, ctx.cfg.profiles[name], factory, probe_ctx) for name in sorted(names)]
+        origin = origin_url(ctx.repo, ctx.env)  # `ci.platform: auto` words the steps for the forge (L4-GHP-009)
+        rows = [
+            adapter_readiness(name, ctx.cfg.profiles[name], factory, probe_ctx, cfg=ctx.cfg, origin=origin)
+            for name in sorted(names)
+        ]
     unset = [row.detail for row in rows if row.detail]  # L4-PRV-024: the variable that would authenticate the profile
     message = "; ".join([*(row.line() for row in rows), *unset, *_provider_notes(ctx, names)])
     if all(row.state in (AdapterState.READY, AdapterState.BUSY) for row in rows):
