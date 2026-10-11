@@ -17,7 +17,6 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import quote
 
 import click
 
@@ -36,7 +35,7 @@ from l4.forge.base import (
     make_forge,
 )
 from l4.forge.gitlab import push_auth_config, strip_remote_credentials
-from l4.forge.urls import app_forge_urls
+from l4.forge.urls import app_forge_urls, blob_url
 from l4.fsutil import read_regular_file
 from l4.outcome import CommandResult
 from l4.services import H_PUSHED, ForgeHook, HookContext, MirrorHook
@@ -103,8 +102,7 @@ def render_pr_body(
     """Static: it names where the evidence will be, so it never needs rewriting when the phase changes."""
     evidence = f"`{evidence_path}`"
     if project_url:
-        blob = "blob" if platform == "github" else "-/blob"  # GitLab's blob URLs carry the `/-/` separator
-        evidence = f"[{evidence_path}]({project_url}/{blob}/{quote(branch, safe='/')}/{quote(evidence_path, safe='/')})"
+        evidence = f"[{evidence_path}]({blob_url(project_url, branch, evidence_path, platform)})"
     return "\n".join(
         [
             f"Implemented by the L4 harness from the spec unit `{unit_id}`.",

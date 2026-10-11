@@ -13,7 +13,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from l4.config.schema import L4Config
 from l4.exitcodes import L4Exit
@@ -108,3 +108,10 @@ def app_forge_urls(app: "AppContext", cfg: L4Config) -> ForgeUrls:
     if held is None:
         held = app.redactor.forge_urls = forge_urls(cfg, app.environ, origin_url(app.repo, app.environ))
     return held  # type: ignore[no-any-return]
+
+
+def blob_url(project_url: str, ref: str, path: str, platform: str) -> str:
+    """The forge page of a file at a branch: GitHub `<project>/blob/<ref>/<path>`, GitLab `<project>/-/blob/...`
+    (github-parity L4-GHP-009: one place for both the PR body and the sticky note)."""
+    blob = "blob" if platform == "github" else "-/blob"  # GitLab's blob URLs carry the `/-/` separator
+    return f"{project_url.rstrip('/')}/{blob}/{quote(ref, safe='/')}/{quote(path, safe='/')}"
