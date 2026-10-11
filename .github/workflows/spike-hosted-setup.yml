@@ -1,6 +1,7 @@
 # SPIKE (branch spike/hosted-agent-setup): can an auto setup step provision the agent CLIs on GitHub-hosted runners
 # nobody customized? Questions A-G are in the spike plan. Nothing here pushes, nothing uses a forge token; the only
-# secrets are optional agent credentials, passed to `l4 probe` only.
+# secrets are optional agent credentials of the GitHub environment `hosted-agents` (deployable from spike/* only), passed
+# to `l4 probe` and to the Claude Code check; no artifact may contain a value (checked before upload).
 name: spike-hosted-setup
 on:
   push:
@@ -19,6 +20,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    environment: hosted-agents   # agent credentials are secrets of this environment (spike/* branches only)
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -186,6 +188,7 @@ jobs:
   warm:
     needs: cold
     runs-on: ubuntu-24.04
+    environment: hosted-agents
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
