@@ -40,7 +40,16 @@ from l4.agents.base import (
 from l4.agents.contract import attach_file_result
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import excerpt, parse_reset
-from l4.availability.probes import _binary, _hello_verdict, _timed, probe_env, text_class
+from l4.availability.probes import (
+    _binary,
+    _hello_verdict,
+    _timed,
+    credential_auth,
+    credential_env,
+    login_failed,
+    probe_env,
+    text_class,
+)
 from l4.availability.quota import kiro_quota
 from l4.config.schema import Profile
 from l4.safepath import resolve_tool
@@ -242,9 +251,9 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
     if step == "binary" or not result.ok:
         return result
     assert exe is not None
-    env = probe_env(ctx)
+    env = probe_env(ctx, credential_env(profile, ctx)[1])
     if step == "auth":
-        return _kiro_auth(exe, env, ctx)
+        return credential_auth(profile, ctx) or _kiro_auth(profile, exe, env, ctx)
     if step == "quota":
         return kiro_quota(profile, exe, env, ctx)
     argv = [exe, "chat", "--no-interactive", "--trust-tools=read"]  # no tool is needed to say the word; shell is denied
@@ -265,7 +274,7 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
     return _hello_verdict(facts.get("final_text"), millis, done.returncode == 124, failure, limit, kind)
 
 
-def _kiro_auth(exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
+def _kiro_auth(profile: Profile, exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
     """`kiro-cli whoami --format json`: logged in is exit 0 and a flat object with a non-empty `accountType` string
     (2.27.1 and 2.28.0 [V]); logged out is exit 1 with `{"account": null}` (2.27.1 [V]). The e-mail is never kept."""
     done = ctx.run([exe, "whoami", "--format", "json"], ctx.cwd, env, ctx.timeout_s)
@@ -276,7 +285,7 @@ def _kiro_auth(exe: str, env: dict[str, str], ctx: ProbeCtx) -> ProbeResult:
     if not isinstance(answer, dict):
         return ProbeResult("auth", False, reason="kiro-cli whoami gave an unrecognised answer")
     if done.returncode != 0 or ("account" in answer and answer["account"] is None):
-        return ProbeResult("auth", False, reason="kiro-cli installed, not authenticated")
+        return login_failed(profile, "kiro-cli installed, not authenticated")
     plan = answer.get("accountType")
     if not isinstance(plan, str) or not plan:
         return ProbeResult("auth", False, reason="kiro-cli whoami gave an unrecognised answer")

@@ -126,16 +126,9 @@ def test_claude_logged_out_and_garbled_status(make_ctx):
     out_json = (CLAUDE / "auth_status_logged_out.stdout.json").read_text()
     ctx, _ = make_ctx({("auth", "status"): CmdResult(1, out_json, ""), ("--version",): CmdResult(0, "2.1.288", "")})
     out = ClaudeCodeAdapter().probe(claude_profile, "auth", ctx)
-    assert not out.ok and out.reason == "claude is not logged in"
+    assert not out.ok and out.reason == "claude is not logged in (or set CLAUDE_CODE_OAUTH_TOKEN)"
     ctx2, _ = make_ctx({("auth", "status"): CmdResult(0, "<html>", ""), ("--version",): CmdResult(0, "2.1.288", "")})
     assert "unrecognised" in (ClaudeCodeAdapter().probe(claude_profile, "auth", ctx2).reason or "")
-
-
-@pytest.mark.parametrize("adapter, profile", [(CodexAdapter(), codex_profile), (ClaudeCodeAdapter(), claude_profile)])
-def test_api_key_profiles_are_refused_in_m0_without_naming_a_value(make_ctx, adapter, profile):
-    ctx, _ = make_ctx({("--version",): CmdResult(0, "codex-cli 0.160.0 2.1.288", "")})
-    out = adapter.probe(profile.model_copy(update={"auth": "api_key"}), "auth", ctx)
-    assert not out.ok and "api_key" in (out.reason or "") and "s3cret" not in repr(out)
 
 
 def test_codex_hello_skips_the_git_repo_check_because_the_probe_cwd_is_not_a_repo(make_ctx):

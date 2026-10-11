@@ -30,7 +30,7 @@ def test_logged_out_is_installed_not_authenticated_from_the_runner_recording(mak
         (RECORDED / "runner-whoami.stderr.txt").read_text(),
     )  # fmt: skip
     out, run = probe("auth", {**VERSION, ("whoami",): whoami}, make_ctx)
-    assert not out.ok and out.reason == "kiro-cli installed, not authenticated"
+    assert not out.ok and out.reason == "kiro-cli installed, not authenticated (or set KIRO_API_KEY)"
     assert run.calls[-1][0][1:] == ["whoami", "--format", "json"]
 
 
@@ -51,7 +51,7 @@ def test_a_flat_answer_without_an_account_type_is_unrecognised(make_ctx, answer)
 def test_a_nonzero_exit_is_not_authenticated_even_with_an_account_type(make_ctx):
     answer = '{"accountType": "Pro"}'
     out, _ = probe("auth", {**VERSION, ("whoami",): CmdResult(1, answer, "")}, make_ctx)
-    assert not out.ok and out.reason == "kiro-cli installed, not authenticated"
+    assert not out.ok and out.reason == "kiro-cli installed, not authenticated (or set KIRO_API_KEY)"
 
 
 def test_an_unrecognised_whoami_answer_fails_auth(make_ctx):
@@ -105,7 +105,8 @@ def test_the_ladder_stops_at_auth_with_the_operator_facing_reason(make_ctx):
     ctx, _ = make_ctx({**VERSION, ("whoami",): whoami})
     report = ProbeLadder(ctx, ["binary", "auth", "quota", "hello"]).run(KiroCliAdapter(), PROFILE)
     assert list(report.steps) == ["binary", "auth"]
-    assert report.failed is not None and report.failed.reason == "kiro-cli installed, not authenticated"
+    assert report.failed is not None
+    assert report.failed.reason == "kiro-cli installed, not authenticated (or set KIRO_API_KEY)"
 
 
 def test_a_throttled_hello_is_a_rate_limit_that_cools_the_profile(make_ctx):

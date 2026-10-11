@@ -24,6 +24,7 @@ from l4.agents.base import (
     ProbeResult,
     ProbeStep,
 )
+from l4.agents.credentials import credential_in, credential_variable
 from l4.availability.limits import normalise_limit
 from l4.availability.quota import Window, claude_quota, codex_quota, now_of, rate_limit_event_windows
 from l4.availability.rpc import run_rpc_session
@@ -71,8 +72,30 @@ def _binary(name: str, profile: Profile, ctx: ProbeCtx) -> tuple[ProbeResult, st
     return ProbeResult("binary", True, {"version": found.group(0)}), exe
 
 
-def _api_key_unsupported(step: ProbeStep) -> ProbeResult:
-    return ProbeResult(step, False, reason="api_key is not supported in M0 (the sandbox passes no credential variable)")
+def credential_env(profile: Profile, ctx: ProbeCtx) -> tuple[str | None, dict[str, str]]:
+    """The profile's credential variable (L4-PRV-024) and, when the host has it set, the one-entry environment to add
+    to this profile's auth, quota and hello calls (and no other profile's): `(NAME, {NAME: value})`, else `(NAME, {})`.
+    """
+    variable = credential_variable(profile.adapter, profile.auth)
+    value = credential_in(ctx.environ, variable)
+    return variable, ({variable: value} if variable and value else {})
+
+
+def credential_auth(profile: Profile, ctx: ProbeCtx) -> ProbeResult | None:
+    """The auth step when the environment decides it: a set variable passes (the hello step proves it works, no status
+    or login command runs); an unset api_key variable fails naming it. None: a file login decides."""
+    variable, extra = credential_env(profile, ctx)
+    if extra:
+        return ProbeResult("auth", True, {"auth_method": "env"})
+    if variable and profile.auth == "api_key":
+        return ProbeResult("auth", False, reason=f"{variable} is not set")
+    return None
+
+
+def login_failed(profile: Profile, reason: str) -> ProbeResult:
+    """A failed file-login check; a profile with a credential variable is told it may set it instead."""
+    variable = credential_variable(profile.adapter, profile.auth)
+    return ProbeResult("auth", False, reason=f"{reason} (or set {variable})" if variable else reason)
 
 
 def _timed(ctx: ProbeCtx, argv: list[str], env: dict[str, str], cwd: Path | None = None) -> tuple[Any, int]:
@@ -155,11 +178,9 @@ def probe_codex(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult
     if step == "binary" or not result.ok:
         return result
     assert exe is not None
-    env = probe_env(ctx)
+    env = probe_env(ctx, credential_env(profile, ctx)[1])
     if step == "auth":
-        if profile.auth == "api_key":
-            return _api_key_unsupported(step)
-        return _codex_auth(profile, exe, env, ctx)
+        return credential_auth(profile, ctx) or _codex_auth(profile, exe, env, ctx)
     if step == "quota":
         return (
             ProbeResult("quota", True, skipped=True)
@@ -234,12 +255,12 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
     if step == "binary" or not result.ok:
         return result
     assert exe is not None
-    env = probe_env(ctx, {"CLAUDE_CODE_MAX_RETRIES": "1"})
+    env = probe_env(ctx, {"CLAUDE_CODE_MAX_RETRIES": "1", **credential_env(profile, ctx)[1]})
     if step == "quota":
         return claude_quota(profile, exe, env, ctx, latest=latest)
     if step == "auth":
-        if profile.auth == "api_key":
-            return _api_key_unsupported(step)
+        if (decided := credential_auth(profile, ctx)) is not None:
+            return decided
         done = ctx.run([exe, "auth", "status"], ctx.cwd, env, ctx.timeout_s)
         try:
             status = json.loads(done.stdout)
@@ -248,7 +269,7 @@ def probe_claude(profile: Profile, step: ProbeStep, ctx: ProbeCtx, *, latest: Se
         if not isinstance(status, dict) or not isinstance(status.get("loggedIn"), bool):
             return ProbeResult(step, False, reason="claude auth status gave an unrecognised answer")
         if not status["loggedIn"]:
-            return ProbeResult(step, False, reason="claude is not logged in")
+            return login_failed(profile, "claude is not logged in")
         method, plan = status.get("authMethod"), status.get("subscriptionType")
         return ProbeResult(
             step, True,
