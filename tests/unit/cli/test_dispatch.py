@@ -11,7 +11,7 @@ from l4.exitcodes import ExitCode
 SECTION_2_1 = {
     "init", "doctor", "plan", "run", "status", "probe", "verify", "archive", "questions", "lessons",
     "simulate", "unlock", "resume", "ci render", "ci render-child", "ci map-exit", "upgrade",
-    "setup gitlab", "ci watch", "eval",
+    "setup gitlab", "setup github", "ci watch", "eval",
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
@@ -36,6 +36,7 @@ ARGV = {
     "ci map-exit": ["ci", "map-exit", "11"],
     "upgrade": ["upgrade"],
     "setup gitlab": ["setup", "gitlab", "--project", "g/p"],
+    "setup github": ["setup", "github", "--repo", "o/r"],
     "ci watch": ["ci", "watch", "--project", "g/p"],
     "s1": ["s1", "export"],
     "eval": ["eval", "--dry-run", "--judge", "j"],

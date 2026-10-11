@@ -149,6 +149,16 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--dry-run", "dry_run", help="Send only reads; say what would change."),
         _TOKEN_COMMAND(),
     ]),
+    "setup github": ("Make the GitHub repository ready: permissions, environment, secrets, labels.", lambda: [
+        _opt("--repo", "github_repo", help="owner/name (default: `origin`); a directory is the checkout."),
+        _opt("--api-url", "api_url", help="GitHub API base (default: GITHUB_API_URL, else api.github.com)."),
+        _opt("--token-env", "token_env", default="GH_TOKEN", show_default=True,
+             help="Environment variable that holds a token with admin rights on the repository."),
+        _opt("--secret", "secret", multiple=True,
+             help="NAME=ENVVAR: seal a secret into the environment (repeat)."),
+        _flag("--watch", "watch", help="Follow the dispatched run to its end."),
+        _flag("--dry-run", "dry_run", help="Send only reads; say what would change."),
+    ]),
     "ci render": ("Print generated CI files.", lambda: [
         _opt("--platform", "platform", required=True, type=click.Choice(["github", "gitlab"])),
     ]),
@@ -223,11 +233,18 @@ def _build_app(options: Mapping[str, Any], environ: Mapping[str, str]) -> AppCon
 
 
 def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> click.Command:
+    own_dests = {param.name for param in params}
+
     def callback(**kwargs: Any) -> int:
         environ: Mapping[str, str] = click.get_current_context().obj
-        app = _build_app({k: kwargs[k] for k in _COMMON_KEYS}, environ)
+        slug = kwargs.pop("github_repo", None)
+        if slug is not None and Path(slug).is_dir():  # the global meaning of `--repo`: the checkout
+            kwargs["repo"], slug = Path(slug), None
+        app = _build_app({k: kwargs.get(k) for k in _COMMON_KEYS}, environ)
         configure_logging(app)
         options = {k: v for k, v in kwargs.items() if k not in _COMMON_KEYS}
+        if slug is not None or "github_repo" in own_dests:
+            options["repo"] = slug
 
         def call():
             return dispatch(name, app, **options)
@@ -242,7 +259,11 @@ def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> c
                     stop()
         return int(result.code)
 
-    return click.Command(name.split()[-1], params=[*_common(), *params], callback=callback, help=help_text)
+    # a command that takes `--repo owner/name` itself (`setup github`, `ci watch`) has one `--repo`: an existing
+    # directory is the checkout (the global meaning), anything else is the GitHub repository
+    own = {opt for param in params for opt in param.opts}
+    common = [param for param in _common() if not own & set(param.opts)]
+    return click.Command(name.split()[-1], params=[*common, *params], callback=callback, help=help_text)
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
