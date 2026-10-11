@@ -26,3 +26,38 @@ gates, and prints the exact remaining steps. A second run is safe. The runner an
 * [Architecture](docs/architecture.md)
 * [Specification](docs/SPEC.md)
 * [Research evidence](docs/research/README.md)
+
+## How a unit moves
+
+A unit is one spec change. The harness moves it through the phases below; each move is one `phase.changed` ledger
+event, written only by `transition()` in `src/l4/state/lifecycle.py`, which refuses an edge its table does not have.
+Waiting for capacity, halt, escalation and resume are left out here.
+
+```mermaid
+stateDiagram-v2
+  [*] --> intake: discovered with pending tasks
+  [*] --> implemented: discovered with all tasks done
+  intake --> ready: intake checks pass
+  ready --> implementing: lease acquired
+  implementing --> clarifying: questions go to the clarifier
+  clarifying --> implementing: clarifier answered all
+  clarifying --> awaiting_human: clarifier needs a human
+  implementing --> awaiting_human: blocking questions
+  awaiting_human --> implementing: answers submitted
+  awaiting_human --> verifying: verdict questions answered
+  implementing --> implemented: all leaves done
+  implemented --> verifying: verification started
+  verifying --> verified: verify pass
+  verifying --> fixing: verify fail, fix unit
+  verifying --> awaiting_human: verify needs a human
+  fixing --> verifying: fix unit done
+  verified --> fixing: minor findings fix
+  verified --> in_review: hand-off pushed
+  in_review --> merged: PR merged
+  in_review --> verifying: commit after hand-off
+  in_review --> verifying: repository CI failed
+  in_review --> implementing: spec edit after hand-off
+  merged --> [*]
+```
+
+The full diagram, with the parking edges and a table of every phase, is in [docs/state-diagram.md](docs/state-diagram.md).
