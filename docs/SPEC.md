@@ -2591,7 +2591,8 @@ missing or too-old tools that ENV-001, ENV-003 and ENV-004 report — uv, a pinn
 - act only when `ci.self_provision` resolves true: `true`, or `auto` unless the platform reports a disposable
   environment (GitLab `CI_DISPOSABLE_ENVIRONMENT=true`, which every executor except shell and ssh sets; GitHub
   `RUNNER_ENVIRONMENT=github-hosted`), so `auto` is true on GitLab shell and ssh executors, self-hosted GitHub runners
-  and local runs [V doc for GitLab; D for GitHub, runner-provisioning design D5]; when it resolves false every install
+  and local runs [V doc for GitLab; V for GitHub: both hosted images set `RUNNER_ENVIRONMENT=github-hosted`,
+  docs/spikes/06-hosted-runner-setup.md, run 38144352581]; when it resolves false every install
   action is reported `skipped` and the checks keep failing (exit 3);
 - install user-locally only (`~/.local/bin`, `$L4_HOME`, `$L4_CACHE/tools`, or the vendor installer's own user-local
   directory), at pinned versions, and never modify a shell profile;
@@ -3091,6 +3092,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 11 | `sandbox-security` | bubblewrap agent and gate sandboxes (L4-SEC-005), environment allow-lists (L4-SEC-001), adapter isolation flags (L4-SEC-002), protected paths, hardened harness-side tools (L4-SEC-006), doctor `SANDBOX-001`; M2: `user`/`container` modes, pairwise probes | `SANDBOX-001` passes on the reference runner; SCN-SEC-* scenarios |
 | 12 | `runner-provisioning` | self-provisioning of shell runners (L4-DOC-002): `install.sh`, `l4 doctor --fix` user-local installs, adapter readiness and printed human steps (PRV-001/002), `ci.self_provision`, the `.bash_logout` runner notice | its SCN-PRV scenarios; a fresh shell-runner user reaches a green `l4 doctor --ci` with only the printed human steps |
 | 13 | `live-validation` | live runs on the reference GitLab + a GitHub repo; `doctor --live` | the live scenario of §20.4 passes end to end |
+| 14 | `hosted-runner-setup` | runners nobody customized (GitHub-hosted): `L4_SELF_PROVISION` override, the pre-shim `.l4/bin/l4-setup` (uv, user-space bwrap, the one AppArmor sysctl on disposable runners only), the hosted tool cache, agent credentials from the environment, the pinned harness Python (L4-PRV-019..026; proposed, `openspec/changes/hosted-runner-setup/`) | the evidence workflow passes cold and warm on `ubuntu-24.04` and `ubuntu-22.04` (docs/spikes/06) |
 
 ---
 
