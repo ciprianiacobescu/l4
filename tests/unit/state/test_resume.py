@@ -151,7 +151,8 @@ def _escalated_world(app, monkeypatch, *, halt_reason: str | None, fix_round: in
     from l4.state.fold import UnitState
 
     state = UnitState(
-        unit=UNIT, phase="escalated", halt_reason=halt_reason, fix_round=fix_round, feedback_rounds_used=feedback_used
+        unit=UNIT, phase="escalated", halt_reason=halt_reason, fix_round=fix_round, fix_rounds_counted=fix_round,
+        feedback_rounds_used=feedback_used,
     )
     monkeypatch.setattr(resume_module, "load_snapshot", lambda *a, **k: SimpleNamespace(state=state))
     seen: dict = {}

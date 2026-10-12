@@ -45,9 +45,11 @@ from l4.specs.base import (
 from l4.specs.base import (
     Finding as SpecFinding,
 )
+from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import read_fix_marker, split_fix_name
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, answered_by, blocked_tasks, is_answered
-from l4.state.fold import fold
+from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
+from l4.state.fold import UnitState, fold
 from l4.state.ledger import ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
 from l4.vcs.git import Git
@@ -353,8 +355,15 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
 # --- after the verdict (line 37) --------------------------------------------------------------------------------------
 
 
-def _used_rounds(provider: FamilyProvider, ref: UnitRef, fix_round: int) -> int:
-    return max(fix_round, len(provider.units()) - 1)
+def _used_rounds(provider: FamilyProvider, state: UnitState) -> int:
+    """The fix units that count against `verifier.max_fix_rounds`: feedback fix units do not (L4-FBK-006). A fix unit
+    on disk that the ledger does not know is counted as a fix round."""
+    return max(state.fix_rounds_counted, len(provider.units()) - 1 - state.feedback_rounds_used)
+
+
+def _next_ordinal(provider: FamilyProvider, state: UnitState) -> int:
+    """`<parent>-fix-<n>`: n runs over fix units of every kind."""
+    return max(state.fix_round, len(provider.units()) - 1) + 1
 
 
 def adopt_orphans(ctx: HookContext, provider: FamilyProvider) -> None:
@@ -398,22 +407,30 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
         result.fix = FixDecision("spawn", marker.round if marker else 0, titles, [])  # no plan: it exists already
         return
     state = fold(read_ledger(s.ref.path).events, s.ref.id)
-    used = _used_rounds(provider, wb.ref, state.fix_round)
+    used = _used_rounds(provider, state)
+    ordinal = _next_ordinal(provider, state)
     limit = cfg.max_fix_rounds + state.fix_rounds_extra  # a member's extension (`l4 resume`, the label), L4-IMP-013
     plan = plan_fix_unit(
-        provider.criteria(wb.ref), result, result.human, ordinal=used + 1, fix_minor=cfg.fix_minor_findings
+        provider.criteria(wb.ref), result, result.human, ordinal=ordinal, fix_minor=cfg.fix_minor_findings
     )
     tasks = [f"{', '.join(g.ids)} {g.title}" for g in plan.groups]
     listed = list(plan.not_converted)
     if result.verdict is Verdict.FAIL:
         if not provider.can_fix:
             why = f"{wb.ref.framework.value} has no fix units"
+        elif plan.feedback_only:  # its own limit, not `max_fix_rounds` (L4-FBK-006)
+            if feedback_rounds_left(ctx.cfg, state) > 0:
+                result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
+            else:
+                note = f"feedback round limit reached ({feedback_round_limit(ctx.cfg, state)})"
+                result.fix = FixDecision("escalate", ordinal - 1, [], listed, note, code=FEEDBACK_ROUNDS_EXHAUSTED)
+            return
         elif used >= limit:
             why = f"fix rounds used {used}/{limit}"
         elif not plan.groups:
             why = "no finding of this round can be converted into a fix task"
         else:
-            result.fix = FixDecision("spawn", used + 1, tasks, listed, plan=plan)
+            result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
             return
         result.fix = FixDecision("escalate", used, [], listed, why)
         return
@@ -425,7 +442,23 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
             why = f"{wb.ref.framework.value} has no fix units"
         result.fix = FixDecision("none", used, [], [*listed, *(f"{', '.join(g.ids)}: {why}" for g in plan.groups)])
     else:
-        result.fix = FixDecision("spawn", used + 1, tasks, listed, plan=plan)
+        result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
+
+
+def _mark_taken(wb: Workbench, plan: FixPlan, fix_unit: str, round_: int) -> list[str]:
+    """Status `taken` and the Outcome line `Taken in round N into <fix unit>` in the parent's `feedback.md`, so that
+    the one fix-unit commit carries them (L4-FBK-004). Returns the repository-relative paths written."""
+    file = FeedbackFile.load(wb.ref.path)
+    if file is None or not plan.taken:
+        return []
+    for ref in plan.taken:
+        if file.get(ref.id) is not None:
+            file = file.set_status(ref.id, FeedbackStatus.TAKEN).set_outcome(
+                ref.id, f"Taken in round {round_} into {fix_unit}", redactor=wb.redactor
+            )
+    file.save()
+    assert file.path is not None
+    return [file.path.resolve().relative_to(wb.worktree.resolve()).as_posix()]
 
 
 def _drop_fix_unit(ctx: HookContext, wb: Workbench, result: VerifyResult, fix: FixDecision, reason: str) -> None:
@@ -450,6 +483,8 @@ def after_verdict(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger
         return trigger
     if fix.action == "escalate":
         ctx.shared["notes"] = (escalation_section(result, fix.reason, wb.redactor.redact_text),)
+        if fix.code:  # the edge's reason, which resume and the label read (`halt_reason`)
+            ctx.shared["escalation"] = (fix.code, fix.reason)
         return Trigger.VERIFY_FAIL_EXHAUSTED
     if fix.plan is None:  # the fix unit already exists: `fix_hook` runs it
         return trigger
@@ -470,12 +505,20 @@ def after_verdict(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger
         ctx.shared["notes"] = (escalation_section(result, reason, wb.redactor.redact_text),)
         return Trigger.VERIFY_FAIL_EXHAUSTED
     rel = ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
-    wb.git.run("add", "--", rel)
+    written = _mark_taken(wb, plan, ref.name, result.round)
+    wb.git.run("add", "--", rel, *written)
     trailers = CommitTrailers(unit=wb.ref.id, run_id=wb.run_id, iteration=max(wb.iteration, 1), phase="verifying")
     wb.git.commit(clip_subject(f"docs({wb.ref.name}): fix unit {fix.ordinal} [skip ci]"), trailers)
     ctx.push()
-    ctx.services.ledger.append(
+    ledger = ctx.services.ledger
+    ledger.append(
         "fix.spawned", parent=wb.ref.id, fix_unit=ref.name, round=fix.ordinal, verify_round=result.round,
-        findings=plan.finding_ids, consumed=plan.consumed,
+        findings=plan.finding_ids, consumed=plan.consumed, **({"feedback_only": True} if plan.feedback_only else {}),
     )  # fmt: skip
+    for item in plan.taken:
+        ledger.append(
+            "feedback.taken", id=item.id, kind=item.kind, sha256=item.sha256, round=result.round, fix_unit=ref.name
+        )
+    if plan.waiting:  # still takeable: the next round takes them
+        ledger.append("feedback.waiting", ids=plan.waiting, reason="fix_unit_full")
     return trigger

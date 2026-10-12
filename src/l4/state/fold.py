@@ -90,6 +90,7 @@ class UnitState(_Model):
     breaker_trips: int = 0  # `breaker.tripped` events since the last `unit.resumed` (L4-IMP-013)
     fix_rounds_extra: int = 0  # the sum of `budget.extended{fix_rounds}`, added to `verifier.max_fix_rounds`
     feedback_rounds_extra: int = 0  # the sum of `budget.extended{feedback_rounds}`, added to `feedback.max_rounds`
+    fix_rounds_counted: int = 0  # the fix units that are not feedback-only: what `verifier.max_fix_rounds` limits
     feedback_rounds_used: int = 0  # `fix.spawned{feedback_only: true}` events: feedback fix units (absent = false)
     feedback: dict[str, FeedbackState] = Field(default_factory=dict)  # item id -> state, from the `feedback.*` events
     resumed_signals: list[str] = Field(default_factory=list)  # `unit.resumed{signal}`: label events acted on (one each)
@@ -204,6 +205,8 @@ def _fix_spawned(state: UnitState, event: LedgerEvent) -> None:
         state.children.append(name)
         if event.data.get("feedback_only") is True:
             state.feedback_rounds_used += 1  # D8: counted apart from `verifier.max_fix_rounds`
+        else:
+            state.fix_rounds_counted += 1
     if isinstance(round_, int) and not isinstance(round_, bool):
         state.fix_round = max(state.fix_round, round_)
     state.open_fix_unit = name

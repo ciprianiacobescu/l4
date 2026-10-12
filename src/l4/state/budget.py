@@ -15,8 +15,9 @@ def fix_round_limit(cfg: L4Config, state: UnitState) -> int:
 
 
 def fix_rounds_exhausted(cfg: L4Config, state: UnitState) -> bool:
-    """The fix units spawned have reached the limit: a resume of an escalated unit then needs an extension."""
-    return state.fix_round >= fix_round_limit(cfg, state)
+    """The fix units spawned have reached the limit: a resume of an escalated unit then needs an extension. Feedback
+    fix units are not counted (L4-FBK-006)."""
+    return state.fix_rounds_counted >= fix_round_limit(cfg, state)
 
 
 def feedback_round_limit(cfg: L4Config, state: UnitState) -> int:

@@ -804,12 +804,14 @@ class Orchestrator:
             raise
         if (notes := self._ctx.shared.pop("notes", None)) is not None:  # the verdict questions' sticky section
             self._notes = notes
+        escalation = self._ctx.shared.pop("escalation", None)  # (reason, note): the feedback limit (L4-FBK-006)
         if trigger is Trigger.VERIFY_FAIL_EXHAUSTED:
-            why = "verification failed and no fix round is left (see verification.md)"
+            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
             self._notes = (self._stopped_section("escalated", why), *(self._notes or ()))
-        edge = self._go(trigger)
+        edge = self._go(trigger, **({"reason": escalation[0]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
-            self._exit_reason = "escalated: verification failed and no fix round is left (see verification.md)"
+            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
+            self._exit_reason = f"escalated: {why}"
         if edge.target is Phase.FIXING and self.services.hooks.fix is not None:
             return None  # SPEC 12.0 "10 or 0": the fix loop goes on in this run (D2)
         return None if edge.exit_code is None else ExitCode(edge.exit_code)
