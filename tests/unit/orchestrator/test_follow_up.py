@@ -218,3 +218,26 @@ def test_feedback_on_an_archived_openspec_change_becomes_a_follow_up_change(
     assert [e["id"] for e in ledger if e["type"] == "feedback.taken"] == ["FB-001", "FB-002"]
     on_main = raw(tdd_repo.origin, "show", f"main:openspec/changes/archive/2026-10-01-{name}/feedback.md")
     assert "**Status:** taken" not in on_main  # only the follow-up's branch says taken
+
+
+def test_a_follow_up_that_cannot_be_made_fails_the_run_and_nothing_is_left_half_done(
+    merged_kiro, run_l4, raw, monkeypatch
+):
+    """A push that fails leaves no branch and no state: the exit code says so and the next run tries again."""
+    from l4.forge.pushfail import PushFailed
+    from l4.vcs.git import Git
+
+    real = Git.push
+
+    def refuse(self, remote, refspecs, *, config=()):
+        if any(f"refs/heads/l4/kiro/{FOLLOW}" in r for r in refspecs):
+            raise PushFailed(1, "push refused by the server")
+        return real(self, remote, refspecs, config=config)
+
+    monkeypatch.setattr(Git, "push", refuse)
+    run = run_l4([], unit=False)
+    assert run.code != 0
+    assert raw(merged_kiro.origin, "for-each-ref", f"refs/heads/{BRANCH}").strip() == ""
+    monkeypatch.setattr(Git, "push", real)
+    assert run_l4([CHORE], unit=False).code == 0  # the next run makes it
+    assert raw(merged_kiro.origin, "for-each-ref", f"refs/heads/{BRANCH}").strip() != ""

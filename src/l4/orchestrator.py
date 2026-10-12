@@ -1139,7 +1139,13 @@ def run_command(
     refresh_refs(app, cfg, git)
     providers = list(providers_for(cfg, app.repo, app.environ))
     found = discover(cfg, git, providers, units)
-    if made := perform_follow_ups(app, cfg, git, [s for _, s in found]):  # merged feedback becomes units (L4-FBK-010)
+    made: list[FollowUpMade] = []
+    failure: ExitCode | int = ExitCode.OK
+    try:  # merged units' feedback becomes units (L4-FBK-010); a failure here is the next run's to retry, not the units'
+        made = perform_follow_ups(app, cfg, git, [s for _, s in found])
+    except Exception as exc:  # noqa: BLE001 - classified: the exit code of the run, after the other units ran
+        failure = classify_exception(exc)[0]
+    if made:
         found = discover(cfg, git, providers, units)  # the new units are on their own branches now
     snapshots = {s.ref.id: s for _, s in found}
     chosen = without_fix_units(
@@ -1151,14 +1157,16 @@ def run_command(
         ]
     if not chosen:
         log.info("nothing to do: no unit has a next step")  # before any lease, worktree or probe
-        return CommandResult(ExitCode.OK, [_follow_up_outcome(m) for m in made])
+        return CommandResult(failure, [_follow_up_outcome(m) for m in made])
     kiro = cfg.spec.kiro
     if (kiro.write_in_progress_marker or kiro.write_queued_marker) and any(
         ref.framework is Framework.KIRO for _, ref in chosen
     ):
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
-    result = replace(result, units=[*(_follow_up_outcome(m) for m in made), *result.units])
+    result = replace(
+        result, code=most_severe([result.code, failure]), units=[*(_follow_up_outcome(m) for m in made), *result.units]
+    )
     result = continue_left_units(app, cfg, result)
     log_artefacts(app.out_dir, app.run_id)
     return result

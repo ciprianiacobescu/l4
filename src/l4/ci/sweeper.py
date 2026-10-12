@@ -39,6 +39,12 @@ feedback limit (`phase.changed` reason `feedback_rounds_exhausted`) gets `budget
 the bot) is said once per event: `resume.refused{signal, why}` in the pending ledger and a section of the MR's sticky
 note.
 
+The follow-up duty (`l4 plan --sweep` only, L4-FBK-010): a `merged` unit whose `feedback.md` on the base branch has
+takeable items and no open follow-up gets its follow-up unit `<name>-followup-<n>` (`l4.follow_up`: its own branch from
+the base head, never pushed to the base). While one is open, newer items are recorded once as `feedback.waiting`
+(`reason: follow_up_open`) in the pending ledger of the parent's lock ref; an archived change has no lock ref, and
+nothing is written for it.
+
 M1: forge-and-ci 2.51 (WIP-branch cleanup, deleting the archived refs), 2.53 (closed and reopened MRs), 2.54
 (base-move refresh), state-vcs-locks 2.32 (capacity and lease resume), 2.35 (mirror repair).
 """

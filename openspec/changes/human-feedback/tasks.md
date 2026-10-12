@@ -26,7 +26,7 @@
 ## 5. After the merge
 
 - [x] 5.1 `l4 feedback add` on a merged unit writes to its folder on the base (OpenSpec archive folder, Kiro spec folder) [L4-FBK-010] — test: tests/unit/specs/test_feedback_cli.py::test_merged_unit_writes_to_the_archive_folder (write first, see it fail) — code: src/l4/specs/feedback.py — verify: uv run pytest tests/unit/specs -q
-- [ ] 5.2 Planner action `follow_up` and the follow-up unit `<name>-followup-<n>` (OpenSpec change or Kiro bugfix spec, `.l4/followup.json`, items taken in its ledger, one open follow-up per parent) [L4-FBK-010] [SCN-FBK-23, SCN-FBK-24] — test: tests/unit/planner/test_follow_up.py and tests/unit/orchestrator/test_follow_up.py (write first, see them fail) — code: src/l4/planner.py, src/l4/orchestrator.py, src/l4/specs/openspec.py, src/l4/specs/kiro.py — verify: uv run pytest tests/unit/planner tests/unit/orchestrator -q
+- [x] 5.2 Planner action `follow_up` and the follow-up unit `<name>-followup-<n>` (OpenSpec change or Kiro bugfix spec, `.l4/followup.json`, items taken in its ledger, one open follow-up per parent) [L4-FBK-010] [SCN-FBK-23, SCN-FBK-24] — test: tests/unit/planner/test_follow_up.py and tests/unit/orchestrator/test_follow_up.py (write first, see them fail) — code: src/l4/planner.py, src/l4/orchestrator.py, src/l4/specs/openspec.py, src/l4/specs/kiro.py — verify: uv run pytest tests/unit/planner tests/unit/orchestrator -q
 
 ## 6. SPEC, docs and live evidence
 
