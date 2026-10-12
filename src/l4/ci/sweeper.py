@@ -33,7 +33,9 @@ green or running pipeline writes nothing, and a branch past H is left to the run
 The resume duty (M1.11, `l4 plan --sweep` only): a `halted` unit whose open MR carries `<prefix>resume` is resumed when
 a member set the label (`l4.ci.resume_label`: the forge's own record of who, Developer access or more, not the harness's
 user), once per label event (`unit.resumed{signal}`). An `escalated` unit whose fix rounds are used up is resumed the
-same way with `budget.extended{fix_rounds: 1}` (M1.13, W-C2): one more round per label event. A refusal (a non-member,
+same way with `budget.extended{fix_rounds: 1}` (M1.13, W-C2): one more round per label event; one escalated at the
+feedback limit (`phase.changed` reason `feedback_rounds_exhausted`) gets `budget.extended{feedback_rounds: 1}` instead
+(L4-FBK-006). A refusal (a non-member,
 the bot) is said once per event: `resume.refused{signal, why}` in the pending ledger and a section of the MR's sticky
 note.
 
@@ -74,7 +76,7 @@ from l4.postmerge import ArchiveResult, MergeDetector, MergeVerdict, PostMergeAr
 from l4.progress import SWEEP_TRACE_TYPES, FilteredTrace, ProgressTrace
 from l4.specs.base import Framework, UnitRef, parse_unit_id
 from l4.specs.providers import provider_for_unit, providers_for
-from l4.state.budget import LABEL_FIX_ROUNDS, fix_rounds_exhausted
+from l4.state.budget import LABEL_FEEDBACK_ROUNDS, LABEL_FIX_ROUNDS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.ledger import LedgerEvent, LedgerWriter, ledger_path
 from l4.state.lifecycle import Phase, Trigger, transition
 from l4.state.pending import PendingLedger, read_pending
@@ -205,7 +207,7 @@ class Sweeper:
         *,
         retry: bool = False,
         ci: bool = False,
-        resumer: Callable[[UnitSnapshot, ResumeSignal, int], "UnitRunResult"] | None = None,
+        resumer: Callable[[UnitSnapshot, ResumeSignal, int, int], "UnitRunResult"] | None = None,
     ) -> None:
         self.app, self.cfg, self.git, self.forge = app, cfg, git, forge
         self._archiver, self._detector, self._retry, self._ci = archiver, detector, retry, ci
@@ -429,9 +431,13 @@ class Sweeper:
         if isinstance(decision, Refusal):
             return self._refuse(snapshot, pr, decision)
         # an escalated unit with all its fix rounds used gets exactly LABEL_FIX_ROUNDS more per label event (L4-CI-004)
-        more = LABEL_FIX_ROUNDS if state.phase == Phase.ESCALATED.value and fix_rounds_exhausted(self.cfg, state) else 0
-        result = self._resumer(snapshot, decision, more)
+        # (or LABEL_FEEDBACK_ROUNDS feedback rounds when it was escalated at the feedback limit, L4-FBK-006)
+        escalated = state.phase == Phase.ESCALATED.value
+        more_feedback = LABEL_FEEDBACK_ROUNDS if escalated and feedback_rounds_exhausted(state) else 0
+        more = LABEL_FIX_ROUNDS if escalated and not more_feedback and fix_rounds_exhausted(self.cfg, state) else 0
+        result = self._resumer(snapshot, decision, more, more_feedback)
         extended = f", {more} more fix round" if more else ""
+        extended += f", {more_feedback} more feedback round" if more_feedback else ""
         log.info("%s: resumed by a member's %s label (event %d%s)", ref.id, label, decision.event_id, extended)
         return SweepAction(ref.id, "resumed", f"{decision.signal}: back in {result.outcome.phase_after}{extended}")
 
@@ -464,7 +470,7 @@ class Sweeper:
         return SweepAction(ref.id, "resume_hint", f"head {head[:10]}")
 
     def _resume_in_worktree(
-        self, snapshot: UnitSnapshot, signal: ResumeSignal, more_fix_rounds: int
+        self, snapshot: UnitSnapshot, signal: ResumeSignal, more_fix_rounds: int, more_feedback_rounds: int = 0
     ) -> "UnitRunResult":
         from l4.state.resume import resume_unit  # the orchestrator imports the planner, which imports this module
 
@@ -473,6 +479,7 @@ class Sweeper:
         return resume_unit(
             self.app, self.cfg, self.git, provider, snapshot.ref, reason=f"label {label}", signal=signal.signal,
             by="member", extend_fix_rounds=more_fix_rounds or None,
+            extend_feedback_rounds=more_feedback_rounds or None,
         )  # fmt: skip
 
     def _refuse(self, snapshot: UnitSnapshot, pr: PullRequest, refusal: Refusal) -> SweepAction | None:
