@@ -2689,6 +2689,8 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
 | CFG-004 | error | `gates.test.command` set when `tdd.mode != off` | — |
 | CFG-005 | warn | an explicitly set `odd.forbidden_paths`, `tdd.test_globs` or `tdd.test_support_globs` drops default entries (names them and the `extra_` key that adds instead of replacing) | — |
+| CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
+| CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
