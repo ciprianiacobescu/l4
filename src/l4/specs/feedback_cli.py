@@ -150,13 +150,30 @@ def _refuse_derived(target: FeedbackTarget) -> None:
         )
 
 
+def _require_unit_branch(app: AppContext, cfg: L4Config, target: FeedbackTarget) -> None:
+    """Review #12: an open unit reads `feedback.md` from its own branch; a commit on the base is read only after the
+    merge, as a follow-up. A merged unit's file goes to the base branch (`_after_merge`)."""
+    git = _git(app)
+    if git is None or target.merged:
+        return
+    branch = git.run("symbolic-ref", "--short", "-q", "HEAD", check=False).stdout.strip()
+    wanted = f"{cfg.forge.branch_prefix}{target.framework.value}/{target.name}"
+    if branch != wanted:
+        raise _usage(
+            f"{target.id} is not merged: its feedback goes on its own branch (now on {branch or 'no branch'}); "
+            f"run: git switch {wanted}"
+        )
+
+
 def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None, *, write: bool = False) -> FeedbackTarget:
     """The unit folder `feedback.md` belongs to: `--unit`, else the unit of the checked-out branch, else exit 2 with
     the units listed. A `merged` unit's folder is its archive folder (OpenSpec, when archived) or its spec folder on
-    the base branch (L4-FBK-010). With `write` (add, submit, withdraw), a follow-up or a fix unit is refused."""
+    the base branch (L4-FBK-010). With `write` (add, submit, withdraw), a follow-up or a fix unit is refused
+    and an open unit must be on its own branch."""
     target = _resolve(app, cfg, unit)
     if write:
         _refuse_derived(target)
+        _require_unit_branch(app, cfg, target)
     return target
 
 

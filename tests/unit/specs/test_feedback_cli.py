@@ -80,6 +80,7 @@ def test_unit_flag_and_no_unit(ctx: Ctx):
     ctx.raw(ctx.repo, "checkout", "-q", "main")
     ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
     assert f"openspec:{UNIT}" in ctx.err and not ctx.feedback.exists()
+    ctx.raw(ctx.repo, "checkout", "-q", f"l4/openspec/{UNIT}")  # an open unit takes it on its own branch (review #12)
     ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}")
     assert ctx.feedback.exists()
     ctx.run("add", "--kind", "tests", "--text", "more", "--unit", "openspec:nope", expect=2)
@@ -428,3 +429,12 @@ def test_at_refuses_the_protected_folders_whatever_their_case_review_11(ctx: Ctx
     assert not ctx.feedback.exists()
 
 
+
+
+# --- an open unit's feedback goes to its branch (review #12) ------------------------------------------------------
+
+
+def test_an_open_unit_off_its_branch_is_refused_with_the_switch_line_review_12(ctx: Ctx):
+    ctx.raw(ctx.repo, "checkout", "-q", "main")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}", expect=2)
+    assert f"git switch l4/openspec/{UNIT}" in ctx.err and not ctx.feedback.exists()
