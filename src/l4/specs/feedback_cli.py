@@ -191,11 +191,12 @@ def parse_at(app: AppContext, cfg: L4Config, spec: str) -> tuple[Place, Quote | 
     parts = path.parts
     if path.is_absolute() or ".." in parts or "\\" in match["path"] or "`" in match["path"] or not parts:
         raise _usage(f"--at {spec!r}: give a path relative to the repository")
-    if ".l4" in parts or ".git" in parts:
+    folded = tuple(part.casefold() for part in parts)  # a case-insensitive file system opens `.L4/` as `.l4/`
+    if ".l4" in folded or ".git" in folded:
         raise _usage(f"--at {spec!r}: .l4/ and .git/ are not code")
     for root in (cfg.spec.openspec.root, cfg.spec.kiro.root):
-        root_parts = PurePosixPath(root).parts
-        if root_parts and parts[: len(root_parts)] == root_parts:
+        root_parts = tuple(part.casefold() for part in PurePosixPath(root).parts)
+        if root_parts and folded[: len(root_parts)] == root_parts:
             raise _usage(f"--at {spec!r}: {root}/ holds specs, not code")
     try:
         reject_symlinks(app.repo, *parts)

@@ -378,3 +378,16 @@ def test_a_merged_unit_off_the_base_branch_is_refused(ctx: Ctx):
     _ledger(ctx.repo / FOLDER, f"openspec:{UNIT}", "in_review", "merged")  # on the unit branch
     ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
     assert "check out main" in ctx.err and not ctx.feedback.exists()
+# --- --at is not case-sensitive about the folders it refuses (review #11) -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "at", [".L4/config.yaml:1", "src/.L4/x:1", f"OpenSpec/changes/{UNIT}/proposal.md:1", ".GIT/config:1"]
+)
+def test_at_refuses_the_protected_folders_whatever_their_case_review_11(ctx: Ctx, at: str):
+    (ctx.repo / "src" / ".l4").mkdir(exist_ok=True)
+    (ctx.repo / "src" / ".l4" / "x").write_text("a\n")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--at", at, expect=2)
+    assert not ctx.feedback.exists()
+
+
