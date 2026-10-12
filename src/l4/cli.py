@@ -74,14 +74,26 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
              help="Harness checkout to vendor (default: the one l4 runs from)."),
         _opt("--harness-repo", "harness_repo", help="Fetch the harness at run time from this git URL, no .l4/vendor/."),
         _opt("--harness-commit", "harness_commit_pin",
-             help="With --harness-repo: the commit to fetch (default: the running harness's)."),
+             help="With --harness-repo or --action: the commit to pin (default: the running harness's)."),
+        _opt("--harness-ref", "harness_ref",
+             help="With --harness-repo or --action: a tag or branch, resolved once with git ls-remote and pinned as "
+                  "its commit sha."),
+        _flag("--action", "action", help="GitHub: the harness comes from the setup action, one pinned uses: line."),
+        _opt("--action-repo", "action_repo", help="With --action: OWNER/REPO that holds the action (default: the "
+                                                  "harness's own)."),
+        _flag("--action-copy", "action_copy", help="With --action: keep a copy of the action in the repository "
+                                                   "and fetch the harness with a deploy key."),
+        _flag("--dependabot", "dependabot", help="With --action: add github-actions to .github/dependabot.yml."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
         _flag("--dry-run", "dry_run"),
         _opt("--harness-commit", "harness_commit_pin",
-             help="Fetched adoption: the commit to pin (default: the running harness's)."),
+             help="Fetched or action adoption: the commit to pin (default: the running harness's)."),
+        _opt("--harness-ref", "harness_ref",
+             help="Fetched or action adoption: a tag or branch, resolved once with git ls-remote and pinned as its "
+                  "commit sha."),
     ]),
     "doctor": ("Check environment, config, specs, git, forge, CI and state.", lambda: [
         _flag("--ci", "ci"), _flag("--live", "live"), _flag("--fix", "fix"), _unit(), _flag("--json", "as_json"),
