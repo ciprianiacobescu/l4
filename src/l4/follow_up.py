@@ -83,6 +83,11 @@ def _provider_in(tree: Path, cfg: L4Config, app: AppContext, framework: Framewor
     return OpenSpecProvider(tree, app.environ, root=cfg.spec.openspec.root)
 
 
+def _on_origin(git: Git, branch: str, cfg: L4Config, app: AppContext) -> bool:
+    found = git.run("ls-remote", "origin", f"refs/heads/{branch}", config=fetch_auth_config(cfg, app.environ))
+    return bool(found.stdout.strip())
+
+
 def make_follow_up(
     app: AppContext, cfg: L4Config, git: Git, snapshot: UnitSnapshot, items: tuple[FeedbackItem, ...], n: int
 ) -> FollowUpMade | None:
@@ -94,8 +99,7 @@ def make_follow_up(
     cache = cache_root(app.environ, repo=app.repo)
     names = UnitNames.for_unit(follow_id, branch_prefix=cfg.forge.branch_prefix, cache=cache)
     push_config = push_auth_config(cfg, app.environ)
-    exists = git.run("ls-remote", "origin", f"refs/heads/{names.branch}", config=fetch_auth_config(cfg, app.environ))
-    if exists.stdout.strip():
+    if _on_origin(git, names.branch, cfg, app):
         log.info("%s: %s is on origin already", parent.id, names.branch)
         return None
     manager = WorktreeManager(
@@ -119,7 +123,9 @@ def make_follow_up(
         created = provider.create_follow_up(parent_in_tree, n, plan.groups, plan.delta, taken)
         _mark_taken(app, created, [i for i, _ in taken], name)
         run_id = _write_ledger(app, created, follow_id, names, tree.head, plan.taken)
-        _commit_and_push(app, cfg, git.at(tree.path), names, parent.id, follow_id, name, n, push_config, run_id)
+        if not _commit_and_push(app, cfg, git.at(tree.path), names, parent.id, follow_id, name, n, push_config, run_id):
+            log.info("%s: %s was already created by another run; nothing more to do", parent.id, names.branch)
+            return None
         log.info("%s: follow-up %s created on %s for %s", parent.id, name, names.branch, ", ".join(i for i, _ in taken))
         return FollowUpMade(parent.id, follow_id, names.branch, tuple(i for i, _ in taken), tuple(plan.waiting))
     finally:
@@ -161,13 +167,17 @@ def _write_ledger(
 def _commit_and_push(
     app: AppContext, cfg: L4Config, git: Git, names: UnitNames, parent_id: str, follow_id: str, name: str, n: int,
     push_config: tuple[tuple[str, str], ...], run_id: str,
-) -> None:  # fmt: skip
+) -> bool:  # fmt: skip
+    """True when this run's push created the branch; False when the push was rejected and the branch is on `origin`
+    now: a concurrent base job (`l4 run`, `l4 plan --sweep`) made the same follow-up first (review #15)."""
     git.run("add", "-A")
     trailers = CommitTrailers(unit=follow_id, run_id=run_id, iteration=1, phase="intake")  # the ledger's run
     git.commit(f"docs({name}): follow-up {n} of {parent_id.partition(':')[2]} [skip ci]", trailers, BOT_IDENTITY)
     try:
         git.push("origin", [f"HEAD:refs/heads/{names.branch}"], config=push_config)
     except GitError as exc:
+        if _on_origin(git, names.branch, cfg, app):
+            return False
         raise explain_push_failure(
             exc, branch=names.branch, token_env=cfg.forge.token_env, environ=app.environ,
             redact=app.redactor.redact_text,
@@ -175,6 +185,7 @@ def _commit_and_push(
     remote_ref = f"refs/remotes/origin/{names.branch}"
     if git.rev_parse(remote_ref) is None:  # a clone with a narrower fetch refspec: the next listing needs the ref
         git.run("update-ref", remote_ref, "HEAD")
+    return True
 
 
 def perform_follow_ups(
