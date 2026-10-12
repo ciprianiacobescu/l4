@@ -10,6 +10,7 @@ from l4.fsutil import UnsafeFile, read_regular_file
 from l4.gates.junit import TestCase
 from l4.specs.base import SAFE_NAME, Criterion, CriterionIdCollision, Framework, SpecError
 from l4.specs.fixmark import read_fix_marker
+from l4.specs.followup import read_follow_up_marker
 from l4.vcs.git import Git
 
 MAX_SPEC_BYTES = 1024 * 1024
@@ -204,13 +205,15 @@ def _kiro_scan(text: str, *, bugfix: bool, dotted: Callable[[int], bool]) -> lis
 def kiro_criteria(unit_dir: Path) -> list[Criterion]:
     """Criteria of a Kiro spec: the EARS lines of `requirements.md` (under each requirement's `Acceptance Criteria`)
     and `bugfix.md`. The id hashes the criterion's normalised text, never its number, so a criterion inserted between
-    two others renumbers the aliases but moves no id (L4-CRT-001, SCN-CRT-05). In the `bugfix.md` of a fix unit only the
-    `2.n` and `3.n` items are criteria (the `1.n` are the defect); any other bugfix spec keeps its `1.n`, which its
-    tasks cite (review #1). In a fix unit (it has the harness's `.l4/fix.json`) a `2.n` item that ends in
-    `(parent Req 1.2, C-1a2b3c4d)` has that id: the family counts the parent's criterion once (L4-FBK-008)."""
+    two others renumbers the aliases but moves no id (L4-CRT-001, SCN-CRT-05).
+    In the `bugfix.md` of a fix unit or a follow-up only the `2.n` and `3.n` items are criteria (the `1.n` are the
+    defect); any other bugfix spec keeps its `1.n`, which its tasks cite (review #1). In a fix unit (it has the
+    harness's `.l4/fix.json`) a `2.n` item that ends in `(parent Req 1.2, C-1a2b3c4d)` has that id: the family counts
+    the parent's criterion once (L4-FBK-008)."""
     criteria: list[Criterion] = []
     seen: dict[str, str] = {}
     fix_unit = read_fix_marker(unit_dir) is not None  # only the harness's marker lets an item name another id
+    harness_unit = fix_unit or read_follow_up_marker(unit_dir) is not None  # a follow-up's bugfix.md has the same shape
     for filename, bugfix in (("requirements.md", False), ("bugfix.md", True)):
         try:
             text = read_regular_file(unit_dir / filename, limit=MAX_SPEC_BYTES).decode("utf-8", "replace")
@@ -219,7 +222,7 @@ def kiro_criteria(unit_dir: Path) -> list[Criterion]:
         except UnsafeFile as exc:
             raise SpecError(str(exc)) from None
         for requirement, label, body, line in _kiro_items(text, bugfix=bugfix):
-            if bugfix and fix_unit and label.startswith("1."):
+            if bugfix and harness_unit and label.startswith("1."):
                 continue  # in a fix unit the Current Behavior (Defect) describes the bug; the criteria are 2.n and 3.n
             alias = f"Req {label}"
             cid = criterion_id(Framework.KIRO.value, unit_dir.name, requirement, body)

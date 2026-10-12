@@ -232,3 +232,14 @@ def test_a_bugfix_spec_without_the_marker_keeps_its_1n_items_and_validates_when_
     )
     result = KiroProvider(tmp_path).validate(UnitRef(Framework.KIRO, "login-bug", spec), strict=True)
     assert result.valid, result.issues
+
+
+def test_a_follow_up_unit_drops_the_1n_items_like_a_fix_unit(tmp_path):
+    """review #1: the harness writes a follow-up's bugfix.md in the fix-unit shape; its 1.n are the defect too."""
+    from l4.specs.followup import FollowUpMarker, write_follow_up_marker
+
+    spec = tmp_path / "login-followup-1"
+    spec.mkdir()
+    (spec / "bugfix.md").write_text(BUGFIX.replace(" (parent Req 1.2, C-1a2b3c4d)", ""))
+    write_follow_up_marker(spec, FollowUpMarker("kiro:login", ()))
+    assert [c.alias for c in kiro_criteria(spec)] == ["Req 2.1", "Req 2.2", "Req 3.1"]
