@@ -111,7 +111,11 @@ l4 feedback add --kind behaviour --at src/inventory/reorder.py:7 \
 - **`--lesson`** makes the request a lesson for future units once it is addressed in a round that passes, for example
   "never hard-code endpoints". The lesson is titled `Human feedback: <your text>`, and the same request on two units
   reinforces one lesson.
-- **`--unit kiro:add-reorder-quantity`** names the unit when the checked-out branch is not the unit's branch.
+- **`--unit kiro:add-reorder-quantity`** names the unit when the checked-out branch is not a unit branch. A unit that
+  is still open takes its feedback on its own branch: from another branch the command exits 2 and prints the
+  `git switch l4/<framework>/<name>` line. A unit that was already merged is the exception (see below).
+- **A follow-up unit or a fix unit takes no feedback of its own.** `add`, `submit` and `withdraw` on its folder exit 2
+  and name the parent unit: give the feedback on the parent.
 - **`l4 feedback list`** and **`l4 feedback show FB-001`** show the items as the file holds them (id, status, kind,
   first place, title, and what makes an item invalid). Add `--json` for scripts.
 - **`l4 feedback withdraw FB-002`** takes back an item, then commit and push. An item not yet taken is never taken. An
@@ -122,8 +126,9 @@ You can also edit `feedback.md` by hand. The file explains its own format at the
 
 ## What happens after the push
 
-- **The pull request is ready (in review).** Your push sends the unit back to work, and any approval for the old head
-  is dropped.
+- **The pull request is ready (in review).** Your push sends the unit back to work: the harness only counts an
+  approval given for the hand-off head, so your push voids it (the approval label is removed) and the pull request goes
+  back to draft.
   1. The next round takes every submitted item and writes a fix unit, with one task per item. Your request comes first in
      the fix unit's proposal (OpenSpec) or `bugfix.md` (Kiro), as `Requested by <you> in FB-001 (…)`. The item's Status in
      `feedback.md` becomes `taken`, and its *Outcome* block names the fix unit.
@@ -135,21 +140,31 @@ You can also edit `feedback.md` by hand. The file explains its own format at the
   again. The note says why. When it is addressed, its Status becomes `addressed` and its *Outcome* block says
   `Addressed in round N at <commit>: <evidence>`.
 - **You change an item's text after it was taken.** It is taken again.
-- **The unit was already merged.** Follow-up units for merged units are planned but not built yet. For now, send the
-  request as a new change.
+- **The unit was already merged.** Check out the base branch and run `l4 feedback add --unit <framework>:<name> …`. It
+  writes `feedback.md` into the unit's folder there (the newest `openspec/changes/archive/<date>-<name>/` when
+  archived, else the change folder; `.kiro/specs/<name>/` for Kiro). Land that commit on the base branch by your usual
+  route. The next base run (`l4 run` or the scheduled sweep) creates the follow-up unit `<name>-followup-<n>` on its own
+  branch with its own pull request, with one task per item as above; the items' Status becomes `taken` (*Outcome*:
+  `Taken into <name>-followup-<n>`). Only one follow-up is open for a unit at a time; newer items wait
+  (`waiting for the next round (follow-up open)`) until it merges. Give later feedback on the parent unit, not on the
+  follow-up's pull request: the follow-up takes none of its own. A unit that was abandoned takes none.
 
 The note on the pull request has a **Your feedback** section, with one line per item (`FB-001 refactor src/x.py:4 — …`).
 After the dash the line says one of:
 - `draft (not sent)`;
-- `submitted (waiting for the next round)`;
-- `taken into <fix unit>`;
-- `waiting for the next round (fix unit full)`;
-- `addressed in round N at <commit>`;
+- `submitted (waiting for the next round)`, or `submitted (changed after round N; waiting for the next round)` for an
+  item you edited after it was taken;
+- `taken into <fix unit>` (or `<follow-up>`);
+- `waiting for the next round (fix unit full)` or `waiting for the next round (follow-up open)`;
+- `addressed in round N at <commit>` (the first ten characters of the commit);
 - `not addressed in round N: <why>`;
 - `invalid: <the problem>`, for example `invalid: config needs Env`;
 - `withdrawn`.
 
-Every note of a unit in review also ends with a hint line:
+A section has at most 30 lines; the rest are counted as `and N more in feedback.md`.
+
+Every note of a unit in review also ends with a hint line (the note of a follow-up or a fix unit instead ends with one
+line saying that feedback goes to the parent unit's `feedback.md`):
 `To ask for changes: l4 feedback add --kind refactor|duplication|tests|config|behaviour --at FILE:LINE --text "…", then commit and push (docs/feedback.md).`
 `verification.md` has a `## Feedback` section for the items taken or judged in each round, and `l4 status` shows a
 FEEDBACK column with the count of items per state.
@@ -158,7 +173,7 @@ FEEDBACK column with the count of items per state.
 
 - **Feedback rounds** have their own limit, `feedback.max_rounds` in `.l4/config.yaml` (default 5). They do not use up
   the fix rounds the harness keeps for its own failures. `max_rounds: 0` turns taking off. At the limit the unit stops
-  (escalated, exit code 13) with the note `feedback round limit reached (5)`. A member can grant more with
+  (escalated; the run exits 13) with the note `feedback round limit reached (5)`. A member can grant more with
   `l4 resume --unit … --reason "…" --extend-feedback-rounds 2`, or one more round with the `l4:resume` label.
 - **A refactor that needs a test change cannot pass**, because test files are frozen for `refactor` and `duplication`.
   An example is renaming a public function that tests call. Send it as `behaviour` instead and say what the new name or

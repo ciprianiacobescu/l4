@@ -35,6 +35,8 @@ from l4.specs.feedback import (
     new_problems,
     problems,
 )
+from l4.specs.fixmark import read_fix_marker
+from l4.specs.followup import read_follow_up_marker
 from l4.specs.providers import providers_for
 from l4.state.fold import fold
 from l4.state.ledger import LedgerCorrupt, LedgerRead, parse_ledger_files, read_ledger_files
@@ -136,10 +138,46 @@ def _after_merge(app: AppContext, cfg: L4Config, target: FeedbackTarget) -> Feed
     return replace(target, merged=True)
 
 
-def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None) -> FeedbackTarget:
+def _refuse_derived(target: FeedbackTarget) -> None:
+    """Review #5: a follow-up and a fix unit judge their parent's items, so a `feedback.md` of their own is never read
+    (it would be taken again every round). Writing commands send the person to the parent."""
+    marker = read_follow_up_marker(target.dir) or read_fix_marker(target.dir)
+    if marker is not None:
+        kind = "follow-up" if read_follow_up_marker(target.dir) is not None else "fix unit"
+        raise _usage(
+            f"{target.id} is a {kind} of {marker.parent}: it takes no feedback of its own; give the feedback on the "
+            f"parent ({marker.parent}), in its feedback.md"
+        )
+
+
+def _require_unit_branch(app: AppContext, cfg: L4Config, target: FeedbackTarget) -> None:
+    """Review #12: an open unit reads `feedback.md` from its own branch; a commit on the base is read only after the
+    merge, as a follow-up. A merged unit's file goes to the base branch (`_after_merge`)."""
+    git = _git(app)
+    if git is None or target.merged:
+        return
+    branch = git.run("symbolic-ref", "--short", "-q", "HEAD", check=False).stdout.strip()
+    wanted = f"{cfg.forge.branch_prefix}{target.framework.value}/{target.name}"
+    if branch != wanted:
+        raise _usage(
+            f"{target.id} is not merged: its feedback goes on its own branch (now on {branch or 'no branch'}); "
+            f"run: git switch {wanted}"
+        )
+
+
+def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None, *, write: bool = False) -> FeedbackTarget:
     """The unit folder `feedback.md` belongs to: `--unit`, else the unit of the checked-out branch, else exit 2 with
     the units listed. A `merged` unit's folder is its archive folder (OpenSpec, when archived) or its spec folder on
-    the base branch (L4-FBK-010)."""
+    the base branch (L4-FBK-010). With `write` (add, submit, withdraw), a follow-up or a fix unit is refused
+    and an open unit must be on its own branch."""
+    target = _resolve(app, cfg, unit)
+    if write:
+        _refuse_derived(target)
+        _require_unit_branch(app, cfg, target)
+    return target
+
+
+def _resolve(app: AppContext, cfg: L4Config, unit: str | None) -> FeedbackTarget:
     providers = providers_for(cfg, app.repo, app.environ)
     chosen = unit or _unit_of_branch(app, cfg)
     if chosen is None:
@@ -191,11 +229,12 @@ def parse_at(app: AppContext, cfg: L4Config, spec: str) -> tuple[Place, Quote | 
     parts = path.parts
     if path.is_absolute() or ".." in parts or "\\" in match["path"] or "`" in match["path"] or not parts:
         raise _usage(f"--at {spec!r}: give a path relative to the repository")
-    if ".l4" in parts or ".git" in parts:
+    folded = tuple(part.casefold() for part in parts)  # a case-insensitive file system opens `.L4/` as `.l4/`
+    if ".l4" in folded or ".git" in folded:
         raise _usage(f"--at {spec!r}: .l4/ and .git/ are not code")
     for root in (cfg.spec.openspec.root, cfg.spec.kiro.root):
-        root_parts = PurePosixPath(root).parts
-        if root_parts and parts[: len(root_parts)] == root_parts:
+        root_parts = tuple(part.casefold() for part in PurePosixPath(root).parts)
+        if root_parts and folded[: len(root_parts)] == root_parts:
             raise _usage(f"--at {spec!r}: {root}/ holds specs, not code")
     try:
         reject_symlinks(app.repo, *parts)
@@ -274,7 +313,7 @@ def run_feedback_add(
     if len(at) > MAX_PLACES:
         raise _usage(f"--at: at most {MAX_PLACES} places")
     app, cfg = load_app_config(app)
-    target = resolve_feedback_dir(app, cfg, unit)
+    target = resolve_feedback_dir(app, cfg, unit, write=True)
     parsed = [parse_at(app, cfg, spec) for spec in at]
     new = NewFeedback(
         kind=FeedbackKind(kind), title=title or _title(body), text=body, by=_by(app),
@@ -363,7 +402,7 @@ def run_feedback_show(app: AppContext, *, item: str, unit: str | None, as_json: 
 
 def _set_status(app: AppContext, unit: str | None, fid: str, status: FeedbackStatus, verb: str) -> ExitCode:
     app, cfg = load_app_config(app)
-    target = resolve_feedback_dir(app, cfg, unit)
+    target = resolve_feedback_dir(app, cfg, unit, write=True)
     file = _load(target)
     item = _find(file, fid, target)
     assert file is not None

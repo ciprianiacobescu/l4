@@ -1123,6 +1123,29 @@ places (`<dir>/**`), unscoped when a place is at the repository root or the item
 followed by the text cut at 60 characters; body the text, a leading `#` dropped, at most 600 characters; source `human
 feedback FB-NNN (<unit> round N)`. It is committed as L4-MEM-005 requires.
 
+**L4-FBK-010** `l4 feedback add --unit ID` on a `merged` unit MUST write `feedback.md` into the unit's folder on the
+checked-out base branch: for OpenSpec the newest `openspec/changes/archive/<date>-<name>/` or, when not archived,
+`openspec/changes/<name>/`; for Kiro `.kiro/specs/<name>/`. Any other checked-out branch is exit 2, an `abandoned`
+unit is exit 2, and the printed next step says to land the commit on the base by the person's usual route and that the
+next base run creates a follow-up. An open unit's item MUST go to the unit's branch: off it the command is exit 2 with
+the `git switch l4/<framework>/<name>` line. A base-branch run (`l4 run`, `l4 plan --sweep`) that finds a `merged` unit
+with takeable items MUST create the unit `<name>-followup-<n>` (n is 1 plus the follow-ups that exist, open or not;
+planner action `follow_up`; the parent's phase does not change):
+- it has the parent's framework, a new unit branch cut from the base head, and is never pushed to the base;
+- it holds one task per item by kind (L4-FBK-005), the `Requested by` lines first;
+- its marker `.l4/followup.json` is `{"schema": "l4/followup@1", "parent", "items": [{id, sha256}], chores,
+  test_chores, refactors}`;
+- it sets the items' Status `taken` (Outcome `Taken into <follow-up>`) in its branch's copy of the parent's
+  `feedback.md`, and writes `feedback.taken{id, kind, sha256, round: 0, fix_unit: <follow-up>}` to its own ledger.
+
+One follow-up is open per parent; newer items wait, recorded once as `feedback.waiting{ids, reason: "follow_up_open"}`
+on the parent's lock ref (nothing is written for an archived parent). The follow-up's rounds judge the parent's items
+through the marker (L4-FBK-007); the parent's `feedback.md` is the one path outside its own folder the harness may write
+for the follow-up, and only through a validated marker; the parent's criteria join its family. When the follow-up
+merges, the items read `addressed`. A follow-up and a fix unit take no feedback of their own: `l4 feedback
+add|submit|withdraw` on their folder is exit 2 naming the parent, and their sticky note says so instead of carrying
+the hint line.
+
 **L4-FBK-011** The person MUST see every item and how to ask: the sticky note section, the hint line and the
 `verification.md` and `l4 status` counts of L4-ARC-002.
 
@@ -2631,6 +2654,10 @@ the unit's ledger records `archive.done` when it merges. The rows mentioning app
 opt-in `on_approval` mode only. No other transitions exist; the simulation
 suite asserts that every edge above is exercised and that no other edge occurs.
 
+*Planner actions.* `l4 plan` names one next action per unit: `implement`, `clarify`, `verify`, `hand_off`, `follow_up`
+or `none`. `follow_up` is for a `merged` unit whose `feedback.md` on the base branch has takeable items and no open
+follow-up (L4-FBK-010); it creates the unit `<name>-followup-<n>` and changes no phase of the parent.
+
 *M1 form of the review rows (M1.9).* `archived` is a source only in `on_approval`, and leaving it needs the archive
 revert of L4-ARC-004, which is not built: the built rows have `in_review` as their only source, and the approval half
 (voided approval, archive revert) is N/A in `post_merge_pr`. The three edges carry no run exit: `commit_after_handoff` →
@@ -2658,7 +2685,7 @@ branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a sou
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
 `feedback.taken` (`{id, kind, sha256, round, fix_unit}`) | `feedback.addressed` (`{id, round, sha, evidence}`) |
 `feedback.not_addressed` (`{id, round, evidence}`) | `feedback.changed` (`{id, previous_sha256, sha256}`) |
-`feedback.withdrawn` (`{id}`) | `feedback.invalid` (`{id, problem}`) | `feedback.waiting` (`{ids, reason}`, `fix_unit_full`),
+`feedback.withdrawn` (`{id}`) | `feedback.invalid` (`{id, problem}`) | `feedback.waiting` (`{ids, reason}`, `fix_unit_full` or `follow_up_open`),
 all L4-FBK-004..007, `guard.restored` (`{task, paths, reason}`; `feedback_refactor` for the frozen tests of a refactor chore,
 L4-VER-006),
 `archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H), `ci.failed` (`{head, pipeline,
@@ -3071,7 +3098,9 @@ L4-GHP-004) [V, run 38173604230: `continuation: dispatched`]. GitLab answers `un
 the sweeper. The scheduled sweeper (`l4 plan --sweep`) MUST: resume `waiting_capacity` units whose `retry_after` has
 passed; resume units whose lease expired mid-step; detect merged or closed PRs; refresh `in_review` units whose base
 moved (L4-ARC-006); honour the `l4:resume` label (L4-SEC-004 limits who may set it to members); re-run intake for
-`rejected` units whose inputs changed; repair mirrors (labels/status/PR body) from state.
+`rejected` units whose inputs changed; create the follow-up unit of a `merged` unit with takeable feedback items, and
+record `feedback.waiting{reason: "follow_up_open"}` once for items that wait for an open one (L4-FBK-010); repair mirrors
+(labels/status/PR body) from state.
 On GitHub the label history is the pull request's issue events, and the access level is the collaborator's role, mapped
 to GitLab's scale: admin 50, maintain 40, write 30, triage 20, read 10. So "Developer" means write access (L4-GHP-007).
 [V, live: `label_events` returned the bot's own `l4:*` changes as `github-actions[bot]` 41898282 and a person's label with
@@ -5223,6 +5252,19 @@ scenario is a spec defect (§26).
 - **Given** a lesson from FB-001 of unit A ("read endpoints from the environment")
 - **When** unit B's FB-003, with the same text and `Lesson: yes`, is addressed in a PASS round
 - **Then** the lesson with that dedupe key is reinforced, not duplicated.
+
+#### SCN-FBK-23 (+) Feedback on a merged Kiro unit · L4-FBK-010
+- **Given** a merged Kiro unit `add-reorder-quantity`, and a base commit that adds a submitted `duplication` item to its
+  `feedback.md`
+- **When** the next base run plans
+- **Then** the unit `add-reorder-quantity-followup-1` exists on its own branch with one chore task and the marker
+  `.l4/followup.json`, and its PR opens as draft.
+
+#### SCN-FBK-24 (−) One follow-up at a time · L4-FBK-010
+- **Given** an open `add-reorder-quantity-followup-1`, and a new submitted item on the parent
+- **When** the next base run plans
+- **Then** no second follow-up is created, `feedback.waiting{reason: "follow_up_open"}` is recorded once, and the item
+  reads `waiting (follow-up open)`.
 
 #### SCN-FBK-25 (+) The hint is there when the PR is ready · L4-FBK-011
 - **Given** a unit that just handed off
