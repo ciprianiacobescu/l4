@@ -164,7 +164,7 @@ of the harness package.
 | `l4 ci render --platform github\|gitlab` | Print generated CI files (used by `init`, `doctor`) | none |
 | `l4 ci render-child --plan FILE` | Print the GitLab child pipeline (one job per actionable unit) | none |
 | `l4 ci map-exit CODE` | Translate an `l4` exit code into the CI platform's convention (§16): GitHub → annotation + exit 0 or 1; GitLab → annotation + the original code (so `allow_failure: exit_codes` applies) | none |
-| `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N]` | Human command (members only): leave `halted`/`escalated`, reset breaker counters, optionally extend budgets (L4-IMP-013). It runs no agent and no gate, so it needs no sandbox; the sweep does the same for a member's `l4:resume` label (L4-CI-004) | ledger commit |
+| `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only): leave `halted`/`escalated`, reset breaker counters, optionally extend budgets (L4-IMP-013). It runs no agent and no gate, so it needs no sandbox; the sweep does the same for a member's `l4:resume` label (L4-CI-004) | ledger commit |
 | `l4 eval [--impl P]… [--judge P]… [--ref-judge P] [--unit ID]… [--k N] --out DIR [--cell-timeout DUR] [--resume] [--idle-check CMD] [--runner] [--dry-run]` \| `--warm-cache` \| `--compare OLD [--new FILE \| --baseline-dir DIR] [--max-drop X] [--allow-seed-change] [--require-all] [--json]` | Measure profiles on the fixed seed set through the real implement and verify paths and write a scorecard (§20.1); compare two scorecards and exit 15 when a profile regressed | `--out` files; `--warm-cache` fills the uv cache of the eval |
 
 All commands MUST accept `--config PATH`, `--repo PATH`, `--log-format human|json` and `-v/-q`.
@@ -989,6 +989,156 @@ is unblocked when every question listing a pending task under *Blocking tasks* i
 If a later commit changes the answer of a consumed question (human override), the harness MUST spawn a fix unit
 "apply clarification Q-NNN" instead of editing `tasks.md`.
 
+### 6.3 `feedback.md`
+
+`feedback.md` is the other direction of `questions.md`: a person asks the harness for changes to the code of an open
+unit, and the harness takes each request into a fix task, checks that it was done, and reports what happened to it. The
+file copies the shape of `questions.md` on purpose (a header comment, an index between markers, one section per item,
+byte-span edits, ids never reused). The change `openspec/changes/human-feedback/` holds the design (D1–D13) and the
+full requirement text; this subsection is the contract, and the mechanics sit with the paragraphs it points to
+(L4-VER-006, L4-VER-007, §10.3, L4-KSP-005, L4-MEM-002, L4-ARC-002, §12.1).
+
+**L4-FBK-001** `feedback.md` MUST live at the root of the unit directory, next to `questions.md` (OpenSpec: the change
+folder; Kiro: `.kiro/specs/<name>/`). The person owns each item's heading title, its *Status* values `draft`,
+`submitted` and `withdrawn`, its *Kind*, *Where*, *Env*, *Lesson* and *By* lines and its *Code*, *Feedback* and
+*When / Then* blocks. The harness owns the header comment, the index region, the *Status* values `taken` and
+`addressed`, and each item's *Outcome* block. Harness edits MUST be span-scoped (one *Status* value, one *Outcome*
+body, one index row, an item appended) and MUST preserve every other byte, including the line-ending style; text the
+harness writes is redacted. The file is read to at most 2 MiB. Item ids are `FB-NNN`, unique per unit and never
+reused: the next id is one more than the largest id seen in a heading, in an index row, or in any `feedback.*` ledger
+event of the unit, so an item whose section the person deleted keeps its number.
+
+````markdown
+# Feedback — add-reorder-quantity
+
+<!-- l4:feedback v1
+Ask for changes here while the unit's branch is open. The easy way is `l4 feedback add` (see `l4 feedback --help`).
+An item is read only when its **Status** is `submitted`; `draft` items wait and `withdrawn` items are ignored.
+Kinds: refactor · duplication · tests · config · behaviour (see docs/feedback.md).
+Do not change item IDs. Commit and push to the l4/… branch: the harness takes submitted items at its next
+verification round, turns them into a fix unit and checks that each one was addressed. -->
+
+<!-- l4:feedback-index:start -->
+| ID | Status | Kind | Where | Feedback |
+|----|--------|------|-------|----------|
+| FB-001 | submitted | config | src/inventory/reorder.py:7 | Read the rounding from the environment |
+<!-- l4:feedback-index:end -->
+
+---
+
+## FB-001: Read the rounding from the environment
+
+- **Status:** submitted
+- **Kind:** config
+- **Where:** `src/inventory/reorder.py:7`
+- **Env:** `PACK_ROUNDING`
+- **Lesson:** yes
+- **By:** Alex, 2026-10-12T09:30:00Z
+
+### Code
+```python
+ROUNDING = 10
+```
+
+### Feedback
+Pack rounding is hard-coded; let operators set it.
+
+### Outcome
+<!-- written by the harness -->
+````
+
+The *Where* line may repeat (at most 5), each as `PATH` or `PATH:L` or `PATH:L-L`; *When / Then* is a pair of lines
+`- **When:** …` and `- **Then:** …`. After a take the harness writes the *Outcome* body as `Taken in round N into <fix
+unit>`, and after the judge's check `Addressed in round N at <sha10>: <evidence>`. Statuses are the five words
+`draft`, `submitted`, `withdrawn` (the person's) and `taken`, `addressed` (the harness's).
+
+**L4-FBK-002** Each item MUST carry Status, Kind, a *Feedback* text and, by kind:
+
+| Kind | Required | Refused |
+|---|---|---|
+| `refactor` | at least one *Where* | *Env*, *When*, *Then* |
+| `duplication` | at least one *Where* | *Env*, *When*, *Then* |
+| `tests` | — | *Env*, *When*, *Then* |
+| `config` | at least one *Where* and *Env* matching `^[A-Z_][A-Z0-9_]*$` | — (*When* and *Then* together, or neither) |
+| `behaviour` | *When* and *Then* | *Env* |
+
+Parsing MUST be tolerant: Status and Kind are case-insensitive, the first word of a Status line counts, and an unknown
+Status reads as `draft`; a section the harness does not know (a heading that is not `## FB-NNN: …`) ends the previous
+item and is never read; a fence that never closes hides nothing. An item that breaks these rules is *invalid*: it MUST
+NOT be taken, and it is reported with its problem (`config needs Env`) in the sticky note and as
+`feedback.invalid{id, problem}`. Only an item that would otherwise be taken is reported invalid; a `draft` is never
+read.
+
+**L4-FBK-003** `l4 feedback add|list|show|submit|withdraw` (§2.1) MUST write only `feedback.md` and MUST never commit,
+push or call the forge. The unit is `--unit ID`, else the one named by the checked-out branch
+`l4/<framework>/<name>`; otherwise the command exits 2 and lists the units. Each `--at PATH[:L[-L]]` (up to 5) names a
+repository-relative file in the working tree, outside `.l4/`, `.git/` and the spec roots, whose line range exists; the
+named lines are quoted into the *Code* block, at most 40 lines or 4,000 bytes, redacted. The kind rules of L4-FBK-002
+are checked before anything is written (a failed check is exit 2 and writes nothing, and the message names options:
+`--env`, `--when`, `--then`, `--at`). `add` prints the item id with its status, the file, and the `git add`,
+`git commit -m "feedback(<name>): FB-NNN <title>"` and `git push` lines that send it. `--text -` reads standard input,
+`--draft` writes Status `draft`, and `submit` accepts only a valid draft. `list` and `show` accept `--json`
+(`l4/feedback@1`). `l4 feedback --help` and each subcommand's `--help` carry the kinds and one example per kind.
+
+**L4-FBK-004** At step 0 of every verification round, each *takeable* item MUST become a deterministic blocking
+finding (`source: "feedback"`; the title `Feedback FB-NNN (<kind>): <title>`, the person's text whole up to 1,200
+characters as the detail), the round MUST fail at step 0 without running gates or judges, and the fix unit of
+L4-VER-006 is written. An item is takeable when it is valid, it is not `withdrawn`, the feedback round limit
+(`feedback.max_rounds` plus extensions, L4-FBK-006) is not 0, and either its Status is `submitted`, or its Status is `taken` or `addressed` and its content
+hash differs from the one the last `feedback.taken` recorded. The content hash is the sha256 of the item's kind,
+places, *Env*, *When*, *Then* and text with whitespace normalised; the title, *Lesson*, *Code*, Status, *Outcome* and
+index are not in it, so a harness edit never changes it and an edit of the request does: the item is taken again and
+`feedback.changed{id, previous_sha256, sha256}` is recorded once. A `taken` or `addressed` item with no take in the
+ledger is not taken (its Status was written by hand). `withdrawn` before a take means the item is never taken; after a
+take the item is no longer judged (`feedback.withdrawn`), and the tasks already written still run. Before the
+hand-off, items wait for the next round: no running task or fix unit is interrupted. A push of `feedback.md` after the
+hand-off is a spec edit (§12.0, `in_review → implementing`), `ALL_LEAVES_DONE` leads to verification, and step 0 takes
+the items. Taking is recorded in the round that writes the fix unit, in the fix unit's own commit: `feedback.taken{id,
+kind, sha256, round, fix_unit}`, Status `taken` and the *Outcome* line.
+
+**L4-FBK-005** The fix unit holds one task per taken item, never shared with another finding, by the item's kind, and
+puts the request first; the rules are in L4-VER-006 (the refactor freeze, the test chore, the ADDED requirement
+`… — feedback FB-NNN` and its scenarios, the cap of `MAX_FIX_TASKS` and `feedback.waiting`).
+
+**L4-FBK-006** Feedback fix units are counted apart from `verifier.max_fix_rounds` and limited by `feedback.max_rounds`
+(§3.2); the rules, the escalation and the extensions are in L4-VER-007 and L4-IMP-013.
+
+**L4-FBK-007** Each taken item MUST be checked. In a round whose family holds a feedback fix unit with items taken and
+not yet addressed, every judge gets the data block `<l4:data kind="feedback">` (id, kind, places, quoted code, text,
+*When*/*Then* or *Env*) and answers `feedback: [{id, addressed, evidence}]` (§10.3). An item is addressed when every
+judge that got the block answers `addressed: true` (a missing answer is `false`, evidence "not answered"); a `config`
+item also needs its *Env* name, as a whole identifier, in a non-test file the family changed, and without it no judge
+answer closes the item. An item that is not addressed becomes a blocking finding (`source: "feedback"`, title
+`FB-NNN not addressed: <evidence>`) and the round fails into the next feedback fix unit, recorded as
+`feedback.not_addressed{id, round, evidence}`. An addressed item gets Status `addressed`, the *Outcome* line, and
+`feedback.addressed{id, round, sha, evidence}` in the round's evidence commit.
+
+**L4-FBK-008** A Kiro unit's fix units are bugfix specs (L4-KSP-005); `decide_fix` does not escalate a Kiro unit for
+lack of fix units.
+
+**L4-FBK-009** An item with `Lesson: yes` that the ledger records as addressed in a PASS round becomes or reinforces a
+lesson (L4-MEM-001, L4-MEM-002 (d)): origin `feedback`; dedupe key `feedback-<first 12 hex of sha256(lower-cased,
+whitespace-collapsed text)>`, so the same request on two units reinforces one lesson; scope the directories of its
+places (`<dir>/**`), unscoped when a place is at the repository root or the item has none; title `Human feedback: `
+followed by the text cut at 60 characters; body the text, a leading `#` dropped, at most 600 characters; source `human
+feedback FB-NNN (<unit> round N)`. It is committed as L4-MEM-005 requires.
+
+**L4-FBK-011** The person MUST see every item and how to ask: the sticky note section, the hint line and the
+`verification.md` and `l4 status` counts of L4-ARC-002.
+
+**L4-FBK-012** `feedback.md` is a protected path for every agent role (L4-SEC-004; the prompt contract names it,
+L4-IMP-004): an agent's change to it is put back as a `guard.violation`. A base merge that conflicts in it MUST be
+resolved by item: the union of the items by id; each item's person-owned content from the side that changed it since
+the merge base, else from the unit branch (the unit branch when both changed it); the harness's spans (Status `taken`
+and `addressed`, the *Outcome* block, the index) from the unit branch. When the unit branch holds every item and the
+base adds none, the result is the unit branch's file byte for byte. The same id holding two different items on the two
+sides, with no merge base to tell which is older, stays a conflict (escalated).
+
+**L4-FBK-013** The change MUST be proven live on a dummy repository with a Kiro unit authored by kiro-cli: the unit
+runs to a ready PR, a person sends one `refactor` and one `config` item with `l4 feedback add`, commits and pushes,
+both are taken, fixed and judged addressed, the PR returns to ready and a person merges. The evidence is recorded
+under `docs/live/feedback/`.
+
 ---
 
 ## 7. Implementer
@@ -1376,6 +1526,12 @@ continue — `l4 resume` without one is refused with a message naming the exhaus
 reset by a later resume. An escalated unit that still has rounds left (three verifier errors, a fix unit that could not be
 created) resumes without one, and the unit goes back to `verifying`. `--extend-iterations` and `--extend-cost` are still
 refused. A member's `l4:resume` label is the extension for an escalated unit, fixed at one round (L4-CI-004).
+The feedback-round extension is built the same way (L4-FBK-006): `--extend-feedback-rounds N` records
+`budget.extended{feedback_rounds: N}` before `unit.resumed`, the fold sums it (`UnitState.feedback_rounds_extra`) and the
+feedback limit is `feedback.max_rounds` plus that sum. A unit escalated at the feedback limit
+(`phase.changed{reason: "feedback_rounds_exhausted"}`) needs it, and `l4 resume` without it is refused with a message
+naming `feedback.max_rounds`; a fix-round extension does not release it, and the label gives it one feedback round instead
+of a fix round.
 
 ### 7.7 Sessions, WIP and time budget
 
@@ -2272,9 +2428,38 @@ non-test file fails the attempt, at least one new test must pass, and `task.test
 commit. Parent → `fixing`; when the fix unit's tasks are done, the **parent** is re-verified as a whole (round + 1),
 covering parent and fix criteria.
 
+A finding with `source: "feedback"` (a taken item of `feedback.md`, L4-FBK-004, or an item the judge found not addressed,
+L4-FBK-007) is one task of its own: it is never grouped with another finding and never dropped for lacking a criterion or a
+scenario. The proposal (OpenSpec) or `bugfix.md` (Kiro) puts the request first, before every other finding and decision:
+`Requested by <By> in FB-NNN (<kind>, <places>): <text>`, the text kept whole up to 1,200 characters, followed by the quoted
+code. The task is by the item's kind:
+* `refactor` and `duplication`: a chore listed under `refactors` in `.l4/fix.json`, run with no red step (it cites no
+  requirement; the implementer's `run_single` runs it as `kind=refactor`). After the agent's step every
+  path matching `tdd.test_globs` or `tdd.test_support_globs` that it changed is put back (a new one is removed) as
+  `guard.restored{task, paths, reason: "feedback_refactor"}`, the attempt fails with `nothing changed` when no other file
+  changed, and every gate must pass: the unchanged, passing tests are the proof that behaviour did not change.
+* `tests`: the test chore above (`test_chores`).
+* `config` and `behaviour`: an **ADDED** requirement (OpenSpec: `### Requirement: <item title> — feedback FB-NNN` in the
+  parent's one capability, else the first by name; Kiro: `2.n`/`3.n` items of `bugfix.md`) and the task goes red, then green.
+  Its scenarios are, for `behaviour`, the item's `WHEN <when>` / `THEN <then>`; for `config`, `WHEN the environment variable
+  NAME is set THEN the system SHALL use its value instead of the value written at <first place>` (the item's own When/Then
+  replaces this one when given) and `WHEN NAME is not set THEN the system SHALL CONTINUE TO behave as before this change`.
+
+A fix unit holds at most `MAX_FIX_TASKS` (5) tasks. Feedback items past that cap are not converted: they stay takeable,
+are recorded as `feedback.waiting{ids, reason: "fix_unit_full"}`, and the sticky note says they wait for the next round.
+
 **L4-VER-007** On FAIL when `max_fix_rounds` fix units already exist (i.e. at most `max_fix_rounds + 1` verification
 rounds), or after 3 consecutive internal errors, the unit goes to `escalated`, label `l4:escalated`, sticky comment
 with the verdict summary, exit 13.
+
+A fix unit all of whose consumed blocking findings have `source: "feedback"` is a *feedback fix unit* (recorded as
+`fix.spawned{…, feedback_only: true}`). It is not counted against `verifier.max_fix_rounds`; it is counted against
+`feedback.max_rounds` (§3.2; default 5, 0 turns taking off), raised by `budget.extended{feedback_rounds}` (L4-IMP-013).
+On a FAIL whose fix unit would be a feedback fix unit and whose feedback limit is used up, the unit goes to `escalated`
+(exit 13, label `l4:escalated`) with `phase.changed{reason: "feedback_rounds_exhausted"}` and the note `feedback round
+limit reached (N)` in the sticky comment; `l4 resume --extend-feedback-rounds N` or the resume label continues it. A fix
+unit that also consumes a non-feedback finding (a red repository CI job, a gate failure) is a normal fix round, counted
+by `max_fix_rounds`, and its feedback items are still marked taken.
 
 ### 10.8 System-One calibration data
 
@@ -2418,9 +2603,9 @@ phase; the archive on approval is the `in_review → archived` transition.
 | `implementing`, `verifying`, `fixing` | breaker or budget (L4-IMP-008/009) | `halted` | 13 |
 | `implemented` | — | `verifying` | — |
 | `verifying` | PASS | `verified` | — |
-| `verifying` | FAIL and fewer than `max_fix_rounds` (+ extensions) fix units | `fixing` (fix unit created) | 10 or 0 |
+| `verifying` | FAIL and fewer than `max_fix_rounds` (+ extensions) fix units (feedback fix units are not counted, L4-FBK-006) | `fixing` (fix unit created) | 10 or 0 |
 | `verifying` | NEEDS_HUMAN | `awaiting_human` (verdict questions) | 11 |
-| `verifying` | FAIL with all allowed fix units used, or 3 consecutive internal errors | `escalated` | 13 |
+| `verifying` | FAIL with all allowed fix units used (for a feedback-only fix unit: the `feedback.max_rounds` rounds, L4-FBK-006), or 3 consecutive internal errors | `escalated` | 13 |
 | `fixing` | the fix unit's tasks are all done | `verifying` (round + 1) | — |
 | `fixing` | the fix unit needs answers | stays `fixing`; outcome reports the child's `awaiting_human` | 11 |
 | `verified`, `in_review`, `archived` | a consumed answer was overridden (L4-QMD-006) | `fixing` (clarification-apply unit) | — |
@@ -2470,7 +2655,12 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `gate.result`, `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret`, `question.raised|question.answered|
 question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
-`fix.spawned`,
+`fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
+`feedback.taken` (`{id, kind, sha256, round, fix_unit}`) | `feedback.addressed` (`{id, round, sha, evidence}`) |
+`feedback.not_addressed` (`{id, round, evidence}`) | `feedback.changed` (`{id, previous_sha256, sha256}`) |
+`feedback.withdrawn` (`{id}`) | `feedback.invalid` (`{id, problem}`) | `feedback.waiting` (`{ids, reason}`, `fix_unit_full`),
+all L4-FBK-004..007, `guard.restored` (`{task, paths, reason}`; `feedback_refactor` for the frozen tests of a refactor chore,
+L4-VER-006),
 `archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H), `ci.failed` (`{head, pipeline,
 jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own CI is red on H; `tail` is the end of the job's
 log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters) and `ci.step` (`{job, head, step,
@@ -2893,7 +3083,9 @@ not the token's own user (the project's bot is a Developer: it is excluded by id
 gate), once per label event: an event id already in a `unit.resumed.signal` is never acted on again, and the next mirror
 sync removes the label. An `escalated` unit whose fix rounds are used up gets one more fix round per label event
 (`budget.extended{fix_rounds: 1, by: member, signal}` before `unit.resumed`, so a label never gives more than one round
-and an old event never gives one again; M1.13, SCN-RES-03); one that has rounds left resumes with no extension. A refusal
+and an old event never gives one again; M1.13, SCN-RES-03); an `escalated` unit stopped at the feedback limit gets one more
+feedback round per label event instead (`budget.extended{feedback_rounds: 1, by: member, signal}`, L4-FBK-006); one that
+has rounds left resumes with no extension. A refusal
 (a non-member, the harness's own user) is said once per event:
 `resume.refused{signal, why}`, one warning line and one sticky-note section. A forge that cannot read label events (GitHub
 for now) has no event to refuse: the label is never honoured there, and nothing is said. A person's push on a halted branch gets one pointer line per branch head (`resume.hint{head}`): add
@@ -4908,6 +5100,150 @@ scenario is a spec defect (§26).
 - **When** the check runs
 - **Then** no finding is raised from the test path freeze (the red-green freeze check still lists the path as unfrozen by
   a human answer, as today); a `task.unfrozen` of another task does not allow it.
+
+### 23.9.1 Human feedback (FBK)
+
+#### SCN-FBK-01 (+) Harness edits leave the person's text alone · L4-FBK-001
+- **Given** a `feedback.md` with two items whose texts contain Markdown headings in code fences and trailing spaces
+- **When** the harness marks FB-001 `taken` and writes its *Outcome*
+- **Then** only FB-001's Status value, its *Outcome* block and its index row changed, byte for byte.
+
+#### SCN-FBK-02 (−) A deleted item's id is not reused · L4-FBK-001
+- **Given** a file where the person deleted the section of FB-002, which the ledger records as taken
+- **When** `l4 feedback add` adds an item
+- **Then** the new item is FB-003.
+
+#### SCN-FBK-03 (−) A config item without a variable is not taken · L4-FBK-002
+- **Given** a submitted `config` item with no *Env* line
+- **When** the next verification round starts
+- **Then** the item is not taken, the note says `FB-001 config … — invalid: config needs Env`, and `feedback.invalid` is
+  recorded.
+
+#### SCN-FBK-04 (−) A draft is never read · L4-FBK-002, L4-FBK-004
+- **Given** a valid item whose Status is `draft`
+- **When** the next verification round starts
+- **Then** the item is not taken, and the note lists it as `draft (not sent)`.
+
+#### SCN-FBK-05 (+) Add on a unit branch · L4-FBK-003
+- **Given** the checked-out branch `l4/openspec/add-reorder-quantity` and `src/inventory/reorder.py` with 20 lines
+- **When** the person runs `l4 feedback add --kind refactor --at src/inventory/reorder.py:4-9 --text "extract the rounding into a helper"`
+- **Then** `openspec/changes/add-reorder-quantity/feedback.md` holds FB-001, Status `submitted`, with lines 4–9 quoted;
+  the output names FB-001 and the `git add`, `git commit` and `git push` lines; `git status` shows only that file
+  changed.
+
+#### SCN-FBK-06 (−) A refused item writes nothing · L4-FBK-003, L4-FBK-002
+- **Given** the same branch
+- **When** the person runs `l4 feedback add --kind behaviour --text "round down"` without `--when` and `--then`
+- **Then** exit 2, the message names `--when` and `--then`, and no file changed.
+
+#### SCN-FBK-07 (−) A place outside the code is refused · L4-FBK-003
+- **Given** the same branch
+- **When** `--at` names `.l4/config.yaml`, a spec file, a missing file, or line 40 of a 20-line file
+- **Then** each is exit 2 and writes nothing.
+
+#### SCN-FBK-08 (+) Feedback after the hand-off re-enters and fails the round at step 0 · L4-FBK-004, L4-ARC-004
+- **Given** a unit `in_review` at H, and a person's commit that adds a submitted `refactor` item to `feedback.md`
+- **When** the next run reads the branch
+- **Then** the phases go `in_review` → `implementing` → `verifying` → `fixing`; the round's verdict is FAIL at step 0 with
+  one feedback finding, no gate or judge ran, and a fix unit exists.
+
+#### SCN-FBK-09 (+) Feedback before the hand-off waits for the round · L4-FBK-004
+- **Given** a unit `implementing` task 2.1, and a person's push that adds a submitted item mid-run
+- **When** the run that resumes the unit continues
+- **Then** task 2.1 and the remaining tasks run as planned, and the item is taken at step 0 of the unit's verification.
+
+#### SCN-FBK-10 (−) Nothing to take, nothing changes · L4-FBK-004
+- **Given** a unit whose `feedback.md` has only `addressed` and `withdrawn` items with unchanged content
+- **When** a verification round starts
+- **Then** step 0 adds no feedback finding.
+
+#### SCN-FBK-11 (+) A refactor changes code and keeps every test · L4-FBK-005, L4-VER-006
+- **Given** a taken `refactor` item, and an agent step that edits `src/inventory/reorder.py` and also `tests/test_reorder.py`
+- **When** the step ends
+- **Then** `tests/test_reorder.py` is put back with `guard.restored{reason: "feedback_refactor"}`, the source change stays,
+  and the gates run on the original tests.
+
+#### SCN-FBK-12 (−) A refactor that changes nothing fails its attempt · L4-FBK-005, L4-VER-006
+- **Given** a taken `duplication` item, and an agent step that changes only a test file
+- **When** the step ends
+- **Then** the test file is put back, and the attempt fails with `nothing changed`.
+
+#### SCN-FBK-13 (+) A config item goes through red and green · L4-FBK-005, L4-VER-006
+- **Given** a taken `config` item with `Env: PACK_ROUNDING` at `src/inventory/reorder.py:7`
+- **When** the fix unit is written and run
+- **Then** it has an ADDED requirement `… — feedback FB-001` with the two scenarios of L4-VER-006, and its task runs red
+  (a new test fails) and then green.
+
+#### SCN-FBK-14 (−) A sixth item waits · L4-FBK-005, L4-VER-006
+- **Given** six submitted items
+- **When** they are taken at step 0
+- **Then** the fix unit has five tasks, `feedback.waiting{ids: [FB-006], reason: "fix_unit_full"}` is recorded, FB-006
+  stays `submitted` in the file, and the note says `waiting for the next round (fix unit full)`.
+
+#### SCN-FBK-15 (+) Feedback does not use up fix rounds · L4-FBK-006, L4-VER-007
+- **Given** `verifier.max_fix_rounds: 1` and a unit that already used its one fix round
+- **When** a person submits an item after the hand-off
+- **Then** a feedback fix unit is written (`fix.spawned{feedback_only: true}`), and the unit is not escalated.
+
+#### SCN-FBK-16 (−) The feedback limit escalates · L4-FBK-006, L4-VER-007, L4-IMP-013
+- **Given** `feedback.max_rounds: 1`, one feedback fix unit already done, and a new submitted item
+- **When** the next round's step 0 runs
+- **Then** the unit is `escalated` with exit 13, `phase.changed{reason: "feedback_rounds_exhausted"}` and the note
+  `feedback round limit reached (1)`; `l4 resume --extend-feedback-rounds 1` records `budget.extended{feedback_rounds: 1}`
+  before `unit.resumed`.
+
+#### SCN-FBK-17 (+) Addressed items close · L4-FBK-007
+- **Given** a feedback fix unit that is done, with FB-001 (`refactor`) and FB-002 (`config`, `Env: PACK_ROUNDING`)
+- **When** the parent is re-verified, the judge answers both `addressed: true`, and `PACK_ROUNDING` appears in `src/inventory/reorder.py`
+- **Then** the round can PASS, both items read `addressed` with the round and sha, and the unit hands off again.
+
+#### SCN-FBK-18 (−) The judge's yes cannot close a config item without its variable · L4-FBK-007
+- **Given** the same, but no changed non-test file contains `PACK_ROUNDING`
+- **When** the judge answers `addressed: true` for FB-002
+- **Then** FB-002 is not addressed (`feedback.not_addressed`), and the round fails into a new feedback fix unit.
+
+#### SCN-FBK-19 (+) An edit after the take re-opens the item · L4-FBK-004, L4-FBK-007
+- **Given** FB-001 `addressed`
+- **When** the person changes its *Feedback* text and pushes
+- **Then** the next round takes FB-001 again, and `feedback.changed` records both hashes.
+
+#### SCN-FBK-20 (+) A failed Kiro round gets a bugfix fix unit · L4-FBK-008, L4-KSP-005
+- **Given** a Kiro unit whose round 1 fails one criterion `Req 1.2` (C-1a2b3c4d)
+- **When** the round ends
+- **Then** `.kiro/specs/<parent>-fix-1/` holds `bugfix.md`, `design.md`, `tasks.md`, `.config.kiro` and `.l4/fix.json`;
+  `bugfix.md` has `2.1` restating C-1a2b3c4d; the unit is `fixing`, not `escalated`; re-verification counts C-1a2b3c4d
+  once.
+
+#### SCN-FBK-21 (−) An invalid Kiro fix unit leaves nothing behind · L4-FBK-008, L4-KSP-005
+- **Given** a Kiro fix unit whose tasks would cite a requirement that does not exist
+- **When** validation fails
+- **Then** the folder and any stray files are removed, and the unit escalates with the validation error.
+
+#### SCN-FBK-22 (+) The same request on a second unit reinforces one lesson · L4-FBK-009
+- **Given** a lesson from FB-001 of unit A ("read endpoints from the environment")
+- **When** unit B's FB-003, with the same text and `Lesson: yes`, is addressed in a PASS round
+- **Then** the lesson with that dedupe key is reinforced, not duplicated.
+
+#### SCN-FBK-25 (+) The hint is there when the PR is ready · L4-FBK-011
+- **Given** a unit that just handed off
+- **When** its sticky note is written
+- **Then** the note ends with the `To ask for changes:` line.
+
+#### SCN-FBK-26 (+) The note follows an item through its life · L4-FBK-011
+- **Given** FB-001 submitted after the hand-off
+- **When** it is taken, then addressed two rounds later
+- **Then** the note reads `taken into add-reorder-quantity-fix-1`, then `addressed in round 3 at <sha>`.
+
+#### SCN-FBK-27 (−) An agent marking its own item addressed is put back · L4-FBK-012
+- **Given** an agent step that sets FB-001's Status to `addressed`
+- **When** the step ends
+- **Then** `feedback.md` is restored, and a `guard.violation` names it.
+
+#### SCN-FBK-28 (+) The full loop on a Kiro unit · L4-FBK-013
+- **Given** a dummy repository with a Kiro unit at a ready PR
+- **When** a person sends a `refactor` and a `config` item and pushes
+- **Then** the run log shows the step-0 FAIL, a Kiro bugfix fix unit, red/green for the config task, a chore for the
+  refactor, a PASS with both items addressed, and a new hand-off.
 
 ### 23.10 Archive and PR lifecycle (ARC)
 
