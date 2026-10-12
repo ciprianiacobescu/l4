@@ -21,7 +21,7 @@ from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
-from l4.specs.followup import feedback_home
+from l4.specs.followup import feedback_home, follow_up_problem
 from l4.state.ledger import LedgerEvent
 from l4.vcs.authorship import SHA, commit_records, is_harness
 from l4.vcs.git import Git
@@ -115,10 +115,13 @@ def _follow_up_feedback(ctx: IntegrityContext) -> str | None:
     if not ctx.unit_dirs:
         return None
     root = ctx.git.repo
-    folder = feedback_home(root / ctx.unit_dirs[0])
+    folder = feedback_home(root / ctx.unit_dirs[0])  # the unit's own folder for a marker that does not validate
     if folder == root / ctx.unit_dirs[0]:
         return None
-    return (folder / FEEDBACK_FILENAME).relative_to(root).as_posix()
+    try:
+        return (folder / FEEDBACK_FILENAME).relative_to(root).as_posix()
+    except ValueError:
+        return None
 
 
 def check_protected(ctx: IntegrityContext) -> Outcome:
@@ -133,6 +136,10 @@ def check_protected(ctx: IntegrityContext) -> Outcome:
     )
     hits, protected_paths = [], {}
     parents_file = _follow_up_feedback(ctx)
+    if parent is not None and (why := follow_up_problem(ctx.git.repo / parent)) is not None:
+        hits_invalid = [f"{parent}/.l4/followup.json ({why}; it exempts nothing)"]
+    else:
+        hits_invalid = []
     for path in sorted(_changed(ctx.git, ctx.base_sha, ctx.head_sha)):
         if _in_unit_dirs(ctx, path) or path.startswith(HARNESS_OWNED) or path == parents_file:
             continue
@@ -142,7 +149,7 @@ def check_protected(ctx: IntegrityContext) -> Outcome:
     # harness commit also touched, or that no commit in the range names, stays a blocker
     human = protected_changes_by_human(ctx.git, ctx.base_sha, ctx.head_sha, list(protected_paths))
     listed = {change.path for change in human}
-    hits = [f"{path} ({rule})" for path, rule in protected_paths.items() if path not in listed]
+    hits = [f"{path} ({rule})" for path, rule in protected_paths.items() if path not in listed] + hits_invalid
     for fix_dir in ctx.unit_dirs[1:]:
         if foreign := foreign_commits(ctx.git, ctx.base_sha, ctx.head_sha, fix_dir):
             hits.append(f"{fix_dir} (touched by non-harness commit {foreign[0][:10]})")
