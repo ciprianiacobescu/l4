@@ -47,7 +47,9 @@ built-ins (available as configured gate commands), a web dashboard.
 
 **L4-INS-001** The harness MUST be a Python ≥ 3.11 package (`l4harness`) exposing a console entry point `l4`,
 runnable without prior installation via
-`uvx --from git+<harness-repo-url>@<tag> l4 <command>`.
+`uvx --from git+<harness-repo-url>@<tag> l4 <command>`. On GitHub it is also a setup action
+(`.github/actions/l4`, L4-ACT-001): the harness repository holds the action, a composite one, and a consumer
+workflow's step `uses: <owner>/<repo>/.github/actions/l4@<sha>` installs the harness and puts `l4` on `PATH`.
 
 **L4-INS-002** `l4 init` MUST create, in the target repository, only:
 `.l4/config.yaml`, `.l4/prompts/` (empty, for overrides), the CI caller file(s) for the chosen platform(s),
@@ -79,6 +81,23 @@ SHA]` writes the fetched form instead (L4-GHP-010). The adopting repository then
 - the CI file;
 - the evidence: each spec's `.l4/ledger/`, `verification.md` and `questions.md`.
 
+`l4 init --ci github --action` writes the action form instead (`harness.delivery: action`, L4-ACT-004). The adopting
+repository then holds only `.l4/config.yaml`, `.github/workflows/l4.yml` and the evidence (and `.serena/project.yml`
+when memory is on): no `.l4/bin/l4`, no `.l4/bin/l4-setup`, no vendored code. There are two sources:
+- **`action`:** the action's own repository is the harness. A private repository of the harness owner reaches it
+  with no key and no secret, once the harness repository's Settings > Actions > Access allows "Accessible from
+  repositories owned by …". GitHub never lets a public repository use it [V: spike, run 38299270512, which fails at
+  "Set up job"].
+- **`repository`:** `--action-copy` writes a copy of the action under `.github/actions/l4` (used as
+  `uses: ./.github/actions/l4`), which installs `git+<repository>@<commit>` with a read-only deploy key, the
+  environment secret `L4_HARNESS_SSH_KEY`: one key per consumer, for public repositories and other owners' ones.
+  `--action-repo OWNER/REPO` names the repository that holds the action (default: the one `--harness-repo` names, else
+  the one the running harness was installed from).
+
+`--dependabot` writes `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, and merges into an existing
+file without replacing it, so version pins move by pull request (L4-ACT-005). A local `l4` is whatever the person
+installed (`uv tool install`); doctor CFG-007 says so when none is on `PATH`.
+
 **L4-INS-005** The harness version used by CI MUST be pinned in exactly one place in the target repo:
 `.l4/config.yaml: harness.version` (a release tag) **and** `harness.commit` (the full commit SHA that tag pointed to
 when pinned). CI files MUST read both from there and fetch by **commit SHA** (`uvx --from git+<url>@<sha>`), because
@@ -88,6 +107,20 @@ shim reads both with `sed` and runs `uvx --python <pin> --from git+<repository>@
 harness by commit, so a warm runner fetches nothing. A private repository is reached with a read-only deploy key: on
 GitHub, the environment secret `L4_HARNESS_SSH_KEY`, which the template writes under `$RUNNER_TEMP` and the sandbox
 hides (L4-GHP-010) [V: public dummy repository, run 38173604230].
+
+With `harness.delivery: action` the pin is in exactly one other place: the workflow's `uses:` line, a full 40-hex
+commit sha followed by a comment naming the ref (`@<sha> # v0.3.0`). `harness.commit` MUST NOT be written, and
+`.l4/bin/` holds nothing. `--harness-ref REF` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with
+`git ls-remote <repository> REF` when the file is written, so the sha is fixed and the comment says which release it
+was; a ref that resolves to nothing is exit 2. `l4 upgrade --harness-ref REF` or `--harness-commit SHA` rewrites the
+`uses:` line, and the `commit` input of a copy of the action (source `repository`), and changes nothing else.
+Doctor CFG-006 checks that the pin is a 40-hex sha and that the two agree. Dependabot reads the `uses:` line and
+proposes a newer release tag as a pull request.
+
+**Harness provenance.** The action exports the commit it installed as `L4_HARNESS_COMMIT` (the `commit` input, or the
+`uses:` ref when that is a 40-hex sha; a tag or branch is no commit, so none is exported). `l4.buildinfo` reads it
+when the installed copy's `direct_url.json` has no commit, so a harness installed from the action's local copy is not
+`unknown` and the ledger names it (`harness 3cd4cfee6f04`) [V: run 38307444318].
 
 **L4-INS-006 `l4 setup gitlab`.** Adoption MUST NOT need three scripts and a hand-made token. `l4 setup gitlab
 --project P` MUST, in order and idempotently: read the project; list the runners that carry `ci.runner_tags` with
@@ -114,12 +147,102 @@ expires during the run (a brokered JWT): on a 401 the command is run once for th
 again; a second 401, a failing command or an empty output raises the 401 with `token command failed (...)` and never shows
 the command's output.
 
+**L4-ACT-001** The harness repository MUST hold `.github/actions/l4/action.yml`, a composite action that installs
+the harness, makes the runner ready and puts `l4` on `PATH`. Inputs: `source` (`auto`, `action` or `repository`),
+`repository`, `commit`, `ssh-key`, `python`, `uv-version`, `self-provision`, `clis` and `command`. Outputs: `source`,
+`harness-cache-hit`, `clis-cache-hit`, `clis-cache-key`, `clis-cache-paths` and `version`. It is a setup action, not
+a do-everything one: the workflow runs each `l4` command as its own step, so logs, timings and `if:` conditions stay
+per step. Two sources:
+- **`action`:** installs from the action's own downloaded copy, with no credential.
+- **`repository`:** installs `git+<repository>@<commit>`. With `ssh-key`, the key goes to a 0600 file in
+  `$RUNNER_TEMP`, used with GitHub's pinned host keys and removed right after the install.
+
+`auto` picks `action` when the action's repository holds `src/l4`, else `repository`. A bad `source`, a `commit` that
+is not 40 hex digits, or a missing `repository` MUST fail with `::error::` and exit 2 before any download. The action
+MUST never print an input value.
+
+**L4-ACT-002** The action MUST keep two caches:
+- **The installed harness:** the uv tool directory, uv's Pythons, and the `l4`, `uv` and `uvx` links. Key:
+  `l4-harness-<os>-<arch>-<image>-py<python>-<source>-<hash>`, the hash a content hash of `src`, `pyproject.toml`,
+  `uv.lock` and `README.md` for `action`, or the commit for `repository`. The action restores and saves it.
+- **The agent CLIs and bwrap,** at the paths `doctor --ci --fix` installs into (`~/.local/bin`, `~/.local/share/l4`,
+  `~/.local/share/claude`, `~/.cache/l4/installers`). Key: the OS, architecture, image and `l4 ci cache-key clis`, a
+  hash of the provisioning catalog's pinned versions. It MUST NOT contain the harness commit or content hash.
+  npm's download cache and the harness's own `uv`, `uvx` and `l4` links are left out (the first is redundant once the
+  installed copies are cached, and the second is in the harness cache).
+
+A composite action has no post step, so the action restores the CLI cache and the consumer's workflow saves it, after
+`l4 doctor --ci --fix` has installed the CLIs, on the base branch and only when `clis-cache-hit` is not `true`. The
+save step reads the paths and the key from the action's outputs `clis-cache-paths` and `clis-cache-key` and MUST NOT
+repeat them (§16.2). `clis: none` skips the second cache.
+
+**L4-ACT-003** On GitHub the action MUST run the harness's own `l4-setup.sh` (L4-PRV-020..022): from its copy for
+source `action`, rendered by the installed harness (`l4 ci render-setup | bash`) for source `repository`. It uses the
+same switch (`L4_SELF_PROVISION`, input `self-provision`, where `auto` means on for a GitHub-hosted runner and
+leaves the config's `ci.self_provision` to decide elsewhere), the same single root command and the same `[HSU-nn]` lines. A consumer in action
+mode MUST NOT need `.l4/bin/l4-setup`. On GitLab and self-hosted runners `.l4/bin/l4-setup` stays as it is.
+
+**L4-ACT-004** `l4 init --ci github --action` MUST write `harness.delivery: action` and a
+`.github/workflows/l4.yml` that keeps the github-parity triggers, permissions, environment, concurrency, timeout and
+base-branch rule. Its steps are: checkout; the base-branch checkout on other branches (L4-GHP-005);
+`uses: <owner>/<repo>/.github/actions/l4@<sha> # <ref>`; `l4 doctor --ci --fix`; `l4 plan --sweep`; `l4 run`;
+`l4 status`; the upload of `.l4-out`; and, on a hosted runner, the CLI cache save step (§16.2). It MUST NOT write
+`.l4/bin/l4`, `.l4/bin/l4-setup` or `harness.commit`: the `uses:` sha is the only pin. `--action-copy` writes the
+action under `.github/actions/l4` and uses it with source `repository`; `--dependabot` adds or merges
+`.github/dependabot.yml` for `github-actions`. `l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
+on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `fetched` or `action` (§3.2).
+
+**L4-ACT-005** `l4 init` and `l4 upgrade` MUST accept `--harness-ref REF`: REF is resolved once with
+`git ls-remote`, the sha is written as `@<sha> # <REF>`, and a ref that resolves to nothing is exit 2. `l4 upgrade`
+(`--harness-ref` or `--harness-commit`) rewrites the `uses:` line, and the `commit` input of source `repository`.
+Once, when the workflow's save step carries a literal path list from before the paths became the action's output,
+`l4 upgrade` replaces that list with the output reference (§16.2).
+
+**L4-ACT-006** The harness repository MUST have `release.yml`. On a tag `src-vX.Y.Z` it MUST: refuse a source commit
+whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
+`LICENSE` (when present), `.github/actions/l4/` and `skills/`, whose parent is the previous release commit and whose
+message names the source sha (`scripts/dev/release_commit.py`); check that its tree equals a `git archive` of those
+paths at the source sha; tag it `vX.Y.Z` and move `v0`; and create a GitHub release naming the source sha. Consumers
+pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27 MB `docs/live/` adds to the main history.
+
+**L4-ACT-007** The harness repository tests itself (§21, change 18). `checks.yml` MUST run the unit suite in 8
+deterministic shards (a split by test file, `scripts/dev/shards.py`, no new dependency) on pull requests to `amaster`,
+nightly when `amaster` moved, and on `workflow_dispatch`, not on every push; one summary check fails when any shard
+fails. It keeps its other jobs: ruff, `scripts/check_spec.py`, gitleaks over every commit and the checked-out files,
+and the publication scrub check. `action-selftest.yml` MUST run `uses: ./.github/actions/l4` with source `action`, then
+`l4 --version` and `l4 doctor --adoption` on `tests/fixtures/py_tdd`. `.github/dependabot.yml` covers the repository's
+own `github-actions` pins. The unit suite MUST NOT depend on the runner: a session git identity, no ambient CI
+variables and no host-specific tool (a hosted runner has no git identity).
+
+**L4-ACT-008** Each ACT requirement MUST be proven on GitHub with run ids and Actions API step timings, recorded under
+`docs/live/action/` ([`live/action/README.md`](live/action/README.md)): both sources, private and public; the split
+caches across a harness upgrade; `l4 init --action` on a fresh copy; a full `doctor`/`plan`/`run` of a seed unit
+through the action; one release; one sharded pull-request check. Temporary deploy keys MUST be removed after their
+test.
+
+**L4-SKL-001** The harness repository MUST hold an installable `l4` skill, `skills/l4/SKILL.md`, in the Agent Skills
+format: frontmatter `name: l4`, a description that starts "Use when…" and names the triggers (adopting L4, a unit's
+status, questions, feedback, an escalated or halted unit), a body under 500 words, and the references `adopt.md`,
+`operate.md` and `feedback.md`. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` MUST make it
+installable with `/plugin marketplace add` and `/plugin install l4@agent-supervisor`; for Codex the folder is copied to
+`~/.agents/skills/`. The skill MUST never ask for, print or move a secret, and never tell an agent to run an agent CLI
+by hand on a runner. [Not yet built: delivery change 18, tasks 4.1–4.3.]
+
+**L4-SKL-002** The skill MUST be written against recorded failures. Before it is written, subagents without it attempt
+the scenarios (a configurable URL is `config` with `--env`; renaming a function the tests call is `behaviour`, never
+`refactor`; refusing to mark one's own feedback item addressed by editing `feedback.md`; a private repository is adopted
+with the action, source `action` and no key; a public one with a deploy key; a verdict question is answered with
+`accept` or `reject` first; an escalated unit at the feedback limit resumes with `l4 resume --extend-feedback-rounds`,
+once human-feedback is merged), and their answers go to `skills/l4/tests/baseline.md`. The same scenarios are then run
+with the skill (`skills/l4/tests/with-skill.md`); every scenario that applies MUST pass, and any loophole found is
+closed and re-run. [Not yet built: delivery change 18, tasks 4.1–4.3.]
+
 Runtime prerequisites on the runner. `doctor` checks them. In CI they are installed only:
 - by `l4 doctor --fix`, when `ci.self_provision` resolves true (the override `L4_SELF_PROVISION` included): explicitly,
   logged, user-local, at pinned versions, never with root and never with a login (L4-DOC-002);
 - on a runner nobody prepared (GitHub-hosted), first by the separate pre-shim script `.l4/bin/l4-setup`. It installs
   uv and a user-space bwrap, and on a disposable runner only it may run one root command, the AppArmor user-namespace
-  sysctl (L4-PRV-020..022).
+  sysctl (L4-PRV-020..022). With the GitHub setup action the same script runs inside the action (L4-ACT-003).
 
 Nothing is ever installed silently. The prerequisites:
 git ≥ 2.34 (Ubuntu 22.04's git; worktrees, `push --atomic`, `commit --trailer` need ≥ 2.32; the reference runner has
@@ -2655,7 +2778,21 @@ and that value decides whether either of the two middle steps installs anything 
 1. a tool-cache restore;
 2. `.l4/bin/l4-setup`;
 3. `l4 doctor --ci --fix`;
-4. a cache save on the base branch. The detailed rules
+4. a cache save on the base branch.
+
+With the GitHub setup action (`harness.delivery: action`, L4-ACT-003) the first two steps are the action's, and the
+consumer keeps no `.l4/bin/l4-setup`:
+- The action runs the same script (`l4 ci render-setup | bash` for source `repository`, the copy of
+  `ci/templates/l4-setup.sh` for source `action`) with the same switch and the same `[HSU-nn]` lines
+  (L4-PRV-020..022). Its input `self-provision` is `auto` by default, which means on for a GitHub-hosted runner
+  (`RUNNER_ENVIRONMENT=github-hosted`); `true` and `false` force it, and `L4_SELF_PROVISION` still decides what
+  `doctor --ci --fix` installs (L4-PRV-023).
+- The tool cache is split in two (L4-ACT-002). The harness cache is the action's. The agent-CLI cache is keyed on the
+  provisioning catalog's pins and never on the harness, so a harness upgrade keeps it warm; it leaves out npm's
+  download cache and the harness's `uv`, `uvx` and `l4`. Measured on the dummy repository: 383 MB restored in 12.0 s
+  became 229 MB in 3.8 s, and a warm job went from 16 s to 7 s in the action step [V: runs 38305164623, 38309137948].
+
+The detailed rules
 (the one-command `install.sh`, checksums, a clean installer environment, one tool search path, a provisioning lock,
 idempotence, offline behaviour, `--fix --dry-run`) are specified by delivery change 12 `runner-provisioning`
 (`openspec/changes/runner-provisioning/`). The reproducible host-side preparation of a shell runner, root steps
@@ -2762,6 +2899,22 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
 * `l4.yml` (caller, generated): triggers above; job `doctor`; job `plan` (outputs the actionable unit list as JSON);
   job `run` with `strategy.matrix.unit: ${{ fromJSON(needs.plan.outputs.units) }}`, `max-parallel:
   ci.max_parallel_units`, skipped when the list is empty.
+* With `harness.delivery: action` (L4-ACT-004) the caller is one job. Its steps are: checkout (with
+  `persist-credentials: false`); the base-branch checkout on other branches; the setup action
+  `uses: <owner>/<repo>/.github/actions/l4@<sha> # <ref>` (`id: l4`; source `repository` adds `source`, `repository`,
+  `commit` and `ssh-key: ${{ secrets.L4_HARNESS_SSH_KEY }}`); `l4 doctor --ci --fix`; `l4 plan --sweep`; `l4 run`;
+  `l4 status`; the upload of `.l4-out`; and, on a hosted runner, `actions/cache/save` for the agent CLIs. The save step
+  runs on the base branch, after success, when `steps.l4.outputs.clis-cache-hit != 'true'`, and reads
+  `path: ${{ steps.l4.outputs.clis-cache-paths }}` and `key: ${{ steps.l4.outputs.clis-cache-key }}`.
+  - **Why the paths come from the action.** A cache is versioned by its exact path list, so a save with a literal list
+    that differs from the restore's by one entry is never found again. After an upgrade changed the action's list, the
+    consumer's literal list was stale: the cache was saved on every run and missed on every run [V: runs 38307444318
+    and 38308033922, CLI cache missed although saved]. The paths are therefore one list, the action's output.
+  - **The one-time migration.** `l4 upgrade` replaces a literal path block in the save step of an adoption made before
+    this with the output reference, once and only that step (L4-ACT-005) [V: run 38308990414, where only the `uses:`
+    line and the path block changed].
+  - **The pin and the trust.** Anyone who can push a workflow to a private same-owner repository can read the harness
+    through the action. The `uses:` sha is the only pin (L4-INS-005).
 * `concurrency: {group: l4-${{ matrix.unit }}, cancel-in-progress: false}` at job level (the default single-pending
   queue is correct because runs are level-triggered [V, research/06]).
 * `actions/checkout` with `persist-credentials: false`; the harness supplies push credentials per command (L4-SEC-005).
@@ -3158,6 +3311,21 @@ also when the baseline has no rated cell for it or the profile is otherwise `unr
 ---
 
 ## 21. Delivery plan (OpenSpec changes for this repository)
+
+### 21.0 This repository's own CI
+
+The harness repository checks itself with GitHub workflows (L4-ACT-006, L4-ACT-007):
+- **`checks.yml`:** ruff, `scripts/check_spec.py`, gitleaks over every commit and the files, the publication scrub, and
+  the unit suite in 8 shards (`scripts/dev/shards.py`: a deterministic split by test file). The shards run on pull
+  requests to `amaster`, nightly when `amaster` moved, and by dispatch, not on every push, to protect the private
+  repository's minutes (about 32 runner-minutes for a run) [V: run 38312211032, 103–355 s per shard]. One summary check
+  fails when any shard fails.
+- **`action-selftest.yml`:** the action from the checkout with source `action`, then `l4 --version` and
+  `l4 doctor --adoption` on `tests/fixtures/py_tdd`.
+- **`.github/dependabot.yml`:** the repository's own `github-actions` pins.
+- **`release.yml`:** on `src-vX.Y.Z`, the slim release commit on branch `release`, the tags `vX.Y.Z` and `v0`, and a
+  GitHub release (scripts/dev/release_commit.py). The `release` branch is separate so that no consumer downloads
+  `docs/live/` on every job.
 
 Built in this order; each change is a unit the harness itself could later run (dogfooding):
 
@@ -5567,6 +5735,93 @@ scenario is a spec defect (§26).
 - **Given** two scorecard files
 - **When** `l4 eval --compare OLD --new NEW` runs
 - **Then** it exits 0, or 15 on a regression, or 2 for a missing file, and starts no agent; `gone` profiles do not fail unless `--require-all`; `--baseline-dir` picks the newest baseline of the same seed set; `l4 doctor` warns (EVAL-001) when a template changed since the baseline.
+
+### 23.18 Adoption kit (ACT, SKL)
+
+#### SCN-ACT-01 (+) A private repository of the same owner needs no key · L4-ACT-001
+- **Given** a private repository of the harness owner, and the harness repository's Actions access `user`
+- **When** a job runs `uses: <owner>/agent-supervisor/.github/actions/l4@<sha>` and then `l4 --version`
+- **Then** the job succeeds with source `action` and no secret configured.
+
+#### SCN-ACT-02 (−) A public repository cannot use the private action · L4-ACT-001
+- **Given** a public repository
+- **When** a job uses the private action
+- **Then** the job fails at "Set up job" with `Unable to resolve action … not found`, as GitHub documents.
+
+#### SCN-ACT-03 (+) A public repository with a deploy key · L4-ACT-001
+- **Given** a public repository with a copy of the action and `L4_HARNESS_SSH_KEY` in its environment `l4`
+- **When** the copy runs with source `repository`, the harness's SSH URL and a pinned commit
+- **Then** `l4 --version` succeeds, and the key file no longer exists after the install step.
+
+#### SCN-ACT-04 (−) A bad commit stops before any download · L4-ACT-001
+- **Given** source `repository` and `commit: main`
+- **When** the action runs
+- **Then** it fails with `::error::commit must be 40 hex digits` and exit 2, and fetched nothing.
+
+#### SCN-ACT-05 (+) A warm job builds nothing · L4-ACT-002
+- **Given** a previous job with the same harness source and catalog
+- **When** a job runs the action
+- **Then** both caches are hits, nothing is installed, and `l4 --version` follows the restore.
+
+#### SCN-ACT-06 (+) A harness upgrade keeps the CLIs warm · L4-ACT-002
+- **Given** warm caches for harness commit A
+- **When** the workflow moves to commit B with the same catalog
+- **Then** the harness cache misses and is rebuilt, the CLI cache hits, and `doctor --ci --fix` installs no CLI.
+
+#### SCN-ACT-07 (+) The sandbox is ready on ubuntu-24.04 · L4-ACT-003
+- **Given** a GitHub-hosted ubuntu-24.04 job with the action and `self-provision: auto`
+- **When** the action runs
+- **Then** the log has `[HSU-99] OK summary` with bwrap usable, and the repository holds no `.l4/bin/` file.
+
+#### SCN-ACT-08 (+) A fresh adoption holds only config, the workflow and evidence · L4-ACT-004
+- **Given** a repository without L4
+- **When** `l4 init --ci github --action --harness-ref v0.3.0` runs
+- **Then** the new files are `.l4/config.yaml`, `.github/workflows/l4.yml` (with `uses: …@<sha> # v0.3.0`) and
+  `.serena/project.yml`, and `l4 doctor` passes its pin check.
+
+#### SCN-ACT-09 (−) A drifting pin is reported · L4-ACT-004
+- **Given** an action-mode workflow with source `repository` whose `uses:` sha and `commit` input differ
+- **When** `l4 doctor` runs
+- **Then** the pin check CFG-006 fails and names both shas.
+
+#### SCN-ACT-10 (+) Upgrade by version · L4-ACT-005
+- **Given** an action-mode workflow at `v0.3.0`
+- **When** `l4 upgrade --harness-ref v0.4.0` runs
+- **Then** the `uses:` line is `@<sha of v0.4.0> # v0.4.0`, and nothing else in the workflow changed (a literal CLI
+  cache path block in the save step is replaced by the action's output, once).
+
+#### SCN-ACT-11 (+) One release · L4-ACT-006
+- **Given** a tag `src-v0.3.0` on a commit whose checks passed
+- **When** `release.yml` runs
+- **Then** `release` gains one commit with only the release paths, `v0.3.0` and `v0` point to it, and the release names
+  the source sha.
+
+#### SCN-ACT-12 (−) A failing shard fails the check · L4-ACT-007
+- **Given** a pull request with one failing unit test
+- **When** `checks.yml` runs
+- **Then** exactly that shard fails, and the summary job fails.
+
+#### SCN-ACT-13 (+) A seed unit end to end through the action · L4-ACT-008
+- **Given** the dummy repository adopted with `l4 init --action` and one seed unit
+- **When** the workflow runs on a push
+- **Then** the unit reaches a ready PR, and the step timings show a warm job's action step under 15 s with both caches
+  hit.
+
+#### SCN-SKL-01 (+) Installed from the repository · L4-SKL-001
+- **Given** a Claude Code session with read access to the harness repository
+- **When** the person runs `/plugin marketplace add ciprianiacobescu/agent-supervisor` and
+  `/plugin install l4@agent-supervisor`
+- **Then** the skill `l4` is listed and loads.
+
+#### SCN-SKL-02 (+) The feedback kind is chosen right · L4-SKL-002
+- **Given** the request "the base URL is hard-coded; make it configurable"
+- **When** an agent with the skill turns it into a command
+- **Then** it runs `l4 feedback add --kind config --env <NAME> --at <file:line> --text …`, not `refactor`.
+
+#### SCN-SKL-03 (−) A refactor that breaks tests is not sent as refactor · L4-SKL-002
+- **Given** the request "rename `calc` to `compute`; the tests call `calc`"
+- **When** an agent with the skill chooses the kind
+- **Then** it chooses `behaviour`, with `--when`/`--then`, and says why.
 
 ## 24. Definition of done
 

@@ -226,7 +226,51 @@ harness:
 
 OpenCode's free models need none. `l4 doctor` row PRV-001 names any variable that is missing.
 
-**The harness without committing it.** `l4 init --ci github --harness-repo git@github.com:<owner>/<harness>.git
+**The harness through the setup action (recommended).** The harness repository is itself a GitHub action. Your
+repository then holds only `.l4/config.yaml`, `.github/workflows/l4.yml` and the evidence folders: no `.l4/bin/`, no
+vendored code, no `harness.commit`. The `uses:` line of the workflow is the only pin. Pick the form that fits the
+repository:
+
+- **A private repository of the same owner as the harness: no key.**
+  1. In the harness repository, open Settings > Actions > Access and choose "Accessible from repositories owned by …".
+     Anyone who can push a workflow to a private repository of that owner can then read the harness through the
+     action, so this is the owner's choice. If the setting is later turned off, every such consumer fails at "Set up
+     job".
+  2. Adopt with a version pin:
+     ```bash
+     l4 init --ci github --action --harness-ref v0.3.0
+     ```
+     `--harness-ref` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with `git ls-remote`. The workflow gets
+     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.3.0`. A ref that resolves to nothing is exit 2. Use
+     `--action-repo OWNER/REPO` when the harness was not installed from its own repository.
+- **A public repository, or one of another owner: a copy of the action and a deploy key.** GitHub never lets a public
+  repository use a private action.
+  1. Adopt with the copy:
+     ```bash
+     l4 init --ci github --action --action-copy --harness-ref v0.3.0
+     ```
+     This writes the action under `.github/actions/l4` and a workflow that uses it with the harness's SSH URL.
+  2. Add a read-only deploy key to the harness repository (Settings > Deploy keys), and store its private half as the
+     environment secret `L4_HARNESS_SSH_KEY` in the environment `l4`. Use one key per consumer, so that a key can be
+     removed on its own.
+
+Then, for both forms:
+- `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
+- `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
+  release arrives as a pull request on the `uses:` line. It merges into an existing file.
+- `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand, and nothing else in the
+  workflow changes. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.
+- There is no `.l4/bin/l4` in this form. To run `l4` on your machine, install it:
+  `uv tool install git+ssh://git@github.com/<owner>/<harness>.git@<sha>` (`l4 doctor` row CFG-007 prints the hint
+  when none is on `PATH`).
+
+On a GitHub-hosted runner the action also installs uv and a user-space bwrap (the runner setup of the next sections
+runs inside it) and keeps two caches: the installed harness, and the agent CLIs, which a harness upgrade does not
+discard. A warm job reaches `l4` in about 7 s [V: docs/live/action/README.md].
+
+**The harness without the action.** The two older forms stay available: vendored (`l4 init --vendor`, section 1, for air-gapped runners) and fetched (below).
+
+**The harness without committing it (fetched).** `l4 init --ci github --harness-repo git@github.com:<owner>/<harness>.git
 --harness-commit <sha>` writes no `.l4/vendor/`. The job fetches that commit with uv and caches it.
 
 A private harness needs a read-only deploy key:
