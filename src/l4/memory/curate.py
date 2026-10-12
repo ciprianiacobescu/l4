@@ -22,6 +22,7 @@ from l4.memory.inject import EventWriter, read_lessons_file
 from l4.memory.lessons import Lesson, LessonsFile, lesson_id, parse_lessons, render_lessons, write_lessons
 from l4.security.protected import glob_match
 from l4.specs.feedback import FeedbackFile
+from l4.specs.followup import feedback_home
 from l4.state.fold import FeedbackState
 from l4.state.ledger import LedgerEvent
 from l4.verifier.types import Verdict, VerifyResult
@@ -184,7 +185,7 @@ def feedback_candidates(
     """L4-FBK-009 (design D10): one candidate per item of `feedback.md` with `Lesson: yes` that the ledger records as
     addressed in `round_`. The text is a person's, collapsed to one line (a line that began `## ` would break the
     lessons file); a leading `#` is dropped for the same reason."""
-    file = FeedbackFile.load(unit_dir)
+    file = FeedbackFile.load(feedback_home(unit_dir))  # a follow-up's items are its parent's (L4-FBK-010)
     if file is None:
         return []
     out: dict[str, LessonCandidate] = {}

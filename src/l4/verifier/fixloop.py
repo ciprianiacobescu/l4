@@ -47,6 +47,7 @@ from l4.specs.base import (
 )
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import read_fix_marker, split_fix_name
+from l4.specs.followup import feedback_home
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, answered_by, blocked_tasks, is_answered
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
 from l4.state.fold import UnitState, fold
@@ -448,7 +449,7 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
 def _mark_taken(wb: Workbench, plan: FixPlan, fix_unit: str, round_: int) -> list[str]:
     """Status `taken` and the Outcome line `Taken in round N into <fix unit>` in the parent's `feedback.md`, so that
     the one fix-unit commit carries them (L4-FBK-004). Returns the repository-relative paths written."""
-    file = FeedbackFile.load(wb.ref.path)
+    file = FeedbackFile.load(feedback_home(wb.ref.path))  # a follow-up's items are its parent's (L4-FBK-010)
     if file is None or not plan.taken:
         return []
     for ref in plan.taken:

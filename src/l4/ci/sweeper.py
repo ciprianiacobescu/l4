@@ -55,6 +55,7 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
+from l4.follow_up import perform_follow_ups
 from l4.forge.base import (
     Forge,
     ForgeAuthError,
@@ -112,7 +113,7 @@ class SweepAction:
     what: Literal[
         "merged", "archive_opened", "archive_existing", "archive_pending", "archive_failed", "skipped", "retired",
         "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "ci_not_run", "resumed", "resume_refused",
-        "resume_hint",
+        "resume_hint", "follow_up", "follow_up_waiting",
     ]  # fmt: skip
     detail: str = ""
 
@@ -239,6 +240,10 @@ class Sweeper:
                 actions += self._resume_duty(snapshots, errors)
             except Exception as exc:  # noqa: BLE001 - as above
                 self._failed("resume labels", exc, errors)
+            try:
+                actions += self._follow_up_duty(snapshots, errors)
+            except Exception as exc:  # noqa: BLE001 - as above
+                self._failed("follow-ups", exc, errors)
         fatal = next((e for e in errors if not _repeats_until_fixed(e)), None)
         if fatal is not None:
             raise fatal
@@ -382,6 +387,58 @@ class Sweeper:
             action = self._duty(snapshot, pr, run)
             code = 0
             return action
+        finally:
+            try:
+                run.close(code)
+            finally:
+                lease.release()
+
+    # --- feedback on a merged unit (L4-FBK-010) -------------------------------------------------------------------
+
+    def _follow_up_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
+        """A merged unit whose `feedback.md` on the base has takeable items gets its follow-up unit (a branch of its
+        own; nothing is pushed to the base). While one is open, newer items are recorded as waiting, once each."""
+        actions: list[SweepAction] = []
+        merged = [s for s in snapshots if s.state.phase == Phase.MERGED.value and s.follow_up and s.follow_up.items]
+        for made in perform_follow_ups(self.app, self.cfg, self.git, merged):
+            actions.append(SweepAction(made.parent, "follow_up", f"{made.follow_up} for {', '.join(made.items)}"))
+        for snapshot in merged:
+            offer = snapshot.follow_up
+            assert offer is not None
+            if offer.open is None:
+                continue
+            ids = [
+                i.id for i in offer.items
+                if (known := snapshot.state.feedback.get(i.id)) is None
+                or (known.status, known.reason) != ("waiting", "follow_up_open")
+            ]  # fmt: skip
+            if not ids:
+                continue
+            try:
+                if (action := self._record_waiting(snapshot, ids, offer.open)) is not None:
+                    actions.append(action)
+            except Exception as exc:  # noqa: BLE001 - one unit's failure never stops the others
+                self._failed(snapshot.ref.id, exc, errors)
+        return actions
+
+    def _record_waiting(self, snapshot: UnitSnapshot, ids: list[str], follow_up: str) -> SweepAction | None:
+        """`feedback.waiting{ids, reason: "follow_up_open"}` in the pending ledger of the parent's lock ref. An
+        archived change has no lock ref any more (it was retired): the planner still says it waits, and nothing is
+        written."""
+        names = self._archiver.names(snapshot.ref)
+        if self.git.rev_parse(names.lock_ref) is None:
+            return None
+        lease = LocalFileLease(names.flock_path, unit=snapshot.ref.id, run_id=self.app.run_id)
+        try:
+            lease.acquire()
+        except Busy:
+            return None
+        run = _UnitRun(self, snapshot, names)
+        code = 1
+        try:
+            run.event("feedback.waiting", ids=ids, reason="follow_up_open", follow_up=follow_up)
+            code = 0
+            return SweepAction(snapshot.ref.id, "follow_up_waiting", f"{', '.join(ids)} wait for {follow_up}")
         finally:
             try:
                 run.close(code)

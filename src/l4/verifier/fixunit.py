@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 
 from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import MAX_DECISION_CHARS, Criterion, DeltaRequirement, DeltaScenario, Finding, SpecDelta
+from l4.specs.feedback import FeedbackItem
+from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
 from l4.verifier.verdicts import is_coverage_hold_finding, rejection_note
@@ -327,6 +329,14 @@ def plan_fix_unit(
         else None
     )
     return FixPlan(groups, delta, consumed, skipped, taken, waiting)
+
+
+def plan_follow_up(family: Sequence[Criterion], items: Sequence[FeedbackItem], *, ordinal: int) -> FixPlan:
+    """The tasks and the ADDED scenarios of follow-up `ordinal` (`<parent>-followup-<ordinal>`, L4-FBK-010): the same
+    one task per item by kind as a feedback fix unit has, from the parent's merged `feedback.md`. `family` is the
+    parent's criteria: the capability an ADDED requirement goes under (none: no delta, the change `skip_specs`)."""
+    result = VerifyResult("", 0, Verdict.FAIL, "", "", findings=feedback_findings(FeedbackScan(tuple(items))))
+    return plan_fix_unit(family, result, (), ordinal=ordinal, fix_minor=False)
 
 
 def redact_plan(plan: FixPlan, redact: Callable[[str], str]) -> FixPlan:

@@ -55,6 +55,7 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
+from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure
 from l4.forge.urls import app_forge_urls, origin_url
@@ -89,7 +90,7 @@ from l4.state.lifecycle import Edge, Phase, Trigger, transition
 from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
 from l4.state.reconcile import reconcile
 from l4.state.review import after_handoff, review_note, review_trigger
-from l4.state.status import load_snapshot, refresh_refs, select_units
+from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
@@ -1136,26 +1137,37 @@ def run_command(
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
-    chosen = without_fix_units(select_units(list(providers_for(cfg, app.repo, app.environ)), units), named=units)
+    providers = list(providers_for(cfg, app.repo, app.environ))
+    found = discover(cfg, git, providers, units)
+    if made := perform_follow_ups(app, cfg, git, [s for _, s in found]):  # merged feedback becomes units (L4-FBK-010)
+        found = discover(cfg, git, providers, units)  # the new units are on their own branches now
+    snapshots = {s.ref.id: s for _, s in found}
+    chosen = without_fix_units(
+        [(p, s.ref) for p, s in found if s.source != "archive"], named=units
+    )  # an archived unit is only ever a parent of a follow-up
     if not units:
         chosen = [
-            (provider, ref)
-            for provider, ref in chosen
-            if next_action(facts_of(load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)))[0]
-            in ACTIONABLE
+            (provider, ref) for provider, ref in chosen if next_action(facts_of(snapshots[ref.id]))[0] in ACTIONABLE
         ]
     if not chosen:
         log.info("nothing to do: no unit has a next step")  # before any lease, worktree or probe
-        return CommandResult(ExitCode.OK, [])
+        return CommandResult(ExitCode.OK, [_follow_up_outcome(m) for m in made])
     kiro = cfg.spec.kiro
     if (kiro.write_in_progress_marker or kiro.write_queued_marker) and any(
         ref.framework is Framework.KIRO for _, ref in chosen
     ):
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
+    result = replace(result, units=[*(_follow_up_outcome(m) for m in made), *result.units])
     result = continue_left_units(app, cfg, result)
     log_artefacts(app.out_dir, app.run_id)
     return result
+
+
+def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:
+    """The merged parent, whose phase did not change, and the follow-up unit its feedback became."""
+    reason = f"follow-up {made.follow_up} created on {made.branch} for {', '.join(made.items)}"
+    return UnitOutcome(unit=made.parent, phase_before="merged", phase_after="merged", exit_reason=reason)
 
 
 def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:
