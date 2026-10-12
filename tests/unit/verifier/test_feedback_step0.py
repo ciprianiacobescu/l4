@@ -178,3 +178,27 @@ def test_pending_feedback_is_the_items_taken_and_not_yet_judged(tmp_path: Path):
     )
     assert [i.id for i in pending_feedback(after, file)] == ["FB-001"]
     assert pending_feedback(after, None) == []
+
+
+# --- review #6: a duplicate id is reported, never taken ----------------------------------------------------------
+
+
+def test_a_duplicate_heading_is_recorded_once_as_invalid_and_never_taken(tmp_path: Path):
+    """L4-FBK-004, review #6: the copy is not taken (the first section is the item); the problem is recorded once,
+    without making the item itself invalid."""
+    add(tmp_path)
+    data = (tmp_path / "feedback.md").read_bytes()
+    copy = data[data.index(b"## FB-001") :].replace(b"Move the rounding", b"Also rename it")
+    (tmp_path / "feedback.md").write_bytes(data + b"\n---\n\n" + copy)
+    file = load(tmp_path)
+    scan = scan_feedback(file, state())
+    assert [(i.id, i.text) for i in scan.takeable] == [("FB-001", "Move the rounding into a helper.")]
+    assert scan.events == (
+        ("feedback.invalid", {"id": "FB-001", "problem": "duplicate id FB-001", "duplicate": True}),
+    )  # fmt: skip
+    seen = state(("feedback.invalid", dict(scan.events[0][1])))
+    assert scan_feedback(file, seen).events == ()  # once
+    assert [i.id for i in scan_feedback(file, seen).takeable] == ["FB-001"]
+    taken_state = state(taken(file), ("feedback.invalid", dict(scan.events[0][1])))
+    assert taken_state.feedback["FB-001"].status == "taken"  # the copy does not stop the item being judged
+    assert [i.id for i in pending_feedback(taken_state, file)] == ["FB-001"]

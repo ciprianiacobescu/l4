@@ -368,6 +368,7 @@ class FeedbackFile:
     items: tuple[FeedbackItem, ...]
     index: Span | None  # the lines between the index markers; None: the file has no well-formed index
     path: Path | None = None
+    duplicates: tuple[FeedbackItem, ...] = ()  # sections whose id an earlier section holds: reported, never items
 
     @classmethod
     def parse(cls, source: bytes | str, path: Path | None = None) -> "FeedbackFile":
@@ -381,15 +382,17 @@ class FeedbackFile:
             in_index = index is not None and index.start <= start < index.end
             if not fenced[number] and not in_index and (match := _HEADING.match(data[start:stop].rstrip(b"\n"))):
                 headings.append((number, match))
-        items = []
+        items: list[FeedbackItem] = []
+        duplicates: list[FeedbackItem] = []
         for position, (first, match) in enumerate(headings):
             if match.group(1) is None:
                 continue  # a section of someone else's: it ends the previous item and is never read
             last = headings[position + 1][0] if position + 1 < len(headings) else len(lines)
-            items.append(
-                _parse_section(data, lines, fenced, pairs, first, last, match.group(1).decode(), match.group(2))
-            )
-        return cls(data, tuple(items), index, path)
+            section = _parse_section(data, lines, fenced, pairs, first, last, match.group(1).decode(), match.group(2))
+            # the first section per normalised id is the item (`FB-1` and `FB-001` are one id); a later one is a
+            # copy the person forgot to renumber: the harness edits, takes and judges the first only
+            (duplicates if any(i.id == section.id for i in items) else items).append(section)
+        return cls(data, tuple(items), index, path, tuple(duplicates))
 
     @classmethod
     def load(cls, unit_dir: Path) -> "FeedbackFile | None":

@@ -47,6 +47,17 @@ def _shift(span: Span, origin: int) -> Span:
 
 
 def merge_feedback(base: bytes | None, ours: bytes, theirs: bytes) -> bytes:
+    """The merged file, or `Escalate`. Nothing else is raised: a file no rule can merge stays a conflict (a person's
+    file, hand-edited, can hold anything)."""
+    try:
+        return _merge(base, ours, theirs)
+    except Escalate:
+        raise
+    except Exception as exc:  # noqa: BLE001 - e.g. overlapping edits: a conflict for a person, never a crash
+        raise Escalate(f"feedback.md cannot be merged by item: {exc}") from None
+
+
+def _merge(base: bytes | None, ours: bytes, theirs: bytes) -> bytes:
     mine, other = FeedbackFile.parse(ours), FeedbackFile.parse(theirs)
     ancestor = FeedbackFile.parse(base) if base is not None else None
     replace: list[tuple[Span, bytes]] = []

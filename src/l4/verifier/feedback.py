@@ -41,6 +41,12 @@ def _flat(text: str, limit: int) -> str:
 def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
     takeable: list[FeedbackItem] = []
     events: list[Event] = []
+    for copy in file.duplicates if file is not None else ():
+        problem = f"duplicate id {copy.id}"  # the first section is the item; the copy is never taken
+        if (known := state.feedback.get(copy.id)) is None or known.duplicate != problem:
+            event = ("feedback.invalid", {"id": copy.id, "problem": problem, "duplicate": True})
+            if event not in events:
+                events.append(event)
     for item in file.items if file is not None else ():
         known = state.feedback.get(item.id)
         was_taken = known is not None and known.sha256 is not None
