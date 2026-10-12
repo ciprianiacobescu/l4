@@ -136,6 +136,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--extend-iterations", "extend_iterations", type=int),
         _opt("--extend-cost", "extend_cost", type=float),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
+        _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
