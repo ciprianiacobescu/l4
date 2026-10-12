@@ -76,12 +76,13 @@ from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError
 from l4.specs.criteria import base_criteria_at
 from l4.specs.feedback import FeedbackFile
+from l4.specs.followup import feedback_home
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.status import load_snapshot, select_units
+from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
@@ -486,6 +487,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         # pass-to-pass compares with the archived specs AT THE BASE COMMIT, read from git: the worktree is at the unit's
         # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
         archived = base_criteria_at(wb.git, base_sha) if wb.ref.framework is Framework.OPENSPEC else []
+        if wb.ref.framework is Framework.KIRO and isinstance(wb.provider, FamilyProvider):
+            archived = wb.provider.merged_parent_criteria()  # a follow-up's merged parent: its folder is protected
         browser = run.e2e.report if run.e2e is not None else None
         # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
         generated, edited = previously_generated(events, wb.worktree, browser)
@@ -911,7 +914,7 @@ def _calibrate(vc: VerifyContext, run: _Run) -> None:
 def _asked_feedback(wb: Workbench) -> list[FeedbackRef]:
     """The items of the parent's `feedback.md` taken and not yet addressed: the judge is asked about them."""
     try:
-        file = FeedbackFile.load(wb.ref.path)
+        file = FeedbackFile.load(feedback_home(wb.ref.path))  # a follow-up judges its parent's items (L4-FBK-010)
     except SpecError as exc:  # an unreadable file is the person's to fix; it must not stop the round
         log.warning("%s: feedback.md is not read: %s", wb.ref.id, exc)
         return []
@@ -1259,7 +1262,8 @@ def verify_hook(ctx: HookContext) -> Trigger:
         wb.restore_ledger()
     decide_fix(ctx, wb, result)  # before the evidence is written, so that the report lists the fix unit
     paths = write_round_evidence(services.ref.path, round_no, result, services.app.redactor)
-    paths += apply_addressed(services.ref.path, result, services.app.redactor)  # Status and Outcome (L4-FBK-007)
+    # Status and Outcome (L4-FBK-007), in the parent's file when the unit is a follow-up (L4-FBK-010)
+    paths += apply_addressed(feedback_home(services.ref.path), result, services.app.redactor)
     if result.verdict is Verdict.NEEDS_HUMAN:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
     commit_verifier_tests(wb, vc.verifier_tests, round_no)
@@ -1282,7 +1286,7 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
     git = Git(app.repo, environ=app.environ)
-    ((provider, ref),) = select_units(list(providers_for(cfg, app.repo, app.environ)), (unit,))
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
     phase = snapshot.state.phase
     answered = phase == "awaiting_human" and next_action(facts_of(snapshot))[0] == "verify"  # verdicts are in

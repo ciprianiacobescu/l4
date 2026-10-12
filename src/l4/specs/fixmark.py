@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file
+from l4.specs.followup import read_follow_up_marker
 
 MARKER_SCHEMA = "l4/fix-unit@1"
 MARKER_PATH = (".l4", "fix.json")
@@ -71,6 +72,19 @@ def _strings(value: object) -> tuple[str, ...]:
     return tuple(v for v in value if isinstance(v, str)) if isinstance(value, list) else ()
 
 
+def task_marker(unit_dir: Path) -> FixMarker | None:
+    """The marker that tags a unit's `[chore]` tasks: a fix unit's `.l4/fix.json`, else a follow-up's
+    `.l4/followup.json` (its chore lists, read as a fix marker of round 0). Only the first makes a fix unit."""
+    if (marker := read_fix_marker(unit_dir)) is not None:
+        return marker
+    follow = read_follow_up_marker(unit_dir)
+    if follow is None:
+        return None
+    return FixMarker(
+        follow.parent, 0, tuple(i for i, _ in follow.items), follow.chores, follow.test_chores, follow.refactors
+    )
+
+
 def chore_kind(unit_dir: Path, title: str) -> Literal["fix", "tests", "refactor"] | None:
     """What kind of chore the task `title` is: `tests` when every chore finding it cites is one of the marker's
     `test_chores` (a coverage hold's task adds tests), `refactor` when every one is one of its `refactors` (feedback:
@@ -79,7 +93,7 @@ def chore_kind(unit_dir: Path, title: str) -> Literal["fix", "tests", "refactor"
     found = chore_findings(unit_dir, title)
     if not found:
         return None
-    marker = read_fix_marker(unit_dir)
+    marker = task_marker(unit_dir)
     assert marker is not None
     if all(f in marker.test_chores for f in found):
         return "tests"
@@ -89,11 +103,11 @@ def chore_kind(unit_dir: Path, title: str) -> Literal["fix", "tests", "refactor"
 def chore_findings(unit_dir: Path, title: str) -> tuple[str, ...]:
     """The finding ids of `title` that the unit's marker tags `[chore]`: a task is one only when the harness said so
     when it wrote the fix unit, never because of what its text says. Empty for a unit that is not a fix unit."""
-    marker = read_fix_marker(unit_dir)
+    marker = task_marker(unit_dir)
     return tuple(f for f in (*marker.chores, *marker.refactors) if f in title) if marker else ()
 
 
 def refactor_findings(unit_dir: Path, title: str) -> tuple[str, ...]:
     """The finding ids of `title` that the marker tags as refactors. A refactor id is a chore id too."""
-    marker = read_fix_marker(unit_dir)
+    marker = task_marker(unit_dir)
     return tuple(f for f in marker.refactors if f in title) if marker else ()

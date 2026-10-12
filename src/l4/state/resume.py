@@ -32,7 +32,7 @@ from l4.state.budget import (
     fix_rounds_exhausted,
 )
 from l4.state.lifecycle import Phase
-from l4.state.status import load_snapshot, refresh_refs, select_units
+from l4.state.status import load_snapshot, refresh_refs, select_runnable
 from l4.vcs.git import Git
 
 log = logging.getLogger("l4.resume")
@@ -109,7 +109,7 @@ def run_resume(
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
-    [(provider, ref)] = select_units(list(providers_for(cfg, app.repo, app.environ)), (unit,))
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     result = resume_unit(app, cfg, git, provider, ref, reason=reason, extend_fix_rounds=extend_fix_rounds,
         extend_feedback_rounds=extend_feedback_rounds,
     )

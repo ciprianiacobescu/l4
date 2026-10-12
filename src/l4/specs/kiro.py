@@ -41,6 +41,7 @@ from l4.specs.base import (
 from l4.specs.criteria import kiro_criteria
 from l4.specs.detect import kiro_spec_dirs
 from l4.specs.fixmark import FixMarker, chore_findings, fix_name, read_fix_marker, split_fix_name, write_fix_marker
+from l4.specs.followup import FollowUpMarker, follow_up_name, write_follow_up_marker
 from l4.specs.markers import MAX_TASKS_BYTES, Line, split_lines, write_marker
 
 log = logging.getLogger("l4.spec")
@@ -338,17 +339,32 @@ class KiroProvider:
         """`<parent>-fix-<round>` as a Kiro bugfix spec (L4-KSP-005, L4-FBK-008): `bugfix.md`, `design.md`, `tasks.md`,
         `.config.kiro` and the fix marker, then the provider's own validation. The whole folder is removed again when
         it does not validate, and nothing is ever written outside it. Takes what the OpenSpec writer takes."""
-        name = fix_name(parent.name, round)
+        return self._create_spec(fix_name(parent.name, round), parent, round, findings, spec_delta, None)
+
+    def create_follow_up(
+        self, parent: UnitRef, n: int, findings: Sequence[Finding], spec_delta: SpecDelta | None,
+        items: Sequence[tuple[str, str]],
+    ) -> UnitRef:  # fmt: skip
+        """`<parent>-followup-<n>` as a Kiro bugfix spec (L4-FBK-010): written like a fix unit is, with
+        `.l4/followup.json` for the marker (`items`: the (id, sha256) of the parent's feedback items it takes), so it is
+        a unit that `l4 run` selects and not a fix unit of the parent."""
+        return self._create_spec(follow_up_name(parent.name, n), parent, n, findings, spec_delta, tuple(items))
+
+    def _create_spec(
+        self, name: str, parent: UnitRef, round: int, findings: Sequence[Finding], spec_delta: SpecDelta | None,
+        follow_items: tuple[tuple[str, str], ...] | None,
+    ) -> UnitRef:  # fmt: skip
+        what = "follow-up" if follow_items is not None else "fix unit"
         if not SAFE_NAME.match(name):
             raise SpecError(f"{name!r} is not a valid spec name")
         ref = UnitRef(Framework.KIRO, name, self._repo.joinpath(*self._parts, name))
         folder = self.unit_dir(ref)
         if folder.exists():
-            raise FixUnitExists(f"{ref.id} exists; a fix unit is never overwritten")
+            raise FixUnitExists(f"{ref.id} exists; a {what} is never overwritten")
         if not findings:
-            raise SpecError("a fix unit needs at least one finding")
+            raise SpecError(f"a {what} needs at least one finding")
         try:
-            self._scaffold(parent, ref, round, findings, spec_delta)
+            self._scaffold(parent, ref, round, findings, spec_delta, follow_items)
             report = self.validate(ref, strict=True)
             if not report.valid:
                 errors = [i for i in report.issues if i.level == "ERROR"] or list(report.issues)
@@ -360,23 +376,28 @@ class KiroProvider:
         return ref
 
     def _scaffold(
-        self, parent: UnitRef, ref: UnitRef, round: int, findings: Sequence[Finding], delta: SpecDelta | None
-    ) -> None:
+        self, parent: UnitRef, ref: UnitRef, round: int, findings: Sequence[Finding], delta: SpecDelta | None,
+        follow_items: tuple[tuple[str, str], ...] | None = None,
+    ) -> None:  # fmt: skip
         folder = ref.path
         folder.mkdir(parents=True)
-        # the marker first: a fix unit's `2.n` item is read as the parent's criterion only where the marker is
-        write_fix_marker(
-            folder,
-            FixMarker(
-                parent.id, round, tuple(i for f in findings for i in f.ids),
-                tuple(i for f in findings if f.chore for i in f.ids),
-                tuple(i for f in findings if f.chore and f.tests for i in f.ids),
-                tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
-            ),
-        )  # fmt: skip
-        items = _FixItems(parent.name, findings, delta, self._known_criteria(parent))
+        chores = (
+            tuple(i for f in findings if f.chore for i in f.ids),
+            tuple(i for f in findings if f.chore and f.tests for i in f.ids),
+            tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
+        )
+        if follow_items is not None:  # a unit of its own: no restated criteria of the parent, no fix marker
+            write_follow_up_marker(folder, FollowUpMarker(parent.id, follow_items, *chores))
+            known: dict[str, tuple[str, Criterion]] = {}
+        else:
+            # the marker first: a fix unit's `2.n` item is read as the parent's criterion only where the marker is
+            write_fix_marker(folder, FixMarker(parent.id, round, tuple(i for f in findings for i in f.ids), *chores))
+            known = self._known_criteria(parent)
+        items = _FixItems(parent.name, findings, delta, known)
         (folder / "bugfix.md").write_text(items.bugfix(), encoding="utf-8")
-        (folder / "design.md").write_text(_fix_design(parent, round, findings), encoding="utf-8")
+        (folder / "design.md").write_text(
+            _fix_design(parent, round, findings, follow_up=follow_items is not None), encoding="utf-8"
+        )
         ids = {c.alias: c.id for c in self.criteria(ref)}
         (folder / "tasks.md").write_text(_fix_tasks(findings, items.refs, ids), encoding="utf-8")
         config = {"specId": self._uuid(), "workflowType": "requirements-first", "specType": "bugfix"}
@@ -569,11 +590,17 @@ def _defect(finding: Finding) -> str:
     return f"{title}: {detail} ({ids})" if detail else f"{title} ({ids})"
 
 
-def _fix_design(parent: UnitRef, round: int, findings: Sequence[Finding]) -> str:
+def _fix_design(parent: UnitRef, round: int, findings: Sequence[Finding], *, follow_up: bool = False) -> str:
+    what = (
+        f"Follow-up {round} of `{parent.name}`. `{parent.name}` was merged, and a person asked for the changes below "
+        "in its `feedback.md`; each task of tasks.md names the findings it answers"
+        if follow_up
+        else f"Fix unit {round} of `{parent.name}`. The verifier found the problems below in `{parent.name}`; each "
+        "task of tasks.md names the findings it answers"
+    )
     parts = [
         "# Design Document\n\n## Overview\n",
-        f"Fix unit {round} of `{parent.name}`. The verifier found the problems below in `{parent.name}`; each task of "
-        "tasks.md names the findings it answers, and bugfix.md says what must change and what must not.\n",
+        f"{what}, and bugfix.md says what must change and what must not.\n",
         "## Findings and Decisions\n",
     ]
     for finding in findings:

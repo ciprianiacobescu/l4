@@ -41,6 +41,7 @@ from l4.outcome import CommandResult
 from l4.services import H_PUSHED, ForgeHook, HookContext, MirrorHook
 from l4.specs.base import SpecError
 from l4.specs.feedback import FeedbackFile
+from l4.specs.followup import feedback_home
 from l4.state.fold import fold
 from l4.state.ledger import LedgerClosed, ledger_path, read_ledger
 from l4.state.status import snapshots
@@ -227,7 +228,7 @@ class _Mirror:
         cannot be read: the note is a courtesy)."""
         s = self._ctx.services
         try:
-            file = FeedbackFile.load(s.ref.path)
+            file = FeedbackFile.load(feedback_home(s.ref.path))  # a follow-up shows its parent's items
         except (SpecError, OSError) as exc:
             log.warning("feedback.md is not readable, the sticky note leaves out the feedback section: %s", exc)
             return None
