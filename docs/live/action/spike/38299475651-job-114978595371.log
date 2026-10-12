@@ -1,0 +1,167 @@
+﻿2026-10-12T19:43:03.1734478Z Current runner version: '2.337.0'
+2026-10-12T19:43:03.1765183Z ##[group]Runner Image Provisioner
+2026-10-12T19:43:03.1766222Z Hosted Compute Agent
+2026-10-12T19:43:03.1766854Z Version: 20261002.596
+2026-10-12T19:43:03.1767553Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-12T19:43:03.1768373Z Build Date: 2026-10-02T22:28:27Z
+2026-10-12T19:43:03.1769407Z Worker ID: {e47d63e9-714b-4627-98cf-f53e1d12de4d}
+2026-10-12T19:43:03.1770281Z Region: northcentralus
+2026-10-12T19:43:03.1770887Z Cloud: Azure
+2026-10-12T19:43:03.1771478Z ##[endgroup]
+2026-10-12T19:43:03.1772972Z ##[group]Operating System
+2026-10-12T19:43:03.1773629Z Ubuntu
+2026-10-12T19:43:03.1774305Z 24.04.5
+2026-10-12T19:43:03.1774848Z LTS
+2026-10-12T19:43:03.1775373Z ##[endgroup]
+2026-10-12T19:43:03.1776023Z ##[group]Runner Image
+2026-10-12T19:43:03.1776699Z Image: ubuntu-24.04
+2026-10-12T19:43:03.1777388Z Version: 20261004.327.1
+2026-10-12T19:43:03.1778969Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-12T19:43:03.1780640Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-12T19:43:03.1781654Z ##[endgroup]
+2026-10-12T19:43:03.1782869Z ##[group]GITHUB_TOKEN Permissions
+2026-10-12T19:43:03.1785180Z Contents: read
+2026-10-12T19:43:03.1785894Z Metadata: read
+2026-10-12T19:43:03.1786494Z ##[endgroup]
+2026-10-12T19:43:03.1788949Z Secret source: Actions
+2026-10-12T19:43:03.1790125Z Cache mode: write
+2026-10-12T19:43:03.1790854Z Prepare workflow directory
+2026-10-12T19:43:03.2187325Z Prepare all required actions
+2026-10-12T19:43:03.2258273Z Getting action download info
+2026-10-12T19:43:04.1037319Z Download action repository 'ciprianiacobescu/agent-supervisor@c148939a71af774dd20a7067262ecf731f8cf3b5' (SHA:c148939a71af774dd20a7067262ecf731f8cf3b5)
+2026-10-12T19:43:06.5224264Z Getting action download info
+2026-10-12T19:43:06.6051215Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+2026-10-12T19:43:06.8182345Z Complete job name: private-action
+2026-10-12T19:43:06.9001817Z ##[group]Run ciprianiacobescu/agent-supervisor/.github/actions/l4@c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:43:06.9002701Z with:
+2026-10-12T19:43:06.9002989Z   command: --version
+2026-10-12T19:43:06.9003285Z   source: auto
+2026-10-12T19:43:06.9003563Z   python: 3.12
+2026-10-12T19:43:06.9003848Z   uv-version: 0.12.22
+2026-10-12T19:43:06.9004272Z ##[endgroup]
+2026-10-12T19:43:06.9091860Z ##[start-action display=l4 source;id=__ciprianiacobescu_agent-supervisor.src]
+2026-10-12T19:43:06.9136680Z ##[group]Run s=$(date +%s.%N)
+2026-10-12T19:43:06.9137183Z s=$(date +%s.%N)
+2026-10-12T19:43:06.9137619Z root=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
+2026-10-12T19:43:06.9138085Z mode=$INPUT_SOURCE
+2026-10-12T19:43:06.9138431Z if [ "$mode" = auto ]; then
+2026-10-12T19:43:06.9139216Z   if [ -f "$root/pyproject.toml" ] && [ -d "$root/src/l4" ]; then mode=action; else mode=repository; fi
+2026-10-12T19:43:06.9139843Z fi
+2026-10-12T19:43:06.9140139Z case "$mode" in
+2026-10-12T19:43:06.9140455Z   action)
+2026-10-12T19:43:06.9140927Z     [ -d "$root/src/l4" ] || { echo "::error::source action, but $root holds no harness"; exit 2; }
+2026-10-12T19:43:06.9141700Z     key=$(cd "$root" && find src pyproject.toml uv.lock README.md -type f ! -path '*/__pycache__/*' 2>/dev/null \
+2026-10-12T19:43:06.9142398Z           | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-24)
+2026-10-12T19:43:06.9142904Z     echo "dir=$root" >> "$GITHUB_OUTPUT"
+2026-10-12T19:43:06.9143573Z     echo "[l4-action] the action's repository: $(find "$root" -type f | wc -l) files, $(du -sh "$root" | cut -f1)"
+2026-10-12T19:43:06.9144148Z     ;;
+2026-10-12T19:43:06.9144449Z   repository)
+2026-10-12T19:43:06.9144939Z     [[ "$INPUT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit must be 40 hex digits"; exit 2; }
+2026-10-12T19:43:06.9145982Z     [ -n "$INPUT_REPOSITORY" ] || { echo "::error::repository is required for source repository"; exit 2; }
+2026-10-12T19:43:06.9146595Z     key=$INPUT_COMMIT
+2026-10-12T19:43:06.9146930Z     ;;
+2026-10-12T19:43:06.9147341Z   *) echo "::error::source must be auto, action or repository"; exit 2 ;;
+2026-10-12T19:43:06.9147792Z esac
+2026-10-12T19:43:06.9148109Z echo "mode=$mode" >> "$GITHUB_OUTPUT"
+2026-10-12T19:43:06.9148875Z echo "key=l4-harness-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-py$INPUT_PYTHON-$mode-$key" >> "$GITHUB_OUTPUT"
+2026-10-12T19:43:06.9149840Z echo "[l4-action] source $mode, key $key ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:43:06.9388925Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:43:06.9389471Z env:
+2026-10-12T19:43:06.9389796Z   INPUT_SOURCE: auto
+2026-10-12T19:43:06.9390122Z   INPUT_COMMIT: 
+2026-10-12T19:43:06.9390451Z   INPUT_REPOSITORY: 
+2026-10-12T19:43:06.9390760Z   INPUT_PYTHON: 3.12
+2026-10-12T19:43:06.9391063Z ##[endgroup]
+2026-10-12T19:43:07.0425608Z [l4-action] the action's repository: 4597 files, 50M
+2026-10-12T19:43:07.0453803Z [l4-action] source action, key ff6e57f80dea4faa90d16f16 (0.09 s)
+2026-10-12T19:43:07.0541304Z ##[end-action id=__ciprianiacobescu_agent-supervisor.src;outcome=success;conclusion=success;duration_ms=144]
+2026-10-12T19:43:07.0547219Z ##[start-action display=restore installed harness;id=__ciprianiacobescu_agent-supervisor.restore]
+2026-10-12T19:43:07.0602402Z ##[group]Run actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-12T19:43:07.0602899Z with:
+2026-10-12T19:43:07.0603437Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-12T19:43:07.0604175Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:43:07.0604710Z   enableCrossOsArchive: false
+2026-10-12T19:43:07.0605341Z   fail-on-cache-miss: false
+2026-10-12T19:43:07.0605659Z   lookup-only: false
+2026-10-12T19:43:07.0605943Z ##[endgroup]
+2026-10-12T19:43:07.3705571Z Cache not found for input keys: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:43:07.3745182Z ##[end-action id=__ciprianiacobescu_agent-supervisor.restore;outcome=success;conclusion=success;duration_ms=319]
+2026-10-12T19:43:07.3751390Z ##[start-action display=install harness;id=__ciprianiacobescu_agent-supervisor.__run]
+2026-10-12T19:43:07.3798990Z ##[group]Run s=$(date +%s.%N)
+2026-10-12T19:43:07.3799411Z s=$(date +%s.%N)
+2026-10-12T19:43:07.3799748Z export PATH="$HOME/.local/bin:$PATH"
+2026-10-12T19:43:07.3800147Z if ! command -v uv >/dev/null 2>&1; then
+2026-10-12T19:43:07.3800759Z   curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | env UV_NO_MODIFY_PATH=1 sh >/dev/null
+2026-10-12T19:43:07.3801560Z   echo "[l4-action] uv $UV_VERSION installed ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:43:07.3802101Z fi
+2026-10-12T19:43:07.3802367Z u=$(date +%s.%N)
+2026-10-12T19:43:07.3802688Z if [ "$MODE" = action ]; then
+2026-10-12T19:43:07.3803184Z   src="$RUNNER_TEMP/l4-harness-src"   # a copy: the build may write next to the sources
+2026-10-12T19:43:07.3803691Z   rm -rf "$src" && mkdir -p "$src"
+2026-10-12T19:43:07.3804341Z   (cd "$DIR" && tar cf - --exclude=__pycache__ src pyproject.toml uv.lock README.md 2>/dev/null) | (cd "$src" && tar xf -)
+2026-10-12T19:43:07.3805029Z   uv tool install --quiet --python "$INPUT_PYTHON" "$src"
+2026-10-12T19:43:07.3805452Z else
+2026-10-12T19:43:07.3805746Z   if [ -n "$INPUT_SSH_KEY" ]; then
+2026-10-12T19:43:07.3806094Z     umask 077
+2026-10-12T19:43:07.3806493Z     printf '%s\n' "$INPUT_SSH_KEY" > "$RUNNER_TEMP/l4-harness-key"
+2026-10-12T19:43:07.3807137Z     printf '%s\n' \
+2026-10-12T19:43:07.3842166Z       'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+2026-10-12T19:43:07.3843876Z       'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=' \
+2026-10-12T19:43:07.3847666Z       'github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=' > "$RUNNER_TEMP/l4-known-hosts"
+2026-10-12T19:43:07.3851910Z     export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/l4-harness-key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/l4-known-hosts -o StrictHostKeyChecking=yes"
+2026-10-12T19:43:07.3852653Z   fi
+2026-10-12T19:43:07.3853096Z   uv tool install --quiet --python "$INPUT_PYTHON" "git+$INPUT_REPOSITORY@$INPUT_COMMIT"
+2026-10-12T19:43:07.3853621Z   rm -f "$RUNNER_TEMP/l4-harness-key"
+2026-10-12T19:43:07.3853959Z fi
+2026-10-12T19:43:07.3854443Z echo "[l4-action] harness installed ($(awk -v s="$u" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:43:07.3925175Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:43:07.3925605Z env:
+2026-10-12T19:43:07.3925875Z   MODE: action
+2026-10-12T19:43:07.3926390Z   DIR: /home/runner/work/_actions/ciprianiacobescu/agent-supervisor/c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:43:07.3926959Z   INPUT_COMMIT: 
+2026-10-12T19:43:07.3927426Z   INPUT_REPOSITORY: 
+2026-10-12T19:43:07.3927710Z   INPUT_SSH_KEY: 
+2026-10-12T19:43:07.3927971Z   INPUT_PYTHON: 3.12
+2026-10-12T19:43:07.3928245Z   UV_VERSION: 0.12.22
+2026-10-12T19:43:07.3928524Z ##[endgroup]
+2026-10-12T19:43:07.5882012Z downloading uv 0.12.22 x86_64-unknown-linux-gnu
+2026-10-12T19:43:08.4472218Z [l4-action] uv 0.12.22 installed (1.04 s)
+2026-10-12T19:43:09.3691676Z [l4-action] harness installed (0.92 s)
+2026-10-12T19:43:09.3703157Z ##[end-action id=__ciprianiacobescu_agent-supervisor.__run;outcome=success;conclusion=success;duration_ms=1995]
+2026-10-12T19:43:09.3706605Z ##[start-action display=save installed harness;id=__ciprianiacobescu_agent-supervisor.__actions_cache]
+2026-10-12T19:43:09.3754790Z ##[group]Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-12T19:43:09.3755191Z with:
+2026-10-12T19:43:09.3755663Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-12T19:43:09.3756364Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:43:09.3756792Z   enableCrossOsArchive: false
+2026-10-12T19:43:09.3757059Z ##[endgroup]
+2026-10-12T19:43:09.5340176Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/l4-dummy-action/l4-dummy-action --files-from manifest.txt --use-compress-program zstdmt
+2026-10-12T19:43:11.1441168Z Sent 25268501 of 25268501 (100.0%), 24.1 MBs/sec
+2026-10-12T19:43:11.3790167Z Cache saved with key: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:43:11.3898372Z ##[end-action id=__ciprianiacobescu_agent-supervisor.__actions_cache;outcome=success;conclusion=success;duration_ms=2019]
+2026-10-12T19:43:11.3905062Z ##[start-action display=l4;id=__ciprianiacobescu_agent-supervisor.__run_2]
+2026-10-12T19:43:11.3934438Z ##[group]Run echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-12T19:43:11.3935277Z echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-12T19:43:11.3935783Z s=$(date +%s.%N)
+2026-10-12T19:43:11.3936412Z # shellcheck disable=SC2086  # the command is a list of words on purpose
+2026-10-12T19:43:11.3937146Z "$HOME/.local/bin/l4" $INPUT_COMMAND
+2026-10-12T19:43:11.3938029Z echo "[l4-action] l4 $INPUT_COMMAND ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:43:11.4038135Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:43:11.4039080Z env:
+2026-10-12T19:43:11.4039451Z   INPUT_COMMAND: --version
+2026-10-12T19:43:11.4039871Z ##[endgroup]
+2026-10-12T19:43:11.8163288Z l4, version 0.1.0
+2026-10-12T19:43:11.8524183Z [l4-action] l4 --version (0.43 s)
+2026-10-12T19:43:11.8535625Z ##[end-action id=__ciprianiacobescu_agent-supervisor.__run_2;outcome=success;conclusion=success;duration_ms=462]
+2026-10-12T19:43:11.8648238Z Cleaning up orphan processes
+
