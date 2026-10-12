@@ -56,6 +56,7 @@ from l4.state.ledger import ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
+from l4.verifier.feedback import record_no_status
 from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
 from l4.verifier.notes import escalation_section
 from l4.verifier.provenance import introduction_problem
@@ -463,14 +464,20 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
         result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
 
 
-def _mark_taken(wb: Workbench, plan: FixPlan, fix_unit: str, round_: int) -> list[str]:
+def _mark_taken(
+    wb: Workbench, plan: FixPlan, fix_unit: str, round_: int, *, skipped: list[str] | None = None
+) -> list[str]:
     """Status `taken` and the Outcome line `Taken in round N into <fix unit>` in the parent's `feedback.md`, so that
-    the one fix-unit commit carries them (L4-FBK-004). Returns the repository-relative paths written."""
+    the one fix-unit commit carries them (L4-FBK-004). Returns the repository-relative paths written. An item with no
+    Status line is skipped (its id goes to `skipped`): this write never raises."""
     file = FeedbackFile.load(feedback_home(wb.ref.path))  # a follow-up's items are its parent's (L4-FBK-010)
     if file is None or not plan.taken:
         return []
     for ref in plan.taken:
-        if file.get(ref.id) is not None:
+        if (item := file.get(ref.id)) is not None and item.status_value is None:
+            if skipped is not None:
+                skipped.append(ref.id)
+        elif item is not None:
             file = file.set_status(ref.id, FeedbackStatus.TAKEN).set_outcome(
                 ref.id, f"Taken in round {round_} into {fix_unit}", redactor=wb.redactor
             )
@@ -523,7 +530,8 @@ def after_verdict(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger
         ctx.shared["notes"] = (escalation_section(result, reason, wb.redactor.redact_text),)
         return Trigger.VERIFY_FAIL_EXHAUSTED
     rel = ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
-    written = _mark_taken(wb, plan, ref.name, result.round)
+    no_status: list[str] = []
+    written = _mark_taken(wb, plan, ref.name, result.round, skipped=no_status)
     wb.git.run("add", "--", rel, *written)
     trailers = CommitTrailers(unit=wb.ref.id, run_id=wb.run_id, iteration=max(wb.iteration, 1), phase="verifying")
     wb.git.commit(clip_subject(f"docs({wb.ref.name}): fix unit {fix.ordinal} [skip ci]"), trailers)
@@ -539,4 +547,6 @@ def after_verdict(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger
         )
     if plan.waiting:  # still takeable: the next round takes them
         ledger.append("feedback.waiting", ids=plan.waiting, reason="fix_unit_full")
+    if no_status:  # after the takes, so that the problem is the item's last word (review #9)
+        record_no_status(ledger, fold(read_ledger(wb.ref.path).events, wb.ref.id), no_status)
     return trigger

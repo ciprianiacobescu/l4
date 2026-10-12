@@ -104,6 +104,7 @@ from l4.verifier.feedback import (
     feedback_ref,
     not_addressed_findings,
     pending_feedback,
+    record_no_status,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
 from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
@@ -1263,7 +1264,10 @@ def verify_hook(ctx: HookContext) -> Trigger:
     decide_fix(ctx, wb, result)  # before the evidence is written, so that the report lists the fix unit
     paths = write_round_evidence(services.ref.path, round_no, result, services.app.redactor)
     # Status and Outcome (L4-FBK-007), in the parent's file when the unit is a follow-up (L4-FBK-010)
-    paths += apply_addressed(feedback_home(services.ref.path), result, services.app.redactor)
+    no_status: list[str] = []
+    paths += apply_addressed(feedback_home(services.ref.path), result, services.app.redactor, skipped=no_status)
+    if no_status:  # an item whose Status line is gone: recorded, never a crash (review #9)
+        record_no_status(services.ledger, fold(_events(wb), wb.ref.id), no_status)
     if result.verdict is Verdict.NEEDS_HUMAN:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
     commit_verifier_tests(wb, vc.verifier_tests, round_no)

@@ -24,6 +24,7 @@ from l4.verifier.types import FeedbackOutcome, FeedbackRef, Finding, Severity, V
 MAX_REQUEST_CHARS = 1200  # the person's text, whole up to this (L4-FBK-004)
 MAX_EVIDENCE_CHARS = 300  # the judge's evidence in a title, an Outcome line and an event
 NOT_ANSWERED = "not answered"
+NO_STATUS = "no Status line"
 Event = tuple[str, dict[str, Any]]
 
 
@@ -156,15 +157,30 @@ def not_addressed_findings(outcomes: Sequence[FeedbackOutcome], asked: Sequence[
     ]
 
 
-def apply_addressed(unit_dir: Path, result: VerifyResult, redactor: Redactor) -> list[Path]:
+def record_no_status(ledger: Any, state: UnitState, ids: Sequence[str]) -> None:
+    """`feedback.invalid{id, problem: "no Status line"}` for each id, once: an item whose Status line the person
+    deleted cannot be written to (review #9). `ledger` has `append(type, **data)`."""
+    for fid in ids:
+        known = state.feedback.get(fid)
+        if known is None or known.status != "invalid" or known.problem != NO_STATUS:
+            ledger.append("feedback.invalid", id=fid, problem=NO_STATUS)
+
+
+def apply_addressed(
+    unit_dir: Path, result: VerifyResult, redactor: Redactor, *, skipped: list[str] | None = None
+) -> list[Path]:
     """Status `addressed` and the Outcome line `Addressed in round N at <sha10>: <evidence>` for each item the round
-    found addressed, in the parent's `feedback.md` (committed with the round's evidence). The paths written."""
+    found addressed, in the parent's `feedback.md` (committed with the round's evidence). The paths written. An item
+    with no Status line is skipped (its id goes to `skipped`): the harness's writes never raise."""
     done = [o for o in result.feedback_outcomes if o.addressed]
     file = FeedbackFile.load(unit_dir) if done else None
     if file is None:
         return []
     for outcome in done:
-        if file.get(outcome.id) is not None:
+        if (item := file.get(outcome.id)) is not None and item.status_value is None:
+            if skipped is not None:
+                skipped.append(outcome.id)
+        elif item is not None:
             line = f"Addressed in round {result.round} at {result.head_sha[:10]}: {outcome.evidence}"
             file = file.set_status(outcome.id, FeedbackStatus.ADDRESSED).set_outcome(
                 outcome.id, line, redactor=redactor

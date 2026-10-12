@@ -334,3 +334,39 @@ def test_a_short_heading_item_is_taken_judged_with_its_canonical_id_and_addresse
     result, backend = judged(wb, base, wb.head(), [yes("FB-004")])
     assert [(o.id, o.addressed) for o in result.feedback_outcomes] == [("FB-004", True)]
     assert "FB-004" in backend.calls[0][0].content
+
+
+# --- review #9: an item whose Status line is gone never crashes the harness's writes -------------------------------
+
+
+def drop_status_line(wb, fid: str = "FB-001") -> None:
+    path = wb.ref.path / "feedback.md"
+    text = FeedbackFile.load(wb.ref.path).data.decode()
+    item = FeedbackFile.load(wb.ref.path).get(fid)
+    section = text[item.section.start : item.section.end]
+    kept = "\n".join(ln for ln in section.split("\n") if not ln.startswith("- **Status:**"))
+    path.write_text(text.replace(section, kept))
+    assert FeedbackFile.load(wb.ref.path).get(fid).status_value is None
+
+
+def test_apply_addressed_skips_an_item_without_a_status_line(make_bench):
+    """L4-FBK-007, review #9: `set_status` raised SpecError (an L4Exit) mid-run; now the item is skipped and named."""
+    wb, base, head, _ = world(make_bench, code="import os\nMODE = os.environ['PACK_ROUNDING']\n")
+    result, _ = judged(wb, base, head, [yes("FB-001"), yes("FB-002")])
+    drop_status_line(wb, "FB-001")
+    skipped: list[str] = []
+    apply_addressed(wb.ref.path, result, REDACTOR, skipped=skipped)
+    assert skipped == ["FB-001"]
+    file = FeedbackFile.load(wb.ref.path)
+    assert file.get("FB-002").status is FeedbackStatus.ADDRESSED and file.get("FB-001").status_value is None
+
+
+def test_a_missing_status_line_is_recorded_as_invalid_once(make_bench):
+    """review #9: `feedback.invalid{id, problem: "no Status line"}`, once."""
+    from l4.verifier.feedback import record_no_status
+
+    wb, *_ = world(make_bench)
+    for _ in range(2):
+        state = fold(read_ledger(wb.ref.path).events, wb.ref.id)
+        record_no_status(wb.ledger, state, ["FB-001"])
+    assert events_of(wb, "feedback.invalid") == [{"id": "FB-001", "problem": "no Status line"}]
