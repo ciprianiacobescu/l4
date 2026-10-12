@@ -293,6 +293,8 @@ harness:
   commit: "<40-hex sha>"           # the SHA CI actually fetches; doctor CI-001 checks tag → sha
   repository: null                 # a fetched harness: https:// or ssh:// git URL; the shim runs
                                    # `uvx --from git+<repository>@<commit> l4`; null: vendored (L4-GHP-010)
+  delivery: null                   # vendored | fetched | action; null: fetched when `repository` is set, else vendored.
+                                   # action: the workflow's `uses:` sha is the only pin, no `commit` here (L4-ACT-004)
 
 spec:
   frameworks: auto                 # auto | [openspec, kiro]
