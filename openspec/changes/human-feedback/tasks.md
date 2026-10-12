@@ -21,7 +21,7 @@
 
 ## 4. Lessons from feedback
 
-- [ ] 4.1 `Lesson: yes` items addressed in a PASS round become or reinforce a lesson (origin `feedback`, dedupe key from the text, scope from the places) [L4-FBK-009] [SCN-FBK-22] — test: tests/unit/memory/test_curate_feedback.py (write first, see it fail) — code: src/l4/memory/curate.py, src/l4/memory/round.py — verify: uv run pytest tests/unit/memory -q
+- [x] 4.1 `Lesson: yes` items addressed in a PASS round become or reinforce a lesson (origin `feedback`, dedupe key from the text, scope from the places) [L4-FBK-009] [SCN-FBK-22] — test: tests/unit/memory/test_curate_feedback.py (write first, see it fail) — code: src/l4/memory/curate.py, src/l4/memory/round.py — verify: uv run pytest tests/unit/memory -q
 
 ## 5. After the merge
 

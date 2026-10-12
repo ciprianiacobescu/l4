@@ -2565,8 +2565,8 @@ Use `getByTestId` with `data-testid` attributes; text selectors broke on copy ch
 ```
 
 **L4-MEM-002** Promotion: a lesson is created or reinforced automatically only from (a) a verifier finding whose fix
-unit later passed, (b) a guard violation repeated across runs, (c) a human-edited lesson. Agent `lesson_proposals`
-go to `.serena/memories/inbox/<run-id>/` and are promoted only by a human (`l4 lessons promote`) or when they match
+unit later passed, (b) a guard violation repeated across runs, (c) a human-edited lesson, or (d) a feedback item with `Lesson: yes` addressed in a PASS round (L4-FBK-009).
+Agent `lesson_proposals` go to `.serena/memories/inbox/<run-id>/` and are promoted only by a human (`l4 lessons promote`) or when they match
 an existing dedupe key. Caps: `memory.max_lessons`, `memory.max_bytes`; overflow archives the least recently
 reinforced lessons to `_archive/` (ignored by Serena via `ignored_memory_patterns`).
 
