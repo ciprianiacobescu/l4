@@ -185,8 +185,14 @@ def test_text_from_stdin_title_draft_lesson_and_by(ctx: Ctx, monkeypatch: pytest
     assert FeedbackFile.load(ctx.repo / FOLDER).get("FB-002").title == "Own title"
 
 
-def test_by_falls_back_to_unknown(ctx: Ctx):
+def test_by_falls_back_to_unknown(ctx: Ctx, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """No user.name anywhere: the repository's is unset and the global and system configs are empty, whatever the
+    machine (or the test session) provides."""
     ctx.raw(ctx.repo, "config", "--unset", "user.name")
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     ctx.run("add", "--kind", "tests", "--text", "x")
     assert FeedbackFile.load(ctx.repo / FOLDER).get("FB-001").by.startswith("unknown, ")
 
