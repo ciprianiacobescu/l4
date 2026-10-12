@@ -279,7 +279,8 @@ class ProviderRegistry:
 
 @runtime_checkable
 class FixUnitCapable(Protocol):
-    """Not a `SpecProvider` member: Kiro has no fix units here, and the provider registry checks `SpecProvider` only."""
+    """Not a `SpecProvider` member: the registry checks `SpecProvider` only. Both providers write fix units (an OpenSpec
+    change, a Kiro bugfix spec); a provider without `create_fix_unit` escalates a failed round instead."""
 
     def create_fix_unit(
         self, parent: UnitRef, round: int, findings: Sequence[Finding], spec_delta: SpecDelta | None

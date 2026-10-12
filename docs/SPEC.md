@@ -773,7 +773,7 @@ valid (a task depends on every task in earlier waves); otherwise document order.
 graph are inserted at their document position.
 
 **L4-KSP-003** Criteria come from `requirements.md` (EARS acceptance criteria, numbered per requirement) or
-`bugfix.md`; a criterion line under a requirement's `#### Acceptance Criteria` heading may be numbered `1.`, `1)`,
+`bugfix.md` (its `2.n` and `3.n` items; the `1.n` describe the defect); a criterion line under a requirement's `#### Acceptance Criteria` heading may be numbered `1.`, `1)`,
 `1.1.`, `1.1)` or `1.1` (in the dotted forms the first number is the requirement's own, and they count only in a
 requirement with no plain `N.`/`N)` item, so a `1.1 …` sub-line of a plain criterion stays part of it), with or without
 a `-`/`*` bullet; the form never changes the criterion's alias (`Req N.M` by position) or id (L4-CRT-001). When a task
@@ -793,9 +793,28 @@ ref is the only place that records it merged (retired, the folder's own ledger w
 sweep would merge it again). Merge detection asks for `.kiro/specs/<name>` (`spec.kiro.root`) in the merged tree for a
 Kiro unit, never `openspec/changes/<name>`.
 
-**L4-KSP-005** Fix units MUST be Kiro **bugfix specs**: `bugfix.md`, `design.md`, `tasks.md` and `.config.kiro`
-`{"specId": <uuid4>, "workflowType": "requirements-first", "specType": "bugfix"}` (file layout and `specType`
-values [V, research/01]; the `workflowType` value for bugfix specs is [I] — confirm against a Kiro-created bugfix spec).
+**L4-KSP-005** Fix units MUST be Kiro **bugfix specs**, written by `KiroProvider.create_fix_unit` with the inputs of
+the OpenSpec writer to `.kiro/specs/<parent>-fix-<n>/` (L4-FBK-008):
+- **`bugfix.md`** in Kiro's template (`# Bugfix Requirements Document`, `## Bug Analysis`): *Current Behavior (Defect)* has
+  one `1.n` per finding (its title and detail, the human's "Decided by …" or "Requested by …" text first, kept whole up
+  to the decision limit); *Expected Behavior (Correct)* has one `2.n` per criterion a task fixes, restating the
+  criterion's text with its place and id (`2.1 WHEN … THEN the system SHALL … (parent Req 1.2, C-1a2b3c4d)`), and one
+  per spec-gap scenario; *Unchanged Behavior (Regression Prevention)* has `3.1 WHEN any other acceptance criterion of
+  <parent> is exercised THEN the system SHALL CONTINUE TO satisfy it` and one `3.n` per scenario whose THEN says `SHALL
+  CONTINUE TO`.
+- **`design.md`** (the findings and decisions in the order of L4-VER-006), **`tasks.md`** (Kiro grammar, one leaf per
+  task under a parent, each followed by `- _Requirements: 2.n[, 3.n]_`; a chore carries `[chore]` and its finding ids and
+  cites `3.1`; a one-wave `## Task Dependency Graph`) and **`.config.kiro`**
+  `{"specId": <uuid4>, "workflowType": "requirements-first", "specType": "bugfix"}` (file layout and `specType` values
+  [V, research/01]; the template is read from Kiro's IDE bundle [V]; the `workflowType` value for bugfix specs is [I] —
+  confirm against a Kiro-created bugfix spec), and the fix marker `.l4/fix.json` (L4-VER-006).
+- The provider validates the fix unit like any Kiro unit; when it does not validate, the folder is removed and the
+  round escalates with the validation error (`FixUnitInvalid`), as for OpenSpec.
+- In a folder with the fix marker, the criteria of `bugfix.md` are its `2.n` and `3.n` items (the `1.n` describe the
+  defect, in every `bugfix.md`); a `2.n` item that ends in `(… C-xxxxxxxx)` is read as that criterion, with the same
+  id and its own alias `Req 2.n`, so the family of a parent and its fix units counts it once (L4-CRT-001).
+  A failed Kiro round therefore spawns a fix unit and the parent goes to `fixing`; it escalates only on the limits of
+  L4-VER-007.
 
 ### 4.6 Byte-safe task marker writes
 
@@ -2230,7 +2249,7 @@ findings on the same criterion); tasks cite finding and criterion IDs. The fix u
 findings with the human's decisions first ("Decided by human in Q-NNN: <reason>"), so a length cut on a long finding
 never drops a decision and leaves the implementer an open question it must not decide. A decision is kept whole up to 1,200 characters (the finding's own detail is what is cut). A test chore (a rejected coverage hold) whose task begins with a decision that calls the code wrong must add tests that assert the decision: a failing test is not kept and is reported `blocked` with a technical question naming the test and the decision, and tests that all pass against that code get one retry reason naming the decision (attempt 1 only). A finding with `spec_gap: true` produces, before
 its task, an **ADDED** regression requirement with a scenario (OpenSpec: `## ADDED Requirements` →
-`### Requirement: <parent requirement> — regression <n>`; Kiro: a new acceptance criterion in `bugfix.md`). Fix units
+`### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). Fix units
 never use MODIFIED/REMOVED/RENAMED deltas (the parent's requirements are not in the base specs until the parent is
 archived, L4-OSP-006). The task of a rejected **coverage** hold is a test chore (`test_chores` in `.l4/fix.json`): its prompt
 says to add tests that run the changed code the hold names; its step may add test files and append new tests to the unit's
