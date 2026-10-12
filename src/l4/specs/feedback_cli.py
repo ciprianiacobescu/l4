@@ -8,7 +8,7 @@ import json
 import re
 import shlex
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -36,8 +36,13 @@ from l4.specs.feedback import (
     problems,
 )
 from l4.specs.providers import providers_for
+from l4.state.fold import fold
+from l4.state.ledger import LedgerCorrupt, LedgerRead, parse_ledger_files, read_ledger_files
+from l4.state.lifecycle import Phase
+from l4.state.pending import merge_ledgers, read_pending
 from l4.state.status import select_units
 from l4.vcs.git import Git
+from l4.vcs.names import lock_ref
 
 SCHEMA = "l4/feedback@1"
 MAX_QUOTE_LINES = 40
@@ -58,6 +63,7 @@ class FeedbackTarget:
     framework: Framework
     name: str
     dir: Path  # the unit folder that holds (or will hold) feedback.md
+    merged: bool = False  # the unit is `merged`: the file goes to the base branch (L4-FBK-010)
 
     @property
     def id(self) -> str:
@@ -91,9 +97,49 @@ def _unit_of_branch(app: AppContext, cfg: L4Config) -> str | None:
     return unit
 
 
+def archive_folder(app: AppContext, cfg: L4Config, name: str) -> Path | None:
+    """The newest `openspec/changes/archive/<date>-<name>/` of an archived change, else None."""
+    archive = app.repo.joinpath(*PurePosixPath(cfg.spec.openspec.root).parts, "changes", "archive")
+    if not archive.is_dir() or archive.is_symlink():
+        return None
+    dated = re.compile(rf"\d{{4}}-\d\d-\d\d-{re.escape(name)}")
+    found = sorted(d for d in archive.iterdir() if d.is_dir() and not d.is_symlink() and dated.fullmatch(d.name))
+    return found[-1] if found else None
+
+
+def _local_phase(app: AppContext, folder: Path, unit_id: str) -> str | None:
+    """The phase the unit's own ledger folds to, with the pending ledger of its lock ref (a merged Kiro unit's folder
+    still reads `in_review`: the merge is only there). None when nothing says."""
+    events: LedgerRead = parse_ledger_files(read_ledger_files(folder))
+    git = _git(app)
+    if git is not None:
+        events = merge_ledgers(events, read_pending(git, lock_ref(unit_id)))
+    return fold(events.events, unit_id).phase
+
+
+def _after_merge(app: AppContext, cfg: L4Config, target: FeedbackTarget) -> FeedbackTarget:
+    """L4-FBK-010: a `merged` unit's feedback goes to its folder on the base branch, which must be checked out. An
+    `abandoned` unit takes none. Any other phase keeps the folder it was found in."""
+    try:
+        phase = _local_phase(app, target.dir, target.id)
+    except LedgerCorrupt:
+        return target
+    if phase == Phase.ABANDONED.value:
+        raise _usage(f"{target.id} is abandoned: it takes no feedback")
+    if phase != Phase.MERGED.value:
+        return target
+    git = _git(app)
+    branch = git.run("symbolic-ref", "--short", "-q", "HEAD", check=False).stdout.strip() if git else ""
+    base = cfg.forge.base_branch
+    if branch != base:
+        raise _usage(f"{target.id} is merged: check out {base} to add feedback to it (now on {branch or 'no branch'})")
+    return replace(target, merged=True)
+
+
 def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None) -> FeedbackTarget:
     """The unit folder `feedback.md` belongs to: `--unit`, else the unit of the checked-out branch, else exit 2 with
-    the units listed. (A merged unit's archive folder is human-feedback 5.1.)"""
+    the units listed. A `merged` unit's folder is its archive folder (OpenSpec, when archived) or its spec folder on
+    the base branch (L4-FBK-010)."""
     providers = providers_for(cfg, app.repo, app.environ)
     chosen = unit or _unit_of_branch(app, cfg)
     if chosen is None:
@@ -106,8 +152,12 @@ def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None) -> Fe
     try:
         ((provider, ref),) = select_units(providers, (chosen,))
     except UnknownUnit as exc:
-        raise _usage(str(exc)) from None
-    return FeedbackTarget(ref.framework, ref.name, provider.unit_dir(ref))
+        framework, _, name = chosen.partition(":")
+        archived = archive_folder(app, cfg, name) if framework == Framework.OPENSPEC.value else None
+        if archived is None:
+            raise _usage(str(exc)) from None
+        return _after_merge(app, cfg, FeedbackTarget(Framework.OPENSPEC, name, archived, merged=True))
+    return _after_merge(app, cfg, FeedbackTarget(ref.framework, ref.name, provider.unit_dir(ref)))
 
 
 # --- --at ------------------------------------------------------------------------------------------------------
@@ -198,9 +248,16 @@ def _shell(message: str) -> str:
     return shlex.quote(message) if re.search(r'["$`\\!]', message) else f'"{message}"'
 
 
-def _git_lines(app: AppContext, target: FeedbackTarget, message: str) -> list[str]:
+def _git_lines(app: AppContext, cfg: L4Config, target: FeedbackTarget, message: str) -> list[str]:
     rel = (target.dir / FEEDBACK_FILENAME).relative_to(app.repo).as_posix()
-    return [rel, f"git add {rel}", f"git commit -m {_shell(f'feedback({target.name}): {message}')}", "git push"]
+    base = cfg.forge.base_branch
+    last = (
+        f"then get the commit onto {base} by your usual route (a pull request or a push); the next {base} run "
+        "creates a follow-up unit for it"
+        if target.merged
+        else "git push"
+    )
+    return [rel, f"git add {rel}", f"git commit -m {_shell(f'feedback({target.name}): {message}')}", last]
 
 
 def _echo(app: AppContext, lines: list[str]) -> None:
@@ -231,7 +288,7 @@ def run_feedback_add(
     item = written.get(fid) if written is not None else None
     shown_title = item.title if item is not None else new.title
     status = FeedbackStatus.DRAFT if draft else FeedbackStatus.SUBMITTED
-    _echo(app, [f"{fid} {status.value}", *_git_lines(app, target, f"{fid} {shown_title}")])
+    _echo(app, [f"{fid} {status.value}", *_git_lines(app, cfg, target, f"{fid} {shown_title}")])
     return ExitCode.OK
 
 
@@ -321,7 +378,7 @@ def _set_status(app: AppContext, unit: str | None, fid: str, status: FeedbackSta
     elif item.status is FeedbackStatus.ADDRESSED:
         raise _usage(f"{item.id} is already addressed")
     file.set_status(item.id, status).save()
-    _echo(app, [f"{item.id} {status.value}", *_git_lines(app, target, f"{verb} {item.id} {item.title}")])
+    _echo(app, [f"{item.id} {status.value}", *_git_lines(app, cfg, target, f"{verb} {item.id} {item.title}")])
     return ExitCode.OK
 
 

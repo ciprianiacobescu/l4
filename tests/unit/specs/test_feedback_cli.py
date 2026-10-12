@@ -278,3 +278,97 @@ def test_help_has_one_example_per_kind(ctx: Ctx):
     assert "--env PACK_ROUNDING" in out and "--when" in out and "--then" in out
     flat = " ".join(out.split())
     assert "only edit feedback.md" in flat and "only edits feedback.md" in flat and "commit and push" in flat
+
+
+# --- after the merge (human-feedback 5.1, L4-FBK-010) -------------------------------------------------------------
+
+
+def _ledger(folder: Path, unit: str, *phases: str, run_id: str = "r-20261003T1312Z-7f3a") -> None:
+    """A ledger under `folder` whose phase changes end in the last of `phases`."""
+    from l4.redact import Redactor
+    from l4.state.ledger import LedgerWriter
+
+    writer = LedgerWriter.open(folder, unit, run_id, redactor=Redactor({}))
+    before = "none"
+    for phase in phases:
+        writer.append("phase.changed", **{"from": before, "to": phase, "trigger": "test"})
+        before = phase
+    writer.finish(0)
+
+
+def _archive(ctx: Ctx, date: str = "2026-10-01") -> Path:
+    """Move the unit's change folder to the archive, as `openspec archive` does, and leave the base checked out."""
+    target = ctx.repo / "openspec" / "changes" / "archive" / f"{date}-{UNIT}"
+    target.parent.mkdir(parents=True)
+    ctx.raw(ctx.repo, "checkout", "-q", "main")
+    ctx.raw(ctx.repo, "mv", FOLDER, str(target.relative_to(ctx.repo)))
+    return target
+
+
+def test_merged_unit_writes_to_the_archive_folder(ctx: Ctx):
+    """SCN-FBK-23 (first part): on the base, add on an archived merged unit writes to the archive folder."""
+    archived = _archive(ctx)
+    _ledger(archived, f"openspec:{UNIT}", "in_review", "merged")
+    older = ctx.repo / "openspec" / "changes" / "archive" / f"2026-09-01-{UNIT}"
+    older.mkdir(parents=True)
+    out = ctx.run(
+        "add", "--kind", "duplication", "--at", f"{SOURCE}:4-9", "--text", "extract it", "--unit", f"openspec:{UNIT}"
+    )
+    rel = f"openspec/changes/archive/2026-10-01-{UNIT}/feedback.md"
+    lines = out.splitlines()
+    assert lines[:4] == [
+        "FB-001 submitted", rel, f"git add {rel}", f'git commit -m "feedback({UNIT}): FB-001 extract it"',
+    ]
+    assert "git push" not in lines
+    assert "main" in lines[4] and "follow-up unit" in lines[4]
+    assert FeedbackFile.load(archived).get("FB-001").status is FeedbackStatus.SUBMITTED
+    assert not (older / "feedback.md").exists()  # the newest match
+
+
+def test_a_merged_openspec_unit_not_yet_archived_writes_to_its_change_folder(ctx: Ctx):
+    ctx.raw(ctx.repo, "checkout", "-q", "main")
+    _ledger(ctx.repo / FOLDER, f"openspec:{UNIT}", "in_review", "merged")
+    out = ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}")
+    assert out.splitlines()[1] == FILE and "follow-up unit" in out
+    assert ctx.feedback.exists()
+
+
+def test_a_merged_kiro_unit_writes_to_its_spec_folder(ctx: Ctx):
+    """The folder's own ledger reads `in_review`; the merge is only in the pending ledger of the lock ref."""
+    from l4.state.pending import PendingLedger
+    from l4.vcs.git import Git
+
+    spec = ctx.repo / ".kiro" / "specs" / "discounts"
+    spec.mkdir(parents=True)
+    (spec / "tasks.md").write_text("- [x] 1 done\n")
+    ctx.raw(ctx.repo, "checkout", "-q", "main")
+    _ledger(spec, "kiro:discounts", "in_review")
+    scratch = ctx.repo.parent / "scratch" / "kiro-discounts"
+    _ledger(scratch, "kiro:discounts", "merged", run_id="r-20261003T1320Z-aaaa")
+    bare = ctx.repo.parent / "origin.git"
+    ctx.raw(ctx.repo.parent, "init", "-q", "--bare", str(bare))
+    ctx.raw(ctx.repo, "remote", "add", "origin", str(bare))
+    git = Git(ctx.repo, environ=ctx.environ)
+    run_id = "r-20261003T1320Z-aaaa"
+    built = PendingLedger(git, lock_ref="refs/l4/locks/kiro/discounts", unit="kiro:discounts", run_id=run_id).build(
+        next((scratch / ".l4" / "ledger").glob("*.jsonl"))
+    )
+    git.run("update-ref", "refs/l4/locks/kiro/discounts", built.sha)
+
+    words = ("add", "--kind", "duplication", "--at", f"{SOURCE}:2-3", "--text", "dedupe", "--unit", "kiro:discounts")
+    out = ctx.run(*words)
+    assert out.splitlines()[1] == ".kiro/specs/discounts/feedback.md" and "follow-up unit" in out
+    assert (spec / "feedback.md").exists()
+
+
+def test_an_abandoned_unit_is_refused(ctx: Ctx):
+    ctx.raw(ctx.repo, "checkout", "-q", "main")
+    _ledger(ctx.repo / FOLDER, f"openspec:{UNIT}", "implementing", "abandoned")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}", expect=2)
+    assert "abandoned" in ctx.err and not ctx.feedback.exists()
+
+
+def test_a_merged_unit_off_the_base_branch_is_refused(ctx: Ctx):
+    _ledger(ctx.repo / FOLDER, f"openspec:{UNIT}", "in_review", "merged")  # on the unit branch
+    ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
+    assert "check out main" in ctx.err and not ctx.feedback.exists()
