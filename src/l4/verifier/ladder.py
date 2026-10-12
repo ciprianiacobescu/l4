@@ -107,6 +107,7 @@ from l4.verifier.feedback import (
     pending_feedback,
     record_addressed,
     record_no_status,
+    unjudged_outcomes,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
 from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
@@ -726,6 +727,25 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     result.human = [effective[t] for t in dict.fromkeys(ids) if t in effective]
     for void in regressions(effective, result.trace):  # a regression voids an accept for good (D3)
         wb.emit("human.void", question=void.question, target=void.target, reason="a tracing test fails at head")
+    result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
+    if result.verdict is Verdict.PASS:
+        _hold_unjudged(vc, result)
+
+
+def _hold_unjudged(vc: VerifyContext, result: VerifyResult) -> None:
+    """L4-FBK-007, review #8: a round with pending items and no answer of this round's judge for one of them (the reply
+    was discarded and a person accepted the hold, or the steps of an earlier round were reused) cannot PASS. Each such
+    item becomes a not-addressed outcome (`not judged in this round`), so the round fails into the next feedback fix
+    unit and the item is judged in a later round."""
+    wb = vc.wb
+    asked = _asked_feedback(wb)
+    missing = unjudged_outcomes(asked, result.feedback_outcomes)
+    if not missing:
+        return
+    result.feedback_outcomes = [*result.feedback_outcomes, *missing]
+    result.findings.extend(not_addressed_findings(missing, asked))
+    for outcome in missing:
+        wb.emit("feedback.not_addressed", id=outcome.id, round=vc.round, evidence=outcome.evidence)
     result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
 
 

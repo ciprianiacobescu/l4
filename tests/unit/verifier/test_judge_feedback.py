@@ -5,6 +5,8 @@ item also needs its variable in the changed non-test code."""
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from l4.redact import Redactor
 from l4.specs.feedback import (
     FeedbackFile,
@@ -408,3 +410,51 @@ def test_the_pass_round_that_confirms_it_closes_it_in_that_round(make_bench):
     record_addressed(wb.ledger, result)
     state = fold(read_ledger(wb.ref.path).events, wb.ref.id)
     assert (state.feedback["FB-001"].status, state.feedback["FB-001"].round) == ("addressed", 2)
+
+
+# --- review #8: pending items with no answer of this round cannot PASS --------------------------------------------
+
+
+@pytest.fixture
+def passing_criteria(monkeypatch):
+    """Every criterion aggregates to `pass` (the tests here are about the feedback items, not the traceability)."""
+    from l4.verifier import ladder
+    from l4.verifier.types import CriterionOutcome
+
+    monkeypatch.setattr(
+        ladder, "aggregate_criterion", lambda cid, alias, *a, **k: CriterionOutcome(cid, alias, "pass", "pass", "ok")
+    )
+
+
+def reused(wb, base, head, events):
+    """Round 2 reusing the steps of a round 1 that ended NEEDS_HUMAN (`_resume`)."""
+    from l4.verifier.ladder import _resume
+
+    prev = {"round": 1, "verdict": "needs_human", "subject_sha": head, "base_sha": base, "head_sha": head}
+    vc = VerifyContext(wb, Scripted(ok({})), "judge", ["impl"], 2, 60)  # type: ignore[arg-type]
+    return _resume(vc, prev, wb.provider.criteria(wb.ref), events, head)
+
+
+def test_a_reused_round_with_taken_items_the_judge_never_answered_does_not_pass(make_bench, passing_criteria):
+    """L4-FBK-007, review #8: the judge's reply was discarded and the hold accepted; the reused round used to PASS with
+    both items still `taken`. Now each becomes a not-addressed finding, so a later round judges it."""
+    wb, base, head, _ = world(make_bench)
+    result = reused(wb, base, head, [])
+    assert result.verdict is Verdict.FAIL
+    assert [f.title for f in result.findings if f.source == "feedback"] == [
+        "FB-001 not addressed: not judged in this round", "FB-002 not addressed: not judged in this round"
+    ]  # fmt: skip
+    assert [e["id"] for e in events_of(wb, "feedback.not_addressed")] == ["FB-001", "FB-002"]
+    assert all(f.feedback is not None for f in result.findings if f.source == "feedback")  # the fix unit takes them
+
+
+def test_a_reused_round_keeps_the_answers_of_the_round_it_reuses(make_bench, passing_criteria):
+    """review #8, review #14: round 1 judged both items yes and ended NEEDS_HUMAN; the reused round 2 passes and is
+    the round that closes them (the judge check is not stored, so the ledger's `feedback.judged` is what it reads)."""
+    wb, base, head, _ = world(make_bench, code="import os\nMODE = os.environ['PACK_ROUNDING']\n")
+    judged(wb, base, head, [yes("FB-001"), yes("FB-002")])  # round 1
+    result = reused(wb, base, head, read_ledger(wb.ref.path).events)
+    assert result.verdict is Verdict.PASS and not [f for f in result.findings if f.source == "feedback"]
+    assert [(o.id, o.addressed) for o in result.feedback_outcomes] == [("FB-001", True), ("FB-002", True)]
+    record_addressed(wb.ledger, result)
+    assert [(e["id"], e["round"]) for e in events_of(wb, "feedback.addressed")] == [("FB-001", 2), ("FB-002", 2)]

@@ -186,6 +186,13 @@ def judged_outcomes(events: Sequence[Any], round_: int) -> list[FeedbackOutcome]
     return list(found.values())
 
 
+def unjudged_outcomes(asked: Sequence[FeedbackRef], outcomes: Sequence[FeedbackOutcome]) -> list[FeedbackOutcome]:
+    """A round that could PASS holds a not-addressed outcome for each pending item it has no answer for (review #8):
+    the item is checked in a later round, like an item the judge left out of its reply."""
+    answered = {o.id for o in outcomes}
+    return [FeedbackOutcome(r.id, False, "not judged in this round") for r in asked if r.id not in answered]
+
+
 def record_addressed(ledger: Any, result: VerifyResult) -> None:
     """`feedback.addressed{id, round, sha, evidence}` for each item the judge found addressed, in a PASS round only
     (review #14): in a round that fails for another reason the judge's yes stays evidence (`feedback.judged`), because
