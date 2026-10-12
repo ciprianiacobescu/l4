@@ -241,3 +241,44 @@ def test_a_follow_up_that_cannot_be_made_fails_the_run_and_nothing_is_left_half_
     monkeypatch.setattr(Git, "push", real)
     assert run_l4([CHORE], unit=False).code == 0  # the next run makes it
     assert raw(merged_kiro.origin, "for-each-ref", f"refs/heads/{BRANCH}").strip() != ""
+
+
+def test_the_archived_parent_is_found_by_its_exact_dated_name(tmp_path):
+    """review #13: `*-x` also matched `2026-05-01-other-x`; the parent `x` is only `<date>-x`."""
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.follow_up import _parent_in
+    from l4.specs.base import Framework, UnitRef
+
+    archive = tmp_path / "openspec" / "changes" / "archive"
+    for name in ("2026-04-01-x", "2026-05-01-other-x", "2026-06-01-x2"):
+        (archive / name).mkdir(parents=True)
+    snapshot = SimpleNamespace(ref=UnitRef(Framework.OPENSPEC, "x", tmp_path / "openspec" / "changes" / "x"))
+    found = _parent_in(tmp_path, L4Config(), snapshot)
+    assert found is not None and found.path.name == "2026-04-01-x"
+    (archive / "2026-04-01-x").rmdir()
+    assert _parent_in(tmp_path, L4Config(), snapshot) is None
+
+
+def test_a_push_lost_to_a_concurrent_run_that_made_the_same_follow_up_is_no_error(
+    merged_kiro, run_l4, raw, monkeypatch, capsys
+):
+    """review #15: `l4 run` and `l4 plan --sweep` can both create the follow-up; the loser's push is rejected, the
+    branch is on origin, and that is "already created by another run": one log line, no error exit, no duplicate."""
+    from l4.vcs.git import Git
+    from l4.vcs.push import PushRejected
+
+    real = Git.push
+
+    def lose_the_race(self, remote, refspecs, *, config=()):
+        if any(f"refs/heads/{BRANCH}" in r for r in refspecs):
+            real(self, remote, refspecs, config=config)  # the other run's push landed first ...
+            raise PushRejected(["push"], 1, f"! [rejected] HEAD -> {BRANCH} (fetch first)")  # ... ours is refused
+        return real(self, remote, refspecs, config=config)
+
+    monkeypatch.setattr(Git, "push", lose_the_race)
+    run = run_l4([CHORE], unit=False)
+    assert run.code == 0
+    assert capsys.readouterr().err.count("already created by another run") == 1
+    assert len(raw(merged_kiro.origin, "for-each-ref", f"refs/heads/{BRANCH}").strip().splitlines()) == 1

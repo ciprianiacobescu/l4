@@ -54,7 +54,8 @@ def test_bugfix_spec_uses_its_own_numbers(tmp_path):
         "3.1 WHEN a user logs in once THEN the system SHALL CONTINUE TO work\n"
     )
     criteria = kiro_criteria(spec)
-    assert [(c.alias, c.requirement) for c in criteria] == [  # the 1.n lines are the defect, not a criterion
+    assert [(c.alias, c.requirement) for c in criteria] == [  # review #1: outside a fix unit the 1.n stay as on main
+        ("Req 1.1", "Current Behavior (Defect)"),
         ("Req 2.1", "Expected Behavior (Correct)"),
         ("Req 3.1", "Unchanged Behavior (Regression Prevention)"),
     ]
@@ -214,3 +215,31 @@ def test_two_expected_items_that_restate_the_same_parent_criterion_collide(tmp_p
     (spec / "bugfix.md").write_text(BUGFIX.replace(second, again))
     with pytest.raises(CriterionIdCollision):
         kiro_criteria(spec)
+
+
+def test_a_bugfix_spec_without_the_marker_keeps_its_1n_items_and_validates_when_tasks_cite_them(tmp_path):
+    """review #1 (BLOCKER): Kiro's own template cites `_Requirements: 1.1_`; only a harness fix unit drops the 1.n."""
+    from l4.specs.base import Framework, UnitRef
+    from l4.specs.kiro import KiroProvider
+
+    spec = tmp_path / ".kiro" / "specs" / "login-bug"
+    spec.mkdir(parents=True)
+    (spec / "bugfix.md").write_text(BUGFIX.replace(" (parent Req 1.2, C-1a2b3c4d)", ""))
+    (spec / "design.md").write_text("# Design\n")
+    (spec / "tasks.md").write_text(
+        "# Implementation Plan\n\n- [ ] 1. Write bug condition exploration test\n  - _Requirements: 1.1_\n"
+        "- [ ] 2. Fix\n  - _Requirements: 2.1, 3.1_\n"
+    )
+    result = KiroProvider(tmp_path).validate(UnitRef(Framework.KIRO, "login-bug", spec), strict=True)
+    assert result.valid, result.issues
+
+
+def test_a_follow_up_unit_drops_the_1n_items_like_a_fix_unit(tmp_path):
+    """review #1: the harness writes a follow-up's bugfix.md in the fix-unit shape; its 1.n are the defect too."""
+    from l4.specs.followup import FollowUpMarker, write_follow_up_marker
+
+    spec = tmp_path / "login-followup-1"
+    spec.mkdir()
+    (spec / "bugfix.md").write_text(BUGFIX.replace(" (parent Req 1.2, C-1a2b3c4d)", ""))
+    write_follow_up_marker(spec, FollowUpMarker("kiro:login", ()))
+    assert [c.alias for c in kiro_criteria(spec)] == ["Req 2.1", "Req 2.2", "Req 3.1"]

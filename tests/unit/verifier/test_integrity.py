@@ -731,3 +731,36 @@ def test_unread_files_do_not_hide_a_python_finding_and_a_skipped_row_blocks_noth
     rows = {c.name: c for c in report.checks}
     assert rows["content scan"].status == "skipped" and rows["suppressions"].status == "skipped"
     assert "not checked: python only" in rows["content scan"].note and not report.findings
+
+
+def _follow_up_context(tmp_path, git_environ, parent: str, edited: str = "victim"):
+    """A follow-up `add-x-followup-1` whose marker names `parent`; the branch edits `<edited>/feedback.md`."""
+    from l4.config.schema import L4Config
+    from l4.specs.followup import FollowUpMarker, write_follow_up_marker
+    from l4.vcs.git import Git
+    from l4.verifier.integrity import IntegrityContext
+
+    files = {"README.md": "x\n", f".kiro/specs/{edited}/feedback.md": "# F\n"}
+    repo, base = new_repo(tmp_path, git_environ, files)
+    unit = ".kiro/specs/add-x-followup-1"
+    (repo.path / unit).mkdir(parents=True)
+    write_follow_up_marker(repo.path / unit, FollowUpMarker(parent, ()))
+    repo.write({f".kiro/specs/{edited}/feedback.md": "# F\nedited\n", f"{unit}/tasks.md": "- [ ] 1\n"})
+    head = repo.commit("work")
+    return IntegrityContext(
+        Git(repo.path, environ=repo.environ), L4Config(), base, head, [], [], [unit], "kiro:add-x-followup-1"
+    )
+
+
+def test_a_follow_up_may_write_exactly_its_parents_feedback_file(tmp_path, git_environ):
+    out = check_protected(_follow_up_context(tmp_path, git_environ, "kiro:add-x", edited="add-x"))
+    assert not out.findings
+
+
+@pytest.mark.parametrize("parent", ["kiro:victim", "kiro:../../elsewhere", "openspec:add-x"])
+def test_an_invalid_follow_up_marker_exempts_nothing_and_raises_nothing(tmp_path, git_environ, parent):
+    """review #4: no exemption of the file it names, no ValueError from `relative_to`, a blocker that says why."""
+    out = check_protected(_follow_up_context(tmp_path, git_environ, parent))
+    details = " ".join(f.detail for f in out.findings if f.severity is Severity.BLOCKER)
+    assert ".kiro/specs/victim/feedback.md" in details  # still protected
+    assert ".l4/followup.json" in details
