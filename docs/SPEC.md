@@ -2036,7 +2036,11 @@ pytest tests only; changed code is not python`: no writer call, no finding, no f
         "title": {"type": "string"}, "detail": {"type": "string"},
         "evidence": {"type": "array"}, "suggested_fix": {"type": "string"},
         "spec_gap": {"type": "boolean", "description": "behaviour not covered by any criterion"}}}},
-    "riskiest_assumptions": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "string"}}
+    "riskiest_assumptions": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "string"}},
+    "feedback": {"type": "array", "items": {"type": "object",
+      "required": ["id", "addressed", "evidence"],
+      "properties": {"id": {"type": "string", "pattern": "^FB-[0-9]{3,}$"},
+                     "addressed": {"type": "boolean"}, "evidence": {"type": "string"}}}}
   }
 }
 ```
@@ -2045,6 +2049,12 @@ pytest tests only; changed code is not python`: no writer call, no finding, no f
 verdict wrong (a reviewer reporting zero findings on a large diff is treated as suspicious, per the maintainer's
 operating rules). `counterexample` is optional in the schema (a `pass` has none) and required by L4-VER-002 step 9
 for every `fail`; a `fail` without one, or with one that does not reproduce, counts as `insufficient_evidence`.
+
+`feedback` is optional. When the prompt holds a `<l4:data kind="feedback">` block (L4-FBK-007), the reply answers once per
+listed item: `addressed` says whether the change does what the item asks, and `evidence` cites `file:line` of the diff. A
+reply without the array, or without an item, counts as `addressed: false` with the evidence "not answered". The harness
+decides from the answers (every judge asked must say `true`; a `config` item also needs its variable in the changed
+non-test code); the judge's answer alone closes nothing.
 
 **Weak judges (live wave D, W-D1).** A reply that breaks the schema only trivially is repaired by the harness
 before it counts as invalid: a string over its `maxLength` is cut there and ends in `…`, a free-text field (`suggested_fix`,

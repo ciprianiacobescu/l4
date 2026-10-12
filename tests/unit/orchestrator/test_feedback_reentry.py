@@ -22,6 +22,9 @@ from .test_review_reentry import HANDOFF, human_commit
 
 CRITERIA = [c.id for c in openspec_criteria(FIXTURE / "openspec" / "changes" / "add-discount-codes")]
 JUDGE = Step(structured=judge_reply(CRITERIA))
+# the judge of a round that holds FB-001 taken: it answers the item too (L4-FBK-007)
+FB1_YES = {"id": "FB-001", "addressed": True, "evidence": "src/pytdd/pricing.py:7"}
+JUDGE_FB1 = Step(structured=judge_reply(CRITERIA, feedback=[FB1_YES]))
 FEEDBACK = f"{UNIT_DIR}/feedback.md"
 FIX_UNIT = "add-discount-codes-fix-1"
 CHORE = Step(
@@ -64,7 +67,7 @@ def test_feedback_after_the_handoff_reenters_and_the_round_fails_at_step_0(
 ):
     """SCN-FBK-08: in_review -> implementing -> verifying -> fixing; one feedback finding; no gate or judge ran."""
     human = human_commit(tdd_repo, raw, {FEEDBACK: feedback_text(tmp_path, {})}, "ask for a refactor")
-    run = run_l4([CHORE, JUDGE])
+    run = run_l4([CHORE, JUDGE_FB1])
     assert run.code == 0, run.adapter.requests[-1].prompt[-500:]
     assert run.triggers()[-7:] == [
         "spec_edit_after_handoff", "all_leaves_done", "verification_started", "verify_fail_fix", "fix_unit_done",
@@ -90,17 +93,22 @@ def test_feedback_after_the_handoff_reenters_and_the_round_fails_at_step_0(
         in proposal
     )
     # the harness set Status and Outcome in the same commit as the fix unit
-    fb = raw(tdd_repo.origin, "show", f"{BRANCH}:{FEEDBACK}")
+    log = raw(tdd_repo.origin, "log", "--format=%H %s", BRANCH, "--", FEEDBACK).splitlines()
+    commit = next(line for line in log if "fix unit 1 [skip ci]" in line)  # later rounds touch the file too
+    fb = raw(tdd_repo.origin, "show", f"{commit.split()[0]}:{FEEDBACK}")
     assert "**Status:** taken" in fb and f"Taken in round 2 into {FIX_UNIT}" in fb
     assert "| FB-001 | taken | refactor |" in fb
-    commit = raw(tdd_repo.origin, "log", "--format=%H %s", BRANCH, "--", FEEDBACK).splitlines()[0]
-    assert "fix unit 1 [skip ci]" in commit
     changed = raw(tdd_repo.origin, "show", "--name-only", "--format=", commit.split()[0]).split()
     assert FEEDBACK in changed and any(c.startswith(f"openspec/changes/{FIX_UNIT}/") for c in changed)
     assert raw(tdd_repo.origin, "log", "-1", "--format=%s", BRANCH).strip() == HANDOFF
     assert not use_fake_gitlab.mrs[1]["title"].lower().startswith("draft")
     # the next round has nothing to take: the item is `taken` and its content is the one taken
     assert run.events("feedback.taken") == [taken]
+    # the last round judged it (L4-FBK-007, SCN-FBK-17): the event, then Status and Outcome in the round's evidence
+    [addressed] = run.events("feedback.addressed")
+    assert (addressed["id"], addressed["round"], addressed["evidence"]) == ("FB-001", 3, "src/pytdd/pricing.py:7")
+    done = raw(tdd_repo.origin, "show", f"{BRANCH}:{FEEDBACK}")
+    assert "**Status:** addressed" in done and f"Addressed in round 3 at {addressed['sha'][:10]}:" in done
 
 
 def test_feedback_pushed_before_the_handoff_waits_for_the_units_own_verification(
@@ -110,7 +118,7 @@ def test_feedback_pushed_before_the_handoff_waits_for_the_units_own_verification
     assert run_l4([blocked_step()]).code == 11
     edit_questions_on_origin(tdd_repo, raw, status="answered", answer="Round half up.")
     human_commit(tdd_repo, raw, {FEEDBACK: feedback_text(tmp_path, {})}, "ask for a refactor")
-    run = run_l4([red_step(), green_step(), CHORE, JUDGE])
+    run = run_l4([red_step(), green_step(), CHORE, JUDGE_FB1])
     assert run.code == 0, run.adapter.requests[-1].prompt[-500:]
     assert run.triggers()[-5:] == [
         "all_leaves_done",
