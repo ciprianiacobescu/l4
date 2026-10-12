@@ -189,3 +189,74 @@ def test_a_git_base_merge_settles_the_file(make_repo, raw, git_for, tmp_path: Pa
     merged = parsed(path.read_bytes())
     assert merged.get("FB-001").text == "round down" and merged.get("FB-001").status is FeedbackStatus.TAKEN
     assert merged.get("FB-001").outcome == "taken into fix 1"
+
+
+def _follow_up_repo(make_repo, raw, tmp_path: Path):
+    """review #3: the follow-up's branch edits the PARENT's feedback.md; a person adds FB-002 on base."""
+    from l4.specs.followup import FollowUpMarker, write_follow_up_marker
+
+    repo = make_repo(remote=True)
+    parent = repo / ".kiro/specs/add-x"
+    parent.mkdir(parents=True)
+    base = build(tmp_path, "round up")
+    (parent / "feedback.md").write_bytes(base)
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "feedback")
+    raw(repo, "checkout", "-q", "-b", "l4/kiro/add-x-followup-1")
+    unit = repo / ".kiro/specs/add-x-followup-1"
+    unit.mkdir()
+    write_follow_up_marker(unit, FollowUpMarker("kiro:add-x", (("FB-001", "0" * 64),)))
+    (parent / "feedback.md").write_bytes(harnessed(base, "FB-001", "Taken into add-x-followup-1"))
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "follow-up takes FB-001")
+    raw(repo, "checkout", "-q", "main")
+    (parent / "feedback.md").write_bytes(_two(base, tmp_path))
+    raw(repo, "commit", "-q", "-am", "person adds FB-002 on base")
+    return repo, parent, raw(repo, "rev-parse", "HEAD").strip()
+
+
+def _two(base: bytes, tmp_path: Path) -> bytes:
+    other = tmp_path / "two"
+    other.mkdir()
+    (other / "feedback.md").write_bytes(base)
+    item = NewFeedback(FeedbackKind.TESTS, "More tests", "Add a test.", "me, 2026-10-12T10:00:00Z")
+    append_item(other, "add-x", item, redactor=R)
+    return (other / "feedback.md").read_bytes()
+
+
+def test_a_follow_up_base_merge_settles_the_parents_feedback_file(make_repo, raw, git_for, tmp_path: Path):
+    """review #3 (L4-FBK-010): without the resolver the merge stops at BaseMergeConflict on every run."""
+    from l4.specs.harness_merge import follow_up_feedback_rel
+
+    repo, parent, main_sha = _follow_up_repo(make_repo, raw, tmp_path)
+    raw(repo, "checkout", "-q", "l4/kiro/add-x-followup-1")
+    unit = repo / ".kiro/specs/add-x-followup-1"
+    rel = follow_up_feedback_rel(unit, repo)
+    assert rel == ".kiro/specs/add-x/feedback.md"
+    trailers = CommitTrailers(unit="kiro:add-x-followup-1", run_id="r-1", iteration=2, phase="verifying")
+    result = merge_base_into(
+        git_for(repo), main_sha, message="chore: merge main into the unit branch [skip ci]", trailers=trailers,
+        resolvers=harness_resolvers(".kiro/specs/add-x-followup-1", Framework.KIRO, follow_up_feedback=rel),
+    )  # fmt: skip
+    assert result.kind == "merged" and result.resolved == (rel,) and result.files == ()
+    merged = parsed((parent / "feedback.md").read_bytes())
+    assert merged.get("FB-002").text == "Add a test."
+    assert merged.get("FB-001").status is FeedbackStatus.TAKEN
+    assert merged.get("FB-001").outcome == "Taken into add-x-followup-1"
+
+
+def test_only_a_follow_up_gets_the_parents_file_and_only_that_file(make_repo, raw, tmp_path: Path):
+    from l4.specs.harness_merge import follow_up_feedback_rel
+
+    repo = make_repo(remote=True)
+    plain = repo / ".kiro/specs/add-x"
+    plain.mkdir(parents=True)
+    assert follow_up_feedback_rel(plain, repo) is None
+    paths = [m for m, _ in harness_resolvers(".kiro/specs/add-x-followup-1", Framework.KIRO)]
+    assert not any(m(".kiro/specs/add-x/feedback.md") for m in paths)
+    own = harness_resolvers(
+        ".kiro/specs/add-x-followup-1", Framework.KIRO, follow_up_feedback=".kiro/specs/add-x/feedback.md"
+    )
+    assert any(m(".kiro/specs/add-x/feedback.md") for m, _ in own)
+    assert not any(m(".kiro/specs/add-x/tasks.md") for m, _ in own)
+    assert not any(m(".kiro/specs/other/feedback.md") for m, _ in own)
