@@ -25,5 +25,7 @@
 
 ## 5. SPEC, docs and live evidence
 
-- [ ] 5.1 SPEC amendments 1–6 of design.md; quickstart: GitHub through the action (private same-owner: no key, the Access setting; public: `--action-copy` and a deploy key) — test: python scripts/check_spec.py docs/SPEC.md — code: docs/SPEC.md, docs/quickstart.md — verify: check_spec passes; the full suite passes
+- [x] 5.1 SPEC amendments 1–6 of design.md; quickstart: GitHub through the action (private same-owner: no key, the Access setting; public: `--action-copy` and a deploy key) — test: python scripts/check_spec.py docs/SPEC.md — code: docs/SPEC.md, docs/quickstart.md — verify: check_spec passes; the full suite passes
+  - Done: docs/SPEC.md (L4-INS-001/004/005, L4-ACT-001..008 and L4-SKL-001..002 as requirements before the runtime prerequisites, §15 and §16.2 action form, §21.0 this repository's CI, SCN-ACT-01..13 and SCN-SKL-01..03 in §23.18), docs/quickstart.md (GitHub through the action), docs/live/action/README.md.
+  - Still open: SCN-ACT-03 with the final action and `--action-copy`; SCN-ACT-06 (harness-only upgrade keeps the CLI cache); the action self-test (runs only from the default branch); one release (after the merge to amaster); the skill (4.1–4.3); the full-suite run.
 - [ ] 5.2 Live on the dummy repository: both sources private and public, the caches across a harness upgrade, `l4 init --action` on a fresh copy, a seed unit end to end through the action, one release, one sharded pull-request check; step timings from the Actions API; temporary deploy keys removed; record under docs/live/action/ [L4-ACT-008] [SCN-ACT-13] — test: the run ids and timings — code: none — verify: ids recorded
