@@ -137,7 +137,10 @@ def test_no_credential_path_is_cached():
             assert path != secret and path not in secret.parents, f"{path} caches {secret}"
     assert {str(p) for p in cached} == {
         f"/home/runner/{p}"
-        for p in (".local/bin", ".local/share/l4", ".local/share/claude", ".local/share/uv", ".cache/l4", ".cache/uv")
+        for p in (
+            ".local/bin", ".local/share/l4", ".local/share/claude", ".local/share/uv", ".cache/l4/installers",
+            ".cache/uv",
+        )
     }
 
 

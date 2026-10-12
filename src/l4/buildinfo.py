@@ -1,8 +1,11 @@
 """Which harness commit is running. In order: `l4 init --vendor` writes `l4/_commit.py` into the vendored copy; a
 harness fetched at run time (`uvx --from git+URL@SHA`, L4-GHP-010) is installed with a `direct_url.json` whose
-`vcs_info.commit_id` is that SHA; a checkout or a plain wheel has neither, so the commit is unknown (None) there."""
+`vcs_info.commit_id` is that SHA; the setup action installs from a local copy, which has no commit there, so it
+exports the commit it installed as `L4_HARNESS_COMMIT`; a checkout or a plain wheel has none of these, so the commit
+is unknown (None) there."""
 
 import json
+import os
 import re
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, distribution
@@ -11,15 +14,20 @@ DISTRIBUTION = "l4harness"
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _exported_commit() -> str | None:
+    commit = os.environ.get("L4_HARNESS_COMMIT", "")
+    return commit if _FULL_SHA.match(commit) else None
+
+
 def _installed_commit() -> str | None:
     try:
         text = distribution(DISTRIBUTION).read_text("direct_url.json")
         info = json.loads(text) if text else None
     except (PackageNotFoundError, OSError, ValueError):
-        return None
+        return _exported_commit()
     vcs = info.get("vcs_info") if isinstance(info, dict) else None
     commit = vcs.get("commit_id") if isinstance(vcs, dict) else None
-    return commit if isinstance(commit, str) and _FULL_SHA.match(commit) else None
+    return commit if isinstance(commit, str) and _FULL_SHA.match(commit) else _exported_commit()
 
 
 def harness_commit() -> str | None:

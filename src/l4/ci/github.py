@@ -24,11 +24,18 @@ CACHE_ACTION = "actions/cache/{op}@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
 # Only user-local tool directories. Never a credential path (`l4.config.defaults.CREDENTIAL_PATHS`): the login of
 # opencode and kiro-cli lives under ~/.local/share/<tool>, so those two directories are left out on purpose.
 CACHE_PATHS = (
-    "~/.local/bin", "~/.local/share/l4", "~/.local/share/claude", "~/.local/share/uv", "~/.cache/l4", "~/.cache/uv",
+    "~/.local/bin", "~/.local/share/l4", "~/.local/share/claude", "~/.local/share/uv", "~/.cache/l4/installers",
+    "~/.cache/uv",
 )  # fmt: skip
 # The agent CLIs and bwrap, at the paths `l4 doctor --ci --fix` installs into. The setup action restores this cache
 # (`.github/actions/l4/action.yml`, step `clis`) and the workflow saves it, so the two lists must be equal (a test).
-CLI_CACHE_PATHS = ("~/.local/bin", "~/.local/share/l4", "~/.local/share/claude", "~/.cache/l4")
+# Not cached: `uv`, `uvx` and `l4` in ~/.local/bin (the harness cache holds them; `!` patterns remove earlier matches),
+# npm's download cache `~/.cache/l4/npm` (353 MB, redundant once the installed copies under ~/.local/share/l4 are
+# cached; it made the CLI cache twice as big and 12 s to restore) and `~/.cache/l4/locks`.
+CLI_CACHE_PATHS = (
+    "~/.local/bin", "!~/.local/bin/uv", "!~/.local/bin/uvx", "!~/.local/bin/l4",
+    "~/.local/share/l4", "~/.local/share/claude", "~/.cache/l4/installers",
+)  # fmt: skip
 # GitHub's published SSH host keys (api.github.com/meta, 2026-10-11), pinned for the fetched harness's deploy key
 # (L4-GHP-010): the clone checks the host against these and nothing else.
 HOST_KEYS = (

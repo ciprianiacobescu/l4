@@ -77,6 +77,7 @@ runs:
         INPUT_UV_VERSION: ${{ inputs.uv-version }}
         INPUT_SELF_PROVISION: ${{ inputs.self-provision }}
         INPUT_CLIS: ${{ inputs.clis }}
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         # Every check here runs before any download, and no message repeats an input value.
         s=$(date +%s.%N)
@@ -108,6 +109,12 @@ runs:
             ;;
           *) echo "::error::source must be auto, action or repository"; exit 2 ;;
         esac
+        # The commit the ledger names: the pinned commit of `uses: ...@<sha>` or the commit input; a branch or a tag is
+        # no commit, so none is exported then (the installed copy has no commit in direct_url.json).
+        commit=
+        if [ "$mode" = repository ]; then commit=$INPUT_COMMIT
+        elif [[ "$ACTION_REF" =~ ^[0-9a-f]{40}$ ]]; then commit=$ACTION_REF; fi
+        [ -z "$commit" ] || echo "L4_HARNESS_COMMIT=$commit" >> "$GITHUB_ENV"
         {
           echo "mode=$mode"
           echo "provision=$provision"
@@ -199,9 +206,12 @@ runs:
       with:
         path: |
           ~/.local/bin
+          !~/.local/bin/uv
+          !~/.local/bin/uvx
+          !~/.local/bin/l4
           ~/.local/share/l4
           ~/.local/share/claude
-          ~/.cache/l4
+          ~/.cache/l4/installers
         key: ${{ steps.clikey.outputs.key }}
     - name: runner setup
       id: setup
