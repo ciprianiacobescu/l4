@@ -159,9 +159,7 @@ def test_a_merge_that_carried_the_archive_leaves_no_unit_to_sweep(tmp_path, raw,
     assert sweep(world, "r-20261005T1000Z-0001") == []
 
 
-def test_a_merged_tree_without_the_folder_is_recorded_merged_and_gets_no_archive_mr(
-    tmp_path, raw, git_environ, gitlab
-):
+def test_a_merged_tree_without_the_folder_is_recorded_merged_and_gets_no_archive_mr(tmp_path, raw, git_environ, gitlab):
     world = MergedWorld(tmp_path, raw, git_environ, gitlab).build(archive_in_merge=True)
     # the base head holds the folder again (a later commit), the tree of the merge commit does not
     world.raw(world.repo, "checkout", "-q", "l4/openspec/add-x", "--", "openspec/changes/add-x")
@@ -170,9 +168,7 @@ def test_a_merged_tree_without_the_folder_is_recorded_merged_and_gets_no_archive
     world.merged_mr()
     (action,) = sweep(world, "r-20261005T1000Z-0001")
     assert (action.what, action.detail) == ("merged", "MR !1: the merged tree holds no change folder")
-    changed = [
-        e for e in pending_events(world) if e["type"] == "phase.changed" and e["run"] == "r-20261005T1000Z-0001"
-    ]
+    changed = [e for e in pending_events(world) if e["type"] == "phase.changed" and e["run"] == "r-20261005T1000Z-0001"]
     assert [(e["from"], e["to"]) for e in changed] == [("in_review", "merged")]
     assert not any(e["type"] == "archive.opened" for e in pending_events(world))
     assert [mr["title"] for mr in gitlab.mrs.values()] == ["[l4] add-x: x"]  # no archive MR

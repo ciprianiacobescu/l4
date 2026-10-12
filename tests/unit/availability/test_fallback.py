@@ -436,12 +436,6 @@ def test_a_lost_login_mid_run_is_logged_as_auth_not_as_a_rate_limit(tmp_path):
     assert fallback["reason"] == "auth"
 
 
-def test_the_api_key_refusal_prints_the_auth_prefix_once():
-    from l4.availability.probes import _api_key_unsupported
-
-    result = _api_key_unsupported("auth")
-    line = format_skipped_line("judges", Skipped("claude-judge", "auth", result.reason or ""))
-    assert line == (
-        "[l4] judges: claude-judge skipped — "
-        "auth: api_key is not supported in M0 (the sandbox passes no credential variable)"
-    )
+def test_a_missing_credential_variable_prints_the_auth_prefix_once():
+    line = format_skipped_line("judges", Skipped("codex-main", "auth", "CODEX_API_KEY is not set"))
+    assert line == "[l4] judges: codex-main skipped — auth: CODEX_API_KEY is not set"

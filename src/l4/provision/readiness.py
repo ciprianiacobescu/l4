@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import Any
 
 from l4.agents.base import ProbeCtx
+from l4.agents.credentials import credential_in, credential_variable
 from l4.agents.factory import Factory
 from l4.agents.gate import GateBusy, busy_detail
 from l4.config.schema import Profile
@@ -85,6 +86,7 @@ class AdapterReadiness:
     state: AdapterState
     steps: tuple[str, ...] = ()  # only for installed-not-authenticated
     status: dict[str, Any] = field(default_factory=dict)  # sanitized
+    detail: str | None = None  # `<profile>: <VARIABLE> is not set` for a profile whose credential variable is unset
 
     def line(self) -> str:
         return f"{self.profile} {self.adapter} {self.state.value}"
@@ -106,9 +108,12 @@ def adapter_readiness(name: str, profile: Profile, factory: Factory, ctx: ProbeC
         return AdapterReadiness(name, adapter, AdapterState.BUSY, status={"note": busy_detail(adapter)})
     if auth.ok:
         return AdapterReadiness(name, adapter, AdapterState.READY, status=sanitize_status(auth.detail))
+    variable = credential_variable(profile.adapter, profile.auth)
+    unset = variable if variable and credential_in(ctx.environ, variable) is None else None
     return AdapterReadiness(
         name,
         adapter,
         AdapterState.INSTALLED_NOT_AUTHENTICATED,
         provider_steps(profile) or steps_for(adapter, profile.auth),
+        detail=f"{name}: {unset} is not set" if unset else None,
     )

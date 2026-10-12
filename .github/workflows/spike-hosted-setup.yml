@@ -1,0 +1,297 @@
+# SPIKE (branch spike/hosted-agent-setup): can an auto setup step provision the agent CLIs on GitHub-hosted runners
+# nobody customized? Questions A-G are in the spike plan. Nothing here pushes, nothing uses a forge token; the only
+# secrets are optional agent credentials of the GitHub environment `hosted-agents` (deployable from spike/* only), passed
+# to `l4 probe` and to the Claude Code check; no artifact may contain a value (checked before upload).
+name: spike-hosted-setup
+on:
+  push:
+    branches: ["spike/**"]
+  workflow_dispatch:
+permissions:
+  contents: read
+
+env:
+  OUT: /home/runner/spike-out   # the hosted images run jobs as user `runner`
+
+jobs:
+  cold:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    environment: hosted-agents   # agent credentials are secrets of this environment (spike/* branches only)
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: facts (question A)
+        run: |
+          mkdir -p "$OUT"
+          {
+            echo "RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT:-unset}"
+            echo "CI_DISPOSABLE_ENVIRONMENT=${CI_DISPOSABLE_ENVIRONMENT:-unset}"
+            echo "ImageOS=${ImageOS:-unset} ImageVersion=${ImageVersion:-unset}"
+            echo "uv_before_anything=$(command -v uv || echo absent)"
+            echo "unzip=$(command -v unzip || echo absent) node=$(node --version 2>&1 | head -1)"
+            echo "apparmor_files_bwrap=$(find /etc/apparmor.d -maxdepth 1 -iname '*bwrap*' -printf '%f ' 2>/dev/null)"
+          } | tee "$OUT/facts.txt"
+
+      - name: render l4-setup from the checkout (the bootstrap; `l4 init` needs uv first)
+        run: |
+          pin=$(sed -n 's/^UV_VERSION = "\(.*\)"$/\1/p' src/l4/provision/catalog.py)
+          sed "s/@@UV_VERSION@@/$pin/g" src/l4/ci/templates/l4-setup.sh > "$RUNNER_TEMP/l4-setup"
+          chmod 0755 "$RUNNER_TEMP/l4-setup"
+          echo "uv_pin=$pin"
+
+      - name: flag off and auto (question F; auto on a hosted runner acts as off)
+        run: |
+          L4_SELF_PROVISION='' "$RUNNER_TEMP/l4-setup" | tee "$OUT/setup-flag-off.txt"
+          L4_SELF_PROVISION=auto "$RUNNER_TEMP/l4-setup" | tee "$OUT/setup-flag-auto.txt"
+          { echo "uv_after_flag_off=$(command -v uv || echo absent)"
+            echo "bwrap_after_flag_off=$(command -v bwrap || echo absent)"
+            echo "local_bin_after_flag_off=$(find ~/.local/bin -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null)"; } | tee "$OUT/flag-off-state.txt"
+
+      - name: flag on (setup step)
+        run: |
+          s=$(date +%s)
+          L4_SELF_PROVISION=true "$RUNNER_TEMP/l4-setup" 2>&1 | tee "$OUT/setup-flag-on.txt"
+          echo "setup_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
+
+      - name: build the target project
+        run: |
+          s=$(date +%s)
+          bash scripts/runner/spike-hosted/make-target.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/target" 2>&1 | tee "$OUT/make-target.txt"
+          echo "make_target_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
+
+      - name: the vendored .l4/bin/l4-setup, as the generated job runs it (task 1.6)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          if cmp -s .l4/bin/l4-setup "$RUNNER_TEMP/l4-setup"; then same=yes; else same=no; fi
+          echo "setup_identical=$same" | tee -a "$OUT/timings.txt"
+          L4_SELF_PROVISION=true .l4/bin/l4-setup 2>&1 | tee "$OUT/setup-vendored.txt"
+
+      - name: doctor --ci --fix with the flag on (question B)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          s=$(date +%s)
+          rc=0; L4_SELF_PROVISION=true .l4/bin/l4 doctor --ci --fix > "$OUT/doctor-fix.txt" 2>&1 || rc=$?
+          echo "doctor_fix_seconds=$(( $(date +%s) - s )) doctor_fix_rc=$rc" | tee -a "$OUT/timings.txt"
+          .l4/bin/l4 doctor --ci --json > "$OUT/doctor-after.json" 2>&1 || true
+          cat "$OUT/doctor-fix.txt" | cut -c1-300
+        continue-on-error: true
+
+      - name: probe (question D)
+        working-directory: ${{ runner.temp }}/target
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        run: |
+          for v in CLAUDE_CODE_OAUTH_TOKEN CODEX_API_KEY KIRO_API_KEY; do
+            if [ -z "${!v}" ]; then unset "$v"; echo "$v=not set"; else echo "$v=set (value not shown)"; fi
+          done | tee "$OUT/probe-secrets-present.txt"
+          s=$(date +%s)
+          rc=0; .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1 || rc=$?; echo "probe_rc=$rc" | tee -a "$OUT/timings.txt"
+          .l4/bin/l4 probe --json > "$OUT/probe.json" 2>&1 || true
+          echo "probe_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
+          cat "$OUT/probe.txt" | cut -c1-300
+        continue-on-error: true
+
+      - name: sandboxed OpenCode call (question D, inside the harness's bwrap)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1 || rc=$?; echo "sandboxed_hello_rc=${rc:-0}" | tee -a "$OUT/timings.txt"
+          cat "$OUT/sandboxed-hello.txt"
+        continue-on-error: true
+
+      - name: Claude Code with CLAUDE_CODE_OAUTH_TOKEN only, outside and inside the harness's bwrap (question D')
+        working-directory: ${{ runner.temp }}/target
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          {
+            if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "CLAUDE_CODE_OAUTH_TOKEN=not set"; exit 0; fi
+            echo "CLAUDE_CODE_OAUTH_TOKEN=set (value not shown) claude_version=$(claude --version 2>&1 | head -1)"
+            claude auth status 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print("auth_status", {k: d.get(k) for k in ("loggedIn", "authMethod", "subscriptionType")})' || echo "auth_status unreadable"
+            s=$(date +%s)
+            rc=0; claude -p --no-session-persistence --max-turns 1 --output-format json "Reply with the single word OK and nothing else." > "$RUNNER_TEMP/claude-out.json" 2>/dev/null || rc=$?
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("outside_sandbox", {k: d.get(k) for k in ("is_error", "api_error_status", "result")})' "$RUNNER_TEMP/claude-out.json" || echo "outside_sandbox unreadable"
+            echo "claude_outside_rc=$rc claude_outside_seconds=$(( $(date +%s) - s ))"
+            rm -f "$RUNNER_TEMP/claude-out.json"
+            mkdir -p "$HOME/.claude"
+            src=0; uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-claude.py" || src=$?
+            echo "claude_sandboxed_rc=$src"
+          } 2>&1 | tee "$OUT/claude-token.txt"
+        continue-on-error: true
+
+      - name: simulate --all in the harness checkout (question E)
+        run: |
+          uv sync --frozen
+          rc=0; uv run --frozen l4 simulate --all > "$OUT/simulate.txt" 2>&1 || rc=$?; echo "simulate_rc=$rc" | tee -a "$OUT/timings.txt"
+          tail -15 "$OUT/simulate.txt"
+        continue-on-error: true
+
+      - name: results.json
+        if: ${{ always() }}
+        run: |
+          cp -r "$RUNNER_TEMP/target/.l4-out" "$OUT/target-l4-out" 2>/dev/null || true
+          python3 - <<'PY'
+          import json, os, re, pathlib
+          out = pathlib.Path(os.environ["OUT"])
+          def read(n):
+              p = out / n
+              return p.read_text(errors="replace") if p.exists() else ""
+          kv = {}
+          for t in (read("timings.txt") + read("facts.txt") + read("flag-off-state.txt")).split():
+              if "=" in t:
+                  k, v = t.split("=", 1); kv[k] = v
+          res = {
+              "os": os.environ.get("MATRIX_OS"),
+              "kv": kv,
+              "hsu_lines_on": [l for l in read("setup-flag-on.txt").splitlines() if l.startswith("[HSU-")],
+              "hsu_lines_off": [l for l in read("setup-flag-off.txt").splitlines() if l.startswith("[HSU-")],
+              "hsu_lines_auto": [l for l in read("setup-flag-auto.txt").splitlines() if l.startswith("[HSU-")],
+              "hsu_lines_vendored": [l for l in read("setup-vendored.txt").splitlines() if l.startswith("[HSU-")],
+              "doctor_fix_rows": [l[:300] for l in read("doctor-fix.txt").splitlines() if re.match(r"^(fix|ENV|PRV|SANDBOX)", l)],
+              "probe_lines": [l[:300] for l in read("probe.txt").splitlines() if l.startswith("[l4] probe")],
+              "simulate_tail": read("simulate.txt").splitlines()[-5:],
+              "sandboxed_hello": read("sandboxed-hello.txt").splitlines()[:3],
+              "claude_token": read("claude-token.txt").splitlines()[:12],
+          }
+          (out / "results.json").write_text(json.dumps(res, indent=2))
+          print(json.dumps(res, indent=2))
+          PY
+        env:
+          MATRIX_OS: ${{ matrix.os }}
+
+      - name: no token value in any artifact file
+        if: ${{ always() }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "token_leak_check=skipped (not set)" | tee -a "$OUT/timings.txt"; exit 0; fi
+          if grep -rlF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$OUT" "$RUNNER_TEMP/target/.l4-out" 2>/dev/null; then
+            echo "token_leak_check=FOUND" | tee -a "$OUT/timings.txt"; exit 1
+          fi
+          echo "token_leak_check=clean" | tee -a "$OUT/timings.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: spike-cold-${{ matrix.os }}
+          path: /home/runner/spike-out
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: save the user-local tool dirs to the cache
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/l4
+            ~/.local/share/claude
+            ~/.local/share/uv
+            ~/.cache/l4
+            ~/.cache/uv
+          key: l4-tools-${{ matrix.os }}-${{ runner.arch }}-${{ hashFiles('src/l4/provision/catalog.py', 'src/l4/ci/templates/l4-setup.sh') }}
+
+  warm:
+    needs: cold
+    runs-on: ubuntu-24.04
+    environment: hosted-agents
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: restore the cache (question G)
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/l4
+            ~/.local/share/claude
+            ~/.local/share/uv
+            ~/.cache/l4
+            ~/.cache/uv
+          key: l4-tools-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('src/l4/provision/catalog.py', 'src/l4/ci/templates/l4-setup.sh') }}
+
+      - name: warm facts
+        run: |
+          mkdir -p "$OUT"
+          echo "cache_hit=${{ steps.cache.outputs.cache-hit }}" | tee -a "$OUT/timings.txt"
+
+      - name: render l4-setup from the checkout (the bootstrap; `l4 init` needs uv first)
+        run: |
+          pin=$(sed -n 's/^UV_VERSION = "\(.*\)"$/\1/p' src/l4/provision/catalog.py)
+          sed "s/@@UV_VERSION@@/$pin/g" src/l4/ci/templates/l4-setup.sh > "$RUNNER_TEMP/l4-setup"
+          chmod 0755 "$RUNNER_TEMP/l4-setup"
+          echo "uv_pin=$pin"
+
+      - name: flag on (setup step)
+        run: |
+          s=$(date +%s)
+          L4_SELF_PROVISION=true "$RUNNER_TEMP/l4-setup" 2>&1 | tee "$OUT/setup-flag-on.txt"
+          echo "setup_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
+
+      - name: build the target project
+        run: |
+          s=$(date +%s)
+          bash scripts/runner/spike-hosted/make-target.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/target" 2>&1 | tee "$OUT/make-target.txt"
+          echo "make_target_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
+
+      - name: the vendored .l4/bin/l4-setup, as the generated job runs it (task 1.6)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          if cmp -s .l4/bin/l4-setup "$RUNNER_TEMP/l4-setup"; then same=yes; else same=no; fi
+          echo "setup_identical=$same" | tee -a "$OUT/timings.txt"
+          L4_SELF_PROVISION=true .l4/bin/l4-setup 2>&1 | tee "$OUT/setup-vendored.txt"
+
+      - name: doctor --ci --fix with the flag on
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          s=$(date +%s)
+          rc=0; L4_SELF_PROVISION=true .l4/bin/l4 doctor --ci --fix > "$OUT/doctor-fix.txt" 2>&1 || rc=$?
+          echo "doctor_fix_seconds=$(( $(date +%s) - s )) doctor_fix_rc=$rc" | tee -a "$OUT/timings.txt"
+          grep -E '^fix ' "$OUT/doctor-fix.txt" | cut -c1-200
+        continue-on-error: true
+
+      - name: probe
+        working-directory: ${{ runner.temp }}/target
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        run: |
+          for v in CLAUDE_CODE_OAUTH_TOKEN CODEX_API_KEY KIRO_API_KEY; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          s=$(date +%s)
+          rc=0; .l4/bin/l4 probe --no-cache > "$OUT/probe.txt" 2>&1 || rc=$?; echo "probe_rc=$rc" | tee -a "$OUT/timings.txt"
+          echo "probe_seconds=$(( $(date +%s) - s ))" | tee -a "$OUT/timings.txt"
+          cut -c1-300 "$OUT/probe.txt"
+        continue-on-error: true
+
+      - name: sandboxed OpenCode call (question D, inside the harness's bwrap)
+        working-directory: ${{ runner.temp }}/target
+        run: |
+          uv run --frozen --no-dev --project .l4/vendor python "$GITHUB_WORKSPACE/scripts/runner/spike-hosted/sandboxed-hello.py" opencode/mimo-v2.6-flash-free > "$OUT/sandboxed-hello.txt" 2>&1 || rc=$?; echo "sandboxed_hello_rc=${rc:-0}" | tee -a "$OUT/timings.txt"
+          cat "$OUT/sandboxed-hello.txt"
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: spike-warm-ubuntu-24.04
+          path: /home/runner/spike-out
+          retention-days: 14
+          if-no-files-found: warn

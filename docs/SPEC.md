@@ -104,9 +104,14 @@ expires during the run (a brokered JWT): on a 401 the command is run once for th
 again; a second 401, a failing command or an empty output raises the 401 with `token command failed (...)` and never shows
 the command's output.
 
-Runtime prerequisites on the runner (checked by `doctor`; installed in CI only by `l4 doctor --fix` on a persistent
-shell runner when `ci.self_provision` resolves true — explicitly, logged, user-local, at pinned versions, never with
-root and never with a login (L4-DOC-002); nothing is ever installed silently):
+Runtime prerequisites on the runner. `doctor` checks them. In CI they are installed only:
+- by `l4 doctor --fix`, when `ci.self_provision` resolves true (the override `L4_SELF_PROVISION` included): explicitly,
+  logged, user-local, at pinned versions, never with root and never with a login (L4-DOC-002);
+- on a runner nobody prepared (GitHub-hosted), first by the separate pre-shim script `.l4/bin/l4-setup`. It installs
+  uv and a user-space bwrap, and on a disposable runner only it may run one root command, the AppArmor user-namespace
+  sysctl (L4-PRV-020..022).
+
+Nothing is ever installed silently. The prerequisites:
 git ≥ 2.34 (Ubuntu 22.04's git; worktrees, `push --atomic`, `commit --trailer` need ≥ 2.32; the reference runner has
 2.34.1 [V, runner]), uv, Python ≥ 3.11 (uv may provision it), Node ≥ 20.19 when OpenSpec is used (OpenSpec 1.14.0
 requirement [V]), each configured agent CLI, bubblewrap for `sandbox.mode: bwrap` (root install: printed by doctor,
@@ -560,7 +565,10 @@ ci:
   self_provision: auto             # auto | true | false : doctor --fix installs missing user-local tools (L4-DOC-002);
                                    # auto = false only when the platform reports a disposable environment
                                    # (CI_DISPOSABLE_ENVIRONMENT=true: GitLab docker et al.; RUNNER_ENVIRONMENT=github-hosted),
-                                   # else true (GitLab shell/ssh executors, self-hosted GitHub runners, local runs)
+                                   # else true (GitLab shell/ssh executors, self-hosted GitHub runners, local runs);
+                                   # the variable L4_SELF_PROVISION (true|false|auto) overrides this key when set (L4-PRV-019)
+  github_environment: l4           # the GitHub Environment whose secrets the generated job reads (forge token, agent
+                                   # credentials); null: the job names none (L4-PRV-027)
 
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)
@@ -1522,6 +1530,13 @@ flags, absent under the implementer flags) reach any other mode.
 The env lists are the **complete** child environment. Bracketed parts are optional. Labels as in
 `spikes/00-summary.md` §3.
 
+A bracketed credential variable reaches only its own profile's agent process (L4-PRV-024).
+1. The adapter writes the value to a new 0600 file in the step's private directory.
+2. A `/bin/sh` loader inside the sandbox reads the file, deletes it, exports the variable and execs the CLI.
+3. The value is never in any argv. bwrap's `--setenv` list is excluded too, because it is readable by any local user.
+
+[V for `CLAUDE_CODE_OAUTH_TOKEN` on GitHub-hosted runners, docs/spikes/06 finding 10.]
+
 `claude-code` implementer, auth `subscription` [V as one command, spikes/01, except `--mcp-config F`, and `--safe-mode` replaced by `--setting-sources "" --disable-slash-commands` (HB-X1: V live, `/context` and hooks canaries on the runner; a model call was not possible, the runner's OAuth session had expired)]:
 
 ```
@@ -1677,7 +1692,7 @@ verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the str
 | Step | Meaning | Examples |
 |---|---|---|
 | `binary` | executable on PATH, version ≥ profile `min_version` | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept) |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY` or `KIRO_API_KEY`, L4-PRV-024) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
 | `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
 | `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner] |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
@@ -2588,10 +2603,12 @@ found` in CI.]
 **L4-DOC-002 Self-provisioning (fix kind `install`).** On a persistent shell runner, `l4 doctor --fix` MAY install the
 missing or too-old tools that ENV-001, ENV-003 and ENV-004 report — uv, a pinned Node, the pinned OpenSpec prefix
 (L4-OSP-001) and the agent CLIs that some role chain uses (only those) — as the safe-fix kind `install`. It MUST:
-- act only when `ci.self_provision` resolves true: `true`, or `auto` unless the platform reports a disposable
+- act only when `ci.self_provision` resolves true, after the override `L4_SELF_PROVISION` (`true`, `false` or `auto`;
+  any other value is ignored with a warning, L4-PRV-019): `true`, or `auto` unless the platform reports a disposable
   environment (GitLab `CI_DISPOSABLE_ENVIRONMENT=true`, which every executor except shell and ssh sets; GitHub
   `RUNNER_ENVIRONMENT=github-hosted`), so `auto` is true on GitLab shell and ssh executors, self-hosted GitHub runners
-  and local runs [V doc for GitLab; D for GitHub, runner-provisioning design D5]; when it resolves false every install
+  and local runs [V doc for GitLab; V for GitHub: both hosted images set `RUNNER_ENVIRONMENT=github-hosted`,
+  docs/spikes/06-hosted-runner-setup.md, run 38144352581]; when it resolves false every install
   action is reported `skipped` and the checks keep failing (exit 3);
 - install user-locally only (`~/.local/bin`, `$L4_HOME`, `$L4_CACHE/tools`, or the vendor installer's own user-local
   directory), at pinned versions, and never modify a shell profile;
@@ -2599,10 +2616,28 @@ missing or too-old tools that ENV-001, ENV-003 and ENV-004 report — uv, a pinn
   manual`);
 - never invoke `sudo` or any other privilege escalation, and never run a login, token or account command.
 
+The separate pre-shim script `.l4/bin/l4-setup` (L4-PRV-020..022) is not `doctor --fix` and may run exactly one root
+command, `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`. It does so only when every one of these holds:
+- the runner is disposable;
+- the user-space bwrap fails its self-test;
+- the setting is `1`;
+- `L4_PROVISION_ROOT` is not `0`;
+- `sudo -n true` works.
+
+On Ubuntu 24.04 hosted images that is the only way to get a working sandbox [V, docs/spikes/06]. `doctor --fix` itself
+never escalates.
+
 A prerequisite that needs root (bubblewrap, git) is reported as action `manual` with the exact command for the detected
 distribution (e.g. `sudo apt-get install -y bubblewrap`) and is never attempted; authentication stays a human step that
 doctor prints per adapter (PRV-001). The generated CI file runs `l4 doctor --ci --fix` as its first `l4` command when
-`ci.self_provision` is `true`, or `auto` with `ci.platform: gitlab`, and `l4 doctor --ci` otherwise. The detailed rules
+`ci.self_provision` is `true`, or `auto` with `ci.platform: gitlab`, and `l4 doctor --ci` otherwise. The exception is a
+GitHub-hosted runner (`ci.runner_tags` empty). There the job sets `L4_SELF_PROVISION` from the repository or
+organisation variable of that name, else from the rendered config value (`true`, or `auto`). It then runs these steps,
+and that value decides whether either of the two middle steps installs anything (L4-PRV-023):
+1. a tool-cache restore;
+2. `.l4/bin/l4-setup`;
+3. `l4 doctor --ci --fix`;
+4. a cache save on the base branch. The detailed rules
 (the one-command `install.sh`, checksums, a clean installer environment, one tool search path, a provisioning lock,
 idempotence, offline behaviour, `--fix --dry-run`) are specified by delivery change 12 `runner-provisioning`
 (`openspec/changes/runner-provisioning/`). The reproducible host-side preparation of a shell runner, root steps
@@ -2627,7 +2662,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | ENV-012 | warn | a Kiro browser login exists while a profile uses `KIRO_API_KEY` (the login shadows the key [D]) | — |
 | ENV-013 | warn | every `engine: ollama` System-One profile (of `roles.s1_judge` or `verifier.s1.shadow`): the host answers, runs Ollama ≥ 0.35.0 and has the model pulled (the remedy `ollama pull <model>` is printed); a host that is down means step 8 falls back to the next S1 profile | — |
 | ENV-014 | warn | a profile's stored OAuth login looks wiped (claude `refreshToken` empty or `expiresAt` 0; codex or kiro `refresh_token` empty), read offline and never printed; the fix hint is the `sudo -u <runner user> -H … login` command (L4-FAC-008) | — |
-| PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output) | — |
+| PRV-001 | warn | adapter readiness per configured profile: `ready`, `installed-not-authenticated` or `missing`, with the human authentication steps printed (never run, no e-mail or token in the output); a profile whose credential variable is unset names it, `<profile>: <VARIABLE> is not set` (L4-PRV-024) | — |
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
 | SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
@@ -2707,6 +2742,12 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
 * `concurrency: {group: l4-${{ matrix.unit }}, cancel-in-progress: false}` at job level (the default single-pending
   queue is correct because runs are level-triggered [V, research/06]).
 * `actions/checkout` with `persist-credentials: false`; the harness supplies push credentials per command (L4-SEC-005).
+* Secrets live in a GitHub Environment. The job declares `environment: <ci.github_environment>`: the default is `l4`,
+  the environment GitLab's variables are scoped to, and null means none. The forge token and the agent credentials are
+  secrets of that environment, and a deployment branch policy can limit them to the base branch and the unit-branch
+  prefix (L4-PRV-027).
+* On a hosted runner (`ci.runner_tags` empty) the job runs, in order: a tool-cache restore, `.l4/bin/l4-setup`,
+  `l4 doctor --ci --fix`, then a cache save on the base branch. `L4_SELF_PROVISION` comes from `vars` (L4-PRV-023).
 * Permissions: `contents: write`, `pull-requests: write`, `statuses: write`, `actions: write` (continuations via
   `workflow_dispatch`). The harness mints the App installation token itself right before each hand-off push; the App
   private key never enters an agent or gate sandbox.
@@ -3091,6 +3132,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 11 | `sandbox-security` | bubblewrap agent and gate sandboxes (L4-SEC-005), environment allow-lists (L4-SEC-001), adapter isolation flags (L4-SEC-002), protected paths, hardened harness-side tools (L4-SEC-006), doctor `SANDBOX-001`; M2: `user`/`container` modes, pairwise probes | `SANDBOX-001` passes on the reference runner; SCN-SEC-* scenarios |
 | 12 | `runner-provisioning` | self-provisioning of shell runners (L4-DOC-002): `install.sh`, `l4 doctor --fix` user-local installs, adapter readiness and printed human steps (PRV-001/002), `ci.self_provision`, the `.bash_logout` runner notice | its SCN-PRV scenarios; a fresh shell-runner user reaches a green `l4 doctor --ci` with only the printed human steps |
 | 13 | `live-validation` | live runs on the reference GitLab + a GitHub repo; `doctor --live` | the live scenario of §20.4 passes end to end |
+| 14 | `hosted-runner-setup` | runners nobody customized (GitHub-hosted): `L4_SELF_PROVISION` override, the pre-shim `.l4/bin/l4-setup` (uv, user-space bwrap, the one AppArmor sysctl on disposable runners only), the hosted tool cache, agent credentials from the environment (a 0600 file and a loader, never bwrap's argv), pipeline secrets in a GitHub Environment, the pinned harness Python (L4-PRV-019..027; approved 2026-10-11, `openspec/changes/hosted-runner-setup/`) | the evidence workflow passes cold and warm on `ubuntu-24.04` and `ubuntu-22.04` (docs/spikes/06) |
 
 ---
 

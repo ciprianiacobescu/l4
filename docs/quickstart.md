@@ -105,7 +105,8 @@ allows it; otherwise one click or API call) and `git remote add origin <url>` fi
 ## 3. Prepare the runner
 
 `l4 setup gitlab` fails when no online runner carries `ci.runner_tags`, and its check pipeline runs on the runner, so the
-runner comes first. You need a host you control, with sudo.
+runner comes first. You need a host you control, with sudo. On GitHub you can instead use GitHub's own runners and no
+host at all (GitHub-hosted, below).
 
 ### Get a runner
 
@@ -125,9 +126,22 @@ next to the runner's agent logins.
 labels in `runs-on` of `.github/workflows/l4.yml` (`["self-hosted", <ci.runner_tags>]`), and run `prereqs.sh` below with
 `RUNNER_USER=<the user the runner service runs as>`.
 
+**GitHub-hosted (no runner of your own).** Leave `ci.runner_tags` empty, and the generated job runs on `ubuntu-24.04`.
+Turn provisioning on with the repository variable `L4_SELF_PROVISION=true` (Settings > Secrets and variables > Actions >
+Variables), or with `ci.self_provision: true` in the config. The job then runs:
+1. A tool-cache restore.
+2. `.l4/bin/l4-setup`. It installs uv and a user-space bubblewrap. On Ubuntu 24.04 it also runs one root command on that
+   throwaway VM, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, because the sandbox cannot start
+   without it. The repository variable `L4_PROVISION_ROOT=0` forbids that command, and the sandbox check then fails.
+3. `l4 doctor --ci --fix`, which installs the agent CLIs your role chains use.
+4. A cache save, on the base branch only.
+
+The first job spends about 45 s on installs. A job that restores the cache spends a few seconds [V, spike 06]. There is
+no prerequisites script and no login on a host: the agents authenticate from secrets (section 4, GitHub).
+
 ### Prerequisites and logins
 
-As an admin with sudo, from a clone of the harness on the runner host:
+Self-hosted runners only; a GitHub-hosted job needs neither. As an admin with sudo, from a clone of the harness on the runner host:
 
 ```bash
 bash scripts/runner/prereqs.sh --check
@@ -181,9 +195,20 @@ summary: 5 ok, 2 new, 1 set, 0 kept, 1 warn, 0 fail -> exit 0
 
 `l4 setup` automates GitLab only; on GitHub these steps are manual:
 
-1. Add a repository secret `L4_FORGE_TOKEN` (the name `forge.token_env` sets) holding a fine-grained token for this
-   repository with contents, pull requests, commit statuses and actions write access.
-2. Run the `l4` workflow by hand (Actions > l4 > Run workflow) and read its log.
+1. Create the environment `l4` (Settings > Environments > New environment). `ci.github_environment` names it, and the
+   generated job reads its secrets from there. A deployment branch policy can limit the environment to the base branch
+   and the unit-branch prefix (`l4/*`).
+2. In that environment, add the secret `L4_FORGE_TOKEN` (the name `forge.token_env` sets). It holds a fine-grained token
+   for this repository with contents, pull requests, commit statuses and actions write access.
+3. Add the secret for each agent your role chains use. The generated job passes exactly these to the harness:
+   - `CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token`, for a claude-code `auth: subscription` profile;
+   - `ANTHROPIC_API_KEY` for a claude-code `auth: api_key` profile;
+   - `CODEX_API_KEY` for a codex `auth: api_key` profile;
+   - `KIRO_API_KEY` for a kiro-cli profile;
+   - an opencode provider's `api_key_env`.
+
+   OpenCode's free models need none. `l4 doctor` row PRV-001 names any variable that is missing.
+4. Run the `l4` workflow by hand (Actions > l4 > Run workflow) and read its log.
 
 ## 5. First run
 

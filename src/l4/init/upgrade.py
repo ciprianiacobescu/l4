@@ -20,7 +20,15 @@ import yaml
 from pydantic import BaseModel
 
 from l4 import __version__
-from l4.ci.render import SHIM_RELPATH, TEMPLATE_RELPATH, VENDOR_RELPATH, render_gitlab_ci, render_shim
+from l4.ci.render import (
+    SETUP_RELPATH,
+    SHIM_RELPATH,
+    TEMPLATE_RELPATH,
+    VENDOR_RELPATH,
+    render_gitlab_ci,
+    render_setup,
+    render_shim,
+)
 from l4.config.loader import CONFIG_RELPATH, load_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -139,7 +147,7 @@ def missing_keys(config: Mapping[str, Any]) -> list[str]:
 
 @dataclass(frozen=True)
 class UpgradePlan:
-    files: tuple[PlannedFile, ...]  # the shim, the template and the config, whose bytes differ
+    files: tuple[PlannedFile, ...]  # the shim, the setup script, the template and the config, whose bytes differ
     vendor: VendorSource
     vendor_added: tuple[str, ...]
     vendor_changed: tuple[str, ...]
@@ -155,7 +163,7 @@ class UpgradePlan:
 
 def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None) -> UpgradePlan:
     config_path = repo / CONFIG_RELPATH
-    for relative in (str(CONFIG_RELPATH), SHIM_RELPATH, TEMPLATE_RELPATH, VENDOR_RELPATH):
+    for relative in (str(CONFIG_RELPATH), SHIM_RELPATH, SETUP_RELPATH, TEMPLATE_RELPATH, VENDOR_RELPATH):
         try:
             reject_symlinks(repo, *Path(relative).parts)
         except UnsafeFile as exc:
@@ -173,6 +181,7 @@ def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None) -
     wanted = (
         PlannedFile(str(CONFIG_RELPATH), new_config.encode("utf-8"), 0o644),
         PlannedFile(SHIM_RELPATH, render_shim().encode(), 0o755),
+        PlannedFile(SETUP_RELPATH, render_setup().encode(), 0o755),
         PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644),
     )
     differing = tuple(p for p in wanted if not _same(repo / p.path, p.data))

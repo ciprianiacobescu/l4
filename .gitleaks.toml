@@ -29,3 +29,8 @@ regexes = ['''(?i)fake|supersecret|0123456789|123456|abcdefgh''', '''^eyJhbGciOi
 description = "the private-key header the excerpt redaction test assembles around a fake body"
 regexTarget = "secret"
 regexes = ['''""\.join\(f"E''']
+
+[[allowlists]]
+description = "the made-up credentials l4-setup's test passes to prove the script never prints one (tok-<tool>-<3 digits>)"
+regexTarget = "secret"
+regexes = ['''^tok-(claude|codex|kiro|forge|anth)-[0-9]{3}$''']
