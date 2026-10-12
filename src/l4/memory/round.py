@@ -10,8 +10,9 @@ from pathlib import PurePosixPath
 from l4.fsutil import read_regular_file, reject_symlinks
 from l4.implementer.workbench import Workbench
 from l4.memory.commit import commit_memory_change
-from l4.memory.curate import apply_candidates, candidates_from_round, guard_violation_candidates
+from l4.memory.curate import apply_candidates, candidates_from_round, feedback_candidates, guard_violation_candidates
 from l4.services import HookContext
+from l4.state.fold import fold
 from l4.state.ledger import read_ledger
 from l4.state.lifecycle import Trigger
 from l4.verifier.playwright import unit_changed_files
@@ -78,7 +79,7 @@ def _restore_quietly(wb: Workbench, relative: str) -> None:
 def _curate(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger: Trigger) -> str | None:
     cfg = ctx.cfg
     spawned = result.fix is not None and result.fix.action == "spawn"
-    if trigger is not Trigger.VERIFY_PASS or spawned or not cfg.memory.enabled:
+    if trigger is not Trigger.VERIFY_PASS or not cfg.memory.enabled:
         return None
     if _worktree_differs_from_head(wb, cfg.memory.lessons_file):
         ctx.services.ledger.append(
@@ -87,11 +88,18 @@ def _curate(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger: Trig
         )
         _restore_to_head(wb, cfg.memory.lessons_file)
         return None
-    candidates = candidates_from_round(
+    events = read_ledger(wb.ref.path).events
+    # a PASS that spawned a fix unit leaves the verifier's lessons to the final PASS; feedback is judged in the round
+    # that confirms it, and that round's items are not seen again in a later one
+    candidates = [] if spawned else candidates_from_round(
         result, cfg, changed_files=unit_changed_files(wb.git, result.base_sha, result.head_sha),
         generated_criteria=[o.criterion for o in result.generated if o.accepted],
     )  # fmt: skip
-    candidates += guard_violation_candidates(read_ledger(wb.ref.path).events)
+    if not spawned:
+        candidates += guard_violation_candidates(events)
+    candidates += feedback_candidates(wb.ref.path, wb.ref.id, fold(events, wb.ref.id).feedback, result.round)
+    if not candidates:
+        return None
     applied = apply_candidates(wb.worktree, cfg.memory, candidates, writer=ctx.services.ledger)
     detail = ", ".join(f"lesson {o.lesson_id} {o.action}" for o in applied.outcomes)
     return commit_memory_change(
