@@ -88,9 +88,9 @@ def test_a_restated_criterion_is_counted_once_in_the_family(family):
     assert [c.id for c in members.criteria(parent)].count(DISCOUNT_ID) == 1
     assert [c.id for c in members.criteria(parent)][: len(parents_own)] == [c.id for c in parents_own]
     assert {c.id: c.alias for c in members.criteria(parent)}[DISCOUNT_ID] == "Req 1.1"  # the parent's own reading
-    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1", "Req 3.1"]
+    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1"]  # the generic unchanged sentence is no criterion
     assert {c.id: c.alias for c in members.criteria(fix)}[DISCOUNT_ID] == "Req 2.1"  # what the fix task cites
-    assert len(members.criteria(parent)) == len(parents_own) + 1  # only the unit's own 3.1 is new
+    assert len(members.criteria(parent)) == len(parents_own)  # nothing of the fix unit's is new
     assert [c.id for c in members.criteria(parent)] == [c.id for c in members.criteria(fix)]  # one set, one order
 
 
@@ -147,7 +147,7 @@ def test_a_failed_kiro_round_spawns_a_bugfix_fix_unit_and_the_parent_is_fixing(r
     marker = json.loads(show(raw, tdd_repo, f"{folder}/.l4/fix.json"))
     assert marker["parent"] == "kiro:discounts" and marker["chores"] == spawned["findings"]
     tasks = show(raw, tdd_repo, f"{folder}/tasks.md")
-    assert "[chore]" in tasks and "_Requirements: 3.1_" in tasks
+    assert "[chore]" in tasks and "_Requirements" not in tasks  # a chore cites nothing: its tag exempts it
     assert "1.1 " in show(raw, tdd_repo, f"{folder}/bugfix.md")
 
 
