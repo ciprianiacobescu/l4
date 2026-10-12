@@ -126,6 +126,7 @@ jobs:
           set -euo pipefail
           mapfile -t files < <(python3 scripts/dev/shards.py --shard "$SHARD" --of 8)
           echo "shard $SHARD of 8: ${#files[@]} files"
+          if [ "${#files[@]}" -eq 0 ]; then echo "::error::shard $SHARD is empty; pytest would run everything"; exit 1; fi
           uv run --frozen pytest -q -m "not live" "${files[@]}"
 
   # One check for branch protection: it fails when any shard failed or was cancelled, and when the tests were
