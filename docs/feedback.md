@@ -15,6 +15,7 @@ You write the request with one command, then commit and push. The harness does t
 5. The pull request goes back to ready, and the note on it shows what happened to each request.
 
 The command only edits one file, `feedback.md` in the unit's folder. It never commits, pushes or talks to the forge.
+`l4 feedback --help` lists the kinds with an example each, and every subcommand has its own `--help`.
 
 ## The short version
 
@@ -24,11 +25,13 @@ git switch l4/kiro/add-reorder-quantity          # the unit's branch
     --at src/inventory/reorder.py:4-9 \
     --text "Extract the pack rounding into its own helper; the loop is hard to read."
 git add .kiro/specs/add-reorder-quantity/feedback.md
-git commit -m "feedback(add-reorder-quantity): FB-001 extract the pack rounding"
+git commit -m "feedback(add-reorder-quantity): FB-001 Extract the pack rounding into its own helper; the loop is hard to read."
 git push
 ```
 
-`l4 feedback add` prints the exact `git` lines for your item, so you can copy them.
+`l4 feedback add` prints the item's id and status (`FB-001 submitted`), the file, and the exact `git add`, `git commit` and
+`git push` lines for your item, so you can copy them. It refuses a bad item with exit code 2 and writes nothing, for
+example a `behaviour` item without `--when` and `--then`, or an `--at` that names a line the file does not have.
 
 ## The five kinds
 
@@ -36,9 +39,9 @@ Pick the kind by what you want to happen. The kind decides what the agent may ch
 
 | Kind | Use it when | What the agent does | How it is checked |
 |---|---|---|---|
-| `refactor` | the code should be restructured and behave the same | changes production code only; every test file is put back if touched | the existing tests still pass, and the judge confirms the request |
+| `refactor` | the code should be restructured and behave the same | changes production code only; every test file it touches is put back | every gate passes on the original tests, and the judge confirms the request |
 | `duplication` | the same logic is written twice or more | the same as `refactor` | the same as `refactor` |
-| `tests` | tests are missing or weak | adds tests; production code is put back if touched | the new tests pass, and the judge confirms the request |
+| `tests` | tests are missing or weak | adds tests only; a change to production code fails the attempt | the new tests pass, and the judge confirms the request |
 | `config` | a value is hard-coded and should come from an environment variable | writes a failing test first, then the code (red, then green) | the test, the variable's name in the changed code, and the judge |
 | `behaviour` | the code should behave differently | red, then green, against the condition you state | the test, and the judge |
 
@@ -49,7 +52,8 @@ l4 feedback add --kind refactor --at src/billing/invoice.py:40-72 \
     --text "Split build_invoice into one function per section; it is 30 lines of nested ifs."
 ```
 
-`--at` is required: it shows where the code is.
+`--at` is required: it shows where the code is. The lines it names are quoted into the item (at most 40 lines or 4,000
+bytes, with secrets redacted). If the agent changes only test files, the attempt fails with `nothing changed`.
 
 ### `duplication`
 
@@ -59,7 +63,8 @@ l4 feedback add --kind duplication \
     --text "Both compute the line total the same way; keep one function and call it from both."
 ```
 
-Give every copy with its own `--at` (up to five). Alternatively, give one place and name the others in the text.
+Give every copy with its own `--at` (up to five). Alternatively, give one place and name the others in the text. Like
+`refactor`, it needs at least one `--at`.
 
 ### `tests`
 
@@ -68,6 +73,8 @@ l4 feedback add --kind tests --at src/inventory/reorder.py \
     --text "No test covers pack_size 1 or a target of 0."
 ```
 
+`--at` is optional here. `tests` takes no `--env`, `--when` or `--then`.
+
 ### `config`
 
 ```sh
@@ -75,12 +82,14 @@ l4 feedback add --kind config --at src/notify/client.py:12 --env NOTIFY_BASE_URL
     --text "The base URL is hard-coded; read it from NOTIFY_BASE_URL and keep today's URL as the default."
 ```
 
-`--at` points at the hard-coded value, and `--env` names the variable. From these the harness writes two conditions,
-which the agent must make true with a failing test first:
-1. When `NOTIFY_BASE_URL` is set, the code uses its value instead of the value at `src/notify/client.py:12`.
-2. When it is not set, the code behaves as before.
+`--at` points at the hard-coded value, and `--env` names the variable (capital letters, digits and `_`). From these the
+harness writes two conditions, which the agent must make true with a failing test first:
+1. WHEN the environment variable `NOTIFY_BASE_URL` is set THEN the system SHALL use its value instead of the value
+   written at `src/notify/client.py:12`.
+2. WHEN `NOTIFY_BASE_URL` is not set THEN the system SHALL CONTINUE TO behave as before this change.
 
-To state the first condition yourself, add `--when` and `--then`.
+To state the first condition yourself, add `--when` and `--then` (both, or neither). The judge's "addressed" is not enough
+for a `config` item: the variable's name must also appear in a non-test file the fix changed.
 
 ### `behaviour`
 
@@ -95,15 +104,18 @@ l4 feedback add --kind behaviour --at src/inventory/reorder.py:7 \
 
 ## Other options
 
-- **`--title "…"`** sets the item's title. By default it is the first line of the text.
+- **`--title "…"`** sets the item's title. By default it is the first line of the text, cut at 72 characters.
 - **`--text -`** reads the text from standard input, for longer requests.
-- **`--draft`** saves the item without sending it. Send it later with `l4 feedback submit FB-002`.
-- **`--lesson`** makes the request a lesson for future units once it is addressed, for example "never hard-code
-  endpoints".
+- **`--draft`** saves the item with Status `draft`, which the harness never reads. Send it later with
+  `l4 feedback submit FB-002` (only a valid draft can be submitted), then commit and push.
+- **`--lesson`** makes the request a lesson for future units once it is addressed in a round that passes, for example
+  "never hard-code endpoints". The lesson is titled `Human feedback: <your text>`, and the same request on two units
+  reinforces one lesson.
 - **`--unit kiro:add-reorder-quantity`** names the unit when the checked-out branch is not the unit's branch.
-- **`l4 feedback list`** and **`l4 feedback show FB-001`** show the items and their state. Add `--json` for scripts.
-- **`l4 feedback withdraw FB-002`** takes back an item. An item already taken is no longer checked, but its task still
-  runs.
+- **`l4 feedback list`** and **`l4 feedback show FB-001`** show the items as the file holds them (id, status, kind,
+  first place, title, and what makes an item invalid). Add `--json` for scripts.
+- **`l4 feedback withdraw FB-002`** takes back an item, then commit and push. An item not yet taken is never taken. An
+  item already taken is no longer checked, but its task still runs. An `addressed` item cannot be withdrawn.
 
 You can also edit `feedback.md` by hand. The file explains its own format at the top. An item is read only when its
 **Status** is `submitted`.
@@ -112,27 +124,47 @@ You can also edit `feedback.md` by hand. The file explains its own format at the
 
 - **The pull request is ready (in review).** Your push sends the unit back to work, and any approval for the old head
   is dropped.
-  1. The next round takes every submitted item and writes a fix unit, with one task per item (at most five at a time).
-  2. The agent works through the tasks.
+  1. The next round takes every submitted item and writes a fix unit, with one task per item. Your request comes first in
+     the fix unit's proposal (OpenSpec) or `bugfix.md` (Kiro), as `Requested by <you> in FB-001 (…)`. The item's Status in
+     `feedback.md` becomes `taken`, and its *Outcome* block names the fix unit.
+  2. The agent works through the tasks, at most five at a time. An item past the fifth waits for the next round.
   3. The unit is verified again, and the judge checks each of your items.
   4. When all of them are addressed and the rest of the verification passes, the pull request is ready again.
 - **The unit is still being built.** Your items wait until the round in progress ends. Nothing is interrupted.
-- **An item is not addressed.** It comes back as a finding, and the next round works on it again. The note says why.
+- **An item is not addressed.** It comes back as a finding (`FB-001 not addressed: …`), and the next round works on it
+  again. The note says why. When it is addressed, its Status becomes `addressed` and its *Outcome* block says
+  `Addressed in round N at <commit>: <evidence>`.
 - **You change an item's text after it was taken.** It is taken again.
-- **The unit was already merged.** Run `l4 feedback add --unit …` on the base branch and get that commit onto the base
-  branch as usual. The next run on the base branch creates a follow-up unit `<name>-followup-1` with its own pull
-  request.
+- **The unit was already merged.** Follow-up units for merged units are planned but not built yet. For now, send the
+  request as a new change.
 
-The note on the pull request has a **Your feedback** section, with one line per item: submitted, taken, waiting,
-addressed (with the round and the commit), not addressed (with the reason), or invalid (with the problem).
+The note on the pull request has a **Your feedback** section, with one line per item (`FB-001 refactor src/x.py:4 — …`).
+After the dash the line says one of:
+- `draft (not sent)`;
+- `submitted (waiting for the next round)`;
+- `taken into <fix unit>`;
+- `waiting for the next round (fix unit full)`;
+- `addressed in round N at <commit>`;
+- `not addressed in round N: <why>`;
+- `invalid: <the problem>`, for example `invalid: config needs Env`;
+- `withdrawn`.
+
+Every note of a unit in review also ends with a hint line:
+`To ask for changes: l4 feedback add --kind refactor|duplication|tests|config|behaviour --at FILE:LINE --text "…", then commit and push (docs/feedback.md).`
+`verification.md` has a `## Feedback` section for the items taken or judged in each round, and `l4 status` shows a
+FEEDBACK column with the count of items per state.
 
 ## Limits
 
 - **Feedback rounds** have their own limit, `feedback.max_rounds` in `.l4/config.yaml` (default 5). They do not use up
-  the fix rounds the harness keeps for its own failures. At the limit the unit stops (escalated). A member can grant
-  more with `l4 resume --unit … --extend-feedback-rounds 2` or with the resume label.
+  the fix rounds the harness keeps for its own failures. `max_rounds: 0` turns taking off. At the limit the unit stops
+  (escalated, exit code 13) with the note `feedback round limit reached (5)`. A member can grant more with
+  `l4 resume --unit … --reason "…" --extend-feedback-rounds 2`, or one more round with the `l4:resume` label.
 - **A refactor that needs a test change cannot pass**, because test files are frozen for `refactor` and `duplication`.
   An example is renaming a public function that tests call. Send it as `behaviour` instead and say what the new name or
   signature must be.
 - **Agents cannot edit `feedback.md`.** A change by an agent is put back.
+- **One fix unit holds at most five tasks.** More items than that wait for the next round and stay submitted.
+- **A request is kept whole up to 1,200 characters** in the fix task. `feedback.md` is read up
+  to 2 MiB.
 - **Comments on the pull request are not read.** Use the command or the file.
