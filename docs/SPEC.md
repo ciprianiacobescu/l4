@@ -72,12 +72,22 @@ into the generated config. If **no** spec framework is detected it MUST offer to
 (`openspec init --tools none`) — SDD is the default and an `l4` repository without specs is out of ODD.
 
 **L4-INS-004** `l4 init --vendor` MUST copy the pinned harness source into `.l4/vendor/` and generate CI files that
-run it with `uv run --project .l4/vendor l4 …`, for air-gapped runners.
+run it with `uv run --project .l4/vendor l4 …`, for air-gapped runners. `l4 init --harness-repo URL [--harness-commit
+SHA]` writes the fetched form instead (L4-GHP-010). The adopting repository then holds no harness code, only:
+- `.l4/config.yaml` with both pins;
+- `.l4/bin/l4` and `.l4/bin/l4-setup`;
+- the CI file;
+- the evidence: each spec's `.l4/ledger/`, `verification.md` and `questions.md`.
 
 **L4-INS-005** The harness version used by CI MUST be pinned in exactly one place in the target repo:
 `.l4/config.yaml: harness.version` (a release tag) **and** `harness.commit` (the full commit SHA that tag pointed to
 when pinned). CI files MUST read both from there and fetch by **commit SHA** (`uvx --from git+<url>@<sha>`), because
-tags can be moved. Doctor check `CI-001` verifies that the tag still resolves to the pinned SHA.
+tags can be moved. Doctor check `CI-001` verifies that the tag still resolves to the pinned SHA. With
+`harness.repository` set (a `https://` or `ssh://` URL; the scp form is normalised), `harness.commit` is required. The
+shim reads both with `sed` and runs `uvx --python <pin> --from git+<repository>@<commit> l4`. uv caches the built
+harness by commit, so a warm runner fetches nothing. A private repository is reached with a read-only deploy key: on
+GitHub, the environment secret `L4_HARNESS_SSH_KEY`, which the template writes under `$RUNNER_TEMP` and the sandbox
+hides (L4-GHP-010) [V: public dummy repository, run 38173604230].
 
 **L4-INS-006 `l4 setup gitlab`.** Adoption MUST NOT need three scripts and a hand-made token. `l4 setup gitlab
 --project P` MUST, in order and idempotently: read the project; list the runners that carry `ci.runner_tags` with
@@ -144,7 +154,8 @@ of the harness package.
 | `l4 simulate [SCENARIO…\|--all] [--with-repo-config] [--keep] [--json]` | Run the real state machine against fakes (§17) | temp dirs only |
 | `l4 unlock --unit ID [--force]` | Release a lock (expired, or forced by a human) | lock ref |
 | `l4 setup gitlab --project ID\|PATH [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--verify-base URL] [--rotate [--revoke-old]] [--secret NAME=ENVVAR]… [--cron EXPR] [--no-schedule] [--no-pipeline] [--watch] [--dry-run] [--token-command CMD]` | Make a GitLab project ready for the harness (L4-INS-006): read the project, check the runner and the include, make sure the `l4-bot` token and the masked `L4_FORGE_TOKEN` (environment scope `l4`) exist, set secrets, make sure the `l4 sweep` schedule exists, trigger one adoption-check pipeline. Rows `OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`; exit 0, 3 on a `FAIL` row, 2 usage, 1 HTTP error | GitLab (project variables, access tokens, pipeline schedules, one pipeline); `--dry-run` sends only reads |
-| `l4 ci watch --project ID\|PATH [--pipeline ID \| --ref REF] [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--interval DUR] [--timeout DUR] [--tail N] [--token-command CMD]` | Follow a GitLab pipeline to its end (L4-INS-006): one line per job status change (`job <id> <name> (<stage>) <status> — runner #<id> <description>`), a final table, the last `N` trace lines of each failed job; a job that failed with `allow_failure` counts as success (`failed (allowed)`); exit 0 for a successful pipeline, 1 for failed, canceled, timed out (default 90 m, polling every 15 s) or an HTTP error, 2 for usage | GitLab (reads only) |
+| `l4 setup github [--repo OWNER/NAME] [--api-url URL] [--token-env VAR] [--secret NAME=ENVVAR]… [--watch] [--dry-run]` | Make a GitHub repository ready for the harness (L4-GHP-011): check that the token (default `GH_TOKEN`, never printed) has admin on the repository, set the workflow permissions to write with pull-request creation allowed, create or update the environment `ci.github_environment` with deployment branch policies for the base branch and the unit prefix, seal each `--secret` into it with its public key, set the variable `L4_SELF_PROVISION=true` when `ci.runner_tags` is empty, create the labels, dispatch the `l4` workflow (`--watch` follows it). `--repo` defaults to `origin`; `--api-url` to `GITHUB_API_URL`, else api.github.com (a proxy such as Mintkey). Rows `OK`, `CREATED`, `SET`, `KEPT`, `FAILED`; a second run prints `KEPT` for every applied step; exit 0, 3 on a `FAILED` row, 2 usage, 1 HTTP error | GitHub (repository workflow permissions, environment, branch policies, environment secrets, variable, labels, one `workflow_dispatch`); `--dry-run` sends only reads |
+| `l4 ci watch (--project ID\|PATH [--pipeline ID \| --ref REF] [--api-base URL] \| --repo OWNER/NAME [--ref REF] [--api-url URL]) [--auth-env VAR] [--auth-scheme private-token\|bearer] [--interval DUR] [--timeout DUR] [--tail N] [--token-command CMD]` | Follow a GitLab pipeline to its end (L4-INS-006): one line per job status change (`job <id> <name> (<stage>) <status> — runner #<id> <description>`), a final table, the last `N` trace lines of each failed job; a job that failed with `allow_failure` counts as success (`failed (allowed)`); exit 0 for a successful pipeline, 1 for failed, canceled, timed out (default 90 m, polling every 15 s) or an HTTP error, 2 for usage. With `--repo` (L4-GHP-012; credential default `GH_TOKEN`): the newest run of `l4.yml` on `--ref`, one line per run status change, each job's conclusion, the last `N` log lines of each failed job; exit 0 when the run's conclusion is `success`, else 1 (also on a timeout) | GitLab or GitHub (reads only) |
 | `l4 ci render --platform github\|gitlab` | Print generated CI files (used by `init`, `doctor`) | none |
 | `l4 ci render-child --plan FILE` | Print the GitLab child pipeline (one job per actionable unit) | none |
 | `l4 ci map-exit CODE` | Translate an `l4` exit code into the CI platform's convention (§16): GitHub → annotation + exit 0 or 1; GitLab → annotation + the original code (so `allow_failure: exit_codes` applies) | none |
@@ -278,6 +289,8 @@ version: 1
 harness:
   version: "0.1.0"                 # release tag (L4-INS-005)
   commit: "<40-hex sha>"           # the SHA CI actually fetches; doctor CI-001 checks tag → sha
+  repository: null                 # a fetched harness: https:// or ssh:// git URL; the shim runs
+                                   # `uvx --from git+<repository>@<commit> l4`; null: vendored (L4-GHP-010)
 
 spec:
   frameworks: auto                 # auto | [openspec, kiro]
@@ -1355,7 +1368,8 @@ whose estimate exceeds the remaining time, MUST send SIGINT (not SIGTERM — Cla
 to a running agent at the soft deadline, push the WIP snapshot and ledger, dispatch a continuation (§16.4) and exit 10.
 
 *Implemented now:* the check between units. Before each unit after the first, `l4 run` computes the time left to the
-soft deadline (`CI_JOB_TIMEOUT` and `CI_JOB_STARTED_AT` for `auto` on GitLab; `ci.time_budget` otherwise) and starts no
+soft deadline (`CI_JOB_TIMEOUT` and `CI_JOB_STARTED_AT` for `auto` on GitLab; `L4_JOB_TIMEOUT_MINUTES`, which the GitHub
+template sets from the job's `timeout-minutes`, on GitHub, L4-GHP-003; `ci.time_budget` otherwise) and starts no
 unit when none is left or when the longest unit it has already run would not fit; the units left are listed in
 `outcome.json` as `not started: soft deadline (…)`, untouched, and the run exits 10 (or a more severe code of a unit).
 With no known budget every unit runs. *Still to do:* the estimate per phase, the SIGINT of a running agent, the WIP
@@ -2723,6 +2737,9 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
   MR pipelines; GitHub skips `push` and `pull_request` workflows for such commits]. GitHub checkpoints are pushed with
   `GITHUB_TOKEN` (no push runs; the PR `synchronize` runs it would otherwise create need manual approval [V]); GitLab
   checkpoints additionally use `-o ci.skip`;
+- **hand-off pushes on GitHub with `GITHUB_TOKEN`** start no workflow run (GitHub's rule against recursive runs). With no
+  check run at the hand-off commit, the sweeper records the repository-CI duty as `not_run` with that reason, never
+  green (L4-GHP-008). A token that does start runs, or a GitHub App (forge-and-ci 2.11), restores the duty.
 - **hand-off pushes** (the hand-off commit H of L4-ARC-008, and the archive commit) MUST NOT carry `[skip ci]`, so the
   repository's normal CI runs on the head a human merges — GitHub: pushed with a GitHub App installation token that the
   **harness mints itself** from `forge.github_app` immediately before the push (installation tokens live 1 h [V]; the App
@@ -2748,6 +2765,20 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
   prefix (L4-PRV-027).
 * On a hosted runner (`ci.runner_tags` empty) the job runs, in order: a tool-cache restore, `.l4/bin/l4-setup`,
   `l4 doctor --ci --fix`, then a cache save on the base branch. `L4_SELF_PROVISION` comes from `vars` (L4-PRV-023).
+* GitHub parity (L4-GHP-001..012):
+  - The workflow's own `GITHUB_TOKEN` can be the forge token (`forge.token_env: GITHUB_TOKEN`). The harness knows itself
+    as `github-actions[bot]` when `GET /user` is refused.
+  - The workflow grants `checks: read` and `issues: write` besides the contents, pull-requests, statuses and actions
+    write. An unnamed scope is `none`.
+  - A job on any branch other than the base checks out the base branch's head before the first `l4` command (`l4: base
+    checkout <sha>`), as on GitLab.
+  - The `L4-Run:` skip exempts the base branch.
+  - The job sets `L4_JOB_TIMEOUT_MINUTES` for the soft deadline.
+  - With an `ssh://` `harness.repository`, a step installs the deploy key from `L4_HARNESS_SSH_KEY` and pins GitHub's
+    host keys.
+  - `l4 setup github` and `l4 ci watch --repo` cover setup and watching.
+  - [V: the public dummy repository `ciprianiacobescu/l4-dummy-public`, runs 38173604230, 38173836160, 38175544040,
+    38175559320; the repository was made private on 2026-10-12, and the maintainer deletes it.]
 * Permissions: `contents: write`, `pull-requests: write`, `statuses: write`, `actions: write` (continuations via
   `workflow_dispatch`). The harness mints the App installation token itself right before each hand-off push; the App
   private key never enters an agent or gate sandbox.
@@ -2799,11 +2830,17 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
 ### 16.4 Continuation and sweeper
 
 **L4-CI-004** A run that exits 10 MUST have dispatched exactly one continuation for its unit (idempotent: ledger
-iteration + `L4-Iteration` trailer) before exiting; a failed dispatch is recorded (`continuation: failed`) and left to
+iteration + `L4-Iteration` trailer) before exiting. On GitHub this is a `workflow_dispatch` of `l4.yml` on the base
+branch, once per run, and none when a run is already queued (`dispatched | already_queued`, in `.l4-out/outcome.json`,
+L4-GHP-004) [V, run 38173604230: `continuation: dispatched`]. GitLab answers `unsupported` until forge-and-ci 2.6. a failed dispatch is recorded (`continuation: failed`) and left to
 the sweeper. The scheduled sweeper (`l4 plan --sweep`) MUST: resume `waiting_capacity` units whose `retry_after` has
 passed; resume units whose lease expired mid-step; detect merged or closed PRs; refresh `in_review` units whose base
 moved (L4-ARC-006); honour the `l4:resume` label (L4-SEC-004 limits who may set it to members); re-run intake for
 `rejected` units whose inputs changed; repair mirrors (labels/status/PR body) from state.
+On GitHub the label history is the pull request's issue events, and the access level is the collaborator's role, mapped
+to GitLab's scale: admin 50, maintain 40, write 30, triage 20, read 10. So "Developer" means write access (L4-GHP-007).
+[V, live: `label_events` returned the bot's own `l4:*` changes as `github-actions[bot]` 41898282 and a person's label with
+the person's id; `member_access(owner)` = 50.]
 The label's mechanics (M1.11): a `halted` unit whose open merge request carries `l4:resume` is resumed when the forge's
 own label history says that the latest `add` event of the label was made by a member with at least Developer access who is
 not the token's own user (the project's bot is a Developer: it is excluded by id). It is the same resume as `l4 resume`
@@ -2890,7 +2927,9 @@ template's `l4` job declares `environment: {name: l4, action: prepare}`; `script
 `scripts/forge/gitlab_ci_var_from_mintkey.py` take `--environment-scope` (default `l4`). Doctor has no check of a
 variable's scope: GitLab's variables API returns the value together with `environment_scope`, and a check MUST NOT read
 values [I, from GitLab's API documentation; not tested live]. Whether the project's other jobs really cannot see the
-variable is proven by a presence-only probe job (`[ -n "$L4_FORGE_TOKEN" ]`), not by doctor.
+variable is proven by a presence-only probe job (`[ -n "$L4_FORGE_TOKEN" ]`), not by doctor. On GitHub the same holds
+for the secrets of the environment `ci.github_environment`: only a job that names the environment receives them, and
+the generated `l4` job is the only one that does (L4-PRV-027).
 
 **L4-SEC-002** Repo-supplied (and user-level) agent configuration MUST NOT take effect. Per adapter: claude
 subscription implementer: `--setting-sources "" --disable-slash-commands` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` +
@@ -3133,6 +3172,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 12 | `runner-provisioning` | self-provisioning of shell runners (L4-DOC-002): `install.sh`, `l4 doctor --fix` user-local installs, adapter readiness and printed human steps (PRV-001/002), `ci.self_provision`, the `.bash_logout` runner notice | its SCN-PRV scenarios; a fresh shell-runner user reaches a green `l4 doctor --ci` with only the printed human steps |
 | 13 | `live-validation` | live runs on the reference GitLab + a GitHub repo; `doctor --live` | the live scenario of §20.4 passes end to end |
 | 14 | `hosted-runner-setup` | runners nobody customized (GitHub-hosted): `L4_SELF_PROVISION` override, the pre-shim `.l4/bin/l4-setup` (uv, user-space bwrap, the one AppArmor sysctl on disposable runners only), the hosted tool cache, agent credentials from the environment (a 0600 file and a loader, never bwrap's argv), pipeline secrets in a GitHub Environment, the pinned harness Python (L4-PRV-019..027; approved 2026-10-11, `openspec/changes/hosted-runner-setup/`) | the evidence workflow passes cold and warm on `ubuntu-24.04` and `ubuntu-22.04` (docs/spikes/06) |
+| 16 | `github-parity` | a full run on GitHub-hosted runners with the workflow's `GITHUB_TOKEN`: the bot identity, the GitHub soft deadline and `workflow_dispatch` continuation, the base-branch harness on other branches, resume by label, honest hand-off CI, the harness fetched at run time instead of vendored (only config, shims and evidence stay in the repository), `l4 setup github`, `l4 ci watch` on GitHub (L4-GHP-001..013; implemented and live-tested, `openspec/changes/github-parity/`, `docs/live/github/`) | the public dummy-repository run of L4-GHP-013 |
 
 ---
 
@@ -3142,7 +3182,7 @@ Maintainer answers of 2026-10-03 are marked **decided**.
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Where is the harness repository hosted? | **Decided (2026-10-03): local only** until the maintainer validates a working version; target repos get the harness with `l4 init --vendor` (pinned copy in `.l4/vendor/`). The `uvx --from git+<url>@<sha>` path is built but unused until hosting is chosen. |
+| Q1 | Where is the harness repository hosted? | **Decided (2026-10-12): a private GitHub repository.** Adopting repositories fetch it at run time by commit (`harness.repository`, `harness.commit`; `uvx --from git+<url>@<sha>`, L4-GHP-010), through a read-only deploy key, so no harness code enters their history. `l4 init --vendor` remains for air-gapped runners. [V: public dummy repository, runs 38173604230 and 38173836160.] Earlier decision (2026-10-03): local only, `--vendor`. |
 | Q2 | Bot identity for commits and the forge token owner. | **Decided (2026-10-03):** GitLab project access token `l4-bot` (Developer, `api` + `write_repository`, 1 year) stored as the masked, unprotected, raw CI variable `L4_FORGE_TOKEN`; created and rotated reproducibly by `scripts/forge/gitlab_bot_token.py` (on `example-group/dummy-agentic`: token id 62, bot user 60, expires 2027-10-03). The maintainer authorised the agent to create as many tokens as needed on `example-group/dummy-agentic`. GitHub: a GitHub App (still open, with Q5). |
 | Q3 | Agent authentication on `l4-runner`. | **Decided: mixed** — subscription logins for Codex and Claude Code (quota probing, per-profile credential mounts, `max_concurrency: 1`), API keys for OpenCode/OpenRouter and the judges. Observed 2026-10-03 [V, runner]: Claude Code (subscription **`pro`**) and Codex are logged in as the runner user (logins moved from the admin user, PRQ-17); OpenCode's free `opencode/*` models and the local `magnitude` provider need no login; Kiro is not logged in; no API key is configured on the runner yet. The OpenRouter key used by the spikes had a negative balance (every call 402) [V, spikes/05]; whether the runner will use the same account is U. Spike 05's Claude quota figures came from a Max plan, not `pro`. |
 | Q4 | Laya checkpoint for v1: fine-tuned `typed-decisions` or base `english`? | Open — default `typed-decisions` if its license and size fit the runner. |

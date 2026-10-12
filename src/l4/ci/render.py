@@ -31,6 +31,51 @@ fi
 exec uv run --frozen --no-dev --python {HARNESS_PYTHON} --project {VENDOR_RELPATH} l4 "$@"
 """
 
+# The fetched harness (github-parity L4-GHP-010, D10): no vendored copy; `uvx` builds the harness from the pinned commit
+# (uv caches the tool environment by commit, so a warm cache fetches nothing). The pins are read from the `harness:`
+# block of `.l4/config.yaml` with awk alone (L4-INS-005: one place), no Python and no yq, since neither is there yet.
+_FETCHED_SHIM = """#!/bin/sh
+# Starts the l4 harness fetched at the commit pinned in .l4/config.yaml. Run it from the repository root.
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+config=".l4/config.yaml"
+# the value of a scalar key of the top-level `harness:` block: quotes and a trailing comment are dropped
+pin() {
+  awk -v key="$1" '
+    BEGIN { sq = sprintf("%c", 39); dq = sprintf("%c", 34) }
+    /^harness:[ \t]*(#.*)?$/ { inside = 1; next }
+    inside && /^[^ \t#]/ { inside = 0 }
+    inside && match($0, "^[ \t]+" key ":") {
+      v = substr($0, RLENGTH + 1)
+      sub(/^[ \t]+/, "", v)
+      if (substr(v, 1, 1) == dq) { v = substr(v, 2); sub(dq ".*$", "", v) }
+      else if (substr(v, 1, 1) == sq) { v = substr(v, 2); sub(sq ".*$", "", v) }
+      else { sub(/[ \t]*#.*$/, "", v); sub(/[ \t]+$/, "", v) }
+      print v
+      exit
+    }
+  ' "$config" 2>/dev/null
+}
+repository=$(pin repository)
+commit=$(pin commit)
+if [ -z "$repository" ]; then
+  echo "l4: $config harness.repository is empty or missing; the fetched harness needs it" >&2
+  exit 3
+fi
+case $commit in
+  *[!0-9a-f]*) commit="" ;;
+esac
+if [ "${#commit}" -ne 40 ]; then
+  echo "l4: $config harness.commit must be exactly 40 lowercase hex characters (the harness commit to fetch)" >&2
+  exit 3
+fi
+if ! command -v uvx >/dev/null 2>&1; then
+  echo "l4: uvx was not found on PATH or in ~/.local/bin; install uv first" >&2
+  exit 3
+fi
+exec uvx --python @@PYTHON@@ --from "git+${repository}@${commit}" l4 "$@"
+""".replace("@@PYTHON@@", HARNESS_PYTHON)
+
 
 def render_gitlab_ci() -> str:
     return files("l4.ci").joinpath("templates", "l4.gitlab-ci.yml").read_text(encoding="utf-8")
@@ -38,6 +83,10 @@ def render_gitlab_ci() -> str:
 
 def render_shim() -> str:
     return _SHIM
+
+
+def render_fetched_shim() -> str:
+    return _FETCHED_SHIM
 
 
 def render_setup() -> str:

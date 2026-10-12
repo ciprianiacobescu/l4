@@ -6,6 +6,7 @@ CLI's output itself and keeps e-mail addresses out (`l4.availability.probes`); `
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -14,8 +15,9 @@ from l4.agents.base import ProbeCtx
 from l4.agents.credentials import credential_in, credential_variable
 from l4.agents.factory import Factory
 from l4.agents.gate import GateBusy, busy_detail
-from l4.config.schema import Profile
+from l4.config.schema import L4Config, Profile
 from l4.exitcodes import L4Exit
+from l4.forge.base import forge_platform
 
 _SAFE_VALUE = re.compile(r"^[A-Za-z0-9_. -]{1,40}$")
 
@@ -46,19 +48,42 @@ HUMAN_STEPS: dict[tuple[str, str], tuple[str, ...]] = {
 }
 
 
-def steps_for(adapter: str, auth: str | None) -> tuple[str, ...]:
-    return HUMAN_STEPS.get((adapter, auth or "subscription"), ())
+_MASKED = re.compile(r"the masked CI variable (\w+)")
 
 
-def provider_steps(profile: Profile) -> tuple[str, ...]:
+def secret_place(environment: str | None) -> str:
+    """Where a credential is stored on GitHub (L4-GHP-009): a secret of the Actions environment the job runs in."""
+    return f"a secret of the GitHub environment `{environment}`" if environment else "a repository secret"
+
+
+def steps_for(
+    adapter: str, auth: str | None, *, platform: str = "gitlab", environment: str | None = None
+) -> tuple[str, ...]:
+    """What a human does. On GitHub a key is `a secret of the GitHub environment <ci.github_environment>`, not `the
+    masked CI variable`; the logins on the runner VM read the same on both."""
+    steps = HUMAN_STEPS.get((adapter, auth or "subscription"), ())
+    if platform != "github":
+        return steps
+    return tuple(_MASKED.sub(lambda m: f"{secret_place(environment)}: {m.group(1)}", step) for step in steps)
+
+
+def provider_steps(profile: Profile, *, platform: str = "gitlab", environment: str | None = None) -> tuple[str, ...]:
     """A profile that declares its own provider names its own key variable (never a value)."""
     options = profile.opencode_options()
     if options is None or options.provider is None:
         return ()
+    where = f"{secret_place(environment)}" if platform == "github" else "a masked CI variable on a runner"
     return (
         f"provide the provider key as {options.provider.api_key_env} in the harness environment "
-        "(a masked CI variable on a runner); it is passed to the agent as a 0600 file, never as a variable",
+        f"({where}); it is passed to the agent as a 0600 file, never as a variable",
     )
+
+
+def platform_of(cfg: L4Config | None, environ: Mapping[str, str], origin: str | None = None) -> tuple[str, str | None]:
+    """The CI platform and the GitHub environment name: `ci.platform`, else the forge type (`forge_platform`)."""
+    if cfg is None:
+        return "gitlab", None
+    return forge_platform(cfg, environ, origin), cfg.ci.github_environment
 
 
 def sanitize_status(raw: dict[str, Any]) -> dict[str, Any]:
@@ -92,8 +117,18 @@ class AdapterReadiness:
         return f"{self.profile} {self.adapter} {self.state.value}"
 
 
-def adapter_readiness(name: str, profile: Profile, factory: Factory, ctx: ProbeCtx) -> AdapterReadiness:
-    """binary, then auth. An adapter this build does not know counts as missing."""
+def adapter_readiness(
+    name: str,
+    profile: Profile,
+    factory: Factory,
+    ctx: ProbeCtx,
+    *,
+    cfg: L4Config | None = None,
+    origin: str | None = None,
+) -> AdapterReadiness:
+    """binary, then auth. An adapter this build does not know counts as missing. The human steps are worded for the
+    platform of `cfg` (default: the factory's own config) and, when `ci.platform` is auto, of the `origin` URL."""
+    platform, environment = platform_of(cfg or getattr(factory, "_cfg", None), ctx.environ, origin)
     adapter = profile.adapter or "backend"
     try:
         impl = factory.build(profile)
@@ -114,6 +149,7 @@ def adapter_readiness(name: str, profile: Profile, factory: Factory, ctx: ProbeC
         name,
         adapter,
         AdapterState.INSTALLED_NOT_AUTHENTICATED,
-        provider_steps(profile) or steps_for(adapter, profile.auth),
+        provider_steps(profile, platform=platform, environment=environment)
+        or steps_for(adapter, profile.auth, platform=platform, environment=environment),
         detail=f"{name}: {unset} is not set" if unset else None,
     )

@@ -13,7 +13,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from l4.forge.base import UNFINISHED, ForgeNotFound, JobLog, JobResult, LabelEvent, PrState, PullRequest, clip_log
+from l4.forge.base import (
+    UNFINISHED,
+    Continuation,
+    ForgeNotFound,
+    JobLog,
+    JobResult,
+    LabelEvent,
+    PrState,
+    PullRequest,
+    clip_log,
+)
 
 STATE_FILENAME = "forge.json"
 WRITE_CALLS = frozenset(
@@ -201,6 +211,10 @@ class LocalForge:
     def own_user_id(self) -> int | None:
         self._log("own_user_id")
         return self._own_id
+
+    def dispatch_continuation(self, ref: str) -> Continuation:
+        self._log("dispatch_continuation", ref)
+        return "unsupported"
 
     # --- what a human does (simulation only) ---
 

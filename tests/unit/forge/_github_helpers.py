@@ -12,6 +12,7 @@ API = "https://api.github.test"
 REPO = "acme/widgets"
 TOKEN = "ghp_FAKE0123456789abcdefghijklmnopqrstuv"
 LOGIN = "l4-bot"
+USER_ID = 777
 
 
 @dataclass
@@ -29,6 +30,10 @@ class FakeGitHub:
     check_runs: list[dict] = field(default_factory=list)  # {id, name, status, conclusion, sha, ...}
     logs: dict[int, str] = field(default_factory=dict)  # check run id -> the text behind the log redirect
     redirect_to: str = "https://logs.example.test/blob"  # where `actions/jobs/:id/logs` sends the client
+    issue_events: dict[int, list[dict]] = field(default_factory=dict)  # issue number -> /issues/:n/events entries
+    users: dict[int, str] = field(default_factory=dict)  # user id -> login (GET /user/:id)
+    permissions: dict[str, dict] = field(default_factory=dict)  # login -> collaborator permission body
+    queued_runs: int = 0  # workflow runs the `status=queued` listing finds
     hosts_seen: list[tuple[str, bool]] = field(default_factory=list)  # (host, request carried a token)
 
     def transport(self) -> httpx.MockTransport:
@@ -105,7 +110,21 @@ class FakeGitHub:
         if path == "/graphql":
             return self._graphql(body)
         if path == "/user":
-            return httpx.Response(self.user_status, json={"login": LOGIN} if self.user_status == 200 else {})
+            return httpx.Response(
+                self.user_status, json={"login": LOGIN, "id": USER_ID} if self.user_status == 200 else {}
+            )
+        if m := re.fullmatch(r"/user/(\d+)", path):
+            login = self.users.get(int(m.group(1)))
+            return httpx.Response(200, json={"login": login}) if login else httpx.Response(404, json={"message": "x"})
+        if m := re.fullmatch(rf"/repos/{REPO}/collaborators/([^/]+)/permission", path):
+            body_ = self.permissions.get(m.group(1))
+            return httpx.Response(200, json=body_) if body_ else httpx.Response(404, json={"message": "Not Found"})
+        if m := re.fullmatch(rf"/repos/{REPO}/issues/(\d+)/events", path):
+            return self._page(request, self.issue_events.get(int(m.group(1)), []))
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/workflows/([^/]+)/runs", path):
+            return httpx.Response(200, json={"total_count": self.queued_runs, "workflow_runs": []})
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/workflows/([^/]+)/dispatches", path):
+            return httpx.Response(204)
         if m := re.fullmatch(rf"/repos/{REPO}", path):
             return httpx.Response(200, json={"html_url": f"https://github.test/{REPO}"})
         if m := re.fullmatch(rf"/repos/{REPO}/pulls", path):
@@ -175,7 +194,7 @@ class FakeGitHub:
         items = self.comments.setdefault(number, [])
         if request.method == "POST":
             self._next_comment += 1
-            comment = {"id": self._next_comment, "body": body["body"], "user": {"login": LOGIN}}
+            comment = {"id": self._next_comment, "body": body["body"], "user": {"login": LOGIN, "id": USER_ID}}
             items.append(comment)
             return httpx.Response(201, json=comment)
         return self._page(request, items)

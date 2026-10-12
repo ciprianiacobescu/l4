@@ -128,3 +128,18 @@ def test_job_remaining_s(env, now_s, want):
 def test_a_set_time_budget_wins_over_the_job_timeout():
     env = {"CI_JOB_TIMEOUT": "99999"}
     assert orchestrator.job_remaining_s(_cfg("30m", "10m"), env, START, START) == 1200
+
+
+@pytest.mark.parametrize(
+    ("env", "want"),
+    [
+        ({"L4_JOB_TIMEOUT_MINUTES": "180"}, 180 * 60 - 1200),
+        ({"L4_JOB_TIMEOUT_MINUTES": "180h"}, None),
+        ({"L4_JOB_TIMEOUT_MINUTES": ""}, None),
+        ({"CI_JOB_TIMEOUT": "1500", "L4_JOB_TIMEOUT_MINUTES": "180"}, 300),  # GitLab's variable is read first
+        ({"CI_JOB_TIMEOUT": "abc", "L4_JOB_TIMEOUT_MINUTES": "180"}, 180 * 60 - 1200),
+    ],
+)
+def test_github_job_timeout_minutes(env, want):
+    """SCN-GHP-04: on GitHub `auto` reads the job env L4_JOB_TIMEOUT_MINUTES (minutes, digits only)."""
+    assert orchestrator.job_remaining_s(_cfg(), env, START, START) == want

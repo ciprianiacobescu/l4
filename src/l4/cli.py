@@ -72,11 +72,16 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--no-ci-edit", "no_ci_edit", help="Print the .gitlab-ci.yml include instead of writing it."),
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
+        _opt("--harness-repo", "harness_repo", help="Fetch the harness at run time from this git URL, no .l4/vendor/."),
+        _opt("--harness-commit", "harness_commit_pin",
+             help="With --harness-repo: the commit to fetch (default: the running harness's)."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
         _flag("--dry-run", "dry_run"),
+        _opt("--harness-commit", "harness_commit_pin",
+             help="Fetched adoption: the commit to pin (default: the running harness's)."),
     ]),
     "doctor": ("Check environment, config, specs, git, forge, CI and state.", lambda: [
         _flag("--ci", "ci"), _flag("--live", "live"), _flag("--fix", "fix"), _unit(), _flag("--json", "as_json"),
@@ -149,16 +154,27 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--dry-run", "dry_run", help="Send only reads; say what would change."),
         _TOKEN_COMMAND(),
     ]),
+    "setup github": ("Make the GitHub repository ready: permissions, environment, secrets, labels.", lambda: [
+        _opt("--repo", "github_repo", help="owner/name (default: `origin`); a directory is the checkout."),
+        _opt("--api-url", "api_url", help="GitHub API base (default: GITHUB_API_URL, else api.github.com)."),
+        _opt("--token-env", "token_env", default="GH_TOKEN", show_default=True,
+             help="Environment variable that holds a token with admin rights on the repository."),
+        _opt("--secret", "secret", multiple=True,
+             help="NAME=ENVVAR: seal a secret into the environment (repeat)."),
+        _flag("--watch", "watch", help="Follow the dispatched run to its end."),
+        _flag("--dry-run", "dry_run", help="Send only reads; say what would change."),
+    ]),
     "ci render": ("Print generated CI files.", lambda: [
         _opt("--platform", "platform", required=True, type=click.Choice(["github", "gitlab"])),
     ]),
-    "ci watch": ("Follow a GitLab pipeline to its end.", lambda: [
-        _opt("--project", "project", required=True, help="Project id or path (group/name)."),
+    "ci watch": ("Follow a GitLab pipeline or a GitHub run to its end.", lambda: [
+        _opt("--project", "project", help="GitLab project id or path (group/name)."),
+        _opt("--repo", "github_repo", help="GitHub owner/name: follow the newest run of l4.yml on --ref."),
+        _opt("--api-url", "api_url", help="GitHub API base (default: GITHUB_API_URL, else api.github.com)."),
         _opt("--pipeline", "pipeline", type=int, help="Pipeline id (default: the latest of --ref)."),
         _opt("--ref", "ref", help="Branch whose latest pipeline to follow (default: the default branch)."),
         _opt("--api-base", "api_base", help="GitLab API base (default: forge.gitlab.api_url, else from `origin`)."),
-        _opt("--auth-env", "auth_env", default="GITLAB_TOKEN", show_default=True,
-             help="Environment variable that holds the credential."),
+        _opt("--auth-env", "auth_env", help="Credential variable (default GITLAB_TOKEN; GH_TOKEN for --repo)."),
         _opt("--auth-scheme", "auth_scheme", type=click.Choice(["private-token", "bearer"]), default="private-token",
              show_default=True, help="How the credential is sent."),
         _opt("--interval", "interval", default="15s", show_default=True),
@@ -223,11 +239,18 @@ def _build_app(options: Mapping[str, Any], environ: Mapping[str, str]) -> AppCon
 
 
 def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> click.Command:
+    own_dests = {param.name for param in params}
+
     def callback(**kwargs: Any) -> int:
         environ: Mapping[str, str] = click.get_current_context().obj
-        app = _build_app({k: kwargs[k] for k in _COMMON_KEYS}, environ)
+        slug = kwargs.pop("github_repo", None)
+        if slug is not None and Path(slug).is_dir():  # the global meaning of `--repo`: the checkout
+            kwargs["repo"], slug = Path(slug), None
+        app = _build_app({k: kwargs.get(k) for k in _COMMON_KEYS}, environ)
         configure_logging(app)
         options = {k: v for k, v in kwargs.items() if k not in _COMMON_KEYS}
+        if slug is not None or "github_repo" in own_dests:
+            options["repo"] = slug
 
         def call():
             return dispatch(name, app, **options)
@@ -242,7 +265,11 @@ def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> c
                     stop()
         return int(result.code)
 
-    return click.Command(name.split()[-1], params=[*_common(), *params], callback=callback, help=help_text)
+    # a command that takes `--repo owner/name` itself (`setup github`, `ci watch`) has one `--repo`: an existing
+    # directory is the checkout (the global meaning), anything else is the GitHub repository
+    own = {opt for param in params for opt in param.opts}
+    common = [param for param in _common() if not own & set(param.opts)]
+    return click.Command(name.split()[-1], params=[*common, *params], callback=callback, help=help_text)
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})

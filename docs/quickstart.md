@@ -193,22 +193,47 @@ summary: 5 ok, 2 new, 1 set, 0 kept, 1 warn, 0 fail -> exit 0
 
 ### GitHub
 
-`l4 setup` automates GitLab only; on GitHub these steps are manual:
+One command does it, with a token that has admin on the repository (`GH_TOKEN`; its value is never printed):
 
-1. Create the environment `l4` (Settings > Environments > New environment). `ci.github_environment` names it, and the
-   generated job reads its secrets from there. A deployment branch policy can limit the environment to the base branch
-   and the unit-branch prefix (`l4/*`).
-2. In that environment, add the secret `L4_FORGE_TOKEN` (the name `forge.token_env` sets). It holds a fine-grained token
-   for this repository with contents, pull requests, commit statuses and actions write access.
-3. Add the secret for each agent your role chains use. The generated job passes exactly these to the harness:
-   - `CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token`, for a claude-code `auth: subscription` profile;
-   - `ANTHROPIC_API_KEY` for a claude-code `auth: api_key` profile;
-   - `CODEX_API_KEY` for a codex `auth: api_key` profile;
-   - `KIRO_API_KEY` for a kiro-cli profile;
-   - an opencode provider's `api_key_env`.
+```bash
+.l4/bin/l4 setup github --secret CLAUDE_CODE_OAUTH_TOKEN=CLAUDE_CODE_OAUTH_TOKEN --watch
+```
 
-   OpenCode's free models need none. `l4 doctor` row PRV-001 names any variable that is missing.
-4. Run the `l4` workflow by hand (Actions > l4 > Run workflow) and read its log.
+It is idempotent: a second run prints `KEPT` rows. It sets up:
+- the environment `l4`, which `ci.github_environment` names, with a deployment branch policy for the base branch and the
+  unit prefix (`l4/*`, `l4/**/*`);
+- each `--secret NAME=ENVVAR`, sealed into that environment;
+- the variable `L4_SELF_PROVISION=true` for a hosted runner;
+- the workflow permissions: write, and Actions may create pull requests;
+- the labels.
+
+It then dispatches the `l4` workflow, and `--watch` follows it (`l4 ci watch --repo owner/name` follows any later run).
+`--dry-run` only reads.
+
+**The forge token.** With `forge.token_env: GITHUB_TOKEN`, the workflow's own token is enough: the harness opens and
+labels pull requests as `github-actions[bot]`. Its one limit is that GitHub starts no workflow run for its pushes, so the
+repository's other CI does not run on the hand-off. The harness reports that as `not_run`. To keep that CI, put a
+fine-grained token, or a GitHub App's, in the environment as `L4_FORGE_TOKEN`, with contents, pull requests, commit
+statuses and actions write.
+
+**Agent secrets.** Add the one for each agent your role chains use. The generated job passes exactly these to the
+harness:
+- `CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token`, for a claude-code `auth: subscription` profile;
+- `ANTHROPIC_API_KEY` for a claude-code `auth: api_key` profile;
+- `CODEX_API_KEY` for a codex `auth: api_key` profile;
+- `KIRO_API_KEY` for a kiro-cli profile;
+- an opencode provider's `api_key_env`.
+
+OpenCode's free models need none. `l4 doctor` row PRV-001 names any variable that is missing.
+
+**The harness without committing it.** `l4 init --ci github --harness-repo git@github.com:<owner>/<harness>.git
+--harness-commit <sha>` writes no `.l4/vendor/`. The job fetches that commit with uv and caches it.
+
+A private harness needs a read-only deploy key:
+1. Add its public half to the harness repository (Settings > Deploy keys, read-only).
+2. Store its private half as the environment secret `L4_HARNESS_SSH_KEY` (`--secret L4_HARNESS_SSH_KEY=...`).
+
+`l4 upgrade --harness-commit <sha>` moves the pin.
 
 ## 5. First run
 

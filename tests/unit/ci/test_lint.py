@@ -25,7 +25,8 @@ def test_cancelling_concurrency_rejected():
         ("persist-credentials: false", "persist-credentials: true", "persist-credentials"),
         ("    timeout-minutes: 180\n", "", "timeout-minutes"),
         (
-            "permissions:\n  contents: write\n  pull-requests: write\n  statuses: write\n  actions: write\n",
+            "permissions:\n  contents: write\n  pull-requests: write\n  issues: write\n  checks: read\n"
+            "  statuses: write\n  actions: write\n",
             "",
             "permissions",
         ),

@@ -118,3 +118,26 @@ def test_an_unreadable_store_is_skipped_not_a_crash(make_ctx, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text("{not json", encoding="utf-8")
     assert outcome(ctx)[0].status == "pass"
+
+
+def test_env_014_on_github_names_the_user_the_runner_service_runs_as(make_ctx, tmp_path):
+    """L4-GHP-009: GitHub's runner service has no `gitlab-runner` user; the hint names the user the service runs as."""
+    wiped = {"claudeAiOauth": {"accessToken": "", "refreshToken": "", "expiresAt": 0}}
+    for adapter, relogin in (("claude-code", "claude, then type /login"), ("codex", "codex login --device-auth")):
+        config = cfg(adapter)
+        config.ci.platform = "github"
+        ctx, _ = make_ctx(cfg=config)
+        write(tmp_path / "home" / ".claude" / ".credentials.json", wiped)
+        write(tmp_path / "home" / ".codex" / "auth.json", {"auth_mode": "chatgpt", "tokens": {"refresh_token": ""}})
+        result, _ = outcome(ctx)
+        assert result.status == "fail"
+        assert "the user the runner service runs as" in result.fix_hint and relogin in result.fix_hint
+        assert "gitlab-runner" not in result.fix_hint + result.message
+
+
+def test_env_014_on_gitlab_keeps_gitlab_runner(make_ctx, tmp_path):
+    config = cfg("claude-code")
+    config.ci.platform = "gitlab"
+    ctx, _ = make_ctx(cfg=config)
+    write(tmp_path / "home" / ".claude" / ".credentials.json", {"claudeAiOauth": {"refreshToken": "", "expiresAt": 0}})
+    assert outcome(ctx)[0].fix_hint == "sudo -iu gitlab-runner claude, then type /login"

@@ -87,3 +87,12 @@ def test_a_symlinked_workflow_directory_is_refused_and_nothing_is_written(target
     (target / ".github").symlink_to(elsewhere)
     assert init(target, harness_repo, git_environ, "--ci", ci, "--vendor") == 2
     assert not (target / ".l4").exists() and list(elsewhere.iterdir()) == []
+
+
+def test_the_github_note_names_l4_setup_github_and_the_environment(target, harness_repo, git_environ, capsys):
+    """github-parity (live finding 4): the closing note points at `l4 setup github` and the environment's secrets, not
+    at a repository secret."""
+    assert init(target, harness_repo, git_environ, "--ci", "github", "--vendor") == 0
+    err = capsys.readouterr().err
+    assert "l4 setup github" in err and "environment `l4`" in err
+    assert "repository secret" not in err

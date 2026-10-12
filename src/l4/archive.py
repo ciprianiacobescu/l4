@@ -17,7 +17,6 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import quote
 
 import click
 
@@ -25,9 +24,18 @@ from l4.ci.sweeper import sweep
 from l4.config.redaction import load_app_config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import Forge, ForgeAuthError, ForgeError, ForgeUnavailable, PullRequest, make_forge
+from l4.forge.base import (
+    Forge,
+    ForgeAuthError,
+    ForgeError,
+    ForgeUnavailable,
+    Platform,
+    PullRequest,
+    forge_platform,
+    make_forge,
+)
 from l4.forge.gitlab import push_auth_config, strip_remote_credentials
-from l4.forge.urls import app_forge_urls
+from l4.forge.urls import app_forge_urls, blob_url
 from l4.fsutil import read_regular_file
 from l4.outcome import CommandResult
 from l4.services import H_PUSHED, ForgeHook, HookContext, MirrorHook
@@ -88,11 +96,13 @@ def render_pr_title(name: str, proposal: str) -> str:
     return title if len(title) <= MAX_TITLE_CHARS else title[: MAX_TITLE_CHARS - 3].rstrip() + "..."
 
 
-def render_pr_body(unit_id: str, branch: str, evidence_path: str, project_url: str | None) -> str:
+def render_pr_body(
+    unit_id: str, branch: str, evidence_path: str, project_url: str | None, platform: Platform = "gitlab"
+) -> str:
     """Static: it names where the evidence will be, so it never needs rewriting when the phase changes."""
     evidence = f"`{evidence_path}`"
     if project_url:
-        evidence = f"[{evidence_path}]({project_url}/-/blob/{quote(branch, safe='/')}/{quote(evidence_path, safe='/')})"
+        evidence = f"[{evidence_path}]({blob_url(project_url, branch, evidence_path, platform)})"
     return "\n".join(
         [
             f"Implemented by the L4 harness from the spec unit `{unit_id}`.",
@@ -149,7 +159,7 @@ def _ensure_mr(ctx: HookContext, mr: _Mr) -> PullRequest:
         except ForgeError:
             project_url = None  # the body then names the file without a link
         evidence = (s.ref.path / "verification.md").resolve().relative_to(s.worktree.resolve()).as_posix()
-        body = render_pr_body(s.ref.id, s.names.branch, evidence, project_url)
+        body = render_pr_body(s.ref.id, s.names.branch, evidence, project_url, forge_platform(ctx.cfg, s.app.environ))
         title = render_pr_title(s.ref.name, proposal_title(s.ref.path, s.ref.name))
         pr = mr.forge.create_pr(s.names.branch, ctx.cfg.forge.base_branch, title, body)
     mr.number, mr.draft = pr.number, pr.draft

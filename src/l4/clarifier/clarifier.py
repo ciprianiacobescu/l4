@@ -15,7 +15,6 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
-from urllib.parse import quote
 
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable
@@ -35,6 +34,8 @@ from l4.clarifier.ports import (
 from l4.clarifier.router import NoS1, Router, build_s1_judge
 from l4.config.schema import ClarifierCfg
 from l4.exitcodes import L4Exit
+from l4.forge.base import forge_platform
+from l4.forge.urls import blob_url
 from l4.implementer.prompt import collect_sources
 from l4.implementer.tasks import answers_unblock, open_blocking_questions
 from l4.implementer.tdd import RoleLimit
@@ -309,7 +310,8 @@ def sticky_location(ctx: HookContext) -> tuple[str, str, str | None]:
     s = ctx.services
     path = (s.ref.path.resolve().relative_to(s.worktree.resolve()) / QUESTIONS_FILENAME).as_posix()
     base = ctx.shared.get("project_url")
-    link = f"{base}/-/blob/{quote(s.names.branch, safe='/')}/{quote(path, safe='/')}" if base else None
+    platform = forge_platform(ctx.cfg, s.app.environ)  # GitHub has no `/-/` separator (live run 38175559320)
+    link = blob_url(base, s.names.branch, path, platform) if base else None
     return path, s.names.branch, link
 
 

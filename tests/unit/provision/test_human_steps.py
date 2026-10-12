@@ -19,7 +19,7 @@ def test_steps_printed_only_for_unauthenticated_profiles():
     assert all(isinstance(text, str) and text for steps in HUMAN_STEPS.values() for text in steps)
 
 
-def _unauthenticated(adapter: str, auth: str | None, environ: dict[str, str]):
+def _unauthenticated(adapter: str, auth: str | None, environ: dict[str, str], *, cfg=None, origin=None):
     from pathlib import Path
 
     from l4.agents.base import ProbeCtx, ProbeResult
@@ -33,7 +33,8 @@ def _unauthenticated(adapter: str, auth: str | None, environ: dict[str, str]):
 
     ctx = ProbeCtx(environ, Path("."), lambda *a: None)
     profile = Profile(adapter=adapter, auth=auth) if auth else Profile(adapter=adapter)
-    return adapter_readiness("p", profile, Factory(L4Config(), ctx, adapters={adapter: Scripted()}), ctx)
+    factory = Factory(cfg or L4Config(), ctx, adapters={adapter: Scripted()})
+    return adapter_readiness("p", profile, factory, ctx, origin=origin)
 
 
 def test_prv001_names_the_missing_variable():
@@ -48,3 +49,46 @@ def test_prv001_names_the_missing_variable():
     # no variable for this profile (codex file login), or the variable is set: nothing to name
     assert _unauthenticated("codex", "subscription", {"CODEX_API_KEY": "x"}).detail is None
     assert _unauthenticated("kiro-cli", "subscription", {"KIRO_API_KEY": "x"}).detail is None
+
+
+def test_github_steps_name_the_environment_secret():
+    """L4-GHP-009 / SCN-GHP-12 area: on GitHub a key is a secret of the GitHub environment, not a masked CI variable."""
+    from l4.config.schema import L4Config
+
+    steps = steps_for("claude-code", "api_key", platform="github", environment="l4")
+    assert steps == ("store your key as a secret of the GitHub environment `l4`: ANTHROPIC_API_KEY",)
+    subscription = steps_for("claude-code", "subscription", platform="github", environment="prod-ci")
+    assert "claude setup-token" in subscription[0]
+    assert "secret of the GitHub environment `prod-ci`: CLAUDE_CODE_OAUTH_TOKEN" in subscription[1]
+    assert all("masked CI variable" not in text for t in HUMAN_STEPS for text in steps_for(*t, platform="github"))
+    # no environment configured (ci.github_environment: null): a repository secret
+    assert "repository secret" in steps_for("codex", "api_key", platform="github", environment=None)[0]
+    # the runner-VM logins do not mention a CI variable at all and stay as they are
+    assert steps_for("codex", "subscription", platform="github") == steps_for("codex", "subscription")
+    # GitLab keeps its texts
+    assert steps_for("claude-code", "api_key", platform="gitlab") == steps_for("claude-code", "api_key")
+    assert "masked CI variable ANTHROPIC_API_KEY" in steps_for("claude-code", "api_key")[0]
+
+    # the readiness row takes the platform from the config of the factory (ci.platform), else the forge type
+    cfg = L4Config.model_validate({"ci": {"platform": "github", "github_environment": "l4"}})
+    row = _unauthenticated("claude-code", "api_key", {}, cfg=cfg)
+    assert row.steps == steps
+    assert _unauthenticated("claude-code", "api_key", {}).steps == steps_for("claude-code", "api_key")
+    on_gitlab = L4Config.model_validate({"ci": {"platform": "gitlab"}})
+    assert _unauthenticated("claude-code", "api_key", {}, cfg=on_gitlab).steps == steps_for("claude-code", "api_key")
+    from_origin = _unauthenticated("claude-code", "api_key", {}, origin="git@github.com:acme/widgets.git")
+    assert from_origin.steps == steps
+
+
+def test_github_provider_key_is_not_called_a_masked_ci_variable():
+    from types import SimpleNamespace
+
+    from l4.provision.readiness import provider_steps
+
+    profile = SimpleNamespace(
+        opencode_options=lambda: SimpleNamespace(provider=SimpleNamespace(api_key_env="PROV_KEY"))
+    )
+    assert "a masked CI variable on a runner" in provider_steps(profile)[0]
+    on_github = provider_steps(profile, platform="github", environment="l4")[0]
+    assert "secret of the GitHub environment `l4`" in on_github and "PROV_KEY" in on_github
+    assert "masked" not in on_github

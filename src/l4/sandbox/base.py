@@ -86,11 +86,16 @@ def expand_credential_paths(configured: Mapping[str, Sequence[str]], home: Path)
 def runner_tmp_paths(environ: Mapping[str, str]) -> tuple[Path, ...]:
     """gitlab-runner keeps `.gitlab-runner.ext.conf` (the job token in an `insteadOf` rule, included from the
     checkout's `.git/config`) and the CA file in `<CI_PROJECT_DIR>.tmp`, which `--ro-bind / /` would leave readable
-    to agents and gates. That is also the `*.tmp` of this project beside the others under `CI_BUILDS_DIR`: one path."""
+    to agents and gates. That is also the `*.tmp` of this project beside the others under `CI_BUILDS_DIR`: one path.
+    On GitHub `$RUNNER_TEMP` holds the harness's deploy key (L4-GHP-010) and the runner's file-command files."""
+    paths: list[Path] = []
     project_dir = environ.get("CI_PROJECT_DIR", "")
-    if not project_dir.startswith("/"):
-        return ()
-    return (Path(f"{project_dir.rstrip('/')}.tmp"),)
+    if project_dir.startswith("/"):
+        paths.append(Path(f"{project_dir.rstrip('/')}.tmp"))
+    runner_temp = environ.get("RUNNER_TEMP", "")
+    if runner_temp.startswith("/") and runner_temp.rstrip("/"):  # relative: whatever bwrap's cwd is; "/": everything
+        paths.append(Path(runner_temp.rstrip("/")))
+    return tuple(dict.fromkeys(paths))
 
 
 def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:

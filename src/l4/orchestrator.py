@@ -36,7 +36,7 @@ import contextlib
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -55,9 +55,9 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
-from l4.forge.base import fetch_auth_config
+from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure
-from l4.forge.urls import app_forge_urls
+from l4.forge.urls import app_forge_urls, origin_url
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
 from l4.implementer.tasks import (
@@ -73,7 +73,7 @@ from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
-from l4.provision.readiness import steps_for
+from l4.provision.readiness import platform_of, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -137,7 +137,15 @@ def base_conflict_section(exc: BaseMergeConflict, branch: str) -> str:
     )
 
 
-def capacity_section(exc: Exception, *, base: str, now: datetime, retry_after: str | None) -> str:
+def capacity_section(
+    exc: Exception,
+    *,
+    base: str,
+    now: datetime,
+    retry_after: str | None,
+    platform: str = "gitlab",
+    environment: str | None = None,
+) -> str:
     """The sticky note of a unit that parked for capacity (L4-ARC-002; live job 5561: the MR stayed silent): what
     is missing, the human steps for a login, and when the unit comes back. `bring_in_base`'s sibling: the next
     `CAPACITY_RESTORED` clears it, a re-park writes it again."""
@@ -150,7 +158,8 @@ def capacity_section(exc: Exception, *, base: str, now: datetime, retry_after: s
         for u in unready:
             lines.append(f"- `{u.profile}` ({u.adapter or 'backend'}): {u.step}: {u.reason}")
             if u.step == "auth" and u.adapter:
-                lines += [f"  - {step}" for step in steps_for(u.adapter, u.auth)]
+                steps = steps_for(u.adapter, u.auth, platform=platform, environment=environment)
+                lines += [f"  - {step}" for step in steps]
         lines.append("")
     else:
         lines += [f"{str(exc)[:300]}", ""]
@@ -435,9 +444,12 @@ class Orchestrator:
             log.warning("%s", exc)
         redact = self.services.app.redactor.redact_text
         self._exit_reason = redact(f"waiting_capacity: {exc}")[:300]
+        app = self.services.app
+        platform, environment = platform_of(self.cfg, app.environ, origin_url(app.repo, app.environ))
         section = capacity_section(
-            exc, base=self.cfg.forge.base_branch, now=self.services.factory.now(), retry_after=retry_after
-        )
+            exc, base=self.cfg.forge.base_branch, now=self.services.factory.now(), retry_after=retry_after,
+            platform=platform, environment=environment,
+        )  # fmt: skip
         self._notes = _sections(redact(section))  # before the phase change, which syncs the mirror
         edge = self._go(Trigger.REQUIRED_ROLE_UNAVAILABLE, **context)
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.WAITING_CAPACITY)
@@ -1130,20 +1142,44 @@ def run_command(
     ):
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
+    result = continue_left_units(app, cfg, result)
     log_artefacts(app.out_dir, app.run_id)
     return result
+
+
+def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:
+    """github-parity D4 (L4-GHP-004): once per `l4 run`, when the run ends with exit 10 because units were left at the
+    soft deadline, `ci.continuation` is `dispatch` and the run is in CI, ask the forge for one more run of the harness's
+    CI on the base branch. The answer is logged and recorded in `outcome.json`. No forge, or a forge error, is a warning
+    at most: the exit code does not change."""
+    left = any((u.exit_reason or "").startswith("not started: soft deadline") for u in result.units)
+    in_ci = app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true"
+    if result.code != ExitCode.CONTINUE or not left or cfg.ci.continuation != "dispatch" or not in_ci:
+        return result
+    base = cfg.forge.base_branch
+    try:
+        answer = make_forge(cfg, app.environ).dispatch_continuation(base)
+    except ForgeUnavailable:
+        return result  # a local run without credentials: nothing to ask
+    except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run
+        log.warning("continuation: not requested (%s)", app.redactor.redact_text(str(exc)))
+        return result
+    log.info("continuation: %s (l4.yml on %s)", answer, base)
+    return replace(result, continuation=answer)
 
 
 def job_remaining_s(cfg: L4Config, environ: Mapping[str, str], now: datetime, began: datetime | None) -> float | None:
     """Seconds of the CI job left before the soft deadline (L4-IMP-012): `ci.time_budget` minus
     `soft_deadline_margin`, minus what has passed since the job started; None when the budget is unknown (`auto`
-    outside GitLab's `CI_JOB_TIMEOUT`). The start is `CI_JOB_STARTED_AT` when set, else `began` (the run's start)."""
+    without GitLab's `CI_JOB_TIMEOUT` or GitHub's `L4_JOB_TIMEOUT_MINUTES`).
+    The start is `CI_JOB_STARTED_AT` when set, else `began` (the run's start)."""
     budget = cfg.ci.time_budget
     if budget != "auto":
         total: int | None = duration_seconds(budget)
     else:
-        raw = environ.get("CI_JOB_TIMEOUT", "")
-        total = int(raw) if raw.isdigit() else None
+        raw = environ.get("CI_JOB_TIMEOUT", "")  # GitLab: seconds
+        minutes = environ.get("L4_JOB_TIMEOUT_MINUTES", "")  # GitHub: the template's `timeout-minutes`, as a job env
+        total = int(raw) if raw.isdigit() else int(minutes) * 60 if minutes.isdigit() else None
     if total is None:
         return None
     started = began or now

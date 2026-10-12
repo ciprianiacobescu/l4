@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from l4.ci.github import doctor_command, render_github_ci
+from l4.ci.github import HOST_KEYS, JOB_TIMEOUT_MINUTES, doctor_command, expression_string, render_github_ci
 from l4.ci.lint import lint_github_yaml
 from l4.config.defaults import CREDENTIAL_PATHS
 from l4.config.schema import L4Config
@@ -108,9 +108,17 @@ def test_hosted_doctor_always_fixes_because_the_harness_decides_whether_to_insta
         assert runs == [".l4/bin/l4 doctor --ci --fix || .l4/bin/l4 ci map-exit $?"]
 
 
+def test_job_timeout_env_comes_from_the_same_constant_as_timeout_minutes():
+    """SCN-GHP-04 (L4-GHP-003): the soft deadline reads what the job is cut off at."""
+    for tags in ([], ["agentic"]):
+        job = parsed(cfg(ci={"runner_tags": tags}))["jobs"]["l4"]
+        assert job["timeout-minutes"] == JOB_TIMEOUT_MINUTES
+        assert job["env"]["L4_JOB_TIMEOUT_MINUTES"] == str(JOB_TIMEOUT_MINUTES)
+
+
 def test_self_hosted_job_has_no_hosted_steps_or_env():
     job = parsed(L4Config())["jobs"]["l4"]
-    assert set(job["env"]) == {"L4_FORGE_TOKEN"}
+    assert set(job["env"]) == {"L4_FORGE_TOKEN", "L4_JOB_TIMEOUT_MINUTES", "L4_BASE_BRANCH"}
     assert not [s for s in job["steps"] if "l4-setup" in s.get("run", "") or "cache" in s.get("uses", "")]
 
 
@@ -142,6 +150,10 @@ def test_no_credential_path_is_cached():
         cfg(ci={"runner_tags": []}),
         cfg(ci={"runner_tags": [], "github_environment": None, "self_provision": True}),
         cfg(ci={"self_provision": True}, forge={"base_branch": "release/1.x"}),
+        cfg(
+            harness={"repository": "ssh://git@github.com/owner/harness.git", "commit": "ab" * 20},
+            ci={"runner_tags": []},
+        ),
     ],
 )
 def test_actionlint_is_clean(config, tmp_path):
@@ -161,21 +173,26 @@ def test_triggers_job_shape_and_steps():
     assert set(triggers) == {"push", "schedule", "workflow_dispatch"}
     assert triggers["push"]["branches"] == ["main", "l4/**"]
     job = doc["jobs"]["l4"]
-    assert job["if"] == "${{ !contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    assert job["if"] == (
+        "${{ github.event_name != 'push' || github.ref_name == 'main' || "
+        "!contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    )
     assert job["concurrency"] == {"group": "l4", "cancel-in-progress": False}
     assert job["timeout-minutes"] == 180
     assert job["runs-on"] == ["self-hosted", "agentic"]
     checkout = job["steps"][0]
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     assert len(checkout["uses"].split("@")[1]) == 40  # pinned to a commit
-    assert [s["run"] for s in job["steps"] if "run" in s] == [
+    assert [s["run"].strip() for s in job["steps"] if "run" in s] == [
+        BASE_CHECKOUT,
         ".l4/bin/l4 doctor --ci || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 run || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 status",
     ]
     assert doc["permissions"] == {
-        "contents": "write", "pull-requests": "write", "statuses": "write", "actions": "write",
+        "contents": "write", "pull-requests": "write", "issues": "write", "checks": "read", "statuses": "write",
+        "actions": "write",
     }  # fmt: skip
 
 
@@ -201,7 +218,9 @@ def test_runner_tags_and_the_hosted_fallback():
 def test_branch_prefix_and_token_env_follow_config():
     doc = parsed(cfg(forge={"branch_prefix": "bots/", "token_env": "MY_TOKEN"}))
     assert doc[True]["push"]["branches"][1] == "bots/**"
-    assert doc["jobs"]["l4"]["env"] == {"MY_TOKEN": "${{ secrets.MY_TOKEN }}"}
+    assert doc["jobs"]["l4"]["env"] == {
+        "MY_TOKEN": "${{ secrets.MY_TOKEN }}", "L4_JOB_TIMEOUT_MINUTES": "180", "L4_BASE_BRANCH": "main",
+    }  # fmt: skip
 
 
 def test_doctor_line_follows_self_provision():
@@ -251,3 +270,116 @@ def test_job_env_maps_exactly_the_chains_credentials():
     }
     assert "KIRO_API_KEY" not in env  # its profile is in no chain
     assert render_github_ci(cfg()) == GOLDEN.read_text()  # no chain, no credential: the env is the forge token alone
+
+
+BASE_CHECKOUT = (
+    'git fetch --quiet origin "+refs/heads/$L4_BASE_BRANCH:refs/remotes/origin/$L4_BASE_BRANCH" '
+    '&& git checkout --quiet --detach "origin/$L4_BASE_BRANCH" '
+    '&& echo "l4: base checkout $(git rev-parse HEAD)"'
+)
+
+
+def test_other_branches_check_out_the_base():
+    """SCN-GHP-07 (L4-GHP-005): "when `github.ref_name` is not the base branch, it fetches ... and runs `git checkout
+    --detach origin/<base>`", the GitLab rule. The base reaches the shell only through the job env."""
+    for tags in ([], ["agentic"]):
+        for environment in ("l4", None):
+            job = parsed(cfg(ci={"runner_tags": tags, "github_environment": environment}))["jobs"]["l4"]
+            steps = job["steps"]
+            at = step_index(steps, lambda st: "base checkout" in st.get("run", ""))
+            assert "actions/checkout" in steps[at - 1]["uses"]  # right after the checkout
+            assert at < step_index(steps, lambda st: ".l4/bin/" in st.get("run", ""))
+            assert steps[at]["if"] == "${{ github.ref_name != env.L4_BASE_BRANCH }}"
+            assert steps[at]["run"].strip() == BASE_CHECKOUT
+            assert job["env"]["L4_BASE_BRANCH"] == "main"
+
+
+def test_the_base_branch_is_never_interpolated_into_a_script():
+    hostile = 'x"; curl evil #'
+    doc = yaml.safe_load(render_github_ci(cfg(forge={"base_branch": hostile}, ci={"runner_tags": []})))
+    assert doc["jobs"]["l4"]["env"]["L4_BASE_BRANCH"] == hostile
+    for step in doc["jobs"]["l4"]["steps"]:
+        assert hostile not in step.get("run", "")
+
+
+def test_expression_string_doubles_quotes():
+    assert expression_string("main") == "'main'"
+    assert expression_string("it's") == "'it''s'"
+    assert expression_string("a''b") == "'a''''b'"
+
+
+def test_skip_rule_exempts_the_base():
+    """SCN-GHP-08 (L4-GHP-006): the `L4-Run:` skip applies to every branch but the base."""
+    want = (
+        "${{ github.event_name != 'push' || github.ref_name == 'main' || "
+        "!contains(github.event.head_commit.message, 'L4-Run: ') }}"
+    )
+    assert parsed(L4Config())["jobs"]["l4"]["if"] == want
+    quoted = parsed(cfg(forge={"base_branch": "o'brien"}))["jobs"]["l4"]["if"]
+    assert "github.ref_name == 'o''brien' ||" in quoted
+
+
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+SSH_HARNESS = {"repository": "ssh://git@github.com/owner/harness.git", "commit": COMMIT}
+
+
+def fetched(repository: str = SSH_HARNESS["repository"], *, tags: list[str] | None = None) -> L4Config:
+    return cfg(harness={"repository": repository, "commit": COMMIT}, ci={"runner_tags": tags or []})
+
+
+def test_fetched_harness_key_step_and_cache_key():
+    """SCN-GHP-14 (L4-GHP-010): an ssh harness gets a deploy-key step before the first `.l4/bin/` command, the secret
+    only in that step's env, and the hosted cache key is the pinned commit, not the vendored files."""
+    for tags in ([], ["agentic"]):
+        job = parsed(fetched(tags=tags))["jobs"]["l4"]
+        steps = job["steps"]
+        at = step_index(steps, lambda st: st.get("name") == "harness deploy key")
+        assert at < step_index(steps, lambda st: ".l4/bin/" in st.get("run", ""))
+        step = steps[at]
+        assert step["env"] == {"L4_HARNESS_SSH_KEY": "${{ secrets.L4_HARNESS_SSH_KEY }}"}
+        assert "L4_HARNESS_SSH_KEY" not in job["env"]  # never the job env: only this step sees the key
+        run = step["run"]
+        assert run.count("L4_HARNESS_SSH_KEY") == 2 and 'echo "$L4_HARNESS_SSH_KEY"' not in run  # never echoed
+        assert 'if [ -n "$L4_HARNESS_SSH_KEY" ]' in run and "umask 077" in run
+        assert 'chmod 600 "$RUNNER_TEMP/l4-harness-key"' in run
+        for host_key in HOST_KEYS:
+            assert host_key in run
+        assert len(HOST_KEYS) == 3 and all(k.startswith("github.com ssh-") or " ecdsa-" in k for k in HOST_KEYS)
+        assert (
+            'echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/l4-harness-key -o IdentitiesOnly=yes '
+            '-o UserKnownHostsFile=$RUNNER_TEMP/l4-known-hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"'
+        ) in run
+    hosted = parsed(fetched())["jobs"]["l4"]["steps"]
+    key = next(st for st in hosted if st.get("uses", "").startswith("actions/cache/restore@"))["with"]["key"]
+    assert key.endswith(f"-harness-{COMMIT}") and "hashFiles" not in key
+    save = next(st for st in hosted if st.get("uses", "").startswith("actions/cache/save@"))
+    assert save["with"]["key"] == key
+
+
+def test_an_https_or_vendored_harness_has_no_key_step():
+    for config in (fetched("https://github.com/owner/harness.git"), L4Config(), cfg(ci={"runner_tags": []})):
+        steps = parsed(config)["jobs"]["l4"]["steps"]
+        assert not [st for st in steps if st.get("name") == "harness deploy key"]
+        assert "L4_HARNESS_SSH_KEY" not in render_github_ci(config)
+    https = parsed(fetched("https://github.com/owner/harness.git"))["jobs"]["l4"]["steps"]
+    assert next(st for st in https if st.get("uses", "").startswith("actions/cache/restore@"))["with"]["key"].endswith(
+        f"-harness-{COMMIT}"
+    )
+    vendored = parsed(cfg(ci={"runner_tags": []}))["jobs"]["l4"]["steps"]
+    key = next(st for st in vendored if st.get("uses", "").startswith("actions/cache/restore@"))["with"]["key"]
+    assert "hashFiles('.l4/vendor/src/l4/provision/catalog.py'" in key and "harness-" not in key
+
+
+def test_the_pinned_host_keys_are_githubs_published_ones():
+    assert HOST_KEYS[0] == "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+    assert [k.split()[1] for k in HOST_KEYS] == ["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"]
+
+
+def test_permissions_cover_every_api_the_harness_calls_with_github_token():
+    """With an explicit `permissions:` block every scope not named is `none` for GITHUB_TOKEN: the harness reads check
+    runs (`checks: read`) and writes labels, comments and issue events through the Issues API (`issues: write`)."""
+    permissions = parsed(cfg())["permissions"]
+    assert permissions == {
+        "contents": "write", "pull-requests": "write", "issues": "write", "checks": "read", "statuses": "write",
+        "actions": "write",
+    }  # fmt: skip
