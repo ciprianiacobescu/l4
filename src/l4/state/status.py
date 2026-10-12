@@ -25,12 +25,14 @@ from l4.forge.base import fetch_auth_config
 from l4.forge.urls import app_forge_urls
 from l4.implementer.tasks import required
 from l4.specs.base import Framework, SpecProvider, Task, UnitRef, UnknownUnit, parse_unit_id
+from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.kiro import kiro_tasks
 from l4.specs.markers import MAX_TASKS_BYTES
 from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.providers import providers_for
 from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, QuestionsFile
+from l4.state.feedback_view import counts, item_views
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import (
     MAX_LEDGER_FILE_BYTES,
@@ -82,6 +84,12 @@ class UnitSnapshot:
     children: tuple[ChildSnapshot, ...] = ()  # the fix units the ledger names, from the same source
     fix_of: str | None = None  # the parent's unit id when this unit is itself a fix unit (`.l4/fix.json`)
     review: AfterHandoff | None = None  # an `in_review` unit read from its branch: what happened after H (M1.9)
+    feedback: FeedbackFile | None = None  # `feedback.md` from the same source as the tasks and the ledger
+
+    @property
+    def feedback_counts(self) -> dict[str, int]:
+        """Items per state (D12), from the file and the fold; empty when the unit has no item."""
+        return counts(item_views(self.feedback, self.state))
 
     @property
     def tasks_done(self) -> int:
@@ -116,6 +124,11 @@ def _read_branch(
     return files, tasks, questions
 
 
+def _read_feedback(git: Git, tracking_ref: str, unit_rel: str) -> FeedbackFile | None:
+    blob = regular_blobs(git, tracking_ref, f"{unit_rel}/{FEEDBACK_FILENAME}", MAX_FEEDBACK_BYTES)
+    return FeedbackFile.parse(git.run_bytes("cat-file", "blob", blob[0].oid)) if blob else None
+
+
 def _check_unit(read: LedgerRead, unit_id: str) -> None:
     for event in read.events:
         if event.unit != unit_id:
@@ -133,9 +146,11 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
             files, tasks, questions = _read_branch(
                 git, tracking_ref, _relative(provider, ref, git), parse_tasks=TASK_PARSERS[ref.framework]
             )
+            feedback = _read_feedback(git, tracking_ref, _relative(provider, ref, git))
         else:
             files, tasks = read_ledger_files(provider.unit_dir(ref)), provider.tasks(ref)
             questions = QuestionsFile.load(provider.unit_dir(ref) / QUESTIONS_FILENAME)
+            feedback = FeedbackFile.load(provider.unit_dir(ref))
         read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(ref.id)))  # the tail after H (5.5)
         _check_unit(read, ref.id)
     except LedgerCorrupt as exc:
@@ -159,6 +174,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         children=children,
         fix_of=marker.parent if marker else None,
         review=review,
+        feedback=feedback,
     )
 
 
@@ -237,6 +253,12 @@ def _table(rows: list[UnitSnapshot]) -> str:
         )
         for s in rows
     ]  # fmt: skip
+    if any(s.feedback_counts for s in rows):  # a column only when some unit has items (D12)
+        header = (*header, "FEEDBACK")
+        body = [
+            (*line, ", ".join(f"{name.replace('_', ' ')} {n}" for name, n in s.feedback_counts.items()) or "-")
+            for line, s in zip(body, rows, strict=True)
+        ]
     widths = [max(len(r[i]) for r in [header, *body]) for i in range(len(header))]
     return "\n".join(
         "  ".join(cell.ljust(w) for cell, w in zip(r, widths, strict=True)).rstrip() for r in [header, *body]
@@ -256,6 +278,7 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
                 "pr": urls.expand(s.state.pr) if s.state.pr else None,  # the recorded `<forge>` back to a link
                 "spec_tasks": {"done": s.tasks_done, "total": s.tasks_total},
                 "source": s.source,
+                **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
             }
             for s in rows

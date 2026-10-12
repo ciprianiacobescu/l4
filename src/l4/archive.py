@@ -39,12 +39,15 @@ from l4.forge.urls import app_forge_urls, blob_url
 from l4.fsutil import read_regular_file
 from l4.outcome import CommandResult
 from l4.services import H_PUSHED, ForgeHook, HookContext, MirrorHook
+from l4.specs.base import SpecError
+from l4.specs.feedback import FeedbackFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerClosed, ledger_path, read_ledger
 from l4.state.status import snapshots
 from l4.vcs.authorship import HANDOFF_SUBJECT, handoff_commit
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
+from l4.verifier.notes import FEEDBACK_HINT, feedback_section
 
 log = logging.getLogger("l4.archive")
 
@@ -56,6 +59,17 @@ NOTHING_WAITING = "Nothing is waiting for a human answer."
 
 
 # --- renderers (pure) ---------------------------------------------------------------------------------------------
+
+
+def compose_sticky(notes: Sequence[str], phase: str, feedback: str | None) -> str:
+    """The body of the sticky note: the sections (or the sentence that nothing waits), then the *Your feedback*
+    section, and for a unit in review the line that says how to ask for changes, always last (L4-FBK-011)."""
+    body = "\n\n".join(notes) if notes else NOTHING_WAITING
+    if feedback:
+        body += "\n\n" + feedback
+    if phase == "in_review":
+        body += "\n\n" + FEEDBACK_HINT
+    return body
 
 
 def _one_line(text: str) -> str:
@@ -206,7 +220,21 @@ class _Mirror:
         self._draft(phase)
         self._labels(phase)
         if notes is not None:
-            self._sticky(notes)
+            self._sticky(compose_sticky(notes, phase, self._feedback()))
+
+    def _feedback(self) -> str | None:
+        """The *Your feedback* section from `feedback.md` and the ledger as they are now (None: no item, or the file
+        cannot be read: the note is a courtesy)."""
+        s = self._ctx.services
+        try:
+            file = FeedbackFile.load(s.ref.path)
+        except (SpecError, OSError) as exc:
+            log.warning("feedback.md is not readable, the sticky note leaves out the feedback section: %s", exc)
+            return None
+        if file is None:
+            return None
+        state = fold(read_ledger(s.ref.path).events, s.ref.id)
+        return feedback_section(file, state, s.app.redactor.redact_text)
 
     def _draft(self, phase: str) -> None:
         """A unit that is neither in review nor merged is not ready: its MR goes back to draft, before the labels and
@@ -245,9 +273,8 @@ class _Mirror:
         except ForgeError as exc:
             _warn("labelling the merge request", exc)
 
-    def _sticky(self, notes: Sequence[str]) -> None:
+    def _sticky(self, body: str) -> None:
         mr = self._mr
-        body = "\n\n".join(notes) if notes else NOTHING_WAITING
         if body == mr.sticky:
             return
         try:

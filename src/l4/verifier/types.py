@@ -253,6 +253,7 @@ class VerifyResult:
     tests: dict[str, str] = field(default_factory=dict)  # test id -> status, from the step 3 report
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
+    feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)
     integrity: IntegrityReport | None = None
     trace: list[CriterionEvidence] = field(default_factory=list)
     audit: list[AuditRecord] = field(default_factory=list)

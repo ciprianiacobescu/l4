@@ -310,7 +310,7 @@ def test_an_answered_question_reaches_the_red_prompt_as_a_data_block(make_bench)
     import hashlib
 
     assert rendered["sha256"] == hashlib.sha256(req.prompt.encode()).hexdigest()  # the hash covers the answer
-    assert rendered["template_version"].startswith("contract@9+")
+    assert rendered["template_version"].startswith("contract@10+")
     assert rendered["answers"] == [{"id": "Q-001", "answer_sha256": hashlib.sha256(b"The rate is 21%.").hexdigest()}]
 
 
