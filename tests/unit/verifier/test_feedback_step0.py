@@ -202,3 +202,76 @@ def test_a_duplicate_heading_is_recorded_once_as_invalid_and_never_taken(tmp_pat
     taken_state = state(taken(file), ("feedback.invalid", dict(scan.events[0][1])))
     assert taken_state.feedback["FB-001"].status == "taken"  # the copy does not stop the item being judged
     assert [i.id for i in pending_feedback(taken_state, file)] == ["FB-001"]
+
+
+# --- review #2: an item judged not addressed is never dropped ----------------------------------------------------
+
+
+def taken_file(tmp_path: Path) -> tuple[FeedbackFile, tuple[str, dict]]:
+    """FB-001 as the fix-unit commit leaves it: Status `taken` in the file and `feedback.taken` in the ledger."""
+    add(tmp_path)
+    file = load(tmp_path).set_status("FB-001", FeedbackStatus.TAKEN)
+    return file, taken(file)
+
+
+def test_a_not_addressed_item_is_takeable_again_at_step_0(tmp_path: Path):
+    """L4-FBK-007, review #2 (i) and (iii): the judge said no (`feedback.not_addressed`) and the round ended at the
+    feedback limit, or the run died before `fix.spawned`. The file still says `taken`; step 0 takes it again."""
+    file, take = taken_file(tmp_path)
+    not_addressed = ("feedback.not_addressed", {"id": "FB-001", "round": 2, "evidence": "still nested"})
+    after = state(take, not_addressed)
+    assert after.feedback["FB-001"].status == "not_addressed"
+    assert pending_feedback(after, file) == []  # the judge is not asked until it is taken again
+    assert [i.id for i in scan_feedback(file, after).takeable] == ["FB-001"]
+
+
+def test_a_waiting_item_that_was_taken_is_takeable_again_at_step_0(tmp_path: Path):
+    """L4-FBK-005, review #2 (ii): a not-addressed item past `MAX_FIX_TASKS` waits; the next round takes it."""
+    file, take = taken_file(tmp_path)
+    rows = (take, ("feedback.not_addressed", {"id": "FB-001", "round": 2, "evidence": "x"}),
+            ("feedback.waiting", {"ids": ["FB-001"], "reason": "fix_unit_full"}))  # fmt: skip
+    waiting = state(*rows)
+    assert waiting.feedback["FB-001"].status == "waiting" and waiting.feedback["FB-001"].sha256
+    assert [i.id for i in scan_feedback(file, waiting).takeable] == ["FB-001"]
+    # the take records it again, and then it is the judge's again, not step 0's
+    again = state(*rows, ("feedback.taken", {**take[1], "round": 3, "fix_unit": "p-fix-3"}))
+    assert scan_feedback(file, again).takeable == ()
+    assert [i.id for i in pending_feedback(again, file)] == ["FB-001"]
+
+
+def test_every_ledger_state_of_a_taken_item_is_takeable_or_pending(tmp_path: Path):
+    """review #2: no item sits in a state that is neither takeable (step 0) nor pending (the judge)."""
+    file, take = taken_file(tmp_path)
+    after = {
+        "taken": (),
+        "not_addressed": (("feedback.not_addressed", {"id": "FB-001", "round": 2, "evidence": "x"}),),
+        "waiting": (("feedback.waiting", {"ids": ["FB-001"], "reason": "fix_unit_full"}),),
+    }
+    for status, rows in after.items():
+        folded = state(take, *rows)
+        assert folded.feedback["FB-001"].status == status
+        takeable = [i.id for i in scan_feedback(file, folded).takeable]
+        pending = [i.id for i in pending_feedback(folded, file)]
+        assert (takeable, pending) == (([], ["FB-001"]) if status == "taken" else (["FB-001"], [])), status
+
+
+def test_a_not_addressed_item_past_the_fix_unit_is_taken_in_a_later_round(tmp_path: Path):
+    """review #2 (ii), whole path: 5 blockers and a not-addressed item fill the unit; the item waits; the round after
+    takes it."""
+    from l4.verifier.feedback import decide_feedback, feedback_ref, not_addressed_findings
+    from l4.verifier.fixunit import plan_fix_unit
+    from l4.verifier.types import Finding, Verdict, VerifyResult
+
+    file, take = taken_file(tmp_path)
+    asked = [feedback_ref(file.get("FB-001"))]
+    found = not_addressed_findings(decide_feedback(asked, [[]], lambda n: True), asked)
+    blockers = [Finding(Severity.BLOCKER, f"gate {i} failed", "x", "deterministic") for i in range(5)]
+    result = VerifyResult("openspec:p", 2, Verdict.FAIL, "h", "b", findings=[*blockers, *found])
+    plan = plan_fix_unit([], result, (), ordinal=2, fix_minor=False)
+    assert plan.waiting == ["FB-001"] and plan.taken == []
+    waiting = state(take, ("feedback.not_addressed", {"id": "FB-001", "round": 2, "evidence": "not answered"}),
+                    ("feedback.waiting", {"ids": plan.waiting, "reason": "fix_unit_full"}))  # fmt: skip
+    [item] = scan_feedback(file, waiting).takeable
+    third = plan_fix_unit([], VerifyResult("openspec:p", 3, Verdict.FAIL, "h", "b", findings=feedback_findings(
+        scan_feedback(file, waiting))), (), ordinal=3, fix_minor=False)  # fmt: skip
+    assert [r.id for r in third.taken] == [item.id]

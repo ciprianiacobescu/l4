@@ -4,6 +4,8 @@
 records out. A takeable item is valid, not withdrawn, and either `submitted` or `taken`/`addressed` with content that
 hashes differently from the last `feedback.taken`. Each becomes a deterministic blocking `Finding` with source
 `"feedback"`, so the round fails at step 0 like a red repository CI job and the fix unit of L4-VER-006 is written.
+An item taken before whose ledger state is `not_addressed` or `waiting` is takeable again (review #2): every taken item
+is either takeable (step 0) or pending (the judge), never neither.
 
 The take itself (`feedback.taken`, Status `taken`, the Outcome line) happens in `fixloop.after_verdict`, once the fix
 unit exists. `pending_feedback` is what a later round reads: the items taken and not yet judged.
@@ -61,6 +63,10 @@ def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
         elif item.status in (FeedbackStatus.TAKEN, FeedbackStatus.ADDRESSED):
             # no take in the ledger: nothing to compare with (a Status written by hand, or a follow-up's take)
             candidate = was_taken and known is not None and digest != known.sha256
+            if not candidate and was_taken and known is not None and item.status is FeedbackStatus.TAKEN:
+                # judged not addressed, or taken and then left waiting (past MAX_FIX_TASKS, a limit, a crash before
+                # the fix unit): the file still says `taken`, and nothing else would take or judge it again (L4-FBK-007)
+                candidate = known.status in ("not_addressed", "waiting")
         else:
             candidate = False
         if not candidate:
