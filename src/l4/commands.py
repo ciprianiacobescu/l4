@@ -31,6 +31,8 @@ HANDLERS: dict[str, str] = {
     "ci render": "l4.ci.commands:run_render",
     "ci watch": "l4.ci.watch:run_ci_watch",
     "ci render-child": "l4.ci.commands:run_render_child",
+    "ci cache-key": "l4.ci.action_commands:run_cache_key",
+    "ci render-setup": "l4.ci.action_commands:run_render_setup",
     "ci map-exit": "l4.exitcodes:run_map_exit",
     "eval": "l4.eval.run:run_eval",
 }
@@ -57,6 +59,8 @@ OWNING_CHANGE: dict[str, str] = {
     "ci render": "forge-and-ci",
     "ci watch": "forge-and-ci",
     "ci render-child": "forge-and-ci",
+    "ci cache-key": "adoption-kit",
+    "ci render-setup": "adoption-kit",
     "ci map-exit": "bootstrap-core",
     "eval": "m114-eval",
 }

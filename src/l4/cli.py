@@ -186,6 +186,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "ci render-child": ("Print the GitLab child pipeline.", lambda: [
         _opt("--plan", "plan", required=True, type=click.Path(dir_okay=False, path_type=Path)),
     ]),
+    "ci cache-key": ("Print the key suffix of a CI cache (clis: the agent CLIs, from the catalog's pins).", lambda: [
+        click.Argument(["cache"], type=str),
+    ]),
+    "ci render-setup": ("Print the runner setup script (l4-setup.sh) for bash.", lambda: []),
     "ci map-exit": ("Translate an l4 exit code into the CI platform's convention.", lambda: [
         click.Argument(["code"], type=int),
     ]),

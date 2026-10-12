@@ -1,6 +1,8 @@
 """What the harness can provision, and the pins it provisions: one table, checked against `scripts/runner/prereqs.sh`
 by a drift test. Versions here are defaults; `spec.openspec.version` and `Profile.min_version` come from config."""
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -27,6 +29,26 @@ INSTALLER_URLS = {
 }
 ADAPTER_BINARIES = {"claude-code": "claude", "codex": "codex", "opencode": "opencode", "kiro-cli": "kiro-cli"}
 ADAPTER_PINS = {"claude-code": CLAUDE_VERSION, "codex": CODEX_VERSION, "opencode": OPENCODE_VERSION}
+
+
+def catalog_pins() -> dict[str, str]:
+    """Every version the harness pins for a runner tool (uv, Node, OpenSpec and its package, each agent CLI). Kiro and
+    bwrap have no pin [U]: they are installed as released, so they add no entry."""
+    pins = {
+        "uv": UV_VERSION,
+        "node": NODE_VERSION,
+        "openspec": f"{OPENSPEC_PACKAGE}@{OPENSPEC_DEFAULT}",
+    }
+    pins.update({f"agent:{name}": version for name, version in ADAPTER_PINS.items()})
+    pins.update({f"npm:{name}": package for name, package in NPM_PACKAGES.items()})
+    return pins
+
+
+def catalog_hash() -> str:
+    """The suffix of the agent-CLI cache key (L4-ACT-002): a stable hash of the pinned versions and nothing else, so a
+    new harness commit keeps the cache and a changed pin replaces it."""
+    text = json.dumps(catalog_pins(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(frozen=True)
