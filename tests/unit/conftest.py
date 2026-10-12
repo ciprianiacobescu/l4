@@ -15,14 +15,16 @@ from l4.vcs.trailers import CommitTrailers
 
 @pytest.fixture
 def git_environ(tmp_path: Path) -> dict[str, str]:
-    """A git environment that cannot see the developer's global config or home."""
+    """A git environment that cannot see the developer's global config or home. Its one global file is the session's
+    (`tests/conftest.py`): a committer identity and a default branch, the same on every machine, so a commit made
+    through `Git` needs neither the developer's configuration nor git's guess from the user and host names."""
     home = tmp_path / "githome"
     home.mkdir()
     return {
         "PATH": os.environ["PATH"],
         "HOME": str(home),
         "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_GLOBAL": os.environ["GIT_CONFIG_GLOBAL"],
     }
 
 
