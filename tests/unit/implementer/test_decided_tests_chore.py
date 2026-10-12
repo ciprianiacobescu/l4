@@ -59,7 +59,7 @@ def test_single_tests_and_single_state_the_rule_for_a_task_a_decision_opens():
     text = render_prompt("single", ctx(adds_tests=True)).text
     assert (
         "begins with a decision by a human" in text
-        and (render_prompt("single", ctx(adds_tests=True)).template_version) == "contract@9+single_tests@5"
+        and (render_prompt("single", ctx(adds_tests=True)).template_version) == "contract@10+single_tests@5"
     )
 
 

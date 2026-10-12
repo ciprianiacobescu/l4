@@ -4,13 +4,22 @@ an answer that does not start with `accept` or `reject` the sentence that asks f
 from collections.abc import Callable, Collection
 
 from l4.clarifier.clarifier import sticky_location
-from l4.clarifier.notify import build_sticky_section
+from l4.clarifier.notify import build_sticky_section, sticky_line
 from l4.clarifier.ports import QuestionView
 from l4.services import HookContext
+from l4.specs.feedback import FeedbackFile
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
+from l4.state.feedback_view import item_views
+from l4.state.fold import UnitState
 from l4.verifier.types import VerifyResult
 from l4.verifier.verdicts import verdict_status
 
+FEEDBACK_HINT = (
+    "To ask for changes: l4 feedback add --kind refactor|duplication|tests|config|behaviour --at FILE:LINE "
+    '--text "…", then commit and push (docs/feedback.md).'
+)  # L4-FBK-011: the last line of every note of a unit in review
+MAX_FEEDBACK_LINES = 30
+MAX_FEEDBACK_LINE_CHARS = 300
 VERDICT_HINT = "Start each answer with `accept` or `reject`, then give your reason."
 
 
@@ -49,4 +58,23 @@ def escalation_section(result: VerifyResult, reason: str, redact: Callable[[str]
     failed = [c for c in result.criteria if c.result == "fail"]
     lines += [f"- criterion {c.id} fails: {clean(c.reason, 160)}" for c in failed[:10]]
     lines += ["", "See `verification.md` on the unit branch for the evidence."]
+    return "\n".join(lines)
+
+
+def feedback_section(
+    file: FeedbackFile | None, state: UnitState, redact: Callable[[str], str] = lambda text: text
+) -> str | None:
+    """The *Your feedback* section (L4-FBK-011, D12): one line per item of `feedback.md`, None when it has none.
+    Places, evidence and problems come from the repository and from judges: redacted, then one line, without markup
+    that could ping people or hide text, and cut."""
+    views = item_views(file, state)
+    if not views:
+        return None
+    lines = ["### Your feedback", ""]
+    for view in views[:MAX_FEEDBACK_LINES]:
+        head = " ".join(part for part in (view.id, view.kind, view.place) if part)
+        line = f"{head} \N{EM DASH} {view.text}"
+        lines.append("- " + sticky_line(redact(line), MAX_FEEDBACK_LINE_CHARS))
+    if len(views) > MAX_FEEDBACK_LINES:
+        lines.append(f"- and {len(views) - MAX_FEEDBACK_LINES} more in `feedback.md`")
     return "\n".join(lines)

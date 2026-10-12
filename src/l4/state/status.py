@@ -11,7 +11,7 @@ after the hand-off commit. M1: state-vcs-locks 1.19 `--rebuild`, state.json, `st
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -25,13 +25,26 @@ from l4.forge.base import fetch_auth_config
 from l4.forge.urls import app_forge_urls
 from l4.implementer.tasks import required
 from l4.specs.base import Framework, SpecProvider, Task, UnitRef, UnknownUnit, parse_unit_id
+from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile
 from l4.specs.fixmark import read_fix_marker
+from l4.specs.followup import MARKER_PATH, MAX_MARKER_BYTES, parse_follow_up_marker, read_follow_up_marker
 from l4.specs.kiro import kiro_tasks
 from l4.specs.markers import MAX_TASKS_BYTES
 from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.providers import providers_for
 from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, QuestionsFile
+from l4.state.feedback_view import counts, item_views
 from l4.state.fold import UnitState, fold
+from l4.state.followups import (
+    FollowUpOffer,
+    archive_folders,
+    base_ref,
+    follow_ups_of,
+    known_follow_ups,
+    offer_for,
+    read_feedback_at,
+    taken_by_follow_ups,
+)
 from l4.state.ledger import (
     MAX_LEDGER_FILE_BYTES,
     LedgerCorrupt,
@@ -76,12 +89,20 @@ class UnitSnapshot:
     ref: UnitRef
     state: UnitState
     tasks: list[Task]
-    source: Literal["branch", "worktree"]
+    source: Literal["branch", "worktree", "archive"]
     corrupt: str | None = None  # "<file>:<line> ..." when the ledger could not be read; the phase is then "corrupt"
     questions: QuestionsFile | None = None  # `questions.md` from the same source as the tasks and the ledger
     children: tuple[ChildSnapshot, ...] = ()  # the fix units the ledger names, from the same source
     fix_of: str | None = None  # the parent's unit id when this unit is itself a fix unit (`.l4/fix.json`)
     review: AfterHandoff | None = None  # an `in_review` unit read from its branch: what happened after H (M1.9)
+    feedback: FeedbackFile | None = None  # `feedback.md` from the same source as the tasks and the ledger
+    follow_up_of: str | None = None  # the parent's unit id when this unit is a follow-up (`.l4/followup.json`)
+    follow_up: FollowUpOffer | None = None  # a `merged` unit: the items a follow-up should take (L4-FBK-010)
+
+    @property
+    def feedback_counts(self) -> dict[str, int]:
+        """Items per state (D12), from the file and the fold; empty when the unit has no item."""
+        return counts(item_views(self.feedback, self.state))
 
     @property
     def tasks_done(self) -> int:
@@ -116,6 +137,11 @@ def _read_branch(
     return files, tasks, questions
 
 
+def _read_feedback(git: Git, tracking_ref: str, unit_rel: str) -> FeedbackFile | None:
+    blob = regular_blobs(git, tracking_ref, f"{unit_rel}/{FEEDBACK_FILENAME}", MAX_FEEDBACK_BYTES)
+    return FeedbackFile.parse(git.run_bytes("cat-file", "blob", blob[0].oid)) if blob else None
+
+
 def _check_unit(read: LedgerRead, unit_id: str) -> None:
     for event in read.events:
         if event.unit != unit_id:
@@ -133,9 +159,11 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
             files, tasks, questions = _read_branch(
                 git, tracking_ref, _relative(provider, ref, git), parse_tasks=TASK_PARSERS[ref.framework]
             )
+            feedback = _read_feedback(git, tracking_ref, _relative(provider, ref, git))
         else:
             files, tasks = read_ledger_files(provider.unit_dir(ref)), provider.tasks(ref)
             questions = QuestionsFile.load(provider.unit_dir(ref) / QUESTIONS_FILENAME)
+            feedback = FeedbackFile.load(provider.unit_dir(ref))
         read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(ref.id)))  # the tail after H (5.5)
         _check_unit(read, ref.id)
     except LedgerCorrupt as exc:
@@ -147,6 +175,9 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
     state = fold(read.events, ref.id)
     children = child_snapshots(provider, git, ref, state.children, tracking_ref if on_branch else None)
     marker = read_fix_marker(provider.unit_dir(ref))
+    follow = _read_follow_up_marker(git, tracking_ref, _relative(provider, ref, git)) if on_branch else None
+    if not on_branch and (found := read_follow_up_marker(provider.unit_dir(ref))) is not None:
+        follow = found.parent
     review = None
     if on_branch and state.phase == Phase.IN_REVIEW.value:
         review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git))
@@ -159,7 +190,15 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         children=children,
         fix_of=marker.parent if marker else None,
         review=review,
+        feedback=feedback,
+        follow_up_of=follow,
     )
+
+
+def _read_follow_up_marker(git: Git, tracking_ref: str, unit_rel: str) -> str | None:
+    blob = regular_blobs(git, tracking_ref, "/".join((unit_rel, *MARKER_PATH)), MAX_MARKER_BYTES)
+    marker = parse_follow_up_marker(git.run_bytes("cat-file", "blob", blob[0].oid)) if blob else None
+    return marker.parent if marker else None
 
 
 def child_snapshots(
@@ -218,13 +257,97 @@ def refresh_refs(app: AppContext, cfg: L4Config, git: Git, *, tolerate_denied: b
         log.warning("could not refresh from the forge (access denied: the job may be cancelled); showing local refs")
 
 
+def _archive_snapshot(git: Git, cfg: L4Config, name: str, folder: str, ref: str) -> UnitSnapshot | None:
+    """An archived OpenSpec change that holds a `feedback.md`, as the base branch has it: the archive folded the pending
+    ledger into the folder's own, so the fold reads `merged` there. None for anything that is not a merged unit."""
+    unit = UnitRef(Framework.OPENSPEC, name, git.repo / folder)
+    try:
+        blobs = regular_blobs(git, ref, f"{folder}/.l4/ledger/", MAX_LEDGER_FILE_BYTES)
+        files = {
+            blob.path.rsplit("/", 1)[-1]: git.run_bytes("cat-file", "blob", blob.oid)
+            for blob in blobs
+            if blob.path.endswith(".jsonl")
+        }
+        state = fold(parse_ledger_files(files).events, unit.id)
+    except LedgerCorrupt:
+        return None
+    if state.phase != Phase.MERGED.value:
+        return None
+    return UnitSnapshot(unit, state, [], "archive", feedback=read_feedback_at(git, ref, folder))
+
+
+def discover(
+    cfg: L4Config, git: Git, providers: list[SpecProvider], wanted: tuple[str, ...] = ()
+) -> list[tuple[SpecProvider, UnitSnapshot]]:
+    """Every unit with its snapshot: the units of the working tree, plus what only git holds (L4-FBK-010): the open
+    follow-ups, which live on their own branch and are never on the base until they merge, and the archived OpenSpec
+    changes that carry a `feedback.md`. A `merged` unit gets its `feedback.md` from the base branch (the person's
+    items are committed there) and the offer a follow-up should take."""
+    prefix = cfg.forge.branch_prefix
+    known = known_follow_ups(git, cfg)
+    by_framework = {p.framework: p for p in providers}
+    branch_only = [k for k in known if k.branch and not k.on_base and k.framework in by_framework]
+    base = base_ref(cfg)
+    has_base = git.rev_parse(base) is not None
+    archived = archive_folders(git, cfg) if has_base and Framework.OPENSPEC in by_framework else {}
+    extra_ids = {k.id for k in branch_only} | {f"openspec:{n}" for n in archived}
+    base_wanted = tuple(w for w in wanted if w not in extra_ids)
+    pairs = [] if wanted and not base_wanted else select_units(providers, base_wanted)
+    rows = [(p, load_snapshot(p, git, ref, branch_prefix=prefix)) for p, ref in pairs]
+    listed = {s.ref.id for _, s in rows}
+    for k in branch_only:
+        if k.id in listed or (wanted and k.id not in wanted):
+            continue
+        provider = by_framework[k.framework]
+        ref = UnitRef(k.framework, k.name, provider.unit_dir(UnitRef(k.framework, k.name, git.repo)))
+        rows.append((provider, load_snapshot(provider, git, ref, branch_prefix=prefix)))
+        listed.add(k.id)
+    for name, folder in archived.items():
+        unit_id = f"openspec:{name}"
+        if unit_id in listed or (wanted and unit_id not in wanted):
+            continue
+        if read_feedback_at(git, base, folder) is None:
+            continue  # an archived change with no feedback is not a unit any more
+        if (snapshot := _archive_snapshot(git, cfg, name, folder, base)) is not None:
+            rows.append((by_framework[Framework.OPENSPEC], snapshot))
+    phases = {s.ref.id: s.state.phase for _, s in rows}
+    done = {Phase.MERGED.value, Phase.ABANDONED.value}
+    out = []
+    for provider, snapshot in rows:
+        if snapshot.state.phase == Phase.MERGED.value:
+            follows = follow_ups_of(known, snapshot.ref.id)
+            opened = {k.name for k in follows if phases.get(k.id) not in done}
+            released = {k.name for k in follows if phases.get(k.id) == Phase.ABANDONED.value}
+            file = snapshot.feedback
+            if has_base and snapshot.source != "archive":
+                rel = _relative(provider, snapshot.ref, git)
+                file = read_feedback_at(git, base, rel) or file  # the base branch holds what the person committed
+            # the follow-ups' takes are on their own ledgers, not the parent's: the parent reads them from the markers
+            state = taken_by_follow_ups(snapshot.state, file, [k for k in follows if k.name not in released])
+            snapshot = replace(
+                snapshot, state=state, feedback=file, follow_up=offer_for(file, state, follows, opened, released)
+            )
+        out.append((provider, snapshot))
+    return sorted(out, key=lambda pair: pair[1].ref.id)
+
+
+def select_runnable(
+    cfg: L4Config, git: Git, providers: list[SpecProvider], unit: str
+) -> tuple[SpecProvider, UnitRef]:
+    """The one unit a command with `--unit` acts on, open follow-ups included. An archived change is only ever the
+    parent of a follow-up: it is no unit to run, resume or verify."""
+    for provider, snapshot in discover(cfg, git, providers, (unit,)):
+        if snapshot.source != "archive":
+            return provider, snapshot.ref
+    raise UnknownUnit(f"no such unit: {unit}")
+
+
 def snapshots(
     app: AppContext, cfg: L4Config, wanted: tuple[str, ...], *, tolerate_denied: bool = False
 ) -> list[UnitSnapshot]:
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git, tolerate_denied=tolerate_denied)
-    pairs = select_units(providers_for(cfg, app.repo, app.environ), wanted)
-    return [load_snapshot(p, git, ref, branch_prefix=cfg.forge.branch_prefix) for p, ref in pairs]
+    return [s for _, s in discover(cfg, git, providers_for(cfg, app.repo, app.environ), wanted)]
 
 
 def _table(rows: list[UnitSnapshot]) -> str:
@@ -237,6 +360,12 @@ def _table(rows: list[UnitSnapshot]) -> str:
         )
         for s in rows
     ]  # fmt: skip
+    if any(s.feedback_counts for s in rows):  # a column only when some unit has items (D12)
+        header = (*header, "FEEDBACK")
+        body = [
+            (*line, ", ".join(f"{name.replace('_', ' ')} {n}" for name, n in s.feedback_counts.items()) or "-")
+            for line, s in zip(body, rows, strict=True)
+        ]
     widths = [max(len(r[i]) for r in [header, *body]) for i in range(len(header))]
     return "\n".join(
         "  ".join(cell.ljust(w) for cell, w in zip(r, widths, strict=True)).rstrip() for r in [header, *body]
@@ -256,6 +385,7 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
                 "pr": urls.expand(s.state.pr) if s.state.pr else None,  # the recorded `<forge>` back to a link
                 "spec_tasks": {"done": s.tasks_done, "total": s.tasks_total},
                 "source": s.source,
+                **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
             }
             for s in rows

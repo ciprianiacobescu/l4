@@ -1,8 +1,8 @@
 """`l4 plan` (SPEC 2.1, simulation-harness D6): the next action of every unit, from its folded phase and task counts.
 
-Next action is one of implement, clarify, verify, hand_off, none. The question facts come from the unit's snapshot
-(`questions.md` of the unit branch, read beside tasks and ledger): an `awaiting_human` unit is actionable only when
-committed answers free a task. The path of the files is never probed here. No resume/sweep duties. `--probe`
+Next action is one of implement, clarify, verify, hand_off, follow_up, none. The question facts come from the unit's
+snapshot (`questions.md` of the unit branch, read beside tasks and ledger): an `awaiting_human` unit is actionable
+only when committed answers free a task. The path of the files is never probed here. No resume/sweep duties. `--probe`
 adds what `l4.sim.availability` finds out about the agents the next actions need; without it the plan is the same
 bytes. `facts_of` over `l4.state.status.load_snapshot` plays the part of simulation-harness' `LiveUnitSource`.
 `--sweep` first runs the minimal sweeper (`l4.ci.sweeper`: merged units and their archive merge requests, and the
@@ -78,6 +78,8 @@ class UnitFacts:
     spec_edit_after_handoff: bool = False  # in_review: those commits changed the unit folder (answers, spec edits)
     handoff_lost: bool = False  # in_review: no H on the branch (history rewritten)
     ci_failed_jobs: tuple[str, ...] = ()  # in_review: the project's CI is red on H, which is the branch head
+    follow_up_items: tuple[str, ...] = ()  # merged: the feedback items (ids) a follow-up should take (L4-FBK-010)
+    follow_up_open: str | None = None  # merged: the follow-up that is open, so newer items wait
 
 
 @dataclass(frozen=True)
@@ -85,7 +87,7 @@ class PlanEntry:
     unit: str
     framework: str
     phase: str | None
-    next_action: str  # implement | clarify | verify | hand_off | none
+    next_action: str  # implement | clarify | verify | hand_off | follow_up | none
     actionable: bool
     reason: str
     tasks_done: int
@@ -177,6 +179,11 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         return row
     if phase == Phase.IN_REVIEW.value and (row := _in_review(facts)):
         return row
+    if phase == Phase.MERGED.value and facts.follow_up_items:
+        ids = ", ".join(facts.follow_up_items)
+        if facts.follow_up_open:
+            return "none", f"merged: feedback {ids} waits for the open follow-up {facts.follow_up_open}"
+        return "follow_up", f"merged: feedback {ids} becomes a follow-up unit"
     if phase in _NOT_ACTIONABLE:
         return "none", _NOT_ACTIONABLE[phase]
     return "none", f"unknown phase {phase}"
@@ -226,6 +233,13 @@ def _review_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
     return facts
 
 
+def _follow_up_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
+    offer = snapshot.follow_up
+    if offer is None or not offer.items:
+        return {}
+    return {"follow_up_items": tuple(i.id for i in offer.items), "follow_up_open": offer.open}
+
+
 def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
     verdicts = verdict_status(snapshot.questions, snapshot.state.verdicts_consumed)
     progress, fix_open = _fix_facts(snapshot)
@@ -251,6 +265,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         fix_questions_open=fix_open,
         legacy_round=legacy_round(snapshot.state, snapshot.questions),
         **_review_facts(snapshot),
+        **_follow_up_facts(snapshot),
     )
 
 

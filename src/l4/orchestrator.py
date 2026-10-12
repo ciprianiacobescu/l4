@@ -55,6 +55,7 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
+from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure
 from l4.forge.urls import app_forge_urls, origin_url
@@ -89,7 +90,7 @@ from l4.state.lifecycle import Edge, Phase, Trigger, transition
 from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
 from l4.state.reconcile import reconcile
 from l4.state.review import after_handoff, review_note, review_trigger
-from l4.state.status import load_snapshot, refresh_refs, select_units
+from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
@@ -217,7 +218,6 @@ class Orchestrator:
         self._clarifier = Clarifier(services.ref.path, services.ledger)
         self._reentry: Reentry | None = None
         self._notes: tuple[str, ...] | None = None  # the sticky note's sections for the mirror; None: leave it alone
-        self._review_noted = False  # `_notes` holds the re-verification section: handing off again clears it
         self._exit_reason: str | None = None  # one line for `ci map-exit` when the exit code alone says too little
         self._rounds: dict[str, int] = {}  # per task, the times it blocked and went to the clarifier in this run
         self._sent: set[str] = set()  # questions handed to the clarify hook in this run: never handed over twice
@@ -331,18 +331,28 @@ class Orchestrator:
             self._sync_mirror()
 
     def resume(
-        self, reason: str, *, signal: str | None = None, by: str | None = None, extend_fix_rounds: int | None = None
+        self,
+        reason: str,
+        *,
+        signal: str | None = None,
+        by: str | None = None,
+        extend_fix_rounds: int | None = None,
+        extend_feedback_rounds: int | None = None,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
         `l4 run` continues the unit. `signal` (`label:<event id>`) and `by` (`member`) say that a member's `l4:resume`
         label asked for it: one resume per signal. `extend_fix_rounds` records `budget.extended` first, so that the fold
-        has the extra rounds when the verifier decides again."""
+        has the extra rounds when the verifier decides again; `extend_feedback_rounds` is the same for the feedback
+        limit (`feedback_rounds` in the same event, L4-FBK-006)."""
         before = self._refold().phase or "none"
         self._commit_what = "resume"
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
-        if extend_fix_rounds:
-            self.services.ledger.append("budget.extended", fix_rounds=extend_fix_rounds, reason=reason[:300], **extra)
+        if extend_fix_rounds or extend_feedback_rounds:
+            rounds = {
+                k: v for k, v in (("fix_rounds", extend_fix_rounds), ("feedback_rounds", extend_feedback_rounds)) if v
+            }
+            self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
         self.services.ledger.append("unit.resumed", reason=reason[:300], **extra)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
         self._go(Trigger.RESUMED)
@@ -529,7 +539,6 @@ class Orchestrator:
         if found is None:
             return False
         self._notes = (review_note(found),)  # the mirror shows why the MR is a draft again, from the first sync on
-        self._review_noted = True
         self._go(found.trigger, **found.context)
         return True
 
@@ -794,12 +803,14 @@ class Orchestrator:
             raise
         if (notes := self._ctx.shared.pop("notes", None)) is not None:  # the verdict questions' sticky section
             self._notes = notes
+        escalation = self._ctx.shared.pop("escalation", None)  # (reason, note): the feedback limit (L4-FBK-006)
         if trigger is Trigger.VERIFY_FAIL_EXHAUSTED:
-            why = "verification failed and no fix round is left (see verification.md)"
+            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
             self._notes = (self._stopped_section("escalated", why), *(self._notes or ()))
-        edge = self._go(trigger)
+        edge = self._go(trigger, **({"reason": escalation[0]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
-            self._exit_reason = "escalated: verification failed and no fix round is left (see verification.md)"
+            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
+            self._exit_reason = f"escalated: {why}"
         if edge.target is Phase.FIXING and self.services.hooks.fix is not None:
             return None  # SPEC 12.0 "10 or 0": the fix loop goes on in this run (D2)
         return None if edge.exit_code is None else ExitCode(edge.exit_code)
@@ -866,8 +877,7 @@ class Orchestrator:
         if handoff(self._ctx) is False:
             log.warning("%s: verified; the hand-off hook did nothing, so the unit stays verified", self.services.ref.id)
             return ExitCode.OK
-        if self._review_noted:
-            self._notes = ()  # in review again: the note that said why the MR was a draft is out of date
+        self._notes = ()  # in review: nothing waits for an answer, and the note says how to ask for changes (D12)
         edge = self._go(Trigger.HAND_OFF_PUSHED)
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.OK)
 
@@ -1029,6 +1039,7 @@ def run_unit_in_worktree(
     resume_signal: str | None = None,
     resume_by: str | None = None,
     resume_extend_fix_rounds: int | None = None,
+    resume_extend_feedback_rounds: int | None = None,
     waits: RunWaits | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
@@ -1079,7 +1090,8 @@ def run_unit_in_worktree(
             orchestrator.run_unit()
             if resume_reason is None
             else orchestrator.resume(
-                resume_reason, signal=resume_signal, by=resume_by, extend_fix_rounds=resume_extend_fix_rounds
+                resume_reason, signal=resume_signal, by=resume_by, extend_fix_rounds=resume_extend_fix_rounds,
+                extend_feedback_rounds=resume_extend_feedback_rounds,
             )
         )
         code, failed = result.exit_code, False
@@ -1125,26 +1137,45 @@ def run_command(
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
-    chosen = without_fix_units(select_units(list(providers_for(cfg, app.repo, app.environ)), units), named=units)
+    providers = list(providers_for(cfg, app.repo, app.environ))
+    found = discover(cfg, git, providers, units)
+    made: list[FollowUpMade] = []
+    failure: ExitCode | int = ExitCode.OK
+    try:  # merged units' feedback becomes units (L4-FBK-010); a failure here is the next run's to retry, not the units'
+        made = perform_follow_ups(app, cfg, git, [s for _, s in found])
+    except Exception as exc:  # noqa: BLE001 - classified: the exit code of the run, after the other units ran
+        failure = classify_exception(exc)[0]
+    if made:
+        found = discover(cfg, git, providers, units)  # the new units are on their own branches now
+    snapshots = {s.ref.id: s for _, s in found}
+    chosen = without_fix_units(
+        [(p, s.ref) for p, s in found if s.source != "archive"], named=units
+    )  # an archived unit is only ever a parent of a follow-up
     if not units:
         chosen = [
-            (provider, ref)
-            for provider, ref in chosen
-            if next_action(facts_of(load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)))[0]
-            in ACTIONABLE
+            (provider, ref) for provider, ref in chosen if next_action(facts_of(snapshots[ref.id]))[0] in ACTIONABLE
         ]
     if not chosen:
         log.info("nothing to do: no unit has a next step")  # before any lease, worktree or probe
-        return CommandResult(ExitCode.OK, [])
+        return CommandResult(failure, [_follow_up_outcome(m) for m in made])
     kiro = cfg.spec.kiro
     if (kiro.write_in_progress_marker or kiro.write_queued_marker) and any(
         ref.framework is Framework.KIRO for _, ref in chosen
     ):
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
+    result = replace(
+        result, code=most_severe([result.code, failure]), units=[*(_follow_up_outcome(m) for m in made), *result.units]
+    )
     result = continue_left_units(app, cfg, result)
     log_artefacts(app.out_dir, app.run_id)
     return result
+
+
+def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:
+    """The merged parent, whose phase did not change, and the follow-up unit its feedback became."""
+    reason = f"follow-up {made.follow_up} created on {made.branch} for {', '.join(made.items)}"
+    return UnitOutcome(unit=made.parent, phase_before="merged", phase_after="merged", exit_reason=reason)
 
 
 def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -> CommandResult:

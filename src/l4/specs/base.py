@@ -192,6 +192,13 @@ class Finding:
     criteria: tuple[str, ...] = ()
     chore: bool = False
     tests: bool = False  # a chore that adds tests (a coverage hold's task): the step may write new test files (M1.11)
+    # a person's feedback item (L4-FBK-005): `item` is its FB id, `request` the sentence "Requested by <By> in FB-NNN
+    # (<kind>, <places>): <text>" (the text whole up to 1,200 characters), `code` the lines quoted in the item;
+    # `refactor` marks a chore that keeps behaviour (the marker's `refactors`: the tests are frozen)
+    refactor: bool = False
+    item: str = ""
+    request: str = ""
+    code: str = ""
 
 
 @dataclass(frozen=True)
@@ -279,7 +286,8 @@ class ProviderRegistry:
 
 @runtime_checkable
 class FixUnitCapable(Protocol):
-    """Not a `SpecProvider` member: Kiro has no fix units here, and the provider registry checks `SpecProvider` only."""
+    """Not a `SpecProvider` member: the registry checks `SpecProvider` only. Both providers write fix units (an OpenSpec
+    change, a Kiro bugfix spec); a provider without `create_fix_unit` escalates a failed round instead."""
 
     def create_fix_unit(
         self, parent: UnitRef, round: int, findings: Sequence[Finding], spec_delta: SpecDelta | None

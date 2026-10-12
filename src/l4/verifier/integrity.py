@@ -20,6 +20,8 @@ from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.specs.base import Task
+from l4.specs.feedback import FEEDBACK_FILENAME
+from l4.specs.followup import feedback_home
 from l4.state.ledger import LedgerEvent
 from l4.vcs.authorship import SHA, commit_records, is_harness
 from l4.vcs.git import Git
@@ -107,6 +109,18 @@ def _listed(items: Sequence[str]) -> str:
 # --- 2.3 protected paths --------------------------------------------------------------------------------------------
 
 
+def _follow_up_feedback(ctx: IntegrityContext) -> str | None:
+    """A follow-up takes and judges the items of its parent's `feedback.md`: that one file of the parent's folder (on
+    the follow-up's branch) is the harness's to write (L4-FBK-010), whatever else of the spec root is protected."""
+    if not ctx.unit_dirs:
+        return None
+    root = ctx.git.repo
+    folder = feedback_home(root / ctx.unit_dirs[0])
+    if folder == root / ctx.unit_dirs[0]:
+        return None
+    return (folder / FEEDBACK_FILENAME).relative_to(root).as_posix()
+
+
 def check_protected(ctx: IntegrityContext) -> Outcome:
     """A contract glob or an `odd.forbidden_paths` path that differs between base and head is a blocker. The unit
     directory and the harness's memory file are the harness's own, and so are the fix units' directories, but only
@@ -118,8 +132,9 @@ def check_protected(ctx: IntegrityContext) -> Outcome:
         tuple(ctx.cfg.odd.forbidden_paths), family_globs=(f"{parent}-fix-*",) if parent is not None else ()
     )
     hits, protected_paths = [], {}
+    parents_file = _follow_up_feedback(ctx)
     for path in sorted(_changed(ctx.git, ctx.base_sha, ctx.head_sha)):
-        if _in_unit_dirs(ctx, path) or path.startswith(HARNESS_OWNED):
+        if _in_unit_dirs(ctx, path) or path.startswith(HARNESS_OWNED) or path == parents_file:
             continue
         if (rule := protected.match(path)) is not None:
             protected_paths[path] = rule

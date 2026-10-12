@@ -561,6 +561,13 @@ class EvidenceCfg(_Strict):
     diff_coverage: DiffCoverageCfg = Field(default_factory=DiffCoverageCfg)
 
 
+class FeedbackCfg(_Strict):
+    """A person's requests for changes (`feedback.md`, L4-FBK-006): `max_rounds` feedback fix units per unit, counted
+    apart from `verifier.max_fix_rounds`; 0 turns taking off."""
+
+    max_rounds: int = Field(default=5, ge=0)
+
+
 class PanelCfg(_Strict):
     size: int = Field(default=1, ge=1)
     tie_breaker: bool = True
@@ -687,6 +694,7 @@ class L4Config(_Strict):
     implementer: ImplementerCfg = Field(default_factory=ImplementerCfg)
     clarifier: ClarifierCfg = Field(default_factory=ClarifierCfg)
     verifier: VerifierCfg = Field(default_factory=VerifierCfg)
+    feedback: FeedbackCfg = Field(default_factory=FeedbackCfg)
     archive: dict[str, Any] = Field(default_factory=dict)
     memory: MemoryCfg = Field(default_factory=MemoryCfg)
     forge: ForgeCfg = Field(default_factory=ForgeCfg)

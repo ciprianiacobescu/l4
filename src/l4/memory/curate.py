@@ -8,8 +8,9 @@ caller that names that origin. Agent `lesson_proposals` are not an origin: M1 ig
 M1: memory-lessons 3.6/3.7 (inbox and quarantine), 3.9 (union-merge repair); the fix-unit reading of (a) after M1.3.
 """
 
+import hashlib
 import re
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -20,10 +21,13 @@ from l4.fsutil import atomic_write_bytes, reject_symlinks
 from l4.memory.inject import EventWriter, read_lessons_file
 from l4.memory.lessons import Lesson, LessonsFile, lesson_id, parse_lessons, render_lessons, write_lessons
 from l4.security.protected import glob_match
+from l4.specs.feedback import FeedbackFile
+from l4.specs.followup import feedback_home
+from l4.state.fold import FeedbackState
 from l4.state.ledger import LedgerEvent
 from l4.verifier.types import Verdict, VerifyResult
 
-Origin = Literal["verifier_finding_fixed", "guard_violation_repeated", "human_edit"]
+Origin = Literal["verifier_finding_fixed", "guard_violation_repeated", "human_edit", "feedback"]
 ARCHIVE_DIR = "_archive"
 GUARD_EVENTS = ("guard.violation", "guard.test_tamper")
 # the guards of the green phase report only `path, phase`; the key then comes from the event, never from the path
@@ -144,6 +148,62 @@ def guard_violation_candidates(
             "guard_violation_repeated",
         ))  # fmt: skip
     return out
+
+
+FEEDBACK_BODY_CHARS = 600
+FEEDBACK_TITLE_CHARS = 60
+
+
+def _cut(text: str, limit: int) -> str:
+    """At most `limit` characters, cut on a word boundary with an ellipsis."""
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 1]
+    if not text[limit - 1].isspace() and " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip() + "\u2026"
+
+
+def feedback_scope(places: Iterable[str]) -> tuple[str, ...]:
+    """The directories of the places as `<dir>/**`; unscoped when a place sits at the repository root (or none
+    has a usable path)."""
+    dirs: set[str] = set()
+    for path in places:
+        pure = PurePosixPath(path)
+        if pure.is_absolute() or ".." in pure.parts or "\\" in path:
+            continue
+        parent = pure.parent.as_posix()
+        if parent == ".":
+            return ()
+        dirs.add(parent)
+    return tuple(f"{d}/**" for d in sorted(dirs))
+
+
+def feedback_candidates(
+    unit_dir: Path, unit: str, feedback: Mapping[str, FeedbackState], round_: int
+) -> list[LessonCandidate]:
+    """L4-FBK-009 (design D10): one candidate per item of `feedback.md` with `Lesson: yes` that the ledger records as
+    addressed in `round_`. The text is a person's, collapsed to one line (a line that began `## ` would break the
+    lessons file); a leading `#` is dropped for the same reason."""
+    file = FeedbackFile.load(feedback_home(unit_dir))  # a follow-up's items are its parent's (L4-FBK-010)
+    if file is None:
+        return []
+    out: dict[str, LessonCandidate] = {}
+    for item in file.items:
+        state = feedback.get(item.id)
+        if not item.lesson or state is None or state.status != "addressed" or state.round != round_:
+            continue
+        text = " ".join(item.text.split())
+        digest = hashlib.sha256(text.lower().encode("utf-8")).hexdigest()[:12]
+        body = _cut(re.sub(r"^#+\s*", "", text), FEEDBACK_BODY_CHARS)
+        if not body:
+            continue
+        key = f"feedback-{digest}"
+        out.setdefault(key, LessonCandidate(
+            key, "Human feedback: " + _cut(body, FEEDBACK_TITLE_CHARS), feedback_scope(p.path for p in item.places), (),
+            f"human feedback {item.id} ({unit} round {round_})", body, "feedback",
+        ))  # fmt: skip
+    return list(out.values())
 
 
 def _recency(lesson: Lesson) -> tuple[date, int, str]:

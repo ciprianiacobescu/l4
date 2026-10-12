@@ -92,7 +92,7 @@ def test_done_gate_is_the_providers_per_member_and_the_wrapper_is_not_a_capabili
     assert "add-greeting-fix-1: the provider says no" in gate.reasons
     assert FamilyProvider(provider, parent).done_gate(fix).reasons[0].startswith("add-greeting-fix-1:")
 
-    class Bare:  # a provider without fix units, such as Kiro's
+    class Bare:  # a provider without `create_fix_unit`
         framework = provider.framework
 
     wrapper = FamilyProvider(Bare(), parent)  # type: ignore[arg-type]

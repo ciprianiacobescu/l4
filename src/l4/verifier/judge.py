@@ -18,19 +18,19 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from l4.implementer.prompt import data_block
+from l4.implementer.prompt import data_block, defuse
 from l4.implementer.tdd import RoleLimit
 from l4.llm.agent_judge import LLMBackend, Msg, StructuredResult, render_prompt
 from l4.schemacheck import validate
 from l4.specs.base import Criterion
 from l4.verifier.judge_repair import repair_reply
 from l4.verifier.selection import same_model
-from l4.verifier.types import REPLY_OUTCOMES
+from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    6  # 6: the round-outputs block and its rule; 5: the Owner changes block; 4: the test conventions block;
-    # 3: a spec gap names its criterion
+    7  # 7: the feedback block, its rule and the reply's `feedback` array; 6: the round-outputs block and its rule;
+    # 5: the Owner changes block; 4: the test conventions block; 3: a spec gap names its criterion
 )
 MAX_REPAIR_ECHO_CHARS = 8_000
 MAX_CALLS = 2  # the first answer and one repair or retry
@@ -92,11 +92,20 @@ class JudgeFinding(_Open):
     spec_gap: bool = False
 
 
+class FeedbackAnswer(_Open):
+    """The judge's answer for one item of the `feedback` block (L4-FBK-007)."""
+
+    id: str = Field(pattern=r"^FB-[0-9]{3,}$")
+    addressed: bool
+    evidence: str
+
+
 class JudgeVerdict(_Open):
     criteria: list[CriterionVerdict]
     test_adequacy: list[TestAdequacy]
     findings: list[JudgeFinding]
     riskiest_assumptions: list[str] = Field(min_length=3, max_length=3)
+    feedback: list[FeedbackAnswer] | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +164,11 @@ gate report's list: the harness wrote and ran them in this round and commits the
 round's verification.md. Judge them as evidence, and raise no finding that they are missing.
 - Files listed under Owner changes were changed by the project's people, not by the implementer: judge the criteria \
 on the committed code as it is, owner changes included, but raise no finding about an owner change itself.
+- When the prompt has a <l4:data kind="feedback"> block, each item in it is a request from a person about this \
+change. Answer in the reply's `feedback: [{id, addressed, evidence}]`, one entry per item id: `addressed` is true only \
+when the diff does what the item asks (and, for a config item, reads its variable); `evidence` is the file:line of the \
+diff that shows it, or what is still missing. The harness decides from your answers: say false when the diff does not \
+show it. Without such a block, leave `feedback` out.
 - test_adequacy: one entry per test of the gate report you rely on (does it check the criterion's observable \
 outcome?); an empty list when you rely on none.
 - riskiest_assumptions: exactly three things that, if wrong, would make your verdicts wrong.
@@ -195,6 +209,27 @@ def _owner_lines(changes: Sequence[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _feedback_block(items: Sequence[FeedbackRef]) -> str:
+    """`<l4:data kind="feedback">`: each item's id, kind, places, quoted code, text, and its When/Then or Env. The
+    people's text is information, defused like every other block (the harness redacts the whole prompt afterwards)."""
+    sections = []
+    for ref in items:
+        lines = [f"### {ref.id} ({ref.kind}): {' '.join(ref.title.split())}"]
+        if ref.places:
+            lines.append("Where: " + ", ".join(ref.places))
+        if ref.code:
+            lines.append("Code quoted by the person:\n```\n" + ref.code.rstrip("\n") + "\n```")
+        lines.append("Feedback:\n" + ref.text.strip())
+        if ref.env:
+            lines.append(f"Env: {ref.env}")
+        if ref.when:
+            lines.append(f"When: {ref.when}")
+        if ref.then:
+            lines.append(f"Then: {ref.then}")
+        sections.append("\n".join(lines))
+    return '<l4:data kind="feedback">\n' + defuse("\n\n".join(sections)) + "\n</l4:data>"
+
+
 @dataclass(frozen=True)
 class JudgePrompt:
     system: str
@@ -216,12 +251,14 @@ def build_judge_prompt(
     conventions: str = "",
     owner_changes: Sequence[tuple[str, str]] = (),
     round_outputs: Sequence[RoundOutput] = (),
+    feedback: Sequence[FeedbackRef] = (),
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
     its test conventions (skip helpers and markers, read at the base: `l4.verifier.conventions`), and the files only the
     project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and what the
-    harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests). `redact` runs
+    harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests), and the
+    feedback items taken and not yet addressed (`feedback`, L4-FBK-007). `redact` runs
     over the whole text before it is hashed (L4-OBS-002), so `sha256` is the hash of the prompt document the judge was
     sent (`render_prompt`: system, blank line, user; the schema instruction a prompt-contract adapter appends is not
     part of it) and of the published `.prompt.md` (HB-5)."""
@@ -248,6 +285,11 @@ def build_judge_prompt(
         if round_outputs
         else []
     )
+    asked = (
+        ["## Feedback items to check (answer each in the reply's `feedback`)\n" + _feedback_block(feedback)]
+        if feedback
+        else []
+    )
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
@@ -257,6 +299,7 @@ def build_judge_prompt(
         *block,
         *owners,
         *written,
+        *asked,
         "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
         + data_block("notes_for_verifier", notes_for_verifier or "(none)"),
     ]

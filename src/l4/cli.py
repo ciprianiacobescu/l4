@@ -17,6 +17,7 @@ from l4.exitcodes import ExitCode, classify_exception
 from l4.log import configure_logging
 from l4.outcome import OUTCOME_COMMANDS, new_run_id, run_guarded, with_outcome
 from l4.redact import Redactor
+from l4.specs import feedback_help
 
 
 def redactor_for(environ: Mapping[str, str]) -> Redactor:
@@ -122,6 +123,26 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "questions": ("List, show, answer or accept questions of a unit.", lambda: [
         click.Argument(["words"], nargs=-1), _unit(), _opt("--text", "text"),
     ]),
+    "feedback add": (feedback_help.ADD_HELP, lambda: [
+        _opt("--kind", "kind", required=True,
+             type=click.Choice(["refactor", "duplication", "tests", "config", "behaviour"], case_sensitive=False),
+             help="What the change is: refactor, duplication, tests, config or behaviour."),
+        _opt("--text", "text", required=True, help="The request. - reads standard input."),
+        _opt("--title", "title", help="Heading of the item (default: the first line of the text, 72 characters)."),
+        _opt("--at", "at", multiple=True, help="PATH[:L[-L]] the request is about (repeatable, up to 5)."),
+        _opt("--env", "env", help="config: the environment variable NAME that replaces the hard-coded value."),
+        _opt("--when", "when", help="behaviour: the condition (the WHEN of the criterion)."),
+        _opt("--then", "then", help="behaviour: the expected result (the THEN of the criterion)."),
+        _flag("--lesson", "lesson", help="Keep a lesson from this item once it is addressed."),
+        _flag("--draft", "draft", help="Write Status draft: the harness ignores it until `submit`."),
+        _unit(),
+    ]),
+    "feedback list": (feedback_help.LIST_HELP, lambda: [_unit(), _flag("--json", "as_json")]),
+    "feedback show": (feedback_help.SHOW_HELP, lambda: [
+        click.Argument(["item"]), _unit(), _flag("--json", "as_json"),
+    ]),
+    "feedback submit": (feedback_help.SUBMIT_HELP, lambda: [click.Argument(["item"]), _unit()]),
+    "feedback withdraw": (feedback_help.WITHDRAW_HELP, lambda: [click.Argument(["item"]), _unit()]),
     "lessons": ("Inspect and curate lessons.", lambda: [click.Argument(["words"], nargs=-1)]),
     "s1": ("S1 data set: export, canary, score, report, audit (M1.6).", lambda: [
         click.Argument(["words"], nargs=-1),
@@ -148,6 +169,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--extend-iterations", "extend_iterations", type=int),
         _opt("--extend-cost", "extend_cost", type=float),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
+        _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
@@ -294,7 +316,11 @@ def cli() -> None:
     """L4 harness: level-4 agentic development."""
 
 
-_GROUPS = {"ci": click.Group("ci", help="CI helpers."), "setup": click.Group("setup", help="Forge setup.")}
+_GROUPS = {
+    "ci": click.Group("ci", help="CI helpers."),
+    "setup": click.Group("setup", help="Forge setup."),
+    "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
+}
 for _group in _GROUPS.values():
     cli.add_command(_group)
 for _name, (_help, _params) in _SPECS.items():

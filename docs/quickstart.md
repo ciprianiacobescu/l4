@@ -286,6 +286,9 @@ The `l4` job starts on a merge to the base branch, on a push to a unit branch, o
 Kiro spec) with unchecked tasks and push it: the job implements them test-first on a unit branch and opens an MR/PR.
 Questions for you appear in `questions.md` next to the spec: answer in the file and push. `.l4/bin/l4 status` (also the
 last step of the job) lists each unit with its state and what it waits for.
+To ask for changes to a unit's code once its MR/PR is open (a refactor, a hard-coded value that should be an
+environment variable, a missing test), run `.l4/bin/l4 feedback add`, then commit and push. [docs/feedback.md](feedback.md)
+has one worked example for each kind and says what happens after the push.
 
 ## Conditional extras
 

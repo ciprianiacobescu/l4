@@ -711,7 +711,7 @@ def test_the_same_label_event_never_resumes_twice(halted, use_fake_gitlab, run_l
     assert [e["signal"] for e in again.events("unit.resumed")] == ["label:100", "label:104"]
 
 
-def escalated_snapshot(tdd_repo, *, fix_round: int):
+def escalated_snapshot(tdd_repo, *, fix_round: int, halt_reason: str | None = None, feedback_used: int = 0):
     """The unit as the sweep reads it, with its phase and fix rounds set (the ledger is that of the halted unit)."""
     from l4.config.loader import load_config
     from l4.specs.openspec import OpenSpecProvider
@@ -723,22 +723,28 @@ def escalated_snapshot(tdd_repo, *, fix_round: int):
     provider = OpenSpecProvider(tdd_repo.repo, tdd_repo.environ)
     [snap] = [load_snapshot(provider, git, ref, branch_prefix="l4/") for ref in provider.list_units()]
     snap.state.phase = "escalated"
-    snap.state.fix_round = fix_round
+    snap.state.fix_round = snap.state.fix_rounds_counted = fix_round
+    snap.state.halt_reason = halt_reason
+    snap.state.feedback_rounds_used = feedback_used
     return cfg, git, snap
 
 
-def sweep_escalated(tdd_repo, monkeypatch, *, fix_round: int) -> tuple[list, list[tuple[str, int]]]:
+def sweep_escalated(
+    tdd_repo, monkeypatch, *, fix_round: int, halt_reason: str | None = None, feedback_used: int = 0
+) -> tuple[list, list[tuple[str, int, int]]]:
     """Run the sweep over an escalated snapshot with the resume itself stubbed: what the sweep decides is the test."""
     from types import SimpleNamespace
 
     from l4.context import AppContext
     from l4.redact import Redactor
 
-    cfg, git, snap = escalated_snapshot(tdd_repo, fix_round=fix_round)
-    calls: list[tuple[str, int]] = []
+    cfg, git, snap = escalated_snapshot(
+        tdd_repo, fix_round=fix_round, halt_reason=halt_reason, feedback_used=feedback_used
+    )
+    calls: list[tuple[str, int, int]] = []
 
-    def resumer(self, snapshot, signal, more):
-        calls.append((signal.signal, more))
+    def resumer(self, snapshot, signal, more, more_feedback):
+        calls.append((signal.signal, more, more_feedback))
         return SimpleNamespace(outcome=SimpleNamespace(phase_after="verifying"))
 
     monkeypatch.setattr(sweeper_module.Sweeper, "_resume_in_worktree", resumer)
@@ -752,7 +758,19 @@ def test_a_member_label_resumes_an_escalated_unit_with_one_more_fix_round(
     set_label(use_fake_gitlab, 105, MEMBER)
     actions, calls = sweep_escalated(tdd_repo, monkeypatch, fix_round=99)  # more than any limit: all rounds are used
     assert [a.what for a in actions] == ["resumed"] and "1 more fix round" in actions[0].detail
-    assert calls == [("label:105", 1)]
+    assert calls == [("label:105", 1, 0)]
+
+
+def test_a_member_label_on_a_unit_escalated_at_the_feedback_limit_gives_one_feedback_round(
+    halted, use_fake_gitlab, tdd_repo, monkeypatch
+):
+    """L4-FBK-006: `budget.extended{feedback_rounds: 1}` instead of `fix_rounds: 1`, once per label event."""
+    set_label(use_fake_gitlab, 107, MEMBER)
+    actions, calls = sweep_escalated(
+        tdd_repo, monkeypatch, fix_round=99, halt_reason="feedback_rounds_exhausted", feedback_used=5
+    )  # the fix rounds are used up as well: the reason decides which budget the label extends
+    assert [a.what for a in actions] == ["resumed"] and "1 more feedback round" in actions[0].detail
+    assert calls == [("label:107", 0, 1)]
 
 
 def test_the_label_on_an_escalated_unit_with_rounds_left_grants_no_extension(
@@ -760,7 +778,7 @@ def test_the_label_on_an_escalated_unit_with_rounds_left_grants_no_extension(
 ):
     set_label(use_fake_gitlab, 106, MEMBER)
     actions, calls = sweep_escalated(tdd_repo, monkeypatch, fix_round=0)  # escalated for another reason
-    assert [a.what for a in actions] == ["resumed"] and calls == [("label:106", 0)]
+    assert [a.what for a in actions] == ["resumed"] and calls == [("label:106", 0, 0)]
 
 
 def test_a_non_member_label_on_an_escalated_unit_is_refused_like_on_a_halted_one(
