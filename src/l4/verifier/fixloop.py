@@ -7,7 +7,7 @@ then goes back to `verifying`, and the verifier judges the parent and its fix un
 The child workbench is the parent's with these differences: the reference is the fix unit, every event carries
 `fix_unit`, the parent's directory is protected, the parent's run ledger is the one file of the run that steps leave
 alone, and the cache mounts are the parent's (a cold uv cache per fix unit would cost minutes). The fix unit has its
-own `questions.md`, and no clarifier: a human answers. Fix units are OpenSpec only (Kiro's bugfix specs are M1.4).
+own `questions.md`, and no clarifier: a human answers. A fix unit is an OpenSpec change or a Kiro bugfix spec.
 """
 
 from collections.abc import Callable, Sequence
@@ -140,10 +140,14 @@ class FamilyProvider:
         return [t for member in self.units() for t in self.inner.tasks(member)]
 
     def criteria(self, unit: UnitRef) -> list[Criterion]:
+        """The family's criteria, each id once and in the order first met. A Kiro fix unit restates a criterion of its
+        parent under its own number (`2.1` for `Req 1.2`, same id): the criterion keeps the reading of the unit asked
+        for, so the parent's own reading for the parent, and for the fix unit the `Req 2.1` its tasks cite."""
         seen: dict[str, Criterion] = {}
         for member in self.units():
             for criterion in self.inner.criteria(member):
-                seen.setdefault(criterion.id, criterion)
+                if criterion.id not in seen or member == unit:
+                    seen[criterion.id] = criterion
         return list(seen.values())
 
     def load(self, unit: UnitRef) -> Unit:

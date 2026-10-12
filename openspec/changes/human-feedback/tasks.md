@@ -16,8 +16,8 @@
 
 ## 3. Kiro fix units
 
-- [ ] 3.1 `KiroProvider.create_fix_unit`: `bugfix.md` in Kiro's template, `design.md`, `tasks.md` (Kiro grammar, `_Requirements:_`, `[chore]` titles, one-wave graph), `.config.kiro`, `.l4/fix.json`; validate or remove; feedback scenarios as `2.n`/`3.n` [L4-FBK-008] [SCN-FBK-20, SCN-FBK-21] — test: tests/unit/specs/test_kiro_fix_unit.py (write first, see it fail) — code: src/l4/specs/kiro.py — verify: uv run pytest tests/unit/specs -q
-- [ ] 3.2 Criteria of a Kiro fix unit: `2.n`/`3.n` items read as criteria, a restated parent criterion keeps the parent's id; `decide_fix` stops escalating Kiro; the family provider and re-verification count it once [L4-FBK-008] [SCN-FBK-20] — test: tests/unit/verifier/test_fixloop_kiro.py and tests/unit/specs/test_kiro_criteria.py (write first, see them fail) — code: src/l4/specs/kiro.py, src/l4/verifier/fixloop.py — verify: uv run pytest tests/unit/specs tests/unit/verifier -q
+- [x] 3.1 `KiroProvider.create_fix_unit`: `bugfix.md` in Kiro's template, `design.md`, `tasks.md` (Kiro grammar, `_Requirements:_`, `[chore]` titles, one-wave graph), `.config.kiro`, `.l4/fix.json`; validate or remove; feedback scenarios as `2.n`/`3.n` [L4-FBK-008] [SCN-FBK-20, SCN-FBK-21] — test: tests/unit/specs/test_kiro_fix_unit.py (write first, see it fail) — code: src/l4/specs/kiro.py — verify: uv run pytest tests/unit/specs -q
+- [x] 3.2 Criteria of a Kiro fix unit: `2.n`/`3.n` items read as criteria, a restated parent criterion keeps the parent's id; `decide_fix` stops escalating Kiro; the family provider and re-verification count it once [L4-FBK-008] [SCN-FBK-20] — test: tests/unit/verifier/test_fixloop_kiro.py and tests/unit/specs/test_kiro_criteria.py (write first, see them fail) — code: src/l4/specs/kiro.py, src/l4/verifier/fixloop.py — verify: uv run pytest tests/unit/specs tests/unit/verifier -q
 
 ## 4. Lessons from feedback
 
