@@ -108,7 +108,7 @@ from l4.verifier.judge import (
 )
 from l4.verifier.notes import verdict_section
 from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
-from l4.verifier.preconditions import check_preconditions, record_ci_steps
+from l4.verifier.preconditions import check_preconditions, record_ci_steps, record_feedback
 from l4.verifier.report import write_round_evidence
 from l4.verifier.s1_labels import record_human_labels
 from l4.verifier.s1_step import S1Step, S1Wiring, evidence_for, record_rows, run_step
@@ -423,6 +423,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         nonlocal base_sha
         pre = check_preconditions(wb)
         record_ci_steps(wb, pre)
+        record_feedback(wb, pre)
         base_sha = result.base_sha = pre.base_sha
         findings.extend(pre.findings)
         return not pre.findings, "; ".join(filter(None, [vc.base_note, *(f.title for f in pre.findings)]))
