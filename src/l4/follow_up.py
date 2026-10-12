@@ -28,7 +28,7 @@ from l4.outcome import new_run_id
 from l4.specs.base import Criterion, Framework, SpecProvider, UnitRef
 from l4.specs.criteria import openspec_criteria
 from l4.specs.feedback import FeedbackFile, FeedbackItem, FeedbackStatus
-from l4.specs.followup import follow_up_name, parent_folder, read_follow_up_marker
+from l4.specs.followup import _DATED, follow_up_name, parent_folder, read_follow_up_marker
 from l4.specs.kiro import KiroProvider
 from l4.specs.openspec import OpenSpecProvider
 from l4.state.ledger import LedgerWriter
@@ -68,7 +68,10 @@ def _parent_in(tree: Path, cfg: L4Config, snapshot: UnitSnapshot) -> UnitRef | N
         changes = tree.joinpath(*Path(cfg.spec.openspec.root).parts, "changes")
         folder = changes / ref.name
         if not folder.is_dir():
-            archive = sorted(d for d in (changes / "archive").glob(f"*-{ref.name}") if d.is_dir())
+            archive = sorted(
+                d for d in (changes / "archive").glob(f"*-{ref.name}")
+                if d.is_dir() and (m := _DATED.match(d.name)) is not None and m.group("name") == ref.name
+            )  # fmt: skip  # `<date>-<name>` exactly: `*-x` also matches `<date>-other-x`
             folder = archive[-1] if archive else folder
     return UnitRef(ref.framework, ref.name, folder) if folder.is_dir() and not folder.is_symlink() else None
 

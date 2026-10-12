@@ -241,3 +241,21 @@ def test_a_follow_up_that_cannot_be_made_fails_the_run_and_nothing_is_left_half_
     monkeypatch.setattr(Git, "push", real)
     assert run_l4([CHORE], unit=False).code == 0  # the next run makes it
     assert raw(merged_kiro.origin, "for-each-ref", f"refs/heads/{BRANCH}").strip() != ""
+
+
+def test_the_archived_parent_is_found_by_its_exact_dated_name(tmp_path):
+    """review #13: `*-x` also matched `2026-05-01-other-x`; the parent `x` is only `<date>-x`."""
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.follow_up import _parent_in
+    from l4.specs.base import Framework, UnitRef
+
+    archive = tmp_path / "openspec" / "changes" / "archive"
+    for name in ("2026-04-01-x", "2026-05-01-other-x", "2026-06-01-x2"):
+        (archive / name).mkdir(parents=True)
+    snapshot = SimpleNamespace(ref=UnitRef(Framework.OPENSPEC, "x", tmp_path / "openspec" / "changes" / "x"))
+    found = _parent_in(tmp_path, L4Config(), snapshot)
+    assert found is not None and found.path.name == "2026-04-01-x"
+    (archive / "2026-04-01-x").rmdir()
+    assert _parent_in(tmp_path, L4Config(), snapshot) is None
