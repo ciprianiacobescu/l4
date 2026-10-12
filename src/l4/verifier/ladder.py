@@ -487,6 +487,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         # pass-to-pass compares with the archived specs AT THE BASE COMMIT, read from git: the worktree is at the unit's
         # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
         archived = base_criteria_at(wb.git, base_sha) if wb.ref.framework is Framework.OPENSPEC else []
+        if wb.ref.framework is Framework.KIRO and isinstance(wb.provider, FamilyProvider):
+            archived = wb.provider.merged_parent_criteria()  # a follow-up's merged parent: its folder is protected
         browser = run.e2e.report if run.e2e is not None else None
         # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
         generated, edited = previously_generated(events, wb.worktree, browser)

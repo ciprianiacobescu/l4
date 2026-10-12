@@ -45,9 +45,10 @@ from l4.specs.base import (
 from l4.specs.base import (
     Finding as SpecFinding,
 )
+from l4.specs.criteria import kiro_criteria, openspec_criteria
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import read_fix_marker, split_fix_name
-from l4.specs.followup import feedback_home
+from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marker
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, answered_by, blocked_tasks, is_answered
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
 from l4.state.fold import UnitState, fold
@@ -151,7 +152,23 @@ class FamilyProvider:
             for criterion in self.inner.criteria(member):
                 if criterion.id not in seen or member == unit:
                     seen[criterion.id] = criterion
+        if unit == self.parent:  # a follow-up keeps what its merged parent promised (L4-FBK-010)
+            for criterion in self.merged_parent_criteria():
+                seen.setdefault(criterion.id, criterion)
         return list(seen.values())
+
+    def merged_parent_criteria(self) -> list[Criterion]:
+        """The criteria of the merged unit this one follows, as they are in the follow-up's tree: a refactor must leave
+        them true, and a follow-up of one refactor has no scenarios of its own. Empty for any other unit. The folder is
+        the parent's own, which the follow-up may not edit (the protected-path check), so it stands for the base's."""
+        marker = read_follow_up_marker(self.parent.path)
+        folder = parent_folder(self.parent.path, marker) if marker is not None else None
+        if folder is None:
+            return []
+        try:
+            return kiro_criteria(folder) if self.framework is Framework.KIRO else openspec_criteria(folder)
+        except SpecError:
+            return []
 
     def load(self, unit: UnitRef) -> Unit:
         return Unit(unit, tuple(self.tasks(unit)), tuple(self.criteria(unit)))

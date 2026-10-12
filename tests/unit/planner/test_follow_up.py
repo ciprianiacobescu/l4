@@ -125,3 +125,77 @@ def test_plan_reads_the_file_from_the_base_branch(project, capsys, raw):
     path = repo / SPEC / "feedback.md"
     path.write_text(path.read_text().replace("submitted", "withdrawn"))  # an unpushed edit: not the base's file
     assert plan(project, capsys)[f"kiro:{UNIT}"]["next_action"] == "follow_up"
+
+
+def test_an_item_a_merged_follow_up_took_is_not_taken_again(project, capsys, raw):
+    """After the follow-up merged, its marker is on the base: the same item (same hash) is not offered again, and a
+    new item gets the next ordinal."""
+    from l4.specs.feedback import content_sha256
+
+    repo, _ = project
+    sha = content_sha256(FeedbackFile.parse(ITEM).get("FB-001"))
+    follow = repo / ".kiro" / "specs" / f"{UNIT}-followup-1"
+    (follow / ".l4").mkdir(parents=True)
+    (follow / "tasks.md").write_text("- [x] 1. Done\n")
+    marker = {"schema": "l4/followup@1", "parent": f"kiro:{UNIT}", "items": [{"id": "FB-001", "sha256": sha}]}
+    (follow / ".l4" / "followup.json").write_text(json.dumps(marker))
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "the follow-up merged")
+    raw(repo, "push", "-q", "origin", "main")
+    assert plan(project, capsys)[f"kiro:{UNIT}"]["next_action"] != "follow_up"
+    second = ITEM.replace("FB-001", "FB-002").replace("dedupe the rounding", "dedupe it again").split("\n", 2)[2]
+    (repo / SPEC / "feedback.md").write_text(ITEM + "\n" + second)
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "a second item")
+    raw(repo, "push", "-q", "origin", "main")
+    entry = plan(project, capsys)[f"kiro:{UNIT}"]
+    assert entry["next_action"] == "follow_up" and "FB-002" in entry["reason"] and "FB-001" not in entry["reason"]
+    from l4.config.schema import L4Config  # noqa: F401
+    from l4.state.followups import known_follow_ups, next_ordinal
+    from l4.vcs.git import Git
+
+    cfg = L4Config.model_validate({"version": 1})
+    found = known_follow_ups(Git(repo, environ=project[1]), cfg)
+    assert [(k.name, k.on_base) for k in found] == [(f"{UNIT}-followup-1", True)] and next_ordinal(found) == 2
+
+
+def test_a_forged_marker_is_not_a_follow_up(project, capsys, raw):
+    """The folder name and the parent in the marker must agree."""
+    repo, _ = project
+    follow = repo / ".kiro" / "specs" / f"{UNIT}-followup-1"
+    (follow / ".l4").mkdir(parents=True)
+    (follow / "tasks.md").write_text("- [x] 1. Done\n")
+    marker = {"schema": "l4/followup@1", "parent": "kiro:someone-else", "items": [{"id": "FB-001", "sha256": "0" * 64}]}
+    (follow / ".l4" / "followup.json").write_text(json.dumps(marker))
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "forged")
+    raw(repo, "push", "-q", "origin", "main")
+    assert plan(project, capsys)[f"kiro:{UNIT}"]["next_action"] == "follow_up"
+
+
+def test_an_archived_openspec_change_with_feedback_plans_a_follow_up(make_repo, git_environ, raw, tmp_path, capsys):
+    from l4.redact import Redactor
+    from l4.state.ledger import LedgerWriter
+
+    repo = make_repo(remote=True)
+    archive = repo / "openspec" / "changes" / "archive" / "2026-10-01-add-x"
+    archive.mkdir(parents=True)
+    (archive / "tasks.md").write_text("# Tasks\n\n- [x] 1.1 done\n")
+    (archive / "feedback.md").write_text(ITEM)
+    writer = LedgerWriter.open(archive, "openspec:add-x", "r-20261003T1312Z-7f3a", redactor=Redactor({}))
+    writer.append("phase.changed", **{"from": "in_review", "to": "merged", "trigger": "pr_merged"})
+    writer.finish(0)
+    older = repo / "openspec" / "changes" / "archive" / "2026-09-01-add-y"  # archived, no feedback: not a unit
+    older.mkdir(parents=True)
+    (older / "tasks.md").write_text("# Tasks\n\n- [x] 1.1 done\n")
+    (repo / "openspec" / "changes" / "live").mkdir(parents=True)
+    (repo / "openspec" / "changes" / "live" / "tasks.md").write_text("# Tasks\n\n- [ ] 1.1 todo\n")
+    (repo / ".l4").mkdir()
+    (repo / ".l4" / "config.yaml").write_text("version: 1\n")
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "archived")
+    raw(repo, "push", "-q", "origin", "main")
+    project = (repo, {**git_environ, "L4_CACHE": str(tmp_path / "cache")})
+    units = plan(project, capsys)
+    assert units["openspec:add-x"]["phase"] == "merged" and units["openspec:add-x"]["next_action"] == "follow_up"
+    assert "openspec:add-y" not in units and units["openspec:live"]["next_action"] == "implement"
