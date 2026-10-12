@@ -313,3 +313,24 @@ def test_the_variable_check_runs_for_config_items_only():
 
     first, second = decide_feedback(asked, [answers], has)
     assert seen == ["PACK_ROUNDING"] and not first.addressed and second.addressed
+
+
+# --- review #7: a short heading goes through take, judge and addressed ---------------------------------------------
+
+
+def test_a_short_heading_item_is_taken_judged_with_its_canonical_id_and_addressed(make_bench):
+    """L4-FBK-007, review #7: `## FB-4:` is `FB-004` for the scan, the ledger, the prompt and the judge's answer."""
+    from l4.verifier.feedback import scan_feedback
+
+    wb = make_bench([]).wb
+    (wb.ref.path / "feedback.md").write_text(
+        "# Feedback\n## FB-4: hand written\n- **Status:** submitted\n- **Kind:** tests\n\n### Feedback\nAdd a test.\n"
+    )
+    file = FeedbackFile.load(wb.ref.path)
+    [item] = scan_feedback(file, fold([], wb.ref.id)).takeable
+    assert item.id == "FB-004"
+    take(wb, "FB-004")
+    base = wb.git.run("rev-parse", "origin/main").stdout.strip()
+    result, backend = judged(wb, base, wb.head(), [yes("FB-004")])
+    assert [(o.id, o.addressed) for o in result.feedback_outcomes] == [("FB-004", True)]
+    assert "FB-004" in backend.calls[0][0].content

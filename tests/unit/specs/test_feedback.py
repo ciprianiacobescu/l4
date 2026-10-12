@@ -349,3 +349,32 @@ def test_the_command_text_is_redacted_on_one_line_fields(tmp_path: Path):
     out = read(tmp_path).decode()
     assert secret not in out
     assert item(out.encode()).title.startswith("use ")
+
+
+# --- review #7: a hand-written short id is the same item as its canonical form ------------------------------------
+
+SHORT = """# Feedback
+## FB-4: hand written
+- **Status:** submitted
+- **Kind:** tests
+
+### Feedback
+Add a test for zero.
+"""
+
+
+def test_a_short_id_is_canonical_everywhere_the_harness_uses_it():
+    """L4-FBK-007, review #7: `## FB-4:` reads as `FB-004`; the heading text stays as the person wrote it."""
+    file = FeedbackFile.parse(SHORT)
+    [only] = file.items
+    assert only.id == "FB-004"
+    assert file.get("FB-4") is only and file.get("fb-004") is only and file.get("FB-004") is only
+    assert b"## FB-4: hand written" in file.data
+
+
+def test_edits_through_the_canonical_id_keep_one_index_row_for_a_short_heading():
+    """review #7: the index row written for `FB-4` is found again by the canonical id (no second row)."""
+    file = FeedbackFile.parse(SHORT).refresh_index()
+    taken = file.set_status("FB-004", FeedbackStatus.TAKEN)
+    rows = [ln for ln in taken.data.decode().splitlines() if ln.startswith("| FB-")]
+    assert len(rows) == 1 and "taken" in rows[0]
