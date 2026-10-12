@@ -308,6 +308,7 @@ class OpenSpecProvider:
                 parent.id, round, tuple(i for f in findings for i in f.ids),
                 tuple(i for f in findings if f.chore for i in f.ids),
                 tuple(i for f in findings if f.chore and f.tests for i in f.ids),
+                tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
             ),
         )  # fmt: skip
 
@@ -394,6 +395,18 @@ def _requirement(r: DeltaRequirement) -> str:
     return "\n".join(lines)
 
 
+def _requests(findings: Sequence[Finding]) -> str:
+    """What the people asked for, first in the proposal (L4-FBK-005): the sentence, then the quoted code as an indented
+    block (a line of it can neither open a section nor close a fence), for each feedback finding."""
+    blocks = []
+    for f in findings:
+        if not f.request:
+            continue
+        code = "\n".join(f"    {line}" if line.strip() else "" for line in f.code.splitlines())
+        blocks.append(f.request + (f"\n\n{code}" if code else ""))
+    return "\n\n".join(blocks) + "\n\n" if blocks else ""
+
+
 def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding]) -> str:
     cites = "\n".join(
         f"- {', '.join(f.ids)} ({f.severity}): {_flat(f.title)}"
@@ -401,7 +414,7 @@ def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding]) -> str:
         for f in findings
     )
     return (
-        f"# Proposal: fix {round} for {parent.name}\n\n## Why\n"
+        f"# Proposal: fix {round} for {parent.name}\n\n## Why\n{_requests(findings)}"
         f"The verifier found problems in `{parent.name}` that this change fixes. The findings are listed below with "
         f"their ids; each task of this change names the ones it answers.\n\n## What Changes\n{cites}\n\n"
         f"## Impact\nThe code and the tests of `{parent.name}`.\n"

@@ -723,7 +723,7 @@ def escalated_snapshot(tdd_repo, *, fix_round: int, halt_reason: str | None = No
     provider = OpenSpecProvider(tdd_repo.repo, tdd_repo.environ)
     [snap] = [load_snapshot(provider, git, ref, branch_prefix="l4/") for ref in provider.list_units()]
     snap.state.phase = "escalated"
-    snap.state.fix_round = fix_round
+    snap.state.fix_round = snap.state.fix_rounds_counted = fix_round
     snap.state.halt_reason = halt_reason
     snap.state.feedback_rounds_used = feedback_used
     return cfg, git, snap

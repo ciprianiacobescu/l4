@@ -207,11 +207,13 @@ At most `MAX_FIX_TASKS` (5) tasks fit in one fix unit. Feedback items past that 
 - **`bugfix.md`** in Kiro's template (Context):
   - Current Behavior `1.n`: one per finding, its title and detail;
   - Expected Behavior `2.n`: one per criterion a task fixes, or per spec-gap or feedback scenario;
-  - Unchanged Behavior `3.1`: "the system SHALL CONTINUE TO satisfy every other acceptance criterion of <parent>".
+  - Unchanged Behavior: the unnumbered sentence "The system SHALL CONTINUE TO satisfy every other acceptance criterion
+    of <parent>." (a numbered item would be a criterion no test can trace); `3.n` only for real `CONTINUE TO`
+    scenarios.
 - **`design.md`:** Overview, then the findings and decisions in the order of L4-VER-006.
 - **`tasks.md`** in Kiro grammar:
   - one leaf per task, citing its `2.n`/`3.n` items with `_Requirements:_`;
-  - chores carry `[chore]` and the finding ids in the title;
+  - chores carry `[chore]` and the finding ids in the title and cite nothing (TDD-exempt for SPEC-004, by the marker);
   - a one-wave `## Task Dependency Graph`.
 - **`.config.kiro`:** `{"specId": <uuid4>, "workflowType": "requirements-first", "specType": "bugfix"}`. The
   `workflowType` value stays [I].

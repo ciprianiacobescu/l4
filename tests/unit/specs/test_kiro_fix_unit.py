@@ -93,11 +93,10 @@ def test_a_failed_criterion_gets_a_bugfix_spec_of_five_files(parent):
     assert f"2.1 {wrong} (parent Req 1.2, {cid})" in bugfix
     assert "1.1 Wrong password opens a session: inverted (F-aaaaaaaa, F-bbbbbbbb)" in bugfix
     assert "1.2 Undeclared suppression: a noqa in src/x.py (F-cccccccc)" in bugfix
-    assert (
-        "3.1 WHEN any other acceptance criterion of login is exercised THEN the system SHALL CONTINUE TO satisfy it"
-        in bugfix
-    )
-    assert [c.alias for c in kiro_criteria(folder)] == ["Req 2.1", "Req 3.1"]
+    # the generic sentence is no criterion: no test could trace it, and a criterion without one fails traceability
+    assert "\nThe system SHALL CONTINUE TO satisfy every other acceptance criterion of login.\n" in bugfix
+    assert "3.1" not in bugfix
+    assert [c.alias for c in kiro_criteria(folder)] == ["Req 2.1"]
     assert kiro_criteria(folder)[0].id == cid  # the parent's id: the family counts it once
     config = json.loads((folder / ".config.kiro").read_text())
     assert config == {"specId": UUID, "workflowType": "requirements-first", "specType": "bugfix"}
@@ -111,10 +110,10 @@ def test_tasks_are_kiro_leaves_that_cite_their_items_and_chores_are_tagged(paren
     text = (fix.path / "tasks.md").read_text()
     tasks = kiro_tasks(text.encode())
     leaves = [t for t in tasks if t.depth > 0]
-    assert [(t.key, t.links) for t in leaves] == [("1.1", ("2.1",)), ("1.2", ("3.1",))]
+    assert [(t.key, t.links) for t in leaves] == [("1.1", ("2.1",)), ("1.2", ())]
     assert f"1.1 Wrong password opens a session (F-aaaaaaaa, F-bbbbbbbb; {cid})" in text
     assert "1.2 [chore] Undeclared suppression (F-cccccccc)" in text
-    assert text.count("- _Requirements:") == 2 and "    - _Requirements: 2.1_" in text
+    assert text.count("- _Requirements:") == 1 and "    - _Requirements: 2.1_" in text  # a chore cites nothing
     assert "## Task Dependency Graph" in text
     assert [t.wave for t in tasks if t.key in {"1.1", "1.2"}] == [0, 0]
     marker = read_fix_marker(fix.path)
@@ -150,7 +149,7 @@ def test_a_decision_is_kept_whole_and_one_line(parent):
     bugfix = (fix.path / "bugfix.md").read_text()
     assert "x" * 3000 in bugfix
     assert "\n## heading" not in bugfix and "\n1.9 sneaky" not in bugfix
-    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1", "Req 3.1"]
+    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1"]
 
 
 def test_scenarios_become_expected_items_and_preservation_scenarios_become_unchanged_items(parent):
@@ -180,23 +179,25 @@ def test_scenarios_become_expected_items_and_preservation_scenarios_become_uncha
     fix = provider_of(repo).create_fix_unit(ref, 1, findings, delta)
     bugfix = (fix.path / "bugfix.md").read_text()
     assert "2.1 WHEN the password is blank THEN sign_in refuses" in bugfix
-    assert "3.2 WHEN LOGIN_URL is not set THEN the system SHALL CONTINUE TO behave as before" in bugfix
-    assert "3.1 WHEN any other acceptance criterion of login" in bugfix
+    assert "3.1 WHEN LOGIN_URL is not set THEN the system SHALL CONTINUE TO behave as before" in bugfix
+    assert "every other acceptance criterion of login" in bugfix and "3.2" not in bugfix
     tasks = {t.key: t.links for t in parse_kiro_tasks((fix.path / "tasks.md").read_bytes()) if t.depth > 0}
-    assert tasks == {"1.1": ("2.1",), "1.2": ("3.2",)}
-    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1", "Req 3.1", "Req 3.2"]
+    assert tasks == {"1.1": ("2.1",), "1.2": ("3.1",)}
+    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1", "Req 3.1"]
 
 
 def test_a_criterion_of_an_earlier_fix_unit_is_restated_with_its_own_id(parent):
     repo, ref = parent
     provider = provider_of(repo)
-    first = provider.create_fix_unit(ref, 1, with_criterion(ref), None)
-    unchanged = kiro_criteria(first.path)[1].id  # fix-1's own 3.1
-    again = [Finding(("F-dddddddd",), "Still broken", "z", "major", (unchanged,))]
+    unset = "- **WHEN** LOGIN_URL is not set\n- **THEN** the system SHALL CONTINUE TO behave as before"
+    delta = SpecDelta((DeltaRequirement("login", "Sign in", (DeltaScenario("Unset", unset, "F-bbbbbbbb"),)),))
+    first = provider.create_fix_unit(ref, 1, [Finding(("F-bbbbbbbb",), "Env", "y", "major", ())], delta)
+    [own] = kiro_criteria(first.path)  # fix-1's own 3.1
+    again = [Finding(("F-dddddddd",), "Still broken", "z", "major", (own.id,))]
     second = provider.create_fix_unit(ref, 2, again, None)
-    restated = [c for c in kiro_criteria(second.path) if c.id == unchanged]
+    restated = [c for c in kiro_criteria(second.path) if c.id == own.id]
     assert [c.alias for c in restated] == ["Req 2.1"]
-    assert "WHEN any other acceptance criterion of login" in restated[0].text
+    assert "WHEN LOGIN_URL is not set" in restated[0].text
 
 
 def test_an_unknown_criterion_id_still_gives_a_cited_item(parent):
@@ -236,3 +237,96 @@ def test_an_invalid_fix_unit_leaves_nothing_behind(parent, monkeypatch):
         provider_of(repo).create_fix_unit(ref, 1, FINDINGS, None)
     assert sorted(p.name for p in (repo / ".kiro" / "specs").iterdir()) == before
     assert not list(repo.rglob("*fix*"))
+
+
+def test_a_fix_unit_of_chores_only_has_no_criteria_and_no_requirements_line_and_still_validates(parent):
+    """L4-FBK-008 (review): the generic line is no criterion; a `[chore]` leaf is TDD-exempt (SPEC-004), so a unit of
+    chores alone validates strictly under `sdd.enforce`."""
+    repo, ref = parent
+    provider = KiroProvider(repo, uuid_factory=lambda: UUID, enforce=True)
+    fix = provider.create_fix_unit(ref, 1, [FINDINGS[1]], None)
+    assert kiro_criteria(fix.path) == []
+    text = (fix.path / "tasks.md").read_text()
+    assert "_Requirements" not in text and "1.1 [chore] Undeclared suppression (F-cccccccc)" in text
+    assert provider.validate(fix, strict=True).valid and provider.leaves_without_requirements(fix) == []
+    assert "Every task of this fix unit is a chore" in (fix.path / "bugfix.md").read_text()
+
+
+def test_a_harness_chore_needs_no_link_even_when_the_exempt_kinds_leave_chore_out(parent):
+    """The marker names the chore, so a configuration that drops `chore` from the exempt kinds cannot invalidate it; a
+    person's untagged leaf in the same unit is still flagged."""
+    repo, ref = parent
+    provider = KiroProvider(repo, uuid_factory=lambda: UUID, enforce=True, exempt_kinds=["docs"])
+    fix = provider.create_fix_unit(ref, 1, [FINDINGS[1]], None)
+    assert provider.validate(fix, strict=True).valid
+    path = fix.path / "tasks.md"
+    path.write_text(path.read_text().replace("(F-cccccccc)", "(F-zzzzzzzz)"))  # no longer the marker's id
+    assert [t.key for t in provider.leaves_without_requirements(fix)] == ["1.1"]
+
+
+# --- feedback items (human-feedback 2.3, L4-FBK-005, L4-FBK-008; SCN-FBK-13, SCN-FBK-14) ------------------------------
+
+REQUEST = "Requested by Ana, 2026-10-12T15:04:00Z in FB-001 (config, src/login.py:7-9): Read the URL from LOGIN_URL."
+
+
+def feedback_finding(kind: str, **over) -> Finding:
+    body = {
+        "ids": ("F-feed0001",), "title": f"Feedback FB-001 ({kind}): Read the URL", "detail": "", "severity": "major",
+        "chore": kind in ("refactor", "duplication", "tests"), "tests": kind == "tests",
+        "refactor": kind in ("refactor", "duplication"), "item": "FB-001", "request": REQUEST,
+        "code": "URL = 'http://x'\n## sneaky",
+    }  # fmt: skip
+    return Finding(**{**body, **over})
+
+
+def test_a_config_item_is_2_n_for_the_first_scenario_and_3_n_for_the_continue_to_one(parent):
+    repo, ref = parent
+    delta = SpecDelta(
+        (
+            DeltaRequirement(
+                "login",
+                "Read the URL \N{EM DASH} feedback FB-001",
+                (
+                    DeltaScenario(
+                        "LOGIN_URL is set",
+                        "- **WHEN** the environment variable LOGIN_URL is set\n- **THEN** the system SHALL use it",
+                        "F-feed0001",
+                    ),
+                    DeltaScenario(
+                        "LOGIN_URL is not set",
+                        "- **WHEN** LOGIN_URL is not set\n- **THEN** the system SHALL CONTINUE TO behave as before",
+                        "F-feed0001",
+                    ),
+                ),
+            ),
+        )
+    )
+    fix = provider_of(repo).create_fix_unit(ref, 1, [feedback_finding("config", chore=False, refactor=False)], delta)
+    bugfix = (fix.path / "bugfix.md").read_text()
+    assert "2.1 WHEN the environment variable LOGIN_URL is set THEN the system SHALL use it" in bugfix
+    assert "3.1 WHEN LOGIN_URL is not set THEN the system SHALL CONTINUE TO behave as before" in bugfix
+    [leaf] = [t for t in parse_kiro_tasks((fix.path / "tasks.md").read_bytes()) if t.depth > 0]
+    assert leaf.links == ("2.1", "3.1")
+    assert [c.alias for c in kiro_criteria(fix.path)] == ["Req 2.1", "Req 3.1"]
+
+
+def test_the_request_is_the_defect_line_and_the_code_follows_whole_on_that_line(parent):
+    repo, ref = parent
+    fix = provider_of(repo).create_fix_unit(ref, 1, [feedback_finding("refactor")], None)
+    bugfix = (fix.path / "bugfix.md").read_text()
+    defect = next(line for line in bugfix.splitlines() if line.startswith("1.1 "))
+    assert defect.startswith("1.1 " + REQUEST + " Quoted code: URL = 'http://x' ## sneaky")
+    assert "\n## sneaky" not in bugfix and "(Feedback FB-001 (refactor): Read the URL; F-feed0001)" in defect
+    design = (fix.path / "design.md").read_text()
+    assert "    URL = 'http://x'\n    ## sneaky\n" in design  # the design keeps the lines, indented
+    marker = read_fix_marker(fix.path)
+    assert marker is not None
+    assert marker.chores == marker.refactors == ("F-feed0001",) and marker.test_chores == ()
+
+
+def test_a_long_request_is_kept_whole_up_to_1200_characters(parent):
+    repo, ref = parent
+    text = "w" * 1200
+    request = f"Requested by Ana in FB-001 (refactor, src/login.py:1): {text}"
+    fix = provider_of(repo).create_fix_unit(ref, 1, [feedback_finding("refactor", request=request)], None)
+    assert request in (fix.path / "bugfix.md").read_text()

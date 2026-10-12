@@ -225,11 +225,12 @@ normalised). A later change to that content makes the item takeable again (`feed
   - `# Bugfix Requirements Document`, then `## Bug Analysis`;
   - `### Current Behavior (Defect)`: one `1.n` per finding;
   - `### Expected Behavior (Correct)`: one `2.n` per criterion a task fixes, or per spec-gap or feedback scenario;
-  - `### Unchanged Behavior (Regression Prevention)`: `3.1 … SHALL CONTINUE TO satisfy every other acceptance
-    criterion of <parent>`, plus the `3.n` items of `config` items.
+  - `### Unchanged Behavior (Regression Prevention)`: the unnumbered sentence "The system SHALL CONTINUE TO satisfy every
+    other acceptance criterion of <parent>." (not a criterion: no test could trace it), plus the `3.n` items of `config`
+    items.
 - **`design.md`**.
 - **`tasks.md`** in Kiro's grammar: leaves cite `2.n`/`3.n` with `_Requirements:_`, chores carry `[chore]` and their
-  finding ids in the title, and there is a one-wave `## Task Dependency Graph`.
+  finding ids in the title and cite nothing (the tag makes them TDD-exempt), and there is a one-wave `## Task Dependency Graph`.
 - **`.config.kiro`:** `{"specId": <uuid4>, "workflowType": "requirements-first", "specType": "bugfix"}`.
 - **`.l4/fix.json`**.
 

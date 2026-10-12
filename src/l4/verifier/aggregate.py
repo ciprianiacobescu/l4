@@ -103,7 +103,7 @@ def judge_findings(judge: JudgeVerdict, *, known: Collection[str]) -> list[Findi
 
 
 def aggregate_unit(findings: Sequence[Finding], criteria: Sequence[CriterionOutcome], holds: Sequence[str]) -> Verdict:
-    if any(f.blocking and f.source in ("deterministic", "human") for f in findings):
+    if any(f.blocking and f.source in ("deterministic", "human", "feedback") for f in findings):
         return Verdict.FAIL
     if any(c.result == "fail" for c in criteria):
         return Verdict.FAIL

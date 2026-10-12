@@ -78,7 +78,7 @@ def resume_unit(
             limit = fix_round_limit(cfg, state)
             raise L4Exit(
                 ExitCode.USAGE_ERROR,
-                f"resume: {ref.id} is escalated with all its fix rounds used ({state.fix_round}/{limit}, "
+                f"resume: {ref.id} is escalated with all its fix rounds used ({state.fix_rounds_counted}/{limit}, "
                 "verifier.max_fix_rounds); add --extend-fix-rounds N to allow N more",
             )
     elif phase != Phase.HALTED:

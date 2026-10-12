@@ -40,7 +40,7 @@ from l4.specs.base import (
 )
 from l4.specs.criteria import kiro_criteria
 from l4.specs.detect import kiro_spec_dirs
-from l4.specs.fixmark import FixMarker, fix_name, read_fix_marker, split_fix_name, write_fix_marker
+from l4.specs.fixmark import FixMarker, chore_findings, fix_name, read_fix_marker, split_fix_name, write_fix_marker
 from l4.specs.markers import MAX_TASKS_BYTES, Line, split_lines, write_marker
 
 log = logging.getLogger("l4.spec")
@@ -371,6 +371,7 @@ class KiroProvider:
                 parent.id, round, tuple(i for f in findings for i in f.ids),
                 tuple(i for f in findings if f.chore for i in f.ids),
                 tuple(i for f in findings if f.chore and f.tests for i in f.ids),
+                tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
             ),
         )  # fmt: skip
         items = _FixItems(parent.name, findings, delta, self._known_criteria(parent))
@@ -420,8 +421,14 @@ class KiroProvider:
         return bool(tags & {k.lower() for k in self._exempt})
 
     def leaves_without_requirements(self, unit: UnitRef) -> list[Task]:
-        """SPEC-004: required leaves with no `_Requirements:_` link that are not TDD-exempt."""
-        return [t for t in required_leaves(self.tasks(unit)) if not t.links and not self.is_exempt(t)]
+        """SPEC-004: required leaves with no `_Requirements:_` link that are not TDD-exempt. A chore of a fix unit is
+        the harness's own (its finding id is in the marker's `chores`), so it needs no link whatever the configured
+        exempt kinds are (L4-FBK-008)."""
+        directory = self.unit_dir(unit)
+        return [
+            t for t in required_leaves(self.tasks(unit))
+            if not t.links and not self.is_exempt(t) and not chore_findings(directory, t.title)
+        ]  # fmt: skip
 
     def validate(self, unit: UnitRef, strict: bool = True) -> ValidationReport:
         """File presence, task grammar, the graph JSON and that every `_Requirements:_` ref resolves. A leaf with no
@@ -472,9 +479,10 @@ class KiroProvider:
 MAX_ITEM_CHARS = 600 + MAX_DECISION_CHARS + 400
 _DECIDED = ("Decided by ", "Requested by ")
 _CONTINUE_TO = re.compile(r"\bTHEN\b.*\bSHALL CONTINUE TO\b")
-GENERIC_UNCHANGED = (
-    "WHEN any other acceptance criterion of {parent} is exercised THEN the system SHALL CONTINUE TO satisfy it"
-)
+MAX_REQUEST_LINE = 1800  # "Requested by <By> in FB-NNN (<kind>, <places>): " and the text, whole up to 1,200 characters
+MAX_CODE_LINE = 600
+# an unnumbered sentence: a criterion no test can trace would fail traceability (L4-FBK-008)
+GENERIC_UNCHANGED = "The system SHALL CONTINUE TO satisfy every other acceptance criterion of {parent}."
 
 
 def _line(text: str, limit: int = 160) -> str:
@@ -489,9 +497,10 @@ def _sentence(scenario: str) -> str:
 
 
 class _FixItems:
-    """The numbered items of a fix unit's `bugfix.md`: `2.n` per criterion a task fixes and per scenario, `3.1` for
-    everything else of the parent and one `3.n` per scenario that says `SHALL CONTINUE TO`. `refs[i]` are the item
-    numbers the task of `findings[i]` cites (`2.1`), `3.1` alone for a task that fixes no criterion (a chore)."""
+    """The numbered items of a fix unit's `bugfix.md`: `2.n` per criterion a task fixes and per scenario, and one
+    `3.n` per scenario that says `SHALL CONTINUE TO`. Everything else of the parent is kept by an unnumbered sentence.
+    `refs[i]` are the item numbers the task of `findings[i]` cites (`2.1`); a chore cites none (its `[chore]` tag
+    makes it TDD-exempt, SPEC-004)."""
 
     def __init__(
         self,
@@ -502,7 +511,7 @@ class _FixItems:
     ) -> None:
         self.parent, self.findings = parent, findings
         self.expected: list[str] = []
-        self.unchanged = [GENERIC_UNCHANGED.format(parent=parent)]
+        self.unchanged: list[str] = []
         self.refs: list[list[str]] = [[] for _ in findings]
         for refs, finding in zip(self.refs, findings, strict=True):
             for cid in dict.fromkeys(finding.criteria):
@@ -517,8 +526,6 @@ class _FixItems:
                         refs.append(ref)
         for refs in self.refs:
             refs.sort(key=lambda r: tuple(int(n) for n in r.split(".")))
-            if not refs:
-                refs.append("3.1")
 
     @staticmethod
     def _add(items: list[str], kind: str, text: str) -> str:
@@ -537,7 +544,10 @@ class _FixItems:
     def bugfix(self) -> str:
         defects = "\n".join(f"1.{n} {_defect(f)}" for n, f in enumerate(self.findings, 1))
         expected = "\n".join(f"2.{n} {text}" for n, text in enumerate(self.expected, 1))
-        unchanged = "\n".join(f"3.{n} {text}" for n, text in enumerate(self.unchanged, 1))
+        generic = GENERIC_UNCHANGED.format(parent=self.parent)
+        unchanged = "\n".join([generic, *([""] if self.unchanged else []), *(
+            f"3.{n} {text}" for n, text in enumerate(self.unchanged, 1)
+        )])  # fmt: skip
         return (
             "# Bugfix Requirements Document\n\n## Bug Analysis\n\n### Current Behavior (Defect)\n\n"
             f"{defects}\n\n### Expected Behavior (Correct)\n\n{expected or _NO_EXPECTED}\n\n"
@@ -551,6 +561,9 @@ _NO_EXPECTED = "Every task of this fix unit is a chore: no behaviour is added, a
 def _defect(finding: Finding) -> str:
     """The finding's title and detail on one line, the human's decisions first when the detail starts with them."""
     ids, title, detail = ", ".join(finding.ids), _line(finding.title), _line(finding.detail, MAX_ITEM_CHARS)
+    if finding.request:  # a person's request first, whole, then the lines they quoted (L4-FBK-005)
+        code = f" Quoted code: {_line(finding.code, MAX_CODE_LINE)}" if finding.code.strip() else ""
+        return f"{_line(finding.request, MAX_REQUEST_LINE)}{code} ({title}; {ids})"
     if detail.startswith(_DECIDED):
         return f"{detail} ({title}; {ids})"
     return f"{title}: {detail} ({ids})" if detail else f"{title} ({ids})"
@@ -570,6 +583,11 @@ def _fix_design(parent: UnitRef, round: int, findings: Sequence[Finding]) -> str
         )
         if finding.detail:
             parts.append("\n" + _line(finding.detail, MAX_ITEM_CHARS))
+        if finding.request:
+            parts.append("\n" + _line(finding.request, MAX_REQUEST_LINE))
+            if finding.code.strip():  # an indented block: no line of it can open a heading or a fence
+                quoted = (f"    {line}" if line.strip() else "" for line in finding.code.splitlines())
+                parts.append("\n" + "\n".join(quoted))
         parts.append("")
     return "\n".join(parts).rstrip() + "\n"
 
@@ -580,13 +598,12 @@ def _fix_tasks(findings: Sequence[Finding], refs: Sequence[Sequence[str]], ids: 
     lines = ["# Implementation Plan", "", "- [ ] 1. Fix the findings of the verifier"]
     leaves: list[str] = []
     for number, (finding, cited) in enumerate(zip(findings, refs, strict=True), 1):
-        criteria = [ids[f"Req {r}"] for r in cited if r != "3.1" and f"Req {r}" in ids]
+        criteria = [ids[f"Req {r}"] for r in cited if f"Req {r}" in ids]
         cites = "; ".join([", ".join(finding.ids), *([", ".join(dict.fromkeys(criteria))] if criteria else [])])
         tag = "[chore] " if finding.chore else ""
-        lines += [
-            f"  - [ ] 1.{number} {tag}{_line(finding.title)} ({cites})",
-            f"    - _Requirements: {', '.join(cited)}_",
-        ]
+        lines.append(f"  - [ ] 1.{number} {tag}{_line(finding.title)} ({cites})")
+        if cited:  # a chore cites nothing: its tag makes it TDD-exempt
+            lines.append(f"    - _Requirements: {', '.join(cited)}_")
         leaves.append(f"1.{number}")
     graph = json.dumps({"waves": [{"id": 0, "tasks": leaves}]})
     return "\n".join(lines) + f"\n\n## Task Dependency Graph\n\n```json\n{graph}\n```\n"

@@ -799,12 +799,13 @@ the OpenSpec writer to `.kiro/specs/<parent>-fix-<n>/` (L4-FBK-008):
   one `1.n` per finding (its title and detail, the human's "Decided by …" or "Requested by …" text first, kept whole up
   to the decision limit); *Expected Behavior (Correct)* has one `2.n` per criterion a task fixes, restating the
   criterion's text with its place and id (`2.1 WHEN … THEN the system SHALL … (parent Req 1.2, C-1a2b3c4d)`), and one
-  per spec-gap scenario; *Unchanged Behavior (Regression Prevention)* has `3.1 WHEN any other acceptance criterion of
-  <parent> is exercised THEN the system SHALL CONTINUE TO satisfy it` and one `3.n` per scenario whose THEN says `SHALL
-  CONTINUE TO`.
+  per spec-gap scenario; *Unchanged Behavior (Regression Prevention)* starts with the unnumbered sentence `The system SHALL
+  CONTINUE TO satisfy every other acceptance criterion of <parent>.` (not a criterion: no test could trace it) and has
+  one `3.n` per scenario whose THEN says `SHALL CONTINUE TO`.
 - **`design.md`** (the findings and decisions in the order of L4-VER-006), **`tasks.md`** (Kiro grammar, one leaf per
   task under a parent, each followed by `- _Requirements: 2.n[, 3.n]_`; a chore carries `[chore]` and its finding ids and
-  cites `3.1`; a one-wave `## Task Dependency Graph`) and **`.config.kiro`**
+  cites nothing, its tag makes it TDD-exempt for SPEC-004 whatever `tdd.exempt_task_kinds` says, so a fix unit of chores
+  alone has no `2.n` and no `_Requirements:_` line; a one-wave `## Task Dependency Graph`) and **`.config.kiro`**
   `{"specId": <uuid4>, "workflowType": "requirements-first", "specType": "bugfix"}` (file layout and `specType` values
   [V, research/01]; the template is read from Kiro's IDE bundle [V]; the `workflowType` value for bugfix specs is [I] —
   confirm against a Kiro-created bugfix spec), and the fix marker `.l4/fix.json` (L4-VER-006).
