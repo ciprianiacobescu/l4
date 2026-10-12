@@ -1,7 +1,9 @@
 """The resolver table of a base merge: the harness-owned files of a unit (and of its fix units) that git may settle
-by the rules of `questions_merge` and `tasks_merge` instead of stopping at a conflict."""
+by the rules of `questions_merge`, `tasks_merge` and `feedback_merge` instead of stopping at a conflict."""
 
 from l4.specs.base import Framework
+from l4.specs.feedback import FEEDBACK_FILENAME
+from l4.specs.feedback_merge import merge_feedback
 from l4.specs.questions import QUESTIONS_FILENAME
 from l4.specs.questions_merge import merge_questions
 from l4.specs.tasks_merge import merge_task_markers
@@ -29,7 +31,14 @@ def harness_resolvers(unit_rel: str, framework: Framework) -> Resolvers:
             ours_lines=sides.ours_lines, theirs_lines=sides.theirs_lines,
         )  # fmt: skip
 
+    def feedback(sides: Sides) -> bytes:
+        return merge_feedback(sides.base, sides.ours, sides.theirs)
+
     def tasks(sides: Sides) -> bytes:
         return merge_task_markers(sides.ours, sides.theirs, framework)
 
-    return ((owned(QUESTIONS_FILENAME), questions), (owned(TASKS_FILENAME), tasks))
+    return (
+        (owned(QUESTIONS_FILENAME), questions),
+        (owned(TASKS_FILENAME), tasks),
+        (owned(FEEDBACK_FILENAME), feedback),
+    )
