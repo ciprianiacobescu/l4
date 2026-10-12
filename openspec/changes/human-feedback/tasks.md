@@ -30,5 +30,5 @@
 
 ## 6. SPEC, docs and live evidence
 
-- [ ] 6.1 SPEC amendments 1–13 of design.md; `docs/feedback.md` (one worked example per kind, what happens after the push, the limits and the refactor-needs-a-test-change case); quickstart §5 points to it — test: python scripts/check_spec.py docs/SPEC.md and tests/unit/test_spec_commands.py — code: docs/SPEC.md, docs/feedback.md, docs/quickstart.md — verify: check_spec passes; the full suite passes
+- [x] 6.1 SPEC amendments 1–13 of design.md; `docs/feedback.md` (one worked example per kind, what happens after the push, the limits and the refactor-needs-a-test-change case); quickstart §5 points to it (done except the follow-up units: L4-FBK-010, SCN-FBK-23/24 and the follow-up paragraph of docs/feedback.md are added when 5.1 and 5.2 merge) — test: python scripts/check_spec.py docs/SPEC.md and tests/unit/test_spec_commands.py — code: docs/SPEC.md, docs/feedback.md, docs/quickstart.md — verify: check_spec passes; the full suite passes
 - [ ] 6.2 Live: a Kiro unit authored by kiro-cli on a dummy repository, run to a ready PR; one `refactor` and one `config` item sent with `l4 feedback add`; both addressed; the PR ready again; a person merges; record under docs/live/feedback/ [L4-FBK-013] [SCN-FBK-28] — test: the run logs, the PR and the ledgers — code: none — verify: ids recorded
