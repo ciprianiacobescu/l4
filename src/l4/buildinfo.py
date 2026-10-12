@@ -28,3 +28,24 @@ def harness_commit() -> str | None:
     except (ImportError, AttributeError):
         return _installed_commit()
     return commit if isinstance(commit, str) else _installed_commit()
+
+
+_GITHUB_REPO = re.compile(r"^(?:https://|ssh://git@|git@)github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def github_slug(url: str) -> str | None:
+    """`owner/repo` of a github.com https or ssh URL (or the scp form), else None."""
+    match = _GITHUB_REPO.match(url)
+    return match.group(1) if match else None
+
+
+def harness_origin() -> str | None:
+    """`owner/repo` of the GitHub repository the running harness was installed from (`uv tool install git+URL`), or
+    None: a checkout, a wheel or another host has no origin that a workflow's `uses:` could name."""
+    try:
+        text = distribution(DISTRIBUTION).read_text("direct_url.json")
+        info = json.loads(text) if text else None
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    url = info.get("url") if isinstance(info, dict) and isinstance(info.get("vcs_info"), dict) else None
+    return github_slug(url) if isinstance(url, str) else None

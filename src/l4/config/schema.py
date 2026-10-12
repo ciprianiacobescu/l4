@@ -90,6 +90,10 @@ class HarnessCfg(_Strict):
     # only, no credential in the URL (a private repository is reached with a deploy key); the scp form
     # `git@host:owner/repo.git` is written as `ssh://git@host/owner/repo.git`, which uv understands. None: vendored.
     repository: str | None = None
+    # How the harness reaches CI (adoption-kit L4-ACT-004): `vendored` (.l4/vendor/), `fetched` (harness.repository at
+    # harness.commit, through the shim) or `action` (the setup action, pinned in the workflow's `uses:`, no commit
+    # here). None: derived by `effective_delivery`, so a config written before this key keeps meaning what it meant.
+    delivery: Literal["vendored", "fetched", "action"] | None = None
 
     @field_validator("repository")
     @classmethod
@@ -105,9 +109,24 @@ class HarnessCfg(_Strict):
 
     @model_validator(mode="after")
     def _commit_with_repository(self) -> "HarnessCfg":
-        if self.repository is not None and self.commit is None:
+        if self.delivery == "fetched" and self.repository is None:
+            raise ValueError("harness.delivery: fetched needs harness.repository")
+        if self.delivery == "vendored" and self.repository is not None:
+            raise ValueError("harness.delivery: vendored contradicts harness.repository (a fetched harness)")
+        if self.delivery != "action" and self.repository is not None and self.commit is None:
             raise ValueError("harness.repository needs harness.commit: the fetched harness is pinned by commit SHA")
         return self
+
+
+def effective_delivery(cfg: "L4Config") -> Literal["vendored", "fetched", "action"]:
+    """The delivery in force: an explicit `harness.delivery` wins; else `fetched` when `harness.repository` is set,
+    else `vendored` (the form that never had a key: `.l4/vendor/` is its only trace, and a repository
+    without either is one `l4 init --vendor` would have written)."""
+    if cfg.harness.delivery is not None:
+        return cfg.harness.delivery
+    if cfg.harness.repository is not None:
+        return "fetched"
+    return "vendored"
 
 
 class OpenSpecCfg(_Strict):

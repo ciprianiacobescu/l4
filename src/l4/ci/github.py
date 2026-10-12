@@ -7,6 +7,8 @@ matrix jobs), `workflow_dispatch` inputs.
 """
 
 import json
+import re
+from dataclasses import dataclass
 from importlib.resources import files
 from typing import Literal
 
@@ -24,6 +26,9 @@ CACHE_ACTION = "actions/cache/{op}@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
 CACHE_PATHS = (
     "~/.local/bin", "~/.local/share/l4", "~/.local/share/claude", "~/.local/share/uv", "~/.cache/l4", "~/.cache/uv",
 )  # fmt: skip
+# The agent CLIs and bwrap, at the paths `l4 doctor --ci --fix` installs into. The setup action restores this cache
+# (`.github/actions/l4/action.yml`, step `clis`) and the workflow saves it, so the two lists must be equal (a test).
+CLI_CACHE_PATHS = ("~/.local/bin", "~/.local/share/l4", "~/.local/share/claude", "~/.cache/l4")
 # GitHub's published SSH host keys (api.github.com/meta, 2026-10-11), pinned for the fetched harness's deploy key
 # (L4-GHP-010): the clone checks the host against these and nothing else.
 HOST_KEYS = (
@@ -171,8 +176,106 @@ def render_github_ci(cfg: L4Config) -> str:
         "HOSTED_ENV": "", "HOSTED_SETUP": "", "HOSTED_SAVE": "",
         **(_hosted_blocks(cfg) if hosted else {}),
     }  # fmt: skip
-    text = files("l4.ci").joinpath("templates", "l4.github.yml").read_text(encoding="utf-8")
+    return _fill("l4.github.yml", values)
+
+
+def _fill(template: str, values: dict[str, str]) -> str:
+    text = files("l4.ci").joinpath("templates", template).read_text(encoding="utf-8")
     for key, value in values.items():
         # a block that is empty takes its whole line with it
         text = text.replace(f"@@{key}@@" if value else f"@@{key}@@\n", value)
     return text
+
+
+ACTION_PATH = ".github/actions/l4"
+_ACTION_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+_REF = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+@dataclass(frozen=True)
+class ActionPin:
+    """What the action-form workflow pins (adoption-kit D4, D5). `copy`: the consumer holds its own copy of the action
+    (`uses: ./.github/actions/l4`), which fetches the harness over ssh at `sha`, so the `commit` input is the pin;
+    otherwise `uses: <repository>/.github/actions/l4@<sha> # <ref>` is."""
+
+    repository: str  # owner/repo of the harness, which holds the action
+    sha: str
+    ref: str | None = None
+    copy: bool = False
+
+    def __post_init__(self) -> None:
+        # these reach the YAML as plain text, so each is checked against the shape it must have
+        if not _ACTION_REPO.match(self.repository):
+            raise ValueError(f"the action repository must look like owner/repo, not {self.repository!r}")
+        if not _FULL_SHA.match(self.sha):
+            raise ValueError(f"the pin must be a full commit sha (40 lowercase hex digits), not {self.sha!r}")
+        if self.ref is not None and not _REF.match(self.ref):
+            raise ValueError(f"the ref must be a tag or branch name, not {self.ref!r}")
+
+    @property
+    def ssh_url(self) -> str:
+        return f"ssh://git@github.com/{self.repository}.git"
+
+
+def _action_step(cfg: L4Config, pin: ActionPin, *, hosted: bool) -> str:
+    inputs: list[tuple[str, str]] = []
+    if pin.copy:
+        inputs += [
+            ("source", "repository"),
+            ("repository", pin.ssh_url),
+            ("commit", pin.sha),
+            ("ssh-key", "${{ secrets.L4_HARNESS_SSH_KEY }}"),
+        ]
+    if hosted:  # the repository variable L4_SELF_PROVISION stays the switch, as in the vendored form
+        rendered = "true" if cfg.ci.self_provision is True else "auto"
+        inputs.append(("self-provision", f"${{{{ vars.L4_SELF_PROVISION || '{rendered}' }}}}"))
+    else:  # a self-hosted runner keeps its own CLIs; there is no cache service to rely on
+        inputs.append(("clis", "none"))
+    uses = (
+        f"./{ACTION_PATH}"
+        if pin.copy
+        else f"{pin.repository}/{ACTION_PATH}@{pin.sha}" + (f" # {pin.ref}" if pin.ref else "")
+    )
+    lines = [f"      - id: l4\n        uses: {uses}\n        with:"]
+    lines += [f"          {name}: {value if value.startswith('$') or name == 'clis' else json.dumps(value)}"
+              for name, value in inputs]  # fmt: skip
+    return "\n".join(lines)
+
+
+def _clis_save_step(hosted: bool) -> str:
+    if not hosted:
+        return ""
+    paths = "\n".join(f"            {path}" for path in CLI_CACHE_PATHS)
+    return f"""\
+      - name: save agent CLI cache
+        if: ${{{{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.clis-cache-hit != 'true' }}}}
+        uses: {CACHE_ACTION.format(op="save")}
+        with:
+          path: |
+{paths}
+          key: ${{{{ steps.l4.outputs.clis-cache-key }}}}"""
+
+
+def render_github_action_ci(cfg: L4Config, pin: ActionPin) -> str:
+    """The action form of the workflow (L4-ACT-004): the same job as `render_github_ci`, the harness from the setup
+    action. `doctor --ci --fix` on a hosted runner, `doctor_command` on a self-hosted one, as in the other form."""
+    tags = list(cfg.ci.runner_tags)
+    hosted = not tags
+    return _fill(
+        "l4.github-action.yml",
+        {
+            "JOB_TIMEOUT": str(JOB_TIMEOUT_MINUTES),
+            "BASE": json.dumps(cfg.forge.base_branch),
+            "BASE_ENV": json.dumps(cfg.forge.base_branch),
+            "IF": _job_condition(cfg.forge.base_branch),
+            "PREFIX": json.dumps(f"{cfg.forge.branch_prefix}**"),
+            "RUNS_ON": json.dumps(["self-hosted", *tags]) if tags else HOSTED_RUNNER,
+            "TOKEN_ENV": cfg.forge.token_env,
+            "DOCTOR": "doctor --ci --fix" if hosted else doctor_command(cfg, "github"),
+            "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
+            "CREDENTIAL_ENV": "\n".join(f"      {n}: ${{{{ secrets.{n} }}}}" for n in credential_secrets(cfg)),
+            "ACTION_STEP": _action_step(cfg, pin, hosted=hosted),
+            "CLIS_SAVE": _clis_save_step(hosted),
+        },
+    )

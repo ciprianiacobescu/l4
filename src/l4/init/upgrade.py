@@ -33,10 +33,11 @@ from l4.ci.render import (
     render_shim,
 )
 from l4.config.loader import CONFIG_RELPATH, load_config
-from l4.config.schema import L4Config, Sha
+from l4.config.schema import L4Config, Sha, effective_delivery
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
+from l4.init.action import read_pin, remote_url, repin, resolve_ref
 from l4.init.init import (
     PlannedFile,
     _serena_seed,
@@ -171,7 +172,11 @@ class UpgradePlan:
         return bool(self.vendor_added or self.vendor_changed or self.vendor_removed)
 
 
-def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None, pin: str | None = None) -> UpgradePlan:
+def plan_upgrade(
+    repo: Path, environ: Mapping[str, str], harness: Path | None, pin: str | None = None, ref: str | None = None
+) -> UpgradePlan:
+    if pin is not None and ref is not None:
+        raise _refuse("--harness-ref and --harness-commit exclude each other")
     config_path = repo / CONFIG_RELPATH
     for relative in (str(CONFIG_RELPATH), SHIM_RELPATH, SETUP_RELPATH, TEMPLATE_RELPATH, VENDOR_RELPATH):
         try:
@@ -185,10 +190,16 @@ def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None, p
     except (UnsafeFile, UnicodeDecodeError) as exc:
         raise _refuse(f"cannot read {CONFIG_RELPATH}: {exc}") from None
     loaded = load_config(repo)  # it must load as it is, or the human has a problem that an upgrade should not hide
-    if loaded.harness.repository is not None:
-        return _plan_fetched(repo, loaded, old_config, harness, pin)
-    if pin is not None:
-        raise _refuse("--harness-commit is for a fetched harness (harness.repository); this adoption is vendored")
+    delivery = effective_delivery(loaded)
+    if delivery == "action":
+        return _plan_action(repo, loaded, old_config, environ, harness, pin, ref)
+    if delivery == "fetched":
+        return _plan_fetched(repo, loaded, old_config, harness, pin, ref, environ)
+    if pin is not None or ref is not None:
+        raise _refuse(
+            "--harness-commit and --harness-ref are for a fetched harness (harness.repository) or the setup action "
+            "(harness.delivery: action); this adoption is vendored"
+        )
     vendor = collect_vendor_source(harness_root(harness), environ)
     new_config = rewrite_pins(old_config, version=_vendor_version(vendor), commit=vendor.commit)
     validated_config(new_config)
@@ -213,12 +224,68 @@ def plan_upgrade(repo: Path, environ: Mapping[str, str], harness: Path | None, p
     )  # fmt: skip
 
 
-def _plan_fetched(repo: Path, loaded: L4Config, old_config: str, harness: Path | None, pin: str | None) -> UpgradePlan:
+def _plan_action(
+    repo: Path,
+    loaded: L4Config,
+    old_config: str,
+    environ: Mapping[str, str],
+    harness: Path | None,
+    pin: str | None,
+    ref: str | None,
+) -> UpgradePlan:
+    """An action adoption (L4-ACT-005): the pin is the workflow's `uses:` line (the `commit` input of a copy of the
+    action), and only that line moves: `@<sha> # <REF>`. Nothing else changes."""
+    if harness is not None:
+        raise _refuse("--harness vendors a checkout; this adoption gets its harness from the setup action")
+    try:
+        reject_symlinks(repo, *Path(WORKFLOW_RELPATH).parts)
+        text = read_regular_file(repo / WORKFLOW_RELPATH, limit=MAX_CONFIG_BYTES).decode("utf-8")
+    except FileNotFoundError:
+        raise _refuse(f"{WORKFLOW_RELPATH} not found: run `l4 init --ci github --action` first") from None
+    except (UnsafeFile, UnicodeDecodeError) as exc:
+        raise _refuse(f"cannot read {WORKFLOW_RELPATH}: {exc}") from None
+    found = read_pin(text)
+    if found is None or found.repository is None:
+        raise _refuse(
+            f"cannot find the setup action (and its repository) in {WORKFLOW_RELPATH}; edit its `uses:` line by hand"
+        )
+    if ref is not None:
+        sha = resolve_ref(remote_url(found.repository), ref, environ)
+    else:
+        sha = pin or harness_commit() or ""
+        if not sha:
+            raise _refuse("the running harness's commit is unknown; pass --harness-ref REF or --harness-commit SHA")
+        try:
+            TypeAdapter(Sha).validate_python(sha)
+        except ValidationError:
+            raise _refuse(f"--harness-commit must be 40 lowercase hex characters, not {sha!r}") from None
+    new = repin(text, sha=sha, ref=ref)
+    changed = () if new == text else (PlannedFile(WORKFLOW_RELPATH, new.encode("utf-8"), 0o644),)
+    missing = tuple(m for m in missing_keys(yaml.safe_load(old_config) or {}) if not m.startswith("harness."))
+    return UpgradePlan(
+        changed, None, (), (), (), missing=missing, seeded=tuple(_serena_seed(repo, loaded)),
+        marker=register_l4_marker(repo) if "pytest" in loaded.gates.test.command else None, commit=sha,
+    )  # fmt: skip
+
+
+def _plan_fetched(
+    repo: Path,
+    loaded: L4Config,
+    old_config: str,
+    harness: Path | None,
+    pin: str | None,
+    ref: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> UpgradePlan:
     """A fetched adoption (L4-GHP-010): only `harness.commit` moves; the shim, the setup script and the CI file are
     re-rendered from the harness that runs; nothing is vendored."""
     if harness is not None:
         raise _refuse("--harness vendors a checkout; this adoption fetches its harness (harness.repository)")
-    commit = pin or harness_commit()
+    if ref is not None:
+        assert loaded.harness.repository is not None
+        commit: str | None = resolve_ref(loaded.harness.repository, ref, environ or {})
+    else:
+        commit = pin or harness_commit()
     if commit is None:
         raise _refuse("the running harness's commit is unknown; pass --harness-commit SHA")
     try:
@@ -271,8 +338,9 @@ def run_upgrade(
     harness: Path | None = None,
     dry_run: bool = False,
     harness_commit_pin: str | None = None,
+    harness_ref: str | None = None,
 ) -> ExitCode:
-    plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin)
+    plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin, harness_ref)
     verb = "would change" if dry_run else "changed"
     if plan.vendor is not None and plan.vendor_differs:
         click.echo(

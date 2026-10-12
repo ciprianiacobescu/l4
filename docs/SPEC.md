@@ -139,8 +139,8 @@ of the harness package.
 
 | Command | Purpose | Side effects |
 |---|---|---|
-| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit]` | Adopt the harness in a repo | writes files (§1) |
-| `l4 upgrade [--harness DIR] [--dry-run]` | Bring the vendored harness, the CI template and the shim up to the harness checkout | writes files (§1) |
+| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file (L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
+| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
 | `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents |
@@ -293,6 +293,8 @@ harness:
   commit: "<40-hex sha>"           # the SHA CI actually fetches; doctor CI-001 checks tag → sha
   repository: null                 # a fetched harness: https:// or ssh:// git URL; the shim runs
                                    # `uvx --from git+<repository>@<commit> l4`; null: vendored (L4-GHP-010)
+  delivery: null                   # vendored | fetched | action; null: fetched when `repository` is set, else vendored.
+                                   # action: the workflow's `uses:` sha is the only pin, no `commit` here (L4-ACT-004)
 
 spec:
   frameworks: auto                 # auto | [openspec, kiro]
@@ -2687,6 +2689,8 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
 | CFG-004 | error | `gates.test.command` set when `tdd.mode != off` | — |
 | CFG-005 | warn | an explicitly set `odd.forbidden_paths`, `tdd.test_globs` or `tdd.test_support_globs` drops default entries (names them and the `extra_` key that adds instead of replacing) | — |
+| CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
+| CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
