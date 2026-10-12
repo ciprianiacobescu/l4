@@ -78,7 +78,7 @@ def test_cli_cache_paths_are_the_hosted_tool_cache_minus_the_harness():
     from l4.ci.github import CACHE_PATHS
 
     step = next(s for s in _steps() if s.get("id") == "clis")
-    paths = [p.strip() for p in step["with"]["path"].splitlines() if p.strip()]
+    paths = [p.strip() for p in step["with"]["path"].splitlines() if p.strip() and not p.strip().startswith("!")]
     assert paths
     assert set(paths) <= set(CACHE_PATHS)
     assert not [p for p in paths if "uv" in p]

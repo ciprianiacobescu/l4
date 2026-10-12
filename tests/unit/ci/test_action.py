@@ -246,3 +246,14 @@ def test_source_action_exports_a_pinned_ref_and_nothing_for_a_branch_or_tag(tmp_
 def test_the_source_step_reads_the_action_ref_through_env():
     assert step("src")["env"]["ACTION_REF"] == "${{ github.action_ref }}"
 
+
+def test_cli_cache_excludes_the_harness_links_and_the_npm_download_cache():
+    """The harness cache holds uv, uvx and l4; npm's download cache duplicates the installed CLIs (L4-ACT-002)."""
+    from l4.ci.github import CLI_CACHE_PATHS
+
+    paths = [p.strip() for p in step("clis")["with"]["path"].splitlines() if p.strip()]
+    assert paths == list(CLI_CACHE_PATHS)
+    assert [p for p in paths if p.startswith("!")] == ["!~/.local/bin/uv", "!~/.local/bin/uvx", "!~/.local/bin/l4"]
+    assert paths.index("~/.local/bin") < paths.index("!~/.local/bin/uv")  # a later `!` removes earlier matches
+    assert "~/.cache/l4" not in paths and "~/.cache/l4/npm" not in paths
+    assert "~/.cache/l4/installers" in paths

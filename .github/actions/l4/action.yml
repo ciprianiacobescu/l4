@@ -206,9 +206,12 @@ runs:
       with:
         path: |
           ~/.local/bin
+          !~/.local/bin/uv
+          !~/.local/bin/uvx
+          !~/.local/bin/l4
           ~/.local/share/l4
           ~/.local/share/claude
-          ~/.cache/l4
+          ~/.cache/l4/installers
         key: ${{ steps.clikey.outputs.key }}
     - name: runner setup
       id: setup
