@@ -102,13 +102,15 @@ def run_source(
     script.write_text(step("src")["run"], encoding="utf-8")
     out = tmp_path / "out"
     out.write_text("", encoding="utf-8")
+    (tmp_path / "genv").write_text("", encoding="utf-8")
     env = {
         "PATH": os.environ["PATH"], "GITHUB_ACTION_PATH": str(action_dir), "GITHUB_OUTPUT": str(out),
+        "GITHUB_ENV": str(tmp_path / "genv"), "ACTION_REF": "",
         "RUNNER_OS": "Linux", "RUNNER_ARCH": "X64", "ImageOS": "ubuntu24", "RUNNER_ENVIRONMENT": runner_environment,
         "INPUT_SOURCE": "auto", "INPUT_COMMIT": "", "INPUT_REPOSITORY": "", "INPUT_PYTHON": "3.12",
         "INPUT_UV_VERSION": catalog.UV_VERSION, "INPUT_SELF_PROVISION": "auto", "INPUT_CLIS": "auto",
     }  # fmt: skip
-    env.update({f"INPUT_{k.upper()}": v for k, v in inputs.items()})
+    env.update({(k if k == "ACTION_REF" else f"INPUT_{k.upper()}"): v for k, v in inputs.items()})
     return subprocess.run(["bash", "-e", str(script)], env=env, capture_output=True, text=True, cwd=tmp_path)
 
 
@@ -215,3 +217,32 @@ def test_setup_failure_is_the_scripts_exit_code(tmp_path):
     script.write_text(setup["run"], encoding="utf-8")
     env = {"PATH": os.environ["PATH"], "HOME": str(home), "PROVISION": "auto", "GITHUB_ENV": str(tmp_path / "e")}
     assert subprocess.run(["bash", "-e", str(script)], env=env, capture_output=True, cwd=tmp_path).returncode == 2
+
+
+def exported(tmp_path: Path) -> dict[str, str]:
+    pairs = (line.partition("=") for line in (tmp_path / "genv").read_text(encoding="utf-8").splitlines())
+    return {k: v for k, _, v in pairs}
+
+
+def test_source_repository_exports_the_commit_it_installs(tmp_path):
+    """The ledger names the harness commit: a copy installed from disk has no commit in direct_url.json."""
+    done = run_source(tmp_path, harness_in_root=False, source="repository", repository="ssh://x/y.git", commit=SHA)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert exported(tmp_path) == {"L4_HARNESS_COMMIT": SHA}
+
+
+def test_source_action_exports_a_pinned_ref_and_nothing_for_a_branch_or_tag(tmp_path):
+    done = run_source(tmp_path, harness_in_root=True, ACTION_REF=SHA)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert exported(tmp_path) == {"L4_HARNESS_COMMIT": SHA}
+    for ref in ("main", "v1", "", SHA[:12], SHA.upper()):
+        other = tmp_path / ("r" + (ref or "empty"))
+        other.mkdir()
+        done = run_source(other, harness_in_root=True, ACTION_REF=ref)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert exported(other) == {}, ref
+
+
+def test_the_source_step_reads_the_action_ref_through_env():
+    assert step("src")["env"]["ACTION_REF"] == "${{ github.action_ref }}"
+
