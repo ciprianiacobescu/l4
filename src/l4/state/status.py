@@ -43,6 +43,7 @@ from l4.state.followups import (
     known_follow_ups,
     offer_for,
     read_feedback_at,
+    taken_by_follow_ups,
 )
 from l4.state.ledger import (
     MAX_LEDGER_FILE_BYTES,
@@ -316,13 +317,29 @@ def discover(
         if snapshot.state.phase == Phase.MERGED.value:
             follows = follow_ups_of(known, snapshot.ref.id)
             opened = {k.name for k in follows if phases.get(k.id) not in done}
+            released = {k.name for k in follows if phases.get(k.id) == Phase.ABANDONED.value}
             file = snapshot.feedback
             if has_base and snapshot.source != "archive":
                 rel = _relative(provider, snapshot.ref, git)
                 file = read_feedback_at(git, base, rel) or file  # the base branch holds what the person committed
-            snapshot = replace(snapshot, feedback=file, follow_up=offer_for(file, snapshot.state, follows, opened))
+            # the follow-ups' takes are on their own ledgers, not the parent's: the parent reads them from the markers
+            state = taken_by_follow_ups(snapshot.state, file, [k for k in follows if k.name not in released])
+            snapshot = replace(
+                snapshot, state=state, feedback=file, follow_up=offer_for(file, state, follows, opened, released)
+            )
         out.append((provider, snapshot))
     return sorted(out, key=lambda pair: pair[1].ref.id)
+
+
+def select_runnable(
+    cfg: L4Config, git: Git, providers: list[SpecProvider], unit: str
+) -> tuple[SpecProvider, UnitRef]:
+    """The one unit a command with `--unit` acts on, open follow-ups included. An archived change is only ever the
+    parent of a follow-up: it is no unit to run, resume or verify."""
+    for provider, snapshot in discover(cfg, git, providers, (unit,)):
+        if snapshot.source != "archive":
+            return provider, snapshot.ref
+    raise UnknownUnit(f"no such unit: {unit}")
 
 
 def snapshots(

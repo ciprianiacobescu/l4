@@ -82,7 +82,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.status import load_snapshot, select_units
+from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
@@ -1286,7 +1286,7 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
     git = Git(app.repo, environ=app.environ)
-    ((provider, ref),) = select_units(list(providers_for(cfg, app.repo, app.environ)), (unit,))
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
     phase = snapshot.state.phase
     answered = phase == "awaiting_human" and next_action(facts_of(snapshot))[0] == "verify"  # verdicts are in

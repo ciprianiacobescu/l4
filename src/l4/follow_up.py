@@ -115,8 +115,8 @@ def make_follow_up(
         assert isinstance(provider, KiroProvider | OpenSpecProvider)
         created = provider.create_follow_up(parent_in_tree, n, plan.groups, plan.delta, taken)
         _mark_taken(app, created, [i for i, _ in taken], name)
-        _write_ledger(app, created, follow_id, names, tree.head, plan.taken)
-        _commit_and_push(app, cfg, git.at(tree.path), names, parent.id, follow_id, name, n, push_config)
+        run_id = _write_ledger(app, created, follow_id, names, tree.head, plan.taken)
+        _commit_and_push(app, cfg, git.at(tree.path), names, parent.id, follow_id, name, n, push_config, run_id)
         log.info("%s: follow-up %s created on %s for %s", parent.id, name, names.branch, ", ".join(i for i, _ in taken))
         return FollowUpMade(parent.id, follow_id, names.branch, tuple(i for i, _ in taken), tuple(plan.waiting))
     finally:
@@ -141,7 +141,7 @@ def _mark_taken(app: AppContext, created: UnitRef, ids: list[str], name: str) ->
 
 def _write_ledger(
     app: AppContext, created: UnitRef, follow_id: str, names: UnitNames, head: str, refs: Sequence[FeedbackRef]
-) -> None:
+) -> str:
     run_id = new_run_id()
     while run_id == app.run_id:
         run_id = new_run_id()
@@ -152,14 +152,15 @@ def _write_ledger(
     for ref in refs:
         writer.append("feedback.taken", id=ref.id, kind=ref.kind, sha256=ref.sha256, round=0, fix_unit=created.name)
     writer.finish(0)
+    return run_id
 
 
 def _commit_and_push(
     app: AppContext, cfg: L4Config, git: Git, names: UnitNames, parent_id: str, follow_id: str, name: str, n: int,
-    push_config: tuple[tuple[str, str], ...],
+    push_config: tuple[tuple[str, str], ...], run_id: str,
 ) -> None:  # fmt: skip
     git.run("add", "-A")
-    trailers = CommitTrailers(unit=follow_id, run_id=app.run_id, iteration=1, phase="intake")
+    trailers = CommitTrailers(unit=follow_id, run_id=run_id, iteration=1, phase="intake")  # the ledger's run
     git.commit(f"docs({name}): follow-up {n} of {parent_id.partition(':')[2]} [skip ci]", trailers, BOT_IDENTITY)
     try:
         git.push("origin", [f"HEAD:refs/heads/{names.branch}"], config=push_config)

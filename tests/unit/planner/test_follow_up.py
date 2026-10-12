@@ -143,6 +143,9 @@ def test_an_item_a_merged_follow_up_took_is_not_taken_again(project, capsys, raw
     raw(repo, "commit", "-q", "-m", "the follow-up merged")
     raw(repo, "push", "-q", "origin", "main")
     assert plan(project, capsys)[f"kiro:{UNIT}"]["next_action"] != "follow_up"
+    assert main(["status", "--json", "--repo", str(repo)], environ=project[1]) == 0
+    status = {u["unit"]: u for u in json.loads(capsys.readouterr().out)["units"]}
+    assert status[f"kiro:{UNIT}"]["feedback_counts"] == {"taken": 1}  # the parent reads the take from the marker
     second = ITEM.replace("FB-001", "FB-002").replace("dedupe the rounding", "dedupe it again").split("\n", 2)[2]
     (repo / SPEC / "feedback.md").write_text(ITEM + "\n" + second)
     raw(repo, "add", "-A")
@@ -199,3 +202,30 @@ def test_an_archived_openspec_change_with_feedback_plans_a_follow_up(make_repo, 
     units = plan(project, capsys)
     assert units["openspec:add-x"]["phase"] == "merged" and units["openspec:add-x"]["next_action"] == "follow_up"
     assert "openspec:add-y" not in units and units["openspec:live"]["next_action"] == "implement"
+
+
+def test_an_abandoned_follow_up_releases_its_items(project, capsys, raw):
+    """A follow-up on a branch whose unit was abandoned keeps its number but no longer holds what it took."""
+    from l4.redact import Redactor
+    from l4.specs.feedback import content_sha256
+    from l4.state.ledger import LedgerWriter
+
+    repo, _ = project
+    sha = content_sha256(FeedbackFile.parse(ITEM).get("FB-001"))
+    name = f"{UNIT}-followup-1"
+    raw(repo, "checkout", "-q", "-b", f"l4/kiro/{name}")
+    follow = repo / ".kiro" / "specs" / name
+    (follow / ".l4").mkdir(parents=True)
+    (follow / "tasks.md").write_text("- [ ] 1. Todo\n")
+    marker = {"schema": "l4/followup@1", "parent": f"kiro:{UNIT}", "items": [{"id": "FB-001", "sha256": sha}]}
+    (follow / ".l4" / "followup.json").write_text(json.dumps(marker))
+    writer = LedgerWriter.open(follow, f"kiro:{name}", "r-20261004T0900Z-bbbb", redactor=Redactor({}))
+    writer.append("phase.changed", **{"from": "implementing", "to": "abandoned", "trigger": "test"})
+    writer.finish(0)
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "an abandoned follow-up")
+    raw(repo, "push", "-q", "origin", f"l4/kiro/{name}")
+    raw(repo, "checkout", "-q", "main")
+    units = plan(project, capsys)
+    assert units[f"kiro:{UNIT}"]["next_action"] == "follow_up"  # the item is offered again, as follow-up 2
+    assert units[f"kiro:{name}"]["phase"] == "abandoned"

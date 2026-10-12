@@ -17,7 +17,7 @@ from l4.config.schema import L4Config
 from l4.specs.base import Framework, parse_unit_id
 from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile, FeedbackItem, content_sha256
 from l4.specs.followup import MARKER_PATH, MAX_MARKER_BYTES, parse_follow_up_marker, split_follow_up_name
-from l4.state.fold import UnitState
+from l4.state.fold import FeedbackState, UnitState
 from l4.vcs.git import Git
 from l4.vcs.tree import regular_blobs
 from l4.verifier.feedback import scan_feedback
@@ -148,12 +148,34 @@ def next_ordinal(follows: list[KnownFollowUp]) -> int:
     return n
 
 
+def taken_by_follow_ups(state: UnitState, file: FeedbackFile | None, follows: list[KnownFollowUp]) -> UnitState:
+    """The parent's state with the takes of its follow-ups (`round` 0, `fix_unit` the follow-up): they are written to
+    the follow-up's ledger, so the parent's own fold knows nothing of them. The latest follow-up wins over an earlier
+    one, and over the parent's own entry when it took the content the file has now. An edit after the take reads as
+    an edit (D7), and the item is takeable again."""
+    now = {i.id: content_sha256(i) for i in file.items} if file is not None else {}
+    overlay: dict[str, FeedbackState] = {}
+    for k in follows:  # by ordinal: the latest take of an item stands
+        for fid, sha in k.items:
+            overlay[fid] = FeedbackState(status="taken", sha256=sha, round=0, fix_unit=k.name)
+    merged = dict(state.feedback)
+    for fid, took in overlay.items():
+        if fid not in merged or now.get(fid) == took.sha256:
+            merged[fid] = took
+    return state.model_copy(update={"feedback": merged})
+
+
 def offer_for(
-    file: FeedbackFile | None, state: UnitState, follows: list[KnownFollowUp], open_names: set[str]
+    file: FeedbackFile | None,
+    state: UnitState,
+    follows: list[KnownFollowUp],
+    open_names: set[str],
+    released: set[str] = frozenset(),  # type: ignore[assignment]
 ) -> FollowUpOffer:
     """The takeable items of the parent's file, less those a follow-up has taken (same id, same content hash), and the
-    open follow-up. `open_names`: the follow-ups whose unit is neither merged nor abandoned."""
-    took = {pair for k in follows for pair in k.items}
+    open follow-up. `open_names`: the follow-ups whose unit is neither merged nor abandoned. `released`: the abandoned
+    ones, which keep their number but no longer hold their items."""
+    took = {pair for k in follows if k.name not in released for pair in k.items}
     scan = scan_feedback(file, state)
     items = tuple(i for i in scan.takeable if (i.id, content_sha256(i)) not in took)
     opened = next((k.name for k in follows if k.name in open_names and not k.on_base), None)
