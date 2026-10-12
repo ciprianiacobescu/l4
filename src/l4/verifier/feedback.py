@@ -21,7 +21,7 @@ from l4.redact import Redactor
 from l4.specs.feedback import FeedbackFile, FeedbackItem, FeedbackStatus, content_sha256, problems
 from l4.state.fold import UnitState
 from l4.verifier.judge import FeedbackAnswer
-from l4.verifier.types import FeedbackOutcome, FeedbackRef, Finding, Severity, VerifyResult
+from l4.verifier.types import FeedbackOutcome, FeedbackRef, Finding, Severity, Verdict, VerifyResult
 
 MAX_REQUEST_CHARS = 1200  # the person's text, whole up to this (L4-FBK-004)
 MAX_EVIDENCE_CHARS = 300  # the judge's evidence in a title, an Outcome line and an event
@@ -172,13 +172,41 @@ def record_no_status(ledger: Any, state: UnitState, ids: Sequence[str]) -> None:
             ledger.append("feedback.invalid", id=fid, problem=NO_STATUS)
 
 
+def judged_outcomes(events: Sequence[Any], round_: int) -> list[FeedbackOutcome]:
+    """The judge's answers of `round_` as the ledger holds them (`feedback.judged` for a yes, `feedback.not_addressed`
+    for a no): a resumed round reuses the steps of the round before, and its judge check is not stored (review #14)."""
+    found: dict[str, FeedbackOutcome] = {}
+    for event in events:
+        data = event.data
+        if event.type not in ("feedback.judged", "feedback.not_addressed") or data.get("round") != round_:
+            continue
+        fid, evidence = str(data.get("id") or ""), str(data.get("evidence") or "")
+        if fid:
+            found[fid] = FeedbackOutcome(fid, event.type == "feedback.judged", evidence)
+    return list(found.values())
+
+
+def record_addressed(ledger: Any, result: VerifyResult) -> None:
+    """`feedback.addressed{id, round, sha, evidence}` for each item the judge found addressed, in a PASS round only
+    (review #14): in a round that fails for another reason the judge's yes stays evidence (`feedback.judged`), because
+    the next fix unit can undo the change."""
+    if result.verdict is not Verdict.PASS:
+        return
+    for outcome in result.feedback_outcomes:
+        if outcome.addressed:
+            ledger.append(
+                "feedback.addressed", id=outcome.id, round=result.round, sha=result.head_sha, evidence=outcome.evidence
+            )
+
+
 def apply_addressed(
     unit_dir: Path, result: VerifyResult, redactor: Redactor, *, skipped: list[str] | None = None
 ) -> list[Path]:
     """Status `addressed` and the Outcome line `Addressed in round N at <sha10>: <evidence>` for each item the round
-    found addressed, in the parent's `feedback.md` (committed with the round's evidence). The paths written. An item
-    with no Status line is skipped (its id goes to `skipped`): the harness's writes never raise."""
-    done = [o for o in result.feedback_outcomes if o.addressed]
+    found addressed, in the parent's `feedback.md` (committed with the round's evidence), in a PASS round only
+    (review #14). The paths written. An item with no Status line is skipped (its id goes to `skipped`): the harness's
+    writes never raise."""
+    done = [o for o in result.feedback_outcomes if o.addressed] if result.verdict is Verdict.PASS else []
     file = FeedbackFile.load(unit_dir) if done else None
     if file is None:
         return []
