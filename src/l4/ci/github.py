@@ -28,7 +28,8 @@ CACHE_PATHS = (
     "~/.cache/uv",
 )  # fmt: skip
 # The agent CLIs and bwrap, at the paths `l4 doctor --ci --fix` installs into. The setup action restores this cache
-# (`.github/actions/l4/action.yml`, step `clis`) and the workflow saves it, so the two lists must be equal (a test).
+# (`.github/actions/l4/action.yml`, step `clipaths`, the output `clis-cache-paths`) and the workflow's save step reads
+# that output; no workflow repeats the list. This tuple is the source the tests hold the action's list to.
 # Not cached: `uv`, `uvx` and `l4` in ~/.local/bin (the harness cache holds them; `!` patterns remove earlier matches),
 # npm's download cache `~/.cache/l4/npm` (353 MB, redundant once the installed copies under ~/.local/share/l4 are
 # cached; it made the CLI cache twice as big and 12 s to restore) and `~/.cache/l4/locks`.
@@ -253,14 +254,14 @@ def _action_step(cfg: L4Config, pin: ActionPin, *, hosted: bool) -> str:
 def _clis_save_step(hosted: bool) -> str:
     if not hosted:
         return ""
-    paths = "\n".join(f"            {path}" for path in CLI_CACHE_PATHS)
     return f"""\
       - name: save agent CLI cache
-        if: ${{{{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.clis-cache-hit != 'true' }}}}
+        if: >-
+          ${{{{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.clis-cache-hit != 'true'
+          && steps.l4.outputs.clis-cache-paths != '' }}}}
         uses: {CACHE_ACTION.format(op="save")}
         with:
-          path: |
-{paths}
+          path: ${{{{ steps.l4.outputs.clis-cache-paths }}}}
           key: ${{{{ steps.l4.outputs.clis-cache-key }}}}"""
 
 

@@ -141,3 +141,41 @@ def repin(text: str, *, sha: str, ref: str | None) -> str:
             f"{ACTION_PATH}@<sha>` line, or the `commit` input of `uses: ./{ACTION_PATH}`); edit it by hand",
         )
     return new
+
+
+SAVE_STEP_NAME = "save agent CLI cache"
+SAVE_PATH_OUTPUT = "${{ steps.l4.outputs.clis-cache-paths }}"
+_SAVE_NAME = re.compile(r"^(?P<indent>[ \t]*)-[ \t]+name:[ \t]*[\"']?" + re.escape(SAVE_STEP_NAME) + r"[\"']?[ \t]*$")
+_PATH_BLOCK = re.compile(r"^(?P<lead>[ \t]*path:)[ \t]*\|[-+]?[ \t]*$")
+
+
+def migrate_save_paths(text: str) -> str | None:
+    """The workflow with the literal path list of its `save agent CLI cache` step replaced by the action's output
+    (`path: ${{ steps.l4.outputs.clis-cache-paths }}`), or None when the step is absent or already reads the output.
+    Only the lines of that `path: |` block change (L4-ACT-002): the action holds the list, so a workflow that repeats it
+    stops matching the restore when the harness changes it."""
+    lines = text.splitlines(keepends=True)
+    for i, raw in enumerate(lines):
+        named = _SAVE_NAME.match(raw.rstrip("\r\n"))
+        if not named:
+            continue
+        dash = len(named["indent"])
+        for j in range(i + 1, len(lines)):
+            body = lines[j].rstrip("\r\n")
+            indent = len(body) - len(body.lstrip())
+            if body.strip() and indent <= dash:
+                break  # the next step
+            block = _PATH_BLOCK.match(body)
+            if not block:
+                continue
+            end = j + 1
+            while end < len(lines):
+                inner = lines[end].rstrip("\r\n")
+                if inner.strip() and len(inner) - len(inner.lstrip()) <= len(block["lead"]) - len("path:"):
+                    break
+                end += 1
+            eol = lines[j][len(body) :] or "\n"
+            lines[j:end] = [f"{block['lead']} {SAVE_PATH_OUTPUT}{eol}"]
+            return "".join(lines)
+        return None
+    return None

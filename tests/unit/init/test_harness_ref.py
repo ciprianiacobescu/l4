@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from l4.ci.github import ActionPin, render_github_action_ci
 from l4.cli import main
+from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.init.action import resolve_ref
 
@@ -160,3 +162,60 @@ def test_ref_and_commit_exclude_each_other_on_init(target: Path, harness_remote:
     flags = ("--action", "--action-repo", "o/harness", "--harness-ref", "v0.3.0", "--harness-commit", SHA)
     assert init(target, harness_remote.environ, *flags) == 2
     assert "exclude each other" in capsys.readouterr().err
+
+
+OLD_SAVE_PATHS = """\
+          path: |
+            ~/.local/bin
+            !~/.local/bin/uv
+            !~/.local/bin/uvx
+            !~/.local/bin/l4
+            ~/.local/share/l4
+            ~/.local/share/claude
+            ~/.cache/l4/installers
+"""
+NEW_SAVE_PATH = "          path: ${{ steps.l4.outputs.clis-cache-paths }}\n"
+
+
+def adopt_hosted(target: Path, remote: HarnessRemote) -> None:
+    """An adoption, then its workflow in the hosted-runner form (the only one with a save step)."""
+    adopt(target, remote)
+    pin = ActionPin(repository="o/harness", sha=remote.old, ref="v0.3.0")
+    hosted = render_github_action_ci(L4Config.model_validate({"ci": {"runner_tags": []}}), pin)
+    (target / WORKFLOW).write_text(hosted)
+
+
+def test_upgrade_replaces_a_literal_save_path_block_once(target: Path, harness_remote: HarnessRemote, capsys):
+    """L4-ACT-002: an adoption made before the paths became an action output keeps its literal list; the upgrade moves
+    the pin and swaps that one block, nothing else, and says so."""
+    adopt_hosted(target, harness_remote)
+    current = (target / WORKFLOW).read_text()
+    assert NEW_SAVE_PATH in current and OLD_SAVE_PATHS.count("\n") == 8
+    old = current.replace(NEW_SAVE_PATH, OLD_SAVE_PATHS)
+    (target / WORKFLOW).write_text(old)
+    capsys.readouterr()
+    assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0") == 0
+    out = capsys.readouterr().out
+    new = (target / WORKFLOW).read_text()
+    assert new == current.replace(f"@{harness_remote.old} # v0.3.0", f"@{harness_remote.new} # v0.4.0")
+    assert out.count("clis-cache-paths") == 1 and "save agent CLI cache" in out
+    assert upgrade(target, harness_remote.environ, "--harness-commit", SHA) == 0  # the second time: only the pin
+    assert "clis-cache-paths" not in capsys.readouterr().out
+
+
+def test_upgrade_keeps_a_new_form_workflow_to_the_uses_line(target: Path, harness_remote: HarnessRemote, capsys):
+    adopt_hosted(target, harness_remote)
+    before = (target / WORKFLOW).read_text()
+    assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0") == 0
+    assert len(changed_lines(before, (target / WORKFLOW).read_text())) == 1
+    assert "clis-cache-paths" not in capsys.readouterr().out
+
+
+def test_dry_run_reports_the_save_migration_and_writes_nothing(target: Path, harness_remote: HarnessRemote, capsys):
+    adopt_hosted(target, harness_remote)
+    old = (target / WORKFLOW).read_text().replace(NEW_SAVE_PATH, OLD_SAVE_PATHS)
+    (target / WORKFLOW).write_text(old)
+    capsys.readouterr()
+    assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0", "--dry-run") == 0
+    assert "would change" in capsys.readouterr().out
+    assert (target / WORKFLOW).read_text() == old

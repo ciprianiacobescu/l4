@@ -12,12 +12,12 @@
 #   clis     the agent CLIs and bwrap, at the paths `l4 doctor --ci --fix` installs into, keyed
 #            l4-clis-<os>-<arch>-<image>-<hash of the catalog's pins> (never the harness). Restored here when the key
 #            has no hit; the WORKFLOW saves it after `l4 doctor --ci --fix`, with actions/cache/save and the outputs
-#            clis-cache-key, when clis-cache-hit is not 'true'.
+#            clis-cache-key and clis-cache-paths, when clis-cache-hit is not 'true'.
 name: L4 harness
 description: >-
   Install the L4 harness at a pinned source, restore its caches, run the runner setup and put l4 on PATH. The agent-CLI
-  cache is restored here and saved by the workflow after `l4 doctor --ci --fix` (actions/cache/save with the output
-  clis-cache-key, when clis-cache-hit is not 'true').
+  cache is restored here and saved by the workflow after `l4 doctor --ci --fix` (actions/cache/save with the outputs
+  clis-cache-key and clis-cache-paths, when clis-cache-hit is not 'true').
 inputs:
   source:
     description: auto (action when this action's repository holds the harness, else repository), action or repository.
@@ -60,6 +60,11 @@ outputs:
   clis-cache-key:
     description: The agent-CLI cache key, for the workflow's actions/cache/save step.
     value: ${{ steps.clikey.outputs.key }}
+  clis-cache-paths:
+    description: >-
+      The agent-CLI cache paths (multi-line; empty when clis is none), for the workflow's actions/cache/save step. The
+      workflow never repeats them: a cache is versioned by its exact path list, so a copy would drift from the restore.
+    value: ${{ steps.clipaths.outputs.paths }}
   version:
     description: The installed harness version.
     value: ${{ steps.ver.outputs.version }}
@@ -199,19 +204,29 @@ runs:
         # the suffix is a hash of the catalog's pins, made by the installed harness; the harness itself is no input
         suffix=$("$HOME/.local/bin/l4" ci cache-key clis)
         echo "key=l4-clis-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-$suffix" >> "$GITHUB_OUTPUT"
+    - name: agent CLI cache paths
+      id: clipaths
+      if: inputs.clis != 'none'
+      shell: bash
+      run: |
+        # the one place the list is written: restored below and output for the workflow's save step
+        cat >> "$GITHUB_OUTPUT" <<'L4_EOF'
+        paths<<L4_CLI_PATHS
+        ~/.local/bin
+        !~/.local/bin/uv
+        !~/.local/bin/uvx
+        !~/.local/bin/l4
+        ~/.local/share/l4
+        ~/.local/share/claude
+        ~/.cache/l4/installers
+        L4_CLI_PATHS
+        L4_EOF
     - name: restore agent CLI cache
       id: clis
       if: inputs.clis != 'none'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          ~/.local/bin
-          !~/.local/bin/uv
-          !~/.local/bin/uvx
-          !~/.local/bin/l4
-          ~/.local/share/l4
-          ~/.local/share/claude
-          ~/.cache/l4/installers
+        path: ${{ steps.clipaths.outputs.paths }}
         key: ${{ steps.clikey.outputs.key }}
     - name: runner setup
       id: setup

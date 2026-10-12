@@ -77,8 +77,10 @@ def test_cli_cache_paths_are_the_hosted_tool_cache_minus_the_harness():
     """SCN-ACT-05: the CLI cache restores the paths `doctor --ci --fix` installs into, none of uv's harness dirs."""
     from l4.ci.github import CACHE_PATHS
 
-    step = next(s for s in _steps() if s.get("id") == "clis")
-    paths = [p.strip() for p in step["with"]["path"].splitlines() if p.strip() and not p.strip().startswith("!")]
+    step = next(s for s in _steps() if s.get("id") == "clipaths")
+    lines = step["run"].splitlines()
+    start = lines.index("paths<<L4_CLI_PATHS") + 1
+    paths = [p for p in lines[start : lines.index("L4_CLI_PATHS", start)] if not p.startswith("!")]
     assert paths
     assert set(paths) <= set(CACHE_PATHS)
     assert not [p for p in paths if "uv" in p]
