@@ -44,9 +44,9 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@9+green@4"
+    assert rendered.template_version == "contract@10+green@4"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
-    assert render_prompt("red", ctx()).template_version == "contract@9+red@9"
+    assert render_prompt("red", ctx()).template_version == "contract@10+red@9"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256
 
 
@@ -360,10 +360,15 @@ def test_a_test_chore_prompt_allows_new_tests_and_names_the_subjects():
     sources = (("proposal.md", f"## Why\nFinding F-aaaaaaaa: {hold}"),)
     plain = render_prompt("single", ctx(sources=sources))
     chore = render_prompt("single", ctx(sources=sources, adds_tests=True))
-    assert "Do not add tests" in plain.text and plain.template_version == "contract@9+single@3"
-    assert "Do not add tests" not in chore.text and chore.template_version == "contract@9+single_tests@5"
+    assert "Do not add tests" in plain.text and plain.template_version == "contract@10+single@3"
+    assert "Do not add tests" not in chore.text and chore.template_version == "contract@10+single_tests@5"
     assert "# Phase: SINGLE (add tests" in chore.text
     assert "new test files" in chore.text and "append new tests to this unit's own test files" in chore.text
     assert "no change to an existing test" in chore.text and "non-test code" in chore.text
     assert "only when the test checks" in chore.text  # a criterion id is not a way to pad coverage
     assert "src/pkg/mod.py::shout" in chore.text  # the subjects reach the agent through the proposal's data block
+
+
+def test_the_contract_names_feedback_md_beside_tasks_and_questions():
+    """L4-FBK-012, L4-IMP-004: every role is told not to edit the person's feedback file."""
+    assert "Do not edit `tasks.md`, `questions.md`, `feedback.md`," in render_prompt("red", ctx()).text

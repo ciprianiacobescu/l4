@@ -217,7 +217,6 @@ class Orchestrator:
         self._clarifier = Clarifier(services.ref.path, services.ledger)
         self._reentry: Reentry | None = None
         self._notes: tuple[str, ...] | None = None  # the sticky note's sections for the mirror; None: leave it alone
-        self._review_noted = False  # `_notes` holds the re-verification section: handing off again clears it
         self._exit_reason: str | None = None  # one line for `ci map-exit` when the exit code alone says too little
         self._rounds: dict[str, int] = {}  # per task, the times it blocked and went to the clarifier in this run
         self._sent: set[str] = set()  # questions handed to the clarify hook in this run: never handed over twice
@@ -539,7 +538,6 @@ class Orchestrator:
         if found is None:
             return False
         self._notes = (review_note(found),)  # the mirror shows why the MR is a draft again, from the first sync on
-        self._review_noted = True
         self._go(found.trigger, **found.context)
         return True
 
@@ -878,8 +876,7 @@ class Orchestrator:
         if handoff(self._ctx) is False:
             log.warning("%s: verified; the hand-off hook did nothing, so the unit stays verified", self.services.ref.id)
             return ExitCode.OK
-        if self._review_noted:
-            self._notes = ()  # in review again: the note that said why the MR was a draft is out of date
+        self._notes = ()  # in review: nothing waits for an answer, and the note says how to ask for changes (D12)
         edge = self._go(Trigger.HAND_OFF_PUSHED)
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.OK)
 

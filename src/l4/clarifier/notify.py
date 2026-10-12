@@ -17,9 +17,14 @@ _MARKUP = str.maketrans({"`": "'", "[": "(", "]": ")", "<": "‹", ">": "›", "
 _LINE_BREAKS = re.compile(r"\s+")
 
 
-def _title(text: str) -> str:
+def sticky_line(text: str, limit: int = MAX_TITLE_CHARS) -> str:
+    """Repository or model text as one line of a note: no line break, no mention, link or markup, cut at `limit`."""
     one = "".join(ch for ch in _LINE_BREAKS.sub(" ", text) if ch.isprintable()).strip()
-    return one.translate(_MARKUP)[:MAX_TITLE_CHARS]
+    return one.translate(_MARKUP)[:limit]
+
+
+def _title(text: str) -> str:
+    return sticky_line(text)
 
 
 def build_sticky_section(
