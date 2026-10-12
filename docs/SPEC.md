@@ -541,6 +541,9 @@ verifier:
   fix_minor_findings: false
   secret_scan: gitleaks            # gitleaks | none
 
+feedback:
+  max_rounds: 5                    # feedback fix units per unit, apart from verifier.max_fix_rounds; 0 turns taking off (L4-FBK-006)
+
 archive:
   mode: post_merge_pr              # post_merge_pr (default, maintainer decision 2026-10-03) | on_approval (L4-ARC-007, L4-ARC-001)
   auto_merge_archive_pr: false     # true: the harness merges its own archive-only PR (contains only spec bookkeeping)
