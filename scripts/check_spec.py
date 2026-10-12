@@ -76,7 +76,7 @@ try:
 
     walk(cfg)
     events = set(re.findall(r"`([a-z_]+\.[a-z_.]+)`", part1[part1.index("### 12.1"):part1.index("### 12.2")]))
-    allow = {"ci.skip"} | events
+    allow = {"ci.skip", "feedback.md"} | events  # feedback.md is the file, not a config key (L4-FBK-001)
     tops = sorted(cfg.keys(), key=len, reverse=True)
     refs = set(m.group(1) for m in re.finditer(r"`((?:%s)(?:\.[a-z_0-9]+)+)`" % "|".join(tops), t))
     unknown = sorted(r for r in refs - allow if r not in paths

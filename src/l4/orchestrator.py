@@ -331,18 +331,28 @@ class Orchestrator:
             self._sync_mirror()
 
     def resume(
-        self, reason: str, *, signal: str | None = None, by: str | None = None, extend_fix_rounds: int | None = None
+        self,
+        reason: str,
+        *,
+        signal: str | None = None,
+        by: str | None = None,
+        extend_fix_rounds: int | None = None,
+        extend_feedback_rounds: int | None = None,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
         `l4 run` continues the unit. `signal` (`label:<event id>`) and `by` (`member`) say that a member's `l4:resume`
         label asked for it: one resume per signal. `extend_fix_rounds` records `budget.extended` first, so that the fold
-        has the extra rounds when the verifier decides again."""
+        has the extra rounds when the verifier decides again; `extend_feedback_rounds` is the same for the feedback
+        limit (`feedback_rounds` in the same event, L4-FBK-006)."""
         before = self._refold().phase or "none"
         self._commit_what = "resume"
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
-        if extend_fix_rounds:
-            self.services.ledger.append("budget.extended", fix_rounds=extend_fix_rounds, reason=reason[:300], **extra)
+        if extend_fix_rounds or extend_feedback_rounds:
+            rounds = {
+                k: v for k, v in (("fix_rounds", extend_fix_rounds), ("feedback_rounds", extend_feedback_rounds)) if v
+            }
+            self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
         self.services.ledger.append("unit.resumed", reason=reason[:300], **extra)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
         self._go(Trigger.RESUMED)
@@ -1029,6 +1039,7 @@ def run_unit_in_worktree(
     resume_signal: str | None = None,
     resume_by: str | None = None,
     resume_extend_fix_rounds: int | None = None,
+    resume_extend_feedback_rounds: int | None = None,
     waits: RunWaits | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
@@ -1079,7 +1090,8 @@ def run_unit_in_worktree(
             orchestrator.run_unit()
             if resume_reason is None
             else orchestrator.resume(
-                resume_reason, signal=resume_signal, by=resume_by, extend_fix_rounds=resume_extend_fix_rounds
+                resume_reason, signal=resume_signal, by=resume_by, extend_fix_rounds=resume_extend_fix_rounds,
+                extend_feedback_rounds=resume_extend_feedback_rounds,
             )
         )
         code, failed = result.exit_code, False
