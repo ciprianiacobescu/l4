@@ -32,7 +32,10 @@ def fake_tool(bin_dir: Path, name: str, body: str) -> None:
 
 
 @pytest.fixture
-def world(tmp_path: Path):
+def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # the root prerequisites (bubblewrap is Linux only) are the machine's business, not these tests': the same
+    # report on a Mac and on a Linux runner
+    monkeypatch.setattr("l4.doctor.checks_provision.detect_platform", lambda: "darwin-arm64")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake_tool(bin_dir, "git", '#!/bin/sh\necho "git version 2.43.0"\n')
