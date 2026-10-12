@@ -41,7 +41,8 @@ from l4.outcome import CommandResult
 from l4.services import H_PUSHED, ForgeHook, HookContext, MirrorHook
 from l4.specs.base import SpecError
 from l4.specs.feedback import FeedbackFile
-from l4.specs.followup import feedback_home
+from l4.specs.fixmark import read_fix_marker
+from l4.specs.followup import feedback_home, read_follow_up_marker
 from l4.state.fold import fold
 from l4.state.ledger import LedgerClosed, ledger_path, read_ledger
 from l4.state.status import snapshots
@@ -62,15 +63,24 @@ NOTHING_WAITING = "Nothing is waiting for a human answer."
 # --- renderers (pure) ---------------------------------------------------------------------------------------------
 
 
-def compose_sticky(notes: Sequence[str], phase: str, feedback: str | None) -> str:
+def compose_sticky(notes: Sequence[str], phase: str, feedback: str | None, *, parent: str | None = None) -> str:
     """The body of the sticky note: the sections (or the sentence that nothing waits), then the *Your feedback*
-    section, and for a unit in review the line that says how to ask for changes, always last (L4-FBK-011)."""
+    section, and for a unit in review the line that says how to ask for changes, always last (L4-FBK-011). A follow-up
+    or a fix unit (`parent`: its parent's id) takes no feedback of its own: its last line sends the person to the
+    parent (review #5)."""
     body = "\n\n".join(notes) if notes else NOTHING_WAITING
     if feedback:
         body += "\n\n" + feedback
     if phase == "in_review":
-        body += "\n\n" + FEEDBACK_HINT
+        body += "\n\n" + (_parent_line(parent) if parent else FEEDBACK_HINT)
     return body
+
+
+def _parent_line(parent: str) -> str:
+    return (
+        f"Feedback goes to the parent unit {_one_line(parent)}, in its feedback.md (docs/feedback.md); "
+        "this unit takes none of its own."
+    )
 
 
 def _one_line(text: str) -> str:
@@ -221,7 +231,12 @@ class _Mirror:
         self._draft(phase)
         self._labels(phase)
         if notes is not None:
-            self._sticky(compose_sticky(notes, phase, self._feedback()))
+            self._sticky(compose_sticky(notes, phase, self._feedback(), parent=self._parent()))
+
+    def _parent(self) -> str | None:
+        """The parent's id for a follow-up or a fix unit (it takes no feedback of its own), else None."""
+        marker = read_follow_up_marker(self._ctx.services.ref.path) or read_fix_marker(self._ctx.services.ref.path)
+        return marker.parent if marker is not None else None
 
     def _feedback(self) -> str | None:
         """The *Your feedback* section from `feedback.md` and the ledger as they are now (None: no item, or the file

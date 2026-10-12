@@ -178,6 +178,17 @@ def test_SCN_FBK_25_an_in_review_note_ends_with_the_hint():
     assert body == f"### Re-verifying after the hand-off\n\nx\n\n### Your feedback\n\n- FB-001 a\n\n{HINT}"
 
 
+def test_a_derived_unit_note_sends_feedback_to_the_parent_review_5():
+    """review #5: a follow-up's (or a fix unit's) note does not invite `l4 feedback add` on it: the parent takes it."""
+    body = compose_sticky((), "in_review", None, parent="openspec:add-reorder")
+    assert HINT not in body and "To ask for changes" not in body
+    assert body == (
+        f"{NOTHING_WAITING}\n\nFeedback goes to the parent unit openspec:add-reorder, in its feedback.md "
+        "(docs/feedback.md); this unit takes none of its own."
+    )
+    assert compose_sticky((), "implementing", None, parent="openspec:add-reorder") == NOTHING_WAITING
+
+
 @pytest.mark.parametrize("phase", ["implementing", "verifying", "awaiting_human", "verified", "fixing", "archived"])
 def test_other_phases_have_no_hint(phase):
     assert compose_sticky((), phase, None) == NOTHING_WAITING
