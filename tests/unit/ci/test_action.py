@@ -36,7 +36,9 @@ def test_inputs_and_outputs_are_those_of_the_design():
     defaults = {k: v.get("default") for k, v in DOC["inputs"].items()}
     assert defaults["source"] == "auto" and defaults["python"] == "3.12"
     assert defaults["self-provision"] == "auto" and defaults["clis"] == "auto" and defaults["command"] == ""
-    assert set(DOC["outputs"]) == {"source", "harness-cache-hit", "clis-cache-hit", "version", "clis-cache-key"}
+    assert set(DOC["outputs"]) == {
+        "source", "harness-cache-hit", "clis-cache-hit", "version", "clis-cache-key", "clis-cache-paths",
+    }  # fmt: skip
 
 
 def test_cache_hit_outputs_read_true_or_false():
@@ -247,11 +249,27 @@ def test_the_source_step_reads_the_action_ref_through_env():
     assert step("src")["env"]["ACTION_REF"] == "${{ github.action_ref }}"
 
 
+def action_cli_paths() -> list[str]:
+    """The list the `clipaths` step writes to its `paths` output (a heredoc in its script)."""
+    lines = step("clipaths")["run"].splitlines()
+    start = lines.index("paths<<L4_CLI_PATHS")
+    return lines[start + 1 : lines.index("L4_CLI_PATHS", start)]
+
+
+def test_the_action_outputs_the_cli_cache_paths_it_restores():
+    """L4-ACT-002: one list, in the action; the consumer's save step reads it instead of repeating it."""
+    out = DOC["outputs"]["clis-cache-paths"]
+    assert out["value"] == "${{ steps.clipaths.outputs.paths }}"
+    assert step("clipaths")["if"] == "inputs.clis != 'none'"
+    assert "clis-cache-key" in DOC["outputs"]
+
+
 def test_cli_cache_excludes_the_harness_links_and_the_npm_download_cache():
     """The harness cache holds uv, uvx and l4; npm's download cache duplicates the installed CLIs (L4-ACT-002)."""
     from l4.ci.github import CLI_CACHE_PATHS
 
-    paths = [p.strip() for p in step("clis")["with"]["path"].splitlines() if p.strip()]
+    assert step("clis")["with"]["path"] == "${{ steps.clipaths.outputs.paths }}"  # the list is held once, below
+    paths = action_cli_paths()
     assert paths == list(CLI_CACHE_PATHS)
     assert [p for p in paths if p.startswith("!")] == ["!~/.local/bin/uv", "!~/.local/bin/uvx", "!~/.local/bin/l4"]
     assert paths.index("~/.local/bin") < paths.index("!~/.local/bin/uv")  # a later `!` removes earlier matches

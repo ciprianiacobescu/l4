@@ -91,17 +91,29 @@ def test_the_cli_cache_is_saved_after_doctor_on_the_base_branch_when_the_key_had
     save = next(s for s in job()["steps"] if s.get("name") == "save agent CLI cache")
     assert save["uses"].startswith("actions/cache/save@")
     assert save["if"] == (
-        "${{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.clis-cache-hit != 'true' }}"
+        "${{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.clis-cache-hit != 'true'"
+        " && steps.l4.outputs.clis-cache-paths != '' }}"
     )
     assert save["with"]["key"] == "${{ steps.l4.outputs.clis-cache-key }}"
-    assert save["with"]["path"].split() == list(CLI_CACHE_PATHS)
+    assert save["with"]["path"] == "${{ steps.l4.outputs.clis-cache-paths }}"
+
+
+def test_the_rendered_workflow_holds_no_literal_cli_cache_path():
+    """The list lives in the action only: a copy in a consumer's workflow drifts when `l4 upgrade` moves the pin."""
+    for pin in (PIN, COPY):
+        text = render_github_action_ci(cfg(ci={"runner_tags": []}), pin)
+        for path in CLI_CACHE_PATHS:
+            assert path not in text, path
 
 
 def test_the_saved_paths_are_the_ones_the_action_restores():
     """The action restores and the workflow saves: one list, or the cache never hits."""
     action = yaml.safe_load(ACTION_FILE.read_text())
-    restore = next(s for s in action["runs"]["steps"] if s.get("id") == "clis")
-    assert restore["with"]["path"].split() == list(CLI_CACHE_PATHS)
+    steps = {s.get("id"): s for s in action["runs"]["steps"]}
+    assert steps["clis"]["with"]["path"] == "${{ steps.clipaths.outputs.paths }}"
+    lines = steps["clipaths"]["run"].splitlines()
+    start = lines.index("paths<<L4_CLI_PATHS") + 1
+    assert lines[start : lines.index("L4_CLI_PATHS", start)] == list(CLI_CACHE_PATHS)
 
 
 def test_the_saved_paths_never_include_a_credential_path():

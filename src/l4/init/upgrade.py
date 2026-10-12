@@ -37,7 +37,7 @@ from l4.config.schema import L4Config, Sha, effective_delivery
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.init.action import read_pin, remote_url, repin, resolve_ref
+from l4.init.action import SAVE_STEP_NAME, migrate_save_paths, read_pin, remote_url, repin, resolve_ref
 from l4.init.init import (
     PlannedFile,
     _serena_seed,
@@ -166,6 +166,7 @@ class UpgradePlan:
     seeded: tuple[PlannedFile, ...] = ()  # files created only when absent (`.serena/project.yml`), never overwritten
     marker: MarkerEdit | MarkerRefusal | None = None  # registers the `l4` pytest marker (P4)
     commit: str = ""  # the harness commit the plan pins or vendors
+    notes: tuple[str, ...] = ()  # one line each, printed after the files (the save step's paths, L4-ACT-002)
 
     @property
     def vendor_differs(self) -> bool:
@@ -260,11 +261,19 @@ def _plan_action(
         except ValidationError:
             raise _refuse(f"--harness-commit must be 40 lowercase hex characters, not {sha!r}") from None
     new = repin(text, sha=sha, ref=ref)
+    notes: tuple[str, ...] = ()
+    migrated = migrate_save_paths(new)
+    if migrated is not None:  # an adoption from before the paths became the action's output (once)
+        new = migrated
+        notes = (
+            f"the `{SAVE_STEP_NAME}` step of {WORKFLOW_RELPATH} now reads its paths from the action's output "
+            "clis-cache-paths (they were a literal list, which drifts from the action's restore)",
+        )
     changed = () if new == text else (PlannedFile(WORKFLOW_RELPATH, new.encode("utf-8"), 0o644),)
     missing = tuple(m for m in missing_keys(yaml.safe_load(old_config) or {}) if not m.startswith("harness."))
     return UpgradePlan(
         changed, None, (), (), (), missing=missing, seeded=tuple(_serena_seed(repo, loaded)),
-        marker=register_l4_marker(repo) if "pytest" in loaded.gates.test.command else None, commit=sha,
+        marker=register_l4_marker(repo) if "pytest" in loaded.gates.test.command else None, commit=sha, notes=notes,
     )  # fmt: skip
 
 
@@ -357,6 +366,8 @@ def run_upgrade(
     for planned in plan.seeded:
         verb_new = "would create" if dry_run else "created"
         click.echo(f"{verb_new} {planned.path} (in Serena's own form, so that its start changes nothing)")
+    for note in plan.notes:
+        click.echo(f"{'would change' if dry_run else 'changed'}: {note}")
     said = marker_message(plan.marker, dry_run=dry_run)
     if said is not None:
         click.echo(said)
