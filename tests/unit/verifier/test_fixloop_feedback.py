@@ -18,7 +18,7 @@ from ..archive.conftest import forge_env, gitlab, use_fake_gitlab  # noqa: F401 
 from ..conftest import TddRepo
 from ..implementer.conftest import green_step, red_step
 from ..orchestrator.conftest import BRANCH, UNIT_DIR
-from ..orchestrator.test_feedback_reentry import CHORE, JUDGE
+from ..orchestrator.test_feedback_reentry import CHORE, JUDGE, JUDGE_FB1
 from ..orchestrator.test_review_reentry import human_commit
 from .conftest import openspec_stand_in, valid_spec  # noqa: F401
 from .test_ladder_fix import chore_fix, noqa_green
@@ -109,7 +109,7 @@ def test_feedback_does_not_use_up_fix_rounds(
     first = run_l4([red_step(), noqa_green(), chore_fix(), JUDGE])
     assert first.code == 0 and [e["fix_unit"] for e in first.events("fix.spawned")] == ["add-discount-codes-fix-1"]
     human_commit(tdd_repo, raw, {FEEDBACK: item_file(tmp_path, None, "Extract the rounding")})
-    second = run_l4([CHORE, JUDGE])
+    second = run_l4([CHORE, JUDGE_FB1])
     assert second.code == 0, second.adapter.requests[-1].prompt[-500:]
     spawned = second.events("fix.spawned")
     assert [(e["fix_unit"], e.get("feedback_only")) for e in spawned] == [
@@ -128,7 +128,7 @@ def test_the_feedback_limit_escalates_with_exit_13_and_its_note(
     assert run_l4([red_step(), green_step(), JUDGE]).code == 0
     first_file = item_file(tmp_path, None, "Extract the rounding")
     human_commit(tdd_repo, raw, {FEEDBACK: first_file})
-    second = run_l4([CHORE, JUDGE])
+    second = run_l4([CHORE, JUDGE_FB1])
     assert second.code == 0 and [e.get("feedback_only") for e in second.events("fix.spawned")] == [True]
     taken_file = raw(tdd_repo.origin, "show", f"{BRANCH}:{FEEDBACK}")
     human_commit(tdd_repo, raw, {FEEDBACK: item_file(tmp_path, taken_file, "Name the constant")}, name="human2")

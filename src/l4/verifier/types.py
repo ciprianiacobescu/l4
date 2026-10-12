@@ -54,6 +54,15 @@ class FeedbackRef:
 
 
 @dataclass(frozen=True)
+class FeedbackOutcome:
+    """The judge check of one item in one round (L4-FBK-007): addressed or not, and the evidence either way."""
+
+    id: str
+    addressed: bool
+    evidence: str
+
+
+@dataclass(frozen=True)
 class Finding:
     severity: Severity
     title: str
@@ -275,6 +284,7 @@ class VerifyResult:
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
     feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)
+    feedback_outcomes: list[FeedbackOutcome] = field(default_factory=list)  # the judge check of L4-FBK-007; not stored
     integrity: IntegrityReport | None = None
     trace: list[CriterionEvidence] = field(default_factory=list)
     audit: list[AuditRecord] = field(default_factory=list)
