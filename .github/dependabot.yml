@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # The repository's own action pins (checkout, cache, upload-artifact, ...); they are full shas with a version comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
