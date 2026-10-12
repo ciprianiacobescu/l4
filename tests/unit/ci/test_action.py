@@ -39,6 +39,13 @@ def test_inputs_and_outputs_are_those_of_the_design():
     assert set(DOC["outputs"]) == {"source", "harness-cache-hit", "clis-cache-hit", "version", "clis-cache-key"}
 
 
+def test_cache_hit_outputs_read_true_or_false():
+    """actions/cache leaves `cache-hit` empty on a miss (seen live, run 38301695561): the outputs compare it, so a
+    caller reads `true` or `false`, never an empty string."""
+    for name, step in (("harness-cache-hit", "restore"), ("clis-cache-hit", "clis")):
+        assert DOC["outputs"][name]["value"] == f"${{{{ steps.{step}.outputs.cache-hit == 'true' }}}}"
+
+
 def test_uv_version_default_equals_the_catalog():
     """The literal default cannot drift from the catalog's uv pin."""
     assert DOC["inputs"]["uv-version"]["default"] == catalog.UV_VERSION

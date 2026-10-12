@@ -52,11 +52,11 @@ outputs:
     description: The source used, action or repository.
     value: ${{ steps.src.outputs.mode }}
   harness-cache-hit:
-    description: true when the installed harness came from the cache.
-    value: ${{ steps.restore.outputs.cache-hit }}
+    description: true when the installed harness came from the cache, else false.
+    value: ${{ steps.restore.outputs.cache-hit == 'true' }}
   clis-cache-hit:
-    description: true when the agent-CLI cache was restored (empty when clis is none).
-    value: ${{ steps.clis.outputs.cache-hit }}
+    description: true when the agent-CLI cache was restored, else false (also when clis is none).
+    value: ${{ steps.clis.outputs.cache-hit == 'true' }}
   clis-cache-key:
     description: The agent-CLI cache key, for the workflow's actions/cache/save step.
     value: ${{ steps.clikey.outputs.key }}
