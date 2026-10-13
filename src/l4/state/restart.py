@@ -5,25 +5,34 @@ over and the old work is kept as a ref (design D4). The seven steps, in this ord
    Any other phase, `abandoned` included, is accepted.
 2. **Keep the old work.** The old branch head goes to `refs/l4/attempts/<fw>/<name>/<n>`, where `<n>` is one more than
    the highest attempt on `origin`; the lock ref `refs/l4/locks/<fw>/<name>`, if there is one, moves to
-   `refs/l4/attempts/<fw>/<name>/<n>-locks`. The harness never deletes a ref under `refs/l4/attempts/`.
-3. **Build the new folder** in a worktree cut from the base head: the old branch's unit folder, without `.l4/` and
-   `verification.md`, with `questions.md` and `feedback.md` kept, and every task box set to its state on the base branch
+   `refs/l4/attempts/<fw>/<name>/<n>-locks` (in the push of step 5, so that a failure leaves it where it was). The
+   harness never deletes a ref under `refs/l4/attempts/`. A lock ref whose pending ledger has a `run.started` with no
+   `run.finished` refuses the restart (a run is working on the unit), and the unit's local `pending-unpublished` files
+   are cleared (M6).
+3. **Build the new folder** in a private, detached worktree (a unit branch that the operator has checked out does not
+   break it) cut from the base head: the old branch's unit folder, without `.l4/` (but with
+   `.l4/followup.json` and `.l4/fix.json`, M1) and `verification.md`, with
+   `questions.md` and `feedback.md` kept, and every task box set to its state on the base branch
    (`[ ]` for a task the base lacks). Fix-unit folders (`<name>-fix-*`) are siblings of the unit folder, so they are
    not copied.
 4. **Create the new branch**: one commit `chore(<name>): restart, attempt <n> [skip ci]` with the folder and a ledger
    file (`run.started`, `unit.restarted{attempt, previous_head, reason, by, signal}`, `run.finished`). The fold reads
    `unit.restarted` as the first event of the unit: no phase, so the planner says `implement`.
-5. **Replace the branch** with `--force-with-lease=<branch>:<old head>`: a person's push since step 2 makes the restart
-   fail with `the branch moved: run l4 restart again`, and nothing else is undone (the attempts ref is history).
+5. **Replace the branch and move the lock ref** in ONE `git push --atomic` with a lease on the old head, a lease on the
+   lock ref's sha and a lease that `<n>-locks` does not exist: a person's push since step 2 makes the restart fail with
+   `the branch moved: run l4 restart again`, and nothing is changed (only the attempts ref of the old head, which is
+   history, may have been pushed).
 6. **Close the old merge request** with a comment that names the attempts ref and the reason.
 7. **Start a run** (L4-OPS-002): the command's job, not this function's (`run_restart`, `start_run_line`).
 
-A deleted unit branch has no old head: step 2 keeps only the lock ref, and step 5 asks for a branch that does not exist.
+A deleted unit branch: its last known head (the tracking ref, which `l4 restart` does not prune, L5) is kept as the
+attempt, and step 5 asks for a branch that does not exist.
 """
 
 import logging
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,8 +51,9 @@ from l4.outcome import CommandResult
 from l4.specs.base import SpecProvider, UnitRef
 from l4.specs.providers import providers_for
 from l4.state.environment import run_environment
-from l4.state.ledger import LedgerWriter
+from l4.state.ledger import LedgerEvent, LedgerWriter
 from l4.state.lifecycle import Phase
+from l4.state.pending import UNPUBLISHED_DIR, read_pending
 from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import TASK_PARSERS, load_snapshot, refresh_refs, select_runnable
 from l4.vcs.errors import GitError
@@ -52,12 +62,12 @@ from l4.vcs.locks import Busy, LocalFileLease
 from l4.vcs.names import UnitNames
 from l4.vcs.push import ATTEMPT_REF_PREFIX, PushRejected
 from l4.vcs.trailers import CommitTrailers
-from l4.vcs.worktree import WorktreeManager
 
 log = logging.getLogger("l4.restart")
 
 TASKS_FILENAME = "tasks.md"
 _DROPPED = ("verification.md", ".l4")  # the harness's files of the unit folder: the new start has none of the old
+_MARKERS = (".l4/followup.json", ".l4/fix.json")  # except these two: what the unit IS (a follow-up, a fix unit), M1
 _NUMBER = re.compile(r"/(\d+)(?:-locks)?$")
 _MAX_FILE_BYTES = 4 * 1024 * 1024
 
@@ -138,51 +148,75 @@ def _restart(
     branch = names.branch
     attempts = f"{ATTEMPT_REF_PREFIX}{ref.framework.value}/{ref.name}"
     old_pr = forge.find_pr(branch)  # read before anything is written
-    # step 2: the old work becomes a ref
     attempt = 1 + max((int(m.group(1)) for r in _remote_refs(git, config, f"{attempts}/*") if (m := _NUMBER.search(r))),
                       default=0)  # fmt: skip
-    old_head = next(iter(_remote_refs(git, config, f"refs/heads/{branch}").values()), None)
+    leased = next(iter(_remote_refs(git, config, f"refs/heads/{branch}").values()), None)  # what the lease expects
+    tracking = f"refs/remotes/origin/{branch}"
+    if leased:
+        git.fetch("origin", refspecs=(f"+refs/heads/{branch}:{tracking}",), config=config)
+    old_head = leased or git.rev_parse(tracking)  # L5: a deleted branch's last known head is still the old work
     attempt_ref = f"{attempts}/{attempt}" if old_head else None
-    if old_head and attempt_ref:
-        git.fetch("origin", refspecs=(f"+refs/heads/{branch}:refs/remotes/origin/{branch}",), config=config)
-        # a plain push, never `+`: the ref is new (max + 1), and one that exists makes git refuse instead of moving it
-        git.push("origin", [f"{old_head}:{attempt_ref}"], config=config)
-    if lock := next(iter(_remote_refs(git, config, names.lock_ref).values()), None):
+    lock = next(iter(_remote_refs(git, config, names.lock_ref).values()), None)
+    if lock:
         git.fetch("origin", refspecs=(f"+{names.lock_ref}:{names.lock_ref}",), config=config)
-        try:
-            git.retire_lock_ref("origin", lock, names.lock_ref, f"{attempts}/{attempt}-locks", config=config)
-        except PushRejected:
-            raise L4Exit(ExitCode.INTERNAL_ERROR, "the lock moved: run l4 restart again") from None
-        git.run("update-ref", "-d", names.lock_ref, check=False)
-    # steps 3 and 4: the new folder and its one commit, in a worktree cut from the base head
-    tree = WorktreeManager(
-        git, base_branch=cfg.forge.base_branch, branch_prefix=cfg.forge.branch_prefix,
-        fetch_config=fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ)),
-    ).ensure_from_base(branch, names.worktree)  # fmt: skip
-    inside = git.at(tree.path)
-    relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve()).as_posix()
-    unit_dir = tree.path / relative
-    _build_folder(git, ref, old_head, relative, unit_dir, f"refs/remotes/origin/{cfg.forge.base_branch}")
-    writer = LedgerWriter.open(
-        unit_dir, ref.id, app.run_id, redactor=app.redactor, command="restart", branch=branch, base=tree.head,
-        source=tree.source, iteration=iteration + 1, file_filter=app_forge_urls(app, cfg).scrub,
-        **run_environment(app.environ),
+        _refuse_live_run(ref, read_pending(git, names.lock_ref).events)
+    # steps 3 and 4: the new folder and its one commit, in a private worktree cut from the base head. Nothing on the
+    # remote has moved yet, so a failure here (or an operator who has the unit branch checked out: the worktree is
+    # detached) leaves the lock ref, the branch and the phase as they were.
+    base = f"refs/remotes/origin/{cfg.forge.base_branch}"
+    git.fetch(
+        "origin", refspecs=(f"+refs/heads/{cfg.forge.base_branch}:{base}",),
+        config=fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ)),
     )  # fmt: skip
-    extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
-    writer.append(
-        "unit.restarted", attempt=attempt, previous_head=old_head, attempt_ref=attempt_ref, reason=reason[:300], **extra
-    )
-    writer.finish(0)
-    inside.run("add", "-A", "--", relative)
-    trailers = CommitTrailers(unit=ref.id, run_id=app.run_id, iteration=iteration + 1, phase="intake")
-    inside.commit(f"chore({ref.name}): restart, attempt {attempt} [skip ci]", trailers)
-    # step 5: the lease on the old head
+    base_head = git.rev_parse(base)
+    if base_head is None:
+        raise GitError(["rev-parse", base], 1, f"base branch {cfg.forge.base_branch} not found")
+    names.worktree.parent.mkdir(parents=True, exist_ok=True)
+    private = Path(tempfile.mkdtemp(prefix=f".restart-{ref.name}-", dir=names.worktree.parent))
     try:
-        inside.replace_branch("origin", branch, old_head or "", config=config)
-    except PushRejected:
-        raise L4Exit(ExitCode.INTERNAL_ERROR, "the branch moved: run l4 restart again") from None
-    head = inside.run("rev-parse", "HEAD").stdout.strip()
-    git.run("update-ref", f"refs/remotes/origin/{branch}", head)
+        git.run("worktree", "add", "--quiet", "--detach", str(private), base_head)
+        inside = git.at(private)
+        relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve()).as_posix()
+        unit_dir = private / relative
+        _build_folder(git, ref, old_head, relative, unit_dir, base)
+        writer = LedgerWriter.open(
+            unit_dir, ref.id, app.run_id, redactor=app.redactor, command="restart", branch=branch, base=base_head,
+            source="base", iteration=iteration + 1, file_filter=app_forge_urls(app, cfg).scrub,
+            **run_environment(app.environ),
+        )  # fmt: skip
+        extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
+        writer.append(
+            "unit.restarted", attempt=attempt, previous_head=old_head, attempt_ref=attempt_ref, reason=reason[:300],
+            **extra,
+        )  # fmt: skip
+        writer.finish(0)
+        inside.run("add", "-A", "--", relative)
+        trailers = CommitTrailers(unit=ref.id, run_id=app.run_id, iteration=iteration + 1, phase="intake")
+        inside.commit(f"chore({ref.name}): restart, attempt {attempt} [skip ci]", trailers)
+        # step 2: the old head is history, so it may be pushed first and stay if a later step fails. A plain push,
+        # never `+`: the number is one more than the highest on `origin`, so the ref is new; one that a restart on
+        # another machine took meanwhile is refused as a non-fast-forward, and the same value is a no-op.
+        if old_head and attempt_ref:
+            git.push("origin", [f"{old_head}:{attempt_ref}"], config=config)
+        # steps 2 and 5, ONE atomic push: the branch replaced (lease on the head the remote has), and the lock ref
+        # (lease on its sha) moved to `<n>-locks` (which must not exist). All of it or none of it.
+        moved = (names.lock_ref, lock, f"{attempts}/{attempt}-locks") if lock else None
+        try:
+            inside.restart_push("origin", branch, leased or "", moved, config=config)
+        except PushRejected:
+            now = next(iter(_remote_refs(git, config, f"refs/heads/{branch}").values()), None)
+            raise L4Exit(
+                ExitCode.INTERNAL_ERROR,
+                "the branch moved: run l4 restart again" if now != leased else "the lock moved: run l4 restart again",
+            ) from None
+        head = inside.run("rev-parse", "HEAD").stdout.strip()
+    finally:
+        git.run("worktree", "remove", "--force", str(private), check=False)
+        shutil.rmtree(private, ignore_errors=True)
+    if lock:
+        git.run("update-ref", "-d", names.lock_ref, check=False)
+    git.run("update-ref", tracking, head)
+    _clear_unpublished(app, ref)
     # step 6: the old merge request
     closed = _close(app, forge, old_pr.number if old_pr else None, attempt_ref, old_head, reason)
     return RestartResult(attempt, old_head, attempt_ref, head, closed, phase)
@@ -210,7 +244,25 @@ def _folder_files(git: Git, ref: str, relative: str) -> dict[str, tuple[bytes, b
 
 
 def _kept(path: str) -> bool:
-    return path.split("/", 1)[0] not in _DROPPED
+    return path in _MARKERS or path.split("/", 1)[0] not in _DROPPED
+
+
+def _refuse_live_run(ref: UnitRef, events: list[LedgerEvent]) -> None:
+    """M6: a `run.started` in the lock ref's pending ledger with no `run.finished` is a run on another machine that is
+    still working on the unit (or died without a line; its pending file then ends a run that never ends, and the
+    operator waits or removes it by hand). Its next push would land on the new branch's history."""
+    finished = {e.run_id for e in events if e.type == "run.finished"}
+    live = next((e.run_id for e in events if e.type == "run.started" and e.run_id not in finished), None)
+    if live is not None:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, f"restart: a run is working on {ref.id} (run {live}); try again when it ends"
+        )
+
+
+def _clear_unpublished(app: AppContext, ref: UnitRef) -> None:
+    """M6: the run files of the old attempt that no push took (`pending-unpublished`) are not the new attempt's."""
+    cache = cache_root(app.environ, repo=app.repo)
+    shutil.rmtree(cache / UNPUBLISHED_DIR / ref.framework.value / ref.name, ignore_errors=True)
 
 
 def _build_folder(git: Git, ref: UnitRef, old_head: str | None, relative: str, unit_dir: Path, base_ref: str) -> None:
@@ -270,7 +322,7 @@ def run_restart(app: AppContext, *, unit: str, reason: str, no_run: bool = False
         raise L4Exit(ExitCode.USAGE_ERROR, "restart: --reason must say why")
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
-    fetch_unit_refs(app, cfg, git)
+    fetch_unit_refs(app, cfg, git, prune=False)
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     result = restart_unit(app, cfg, git, provider, ref, reason=reason)

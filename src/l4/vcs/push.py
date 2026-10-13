@@ -85,6 +85,33 @@ def build_lease_push_args(remote: str, sha: str, ref: str, expected: str) -> lis
     return ["push", f"--force-with-lease={ref}:{expected}", "--", remote, f"{sha}:{ref}"]
 
 
+def build_restart_args(remote: str, branch: str, old_head: str, lock: tuple[str, str, str] | None = None) -> list[str]:
+    """`l4 restart` (L4-OPS-004): push HEAD over the unit branch and, when there is a lock ref, move it to the attempt's
+    `-locks` name, in ONE atomic push. The leases: the branch at `old_head` ('' = it must not exist), and for `lock` =
+    `(lock ref, its sha, archived name)` the lock ref at that sha and the archived name absent. Either every ref moves
+    or none does, so a lost lease leaves the pending ledger where the fold reads it."""
+    if not remote or remote.startswith("-"):
+        raise ForcedPushRefused(f"not a remote name: {remote!r}")
+    if old_head and not _OBJECT_ID.match(old_head):
+        raise ForcedPushRefused(f"not a commit id: {old_head!r}")
+    ref = f"refs/heads/{branch}"
+    if not branch or not _plain_ref(ref, "refs/heads/") or branch.startswith("-"):
+        raise ForcedPushRefused(f"not a branch name: {branch!r}")
+    args = ["push", "--atomic", f"--force-with-lease={ref}:{old_head}"]
+    specs = [f"HEAD:{ref}"]
+    if lock is not None:
+        lock_ref, sha, archived = lock
+        if not _OBJECT_ID.match(sha):
+            raise ForcedPushRefused(f"not a commit id: {sha!r}")
+        if not _plain_ref(lock_ref, LOCK_REF_PREFIX):
+            raise ForcedPushRefused(f"not a lock ref: {lock_ref!r}")
+        if not _plain_ref(archived, ATTEMPT_REF_PREFIX):
+            raise ForcedPushRefused(f"not an attempts ref: {archived!r}")
+        args += [f"--force-with-lease={lock_ref}:{sha}", f"--force-with-lease={archived}:"]
+        specs += [f"{sha}:{archived}", f":{lock_ref}"]
+    return [*args, "--", remote, *specs]
+
+
 def build_retire_args(remote: str, sha: str, ref: str, archived: str) -> list[str]:
     """Move the lock ref `ref` to `archived` (a ref that must not exist yet, under `refs/l4/archived/` or, for
     `l4 restart`, `refs/l4/attempts/`) in one atomic push, only if `ref` still holds `sha`: the commit, and the pending

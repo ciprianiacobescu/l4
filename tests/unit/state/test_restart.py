@@ -46,10 +46,10 @@ def forge(monkeypatch):
     return local
 
 
-def restart(world, **kwargs):
+def restart(world, unit=UNIT, **kwargs):
     app, cfg = load_app_config(world.app)
     git = Git(app.repo, environ=app.environ)
-    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), UNIT)
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     kwargs.setdefault("reason", "start over")
     return restart_unit(app, cfg, git, provider, ref, **kwargs)
 
@@ -139,14 +139,14 @@ def test_a_person_pushing_during_the_restart_wins(world, forge, monkeypatch):
     """SCN-OPS-09: the lease fails, the restart exits 1, and the merge request and the branch stay as they were."""
     pr = poisoned(world, forge)
     old = remote_ref(world, f"refs/heads/{BRANCH}")
-    real = Git.replace_branch
+    real = Git.restart_push
     pushed = {}
 
-    def late_push(self, remote, branch, expected, **kwargs):
+    def late_push(self, *args, **kwargs):
         pushed["head"] = world.sim.human_commit({"NOTES.md": "mine\n"}, "a person's late push", BRANCH)
-        return real(self, remote, branch, expected, **kwargs)
+        return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Git, "replace_branch", late_push)
+    monkeypatch.setattr(Git, "restart_push", late_push)
     with pytest.raises(L4Exit, match="the branch moved: run l4 restart again") as caught:
         restart(world)
     assert caught.value.code == ExitCode.INTERNAL_ERROR
@@ -256,3 +256,186 @@ def test_no_run_starts_nothing(world, forge, capsys):
     argv += ["--config", str(world.app.config_path)]
     assert main(argv, environ=dict(world.app.environ)) == 0
     assert forge.called("start_run") == [] and "run started" not in capsys.readouterr().out
+
+
+# --- review H1, M1, M6, L5: a failed restart changes nothing; the markers, the live run, the deleted branch ---------
+
+
+LOCK = f"refs/l4/locks/openspec/{NAME}"
+
+
+def phase_of(world) -> str | None:
+    """The unit's phase as a new `l4` process folds it (the lock ref fetched as the commands do)."""
+    app, cfg = load_app_config(world.app)
+    git = Git(app.repo, environ=app.environ)
+    git.run("fetch", "--quiet", "--prune", "origin", "+refs/l4/*:refs/l4/*")
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), UNIT)
+    return load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state.phase
+
+
+def late_person_push(world, monkeypatch):
+    real = Git.restart_push
+
+    def push_first(self, *args, **kwargs):
+        world.sim.human_commit({"NOTES.md": "mine\n"}, "a person's late push", BRANCH)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Git, "restart_push", push_first)
+
+
+def test_a_lost_lease_leaves_the_lock_ref_and_the_phase_as_they_were(world, forge, monkeypatch):
+    """H1, SCN-OPS-09: the lock ref holds the pending ledger (the `in_review` edge); a failed restart leaves it."""
+    assert world.run(happy()).code == ExitCode.OK
+    forge.create_pr(BRANCH, "main", "add-greeting", "body")
+    lock, phase = remote_ref(world, LOCK), phase_of(world)
+    assert lock is not None and phase == "in_review"
+    late_person_push(world, monkeypatch)
+    with pytest.raises(L4Exit, match="the branch moved") as caught:
+        restart(world)
+    assert caught.value.code == ExitCode.INTERNAL_ERROR
+    assert remote_ref(world, LOCK) == lock and remote_ref(world, f"{ATTEMPTS}/1-locks") is None
+    assert phase_of(world) == phase
+
+
+def test_a_lost_lease_with_a_pending_ledger_on_an_escalated_unit(world, forge, monkeypatch):
+    pr = poisoned(world, forge)
+    head = remote_ref(world, f"refs/heads/{BRANCH}")
+    world.remote.run("update-ref", LOCK, head)
+    late_person_push(world, monkeypatch)
+    with pytest.raises(L4Exit, match="the branch moved"):
+        restart(world)
+    assert remote_ref(world, LOCK) == head and remote_ref(world, f"{ATTEMPTS}/1-locks") is None
+    assert forge.get_pr(pr.number).state == "open"
+
+
+def test_a_lock_ref_that_moved_stops_the_restart_with_nothing_changed(world, forge, monkeypatch):
+    """The lease on the lock ref is part of the one atomic push: a run that wrote a pending line since wins."""
+    poisoned(world, forge)
+    head = remote_ref(world, f"refs/heads/{BRANCH}")
+    world.remote.run("update-ref", LOCK, head)
+    real = restart_module._remote_refs
+
+    def moved_after_read(git, config, pattern):
+        found = real(git, config, pattern)
+        if pattern == LOCK:
+            identity = (("user.name", "t"), ("user.email", "t@example.com"))
+            later = world.remote.run("commit-tree", "-p", head, "-m", "later", f"{head}^{{tree}}", config=identity)
+            world.remote.run("update-ref", LOCK, later.stdout.strip())
+        return found
+
+    monkeypatch.setattr(restart_module, "_remote_refs", moved_after_read)
+    with pytest.raises(L4Exit, match="moved"):
+        restart(world)
+    assert remote_ref(world, f"{ATTEMPTS}/1-locks") is None and remote_ref(world, f"refs/heads/{BRANCH}") == head
+
+
+def test_a_unit_branch_checked_out_by_the_operator_does_not_break_the_restart(world, forge):
+    """H1: the worktree is built apart from the unit branch, before any ref is touched."""
+    assert world.run(happy()).code == ExitCode.OK
+    forge.create_pr(BRANCH, "main", "add-greeting", "body")
+    lock = remote_ref(world, LOCK)
+    repo = Git(world.app.repo, environ=world.app.environ)
+    for line in repo.run("worktree", "list", "--porcelain").stdout.splitlines()[1:]:
+        if line.startswith("worktree "):
+            repo.run("worktree", "remove", "--force", line.removeprefix("worktree "))
+    repo.run("checkout", "-q", "-B", BRANCH, f"refs/remotes/origin/{BRANCH}")
+    result = restart(world)
+    repo.run("checkout", "-q", "main")
+    assert remote_ref(world, f"refs/heads/{BRANCH}") == result.branch_head
+    assert remote_ref(world, f"{ATTEMPTS}/1-locks") == lock and remote_ref(world, LOCK) is None
+
+
+def test_a_failure_before_the_push_changes_no_remote_ref(world, forge, monkeypatch):
+    """H1: the folder and the commit are built before any ref moves; a failure there leaves the remote as it was."""
+    assert world.run(happy()).code == ExitCode.OK
+    forge.create_pr(BRANCH, "main", "add-greeting", "body")
+    before, phase = refs_of(world), phase_of(world)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("the folder cannot be built")
+
+    monkeypatch.setattr(restart_module, "_build_folder", broken)
+    with pytest.raises(RuntimeError):
+        restart(world)
+    assert [
+        r for r in refs_of(world).splitlines() if "/attempts/" not in r
+    ] == before.splitlines()  # the kept head may stay
+    assert remote_ref(world, LOCK) is not None and remote_ref(world, f"{ATTEMPTS}/1-locks") is None
+    assert remote_ref(world, f"refs/heads/{BRANCH}") is not None and phase_of(world) == phase
+
+
+FOLLOW = "add-greeting-followup-1"
+FOLLOW_REL = f"openspec/changes/{FOLLOW}"
+
+
+def test_a_restarted_follow_up_unit_is_still_discovered(world, forge):
+    """M1: `.l4/followup.json` and `.l4/fix.json` stay in the restarted folder; without the marker the unit vanishes."""
+    from l4.state.followups import known_follow_ups
+
+    marker = (
+        '{"schema": "l4/followup@1", "parent": "openspec:add-greeting", "items": [{"id": "FB-001", "sha256": "%s"}]}'
+    )
+    files = {
+        f"{FOLLOW_REL}/proposal.md": "## Why\nx\n",
+        f"{FOLLOW_REL}/tasks.md": "- [ ] 1.1 A task\n",
+        f"{FOLLOW_REL}/.l4/followup.json": marker % ("0" * 64),
+        f"{FOLLOW_REL}/.l4/fix.json": '{"schema": "l4/fix-unit@1"}',
+        f"{FOLLOW_REL}/.l4/ledger/old.jsonl": "{}\n",
+    }
+    branch = f"l4/openspec/{FOLLOW}"
+    world.sim.human_commit(files, "the follow-up", branch)
+    Git(world.app.repo, environ=world.app.environ).run("fetch", "--quiet", "origin")
+    result = restart(world, unit=f"openspec:{FOLLOW}")
+    assert blob(world, result.branch_head, f"{FOLLOW_REL}/.l4/followup.json") == marker % ("0" * 64)
+    assert blob(world, result.branch_head, f"{FOLLOW_REL}/.l4/fix.json") is not None
+    assert blob(world, result.branch_head, f"{FOLLOW_REL}/.l4/ledger/old.jsonl") is None  # the old evidence goes
+    app, cfg = load_app_config(world.app)
+    git = Git(app.repo, environ=app.environ)
+    git.run("fetch", "--quiet", "--prune", "origin")
+    assert [k.name for k in known_follow_ups(git, cfg)] == [FOLLOW]
+
+
+def test_a_restart_clears_the_local_unpublished_tails(world, forge):
+    """M6: a `pending-unpublished` run file of the old attempt would be published into the new one."""
+    from l4.state.pending import UNPUBLISHED_DIR
+
+    poisoned(world, forge)
+    cache = cache_root(world.app.environ, repo=world.app.repo)
+    tail = cache / UNPUBLISHED_DIR / "openspec" / NAME / "r-20261013T1000Z-aaaa.jsonl"
+    tail.parent.mkdir(parents=True)
+    tail.write_text("{}\n")
+    restart(world)
+    assert not tail.exists()
+
+
+def test_a_restart_is_refused_while_a_run_works_on_the_unit(world, forge, tmp_path):
+    """M6: the pending ledger of the lock ref has `run.started` and no `run.finished`."""
+    from l4.redact import Redactor
+    from l4.state.ledger import LedgerWriter
+    from l4.state.pending import PendingLedger
+
+    poisoned(world, forge)
+    run_id = "r-20261013T1000Z-bbbb"
+    writer = LedgerWriter.open(tmp_path / "unit", UNIT, run_id, redactor=Redactor({}))  # never finished
+    git = Git(world.app.repo, environ=world.app.environ)
+    PendingLedger(git, lock_ref=LOCK, unit=UNIT, run_id=run_id).publish(writer.path)
+    before = refs_of(world)
+    with pytest.raises(L4Exit, match=rf"a run is working on {UNIT} \(run {run_id}\); try again when it ends") as caught:
+        restart(world)
+    assert caught.value.code == ExitCode.USAGE_ERROR and refs_of(world) == before
+
+
+def test_the_last_known_head_of_a_deleted_branch_is_kept_as_the_attempt(world, forge):
+    """L5: `l4 restart` fetches without prune; the tracking ref of a branch the forge deleted is the old work."""
+    assert world.run(failing_reds()).code == ExitCode.HALTED
+    open_pr(forge)
+    old = remote_ref(world, f"refs/heads/{BRANCH}")
+    world.remote.run("update-ref", "-d", f"refs/heads/{BRANCH}")
+    app, cfg = load_app_config(world.app)
+    git = Git(app.repo, environ=app.environ)
+    restart_module.fetch_unit_refs(app, cfg, git, prune=False)
+    assert git.rev_parse(f"refs/remotes/origin/{BRANCH}") == old
+    result = restart(world)
+    assert (result.previous_head, result.attempt_ref) == (old, f"{ATTEMPTS}/1")
+    assert remote_ref(world, f"{ATTEMPTS}/1") == old
+    assert remote_ref(world, f"refs/heads/{BRANCH}") == result.branch_head

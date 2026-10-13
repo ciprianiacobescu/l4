@@ -167,8 +167,10 @@ class Options:
 
 
 def managed_labels(prefix: str) -> tuple[str, ...]:
-    """Every label the harness sets on a pull request: one per phase, `needs-answers`, and the `resume` signal."""
-    return (*(f"{prefix}{phase.value}" for phase in Phase), f"{prefix}needs-answers", f"{prefix}resume")
+    """Every label the harness sets on a pull request: one per phase, `needs-answers`, and the operator signals
+    `resume`, `retry` and `restart` (L4-OPS-003)."""
+    signals = (f"{prefix}{name}" for name in ("resume", "retry", "restart"))
+    return (*(f"{prefix}{phase.value}" for phase in Phase), f"{prefix}needs-answers", *signals)
 
 
 def seal(public_key: str, value: str) -> str:

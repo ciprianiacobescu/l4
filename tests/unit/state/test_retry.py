@@ -7,6 +7,7 @@ import pytest
 from l4.cli import main
 from l4.config.redaction import load_app_config
 from l4.exitcodes import ExitCode, L4Exit
+from l4.forge.base import AmbiguousWrite, ForgeError
 from l4.forge.local import LocalForge
 from l4.specs.providers import providers_for
 from l4.state.retry import retry_unit
@@ -294,6 +295,22 @@ def test_a_refused_start_still_exits_0_and_says_how(world, forge, capsys, answer
     assert command(world) == 0
     out = capsys.readouterr().out
     assert "start a run with: " in out and "main" in out and "run started" not in out
+    assert subject(world) == f"chore({NAME}): retry [skip ci]"
+
+
+@pytest.mark.parametrize("failure", [ForgeError("HTTP 422", status=422), AmbiguousWrite("HTTP 502", status=502)])
+def test_a_start_the_forge_fails_with_an_error_still_exits_0_and_says_how(world, forge, capsys, monkeypatch, failure):
+    """Review M4: the push is done; a 422 (`ForgeError`) or a 502 (`AmbiguousWrite`) of the dispatch must not turn a
+    successful retry into a failing command."""
+    world.run(failing_reds())
+
+    def fails(ref):
+        raise failure
+
+    monkeypatch.setattr(forge, "start_run", fails)
+    assert command(world) == 0
+    out = capsys.readouterr().out
+    assert "start a run with: " in out and "run started" not in out
     assert subject(world) == f"chore({NAME}): retry [skip ci]"
 
 
