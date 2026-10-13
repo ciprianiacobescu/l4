@@ -38,7 +38,8 @@ right file with the right command, never to do the harness's work by hand.
 | Anything else that changes behaviour, **a rename, or anything the existing tests would have to follow** | `behaviour` | `--when` and `--then` |
 
 A `refactor` runs with every test file frozen. If the existing tests call the old name, the attempt fails, so a
-rename is `behaviour` (say in the text whether to keep the old name as an alias).
+rename is `behaviour`. No kind may delete, rename, skip or weaken an existing test: ask for the old name to stay as an
+alias that the existing tests keep calling.
 
 ```sh
 git switch l4/<framework>/<name>            # feedback on an open unit is given on its own branch

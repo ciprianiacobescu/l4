@@ -46,7 +46,18 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/a
     - codex needs `auth: api_key` (`CODEX_API_KEY`), since its subscription login is a local file;
     - OpenCode's free models need no key.
 
-    Give the implementer and the judges different vendors.
+    Give the implementer and the judges different vendors. Profiles proven on GitHub-hosted runners:
+
+    ```yaml
+    profiles:
+      kiro:         {adapter: kiro-cli, auth: api_key, model: glm-5, vendor: zhipu}       # secret KIRO_API_KEY
+      oc-free:      {adapter: opencode, model: opencode/mimo-v2.6-flash-free, vendor: xiaomi}  # no secret
+      claude-judge: {adapter: claude-code, auth: subscription, vendor: anthropic}          # secret CLAUDE_CODE_OAUTH_TOKEN
+      codex:        {adapter: codex, auth: api_key, vendor: openai}                        # secret CODEX_API_KEY
+    roles:
+      implementer: [kiro]          # or [oc-free], [codex]; a list is a fallback chain
+      judges: [claude-judge]
+    ```
   - **`ci.schedule`:** the default is every 30 minutes. On a private repository that is about 1,400 runner-minutes a
     month even when idle; set a slower cron, or `null`.
   - **`ci.upload_artifacts: false`** on a **public** repository. The `l4-out` artifact holds the prompts and agent

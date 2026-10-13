@@ -34,7 +34,9 @@ l4 feedback withdraw FB-002         # not after it was addressed
 | `behaviour` | Red, then green, against your `--when`/`--then`. | The tests and the judge. |
 
 **Choosing.**
-- A rename, a changed signature, or anything the current tests would have to follow is `behaviour`.
+- A rename, a changed signature, or anything the current tests would have to follow is `behaviour`. Existing tests are
+  never deleted, renamed, skipped or weakened by any fix (the integrity check rejects it); new tests are added. For a
+  rename, ask for the old name to stay as an alias that the existing tests keep calling.
 - `--when` and `--then` describe the new behaviour as one acceptance criterion: a failing test is written for it
   first.
 - `config` needs `--at` pointing at the hard-coded value, and `--env`.
