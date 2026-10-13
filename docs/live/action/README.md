@@ -45,6 +45,26 @@ Step timings come from the Actions API. The spike's logs and step files are in [
 | 38330251183 | 19a2403a | The dummy was upgraded with the new `l4 upgrade`, which re-renders the whole workflow and printed the diff (the base-checkout step, the pin, the status guard). The CLI cache key now includes the config's CLIs: a new key, a miss, and openspec, claude and kiro-cli installed and saved. The feedback loop ran to PR #3 ready again; see docs/live/feedback on the human-feedback branch. |
 
 Still open:
-- SCN-ACT-03 with the final action and `--action-copy`;
 - the action self-test workflow and one release (both after the merge to amaster);
 - the skill.
+
+## Copy mode with the final action (SCN-ACT-03, 2026-10-13)
+
+`l4 init --ci github --action --action-copy --harness-repo ssh://…/agent-supervisor.git --harness-commit b97cd66f` in a
+scratch repository wrote:
+- `.github/actions/l4/action.yml`, byte-identical to the harness's;
+- a workflow whose action step uses `source: repository`, the pinned commit and `ssh-key: ${{ secrets.L4_HARNESS_SSH_KEY }}`;
+- no `.l4/bin/`.
+
+On the dummy, a one-off workflow with that action step and a temporary read-only deploy key ran as run 38334353208
+(`copy-check-38334353208.log`):
+- the harness was installed over SSH at the pinned commit (3.09 s), and the runner setup ended with `[HSU-99] OK`;
+- `l4 --version` answered;
+- **the key file was gone from `$RUNNER_TEMP` after the install** (count 0);
+- the log shows the key only as `INPUT_SSH_KEY: ***`.
+
+The job's last step, `l4 status`, failed because the one-off job had no forge token in its environment, which the
+rendered workflow provides. It also shows a rough edge: without credentials, `l4 status` reports
+`internal error: GitError` instead of saying it cannot fetch. That is noted for a follow-up.
+
+The deploy key (id 166254199), the secret and the workflow were removed after the run.
