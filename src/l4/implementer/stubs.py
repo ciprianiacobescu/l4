@@ -84,6 +84,11 @@ def _is_stub_body(body: Sequence[ast.stmt]) -> bool:
     return len(rest) == 1 and _is_not_implemented(rest[0])
 
 
+def _ends_with_stub(body: Sequence[ast.stmt]) -> bool:
+    """A partial stub: guards (an earlier task's behaviour) and then a final bare `raise NotImplementedError`."""
+    return len(body) > len(_docstring(body)) + 1 and _is_not_implemented(body[-1])
+
+
 def _raise_stub() -> ast.stmt:
     return ast.Raise(exc=ast.Name("NotImplementedError", ast.Load()), cause=None)
 
@@ -508,12 +513,13 @@ def classify_red_changes(head_src: str, new_src: str) -> RedChanges:
 
 
 def has_stub(source: str) -> bool:
-    """Whether any function of `source` has a not-implemented body or a not-implemented guard."""
+    """Whether any function of `source` has a not-implemented body, a not-implemented guard or a final
+    `raise NotImplementedError` after other statements (a partial stub: its not-implemented path is still a stub)."""
     return bool(_stub_sites(ast.parse(source)))
 
 
 def _stub_sites(tree: ast.Module) -> list[ast.stmt]:
-    """The `raise NotImplementedError` statements that are a whole function body or a guard body."""
+    """The `raise NotImplementedError` statements that are a whole function body, a guard body or the last statement."""
     found: list[ast.stmt] = []
     for fn in (n for n in ast.walk(tree) if isinstance(n, _Def)):
         doc = len(_docstring(fn.body))
@@ -525,6 +531,8 @@ def _stub_sites(tree: ast.Module) -> list[ast.stmt]:
             and _guard_ok(fn.body[doc], {a.arg for a in _params(fn.args)})
         ):
             found.append(fn.body[doc].body[0])  # type: ignore[attr-defined]
+        if _ends_with_stub(fn.body):
+            found.append(fn.body[-1])
     return found
 
 
@@ -577,6 +585,8 @@ class _Zero(ast.NodeTransformer):
             and _guard_ok(guard, {a.arg for a in _params(fn.args)})
         ):
             guard.body = [_zero_statement(fn)]  # the guard body gets the same treatment
+        if not self.public and _ends_with_stub(fn.body):
+            fn.body[-1] = _zero_statement(fn)  # a partial stub: its guards stay, its final raise answers the zero value
         return fn
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
@@ -588,7 +598,9 @@ class _Zero(ast.NodeTransformer):
 def zero_value_variant(source: str, *, public: bool = False) -> str:
     """`source` with each red stub (`public`: each public function and method) answering the zero value of its
     return annotation: `str` "", `int` 0, `float` 0.0, `bool` False, `list` [], `dict` {}, `set` set(), `tuple` (),
-    `bytes` b""; unannotated or unknown None; `-> None` nothing. Nested functions are left alone."""
+    `bytes` b""; unannotated or unknown None; `-> None` nothing. A partial stub (guards, then a final bare
+    `raise NotImplementedError`) keeps its guards and answers the zero value in place of that raise, so a test of the
+    unwritten path fails by assertion, not by error (L4-IMP-002 check 5). Nested functions are left alone."""
     tree = ast.parse(source)
     tree.body = [_Zero(public)._member(n) for n in tree.body]
     return ast.unparse(ast.fix_missing_locations(tree)) + "\n"

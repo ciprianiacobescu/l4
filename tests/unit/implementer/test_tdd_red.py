@@ -371,8 +371,12 @@ def test_a_test_that_asserts_on_the_answer_of_a_head_stub_is_proved_by_the_zero_
 
 
 def test_without_any_stub_a_failure_that_is_not_an_assertion_is_vacuous(make_bench, tdd_repo, raw):
-    # not a stub site (the body does more than raise), so no zero-value run is possible: run (a) must show an assertion
-    body = '\n\ndef apply_discount(amount, code):\n    amount = float(amount)\n    raise NotImplementedError("later")\n'
+    # not a stub site (the body does more than raise and does not END in the raise: that would be a partial stub, which
+    # the zero-value run covers), so no zero-value run is possible: run (a) must show an assertion
+    body = (
+        "\n\ndef apply_discount(amount, code):\n    amount = float(amount)\n"
+        '    raise NotImplementedError("later")\n    return amount\n'
+    )
     _commit_pricing_on_main(tdd_repo, raw, body)
     bench: Bench = make_bench([_only_known_test('apply_discount(50.0, "SAVE10")')])
     outcome = run_red(bench.wb, TASK, attempt=1)
