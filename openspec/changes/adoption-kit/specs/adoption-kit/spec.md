@@ -86,7 +86,9 @@ github-parity's triggers, permissions, environment, concurrency, timeout and bas
 Further rules:
 - It MUST NOT write `.l4/bin/l4`, `.l4/bin/l4-setup` or `harness.commit`. The `uses:` sha is the only pin.
 - `--action-copy` writes the action under `.github/actions/l4` and uses it with source `repository`, for public
-  callers.
+  callers. The copy is the one the running `l4` ships (`src/l4/ci/action/action.yml`, byte-identical to
+  `.github/actions/l4/action.yml`), so it works from an installed `l4` with no git checkout; `l4 upgrade` in copy mode
+  refreshes it from the same copy and reports it.
 - `--dependabot` adds or merges `.github/dependabot.yml` for `github-actions`.
 - The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []` unless `--runner-tag TAG` (repeatable)
   is given, and `forge.token_env: GITHUB_TOKEN` unless `--forge-token-env NAME` is given. A default role-chain profile

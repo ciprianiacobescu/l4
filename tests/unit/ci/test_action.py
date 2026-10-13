@@ -275,3 +275,12 @@ def test_cli_cache_excludes_the_harness_links_and_the_npm_download_cache():
     assert paths.index("~/.local/bin") < paths.index("!~/.local/bin/uv")  # a later `!` removes earlier matches
     assert "~/.cache/l4" not in paths and "~/.cache/l4/npm" not in paths
     assert "~/.cache/l4/installers" in paths
+
+
+def test_the_action_shipped_in_the_package_is_the_repository_one():
+    """`--action-copy` writes `src/l4/ci/action/action.yml` from an installed `l4` (baseline gap 6): the two files are
+    one, so a change to the action is made in both (`cp .github/actions/l4/action.yml src/l4/ci/action/`)."""
+    from l4.init.action import packaged_action
+
+    repo_file = Path(__file__).resolve().parents[3] / ".github" / "actions" / "l4" / "action.yml"
+    assert packaged_action() == repo_file.read_bytes()

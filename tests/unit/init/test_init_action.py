@@ -289,3 +289,30 @@ def test_which_profiles_can_log_in_on_a_hosted_runner():
     assert hosted_login_problem("claude-code", "subscription") is None
     assert hosted_login_problem("kiro-cli", "subscription") is None
     assert hosted_login_problem("opencode", None) is None
+
+
+# --- copy mode from an installed l4, and its upgrade (baseline gap 6) -----------------------------------------------
+
+
+COPY_FLAGS = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA)
+
+
+def test_copy_needs_no_checkout_of_the_harness(target: Path, git_environ, monkeypatch):
+    """An installed `l4` is not a git checkout: the action comes from the package."""
+    from l4.init.action import packaged_action
+
+    def no_checkout(harness):
+        raise AssertionError("the harness checkout was looked for")
+
+    monkeypatch.setattr("l4.init.init.harness_root", no_checkout)
+    assert init(target, git_environ, *COPY_FLAGS) == 0
+    assert (target / ACTION).read_bytes() == packaged_action()
+    assert (target / ACTION).stat().st_mode & 0o777 == 0o644
+    assert yaml.safe_load((target / WORKFLOW).read_text())["jobs"]["l4"]["steps"][2]["uses"] == "./.github/actions/l4"
+
+
+def test_copy_refuses_an_existing_action_without_force(target: Path, git_environ, capsys):
+    (target / ".github/actions/l4").mkdir(parents=True)
+    (target / ACTION).write_text("name: mine\n")
+    assert init(target, git_environ, *COPY_FLAGS) == 2
+    assert ACTION in capsys.readouterr().err and (target / ACTION).read_text() == "name: mine\n"

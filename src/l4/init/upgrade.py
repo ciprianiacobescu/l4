@@ -22,7 +22,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from l4 import __version__
 from l4.buildinfo import harness_commit
-from l4.ci.github import WORKFLOW_RELPATH, ActionPin, render_github_action_ci, render_github_ci
+from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH, ActionPin, render_github_action_ci, render_github_ci
 from l4.ci.render import (
     SETUP_RELPATH,
     SHIM_RELPATH,
@@ -38,7 +38,7 @@ from l4.config.schema import L4Config, Sha, effective_delivery
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.init.action import read_pin, remote_url, resolve_ref
+from l4.init.action import packaged_action, read_pin, remote_url, resolve_ref
 from l4.init.init import (
     PlannedFile,
     _serena_seed,
@@ -286,6 +286,15 @@ def _plan_action(
     if new != text:
         changed = (PlannedFile(WORKFLOW_RELPATH, new.encode("utf-8"), 0o644),)
         notes = (_rerender_note(text, new),)
+    if found.local:  # the consumer's own copy of the setup action is refreshed from the one this `l4` ships
+        action_path = f"{ACTION_PATH}/action.yml"
+        try:
+            reject_symlinks(repo, *Path(action_path).parts)
+        except UnsafeFile as exc:
+            raise _refuse(str(exc)) from None
+        shipped = packaged_action()
+        if not _same(repo / action_path, shipped):
+            changed += (PlannedFile(action_path, shipped, 0o644),)
     missing = tuple(m for m in missing_keys(yaml.safe_load(old_config) or {}) if not m.startswith("harness."))
     return UpgradePlan(
         changed, None, (), (), (), missing=missing, seeded=tuple(_serena_seed(repo, loaded)),
@@ -376,6 +385,8 @@ def run_upgrade(
         pins = (
             (" (harness.commit)" if plan.vendor is None else " (harness.version, harness.commit)")
             if planned.path == str(CONFIG_RELPATH)
+            else " (the setup action, from the copy this l4 ships)"
+            if planned.path == f"{ACTION_PATH}/action.yml"
             else ""
         )
         click.echo(f"{verb} {planned.path}{pins}")

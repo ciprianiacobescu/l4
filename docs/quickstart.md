@@ -249,7 +249,8 @@ repository:
      ```bash
      l4 init --ci github --action --action-copy --harness-ref v0.3.0
      ```
-     This writes the action under `.github/actions/l4` and a workflow that uses it with the harness's SSH URL.
+     This writes the action under `.github/actions/l4` (the copy your `l4` ships, so no checkout of the harness is
+     needed) and a workflow that uses it with the harness's SSH URL. `l4 upgrade` refreshes that copy too.
   2. Add a read-only deploy key to the harness repository (Settings > Deploy keys), and store its private half as the
      environment secret `L4_HARNESS_SSH_KEY` in the environment `l4`. Use one key per consumer, so that a key can be
      removed on its own.

@@ -51,3 +51,47 @@ def test_upgrade_drops_and_restores_the_upload_with_the_config(target: Path, git
     set_ci(target, upload_artifacts=True)
     upgrade(target, git_environ)
     assert "upload-artifact" in workflow.read_text()
+
+
+# --- `l4 upgrade` refreshes the copy of the setup action (baseline gap 6) -------------------------------------------
+
+
+def adopt_copy(target: Path, environ) -> None:
+    flags = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA)
+    assert main(["init", "--repo", str(target), "--ci", "github", *flags], environ=environ) == 0
+
+
+def test_upgrade_in_copy_mode_refreshes_the_action_and_says_so(target: Path, git_environ, capsys):
+    from l4.init.action import packaged_action
+
+    adopt_copy(target, git_environ)
+    action = target / ".github/actions/l4/action.yml"
+    action.write_text("name: stale\n")
+    capsys.readouterr()
+    upgrade(target, git_environ)
+    assert action.read_bytes() == packaged_action()
+    out = capsys.readouterr().out
+    assert "changed .github/actions/l4/action.yml" in out and "up to date" not in out
+
+
+def test_upgrade_recreates_a_missing_copy_and_dry_run_writes_nothing(target: Path, git_environ, capsys):
+    adopt_copy(target, git_environ)
+    action = target / ".github/actions/l4/action.yml"
+    action.unlink()
+    assert main(["upgrade", "--repo", str(target), "--harness-commit", SHA, "--dry-run"], environ=git_environ) == 0
+    assert not action.exists() and "would change .github/actions/l4/action.yml" in capsys.readouterr().out
+    upgrade(target, git_environ)
+    assert action.exists()
+
+
+def test_upgrade_with_a_current_copy_changes_nothing(target: Path, git_environ, capsys):
+    adopt_copy(target, git_environ)
+    capsys.readouterr()
+    upgrade(target, git_environ)
+    assert ".github/actions/l4/action.yml" not in capsys.readouterr().out
+
+
+def test_upgrade_of_a_published_action_writes_no_copy(target: Path, git_environ):
+    adopt(target, git_environ)
+    upgrade(target, git_environ)
+    assert not (target / ".github/actions").exists()

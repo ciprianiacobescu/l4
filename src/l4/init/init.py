@@ -42,7 +42,7 @@ from l4.config.schema import HarnessCfg, L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.init.action import remote_url, resolve_ref
+from l4.init.action import packaged_action, remote_url, resolve_ref
 from l4.init.ciedit import merge_include
 from l4.init.dependabot import DEPENDABOT_RELPATH, merge_dependabot
 from l4.init.ecosystem import M0_GATES, Proposal, detect_python, propose_gates
@@ -230,7 +230,10 @@ def _fetched_pins(repository: str, commit: str) -> tuple[str, str]:
 
 
 def _action_file(harness: Path | None) -> bytes:
-    """The setup action of the harness checkout (`--action-copy`): the consumer keeps its own copy of it."""
+    """The setup action for `--action-copy`: the consumer keeps its own copy of it. `--harness PATH` names a checkout
+    to copy it from; without it the copy is the one the running `l4` ships (no checkout is needed)."""
+    if harness is None:
+        return packaged_action()
     root = harness_root(harness)
     relative = f"{ACTION_PATH}/action.yml"
     try:

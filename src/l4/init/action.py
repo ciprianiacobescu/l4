@@ -5,6 +5,7 @@ import re
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib.resources import files
 from typing import Any
 
 import yaml
@@ -16,6 +17,13 @@ LS_REMOTE_TIMEOUT_S = 60
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SSH_REPO = re.compile(r"^ssh://git@github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$")
+
+
+def packaged_action() -> bytes:
+    """The setup action as the running `l4` ships it (`src/l4/ci/action/action.yml`, a copy of
+    `.github/actions/l4/action.yml` that a test holds byte-identical), so a copy of the action can be written by an
+    installed `l4` that has no git checkout of the harness."""
+    return files("l4.ci").joinpath("action", "action.yml").read_bytes()
 
 
 def remote_url(repository: str) -> str:
