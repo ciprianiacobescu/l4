@@ -1,0 +1,48 @@
+# The implementer asks a question and there is no clarifier: the unit waits for a person (exit 11). The person answers
+# on the unit branch, the next run picks the answer up and finishes the unit.
+name: stuck-human-answers
+fixture: openspec-basic
+max_runs: 2
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        result:
+          status: blocked
+          questions:
+            - title: Should a greeting trim the name?
+              context: The scenario says "Hello, <name>!" but does not say what happens to surrounding spaces.
+              kind: ambiguous
+              options: ["trim it", "keep it as given"]
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:
+    verdict: "@fixture:pass_all.json"
+between_runs:
+  - message: answer Q-001
+    branch: l4/openspec/add-greeting
+    write:
+      openspec/changes/add-greeting/questions.md: "@fixture:questions_answered.md"
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: question.raised, id: Q-001}
+    - {type: phase.changed, to: awaiting_human, exit_code: 11}
+    - {type: phase.changed, from: awaiting_human, to: implementing, trigger: answers_submitted}
+    - {type: task.done, task: "1.1"}
+    - {type: task.done, task: "1.2"}
+    - {type: phase.changed, to: in_review}

@@ -1,0 +1,153 @@
+{
+ "$id": "l4/implementer-result@1",
+ "type": "object",
+ "required": [
+  "status",
+  "phase",
+  "task_ids",
+  "summary"
+ ],
+ "properties": {
+  "status": {
+   "enum": [
+    "done",
+    "blocked",
+    "failed",
+    "partial"
+   ]
+  },
+  "phase": {
+   "enum": [
+    "red",
+    "green",
+    "single"
+   ]
+  },
+  "task_ids": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "minItems": 1
+  },
+  "criteria_ids": {
+   "type": "array",
+   "items": {
+    "type": "string",
+    "pattern": "^C-[0-9a-f]{8}$"
+   },
+   "description": "criteria the step's tests trace; required in red; must include the task's cited criteria (Kiro) and be a subset of the unit's"
+  },
+  "summary": {
+   "type": "string",
+   "maxLength": 2000
+  },
+  "tests_added": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "files_changed": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "questions": {
+   "type": "array",
+   "maxItems": 3,
+   "items": {
+    "type": "object",
+    "required": [
+     "title",
+     "context",
+     "kind"
+    ],
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "context": {
+      "type": "string"
+     },
+     "options": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "blocking_tasks": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "kind": {
+      "enum": [
+       "technical",
+       "product",
+       "ambiguous"
+      ]
+     }
+    }
+   }
+  },
+  "tdd_exemption": {
+   "type": [
+    "object",
+    "null"
+   ],
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   }
+  },
+  "notes_for_verifier": {
+   "type": "string",
+   "maxLength": 2000
+  },
+  "suppressions": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "file",
+     "line",
+     "rule",
+     "reason"
+    ],
+    "properties": {
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer"
+     },
+     "rule": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300
+     }
+    }
+   }
+  },
+  "lesson_proposals": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string"
+     },
+     "scope": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ }
+}

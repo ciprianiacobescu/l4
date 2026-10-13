@@ -1,0 +1,24 @@
+{
+ "$id": "l4/eval-expected@1",
+ "type": "object",
+ "required": ["judge"],
+ "additionalProperties": false,
+ "properties": {
+  "implementer": {
+   "type": "object",
+   "required": ["outcome"],
+   "additionalProperties": false,
+   "properties": {"outcome": {"enum": ["pass"]}}
+  },
+  "judge": {
+   "type": "object",
+   "required": ["verdict"],
+   "additionalProperties": false,
+   "properties": {
+    "verdict": {"enum": ["PASS", "FAIL", "NEEDS_HUMAN"]},
+    "min_findings": {"type": "integer"},
+    "designed_defect": {"type": "boolean"}
+   }
+  }
+ }
+}

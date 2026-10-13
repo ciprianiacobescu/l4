@@ -1,0 +1,41 @@
+# SIGKILL twice, then finish: run 1 dies in the middle of the green step of 1.1 after a snapshot was taken; run 2
+# restores it, commits 1.1, and dies at the start of the red step of 1.2 (between two steps); run 3 finishes.
+# Every task still has exactly one red and one green commit, and every marker is ticked once.
+name: crash-mid-task-resume
+fixture: openspec-basic
+max_runs: 3
+config:
+  implementer:
+    wip_snapshot_interval: 1s
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+        kill: {run: 1, at: end, after_s: 3}
+      - when: {phase: red, task: "1.2"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+        kill: {run: 2, at: start}
+      - when: {phase: green, task: "1.2"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+judges:
+  judge:
+    verdict: "@fixture:pass_all.json"
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: step.reconciled, action: restore_wip}
+    - {type: task.done, task: "1.2"}
+    - {type: verify.verdict, verdict: PASS}
+    - {type: phase.changed, to: in_review}
+  trailers_include:
+    L4-Step: 1.1/green/1

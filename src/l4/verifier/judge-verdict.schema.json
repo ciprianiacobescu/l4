@@ -1,0 +1,198 @@
+{
+ "$id": "l4/judge-verdict@1",
+ "type": "object",
+ "required": [
+  "criteria",
+  "test_adequacy",
+  "findings",
+  "riskiest_assumptions"
+ ],
+ "properties": {
+  "criteria": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "verdict",
+     "evidence"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "pattern": "^C-[0-9a-f]{8}$"
+     },
+     "verdict": {
+      "enum": [
+       "pass",
+       "fail",
+       "insufficient_evidence",
+       "not_verifiable"
+      ]
+     },
+     "confidence": {
+      "enum": [
+       "high",
+       "medium",
+       "low"
+      ]
+     },
+     "evidence": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "kind",
+        "ref"
+       ],
+       "properties": {
+        "kind": {
+         "enum": [
+          "file",
+          "test",
+          "log",
+          "trace"
+         ]
+        },
+        "ref": {
+         "type": "string"
+        },
+        "quote": {
+         "type": "string",
+         "maxLength": 300
+        }
+       }
+      }
+     },
+     "reasoning": {
+      "type": "string",
+      "maxLength": 1200
+     },
+     "counterexample": {
+      "type": "object",
+      "required": [
+       "call",
+       "expected",
+       "actual"
+      ],
+      "description": "required when verdict is fail; executed by the harness before the verdict counts (L4-VER-002 step 9)",
+      "properties": {
+       "call": {
+        "type": "string"
+       },
+       "expected": {
+        "type": "string"
+       },
+       "actual": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
+  },
+  "test_adequacy": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "test",
+     "criterion",
+     "adequate"
+    ],
+    "properties": {
+     "test": {
+      "type": "string"
+     },
+     "criterion": {
+      "type": "string"
+     },
+     "adequate": {
+      "type": "boolean"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 600
+     },
+     "generated_test_misreads_criterion": {
+      "type": "boolean"
+     }
+    }
+   }
+  },
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "severity",
+     "title",
+     "detail",
+     "evidence"
+    ],
+    "properties": {
+     "severity": {
+      "enum": [
+       "blocker",
+       "major",
+       "minor"
+      ]
+     },
+     "criterion": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "title": {
+      "type": "string"
+     },
+     "detail": {
+      "type": "string"
+     },
+     "evidence": {
+      "type": "array"
+     },
+     "suggested_fix": {
+      "type": "string"
+     },
+     "spec_gap": {
+      "type": "boolean",
+      "description": "behaviour not covered by any criterion"
+     }
+    }
+   }
+  },
+  "riskiest_assumptions": {
+   "type": "array",
+   "minItems": 3,
+   "maxItems": 3,
+   "items": {
+    "type": "string"
+   }
+  },
+  "feedback": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "addressed",
+     "evidence"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "pattern": "^FB-[0-9]{3,}$"
+     },
+     "addressed": {
+      "type": "boolean"
+     },
+     "evidence": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "l4",
+  "description": "Work with the L4 agentic harness: ask for changes on a unit's pull request (l4 feedback), answer its questions, read state, resume escalated units, and adopt L4 in a repository.",
+  "author": { "name": "CiprianSpot" }
+}

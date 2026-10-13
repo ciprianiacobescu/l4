@@ -1,0 +1,14 @@
+{
+  "question_id": "Q-001",
+  "answer": "Trim the name: the spec's greeting is for a non-blank name and Hello, <name>! shows the name as the caller wrote it without surrounding spaces.",
+  "confidence": "high",
+  "kind": "technical",
+  "citations": [
+    {
+      "ref": "specs/greeting/spec.md",
+      "quote": "SHALL return `Hello, <name>!` for a non-blank name",
+      "claim": "The requirement fixes the greeting text for a non-blank name."
+    }
+  ],
+  "rationale": "the requirement text defines the greeting for a non-blank name"
+}

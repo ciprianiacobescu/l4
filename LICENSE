@@ -1,0 +1,38 @@
+Agent Supervisor Attribution License
+
+Copyright (c) 2026 Alexandru-Ciprian Iacobescu. All rights not expressly granted below are reserved.
+
+1. Grant
+
+   Subject to the conditions in section 2, Alexandru-Ciprian Iacobescu (the "Owner") grants you a worldwide,
+   royalty-free, non-exclusive licence to use, copy, modify, merge, publish, distribute, sublicense and sell copies
+   of this software and its documentation (the "Software"), and to do the same with works based on it.
+
+2. Attribution is required for every use
+
+   a. Keep the copyright notice above and this licence in every copy of the Software, in every substantial portion
+      of it, and in every work based on it.
+   b. When you distribute, publish or provide the Software or a work based on it to anyone else, including as a
+      hosted or networked service, credit the Owner where its users would reasonably look for credits (for example
+      the README, an "About" page, a NOTICE file or the documentation), with the words:
+      "Based on agent-supervisor by Alexandru-Ciprian Iacobescu (https://github.com/ciprianiacobescu/agent-supervisor)".
+   c. Do not remove, hide or misstate the Owner's authorship, and do not suggest that the Owner endorses you or your
+      work.
+
+3. Use without attribution is prohibited
+
+   Any use of the Software, or of a work based on it, that does not meet section 2 is not licensed and is
+   prohibited. The licence in section 1 ends automatically for anyone who does not meet section 2.
+
+4. Third-party files
+
+   Files that carry their own licence notice are not covered by this licence and stay under their own terms. In
+   particular, scripts/s1/vendor/laya_finetune_mps.py is third-party code under the Apache License 2.0; see
+   scripts/s1/vendor/NOTICE.
+
+5. No warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+   THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OR OTHER DEALINGS IN THE SOFTWARE.
