@@ -681,7 +681,7 @@ class Sweeper:
             return None
         ref = snapshot.ref
         head = self.git.rev_parse(f"refs/remotes/origin/{unit_branch(ref.id, self.cfg.forge.branch_prefix)}")
-        if head is None or head in snapshot.state.hinted_heads or not foreign_tail(self.git, head):
+        if head is None or head in snapshot.state.hinted_heads or not foreign_tail(self.git, head, strict=False):
             return None
         names = self._archiver.names(ref)
         lease = LocalFileLease(names.flock_path, unit=ref.id, run_id=self.app.run_id)
