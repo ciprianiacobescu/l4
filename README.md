@@ -36,6 +36,7 @@ On older Claude Code, use `/plugin marketplace add ciprianiacobescu/agent-superv
 For Codex, copy `plugins/l4/skills/l4` to `~/.agents/skills/l4`.
 
 * [Quickstart](docs/quickstart.md)
+* [Operations runbook](docs/runbook.md): the states of a unit, why a unit stops, and how to resume or retry
 * [Architecture](docs/architecture.md)
 * [Specification](docs/SPEC.md)
 * [Research evidence](docs/research/README.md)
