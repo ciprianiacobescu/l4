@@ -574,7 +574,7 @@ unit new task attempts.
     - `the forge does not say who set the label`, or `the harness cannot tell which user is its own, so no label is
       honoured`: a new label does not help. Use procedure B.
 11. If a new label can fix the reason, remove the label.
-12. Ask a member to add the label again. Only a new "add" event counts.
+12. Then ask a member to add the label again. Only a new "add" event counts.
 
 **Procedure B: the `l4 resume` command**
 
@@ -595,10 +595,9 @@ unit new task attempts.
 
 5. Make sure that the log has `[l4] resume: <unit> resumed: back in <phase>`. The phase is `implementing` or `fixing`
    for a halted unit, and `verifying` for an escalated unit.
-6. If the line says `back in halted` or `back in escalated`, wait until the other `l4` process on this computer ends.
-   The log also has `is locked by another run: skipped`.
-7. Do step 4 again.
-8. Start a run on `<base>` (section 6), or wait for the schedule.
+6. If the line says `back in halted` or `back in escalated`, do step 4 again after the other `l4` process ends. The
+   log then also has `is locked by another run: skipped`.
+7. Start a run on `<base>` (section 6), or wait for the schedule.
 
 ### 7.3 `escalated`
 
