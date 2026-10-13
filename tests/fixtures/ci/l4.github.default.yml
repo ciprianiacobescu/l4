@@ -65,4 +65,5 @@ jobs:
         with:
           name: l4-out
           path: .l4-out/
+          include-hidden-files: true
           retention-days: 7

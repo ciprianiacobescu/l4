@@ -105,12 +105,15 @@ UPLOAD_STEP = """\
         with:
           name: l4-out
           path: .l4-out/
+          include-hidden-files: true
           retention-days: 7"""
 
 
 def _upload_step(cfg: L4Config) -> str:
     """The step that uploads `.l4-out` (prompts and agent transcripts, secrets masked), or nothing when
-    `ci.upload_artifacts` is false: on a public repository any signed-in user can download the artifact."""
+    `ci.upload_artifacts` is false: on a public repository any signed-in user can download the artifact. The folder
+    is hidden, so `include-hidden-files` is required: without it upload-artifact uploads nothing (live run
+    38330251183)."""
     return UPLOAD_STEP if cfg.ci.upload_artifacts else ""
 
 

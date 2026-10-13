@@ -43,7 +43,11 @@ def test_the_default_uploads_and_only_a_boolean_is_accepted():
 def test_true_keeps_the_upload_as_the_last_step(form):
     text = RENDERS[form](cfg())
     assert len(uploads(text)) == 1
-    assert steps(text)[-1]["with"] == {"name": "l4-out", "path": ".l4-out/", "retention-days": 7}
+    # `.l4-out` is a hidden folder: without `include-hidden-files` upload-artifact finds nothing (live run 38330251183:
+    # "No files were found with the provided path: .l4-out/. No artifacts will be uploaded.")
+    assert steps(text)[-1]["with"] == {
+        "name": "l4-out", "path": ".l4-out/", "include-hidden-files": True, "retention-days": 7,
+    }  # fmt: skip
 
 
 @pytest.mark.parametrize("form", RENDERS)
