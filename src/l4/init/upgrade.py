@@ -69,6 +69,14 @@ def _refuse(message: str) -> L4Exit:
     return L4Exit(ExitCode.USAGE_ERROR, f"upgrade: {message}")
 
 
+def _gitlab_template(cfg: L4Config) -> str:
+    """The GitLab job for the config as it is now (L4-OPS-016): a changed base branch or prefix changes the file."""
+    try:
+        return render_gitlab_ci(cfg)
+    except ValueError as exc:
+        raise _refuse(str(exc)) from None
+
+
 def rewrite_pins(text: str, *, version: str | None, commit: str) -> str:
     """Replace the scalars of `harness.version` and `harness.commit` and nothing else: the quotes of each value, a
     trailing comment, the line endings and every other line stay. Refuses a file where either is not a plain
@@ -210,7 +218,7 @@ def plan_upgrade(
         PlannedFile(str(CONFIG_RELPATH), new_config.encode("utf-8"), 0o644),
         PlannedFile(SHIM_RELPATH, render_shim().encode(), 0o755),
         PlannedFile(SETUP_RELPATH, render_setup().encode(), 0o755),
-        PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644),
+        PlannedFile(TEMPLATE_RELPATH, _gitlab_template(loaded).encode(), 0o644),
     )
     differing = tuple(p for p in wanted if not _same(repo / p.path, p.data))
     seeded = tuple(_serena_seed(repo, loaded))
@@ -335,7 +343,7 @@ def _plan_fetched(
     ]
     platform = loaded.ci.platform
     if platform in ("gitlab", "auto") and (repo / TEMPLATE_RELPATH).exists():
-        wanted.append(PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644))
+        wanted.append(PlannedFile(TEMPLATE_RELPATH, _gitlab_template(new_cfg).encode(), 0o644))
     if platform in ("github", "auto") and (repo / WORKFLOW_RELPATH).exists():
         wanted.append(PlannedFile(WORKFLOW_RELPATH, render_github_ci(new_cfg).encode(), 0o644))
     return UpgradePlan(
