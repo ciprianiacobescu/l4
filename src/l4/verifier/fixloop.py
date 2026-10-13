@@ -430,8 +430,10 @@ _RETRY_EVENTS = ("unit.retried", "unit.resumed")  # a person's decision to try a
 
 def failure_set(gates: Iterable[Mapping[str, object]], tests: Mapping[str, str]) -> frozenset[str]:
     """What a FAIL round failed on (D7): the name of each failed gate, the failing test ids of a failed test gate, and
-    for a failed gate with no failing test the exit code (`<gate>:exit <code>`, else the head of its reason). Judge
-    findings are not part of it: their wording changes between rounds. `gates` are the `verdict.json` rows."""
+    for a failed gate with no failing test the exit code (`<gate>:exit <code>`, else the head of its reason) and the
+    digest of its last error lines (`<gate>:log <digest>`, review M5: two lint errors are two failures, the same crash
+    twice is one). Judge findings are not part of it: their wording changes between rounds. `gates` are the
+    `verdict.json` rows."""
     failing = sorted(i for i, status in tests.items() if status in ("failed", "error"))
     found: set[str] = set()
     for row in gates:
@@ -445,6 +447,8 @@ def failure_set(gates: Iterable[Mapping[str, object]], tests: Mapping[str, str])
         reason = str(row.get("reason") or "")
         code = _EXIT.search(reason)
         found.add(f"{name}:exit {code.group(1)}" if code else f"{name}:{reason.split(';', 1)[0].strip()[:80]}")
+        if digest := row.get("digest"):
+            found.add(f"{name}:log {digest}")
     return frozenset(found)
 
 
