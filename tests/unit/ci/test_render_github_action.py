@@ -68,7 +68,9 @@ def test_steps_checkout_base_checkout_action_doctor_save_plan_run_status_upload(
     assert by_name["doctor"]["run"] == "l4 doctor --ci --fix || l4 ci map-exit $?"
     assert by_name["plan"]["run"] == "l4 plan --sweep || l4 ci map-exit $?"
     assert by_name["run"]["run"] == "l4 run || l4 ci map-exit $?"
-    assert by_name["status"]["run"] == "l4 status" and by_name["status"]["if"] == "${{ always() }}"
+    assert by_name["status"]["run"] == "l4 status" and (
+        by_name["status"]["if"] == "${{ always() && steps.l4.outcome == 'success' }}"  # no `l4` when the action failed
+    )
     upload = steps[-1]
     assert upload["if"] == "${{ always() }}" and upload["with"]["path"] == ".l4-out/"
     assert upload["with"]["name"] == "l4-out" and upload["with"]["retention-days"] == 7

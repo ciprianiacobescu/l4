@@ -194,9 +194,10 @@ on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `
 
 **L4-ACT-005** `l4 init` and `l4 upgrade` MUST accept `--harness-ref REF`: REF is resolved once with
 `git ls-remote`, the sha is written as `@<sha> # <REF>`, and a ref that resolves to nothing is exit 2. `l4 upgrade`
-(`--harness-ref` or `--harness-commit`) rewrites the `uses:` line, and the `commit` input of source `repository`.
-Once, when the workflow's save step carries a literal path list from before the paths became the action's output,
-`l4 upgrade` replaces that list with the output reference (§16.2).
+(`--harness-ref` or `--harness-commit`) re-renders the workflow from the config with the template of the harness that
+runs it and the new pin (the `uses:` line, and the `commit` input of source `repository`), so a template fix reaches
+the adoption; it prints `re-rendered .github/workflows/l4.yml (N lines changed)` and the changed lines, and writes
+nothing with `--dry-run`. A second run changes nothing.
 
 **L4-ACT-006** The harness repository MUST have `release.yml`. On a tag `src-vX.Y.Z` it MUST: refuse a source commit
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
@@ -2910,9 +2911,8 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
     that differs from the restore's by one entry is never found again. After an upgrade changed the action's list, the
     consumer's literal list was stale: the cache was saved on every run and missed on every run [V: runs 38307444318
     and 38308033922, CLI cache missed although saved]. The paths are therefore one list, the action's output.
-  - **The one-time migration.** `l4 upgrade` replaces a literal path block in the save step of an adoption made before
-    this with the output reference, once and only that step (L4-ACT-005) [V: run 38308990414, where only the `uses:`
-    line and the path block changed].
+  - **The upgrade re-renders.** `l4 upgrade` writes the whole workflow again from the config, so an adoption with a
+    literal path block in its save step, or an older base-checkout step, gets the current one (L4-ACT-005).
   - **The pin and the trust.** Anyone who can push a workflow to a private same-owner repository can read the harness
     through the action. The `uses:` sha is the only pin (L4-INS-005).
 * `concurrency: {group: l4-${{ matrix.unit }}, cancel-in-progress: false}` at job level (the default single-pending
@@ -5787,8 +5787,9 @@ scenario is a spec defect (§26).
 #### SCN-ACT-10 (+) Upgrade by version · L4-ACT-005
 - **Given** an action-mode workflow at `v0.3.0`
 - **When** `l4 upgrade --harness-ref v0.4.0` runs
-- **Then** the `uses:` line is `@<sha of v0.4.0> # v0.4.0`, and nothing else in the workflow changed (a literal CLI
-  cache path block in the save step is replaced by the action's output, once).
+- **Then** the workflow is re-rendered from the config with the template of the harness that runs it and the new pin:
+  the `uses:` line is `@<sha of v0.4.0> # v0.4.0`, an older template's steps are replaced by the current ones, and a
+  second run changes nothing.
 
 #### SCN-ACT-11 (+) One release · L4-ACT-006
 - **Given** a tag `src-v0.3.0` on a commit whose checks passed

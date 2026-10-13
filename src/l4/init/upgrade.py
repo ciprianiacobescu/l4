@@ -8,6 +8,7 @@ configuration (`l4.init.pytest_marker`), once, or the snippet is printed. New co
 M1: forge-and-ci 1.14 and 1.20 (the `uvx` pin form).
 """
 
+import difflib
 import logging
 import re
 from collections.abc import Mapping
@@ -21,7 +22,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from l4 import __version__
 from l4.buildinfo import harness_commit
-from l4.ci.github import WORKFLOW_RELPATH, render_github_ci
+from l4.ci.github import WORKFLOW_RELPATH, ActionPin, render_github_action_ci, render_github_ci
 from l4.ci.render import (
     SETUP_RELPATH,
     SHIM_RELPATH,
@@ -37,7 +38,7 @@ from l4.config.schema import L4Config, Sha, effective_delivery
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.init.action import SAVE_STEP_NAME, migrate_save_paths, read_pin, remote_url, repin, resolve_ref
+from l4.init.action import read_pin, remote_url, resolve_ref
 from l4.init.init import (
     PlannedFile,
     _serena_seed,
@@ -54,6 +55,7 @@ from l4.init.vendor import VendorSource, collect_vendor_source, harness_root
 log = logging.getLogger("l4.upgrade")
 
 MAX_CONFIG_BYTES = 1024 * 1024
+_DIFF_LINES = 40
 _VERSION_LINE = re.compile(rb'^__version__\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 _BLOCK = re.compile(r"^harness:[ \t]*(#.*)?$")
 _PIN = re.compile(
@@ -166,7 +168,7 @@ class UpgradePlan:
     seeded: tuple[PlannedFile, ...] = ()  # files created only when absent (`.serena/project.yml`), never overwritten
     marker: MarkerEdit | MarkerRefusal | None = None  # registers the `l4` pytest marker (P4)
     commit: str = ""  # the harness commit the plan pins or vendors
-    notes: tuple[str, ...] = ()  # one line each, printed after the files (the save step's paths, L4-ACT-002)
+    notes: tuple[str, ...] = ()  # printed after the files (the re-rendered workflow and its changed lines)
 
     @property
     def vendor_differs(self) -> bool:
@@ -225,6 +227,19 @@ def plan_upgrade(
     )  # fmt: skip
 
 
+def _rerender_note(old: str, new: str) -> str:
+    """`re-rendered <workflow> (N lines changed)` and the changed lines, as a short unified diff."""
+    diff = [
+        line
+        for line in difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=0)
+        if not line.startswith(("---", "+++", "@@"))
+    ]
+    shown = diff[:_DIFF_LINES] + ([f"... {len(diff) - _DIFF_LINES} more"] if len(diff) > _DIFF_LINES else [])
+    return f"re-rendered {WORKFLOW_RELPATH} ({sum(line.startswith('+') for line in diff)} lines changed)" + "".join(
+        f"\n    {line}" for line in shown
+    )
+
+
 def _plan_action(
     repo: Path,
     loaded: L4Config,
@@ -234,8 +249,9 @@ def _plan_action(
     pin: str | None,
     ref: str | None,
 ) -> UpgradePlan:
-    """An action adoption (L4-ACT-005): the pin is the workflow's `uses:` line (the `commit` input of a copy of the
-    action), and only that line moves: `@<sha> # <REF>`. Nothing else changes."""
+    """An action adoption (L4-ACT-005): the workflow is re-rendered from the config with the template of the harness
+    that runs and the new pin (`@<sha> # <REF>`, or the `commit` input of a copy of the action), as the fetched form's
+    upgrade re-renders its CI file, so a fix in the template reaches the adoption."""
     if harness is not None:
         raise _refuse("--harness vendors a checkout; this adoption gets its harness from the setup action")
     try:
@@ -260,16 +276,16 @@ def _plan_action(
             TypeAdapter(Sha).validate_python(sha)
         except ValidationError:
             raise _refuse(f"--harness-commit must be 40 lowercase hex characters, not {sha!r}") from None
-    new = repin(text, sha=sha, ref=ref)
+    try:
+        pinned = ActionPin(found.repository, sha, ref, copy=found.local)
+    except ValueError as exc:
+        raise _refuse(f"cannot move the pin: {exc}") from None
+    new = render_github_action_ci(loaded, pinned)
     notes: tuple[str, ...] = ()
-    migrated = migrate_save_paths(new)
-    if migrated is not None:  # an adoption from before the paths became the action's output (once)
-        new = migrated
-        notes = (
-            f"the `{SAVE_STEP_NAME}` step of {WORKFLOW_RELPATH} now reads its paths from the action's output "
-            "clis-cache-paths (they were a literal list, which drifts from the action's restore)",
-        )
-    changed = () if new == text else (PlannedFile(WORKFLOW_RELPATH, new.encode("utf-8"), 0o644),)
+    changed: tuple[PlannedFile, ...] = ()
+    if new != text:
+        changed = (PlannedFile(WORKFLOW_RELPATH, new.encode("utf-8"), 0o644),)
+        notes = (_rerender_note(text, new),)
     missing = tuple(m for m in missing_keys(yaml.safe_load(old_config) or {}) if not m.startswith("harness."))
     return UpgradePlan(
         changed, None, (), (), (), missing=missing, seeded=tuple(_serena_seed(repo, loaded)),
@@ -367,7 +383,7 @@ def run_upgrade(
         verb_new = "would create" if dry_run else "created"
         click.echo(f"{verb_new} {planned.path} (in Serena's own form, so that its start changes nothing)")
     for note in plan.notes:
-        click.echo(f"{'would change' if dry_run else 'changed'}: {note}")
+        click.echo(note.replace("re-rendered", "would re-render" if dry_run else "re-rendered", 1))
     said = marker_message(plan.marker, dry_run=dry_run)
     if said is not None:
         click.echo(said)
