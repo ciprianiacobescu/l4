@@ -123,6 +123,42 @@ def test_the_task_boxes_are_the_base_branchs_and_a_task_the_base_lacks_is_open(w
     assert "[x]" not in after and "3.1 A task that only the branch has" in after and "- [ ] 3.1 A task" in after
 
 
+QUESTIONS = f"{UNIT_REL}/questions.md"
+_SECTION = "## {id}: {title}\n\n- **Status:** {status}\n- **Blocking tasks:** {task}\n- **Kind:** technical\n"
+
+
+def questions_text() -> str:
+    rows = [("Q-001", "open", "1.1", "a conflict of the old code"), ("Q-002", "answered", "1.2", "trim the name")]
+    index = "".join(f"| {i} | {s} | {t} | technical | {w} |\n" for i, s, t, w in rows)
+    sections = "\n---\n\n".join(
+        _SECTION.format(id=i, title=w, status=s, task=t) + ("\n### Answer\nTrim it.\n" if s == "answered" else "")
+        for i, s, t, w in rows
+    )
+    return (
+        "# Questions \u2014 add-greeting\n\n<!-- l4:index:start -->\n| ID | Status | Blocking | Kind | Question |\n"
+        f"|----|--------|----------|------|----------|\n{index}<!-- l4:index:end -->\n\n---\n\n{sections}"
+    )
+
+
+def test_a_restart_supersedes_the_open_questions_of_the_old_attempt(world, forge):
+    """L4-OPS-004: a question about code that only the old attempt had must not block the new attempt."""
+    assert world.run(happy()).code == ExitCode.OK
+    person_pushes(world, {QUESTIONS: questions_text()})
+    result = restart(world)
+    text = blob(world, result.branch_head, QUESTIONS)
+    assert text is not None
+    assert "- **Status:** superseded by restart" in text and "| Q-001 | superseded |" in text
+    assert "| Q-002 | answered |" in text and text.count("- **Status:** answered\n") == 1
+    assert "Trim it." in text
+    [restarted] = [e for e in events(world.remote) if e["type"] == "unit.restarted"]
+    assert restarted["superseded_questions"] == ["Q-001"]
+    app, cfg = load_app_config(world.app)
+    git = Git(app.repo, environ=app.environ)
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), UNIT)
+    facts = facts_of(load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix))
+    assert facts.open_blocking_questions == () and next_action(facts)[0] == "implement"
+
+
 def test_a_second_restart_is_attempt_two_and_the_lock_ref_is_kept_under_the_attempt(world, forge):
     poisoned(world, forge)
     first = restart(world)

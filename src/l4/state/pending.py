@@ -222,4 +222,3 @@ class PendingLedger:
             if "\n" in value or "\r" in value:
                 raise ValueError("a lock commit trailer must be one line")
         return f"{json.dumps(fields)}\n\n[skip ci]\n\nL4-Unit: {self._unit}\nL4-Run: {self._run_id}\n"
-

@@ -349,6 +349,19 @@ def test_a_superseded_question_keeps_holding_what_its_successor_does_not():
     assert blocked_tasks(gone.questions, ["1.1"]) == {"1.1"}
 
 
+def test_a_question_superseded_by_a_restart_holds_nothing_and_the_index_follows():
+    text = (
+        "## Q-001: a\n\n- **Status:** open\n- **Blocking tasks:** 1.1\n\n---\n\n"
+        "## Q-002: b\n\n- **Status:** open\n- **Blocking tasks:** 1.2\n"
+    )
+    file = QuestionsFile.parse(text).supersede_by_restart("Q-001")
+    one = file.get("Q-001")
+    assert one is not None and one.status is QuestionStatus.SUPERSEDED and one.superseded_by is None
+    assert "- **Status:** superseded by restart\n" in file.data.decode()
+    assert "| Q-001 | superseded |" in file.data.decode()  # the index row follows (the file has no index: one is added)
+    assert blocked_tasks(file.questions, ["1.1", "1.2"]) == {"1.2"}  # a plain `superseded` would still hold 1.1
+
+
 def test_a_stale_index_row_is_refreshed_and_only_that_row_changes(tmp_path: Path):
     ask(tmp_path, question(), question(title="Second"), question(title="Third"))
     path = tmp_path / "questions.md"

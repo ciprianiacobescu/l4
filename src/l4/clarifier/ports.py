@@ -75,6 +75,7 @@ class QuestionsPort(Protocol):
 def render_answer_with_citations(answer_md: str, citations: Sequence[Citation]) -> str:
     if not citations:
         return answer_md
+
     def one_line(text: str) -> str:
         return " ".join(text.split())
 

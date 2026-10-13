@@ -12,12 +12,15 @@ over and the old work is kept as a ref (design D4). The seven steps, in this ord
 3. **Build the new folder** in a private, detached worktree (a unit branch that the operator has checked out does not
    break it) cut from the base head: the old branch's unit folder, without `.l4/` (but with
    `.l4/followup.json` and `.l4/fix.json`, M1) and `verification.md`, with
-   `questions.md` and `feedback.md` kept, and every task box set to its state on the base branch
-   (`[ ]` for a task the base lacks). Fix-unit folders (`<name>-fix-*`) are siblings of the unit folder, so they are
-   not copied.
+   `questions.md` kept, with every question whose Status is `open` set to `superseded by restart` (it was asked about
+   the old attempt's code, and would block the new attempt for nothing; a bare `superseded` with no successor still
+   holds its tasks, so the restart form releases them), and `feedback.md` kept, and every task box set to its state on
+   the base branch (`[ ]` for a task the base lacks). Fix-unit folders (`<name>-fix-*`) are siblings of the unit
+   folder, so they are not copied.
 4. **Create the new branch**: one commit `chore(<name>): restart, attempt <n> [skip ci]` with the folder and a ledger
-   file (`run.started`, `unit.restarted{attempt, previous_head, reason, by, signal}`, `run.finished`). The fold reads
-   `unit.restarted` as the first event of the unit: no phase, so the planner says `implement`.
+   file (`run.started`, `unit.restarted{attempt, previous_head, reason, by, signal, superseded_questions}`,
+   `run.finished`). The fold reads `unit.restarted` as the first event of the unit: no phase, so the planner says
+   `implement`.
 5. **Replace the branch and move the lock ref** in ONE `git push --atomic` with a lease on the old head, a lease on the
    lock ref's sha and a lease that `<n>-locks` does not exist: a person's push since step 2 makes the restart fail with
    `the branch moved: run l4 restart again`, and nothing is changed (only the attempts ref of the old head, which is
@@ -48,8 +51,9 @@ from l4.forge.gitlab import push_auth_config
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.orchestrator import UnitOutcome
 from l4.outcome import CommandResult
-from l4.specs.base import SpecProvider, UnitRef
+from l4.specs.base import SpecError, SpecProvider, UnitRef
 from l4.specs.providers import providers_for
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, QuestionStatus
 from l4.state.environment import run_environment
 from l4.state.ledger import LedgerEvent, LedgerWriter
 from l4.state.lifecycle import Phase
@@ -179,12 +183,15 @@ def _restart(
         relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve()).as_posix()
         unit_dir = private / relative
         _build_folder(git, ref, old_head, relative, unit_dir, base)
+        superseded = _supersede_open_questions(unit_dir)
         writer = LedgerWriter.open(
             unit_dir, ref.id, app.run_id, redactor=app.redactor, command="restart", branch=branch, base=base_head,
             source="base", iteration=iteration + 1, file_filter=app_forge_urls(app, cfg).scrub,
             **run_environment(app.environ),
         )  # fmt: skip
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
+        if superseded:
+            extra["superseded_questions"] = superseded
         writer.append(
             "unit.restarted", attempt=attempt, previous_head=old_head, attempt_ref=attempt_ref, reason=reason[:300],
             **extra,
@@ -282,6 +289,27 @@ def _build_folder(git: Git, ref: UnitRef, old_head: str | None, relative: str, u
     if tasks.is_file() and not tasks.is_symlink():
         base = git.run_bytes("show", f"{base_ref}:{relative}/{TASKS_FILENAME}", check=False)
         tasks.write_bytes(reset_boxes(tasks.read_bytes(), base, ref))
+
+
+def _supersede_open_questions(unit_dir: Path) -> list[str]:
+    """Step 3: every question that is `open` is the old attempt's, so it is set to `superseded by restart` (the file
+    API keeps the index consistent). The answered ones, and every other Status, stay. Returns the ids."""
+    path = unit_dir / QUESTIONS_FILENAME
+    if path.is_symlink():
+        return []
+    try:
+        file = QuestionsFile.load(path)
+        if file is None:
+            return []
+        ids = [q.id for q in file.questions if q.status is QuestionStatus.OPEN and q.status_value is not None]
+        for qid in ids:
+            file = file.supersede_by_restart(qid)
+        if ids:
+            file.save(path)
+    except SpecError as exc:
+        log.warning("restart: questions.md was kept as it is: %s", exc)
+        return []
+    return ids
 
 
 def reset_boxes(current: bytes, base: bytes, ref: UnitRef) -> bytes:

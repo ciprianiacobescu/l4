@@ -544,8 +544,13 @@ def run_init(
     if harness_ref is not None and harness_commit_pin is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref and --harness-commit exclude each other")
     if not action:
-        extras = (("--action-repo", action_repo), ("--action-copy", action_copy), ("--dependabot", dependabot),
-                  ("--runner-tag", runner_tag), ("--forge-token-env", forge_token_env))
+        extras = (
+            ("--action-repo", action_repo),
+            ("--action-copy", action_copy),
+            ("--dependabot", dependabot),
+            ("--runner-tag", runner_tag),
+            ("--forge-token-env", forge_token_env),
+        )
         for flag, used in extras:
             if used:
                 raise L4Exit(ExitCode.USAGE_ERROR, f"init: {flag} needs --action")
@@ -627,8 +632,7 @@ def run_init(
         click.echo(f"todo: {todo}", err=True)
     click.echo(
         f"next: run `{'l4' if pin is not None else '.l4/bin/l4'} doctor --adoption` (the config rows and a dry run of "
-        "the gates at HEAD), then commit "
-        + _listed(files_to_commit(plan)),
+        "the gates at HEAD), then commit " + _listed(files_to_commit(plan)),
         err=True,
     )
     if plan.vendor is not None:

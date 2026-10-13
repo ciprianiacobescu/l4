@@ -35,9 +35,7 @@ def reverify_hold(round_no: int) -> str:
 
 def _outcomes(stored: dict) -> list[CriterionOutcome]:
     return [
-        CriterionOutcome(
-            str(c["id"]), str(c.get("alias", "")), c["result"], c.get("judge"), str(c.get("reason", ""))
-        )
+        CriterionOutcome(str(c["id"]), str(c.get("alias", "")), c["result"], c.get("judge"), str(c.get("reason", "")))
         for c in stored.get("criteria", [])
         if isinstance(c, dict) and "id" in c and "result" in c
     ]
@@ -53,7 +51,9 @@ def raise_legacy_verdicts(ctx: HookContext, round_no: int, consumed: Sequence[st
     existing = QuestionsFile.load(s.ref.path / QUESTIONS_FILENAME)
 
     def raise_(
-        outcomes: Sequence[CriterionOutcome], findings: Sequence[Finding], trace: Sequence[CriterionEvidence],
+        outcomes: Sequence[CriterionOutcome],
+        findings: Sequence[Finding],
+        trace: Sequence[CriterionEvidence],
         held: Sequence[str],
     ) -> list[str]:
         return raise_verdict_questions(

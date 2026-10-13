@@ -237,7 +237,7 @@ def _feedback_candidate(f: VerifierFinding, ref: FeedbackRef) -> _Candidate:
 
 
 def request_of(ref: FeedbackRef) -> str:
-    """"Requested by <By> in FB-NNN (<kind>, <places>): <text>", the text whole up to 1,200 characters."""
+    """ "Requested by <By> in FB-NNN (<kind>, <places>): <text>", the text whole up to 1,200 characters."""
     where = ", ".join((ref.kind, *ref.places))
     return f"Requested by {_flat(ref.by, 120)} in {ref.id} ({where}): {_flat(ref.text, MAX_REQUEST_CHARS)}"
 

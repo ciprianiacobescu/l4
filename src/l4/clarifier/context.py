@@ -147,9 +147,11 @@ class ContextBuilder:
                     matched.setdefault(path, [])
         ranked = sorted(
             (
-                p for p in score
+                p
+                for p in score
                 if p in tracked and not p.startswith(SKIPPED_PREFIXES) and not is_no_evidence(PurePosixPath(p).parts)
-            ), key=lambda p: (-score[p], p)
+            ),
+            key=lambda p: (-score[p], p),
         )
         excerpts, left = [], self._budget // DOCUMENT_SHARE
         for path in ranked:

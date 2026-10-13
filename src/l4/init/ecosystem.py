@@ -55,9 +55,7 @@ def propose_gates(eco: PythonEco) -> Proposal:
                 "lint": list(M0_GATES["lint"]),
                 "test": dict(M0_GATES["test"]),
             },
-            (
-                "no pyproject.toml: the gates are the uv/pytest/ruff defaults; set gates.setup, gates.test, gates.lint",
-            ),
+            ("no pyproject.toml: the gates are the uv/pytest/ruff defaults; set gates.setup, gates.test, gates.lint",),
         )
     project = eco.project
     todos: list[str] = []

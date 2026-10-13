@@ -639,7 +639,7 @@ _CRON = re.compile(r"^[A-Za-z0-9*/,?#-]+( [A-Za-z0-9*/,?#-]+){4}$")
 def _cron(value: str) -> str:
     """Five fields of a POSIX cron expression, as GitHub's `schedule:` reads them; it is written into the workflow."""
     if not _CRON.match(value):
-        raise ValueFree("not a cron expression of five space-separated fields, for example \"*/30 * * * *\"")
+        raise ValueFree('not a cron expression of five space-separated fields, for example "*/30 * * * *"')
     return value
 
 

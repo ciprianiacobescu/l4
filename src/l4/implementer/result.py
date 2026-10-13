@@ -152,7 +152,6 @@ _NAME_RULES = TraceRules(
 )
 
 
-
 def trace_rules(test_command: str) -> TraceRules:
     """The trace instruction for the project's test gate: the `l4` marker when the gate command runs pytest (the
     word `pytest` in the command, as in `python -m pytest` or `uv run pytest`), else the id in the test name, which

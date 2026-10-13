@@ -93,11 +93,13 @@ start a pipeline.
    `refs/l4/attempts/<fw>/<name>/<n>-locks`.
 3. **Build the new folder.** It starts from the old branch's unit folder:
    - drop `.l4/` and `verification.md`, and the fix-unit folders `<name>-fix-*`;
-   - keep `questions.md` and `feedback.md`;
+   - keep `questions.md`, with its open questions set to `superseded by restart`, and `feedback.md`;
    - set each task box to its state on the base branch, and to `[ ]` for a task the base does not have.
 4. **Create the new branch** from the base head. It has one commit, `chore(<name>): restart, attempt <n> [skip ci]`,
    with the folder and a ledger file. The ledger file holds `run.started`,
-   `unit.restarted{attempt, previous_head, reason, by, signal}` and `run.finished`.
+   `unit.restarted{attempt, previous_head, reason, by, signal, superseded_questions}` and `run.finished`.
+   An open question of the old attempt would block the new one for nothing, and a bare `superseded` with no successor
+   still holds its tasks, so the status written is `superseded by restart`, which holds nothing.
 5. **Replace the branch.** Push the new branch with `--force-with-lease=<branch>:<old head>`, so a person's push since
    step 2 makes the restart fail and change nothing.
 6. **Close the old merge request** with a comment that names the attempts ref and the reason.

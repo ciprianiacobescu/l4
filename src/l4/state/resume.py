@@ -113,7 +113,14 @@ def run_resume(
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
-    result = resume_unit(app, cfg, git, provider, ref, reason=reason, extend_fix_rounds=extend_fix_rounds,
+    result = resume_unit(
+        app,
+        cfg,
+        git,
+        provider,
+        ref,
+        reason=reason,
+        extend_fix_rounds=extend_fix_rounds,
         extend_feedback_rounds=extend_feedback_rounds,
     )
     log.info("%s resumed: back in %s", unit, result.outcome.phase_after)

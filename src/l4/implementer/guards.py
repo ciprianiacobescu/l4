@@ -74,9 +74,7 @@ def build_manifest(
     return FreezeManifest(red_sha, files, tuple(support_globs))
 
 
-def manifest_at_head(
-    git: Git, head: str, paths: Sequence[str], *, support_globs: Sequence[str]
-) -> FreezeManifest:
+def manifest_at_head(git: Git, head: str, paths: Sequence[str], *, support_globs: Sequence[str]) -> FreezeManifest:
     """`paths` as they are in the work tree now (HEAD is `head`): what a step that has no red phase of its own may not
     change. Support files and ignore files are frozen like in green; a path that is not a file at HEAD is left out."""
     support_globs = (*support_globs, *IGNORE_FILE_GLOBS)

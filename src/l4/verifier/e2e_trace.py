@@ -18,7 +18,7 @@ def e2e_coverage(
     test that mentions everything proves nothing about any of them."""
     known = {c.id for c in criteria}
     covered: dict[str, list[str]] = {}
-    for case in (report.tests.values() if report else ()):
+    for case in report.tests.values() if report else ():
         if case.status == "skipped":
             continue
         traced = trace_ids(case) & known

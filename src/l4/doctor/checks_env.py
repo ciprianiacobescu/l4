@@ -58,10 +58,7 @@ def _env_003(ctx: DoctorContext) -> CheckResult:
         return CheckResult("skip", "OpenSpec is not active in this repository")
     pin = ctx.cfg.spec.openspec.version
     entry = openspec_entrypoint(ctx.env)
-    hint = (
-        f"npm install --prefix {openspec_prefix(ctx.env)} --save-exact "
-        f"{ctx.cfg.spec.openspec.package}@{pin}"
-    )
+    hint = f"npm install --prefix {openspec_prefix(ctx.env)} --save-exact {ctx.cfg.spec.openspec.package}@{pin}"
     # the node checked here is the node the provider will run (L4-OSP-001)
     node = ctx.which("node")
     if not node:
