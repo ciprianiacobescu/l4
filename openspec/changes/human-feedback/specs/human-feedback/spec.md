@@ -18,7 +18,8 @@ The file is split between two owners:
   item's *Outcome* block.
 
 Harness edits MUST be span-scoped and MUST preserve every other byte. Item ids are `FB-NNN`, unique per unit and never
-reused.
+reused. Ids are canonical `FB-%03d`: a hand-written `FB-4` is the item `FB-004`. When two sections hold one id, the first
+is the item, and the others MUST NOT be taken and are reported once as `feedback.invalid{id, problem, duplicate: true}`.
 
 #### Scenario: SCN-FBK-01 (+) Harness edits leave the person's text alone
 - **GIVEN** a `feedback.md` with two items whose texts contain Markdown headings in code fences and trailing spaces
@@ -43,7 +44,13 @@ Each item SHALL carry Status, Kind, Feedback text and, depending on its kind, th
 
 Parsing MUST be tolerant: Status and Kind are case-insensitive, and an unknown Status reads as `draft`. An item that
 breaks these rules is invalid: it MUST NOT be taken, and it MUST be reported with its problem in the sticky note and as
-`feedback.invalid{id, problem}`.
+`feedback.invalid{id, problem}`. An item with no *Status* line MUST be reported invalid (`no Status line`) and skipped by
+every harness write, which MUST NOT raise.
+
+#### Scenario: SCN-FBK-32 (−) A copy of an id is reported, and a short id is the canonical one
+- **GIVEN** a `feedback.md` with sections `## FB-1:` and `## FB-001:`, and an item whose *Status* line was deleted
+- **WHEN** step 0 reads it
+- **THEN** the first section is the item `FB-001`, the other is recorded once as `feedback.invalid{duplicate: true}` and never taken, the item without a *Status* line is reported `no Status line`, and nothing raises
 
 #### Scenario: SCN-FBK-03 (−) A config item without a variable is not taken
 - **GIVEN** a submitted `config` item with no *Env* line
@@ -71,6 +78,9 @@ never commit, push, or call the forge.
 - **`--text -`** reads standard input.
 - **`--draft`** writes Status `draft`; otherwise the item is `submitted`.
 - **`list` and `show`** accept `--json`, printing `{"schema": "l4/feedback@1", …}`.
+- **Where it is allowed:** an open unit takes feedback on its own branch (off it the command is exit 2 with the
+  `git switch l4/<framework>/<name>` line); a follow-up's or a fix unit's folder takes none (`add`, `submit` and
+  `withdraw` are exit 2 naming the parent, whose file is the one judged).
 
 #### Scenario: SCN-FBK-05 (+) Add on a unit branch
 - **GIVEN** the checked-out branch `l4/openspec/add-reorder-quantity` and `src/inventory/reorder.py` with 20 lines
@@ -98,7 +108,8 @@ An item is takeable when all of these hold:
 - it is valid;
 - it is not `withdrawn`;
 - its Status is `submitted`, or its human content differs from what the last `feedback.taken` recorded
-  (L4-FBK-007);
+  (L4-FBK-007), or its Status is `taken` and the ledger holds it as `not_addressed` or `waiting` (it is taken again, so
+  that no taken item is neither takeable nor pending at the judge);
 - the feedback round limit (L4-FBK-006) is not reached.
 
 Before the hand-off, items MUST wait for the next round: no running task or fix unit is interrupted. A push of
@@ -142,6 +153,14 @@ The ADDED criterion takes this form:
 - OpenSpec: a requirement `### Requirement: <title> — feedback FB-NNN` with the scenarios;
 - Kiro: `2.n`/`3.n` items in `bugfix.md`.
 
+An item taken again with the content it had at its last take is a *retake*. When every item a chore task carries is a
+retake (the planner lists it under `retakes` in `.l4/fix.json`), "nothing changed" (refactor) and "no tests added" (test
+chore) MUST complete the task instead of failing the attempt, because the judge may have left the item out of its reply
+when the change was made. Nothing but the task's tick is committed (`L4-TDD: already-done`), the ledger records
+`task.done{tdd: "already-done", reason: "retaken FB-NNN: nothing left to change"}`, the integrity check accepts that
+value as it does `exempt`, and the parent is verified again. A first take keeps failing as before. A `config` or
+`behaviour` retake is red/green, with the already-satisfied exemption of L4-IMP-002 when its tests pass already.
+
 Items past `MAX_FIX_TASKS` MUST stay takeable and wait for the next round, as `feedback.waiting{ids, reason: "fix_unit_full"}`. They are never "not converted".
 
 #### Scenario: SCN-FBK-11 (+) A refactor changes code and keeps every test
@@ -153,6 +172,12 @@ Items past `MAX_FIX_TASKS` MUST stay takeable and wait for the next round, as `f
 - **GIVEN** a taken `duplication` item, and an agent step that changes only a test file
 - **WHEN** the step ends
 - **THEN** the test file is put back, and the attempt fails with `nothing changed`
+
+#### Scenario: SCN-FBK-31 (+) A retaken item with nothing left to change completes
+- **GIVEN** FB-001 (`refactor`) taken again after the judge left it out, and an agent step that changes nothing
+- **WHEN** the chore of the new fix unit runs
+- **THEN** the task is ticked with `L4-TDD: already-done` and `task.done{tdd: "already-done"}`, no attempt fails, and the parent is verified again
+- **AND** the same step on a first take fails the attempt with `nothing changed`
 
 #### Scenario: SCN-FBK-13 (+) A config item goes through red and green
 - **GIVEN** a taken `config` item with `Env: PACK_ROUNDING` at `src/inventory/reorder.py:7`
@@ -196,9 +221,14 @@ An item is addressed when:
 - for `config`, NAME appears in a non-test file the family changed. Without it the item is not addressed, whatever the
   judges answer.
 
+The judge's yes is evidence: it is recorded as `feedback.judged{id, round, evidence}`. Status `addressed`, an Outcome
+with the round and short sha, and `feedback.addressed{id, round, sha, evidence}` MUST be written in a PASS round only,
+because a later fix unit can undo the change.
+
 An item that is not addressed MUST become a blocking finding (`source: "feedback"`, title
-`FB-NNN not addressed: <evidence>`) and the round fails into the next feedback fix unit. An addressed item gets Status
-`addressed`, an Outcome with the round and short sha, and `feedback.addressed{id, round, sha, evidence}`.
+`FB-NNN not addressed: <evidence>`) and the round fails into the next feedback fix unit. A round with pending items that
+the judge did not answer (or whose reply was discarded) MUST NOT PASS: each such item is not addressed with the evidence
+`not judged in this round`, and it is taken again with the other not-addressed items (L4-FBK-004, L4-FBK-005).
 
 `feedback.taken` stores the sha256 of the item's human content (kind, places, env, when, then and text, whitespace
 normalised). A later change to that content makes the item takeable again (`feedback.changed`), whatever its Status.
@@ -213,6 +243,17 @@ normalised). A later change to that content makes the item takeable again (`feed
 - **GIVEN** the same, but no changed non-test file contains `PACK_ROUNDING`
 - **WHEN** the judge answers `addressed: true` for FB-002
 - **THEN** FB-002 is not addressed, and the round fails into a new feedback fix unit
+
+#### Scenario: SCN-FBK-29 (+) The judge's yes in a failing round is evidence only
+- **GIVEN** FB-001 taken, and a round that fails for another reason while the judge answers `addressed: true` for it
+- **WHEN** the round ends
+- **THEN** `feedback.judged` is recorded, FB-001 stays `taken`, and `verification.md` says `judged addressed, pending a PASS round`
+- **AND** Status `addressed` and `feedback.addressed` are written in the PASS round
+
+#### Scenario: SCN-FBK-30 (−) A round with an unanswered pending item cannot PASS
+- **GIVEN** FB-001 taken, and a judge reply that leaves it out
+- **WHEN** the round could otherwise PASS
+- **THEN** the round fails with `FB-001 not addressed: not judged in this round`, and the next step 0 takes FB-001 again
 
 #### Scenario: SCN-FBK-19 (+) An edit after the take re-opens the item
 - **GIVEN** FB-001 `addressed`
@@ -275,6 +316,10 @@ A base-branch run that finds a merged unit with takeable items and no open follo
 - its tasks follow L4-FBK-005;
 - its marker is `.l4/followup.json` `{parent, items: [{id, sha256}]}`;
 - it takes the items in its own ledger, and sets their Status `taken` in its branch's copy of the parent's file.
+
+The marker is validated in one place, whoever reads it: `parent` MUST be a safe unit name of the follow-up's own
+framework and the one its folder name says. An invalid marker is no follow-up: it exempts no path in the integrity
+check's protected-path check, and is a blocker there.
 
 Its rounds judge those items (L4-FBK-007). While a follow-up of the parent is open, newer items MUST wait as
 `feedback.waiting{reason: "follow_up_open"}`. The parent's phase does not change.

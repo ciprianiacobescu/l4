@@ -1006,7 +1006,10 @@ folder; Kiro: `.kiro/specs/<name>/`). The person owns each item's heading title,
 body, one index row, an item appended) and MUST preserve every other byte, including the line-ending style; text the
 harness writes is redacted. The file is read to at most 2 MiB. Item ids are `FB-NNN`, unique per unit and never
 reused: the next id is one more than the largest id seen in a heading, in an index row, or in any `feedback.*` ledger
-event of the unit, so an item whose section the person deleted keeps its number.
+event of the unit, so an item whose section the person deleted keeps its number. Ids are canonical `FB-%03d`: a
+hand-written `FB-4` in a heading, an index row or an argument is the item `FB-004`. When two sections hold one id, the
+first is the item and the others are never taken, each reported once as `feedback.invalid{id, problem: "duplicate id
+FB-NNN", duplicate: true}` (the item keeps its state).
 
 ````markdown
 # Feedback — add-reorder-quantity
@@ -1067,7 +1070,8 @@ Status reads as `draft`; a section the harness does not know (a heading that is 
 item and is never read; a fence that never closes hides nothing. An item that breaks these rules is *invalid*: it MUST
 NOT be taken, and it is reported with its problem (`config needs Env`) in the sticky note and as
 `feedback.invalid{id, problem}`. Only an item that would otherwise be taken is reported invalid; a `draft` is never
-read.
+read. An item whose *Status* line the person deleted has no value to read or to write: it is reported as invalid
+(`no Status line`) and skipped by every harness write (the take, the Outcome, `addressed`), which never raise.
 
 **L4-FBK-003** `l4 feedback add|list|show|submit|withdraw` (§2.1) MUST write only `feedback.md` and MUST never commit,
 push or call the forge. The unit is `--unit ID`, else the one named by the checked-out branch
@@ -1078,14 +1082,19 @@ are checked before anything is written (a failed check is exit 2 and writes noth
 `--env`, `--when`, `--then`, `--at`). `add` prints the item id with its status, the file, and the `git add`,
 `git commit -m "feedback(<name>): FB-NNN <title>"` and `git push` lines that send it. `--text -` reads standard input,
 `--draft` writes Status `draft`, and `submit` accepts only a valid draft. `list` and `show` accept `--json`
-(`l4/feedback@1`). `l4 feedback --help` and each subcommand's `--help` carry the kinds and one example per kind.
+(`l4/feedback@1`). `l4 feedback --help` and each subcommand's `--help` carry the kinds and one example per kind. An
+open unit takes its feedback on its own branch (off it the command is exit 2 with the `git switch
+l4/<framework>/<name>` line), and a follow-up's or a fix unit's folder takes none: `add|submit|withdraw` there is exit 2
+naming the parent, whose `feedback.md` is the one that is judged (L4-FBK-010).
 
 **L4-FBK-004** At step 0 of every verification round, each *takeable* item MUST become a deterministic blocking
 finding (`source: "feedback"`; the title `Feedback FB-NNN (<kind>): <title>`, the person's text whole up to 1,200
 characters as the detail), the round MUST fail at step 0 without running gates or judges, and the fix unit of
 L4-VER-006 is written. An item is takeable when it is valid, it is not `withdrawn`, the feedback round limit
 (`feedback.max_rounds` plus extensions, L4-FBK-006) is not 0, and either its Status is `submitted`, or its Status is `taken` or `addressed` and its content
-hash differs from the one the last `feedback.taken` recorded. The content hash is the sha256 of the item's kind,
+hash differs from the one the last `feedback.taken` recorded, or its Status is `taken` and the ledger holds it as
+`not_addressed` (the judge said no) or `waiting` (left out of a full fix unit, or after a limit or a crash before the
+fix unit): it is taken again, so that every taken item is either takeable here or pending at the judge. The content hash is the sha256 of the item's kind,
 places, *Env*, *When*, *Then* and text with whitespace normalised; the title, *Lesson*, *Code*, Status, *Outcome* and
 index are not in it, so a harness edit never changes it and an edit of the request does: the item is taken again and
 `feedback.changed{id, previous_sha256, sha256}` is recorded once. A `taken` or `addressed` item with no take in the
@@ -1098,7 +1107,12 @@ kind, sha256, round, fix_unit}`, Status `taken` and the *Outcome* line.
 
 **L4-FBK-005** The fix unit holds one task per taken item, never shared with another finding, by the item's kind, and
 puts the request first; the rules are in L4-VER-006 (the refactor freeze, the test chore, the ADDED requirement
-`… — feedback FB-NNN` and its scenarios, the cap of `MAX_FIX_TASKS` and `feedback.waiting`).
+`… — feedback FB-NNN` and its scenarios, the cap of `MAX_FIX_TASKS` and `feedback.waiting`). An item taken again with
+the content it had at its last take is a *retake*: the planner lists its finding under `retakes` in `.l4/fix.json`
+(a fix unit's marker), and when every item a chore task carries is a retake the chore completes without a change
+(L4-VER-006: `task.done{tdd: "already-done"}`), so that the parent is verified again and the judge looks at the item once
+more instead of the unit escalating over a judge that left the item out of its reply. A first take, or an item whose
+text the person changed, is not a retake.
 
 **L4-FBK-006** Feedback fix units are counted apart from `verifier.max_fix_rounds` and limited by `feedback.max_rounds`
 (§3.2); the rules, the escalation and the extensions are in L4-VER-007 and L4-IMP-013.
@@ -1108,10 +1122,14 @@ not yet addressed, every judge gets the data block `<l4:data kind="feedback">` (
 *When*/*Then* or *Env*) and answers `feedback: [{id, addressed, evidence}]` (§10.3). An item is addressed when every
 judge that got the block answers `addressed: true` (a missing answer is `false`, evidence "not answered"); a `config`
 item also needs its *Env* name, as a whole identifier, in a non-test file the family changed, and without it no judge
-answer closes the item. An item that is not addressed becomes a blocking finding (`source: "feedback"`, title
-`FB-NNN not addressed: <evidence>`) and the round fails into the next feedback fix unit, recorded as
-`feedback.not_addressed{id, round, evidence}`. An addressed item gets Status `addressed`, the *Outcome* line, and
-`feedback.addressed{id, round, sha, evidence}` in the round's evidence commit.
+answer closes the item. The judge's yes is evidence, not a close: it is recorded as `feedback.judged{id, round,
+evidence}` in whatever round it is given, because a later fix unit can undo the change. Status `addressed`, the
+*Outcome* line `Addressed in round N at <sha10>: <evidence>` and `feedback.addressed{id, round, sha, evidence}` are
+written in the evidence commit of a PASS round only. An item that is not addressed becomes a blocking finding
+(`source: "feedback"`, title `FB-NNN not addressed: <evidence>`) and the round fails into the next feedback fix unit,
+recorded as `feedback.not_addressed{id, round, evidence}`. A round that would otherwise PASS and holds a pending item
+the judge did not answer (or whose reply was discarded) MUST NOT PASS: the item is not addressed with the evidence
+`not judged in this round`, and it is taken again like any other not-addressed item (L4-FBK-004, L4-FBK-005).
 
 **L4-FBK-008** A Kiro unit's fix units are bugfix specs (L4-KSP-005); `decide_fix` does not escalate a Kiro unit for
 lack of fix units.
@@ -1134,7 +1152,9 @@ planner action `follow_up`; the parent's phase does not change):
 - it has the parent's framework, a new unit branch cut from the base head, and is never pushed to the base;
 - it holds one task per item by kind (L4-FBK-005), the `Requested by` lines first;
 - its marker `.l4/followup.json` is `{"schema": "l4/followup@1", "parent", "items": [{id, sha256}], chores,
-  test_chores, refactors}`;
+  test_chores, refactors}`, validated in one place whoever reads it: `parent` is a safe unit name of the follow-up's own
+  framework and the one its folder name `<parent>-followup-<n>` says. An invalid marker is no follow-up: it exempts no
+  path in the integrity check's protected-path check (§10.2 step 1) and is a blocker there;
 - it sets the items' Status `taken` (Outcome `Taken into <follow-up>`) in its branch's copy of the parent's
   `feedback.md`, and writes `feedback.taken{id, kind, sha256, round: 0, fix_unit: <follow-up>}` to its own ledger.
 
@@ -1512,7 +1532,7 @@ L4-Agent: claude-sonnet/claude-sonnet-5-5
 L4-Fallback-From: codex-sol
 ```
 
-`L4-TDD` takes the values `red`, `green` and `already-satisfied` (L4-IMP-003).
+`L4-TDD` takes the values `red`, `green` and `already-satisfied` (L4-IMP-003), and `exempt` (a fix chore) and `already-done` (a retaken feedback chore with nothing left to change, L4-VER-006).
 Commits are authored by the configured bot identity; the agent never commits. If it does, the harness folds those
 **local, never-pushed** commits back into its own commit on the next guard pass and logs `guard.agent_commit`. The
 harness never rewrites history that has been pushed.
@@ -2468,6 +2488,17 @@ code. The task is by the item's kind:
   NAME is set THEN the system SHALL use its value instead of the value written at <first place>` (the item's own When/Then
   replaces this one when given) and `WHEN NAME is not set THEN the system SHALL CONTINUE TO behave as before this change`.
 
+The retake rule for both chores: when every feedback item a chore task carries is a *retake* (the finding is listed under
+`retakes` in `.l4/fix.json`: the item had a `feedback.taken` before this fix unit and its content is the one taken), a step
+that leaves "nothing changed" (refactor) or adds "no tests" (test chore) does not fail the attempt. The change may have
+been made already, with the judge leaving the item out of its reply. The task is ticked in a commit that changes no file
+of the project, with `L4-TDD: already-done`, and recorded as `task.done{tdd: "already-done", reason: "retaken FB-NNN:
+nothing left to change"}` without `task.tdd_exempt`; the integrity check of the TDD history accepts that value as it does
+`exempt`, and the test-path check still applies to its commit. The parent is then re-verified and the judge looks at the
+item again; an item that is still not addressed is taken again until `feedback.max_rounds`. A first take keeps failing as
+before. A `config` or `behaviour` item is red/green and needs no rule of its own: when the tests its retake writes pass
+already, the `already_satisfied` exemption of L4-IMP-002 applies.
+
 A fix unit holds at most `MAX_FIX_TASKS` (5) tasks. Feedback items past that cap are not converted: they stay takeable,
 are recorded as `feedback.waiting{ids, reason: "fix_unit_full"}`, and the sticky note says they wait for the next round.
 
@@ -2685,7 +2716,8 @@ branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a sou
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
 `feedback.taken` (`{id, kind, sha256, round, fix_unit}`) | `feedback.addressed` (`{id, round, sha, evidence}`) |
 `feedback.not_addressed` (`{id, round, evidence}`) | `feedback.changed` (`{id, previous_sha256, sha256}`) |
-`feedback.withdrawn` (`{id}`) | `feedback.invalid` (`{id, problem}`) | `feedback.waiting` (`{ids, reason}`, `fix_unit_full` or `follow_up_open`),
+`feedback.judged` (`{id, round, evidence}`: the judge's yes, closed only by a PASS round) |
+`feedback.withdrawn` (`{id}`) | `feedback.invalid` (`{id, problem}`, and `duplicate: true` for a copy of a heading; the problems are the rule that the item breaks, `duplicate id FB-NNN` and `no Status line`) | `feedback.waiting` (`{ids, reason}`, `fix_unit_full` or `follow_up_open`),
 all L4-FBK-004..007, `guard.restored` (`{task, paths, reason}`; `feedback_refactor` for the frozen tests of a refactor chore,
 L4-VER-006),
 `archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H), `ci.failed` (`{head, pipeline,
@@ -5286,6 +5318,31 @@ scenario is a spec defect (§26).
 - **When** a person sends a `refactor` and a `config` item and pushes
 - **Then** the run log shows the step-0 FAIL, a Kiro bugfix fix unit, red/green for the config task, a chore for the
   refactor, a PASS with both items addressed, and a new hand-off.
+
+#### SCN-FBK-29 (+) The judge's yes in a failing round is evidence only · L4-FBK-007
+- **Given** FB-001 taken, and a round that fails for another reason (a gate) while the judge answers `addressed: true` for it
+- **When** the round ends
+- **Then** `feedback.judged` is recorded, FB-001 stays `taken` in `feedback.md`, `verification.md` says `judged addressed,
+  pending a PASS round`, and Status `addressed`, the *Outcome* line and `feedback.addressed` are written in the PASS round.
+
+#### SCN-FBK-30 (−) A round with an unanswered pending item cannot PASS · L4-FBK-007, L4-FBK-004
+- **Given** FB-001 taken, and a judge reply that leaves it out
+- **When** the round could otherwise PASS
+- **Then** the round fails with `FB-001 not addressed: not judged in this round` (`feedback.not_addressed`), and the next
+  round's step 0 takes FB-001 again.
+
+#### SCN-FBK-31 (+) A retaken item with nothing left to change completes · L4-FBK-005, L4-VER-006
+- **Given** FB-001 (`refactor`) taken again after the judge left it out, and an agent step that changes nothing
+- **When** the chore of the new fix unit runs
+- **Then** no attempt fails: the task is ticked with `L4-TDD: already-done` and `task.done{tdd: "already-done"}`, the parent
+  is verified again, and the judge's yes closes FB-001 in the PASS round. A first take with the same step fails with
+  `nothing changed`.
+
+#### SCN-FBK-32 (−) A copy of an id is reported, and a short id is the canonical one · L4-FBK-001, L4-FBK-002
+- **Given** a `feedback.md` with two sections `## FB-1:` and `## FB-001:`, and an item whose *Status* line was deleted
+- **When** step 0 reads it
+- **Then** the first section is the item `FB-001` and the other is recorded once as `feedback.invalid{duplicate: true}` and
+  never taken; the item without a *Status* line is reported `no Status line`; nothing raises.
 
 ### 23.10 Archive and PR lifecycle (ARC)
 
