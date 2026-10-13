@@ -185,6 +185,42 @@ def test_a_child_pytest_cannot_clobber_the_parents_measurement(tmp_path: Path):
     assert 2 in cov["files"]["mod/x.py"]["executed_lines"], "the child's erase() lost the parent's data"
 
 
+REFUSE = "def refuse_io(*args, **kwargs):\n    raise AssertionError('the health check must not open a database')\n"
+
+
+def test_a_test_that_patches_sqlite3_connect_does_not_break_the_measurement(tmp_path: Path):
+    """Live (a free model's test for "the health check reads no database"): a test replaced `sqlite3.connect`, and
+    coverage's own write at the start of the next test function called the replacement; pytest stopped with
+    INTERNALERROR (exit 3) on a suite that passes without the plugin, and every verification round failed on it."""
+    work = tmp_path / "work"
+    (work / "mod").mkdir(parents=True)
+    (work / "mod" / "__init__.py").write_text("")
+    (work / "mod" / "health.py").write_text("def health():\n    return {'status': 'ok'}\n")
+    (work / "test_a_plain.py").write_text("from mod.health import health\n\n\ndef test_a():\n    assert health()\n")
+    (work / "test_decorator.py").write_text(
+        f"from unittest.mock import patch\n\nfrom mod.health import health\n\n\n{REFUSE}\n\n"
+        "@patch('sqlite3.connect', side_effect=refuse_io)\n"
+        "def test_no_database(connect):\n    assert health() == {'status': 'ok'}\n    connect.assert_not_called()\n"
+    )
+    (work / "test_fixture.py").write_text(
+        f"import sqlite3\n\nimport pytest\n\nfrom mod.health import health\n\n\n{REFUSE}\n\n"
+        "@pytest.fixture\ndef no_database(monkeypatch):\n    monkeypatch.setattr(sqlite3, 'connect', refuse_io)\n\n\n"
+        "def test_with_fixture(no_database):\n    assert health() == {'status': 'ok'}\n"
+    )
+    (work / "test_module.py").write_text(  # replaced at import and never put back
+        f"import sqlite3\n\nfrom mod.health import health\n\n\n{REFUSE}\n\nsqlite3.connect = refuse_io\n\n\n"
+        "def test_after_a_global_patch():\n    assert health() == {'status': 'ok'}\n"
+    )
+    out = tmp_path / "cov"
+    done = run_pytest(work, out, packages=("mod",))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "INTERNALERROR" not in done.stdout + done.stderr
+    status, cov = read(out)
+    assert status["status"] == "ok", status
+    contexts = {c for ctxs in cov["files"]["mod/health.py"]["contexts"].values() for c in ctxs}
+    assert {"test_decorator.test_no_database", "test_fixture.test_with_fixture"} <= contexts
+
+
 @pytest.mark.parametrize("bad", ["src/a\nomit = *", "src/a\rx", "[report]", "#x", ";x"])
 def test_write_rc_refuses_unsafe_package_names(tmp_path: Path, bad: str):
     with pytest.raises(ValueError):
