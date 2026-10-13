@@ -1307,7 +1307,8 @@ def verify_hook(ctx: HookContext) -> Trigger:
 
 def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandResult:
     """`l4 verify --unit U`: the verifier alone, on a unit that is `implemented` or `verifying`. It is the normal run
-    with the hand-off hook left out, so a PASS stops at `verified` (exit 0)."""
+    with the hand-off hook left out, so a PASS stops at `verified` (exit 0). It does not take a person's spec edit (that
+    would run the implementer): the edit is recorded as `spec.edit_seen`, and the next `l4 run` takes it."""
     if dry_run:
         raise L4Exit(ExitCode.USAGE_ERROR, "verify: --dry-run not yet implemented (M1: verifier)")
     app, cfg = load_app_config(app)
@@ -1322,5 +1323,5 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
             ExitCode.USAGE_ERROR, f"verify: {unit} is {phase or 'new'}; only an implemented unit can be verified"
         )
     hooks = dataclasses.replace(load_hooks(), handoff=None, fix=None)
-    result = run_unit_in_worktree(app, cfg, git, provider, ref, hooks=hooks)
+    result = run_unit_in_worktree(app, cfg, git, provider, ref, hooks=hooks, take_spec_edit=False)  # review L3
     return CommandResult(result.exit_code, [result.outcome])

@@ -9,7 +9,11 @@ the unit continues from where it stopped, by its recorded phase (design D2).
 | | are used up, a plain retry when they are not |
 | `halted`, `escalated` after a person changed the unit folder | `implementing` (`spec_edit_since_stop`, L4-OPS-003) |
 | `waiting_capacity` | `capacity_restored` now, to `previous_phase`; `retry_after` is ignored |
-| `in_review` | `verifying` (`retry_requested`) |
+| `in_review` | `verifying` (`retry_requested`); after a person's change to the unit folder `implementing` |
+| | (`spec_edit_after_handoff`) |
+
+A person's change to the unit folder is checked before the retry's own commit buries it (review M3): a phase that
+cannot take it at once (`waiting_capacity` back to `fixing`) records `spec.edit_seen`, and the run takes it later.
 | `merged` | the archive or the done-gate again: `l4 archive --unit ID --retry` |
 | every other phase, unstarted | refused (exit 2) with what moves the unit |
 
@@ -118,7 +122,6 @@ def retry_unit(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
         resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,
         resume_event="unit.retried", resume_trigger=_EDGE_OF.get(phase, Trigger.RESUMED), resume_what="retry",
-        resume_spec_edit_check=phase in (Phase.HALTED, Phase.ESCALATED),
     )  # fmt: skip
 
 

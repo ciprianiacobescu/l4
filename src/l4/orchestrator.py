@@ -203,9 +203,12 @@ class RunWaits:
 
 
 class Orchestrator:
-    def __init__(self, cfg: L4Config, services: Services, waits: RunWaits | None = None) -> None:
+    def __init__(
+        self, cfg: L4Config, services: Services, waits: RunWaits | None = None, *, take_spec_edit: bool = True
+    ) -> None:
         self.cfg = cfg
         self.services = services
+        self._takes_spec_edit = take_spec_edit  # `l4 verify` leaves a spec edit for the next `l4 run` (review L3)
         self.state: UnitState = UnitState(unit=services.ref.id)
         self._selected: Selected | None = None
         ctx = HookContext(cfg, services, self.push)
@@ -367,7 +370,6 @@ class Orchestrator:
         event: str = "unit.resumed",
         trigger: Trigger = Trigger.RESUMED,
         what: str = "resume",
-        spec_edit_check: bool = False,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
@@ -378,9 +380,12 @@ class Orchestrator:
 
         `l4 retry` is the same step with its own words (L4-OPS-001): `event` is `unit.retried` (it folds like
         `unit.resumed`), `what` is `retry` (the subject of the commit), and `trigger` is the edge of the phase it
-        leaves (`capacity_restored`, `retry_requested`). With `spec_edit_check` a halted or escalated unit whose branch
-        carries a person's change to the unit folder after the stop takes `spec_edit_since_stop` instead
-        (L4-OPS-003)."""
+        leaves (`capacity_restored`, `retry_requested`).
+
+        The commit of this step would bury a person's change to the unit folder (review M3), so the tail is checked
+        first: a halted or escalated unit takes `spec_edit_since_stop` instead (L4-OPS-003), an `in_review` unit takes
+        `spec_edit_after_handoff`, and a unit that waits for capacity records `spec.edit_seen` and takes the edit as
+        soon as `capacity_restored` has put it in a phase that can (`fixing` cannot: its fix unit ends first)."""
         before = self._refold().phase or "none"
         self._commit_what = what
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
@@ -391,12 +396,21 @@ class Orchestrator:
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
         self.services.ledger.append(event, reason=reason[:300], **extra)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
-        edit = self._spec_edit() if spec_edit_check and before in (Phase.HALTED.value, Phase.ESCALATED.value) else None
-        if edit is not None:
-            trigger = Trigger.SPEC_EDIT_SINCE_STOP
-        self._go(trigger)
-        if edit is not None:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
-            self._reopen(edit.base)
+        edit = self._spec_edit() if self._takes_spec_edit else None
+        stop_edge = {
+            Phase.HALTED.value: Trigger.SPEC_EDIT_SINCE_STOP, Phase.ESCALATED.value: Trigger.SPEC_EDIT_SINCE_STOP,
+            Phase.IN_REVIEW.value: Trigger.SPEC_EDIT_AFTER_HANDOFF,
+        }.get(before)  # fmt: skip
+        context: dict[str, object] = {}
+        if edit is not None and stop_edge is not None:
+            trigger, context = stop_edge, {"commits": list(edit.shas)[-MAX_EDIT_COMMITS:]}
+        elif edit is not None:
+            self._see_spec_edit(edit)  # this step's commit buries it: the run that follows takes it
+        self._go(trigger, **context)
+        if context:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
+            self._reopen(edit.base)  # type: ignore[union-attr]
+        else:
+            self._take_pending_spec_edit()  # `capacity_restored` put the unit in a phase that can take it
         return UnitRunResult(self._outcome(before), ExitCode.OK)
 
     def _spec_edit(self) -> SpecEdit | None:
@@ -418,11 +432,14 @@ class Orchestrator:
         `unit.retried{reason: "spec edited", signal: "spec_edit:<head>", by: "push"}` (it folds like a resume), and a
         unit escalated at the fix-round or feedback limit gets one round of that kind first, once for each head (a
         signal already recorded grants nothing). `implementing` needs no edge but reaches the reopening of D14 as well;
-        `fixing` has no edge: the run records `spec.edit_seen` and takes the edit when the fix unit ends
-        (`_take_pending_spec_edit`), because the fix unit's own commits will bury the person's commit."""
+        `fixing` and `waiting_capacity` have no edge: the run records `spec.edit_seen` and takes the edit when the fix
+        unit ends or capacity is restored (`_take_pending_spec_edit`), because the unit's own commits will bury the
+        person's commit."""
+        if not self._takes_spec_edit:  # `l4 verify`: the edit is left for the next `l4 run`, but not buried (review L3)
+            return self._see_spec_edit()
         self._take_pending_spec_edit()
         phase = Phase(self.state.phase) if self.state.phase else None
-        if phase is Phase.FIXING:
+        if phase in (Phase.FIXING, Phase.WAITING_CAPACITY):  # no edge takes it here: recorded, taken later (review M3)
             return self._see_spec_edit()
         if phase is not Phase.IMPLEMENTING and phase not in SPEC_EDIT_PHASES:
             return
@@ -433,11 +450,11 @@ class Orchestrator:
             self._record_spec_edit(phase, edit)
         self._reopen(edit.base)
 
-    def _see_spec_edit(self) -> None:
-        """A person's spec edit on a `fixing` unit: `spec.edit_seen{head, base, commits}`, once for each head. A pending
-        edit of an earlier head keeps its older `base` (the reopening diffs from where the spec was last the
-        harness's) and its commits."""
-        edit, pending = self._spec_edit(), self.state.pending_spec_edit
+    def _see_spec_edit(self, edit: SpecEdit | None = None) -> None:
+        """A person's spec edit on a unit that cannot take it now (`fixing`, `waiting_capacity`, a verify):
+        `spec.edit_seen{head, base, commits}`, once for each head. A pending edit of an earlier head keeps its older
+        `base` (the reopening diffs from where the spec was last the harness's) and its commits."""
+        edit, pending = edit or self._spec_edit(), self.state.pending_spec_edit
         if edit is None or edit.signal in self.state.resumed_signals or (pending and pending.head == edit.head):
             return
         base = pending.base if pending else edit.base
@@ -449,16 +466,23 @@ class Orchestrator:
         self._refold()
 
     def _take_pending_spec_edit(self) -> bool:
-        """The `spec.edit_seen` of a run that found the unit `fixing` is taken as soon as the unit is in a phase of
-        `SPEC_EDIT_PHASES`: right after the fix unit ends (`verifying`, before the verifier runs), or at the start of a
-        later run. The edge is the push's own (`_record_spec_edit`), and the Kiro tasks that cite a changed criterion
-        reopen against the recorded base."""
+        """The `spec.edit_seen` of a run that found the unit `fixing` or `waiting_capacity` is taken as soon as the unit
+        is in a phase of `SPEC_EDIT_PHASES` or in `implementing`: right after the fix unit ends (`verifying`, before
+        the verifier runs), right after `capacity_restored`, or at the start of a later run. The edge is the push's
+        own (`_record_spec_edit`), and the Kiro tasks that cite a changed criterion reopen against the recorded
+        base."""
         pending = self.state.pending_spec_edit
         phase = Phase(self.state.phase) if self.state.phase else None
-        if pending is None or phase not in SPEC_EDIT_PHASES:
+        if pending is None or not self._takes_spec_edit:
             return False
         edit = SpecEdit(tuple(pending.commits), pending.base, pending.head)
-        self._record_spec_edit(phase, edit)
+        if phase is Phase.IMPLEMENTING:  # no edge to take, but the edit is consumed and the tasks reopen (D14)
+            self.services.ledger.append("unit.retried", reason="spec edited", signal=edit.signal, by="push")
+            self._refold()
+        elif phase in SPEC_EDIT_PHASES:
+            self._record_spec_edit(phase, edit)
+        else:
+            return False
         self._reopen(edit.base)
         return True
 
@@ -635,6 +659,7 @@ class Orchestrator:
             elif phase is Phase.WAITING_CAPACITY:
                 self._notes = ()  # the capacity note is out of date: a re-park writes it again
                 self._go(Trigger.CAPACITY_RESTORED)
+                self._take_pending_spec_edit()  # a spec push seen while the agents were missing (review M3)
             elif phase is Phase.REJECTED:
                 return ExitCode.REJECTED
             elif phase is Phase.IN_REVIEW:
@@ -1171,12 +1196,17 @@ def _refuse_stopped(
     cause and the command that moves the unit. Nothing else happens: no lease, worktree, ledger line, commit, push or
     label sync, because a rerun cannot move the unit and its own side effects (a halt note, a ledger push) hid the
     cause it was asked about. `l4 resume` and `l4 retry` pass a reason and do not come here. A unit with a person's spec
-    edit after the stop is not refused: the run takes `spec_edited` (L4-OPS-014)."""
-    if state.phase not in (Phase.HALTED.value, Phase.ESCALATED.value) or edit is not None:
-        return None
+    edit after the stop is not refused: the run takes `spec_edited` (L4-OPS-014). An `abandoned` unit (its MR was closed
+    without a merge) is refused the same way and told `l4 restart` (L4-OPS-009, review L4)."""
     phase = state.phase
-    detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
-    next_step = f"l4 retry --unit {ref.id} --reason TEXT"
+    if phase == Phase.ABANDONED.value:
+        detail = app.redactor.redact_text(state.halt_detail or "the merge request was closed without a merge")
+        next_step = f"l4 restart --unit {ref.id} --reason TEXT"
+    elif phase in (Phase.HALTED.value, Phase.ESCALATED.value) and edit is None:
+        detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
+        next_step = f"l4 retry --unit {ref.id} --reason TEXT"
+    else:
+        return None
     log.error("%s %s: %s", ref.id, phase, detail)
     log.error("Next: %s", next_step)
     reason = f"{phase}: {detail}. Next: {next_step}"[:300]
@@ -1202,14 +1232,14 @@ def run_unit_in_worktree(
     resume_event: str = "unit.resumed",
     resume_trigger: Trigger = Trigger.RESUMED,
     resume_what: str = "resume",
-    resume_spec_edit_check: bool = False,
+    take_spec_edit: bool = True,
     waits: RunWaits | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
-    lease is held. `resume_event`, `resume_trigger`, `resume_what` and `resume_spec_edit_check` make the resume an
-    `l4 retry` (L4-OPS-001, `Orchestrator.resume`). `waits`: what the run's earlier units waited for a cool-down
-    (L4-AVL-011)."""
+    lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
+    `Orchestrator.resume`). `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
+    `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
         ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
@@ -1252,7 +1282,7 @@ def run_unit_in_worktree(
             app, cfg, git=unit_git, names=names, worktree=opened["worktree"], ledger=writer,
             adapters=adapters, hooks=hooks, sandbox=resume_reason is None,  # a resume runs no agent and no gate
         )  # fmt: skip
-        orchestrator = Orchestrator(cfg, services, waits)
+        orchestrator = Orchestrator(cfg, services, waits, take_spec_edit=take_spec_edit)
         result = (
             orchestrator.run_unit()
             if resume_reason is None
@@ -1265,7 +1295,6 @@ def run_unit_in_worktree(
                 event=resume_event,
                 trigger=resume_trigger,
                 what=resume_what,
-                spec_edit_check=resume_spec_edit_check,
             )
         )
         code, failed = result.exit_code, False
