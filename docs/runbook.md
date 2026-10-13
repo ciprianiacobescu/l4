@@ -777,9 +777,6 @@ The harness always records a time to try again (`retry_after`). When the cause g
 
 4. Or add the label `l4:retry` to the PR, and start a run (section 6).
 
-> **NOTE:** The note says "The scheduled `l4 sweep` resumes the unit". There is no `l4 sweep` command. It means the
-> scheduled CI run.
-
 To examine one profile again on a self-hosted runner, run `l4 probe <profile> --role <role> --no-cache`. The role is
 `implementer`, `verifier_agent` or `judges`. When the probe passes, it removes the wait time of that profile on that
 runner. The unit still waits until its `retry_after`, unless you retry it.
@@ -1279,11 +1276,11 @@ These limits make operation more difficult. Know them before you start.
   `abandoned` unit.
 - A corrupt `ledger-pending/` on the lock ref has no procedure ([7.9](#79-corrupt-ledger)).
 - `l4 retry` and `l4 resume` do not check membership, although the help of `l4 resume` says "members only".
-- `l4 resume` starts no run and does not look for a spec edit. `l4 retry` does both.
+- `l4 resume` starts no run. `l4 retry` starts one. Both take a spec edit that a person pushed before.
 - `l4 run --unit` on your computer does not fetch. A stale local ref can miss a spec edit that someone pushed from
   another computer. Use `l4 retry`, which fetches.
-- A spec push during `fixing` waits until the fix unit ends ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
-- The capacity note names an `l4 sweep` command. It does not exist.
+- A spec push during `fixing` or `waiting_capacity`, and one that `l4 verify` finds, is recorded and waits until the fix unit
+  ends, capacity is restored or the next `l4 run` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
 - A lock does not protect a local run against a CI run on another computer. A local `l4 retry`, `l4 resume` or
   `l4 restart` while CI works on the same unit can fail with exit 1.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a

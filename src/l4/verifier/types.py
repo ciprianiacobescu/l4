@@ -239,6 +239,7 @@ class GateLine:
     status: Literal["pass", "fail"]
     reason: str
     log: str | None
+    digest: str | None = None  # a failed gate's last error lines, normalised (`gates.log_digest`): `same_failure` (M5)
 
 
 @dataclass

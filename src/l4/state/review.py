@@ -13,7 +13,7 @@ from pathlib import PurePosixPath
 
 from l4.state.fold import UnitState
 from l4.state.lifecycle import Trigger
-from l4.vcs.authorship import AUTHOR, SHA, SUBJECT, commit_records, handoff_commit, is_harness_strict
+from l4.vcs.authorship import AUTHOR, SHA, SUBJECT, commit_records, handoff_commit, is_harness, is_harness_strict
 from l4.vcs.git import Git
 
 MAX_LISTED = 10  # commits named in an edge context, a plan row or a note
@@ -67,12 +67,14 @@ def after_handoff(git: Git, head: str, name: str, unit_rel: str) -> AfterHandoff
     return AfterHandoff(handoff, head_sha, foreign, spec_edit)
 
 
-def foreign_tail(git: Git, head: str, scan: int = 50) -> tuple[ForeignCommit, ...]:
-    """The commits at the end of the first-parent chain of `head` that the harness did not make (the strict rule),
-    oldest first: what a person pushed after the harness's own last commit (the halt)."""
+def foreign_tail(git: Git, head: str, scan: int = 50, *, strict: bool = True) -> tuple[ForeignCommit, ...]:
+    """The commits at the end of the first-parent chain of `head` that the harness did not make, oldest first: what a
+    person pushed after the harness's own last commit (the halt). `strict` (the default) is the rule of the review
+    re-entry (author and committer); `strict=False` is the author rule, which a rebase keeps (review M2)."""
     found: list[ForeignCommit] = []
+    harness = is_harness_strict if strict else is_harness
     for record in commit_records(git, "--first-parent", f"--max-count={scan}", head):
-        if is_harness_strict(record):
+        if harness(record):
             break
         found.append(ForeignCommit(record[SHA], record[AUTHOR], record[SUBJECT]))
     return tuple(reversed(found))
@@ -97,8 +99,11 @@ def spec_edit_since_harness(git: Git, head: str, unit_rel: str) -> SpecEdit | No
     folder that is not the harness's (`.l4/`, `verification.md`) and has no channel of its own (`questions.md`,
     `feedback.md`: answers, verdicts and feedback keep their paths). A change elsewhere (`src/`) and a fix-unit folder,
     which is a sibling of the unit folder, are not a change of the spec. One rule for the push (`spec_edited`) and the
-    retry (`spec_edit_since_stop`)."""
-    tail = foreign_tail(git, head)
+    retry (`spec_edit_since_stop`). The tail is bounded by the author rule (`is_harness`, not the strict one): a
+    person's rebase makes the person the committer of every harness commit and must not turn them into a spec edit
+    (review M2). A file that is the same at the harness's last commit and at the head is no edit: the diff is the net
+    change."""
+    tail = foreign_tail(git, head, strict=False)
     base = git.rev_parse(f"{tail[0].sha}^") if tail else None
     if not tail or base is None:
         return None

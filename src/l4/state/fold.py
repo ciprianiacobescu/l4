@@ -47,7 +47,8 @@ class CiFailure(_Model):
 
 
 class PendingSpecEdit(_Model):
-    """A person's spec push that a run saw while the unit was `fixing`, where no edge takes it (L4-OPS-014, design D13):
+    """A person's spec push that a run saw while the unit was `fixing` or `waiting_capacity` (or under `l4 verify`),
+    where no edge takes it (L4-OPS-014, design D13, review M3):
     `spec.edit_seen{head, base, commits}`. `base` is the harness's last commit before the person's first one (the
     Kiro reopening diffs against it), `head` the person's newest commit, `commits` the person's shas, oldest first.
     It stays until `unit.retried` records the signal `spec_edit:<head>`."""
@@ -55,6 +56,14 @@ class PendingSpecEdit(_Model):
     head: str
     base: str
     commits: list[str] = Field(default_factory=list)
+
+
+class ReturnState(_Model):
+    """What a closed MR must give back (L4-OPS-009): the phase the unit closed from and that phase's own
+    `previous_phase`. `abandoned` parks the unit like `halted` does, so `previous_phase` alone cannot hold both."""
+
+    phase: str | None = None
+    previous_phase: str | None = None
 
 
 class FeedbackState(_Model):
@@ -111,6 +120,7 @@ class UnitState(_Model):
     halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
     halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
     restarts: int = 0  # `unit.restarted` events: how many times `l4 restart` began the unit again (L4-OPS-004)
+    closed_from: ReturnState | None = None  # `pr.closed` (or the `pr_closed` edge) until `pr_reopened` gives it back
     hinted_heads: list[str] = Field(default_factory=list)  # `resume.hint{head}`: branch heads a halt pointer was for
     updated_at: str | None = None
 
@@ -128,10 +138,19 @@ def _phase_changed(state: UnitState, event: LedgerEvent) -> None:
     target, source = _text(event, "to"), _text(event, "from")
     if target is None:
         return
+    trigger = _text(event, "trigger")
+    if trigger == "pr_closed" and (
+        state.closed_from is None or state.closed_from.phase != source
+    ):  # no `pr.closed` before
+        state.closed_from = ReturnState(phase=source, previous_phase=state.previous_phase)
     if target in PARKING_PHASES:
         state.previous_phase = source
     elif source in PARKING_PHASES:
         state.previous_phase = None
+    if trigger == "pr_reopened":  # L4-OPS-009: the phase it closed from, with that phase's own previous phase
+        if state.closed_from is not None and state.closed_from.phase == target:
+            state.previous_phase = state.closed_from.previous_phase
+        state.closed_from = None
     state.retry_after = _text(event, "retry_after") if target == "waiting_capacity" else None
     stopped = target in ("halted", "escalated")
     state.halt_reason = _text(event, "reason") if stopped else None
@@ -272,6 +291,16 @@ def _ci_preexisting(state: UnitState, event: LedgerEvent) -> None:
         state.ci_heads.setdefault(head, "preexisting")
 
 
+def _pr_closed(state: UnitState, event: LedgerEvent) -> None:
+    """`pr.closed{number, from_phase, from_previous}` (L4-OPS-009), written just before the `pr_closed` edge: the return
+    state of the unit. An event without the two fields (the sweeper writes `{number}`) takes them from the state at
+    this moment, which is the state the edge leaves."""
+    data = event.data
+    phase = _text(event, "from_phase") if "from_phase" in data else state.phase
+    previous = _text(event, "from_previous") if "from_previous" in data else state.previous_phase
+    state.closed_from = ReturnState(phase=phase, previous_phase=previous)
+
+
 def _breaker_tripped(state: UnitState, event: LedgerEvent) -> None:
     state.breaker_trips += 1
 
@@ -285,8 +314,9 @@ def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
 
 
 def _spec_edit_seen(state: UnitState, event: LedgerEvent) -> None:
-    """`spec.edit_seen{head, base, commits}` (L4-OPS-014): a person's spec push seen in `fixing`. It is pending, unless
-    the signal of that head was consumed already (each head is taken once). A row without head or base is ignored."""
+    """`spec.edit_seen{head, base, commits}` (L4-OPS-014): a person's spec push seen where no edge takes
+    it. It is pending, unless the signal of that head was consumed already (each head is taken once). A row without
+    head or base is ignored."""
     head, base = _text(event, "head"), _text(event, "base")
     if not head or not base or f"spec_edit:{head}" in state.resumed_signals:
         return
@@ -421,6 +451,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "pr.updated": _pr_updated,
     "ci.failed": _ci_failed,
     "ci.preexisting": _ci_preexisting,
+    "pr.closed": _pr_closed,
     "breaker.tripped": _breaker_tripped,
     "unit.resumed": _unit_resumed,
     "unit.retried": _unit_resumed,  # `l4 retry` and the `l4:retry` label: the same fold as a resume (L4-OPS-001)

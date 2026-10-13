@@ -66,3 +66,29 @@ def test_a_run_of_an_escalated_unit_is_refused_the_same_way(run_l4, monkeypatch,
     assert f"[l4] run: {UNIT} escalated: round 2 failed the same way" in err
     assert f"Next: l4 retry --unit {UNIT} --reason TEXT" in err
     assert refs(run) == heads
+
+
+def test_a_run_of_an_abandoned_unit_is_refused_and_names_l4_restart(run_l4, monkeypatch, capsys):
+    """Review L4: the MR was closed without a merge; a run cannot move the unit, so it exits 13 with no side effect."""
+    from l4 import orchestrator
+
+    real = orchestrator.load_snapshot
+
+    def abandoned(*args, **kwargs):
+        snapshot = real(*args, **kwargs)
+        state = snapshot.state.model_copy(update={"phase": "abandoned", "previous_phase": "in_review"})
+        return snapshot.__class__(**{**snapshot.__dict__, "state": state})
+
+    first = run_l4([red_step()], implementer={"max_task_attempts": 1})
+    heads = refs(first)
+    files = ledger_files(first)
+    monkeypatch.setattr(orchestrator, "load_snapshot", abandoned)
+    capsys.readouterr()
+    run = run_l4([red_step()])
+    err = capsys.readouterr().err
+    assert run.code == 13 and run.adapter.requests == []
+    assert f"[l4] run: {UNIT} abandoned: " in err
+    assert f"Next: l4 restart --unit {UNIT} --reason TEXT" in err
+    (unit,) = run.outcome["units"]
+    assert (unit["phase_before"], unit["phase_after"]) == ("abandoned", "abandoned")
+    assert refs(run) == heads and ledger_files(run) == files

@@ -275,7 +275,7 @@ def test_auth_park_writes_sticky_with_login_steps(run_l4, install_hooks, fake_cl
     assert note.startswith("### Waiting for capacity")
     assert "`claude-code`" in note and "claude is not logged in" in note
     assert "run `claude setup-token` on a machine with a browser" in note
-    assert "run a pipeline on `main`" in note and "l4 sweep" in note
+    assert "run a pipeline on `main`" in note and "wait for the scheduled run" in note and "l4 sweep" not in note
 
 
 def quota_park(ctx):
@@ -293,7 +293,7 @@ def test_quota_park_names_retry_after_and_the_sweep(run_l4, install_hooks, fake_
     install_hooks(mirror=lambda ctx: mirror, verify=quota_park)
     assert run_l4([red_step(), green_step()]).code == 12
     note = mirror.calls[-1][1][0]
-    assert "2026-01-01T01:00Z" in note and "scheduled `l4 sweep`" in note
+    assert "2026-01-01T01:00Z" in note and "The scheduled run resumes the unit" in note
     assert "setup-token" not in note  # a cool-down needs no login
 
 

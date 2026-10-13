@@ -10,6 +10,7 @@ import pytest
 from l4.state.ledger import LedgerEvent
 from l4.verifier import fixloop
 from l4.verifier.fixloop import failure_set, repeated_failure
+from l4.verifier.gates import log_digest
 from l4.verifier.types import GateLine, Verdict, VerifyResult
 
 from ..implementer.conftest import green_step
@@ -22,8 +23,8 @@ with_verifier = ladder_fix.with_verifier
 BOT = ("l4-bot", "l4-bot@users.noreply.invalid")
 
 
-def gate(name: str, status: str = "fail", reason: str = "exit code 1") -> dict:
-    return {"name": name, "command": name, "status": status, "reason": reason, "log": None}
+def gate(name: str, status: str = "fail", reason: str = "exit code 1", digest: str | None = None) -> dict:
+    return {"name": name, "command": name, "status": status, "reason": reason, "log": None, "digest": digest}
 
 
 # --- the failure set (D7) ----------------------------------------------------------------------------------------
@@ -39,6 +40,47 @@ def test_the_failure_set_names_failed_gates_failing_tests_and_the_exit_code_of_a
         "test",
         "test:report missing: gates.test.reports is empty",
     }
+
+
+def test_a_failed_gate_with_no_report_adds_the_digest_of_its_last_error_lines():  # review M5
+    assert failure_set([gate("lint", digest="ab12cd34ef56")], {}) == {"lint", "lint:exit 1", "lint:log ab12cd34ef56"}
+    assert failure_set([gate("test", digest="ab12cd34ef56")], {"t::a": "failed"}) == {"test", "t::a"}  # a JUnit report
+
+
+def write_log(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "gate.log"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_the_same_internal_error_twice_has_the_same_digest(tmp_path):
+    where = "INTERNALERROR> File \"{}/site/x.py\", line {}, in f\nINTERNALERROR> KeyError: 'a' at {} {}\n"
+    first = where.format("/tmp/run-1", 120, "0x7f3a9c01", "2026-10-13T09:00:01Z")
+    second = where.format("/home/ci/run-2", 98, "0x7f11ab02", "2026-10-13T10:41:59Z")
+    assert log_digest(write_log(tmp_path, first)) == log_digest(write_log(tmp_path, second))
+    assert len(log_digest(write_log(tmp_path, first))) == 12
+
+
+def test_two_different_lint_errors_have_different_digests(tmp_path):
+    one = "src/a.py:3:1: F401 `os` imported but unused\nFound 1 error.\n"
+    two = "src/a.py:9:5: E722 Do not use bare `except`\nFound 1 error.\n"
+    assert log_digest(write_log(tmp_path, one)) != log_digest(write_log(tmp_path, two))
+
+
+def test_only_the_last_thirty_lines_count_and_a_missing_log_has_no_digest(tmp_path):
+    head = "".join(f"noise {c}\n" for c in "abcdefghij")
+    tail = "".join(f"error line {chr(97 + i)}\n" for i in range(30))
+    assert log_digest(write_log(tmp_path, head + tail)) == log_digest(write_log(tmp_path, tail))
+    assert log_digest(tmp_path / "missing.log") is None
+
+
+def test_the_same_lint_error_twice_is_a_repeat_and_two_different_ones_are_not(unit):
+    git, repo, path, head = unit
+    previous(path, head, [gate("lint", digest="aaaaaaaaaaaa")])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    assert repeated_failure(path, git, [], current(now, [gate("lint", digest="aaaaaaaaaaaa")])) is not None
+    assert repeated_failure(path, git, [], current(now, [gate("lint", digest="bbbbbbbbbbbb")])) is None
 
 
 def test_a_round_with_no_failed_gate_has_an_empty_failure_set():
@@ -77,7 +119,9 @@ def previous(path: Path, head: str, gates: list[dict], tests: dict | None = None
 
 def current(head: str, gates: list[dict], tests: dict | None = None, n: int = 2) -> VerifyResult:
     result = VerifyResult("u", n, Verdict.FAIL, "b", head)
-    result.gates = [GateLine(g["name"], g["command"], g["status"], g["reason"], g["log"]) for g in gates]
+    result.gates = [
+        GateLine(g["name"], g["command"], g["status"], g["reason"], g["log"], g.get("digest")) for g in gates
+    ]
     result.tests = tests or {}
     return result
 
@@ -205,7 +249,23 @@ def test_a_repeated_failure_escalates_with_same_failure_and_writes_no_second_fix
     assert len(run.events("fix.spawned")) == 1  # no fix unit 2
     code, detail = escalation[-1]
     assert code == "same_failure"
-    assert detail == "round 2 failed the same way as round 1: lint, lint:exit 1"
+    assert detail.startswith("round 2 failed the same way as round 1: lint, lint:exit 1, lint:log ")  # the digest (M5)
+
+
+LINT_BY_CONTENT = (
+    "sh -c 'if grep -q UNUSED src/pytdd/pricing.py; then echo unused-name-found; else echo other-error; fi; exit 1'"
+)
+
+
+def test_a_lint_gate_that_fails_with_another_error_is_not_a_repeat(run_l4, valid_spec, escalation):  # review M5
+    """The first round fails on one lint error, the fix round on another: that is progress, so a second fix unit is
+    written; only round 3, which fails exactly as round 2 did, is the repeat."""
+    run = run_l4([red_step(), noqa_green(), chore_fix(), chore_fix(), chore_fix()], lint=[LINT_BY_CONTENT])
+    assert [e["verdict"] for e in run.events("verify.verdict")][:2] == ["FAIL", "FAIL"]
+    assert len(run.events("fix.spawned")) == 2
+    assert escalation[-1][0] == "same_failure" and escalation[-1][1].startswith(
+        "round 3 failed the same way as round 2"
+    )
 
 
 def test_a_framework_without_fix_units_sets_its_code(run_l4, valid_spec, monkeypatch, escalation):
