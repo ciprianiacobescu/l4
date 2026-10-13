@@ -268,8 +268,13 @@ def _read_text(text: str) -> str:
 
 
 def _title(text: str) -> str:
-    first = next((line for line in text.splitlines() if line.strip()), "")
-    return " ".join(first.split())[:MAX_TITLE].rstrip()
+    """The first line, at most MAX_TITLE characters, cut on a word when one ends in the second half (it also goes into
+    the printed commit message, where a word cut in two reads as a typo)."""
+    first = " ".join(next((line for line in text.splitlines() if line.strip()), "").split())
+    if len(first) <= MAX_TITLE:
+        return first
+    cut = first.rfind(" ", 0, MAX_TITLE + 1)
+    return (first[:cut] if cut >= MAX_TITLE // 2 else first[:MAX_TITLE]).rstrip()
 
 
 def _by(app: AppContext) -> str:
