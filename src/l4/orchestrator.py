@@ -1056,6 +1056,24 @@ def _busy(snapshot_phase: str | None, ref: UnitRef) -> UnitRunResult:
     return UnitRunResult(outcome, ExitCode.OK)
 
 
+def _refuse_stopped(app: AppContext, state: UnitState, ref: UnitRef) -> UnitRunResult | None:
+    """`l4 run --unit` on a `halted` or `escalated` unit (L4-OPS-010, SCN-OPS-17, design D10): exit 13 with the recorded
+    cause and the command that moves the unit. Nothing else happens: no lease, worktree, ledger line, commit, push or
+    label sync, because a rerun cannot move the unit and its own side effects (a halt note, a ledger push) hid the
+    cause it was asked about. `l4 resume` and `l4 retry` pass a reason and do not come here."""
+    if state.phase not in (Phase.HALTED.value, Phase.ESCALATED.value):
+        return None
+    phase = state.phase
+    detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
+    next_step = f"l4 retry --unit {ref.id} --reason TEXT"
+    log.error("%s %s: %s", ref.id, phase, detail)
+    log.error("Next: %s", next_step)
+    reason = f"{phase}: {detail}. Next: {next_step}"[:300]
+    return UnitRunResult(
+        UnitOutcome(unit=ref.id, phase_before=phase, phase_after=phase, exit_reason=reason), ExitCode.HALTED
+    )
+
+
 def run_unit_in_worktree(
     app: AppContext,
     cfg: L4Config,
@@ -1081,6 +1099,8 @@ def run_unit_in_worktree(
     )
     relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve())
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
+    if resume_reason is None and (stopped := _refuse_stopped(app, snapshot.state, ref)) is not None:
+        return stopped  # before the lease, the worktree and the ledger: a stopped unit costs a run nothing (L4-OPS-010)
     lease = LocalFileLease(names.flock_path, unit=ref.id, run_id=app.run_id, job=app.environ.get("CI_JOB_ID"))
     opened: dict[str, Path] = {}
 

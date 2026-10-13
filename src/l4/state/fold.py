@@ -262,10 +262,10 @@ def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
 
 
 def _unit_restarted(state: UnitState, event: LedgerEvent) -> None:
-    """`unit.restarted{attempt, previous_head, reason, by, signal}` (L4-OPS-004): `l4 restart` replaced the branch, so the
-    unit starts again with no phase and every counter at zero. Kept: `restarts` (counted), `iteration` and `cost_usd`
-    (the run count only grows; spent money stays spent), the signals already acted on (a label event acts once, also
-    when it asked for the restart). Everything else, the agent sessions included, goes with the old work."""
+    """`unit.restarted{attempt, previous_head, reason, by, signal}` (L4-OPS-004): `l4 restart` replaced the branch, so
+    the unit starts again with no phase and every counter at zero. Kept: `restarts` (counted), `iteration` and
+    `cost_usd` (the run count only grows; spent money stays spent), the signals already acted on (a label event acts
+    once, also when it asked for the restart). Everything else, the agent sessions included, goes with the old work."""
     fresh = UnitState(unit=state.unit)
     keep = {
         "restarts": state.restarts + 1, "iteration": state.iteration, "cost_usd": state.cost_usd,

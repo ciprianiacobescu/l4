@@ -5,7 +5,7 @@ from l4 import orchestrator
 from l4.implementer.tdd import BaselineFailed
 from l4.state.fold import fold
 
-from ..implementer.conftest import red_step, result
+from ..implementer.conftest import red_step
 from .conftest import UNIT, UNIT_DIR, new_origin_main
 
 

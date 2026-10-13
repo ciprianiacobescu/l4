@@ -97,9 +97,9 @@ class PlanEntry:
 
 def _after_capacity(facts: UnitFacts, now: datetime) -> tuple[str, str] | None:
     """The `waiting_capacity` row (forge-and-ci 2.32, reduced): the previous phase's action once `retry_after` has
-    passed, `none` before that. A park from `fixing` is continued by a run too (`implement`: the run drives the fix unit).
-    A park without a readable `retry_after`, or from another phase, stays as it was (the park always records one now,
-    L4-OPS-009)."""
+    passed, `none` before that. A park from `fixing` is continued by a run too (`implement`: the run drives the fix
+    unit). A park without a readable `retry_after`, or from another phase, stays as it was (the park always records
+    one now, L4-OPS-009)."""
     try:
         due = datetime.fromisoformat(facts.retry_after or "")
     except ValueError:
