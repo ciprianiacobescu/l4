@@ -633,6 +633,16 @@ class LocksCfg(_Strict):
     lease: Duration = "30m"
 
 
+_CRON = re.compile(r"^[A-Za-z0-9*/,?#-]+( [A-Za-z0-9*/,?#-]+){4}$")
+
+
+def _cron(value: str) -> str:
+    """Five fields of a POSIX cron expression, as GitHub's `schedule:` reads them; it is written into the workflow."""
+    if not _CRON.match(value):
+        raise ValueFree("not a cron expression of five space-separated fields, for example \"*/30 * * * *\"")
+    return value
+
+
 class CiCfg(_Strict):
     platform: Literal["auto", "github", "gitlab", "local"] = "auto"
     max_parallel_units: int = Field(default=2, ge=1)
@@ -644,6 +654,9 @@ class CiCfg(_Strict):
     # the GitHub Environment the generated job runs in: the forge token and the agent credentials are secrets of it
     # (repository secrets still resolve); null leaves `environment:` out of the workflow
     github_environment: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._-]{1,255}$")] | None = "l4"
+    # the cron of the generated GitHub workflow's `schedule:` trigger; null leaves the trigger out. `l4 upgrade`
+    # re-renders the workflow, so this is where it is changed (L4-ACT-004)
+    schedule: Annotated[str, AfterValidator(_cron)] | None = "*/30 * * * *"
 
 
 class PriceEntry(_Strict):

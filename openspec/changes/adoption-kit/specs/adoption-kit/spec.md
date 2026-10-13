@@ -92,6 +92,8 @@ Further rules:
   is given, and `forge.token_env: GITHUB_TOKEN` unless `--forge-token-env NAME` is given. A default role-chain profile
   that cannot log in on a hosted runner (a `subscription` profile of `codex`) is named in a `todo:` line and a
   `# TODO:` config line; the person's agents are not changed.
+- The `schedule:` trigger is `ci.schedule`: a cron string (default `"*/30 * * * *"`) or `null` for no trigger; it is
+  rendered into both GitHub workflow forms and moved by `l4 upgrade`.
 - `l4 doctor` MUST check that the `uses:` line names a 40-hex sha and, for source `repository`, that its `commit`
   input matches it.
 

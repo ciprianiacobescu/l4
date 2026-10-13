@@ -195,7 +195,9 @@ unless `--runner-tag TAG` (repeatable) names a self-hosted one, and `forge.token
 token) unless `--forge-token-env NAME` is given. When the default role chains name a profile that cannot log in on a hosted
 runner (a `subscription` profile of `codex`, whose login is a stored local file; `claude-code` takes
 `CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets), init MUST print a `todo:` line (and write a
-`# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents.
+`# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents. The
+`schedule:` trigger of both GitHub workflow forms is `ci.schedule` (a cron string, default `"*/30 * * * *"`; `null`
+leaves the trigger out), re-rendered by `l4 upgrade`.
 `l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
 on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `fetched` or `action` (§3.2).
 
@@ -725,6 +727,8 @@ ci:
                                    # the variable L4_SELF_PROVISION (true|false|auto) overrides this key when set (L4-PRV-019)
   github_environment: l4           # the GitHub Environment whose secrets the generated job reads (forge token, agent
                                    # credentials); null: the job names none (L4-PRV-027)
+  schedule: "*/30 * * * *"         # the cron of the generated GitHub workflow's `schedule:` trigger; null: no
+                                   # schedule. `l4 upgrade` re-renders the workflow, so change it here (L4-ACT-004)
 
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)

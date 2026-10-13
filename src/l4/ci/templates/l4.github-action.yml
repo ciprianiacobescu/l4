@@ -11,8 +11,7 @@ name: l4
 on:
   push:
     branches: [@@BASE@@, @@PREFIX@@]
-  schedule:
-    - cron: "*/30 * * * *"
+@@SCHEDULE@@
   workflow_dispatch:
 permissions:
   contents: write

@@ -260,6 +260,10 @@ runner and `--forge-token-env NAME` to use a token of your own. A hosted runner 
 subscription cannot log in there, so init prints a `todo:` line naming the profile; give it `auth: api_key` and the
 secret `CODEX_API_KEY`, or name another profile in the role (`claude-code` takes `CLAUDE_CODE_OAUTH_TOKEN`).
 
+The workflow also runs on a schedule, every 30 minutes by default. On a private repository that costs about 1,400
+runner-minutes a month even when idle: set `ci.schedule` in `.l4/config.yaml` to a slower cron (for example
+`"0 * * * *"`) or to `null` for no schedule, then run `l4 upgrade`, which re-renders the workflow.
+
 Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
