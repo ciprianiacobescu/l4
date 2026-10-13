@@ -83,7 +83,9 @@ def _curate(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger: Trig
         return None
     if _worktree_differs_from_head(wb, cfg.memory.lessons_file):
         ctx.services.ledger.append(
-            "lessons.curated", action="refused", id="",
+            "lessons.curated",
+            action="refused",
+            id="",
             reason="the lessons file in the work tree is not the committed one",
         )
         _restore_to_head(wb, cfg.memory.lessons_file)

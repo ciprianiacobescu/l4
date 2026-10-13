@@ -81,9 +81,7 @@ CFG_005 = register(
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _ACTION_FILE = f"{ACTION_PATH}/action.yml"
-_PIN_HINT = (
-    "pin it with `l4 upgrade --harness-ref REF` (or `--harness-commit SHA`), which writes `@<sha> # <REF>`"
-)
+_PIN_HINT = "pin it with `l4 upgrade --harness-ref REF` (or `--harness-commit SHA`), which writes `@<sha> # <REF>`"
 
 
 def _cfg_006(ctx: DoctorContext) -> CheckResult:
@@ -151,6 +149,4 @@ def _cfg_007(ctx: DoctorContext) -> CheckResult:
     )
 
 
-CFG_007 = register(
-    Check("CFG-007", "A local l4 is on PATH (action adoption)", "info", _cfg_007, scopes=CONFIG_SCOPES)
-)
+CFG_007 = register(Check("CFG-007", "A local l4 is on PATH (action adoption)", "info", _cfg_007, scopes=CONFIG_SCOPES))

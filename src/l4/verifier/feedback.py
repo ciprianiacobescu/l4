@@ -158,9 +158,11 @@ def not_addressed_findings(outcomes: Sequence[FeedbackOutcome], asked: Sequence[
     refs = {r.id: r for r in asked}
     return [
         Finding(
-            Severity.MAJOR, f"{o.id} not addressed: {o.evidence}",
+            Severity.MAJOR,
+            f"{o.id} not addressed: {o.evidence}",
             f"Judged not addressed: {o.evidence}\n\n{_flat(refs[o.id].text, MAX_REQUEST_CHARS)}",
-            "feedback", feedback=replace(refs[o.id], retake=True),  # it was taken before: it is asked about
+            "feedback",
+            feedback=replace(refs[o.id], retake=True),  # it was taken before: it is asked about
         )  # fmt: skip
         for o in outcomes
         if not o.addressed and o.id in refs
