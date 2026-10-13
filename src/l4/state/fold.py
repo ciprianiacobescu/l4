@@ -149,6 +149,15 @@ def _task_done(state: UnitState, event: LedgerEvent) -> None:
             state.tasks.in_progress = None
 
 
+def _tasks_reopened(state: UnitState, event: LedgerEvent) -> None:
+    """`tasks.reopened{tasks, requirements}` (L4-OPS-015): a spec edit changed criteria that these Kiro tasks cite, so
+    their boxes are `[ ]` again and they are no longer done."""
+    reopened = event.data.get("tasks")
+    if isinstance(reopened, list):
+        gone = {t for t in reopened if isinstance(t, str)}
+        state.tasks.done = [t for t in state.tasks.done if t not in gone]
+
+
 def _question_id(event: LedgerEvent) -> str | None:
     """`Q-001` for the parent's questions, `<fix unit>/Q-001` for a fix unit's: the files number them separately."""
     qid = _text(event, "id")
@@ -373,6 +382,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "phase.changed": _phase_changed,
     "task.started": _task_started,
     "task.done": _task_done,
+    "tasks.reopened": _tasks_reopened,
     "question.raised": _question_raised,
     "question.answered": _question_answered,
     "availability.selected": _availability_selected,

@@ -113,3 +113,18 @@ def test_events_after_a_restart_build_on_the_new_start_and_restarts_are_counted(
     ]
     state = fold(events(*rows), "openspec:x")
     assert (state.phase, state.restarts, state.tasks.done) == (None, 2, ["1.1"])
+
+
+def test_reopened_tasks_are_no_longer_done():
+    """L4-OPS-015: `tasks.reopened{tasks, requirements}` takes the tasks out of the folded done list."""
+    state = fold(
+        events(
+            *TO_IMPLEMENTING,
+            ("task.done", {"task": "1.1"}),
+            ("task.done", {"task": "2.1"}),
+            ("tasks.reopened", {"tasks": ["2.1", "2"], "requirements": ["2.3"]}),
+            ("tasks.reopened", {"tasks": "bad"}),
+        ),
+        "openspec:x",
+    )
+    assert state.tasks.done == ["1.1"]

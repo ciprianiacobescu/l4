@@ -240,6 +240,26 @@ def kiro_criteria(unit_dir: Path) -> list[Criterion]:
     return criteria
 
 
+def kiro_requirement_texts(text: str | None) -> dict[str, str]:
+    """`{"2.3": criterion text}` for the acceptance criteria of a `requirements.md` text (a missing file has none): the
+    number is the place in its requirement (the `Req 2.3` alias) and the text has its whitespace collapsed."""
+    return {label: normalise(body) for _, label, body, _ in _kiro_items(text or "", bugfix=False)}
+
+
+def _number_key(label: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in label.split("."))
+
+
+def changed_requirements(before: str | None, after: str | None) -> tuple[str, ...]:
+    """The numbers of the criteria whose text differs between two versions of a Kiro `requirements.md`, in number order
+    (L4-OPS-015). A criterion that exists in one version only is changed. Re-wrapped text is not (whitespace is
+    normalised)."""
+    old, new = kiro_requirement_texts(before), kiro_requirement_texts(after)
+    return tuple(
+        sorted((label for label in old.keys() | new.keys() if old.get(label) != new.get(label)), key=_number_key)
+    )
+
+
 def _base_scenarios(capability: str, text: str) -> list[Criterion]:
     found: list[Criterion] = []
     for requirement, scenario, body, line in _scenarios(text, sections=("Requirements",), heading=_BASE_SECTION):
