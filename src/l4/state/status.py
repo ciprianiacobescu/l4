@@ -53,10 +53,10 @@ from l4.state.ledger import (
     parse_ledger_files,
     read_ledger_files,
 )
-from l4.state.lifecycle import Phase
+from l4.state.lifecycle import SPEC_EDIT_PHASES, Phase
 from l4.state.next_step import label_for, next_step, reason
 from l4.state.pending import merge_ledgers, read_pending
-from l4.state.review import AfterHandoff, after_handoff
+from l4.state.review import AfterHandoff, SpecEdit, after_handoff, spec_edit_since_harness
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
@@ -105,6 +105,7 @@ class UnitSnapshot:
     follow_up_of: str | None = None  # the parent's unit id when this unit is a follow-up (`.l4/followup.json`)
     follow_up: FollowUpOffer | None = None  # a `merged` unit: the items a follow-up should take (L4-FBK-010)
     stopped_in: str | None = None  # a halted or escalated unit: the run whose edge stopped it (L4-OPS-006)
+    spec_edit: SpecEdit | None = None  # a person's spec push after the harness's last commit (L4-OPS-014)
 
     @property
     def feedback_counts(self) -> dict[str, int]:
@@ -188,6 +189,9 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
     review = None
     if on_branch and state.phase == Phase.IN_REVIEW.value:
         review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git))
+    edit = None
+    if on_branch and state.phase in {p.value for p in SPEC_EDIT_PHASES}:
+        edit = spec_edit_since_harness(git, tracking_ref, _relative(provider, ref, git))
     return UnitSnapshot(
         ref,
         state,
@@ -200,6 +204,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         feedback=feedback,
         follow_up_of=follow,
         stopped_in=_stopped_in(read.events, state),
+        spec_edit=edit,
     )
 
 

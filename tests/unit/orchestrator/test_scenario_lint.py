@@ -89,10 +89,11 @@ def test_a_removed_base_requirement_does_not_conflict_with_its_replacement(run_l
     assert run.code == 0 and run.events("question.raised") == []
 
 
-def test_the_lint_only_runs_before_verification(run_l4, tdd_repo, raw):
+def test_a_spec_push_to_a_unit_past_implementation_re_enters_it_and_the_lint_reads_the_new_spec(run_l4, tdd_repo, raw):
     ok = run_l4([red_step(), green_step()])
     assert ok.code == 0 and ok.outcome["units"][0]["phase_after"] == "implemented"  # no verifier: it stops there
-    # a human reopens a task and breaks the spec on the unit branch; the unit is past intake, the verifier judges now
+    # a human reopens a task and breaks the spec on the unit branch. Since L4-OPS-014 that is a spec edit: the unit goes
+    # back to `implementing`, a phase the lint covers, so the conflict is raised before any agent step.
     clone = tdd_repo.repo.parent / "human-spec"
     raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
     (clone / SPEC).write_text(CONFLICT)
@@ -102,8 +103,9 @@ def test_the_lint_only_runs_before_verification(run_l4, tdd_repo, raw):
     raw(clone, "commit", "-q", "-m", "reopen")
     raw(clone, "push", "-q", "origin", BRANCH)
     again = run_l4([Step()])
-    assert again.events("question.raised") == [] and SUBJECT not in again.subjects()
     assert again.outcome["units"][0]["phase_before"] == "implemented"
+    assert "spec_edited" in again.triggers() and again.events("unit.retried")[-1]["reason"] == "spec edited"
+    assert again.events("question.raised") and SUBJECT in again.subjects()
 
 
 DESIGN = f"{UNIT_DIR}/design.md"

@@ -61,6 +61,7 @@ from l4.forge.pushfail import PushFailed, explain_push_failure
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
+from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
     open_blocking_questions,
     questions_hold,
@@ -83,15 +84,14 @@ from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
 from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
 from l4.state.breaker import consecutive_verifier_errors
-from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS
+from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
-from l4.state.lifecycle import Edge, Phase, Trigger, allowed_edge, transition
+from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
 from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
 from l4.state.reconcile import reconcile
-from l4.state.review import _owned as harness_owned
-from l4.state.review import after_handoff, foreign_tail, review_note, review_trigger
+from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
 from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
@@ -104,6 +104,7 @@ from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
 
+MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
 
 log = logging.getLogger("l4.run")
@@ -327,6 +328,7 @@ class Orchestrator:
         before = self._refold().phase or "none"
         try:
             self._reconcile()
+            self._take_spec_edit()
             if (rejected := self._lint_scenarios()) is not None:
                 return UnitRunResult(self._outcome(before), rejected)
             self._reentry = self._clarifier.reenter(
@@ -389,25 +391,59 @@ class Orchestrator:
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
         self.services.ledger.append(event, reason=reason[:300], **extra)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
-        if spec_edit_check and before in (Phase.HALTED.value, Phase.ESCALATED.value) and self._edited_since_stop():
+        edit = self._spec_edit() if spec_edit_check and before in (Phase.HALTED.value, Phase.ESCALATED.value) else None
+        if edit is not None:
             trigger = Trigger.SPEC_EDIT_SINCE_STOP
         self._go(trigger)
+        if edit is not None:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
+            self._reopen(edit.base)
         return UnitRunResult(self._outcome(before), ExitCode.OK)
 
-    def _edited_since_stop(self) -> bool:
-        """L4-OPS-003, SCN-OPS-06, SCN-OPS-07: a person's commits after the harness's last commit (the stop) changed a
-        file of the unit folder that is not the harness's (`.l4/`, `verification.md`). A change elsewhere, `src/`
-        for one, is not a change of the spec."""
+    def _spec_edit(self) -> SpecEdit | None:
+        """L4-OPS-003, L4-OPS-014, SCN-OPS-06, SCN-OPS-07: a person's commits after the harness's last commit changed a
+        file of the unit folder that is not the harness's and has no channel of its own. A change elsewhere, `src/` for
+        one, is not a change of the spec."""
         s = self.services
-        tail = foreign_tail(s.git, "HEAD")
-        if not tail:
-            return False
-        rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
-        names = s.git.run("diff", "--name-only", "-z", f"{tail[0].sha}^", "HEAD", "--", f":(literal){rel}").stdout
-        prefix = rel.rstrip("/") + "/"
-        return any(
-            not harness_owned(path.removeprefix(prefix)) for path in names.split("\0") if path.startswith(prefix)
+        return spec_edit_since_harness(s.git, "HEAD", s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix())
+
+    def _reopen(self, base: str) -> list[str]:
+        """A spec edit was taken: on a Kiro unit the tasks that cite a changed criterion are `[ ]` again (OPS-015)."""
+        return reopen_for_changed_requirements(
+            self.services, base, phase=self.state.phase or "implementing", iteration=self.state.iteration
         )
+
+    def _take_spec_edit(self) -> None:
+        """L4-OPS-014, design D13, at the start of a run, when the worktree is at the remote head: a person's push to
+        the unit folder takes `spec_edited` to `implementing` from every phase that is not finished. The run records
+        `unit.retried{reason: "spec edited", signal: "spec_edit:<head>", by: "push"}` (it folds like a resume), and a
+        unit escalated at the fix-round or feedback limit gets one round of that kind first, once for each head (a
+        signal already recorded grants nothing). `implementing` needs no edge but reaches the reopening of D14 as well;
+        `fixing` defers (it has no edge)."""
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if phase is not Phase.IMPLEMENTING and phase not in SPEC_EDIT_PHASES:
+            return
+        edit = self._spec_edit()
+        if edit is None:
+            return
+        if phase is not Phase.IMPLEMENTING:
+            self._record_spec_edit(phase, edit)
+        self._reopen(edit.base)
+
+    def _record_spec_edit(self, phase: Phase | None, edit: SpecEdit) -> None:
+        ledger, extra = self.services.ledger, {"signal": edit.signal, "by": "push"}
+        if phase is Phase.ESCALATED and edit.signal not in self.state.resumed_signals:
+            rounds = (
+                {"feedback_rounds": 1}
+                if feedback_rounds_exhausted(self.state)
+                else {"fix_rounds": 1}
+                if fix_rounds_exhausted(self.cfg, self.state)
+                else {}
+            )
+            if rounds:
+                ledger.append("budget.extended", **rounds, reason="spec edited", **extra)
+        ledger.append("unit.retried", reason="spec edited", **extra)
+        self._notes = ()  # the note of the stop is out of date: the mirror says nothing is waiting
+        self._go(Trigger.SPEC_EDITED, commits=list(edit.shas)[-MAX_EDIT_COMMITS:])
 
     def _reconcile(self) -> None:
         """A step that a killed run left half done is reconciled before anything else (L4-STA-003). A restored
@@ -586,12 +622,19 @@ class Orchestrator:
         merge."""
         s = self.services
         unit_rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
-        found = review_trigger(after_handoff(s.git, "HEAD", s.ref.name, unit_rel), self.state)
+        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel)
+        found = review_trigger(after, self.state)
         if found is None:
             return False
         self._notes = (review_note(found),)  # the mirror shows why the MR is a draft again, from the first sync on
         self._go(found.trigger, **found.context)
+        if found.trigger is Trigger.SPEC_EDIT_AFTER_HANDOFF and (base := self._before_first_foreign(after)) is not None:
+            self._reopen(base)  # the tasks that cite a changed criterion are open again (L4-OPS-015)
         return True
+
+    def _before_first_foreign(self, after: AfterHandoff) -> str | None:
+        """The last commit before the person's first one after the hand-off: the spec as the harness left it."""
+        return self.services.git.rev_parse(f"{after.foreign[0].sha}^") if after.foreign else None
 
     def _discover(self) -> ExitCode | None:
         """A unit without a phase: intake, or straight to `implemented` when every task is already done."""
@@ -1087,12 +1130,15 @@ def _busy(snapshot_phase: str | None, ref: UnitRef) -> UnitRunResult:
     return UnitRunResult(outcome, ExitCode.OK)
 
 
-def _refuse_stopped(app: AppContext, state: UnitState, ref: UnitRef) -> UnitRunResult | None:
+def _refuse_stopped(
+    app: AppContext, state: UnitState, ref: UnitRef, edit: SpecEdit | None = None
+) -> UnitRunResult | None:
     """`l4 run --unit` on a `halted` or `escalated` unit (L4-OPS-010, SCN-OPS-17, design D10): exit 13 with the recorded
     cause and the command that moves the unit. Nothing else happens: no lease, worktree, ledger line, commit, push or
     label sync, because a rerun cannot move the unit and its own side effects (a halt note, a ledger push) hid the
-    cause it was asked about. `l4 resume` and `l4 retry` pass a reason and do not come here."""
-    if state.phase not in (Phase.HALTED.value, Phase.ESCALATED.value):
+    cause it was asked about. `l4 resume` and `l4 retry` pass a reason and do not come here. A unit with a person's spec
+    edit after the stop is not refused: the run takes `spec_edited` (L4-OPS-014)."""
+    if state.phase not in (Phase.HALTED.value, Phase.ESCALATED.value) or edit is not None:
         return None
     phase = state.phase
     detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
@@ -1136,7 +1182,7 @@ def run_unit_in_worktree(
     )
     relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve())
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
-    if resume_reason is None and (stopped := _refuse_stopped(app, snapshot.state, ref)) is not None:
+    if resume_reason is None and (stopped := _refuse_stopped(app, snapshot.state, ref, snapshot.spec_edit)) is not None:
         return stopped  # before the lease, the worktree and the ledger: a stopped unit costs a run nothing (L4-OPS-010)
     lease = LocalFileLease(names.flock_path, unit=ref.id, run_id=app.run_id, job=app.environ.get("CI_JOB_ID"))
     opened: dict[str, Path] = {}

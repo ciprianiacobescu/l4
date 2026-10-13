@@ -21,6 +21,9 @@ operator-commands (L4-OPS-001, -003, -009) adds the rows an operator's verb or a
 `in_review -> verifying` on `retry_requested`, `verifying | verified -> halted` on `breaker_or_budget` (a secret in
 the push halts in any phase), every non-terminal phase `-> abandoned` on `pr_closed` (not `archived`, which exists only
 in `on_approval`), and `abandoned -> previous phase` on `pr_reopened`.
+operator-commands wave 3 (L4-OPS-014) adds `spec_edited` -> `implementing` from every phase that is not finished and can
+wait for a person (`SPEC_EDIT_PHASES`): a person's push to the unit folder re-enters the unit by itself. `in_review`
+keeps `spec_edit_after_handoff`, `fixing` defers (its fix unit ends in `verifying`), `implementing` needs no edge.
 """
 
 from enum import StrEnum
@@ -52,6 +55,10 @@ class Phase(StrEnum):
 
 
 TERMINAL = frozenset({Phase.MERGED, Phase.ABANDONED})
+SPEC_EDIT_PHASES = frozenset(
+    {Phase.INTAKE, Phase.READY, Phase.IMPLEMENTED, Phase.VERIFYING, Phase.VERIFIED, Phase.AWAITING_HUMAN,
+     Phase.CLARIFYING, Phase.HALTED, Phase.ESCALATED}
+)  # fmt: skip  # where a spec edit (L4-OPS-014) takes the `spec_edited` edge
 
 
 class Trigger(StrEnum):
@@ -83,6 +90,7 @@ class Trigger(StrEnum):
     REPOSITORY_CI_FAILED = "repository_ci_failed"
     RESUMED = "resumed"
     SPEC_EDIT_SINCE_STOP = "spec_edit_since_stop"
+    SPEC_EDITED = "spec_edited"
     RETRY_REQUESTED = "retry_requested"
     PR_CLOSED = "pr_closed"
     PR_REOPENED = "pr_reopened"
@@ -147,6 +155,8 @@ TRANSITIONS: tuple[Edge, ...] = (
     _edge({Phase.HALTED, Phase.ESCALATED}, Trigger.RESUMED, None),
     # operator-commands: a person changed the unit folder since the stop, so the unit implements again (L4-OPS-003)
     _edge({Phase.HALTED, Phase.ESCALATED}, Trigger.SPEC_EDIT_SINCE_STOP, Phase.IMPLEMENTING),
+    # a person pushed a change of the unit folder to the unit branch (L4-OPS-014, design D13)
+    _edge(SPEC_EDIT_PHASES, Trigger.SPEC_EDITED, Phase.IMPLEMENTING),
     _edge({Phase.IN_REVIEW}, Trigger.RETRY_REQUESTED, Phase.VERIFYING),  # `l4 retry` / `l4:retry` (L4-OPS-001)
     # the merge request was closed without a merge, or reopened before any restart (L4-OPS-009)
     _edge(set(Phase) - {Phase.MERGED, Phase.ABANDONED, Phase.ARCHIVED}, Trigger.PR_CLOSED, Phase.ABANDONED),

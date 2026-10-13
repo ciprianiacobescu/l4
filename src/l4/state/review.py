@@ -18,6 +18,7 @@ from l4.vcs.git import Git
 
 MAX_LISTED = 10  # commits named in an edge context, a plan row or a note
 _HARNESS_OWNED = ("verification.md", ".l4")
+_NOT_SPEC = (*_HARNESS_OWNED, "questions.md", "feedback.md")  # the files with a channel of their own (L4-OPS-014)
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,41 @@ def foreign_tail(git: Git, head: str, scan: int = 50) -> tuple[ForeignCommit, ..
             break
         found.append(ForeignCommit(record[SHA], record[AUTHOR], record[SUBJECT]))
     return tuple(reversed(found))
+
+
+@dataclass(frozen=True)
+class SpecEdit:
+    """A person's change to the unit folder since the harness's last commit (L4-OPS-014, L4-OPS-003)."""
+
+    shas: tuple[str, ...]  # the person's commits after `base`, oldest first (the planner's fact `spec_edited`)
+    base: str  # the harness's last commit: what the spec looked like when the harness left the unit
+    head: str  # the branch head the answer is for
+
+    @property
+    def signal(self) -> str:
+        """The consumed-signals key: a head grants its extra round once (`unit.retried{signal}`)."""
+        return f"spec_edit:{self.head}"
+
+
+def spec_edit_since_harness(git: Git, head: str, unit_rel: str) -> SpecEdit | None:
+    """The `foreign_tail` of `head` when its net change since the harness's last commit touches a file of the unit
+    folder that is not the harness's (`.l4/`, `verification.md`) and has no channel of its own (`questions.md`,
+    `feedback.md`: answers, verdicts and feedback keep their paths). A change elsewhere (`src/`) and a fix-unit folder,
+    which is a sibling of the unit folder, are not a change of the spec. One rule for the push (`spec_edited`) and the
+    retry (`spec_edit_since_stop`)."""
+    tail = foreign_tail(git, head)
+    base = git.rev_parse(f"{tail[0].sha}^") if tail else None
+    if not tail or base is None:
+        return None
+    last = tail[-1].sha
+    changed = git.run("diff", "--name-only", "-z", base, last, "--", f":(literal){unit_rel}").stdout
+    prefix = unit_rel.rstrip("/") + "/"
+    if not any(
+        PurePosixPath(path.removeprefix(prefix)).parts[0] not in _NOT_SPEC for path in changed.split("\0")
+        if path.startswith(prefix)
+    ):  # fmt: skip
+        return None
+    return SpecEdit(tuple(c.sha for c in tail), base, last)
 
 
 @dataclass(frozen=True)
