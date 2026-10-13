@@ -9,6 +9,7 @@ from l4.specs.base import Criterion, Framework
 from l4.specs.questions import QuestionKind, QuestionsFile, QuestionStatus
 from l4.state.ledger import LedgerEvent
 from l4.verifier.evidence import stored_finding
+from l4.verifier.notes import VERDICT_HINT, verdict_hints
 from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, HumanVerdict, Severity, TracingTest
 from l4.verifier.verdicts import (
     apply_finding_verdicts,
@@ -147,6 +148,21 @@ def test_a_draft_under_status_open_is_still_open(tmp_path):
     assert verdict_status(file).open == ("Q-001",)
 
 
+def test_a_dismissed_verdict_question_reads_as_open_and_is_named(tmp_path):  # L4-OPS-009
+    sink = Sink()
+    ask(tmp_path, sink, outcomes=[outcome(A), outcome(B)])
+    file = answer(tmp_path / "questions.md", "Q-001", "", status="dismissed")
+    status = verdict_status(file)
+    assert status.open == ("Q-001", "Q-002") and status.dismissed == ("Q-001",)
+    assert not status.ready and not status.invalid and status.any
+    assert consume_verdicts(file, sink.events, sink, [crit(A), crit(B)]) == []
+    assert verdict_status(file, consumed={"Q-001"}).dismissed == ()
+    assert verdict_hints(status) == [
+        VERDICT_HINT,
+        "Q-001: a verdict question cannot be dismissed: start the answer with accept or reject",
+    ]
+
+
 def verdict_event(seq: int, question: str, target: str, decision: str, sha: str) -> LedgerEvent:
     data = {
         "question": question,
@@ -221,6 +237,7 @@ def test_a_reject_whose_finding_is_not_raised_again_brings_the_stored_finding_ba
     minor = Finding(Severity.MINOR, "Case", "d", "judge")
     reject = HumanVerdict("Q-002", old.id, "reject", "ana", "WHEN x THEN y", "")
     events = [_asked("Q-002", old.id)]
+
     def asked(n: int, t: str) -> Finding | None:
         return old if (n, t) == (1, old.id) else None
 

@@ -12,7 +12,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.feedback_view import item_views
 from l4.state.fold import UnitState
 from l4.verifier.types import VerifyResult
-from l4.verifier.verdicts import verdict_status
+from l4.verifier.verdicts import VerdictQuestions, verdict_status
 
 FEEDBACK_HINT = (
     "To ask for changes: l4 feedback add --kind refactor|duplication|tests|config|behaviour --at FILE:LINE "
@@ -21,6 +21,22 @@ FEEDBACK_HINT = (
 MAX_FEEDBACK_LINES = 30
 MAX_FEEDBACK_LINE_CHARS = 300
 VERDICT_HINT = "Start each answer with `accept` or `reject`, then give your reason."
+
+
+def verdict_hints(status: VerdictQuestions) -> list[str]:
+    """The lines under the open verdict questions: the hint, a line for an answer that was not read, and for a question
+    that was dismissed (L4-OPS-009) the line that says a verdict question cannot be dismissed."""
+    return [
+        VERDICT_HINT,
+        *(
+            f"{qid} has an answer that does not start with `accept` or `reject`: it was not read. Please answer again."
+            for qid in status.invalid
+        ),
+        *(
+            f"{qid}: a verdict question cannot be dismissed: start the answer with accept or reject"
+            for qid in status.dismissed
+        ),
+    ]
 
 
 def verdict_section(ctx: HookContext, consumed: Collection[str]) -> str | None:
@@ -32,11 +48,7 @@ def verdict_section(ctx: HookContext, consumed: Collection[str]) -> str | None:
         return None
     path, branch, link = sticky_location(ctx)
     views = [QuestionView.of(q) for q in file.questions if q.id in waiting]
-    notes = [VERDICT_HINT] + [
-        f"{qid} has an answer that does not start with `accept` or `reject`: it was not read. Please answer again."
-        for qid in status.invalid
-    ]
-    return build_sticky_section(views, path=path, branch=branch, link=link) + "\n\n" + "\n".join(notes)
+    return build_sticky_section(views, path=path, branch=branch, link=link) + "\n\n" + "\n".join(verdict_hints(status))
 
 
 def escalation_section(result: VerifyResult, reason: str, redact: Callable[[str], str] = lambda text: text) -> str:

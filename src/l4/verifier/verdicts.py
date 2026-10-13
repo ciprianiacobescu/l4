@@ -265,6 +265,7 @@ class VerdictQuestions:
     open: tuple[str, ...] = ()  # asked, not answered
     ready: tuple[str, ...] = ()  # answered with `accept` or `reject`, not yet consumed
     invalid: tuple[str, ...] = ()  # answered, but the first word is neither
+    dismissed: tuple[str, ...] = ()  # Status `dismissed`: refused, read as open (L4-OPS-009); also in `open`
 
     @property
     def any(self) -> bool:
@@ -272,10 +273,15 @@ class VerdictQuestions:
 
 
 def verdict_status(file: QuestionsFile | None, consumed: Collection[str] = ()) -> VerdictQuestions:
-    """The verdict questions that still matter: consumed, dismissed and superseded ones are left out."""
-    open_, ready, invalid = [], [], []
+    """The verdict questions that still matter: consumed and superseded ones are left out. A verdict question cannot be
+    dismissed (the harness needs an accept or a reject): a `dismissed` one reads as open and is named in `dismissed`."""
+    open_, ready, invalid, dismissed = [], [], [], []
     for q in _verdict_questions(file):
-        if q.id in consumed or q.status in (QuestionStatus.DISMISSED, QuestionStatus.SUPERSEDED):
+        if q.id in consumed or q.status is QuestionStatus.SUPERSEDED:
+            continue
+        if q.status is QuestionStatus.DISMISSED:
+            open_.append(q.id)
+            dismissed.append(q.id)
             continue
         answer = effective_answer(q) if is_answered(q) else None
         if answer is None:
@@ -284,7 +290,7 @@ def verdict_status(file: QuestionsFile | None, consumed: Collection[str] = ()) -
             invalid.append(q.id)
         else:
             ready.append(q.id)
-    return VerdictQuestions(tuple(open_), tuple(ready), tuple(invalid))
+    return VerdictQuestions(tuple(open_), tuple(ready), tuple(invalid), tuple(dismissed))
 
 
 def _raised(events: Iterable[LedgerEvent]) -> dict[str, Mapping[str, Any]]:

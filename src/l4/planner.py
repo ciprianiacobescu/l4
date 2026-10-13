@@ -68,6 +68,7 @@ class UnitFacts:
     verdicts_open: tuple[str, ...] = ()  # verdict questions the verifier asked and nobody answered
     verdicts_ready: tuple[str, ...] = ()  # answered with `accept` or `reject`, not yet consumed
     verdicts_invalid: tuple[str, ...] = ()  # answered, but not starting with `accept` or `reject`
+    verdicts_dismissed: tuple[str, ...] = ()  # Status `dismissed`: read as open (L4-OPS-009)
     fix_unit_of: str | None = None  # this unit is a fix unit of that parent: never planned on its own (G5)
     open_fix_unit: str | None = None  # the last fix unit spawned and not done
     fix_progress: tuple[int, int] | None = None  # (done, total) tasks of the open fix unit
@@ -159,6 +160,12 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
             return "none", (
                 f"awaiting_human: verdict answer must start with accept or reject: {', '.join(facts.verdicts_invalid)}"
             )
+        if facts.verdicts_dismissed:
+            ids = "; ".join(
+                f"{qid}: a verdict question cannot be dismissed: start the answer with accept or reject"
+                for qid in facts.verdicts_dismissed
+            )
+            return "none", f"awaiting_human: {ids}"
         if facts.verdicts_ready and not facts.verdicts_open:
             return "verify", f"verdicts answered: {', '.join(facts.verdicts_ready)}"
         if facts.answers_unblock:
@@ -259,6 +266,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         verdicts_open=verdicts.open,
         verdicts_ready=verdicts.ready,
         verdicts_invalid=verdicts.invalid,
+        verdicts_dismissed=verdicts.dismissed,
         fix_unit_of=snapshot.fix_of,
         open_fix_unit=snapshot.state.open_fix_unit,
         fix_progress=progress,
