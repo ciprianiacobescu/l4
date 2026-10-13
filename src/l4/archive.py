@@ -147,6 +147,13 @@ def labels_for(prefix: str, phase: str, *, needs_answers: bool) -> list[str]:
     return [f"{prefix}{phase}", *([f"{prefix}needs-answers"] if needs_answers else [])]
 
 
+def operator_labels(prefix: str) -> list[str]:
+    """The labels a member uses to command the harness (L4-OPS-008): `retry`, `restart` and `resume` (which means
+    `retry`). A run creates them next to its phase labels so they can be found; it never puts them on a merge
+    request."""
+    return [f"{prefix}{name}" for name in ("retry", "restart", "resume")]
+
+
 # --- what the hooks of one run share ------------------------------------------------------------------------------
 
 
@@ -166,7 +173,7 @@ def _mr(ctx: HookContext) -> _Mr:
     found = ctx.shared.get("mr")
     if found is None:
         s = ctx.services
-        found = ctx.shared["mr"] = _Mr(make_forge(ctx.cfg, s.app.environ))
+        found = ctx.shared["mr"] = _Mr(make_forge(ctx.cfg, s.app.environ, repo=s.app.repo))
         # a unit that went back to review already has its branch (and MR): the mirror may act before this run pushes
         found.pushed = s.git.rev_parse(f"refs/remotes/origin/{s.names.branch}") is not None
     return found
@@ -277,7 +284,7 @@ class _Mirror:
         try:
             if mr.number is None:
                 mr.number = _ensure_mr(ctx, mr).number
-            missing = [name for name in wanted if name not in mr.ensured]
+            missing = [name for name in (*wanted, *operator_labels(prefix)) if name not in mr.ensured]
             if missing:
                 mr.forge.ensure_labels(missing)
                 mr.ensured.update(missing)

@@ -32,6 +32,7 @@ class FakeGitLab:
     pipelines: list[dict] = field(default_factory=list)  # {id, sha, status, jobs: [job], ...}
     traces: dict[int, str] = field(default_factory=dict)  # job id -> log text
     label_events: dict[int, list[dict]] = field(default_factory=dict)  # per MR iid: GitLab's resource_label_events
+    pipeline_post_status: int = 201  # the answer of POST /pipeline (401/403: the token may not start pipelines)
 
     def add_pipeline(self, sha: str, jobs: list[tuple], *, status: str = "success") -> int:
         """A pipeline for `sha`: `jobs` are `(name, status[, {stage, allow_failure, trace}])`. Returns its id."""
@@ -88,6 +89,18 @@ class FakeGitLab:
             return self.notes_route(method, int(notes[1]), int(notes[2]) if notes[2] else None, query, body)
         if path == f"{base}/labels":
             return self.labels_route(method, query, body)
+        if path == f"{base}/pipeline" and method == "POST":  # the shape GitLab's docs show for a created pipeline
+            if self.pipeline_post_status != 201:
+                return httpx.Response(self.pipeline_post_status, json={"message": "nope"})
+            assert body is not None
+            pipeline_id = len(self.pipelines) + 1
+            self.pipelines.append(
+                {"id": pipeline_id, "sha": "0" * 40, "status": "created", "jobs": [], "ref": body["ref"]}
+            )
+            return httpx.Response(201, json={
+                "id": pipeline_id, "iid": pipeline_id, "project_id": int(PROJECT), "sha": "0" * 40, "ref": body["ref"],
+                "status": "created", "source": "api", "web_url": f"{WEB}/-/pipelines/{pipeline_id}",
+            })  # fmt: skip
         if path == f"{base}/pipelines" and method == "GET":
             found = [{k: v for k, v in p.items() if k != "jobs"} for p in self.pipelines if p["sha"] == query["sha"]]
             return self.paged(found, query)
@@ -131,6 +144,8 @@ class FakeGitLab:
                 for key in ("title", "description"):
                     if key in body:
                         mr[key] = body[key]
+                if body.get("state_event") == "close":
+                    mr["state"] = "closed"
                 for name in filter(None, body.get("remove_labels", "").split(",")):
                     mr["labels"].remove(name)
                 for name in filter(None, body.get("add_labels", "").split(",")):

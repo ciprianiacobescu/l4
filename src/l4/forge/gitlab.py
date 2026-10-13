@@ -31,6 +31,7 @@ from l4.forge.base import (
     LabelEvent,
     PrState,
     PullRequest,
+    StartRun,
     clip_log,
     forge_platform,
     post_once,
@@ -357,6 +358,20 @@ class GitLabForge:
         """Not on GitLab yet (forge-and-ci 2.6, a trigger token): the next push or the schedule continues."""
         return "unsupported"
 
+    def start_run(self, ref: str) -> StartRun:
+        """`POST /projects/:id/pipeline {ref}` (L4-OPS-002): 201 is `started`; a token that may not (401, 403) is
+        `refused`; a ref or project that cannot run a pipeline (400, 404, 422) is `unsupported`. The `l4` job's rules
+        accept the source `api`. Another failure raises."""
+        try:
+            self._request("POST", "/pipeline", json={"ref": ref})
+        except ForgeAuthError:
+            return "refused"
+        except ForgeError as exc:
+            if exc.status in (400, 404, 422):
+                return "unsupported"
+            raise
+        return "started"
+
     # --- the sticky note --------------------------------------------------------------------------------------
 
     def _author_id(self) -> int | None:
@@ -407,6 +422,24 @@ class GitLabForge:
             mine = post_once(lambda: self._request("POST", path, json={"body": text}).json(), find, self._pause)
         if mine["body"] != text:
             self._request("PUT", f"{path}/{mine['id']}", json={"body": text})
+
+    def close_pr(self, number: int, comment: str) -> PullRequest:
+        """The note first (found again by its text after a lost response, never posted twice), then
+        `PUT merge_requests/:iid {state_event: close}`. A merge request that is not open is returned as it is
+        (L4-OPS-004)."""
+        current = self.get_pr(number)
+        if current.state != "open":
+            return current
+        path = f"/merge_requests/{number}/notes"
+
+        def find() -> dict[str, Any] | None:
+            return next(
+                (n for n in self._pages(path) if not n.get("system") and str(n.get("body", "")) == comment), None
+            )
+
+        if find() is None:
+            post_once(lambda: self._request("POST", path, json={"body": comment}).json(), find, self._pause)
+        return self._pr(self._request("PUT", f"/merge_requests/{number}", json={"state_event": "close"}).json())
 
     # --- labels -----------------------------------------------------------------------------------------------
 
@@ -462,10 +495,12 @@ def git_auth_config(token_env: str, username: str = "oauth2") -> tuple[tuple[str
     return (("credential.helper", ""), ("credential.helper", helper))
 
 
-def push_auth_config(cfg: L4Config, environ: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+def push_auth_config(
+    cfg: L4Config, environ: Mapping[str, str], origin_url: str | None = None
+) -> tuple[tuple[str, str], ...]:
     """The `git -c` pairs of every push: the credential helper, plus a credential-free push URL because a runner may
-    rewrite the origin URL to carry its job token (`l4.forge.pushurl`)."""
-    platform = forge_platform(cfg, environ)
+    rewrite the origin URL to carry its job token (`l4.forge.pushurl`). `origin_url` names the platform outside CI."""
+    platform = forge_platform(cfg, environ, origin_url)
     config = git_auth_config(cfg.forge.token_env, username=GIT_USERNAMES.get(platform, "oauth2"))
     url = push_url(cfg, environ) if platform == "gitlab" else None  # the runner workaround is GitLab's
     return (*config, ("remote.origin.pushurl", url)) if url else config

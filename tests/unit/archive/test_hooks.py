@@ -254,3 +254,19 @@ def test_the_section_goes_when_the_unit_resumes(run_l4, tdd_repo, forge_env, use
     assert main(argv, environ=tdd_repo.environ) == 0
     assert use_fake_gitlab.notes[1][0]["body"].endswith("Nothing is waiting for a human answer.")
     assert use_fake_gitlab.mrs[1]["labels"] == ["l4:implementing"]
+
+
+def test_the_run_creates_the_operator_labels_once_and_never_puts_them_on_the_mr(
+    run_l4, install_hooks, forge_env, use_fake_gitlab
+):
+    """L4-OPS-008: a member can find `l4:retry`, `l4:restart` and `l4:resume`; the run only creates them."""
+    gitlab = use_fake_gitlab
+    passing_verifier(install_hooks)
+    run_l4([red_step(), green_step()])
+    operator = {"l4:retry", "l4:restart", "l4:resume"}
+    assert operator <= set(gitlab.labels)
+    created = [b["name"] for m, p, q, b in gitlab.requests if m == "POST" and p.endswith("/labels")]
+    assert sorted(n for n in created if n in operator) == sorted(operator)  # once each, over every phase change
+    assert not operator & set(gitlab.mrs[1]["labels"])
+    for _, _, _, body in gitlab.requests:
+        assert not operator & set((body or {}).get("add_labels", "").split(","))

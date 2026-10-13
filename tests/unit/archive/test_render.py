@@ -116,3 +116,10 @@ def test_github_evidence_link():
     assert "/-/blob/" not in github
     assert "/-/blob/" in render_pr_body(*args, platform="gitlab")
     assert "/-/blob/" in render_pr_body(*args)  # GitLab by default
+
+
+def test_the_operator_labels_are_retry_restart_and_resume_under_the_prefix():
+    from l4.archive import operator_labels
+
+    assert operator_labels("l4:") == ["l4:retry", "l4:restart", "l4:resume"]
+    assert operator_labels("x-") == ["x-retry", "x-restart", "x-resume"]

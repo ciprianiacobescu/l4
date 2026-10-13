@@ -22,12 +22,23 @@ from l4.forge.base import (
     LabelEvent,
     PrState,
     PullRequest,
+    StartRun,
     clip_log,
 )
 
 STATE_FILENAME = "forge.json"
 WRITE_CALLS = frozenset(
-    {"ensure_labels", "create_pr", "update_pr", "set_managed_labels", "upsert_sticky_note", "merge", "close"}
+    {
+        "ensure_labels",
+        "create_pr",
+        "update_pr",
+        "set_managed_labels",
+        "upsert_sticky_note",
+        "merge",
+        "close",
+        "start_run",
+        "close_pr",
+    }
 )
 
 
@@ -45,12 +56,14 @@ class LocalForge:
         self._prs: dict[int, dict[str, Any]] = {}
         self._labels: list[str] = []
         self._notes: dict[int, str] = {}
+        self._comments: dict[int, list[str]] = {}  # MR number -> the comments of `close_pr`
         self._jobs: dict[str, list[dict[str, Any]]] = {}  # sha -> scripted CI jobs (JobResult fields)
         self._tails: dict[int, str] = {}  # job id -> its log
         self._steps: dict[int, str] = {}  # job id -> the command its step_script ran last (scripted)
         self._label_events: dict[int, list[dict[str, Any]]] = {}  # MR number -> scripted label events
         self._members: dict[int, int] = {}  # user id -> access level (scripted)
         self._own_id: int | None = None  # the user the harness's token acts as (scripted)
+        self._start_result: StartRun = "unsupported"  # what `start_run` answers (scripted)
         if directory is not None and (directory / STATE_FILENAME).is_file():
             state = json.loads((directory / STATE_FILENAME).read_text(encoding="utf-8"))
             self._prs = {int(k): v for k, v in state["prs"].items()}
@@ -61,6 +74,7 @@ class LocalForge:
             self._label_events = {int(k): v for k, v in state.get("label_events", {}).items()}
             self._members = {int(k): int(v) for k, v in state.get("members", {}).items()}
             self._own_id = state.get("own_id")
+            self._comments = {int(k): v for k, v in state.get("comments", {}).items()}
 
     # --- bookkeeping ---
 
@@ -80,7 +94,7 @@ class LocalForge:
         state = {
             "prs": self._prs, "labels": self._labels, "notes": self._notes, "jobs": self._jobs, "tails": self._tails,
             "steps": self._steps, "label_events": self._label_events, "members": self._members,
-            "own_id": self._own_id,
+            "own_id": self._own_id, "comments": self._comments,
         }  # fmt: skip
         fd, tmp = tempfile.mkstemp(dir=self._dir, prefix=".forge-", suffix=".tmp")
         try:
@@ -215,6 +229,29 @@ class LocalForge:
     def dispatch_continuation(self, ref: str) -> Continuation:
         self._log("dispatch_continuation", ref)
         return "unsupported"
+
+    def start_run(self, ref: str) -> StartRun:
+        self._log("start_run", ref)
+        return self._start_result
+
+    def script_start_run(self, result: StartRun) -> None:
+        """What the next `start_run` answers (the default is `unsupported`, as for `dispatch_continuation`)."""
+        self._start_result = result
+
+    def close_pr(self, number: int, comment: str) -> PullRequest:
+        self._log("close_pr", number, comment)
+        raw = self._prs.get(number)
+        if raw is None:
+            raise ForgeNotFound(f"local forge: no pull request {number}", status=404)
+        if raw["state"] == "open":
+            self._comments.setdefault(number, []).append(comment)
+            raw["state"] = "closed"
+            self._save()
+        return self._view(number)
+
+    def comments(self, number: int) -> list[str]:
+        """The comments the harness posted with `close_pr`, oldest first."""
+        return list(self._comments.get(number, []))
 
     # --- what a human does (simulation only) ---
 
