@@ -10,7 +10,7 @@ from l4.exitcodes import ExitCode
 
 SECTION_2_1 = {
     "init", "doctor", "plan", "run", "status", "probe", "verify", "archive", "questions", "lessons",
-    "simulate", "unlock", "resume", "ci render", "ci render-child", "ci map-exit", "upgrade",
+    "simulate", "unlock", "resume", "retry", "restart", "ci render", "ci render-child", "ci map-exit", "upgrade",
     "setup gitlab", "setup github", "ci watch", "eval", "ci cache-key", "ci render-setup",
     "feedback add", "feedback list", "feedback show", "feedback submit", "feedback withdraw",
 }  # fmt: skip
@@ -32,6 +32,8 @@ ARGV = {
     "simulate": ["simulate", "--all"],
     "unlock": ["unlock", "--unit", "openspec:a"],
     "resume": ["resume", "--unit", "openspec:a", "--reason", "why"],
+    "retry": ["retry", "--unit", "openspec:a", "--reason", "why"],
+    "restart": ["restart", "--unit", "openspec:a", "--reason", "why"],
     "ci render": ["ci", "render", "--platform", "github"],
     "ci render-child": ["ci", "render-child", "--plan", "plan.json"],
     "ci map-exit": ["ci", "map-exit", "11"],

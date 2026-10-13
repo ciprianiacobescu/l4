@@ -13,6 +13,9 @@ A unit escalated at the feedback limit (`feedback_rounds_exhausted`, L4-FBK-006)
 (`budget.extended{feedback_rounds}`, recorded before `unit.resumed`, added to `feedback.max_rounds`); fix rounds do not
 help it.
 M1: `--extend-iterations` and `--extend-cost` (the limits that read them are not built).
+`l4 retry` (`l4.state.retry`, L4-OPS-001) is the same step for more phases: both end in `run_unit_in_worktree` and
+`Orchestrator.resume`. `l4 resume` is `retry` restricted to `halted` and `escalated`, with its flags and refusals
+unchanged; it keeps recording `unit.resumed` (compatibility), takes the `resumed` edge, and starts no run.
 """
 
 import logging
