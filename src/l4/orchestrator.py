@@ -407,8 +407,8 @@ class Orchestrator:
         elif edit is not None:
             self._see_spec_edit(edit)  # this step's commit buries it: the run that follows takes it
         self._go(trigger, **context)
-        if context:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
-            self._reopen(edit.base)  # type: ignore[union-attr]
+        if edit is not None and context:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
+            self._reopen(edit.base)
         else:
             self._take_pending_spec_edit()  # `capacity_restored` put the unit in a phase that can take it
         return UnitRunResult(self._outcome(before), ExitCode.OK)

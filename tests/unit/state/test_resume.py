@@ -151,7 +151,11 @@ def _escalated_world(app, monkeypatch, *, halt_reason: str | None, fix_round: in
     from l4.state.fold import UnitState
 
     state = UnitState(
-        unit=UNIT, phase="escalated", halt_reason=halt_reason, fix_round=fix_round, fix_rounds_counted=fix_round,
+        unit=UNIT,
+        phase="escalated",
+        halt_reason=halt_reason,
+        fix_round=fix_round,
+        fix_rounds_counted=fix_round,
         feedback_rounds_used=feedback_used,
     )
     monkeypatch.setattr(resume_module, "load_snapshot", lambda *a, **k: SimpleNamespace(state=state))
@@ -208,7 +212,9 @@ def test_the_feedback_extension_is_recorded_before_unit_resumed():
     orch = Orchestrator.__new__(Orchestrator)
     orch.services = type("S", (), {"ledger": Ledger()})()
     orch._refold = lambda: type("St", (), {"phase": "escalated"})()
-    orch._go = lambda trigger: None
+    orch._go = lambda trigger, **context: None
+    orch._takes_spec_edit = False  # this test is about the budget event: no branch to read
+    orch._take_pending_spec_edit = lambda: False
     orch._outcome = lambda before: None
     orch._notes = ()
     orch._commit_what = ""

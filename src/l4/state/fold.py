@@ -47,7 +47,8 @@ class CiFailure(_Model):
 
 
 class PendingSpecEdit(_Model):
-    """A person's spec push that a run saw while the unit was `fixing`, where no edge takes it (L4-OPS-014, design D13):
+    """A person's spec push that a run saw while the unit was `fixing` or `waiting_capacity` (or under `l4 verify`),
+    where no edge takes it (L4-OPS-014, design D13, review M3):
     `spec.edit_seen{head, base, commits}`. `base` is the harness's last commit before the person's first one (the
     Kiro reopening diffs against it), `head` the person's newest commit, `commits` the person's shas, oldest first.
     It stays until `unit.retried` records the signal `spec_edit:<head>`."""
@@ -313,8 +314,9 @@ def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
 
 
 def _spec_edit_seen(state: UnitState, event: LedgerEvent) -> None:
-    """`spec.edit_seen{head, base, commits}` (L4-OPS-014): a person's spec push seen in `fixing`. It is pending, unless
-    the signal of that head was consumed already (each head is taken once). A row without head or base is ignored."""
+    """`spec.edit_seen{head, base, commits}` (L4-OPS-014): a person's spec push seen where no edge takes
+    it. It is pending, unless the signal of that head was consumed already (each head is taken once). A row without
+    head or base is ignored."""
     head, base = _text(event, "head"), _text(event, "base")
     if not head or not base or f"spec_edit:{head}" in state.resumed_signals:
         return
