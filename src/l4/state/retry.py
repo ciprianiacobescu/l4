@@ -27,7 +27,7 @@ from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
-from l4.forge.base import ForgeUnavailable, fetch_auth_config, forge_platform, make_forge, parse_remote_url
+from l4.forge.base import ForgeError, ForgeUnavailable, fetch_auth_config, forge_platform, make_forge, parse_remote_url
 from l4.forge.urls import origin_url
 from l4.orchestrator import UnitOutcome, UnitRunResult, run_unit_in_worktree
 from l4.outcome import CommandResult
@@ -139,14 +139,15 @@ def _retry_archive(app: AppContext, cfg: L4Config, git: Git, ref: UnitRef) -> Un
 # --- the command, and the start of a run (L4-OPS-002) ----------------------------------------------------------------
 
 
-def fetch_unit_refs(app: AppContext, cfg: L4Config, git: Git) -> None:
+def fetch_unit_refs(app: AppContext, cfg: L4Config, git: Git, *, prune: bool = True) -> None:
     """The base branch and the unit refs, as the worktree manager reads them: an operator's laptop does not fetch on
-    its own (`refresh_refs` does only in CI), and a branch a person pushed since is what a retry must see."""
+    its own (`refresh_refs` does only in CI), and a branch a person pushed since is what a retry must see. `prune=False`
+    (`l4 restart`) keeps the tracking ref of a branch the forge deleted: its last head is the old work (L5)."""
     if git.run("remote", "get-url", "origin", check=False).returncode != 0:
         return
     base = f"+refs/heads/{cfg.forge.base_branch}:refs/remotes/origin/{cfg.forge.base_branch}"
     git.fetch(
-        "origin", refspecs=(base, *unit_refspecs(cfg.forge.branch_prefix)), prune=True,
+        "origin", refspecs=(base, *unit_refspecs(cfg.forge.branch_prefix)), prune=prune,
         config=fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ)),
     )  # fmt: skip
 
@@ -176,7 +177,7 @@ def start_run_line(app: AppContext, cfg: L4Config) -> str:
     by_hand = f"start a run with: {how_to_start(app, cfg, base)}"
     try:
         answer = make_forge(cfg, app.environ, repo=app.repo).start_run(base)
-    except ForgeUnavailable:
+    except (ForgeUnavailable, ForgeError):
         return by_hand
     if answer == "started":
         return f"run started on {base}"
