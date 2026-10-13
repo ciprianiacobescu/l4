@@ -258,8 +258,9 @@ Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
   release arrives as a pull request on the `uses:` line. It merges into an existing file.
-- `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand, and nothing else in the
-  workflow changes. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.
+- `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand: it re-renders the whole
+  workflow from the config with the template of the harness that runs it, so run it with the target version, for
+  example `uvx --from git+https://github.com/<owner>/<repo>@<sha> l4 upgrade --harness-commit <sha>`. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.
 - There is no `.l4/bin/l4` in this form. To run `l4` on your machine, install it:
   `uv tool install git+ssh://git@github.com/<owner>/<harness>.git@<sha>` (`l4 doctor` row CFG-007 prints the hint
   when none is on `PATH`).

@@ -40,11 +40,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # on any other branch the harness and the config come from the head of the base branch, not from the pushed one
-      # (L4-GHP-005); the branch name reaches the shell only through the job env
+      # (L4-GHP-005), from the branches the checkout already fetched (fetch-depth: 0), so the step needs no credential; the
+      # branch name reaches the shell only through the job env
       - name: base checkout
         if: ${{ github.ref_name != env.L4_BASE_BRANCH }}
         run: |
-          git fetch --quiet origin "+refs/heads/$L4_BASE_BRANCH:refs/remotes/origin/$L4_BASE_BRANCH" && git checkout --quiet --detach "origin/$L4_BASE_BRANCH" && echo "l4: base checkout $(git rev-parse HEAD)"
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/$L4_BASE_BRANCH^{commit}" > /dev/null; then
+            echo "::error::origin/$L4_BASE_BRANCH is not in the checkout: keep fetch-depth: 0 on actions/checkout, which fetches every branch"
+            exit 1
+          fi
+          git checkout --quiet --detach "origin/$L4_BASE_BRANCH"
+          echo "l4: base checkout $(git rev-parse HEAD)"
 @@HARNESS_KEY@@
 @@HOSTED_SETUP@@
       - name: doctor

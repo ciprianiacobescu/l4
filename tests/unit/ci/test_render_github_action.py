@@ -68,7 +68,9 @@ def test_steps_checkout_base_checkout_action_doctor_save_plan_run_status_upload(
     assert by_name["doctor"]["run"] == "l4 doctor --ci --fix || l4 ci map-exit $?"
     assert by_name["plan"]["run"] == "l4 plan --sweep || l4 ci map-exit $?"
     assert by_name["run"]["run"] == "l4 run || l4 ci map-exit $?"
-    assert by_name["status"]["run"] == "l4 status" and by_name["status"]["if"] == "${{ always() }}"
+    assert by_name["status"]["run"] == "l4 status" and (
+        by_name["status"]["if"] == "${{ always() && steps.l4.outcome == 'success' }}"  # no `l4` when the action failed
+    )
     upload = steps[-1]
     assert upload["if"] == "${{ always() }}" and upload["with"]["path"] == ".l4-out/"
     assert upload["with"]["name"] == "l4-out" and upload["with"]["retention-days"] == 7
@@ -180,3 +182,12 @@ def test_actionlint_is_clean(config, pin, tmp_path):
     argv = ["actionlint", "-no-color", "-config-file", str(tmp_path / "actionlint.yaml"), str(workflow)]
     done = subprocess.run(argv, capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_base_checkout_is_the_same_step_without_a_fetch():
+    """Defect of run 38329266005: a fetch needs a credential the checkout does not keep (a private repository)."""
+    steps = job()["steps"]
+    run = next(s["run"] for s in steps if s.get("name") == "base checkout")
+    assert "git fetch" not in run and "fetch-depth: 0" in run
+    plain = yaml.safe_load(render_github_ci(cfg(ci={"runner_tags": []})))["jobs"]["l4"]["steps"][1]["run"]
+    assert run == plain

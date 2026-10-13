@@ -43,7 +43,8 @@ The action SHALL restore and save two caches:
 - **The installed harness:** the uv tool directory, uv's Pythons, and the `l4`, `uv` and `uvx` links. It is keyed on
   the OS, architecture, image, Python, source, and the source's content hash or commit.
 - **The agent CLIs and bwrap,** at the paths `doctor --ci --fix` installs into. They are keyed on the OS,
-  architecture, image and a hash of the provisioning catalog's pinned versions.
+  architecture, image and a hash of the provisioning catalog's pinned versions and of the sorted set of agent CLIs the config needs, so a CLI that
+  joins or leaves the role chains is a new key.
 
 The CLI key MUST NOT contain the harness commit or content hash. `clis: none` skips the second cache.
 
@@ -104,13 +105,16 @@ Further rules:
 `l4 init` and `l4 upgrade` SHALL accept `--harness-ref REF`.
 - REF is resolved once with `git ls-remote`, and the sha is written as `@<sha> # <REF>`. A ref that resolves to
   nothing is exit 2.
-- `l4 upgrade --harness-ref` or `--harness-commit` rewrites the `uses:` line, and the `commit` input of source
-  `repository`.
+- `l4 upgrade --harness-ref` or `--harness-commit` re-renders the workflow from the config with the template of the
+  harness that runs it and the new pin (the `uses:` line, and the `commit` input of source `repository`); `--dry-run`
+  writes nothing, and a second run changes nothing.
 
 #### Scenario: SCN-ACT-10 (+) Upgrade by version
 - **GIVEN** an action-mode workflow at `v0.3.0`
 - **WHEN** `l4 upgrade --harness-ref v0.4.0` runs
-- **THEN** the `uses:` line is `@<sha of v0.4.0> # v0.4.0`, and nothing else in the workflow changed
+- **THEN** the workflow is re-rendered from the config with the template of the harness that runs it and the new pin:
+  the `uses:` line is `@<sha of v0.4.0> # v0.4.0`, older steps are replaced by the current ones, and a second run
+  changes nothing
 
 ### Requirement: L4-ACT-006 Releases are slim commits on a release branch
 The harness repository SHALL have `release.yml`. On a tag `src-vX.Y.Z` it MUST:
