@@ -841,11 +841,53 @@ def test_a_retry_label_acts_on_the_phases_a_retry_continues(halted, use_fake_git
     assert [(r["signal"], r["rounds"]) for r in operator.retries] == [("label:117", None)]  # the phase decides rounds
 
 
-@pytest.mark.parametrize("phase", ["implementing", "in_review", "abandoned"])
-def test_a_retry_label_on_another_phase_is_left_alone(halted, use_fake_gitlab, tdd_repo, operator, phase):
+def test_a_retry_label_while_the_unit_is_implementing_is_left_alone(halted, use_fake_gitlab, tdd_repo, operator):
     set_label(use_fake_gitlab, 118, MEMBER, name="l4:retry")
-    actions, _ = sweep_phase(tdd_repo, phase, previous="implementing")
+    actions, _ = sweep_phase(tdd_repo, "implementing", previous="implementing")
     assert [a for a in actions if a.what in ("resumed", "resume_refused")] == [] and operator.retries == []
+
+
+UNIT_ID = "openspec:add-discount-codes"
+
+
+@pytest.mark.parametrize("label", ["l4:retry", "l4:resume"])
+@pytest.mark.parametrize("phase", ["in_review", "merged"])
+def test_a_retry_label_on_a_unit_that_is_in_review_or_merged_is_refused_naming_the_command(
+    halted, use_fake_gitlab, tdd_repo, operator, label, phase
+):
+    """Review L4: the label cannot act there; the refusal says what works, once per label event."""
+    set_label(use_fake_gitlab, 118, MEMBER, name=label)
+    actions, snap = sweep_phase(tdd_repo, phase, previous="implementing")
+    actions = [a for a in actions if a.what == "resume_refused"]  # a merged unit's sweep also tries its archive
+    assert len(actions) == 1 and operator.retries == [] and operator.restarts == []
+    assert f"use l4 retry --unit {UNIT_ID} --reason TEXT" in actions[0].detail
+    assert "label:118" in snap.state.refused_signals
+    assert f"l4 retry --unit {UNIT_ID} --reason TEXT" in use_fake_gitlab.notes[1][-1]["body"]
+
+
+@pytest.mark.parametrize("label", ["l4:retry", "l4:resume"])
+def test_a_retry_label_on_an_abandoned_unit_names_the_restart(halted, use_fake_gitlab, tdd_repo, operator, label):
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    set_label(use_fake_gitlab, 118, MEMBER, name=label)
+    actions, _ = sweep_phase(tdd_repo, "abandoned", previous="in_review")
+    assert [a.what for a in actions] == ["resume_refused"] and operator.retries == []
+    assert "l4:restart" in actions[0].detail and f"l4 restart --unit {UNIT_ID} --reason TEXT" in actions[0].detail
+
+
+def test_a_restart_label_on_a_merged_unit_is_refused_naming_retry(halted, use_fake_gitlab, tdd_repo, operator):
+    set_label(use_fake_gitlab, 121, MEMBER, name="l4:restart")
+    actions, _ = sweep_phase(tdd_repo, "merged")
+    actions = [a for a in actions if a.what == "resume_refused"]
+    assert len(actions) == 1 and operator.restarts == []
+    assert f"use l4 retry --unit {UNIT_ID} --reason TEXT" in actions[0].detail
+
+
+def test_a_refusal_for_the_phase_is_said_once_per_label_event(halted, use_fake_gitlab, tdd_repo, operator):
+    set_label(use_fake_gitlab, 118, MEMBER, name="l4:retry")
+    first, _ = sweep_phase(tdd_repo, "in_review", previous="implementing")
+    second, _ = sweep_phase(tdd_repo, "in_review", previous="implementing")
+    assert [a.what for a in first] == ["resume_refused"] and [a.what for a in second] == []
+    assert [e["signal"] for e in halted.events("resume.refused")] == ["label:118"]
 
 
 @pytest.mark.parametrize("phase", ["halted", "escalated", "waiting_capacity", "implementing", "in_review"])
@@ -860,12 +902,6 @@ def test_a_restart_label_on_the_closed_mr_of_an_abandoned_unit_acts(halted, use_
     set_label(use_fake_gitlab, 120, MEMBER, name="l4:restart")
     actions, _ = sweep_phase(tdd_repo, "abandoned", previous="in_review")
     assert [a.what for a in actions] == ["restarted"] and operator.retries == []
-
-
-def test_a_restart_label_on_a_merged_unit_is_ignored(halted, use_fake_gitlab, tdd_repo, operator):
-    set_label(use_fake_gitlab, 121, MEMBER, name="l4:restart")
-    sweep_phase(tdd_repo, "merged")
-    assert operator.restarts == []
 
 
 def test_a_non_member_label_on_an_escalated_unit_is_refused_like_on_a_halted_one(
@@ -988,3 +1024,17 @@ def test_a_push_on_a_halted_branch_names_the_label_once(halted, use_fake_gitlab,
     assert plan_sweep(halted) == 0
     assert capsys.readouterr().err.count(hint) == 1  # a new head says it again
     assert halted.events("unit.resumed") == []
+
+
+def test_the_note_around_a_refusal_carries_the_detail_of_the_halt(halted, use_fake_gitlab, tdd_repo, operator):
+    """Review contradiction 1: the sticky note shows the person's text (`halt_detail`), not the reason code."""
+    set_label(use_fake_gitlab, 108, STRANGER, name="l4:retry")
+    cfg, git, snap = phase_snapshot(tdd_repo, "escalated", previous="verifying", halt_reason="fix_rounds_exhausted")
+    snap.state.halt_detail = "fix rounds used 3/3"
+    from l4.context import AppContext
+    from l4.redact import Redactor
+
+    app = AppContext(tdd_repo.repo, None, "human", 0, "r-20261006T1800Z-ab12", tdd_repo.environ, Redactor({}))
+    sweeper_module.sweep(app, cfg, git, [snap], ci=True)
+    body = use_fake_gitlab.notes[1][-1]["body"]
+    assert "### Escalated: fix rounds used 3/3" in body and "fix_rounds_exhausted" not in body

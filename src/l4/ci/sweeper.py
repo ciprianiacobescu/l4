@@ -572,7 +572,10 @@ class Sweeper:
     # --- the operator labels `retry`, `resume` and `restart` (M1.11, L4-CI-004, L4-SEC-004, L4-OPS-008) --------------
 
     def _resume_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
-        held = [s for s in snapshots if s.state.phase is not None and s.state.phase not in _ENDED]
+        held = [  # a merged unit too: a label on its MR is refused with the command that works (L4-OPS-008)
+            s for s in snapshots
+            if s.state.phase is not None and (s.state.phase not in _ENDED or s.state.phase == Phase.MERGED.value)
+        ]  # fmt: skip
         if not held:
             return []
         newest = self._newest_mrs()
@@ -609,13 +612,16 @@ class Sweeper:
             own_id = self.forge.own_user_id()
             decisions = {}
             for label, read in reads.items():
-                if not read:
+                why = self._cannot_act(ref.id, state.phase, label)
+                if not read and why is None:
                     continue
                 decision = resume_signal(
                     pr.labels, events, label=label, own_id=own_id, access=self.forge.member_access,
                     consumed={*state.resumed_signals, *state.refused_signals}, unit=ref.id,
                     command="l4 restart" if label == restart else "l4 retry",
                 )  # fmt: skip
+                if decision is not None and why is not None:  # whoever set it, it cannot act here
+                    decision = Refusal(decision.event_id, decision.signal, why)
                 if decision is not None:
                     decisions[label] = decision
         except ForgeAuthError:
@@ -649,6 +655,24 @@ class Sweeper:
         result = self._retry_in_worktree(snapshot, signal, winner)
         log.info("%s: retried by a member's %s label (event %d)", ref.id, winner, signal.event_id)
         return SweepAction(ref.id, "resumed", f"{signal.signal}: back in {result.outcome.phase_after}")
+
+    def _cannot_act(self, unit: str, phase: str | None, label: str) -> str | None:
+        """Why an operator label cannot act on a unit in `phase`, naming what works (L4-OPS-008); None where it acts:
+        `retry` and `resume` on `in_review`, `merged` and `abandoned`, and `restart` on `merged`."""
+        prefix = self.cfg.forge.labels_prefix
+        kind = label.removeprefix(prefix)
+        run = f"l4 retry --unit {unit} --reason TEXT"
+        if phase == Phase.MERGED.value:
+            what = "a merged change gets a follow-up unit" if kind == "restart" else "the unit is merged"
+            return f"the label {label} does nothing: {what}; use {run} to run the archive or the done-gate again"
+        if kind in ("retry", "resume") and phase == Phase.IN_REVIEW.value:
+            return f"the label {label} does nothing while the unit is in review; use {run}"
+        if kind in ("retry", "resume") and phase == Phase.ABANDONED.value:
+            return (
+                f"the label {label} does nothing on an abandoned unit; add the label {prefix}restart, "
+                f"or use l4 restart --unit {unit} --reason TEXT"
+            )
+        return None
 
     def _push_hint(self, snapshot: UnitSnapshot, label: str) -> SweepAction | None:
         """A person pushed to a halted branch (a task edit, say): nothing retries it but the label or `l4 retry`, so
@@ -726,7 +750,7 @@ class Sweeper:
         if state.phase in (Phase.HALTED.value, Phase.ESCALATED.value):
             stopped = halted_section(
                 state.phase,
-                state.halt_reason or "see the ledger",
+                state.halt_detail or state.halt_reason or "see the ledger",
                 ref.id,
                 retry_label(f"{self.cfg.forge.labels_prefix}resume"),
                 feedback=feedback_rounds_exhausted(state),
