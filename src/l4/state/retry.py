@@ -112,6 +112,8 @@ def retry_unit(
             feedback = rounds or 1
         elif fix_rounds_exhausted(cfg, state):
             fix = rounds or 1  # the fix-round limit, `same_failure` at the limit included
+        elif rounds is not None:
+            log.warning("%s has rounds left: --rounds %d is not used", ref.id, rounds)
     return run_unit_in_worktree(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
         resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,

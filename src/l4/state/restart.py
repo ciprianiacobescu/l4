@@ -145,6 +145,7 @@ def _restart(
     attempt_ref = f"{attempts}/{attempt}" if old_head else None
     if old_head and attempt_ref:
         git.fetch("origin", refspecs=(f"+refs/heads/{branch}:refs/remotes/origin/{branch}",), config=config)
+        # a plain push, never `+`: the ref is new (max + 1), and one that exists makes git refuse instead of moving it
         git.push("origin", [f"{old_head}:{attempt_ref}"], config=config)
     if lock := next(iter(_remote_refs(git, config, names.lock_ref).values()), None):
         git.fetch("origin", refspecs=(f"+{names.lock_ref}:{names.lock_ref}",), config=config)
