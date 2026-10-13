@@ -78,7 +78,7 @@ from l4.forge.base import (
 )
 from l4.forge.gitlab import push_auth_config, strip_remote_credentials
 from l4.forge.pushfail import PushFailed
-from l4.forge.urls import app_forge_urls
+from l4.forge.urls import app_forge_urls, origin_url
 from l4.postmerge import ArchiveResult, MergeDetector, MergeVerdict, PostMergeArchiver
 from l4.progress import SWEEP_TRACE_TYPES, FilteredTrace, ProgressTrace
 from l4.specs.base import Framework, UnitRef, parse_unit_id
@@ -573,7 +573,10 @@ class Sweeper:
         state = snapshot.state
         stopped = (
             halted_section(
-                state.phase, state.halt_reason or "see the ledger", ref.id, f"{self.cfg.forge.labels_prefix}resume",
+                state.phase,
+                state.halt_reason or "see the ledger",
+                ref.id,
+                f"{self.cfg.forge.labels_prefix}resume",
                 feedback=feedback_rounds_exhausted(state),
             )
             if state.phase in (Phase.HALTED.value, Phase.ESCALATED.value)
@@ -623,7 +626,8 @@ class Sweeper:
             jobs = self.forge.list_pipeline_jobs(head)
             if unfinished(jobs):
                 return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running")
-            if not jobs and forge_platform(self.cfg, self.app.environ) == "github":
+            platform = forge_platform(self.cfg, self.app.environ, origin_url(self.app.repo, self.app.environ))
+            if not jobs and platform == "github":
                 # L4-GHP-008: never green. A push made with the workflow's GITHUB_TOKEN starts no run.
                 return SweepAction(snapshot.ref.id, "ci_not_run", f"H {short}: {NO_CHECK_RUN}")
             if not red_jobs(jobs):
@@ -797,7 +801,7 @@ def sweep(
     forge token is exit 3 (before anything is written); outside CI with no forge there is nothing to look at."""
     require_token_in_ci(cfg, app.environ)
     try:
-        forge = make_forge(cfg, app.environ)
+        forge = make_forge(cfg, app.environ, repo=app.repo)  # outside CI the project comes from `origin` (L4-OPS-011)
     except ForgeUnavailable as exc:
         log.warning("sweep skipped: %s", exc)
         return []

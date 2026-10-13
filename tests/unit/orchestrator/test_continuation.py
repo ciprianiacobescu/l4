@@ -40,7 +40,7 @@ def _cfg(continuation="dispatch", base="main"):
 @pytest.fixture
 def forge(monkeypatch):
     fake = FakeForge()
-    monkeypatch.setattr(orchestrator, "make_forge", lambda cfg, environ: fake)
+    monkeypatch.setattr(orchestrator, "make_forge", lambda cfg, environ, **kw: fake)
     return fake
 
 
@@ -87,7 +87,7 @@ def test_not_called_outside_ci(forge):
 
 def test_a_forge_error_is_a_warning_never_a_failure(monkeypatch, caplog):
     fake = FakeForge(error=ForgeError("boom"))
-    monkeypatch.setattr(orchestrator, "make_forge", lambda cfg, environ: fake)
+    monkeypatch.setattr(orchestrator, "make_forge", lambda cfg, environ, **kw: fake)
     out = _go(CommandResult(ExitCode.CONTINUE, [LEFT]))
     assert out.code == ExitCode.CONTINUE and out.continuation is None and fake.calls == ["main"]
     assert "continuation" in caplog.text and "boom" in caplog.text
@@ -96,7 +96,7 @@ def test_a_forge_error_is_a_warning_never_a_failure(monkeypatch, caplog):
 def test_no_forge_does_nothing(monkeypatch):
     from l4.forge.base import ForgeUnavailable
 
-    def none(cfg, environ):
+    def none(cfg, environ, **kw):
         raise ForgeUnavailable("L4_FORGE_TOKEN is not set")
 
     monkeypatch.setattr(orchestrator, "make_forge", none)

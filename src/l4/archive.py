@@ -35,7 +35,7 @@ from l4.forge.base import (
     make_forge,
 )
 from l4.forge.gitlab import push_auth_config, strip_remote_credentials
-from l4.forge.urls import app_forge_urls, blob_url
+from l4.forge.urls import app_forge_urls, blob_url, origin_url
 from l4.fsutil import read_regular_file
 from l4.outcome import CommandResult
 from l4.services import H_PUSHED, ForgeHook, HookContext, MirrorHook
@@ -191,7 +191,8 @@ def _ensure_mr(ctx: HookContext, mr: _Mr) -> PullRequest:
         except ForgeError:
             project_url = None  # the body then names the file without a link
         evidence = (s.ref.path / "verification.md").resolve().relative_to(s.worktree.resolve()).as_posix()
-        body = render_pr_body(s.ref.id, s.names.branch, evidence, project_url, forge_platform(ctx.cfg, s.app.environ))
+        platform = forge_platform(ctx.cfg, s.app.environ, origin_url(s.app.repo, s.app.environ))
+        body = render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform)
         title = render_pr_title(s.ref.name, proposal_title(s.ref.path, s.ref.name))
         pr = mr.forge.create_pr(s.names.branch, ctx.cfg.forge.base_branch, title, body)
     mr.number, mr.draft = pr.number, pr.draft

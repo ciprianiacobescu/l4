@@ -83,7 +83,7 @@ from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
 from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
 from l4.state.breaker import consecutive_verifier_errors
-from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED
+from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS
 from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
@@ -829,15 +829,17 @@ class Orchestrator:
             raise
         if (notes := self._ctx.shared.pop("notes", None)) is not None:  # the verdict questions' sticky section
             self._notes = notes
-        escalation = self._ctx.shared.pop("escalation", None)  # (reason, note): the feedback limit (L4-FBK-006)
+        # (code, detail) of every escalation the fix loop decides (L4-OPS-005, D5); a verify hook that sets none (an
+        # older or a test hook) gets the generic text and no code
+        escalation = self._ctx.shared.pop("escalation", None)
+        code, why = escalation if escalation else (None, "verification failed (see verification.md)")
         if trigger is Trigger.VERIFY_FAIL_EXHAUSTED:
-            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
-            at_feedback = bool(escalation) and escalation[0] == FEEDBACK_ROUNDS_EXHAUSTED
+            at_feedback = code == FEEDBACK_ROUNDS_EXHAUSTED
             self._notes = (self._stopped_section("escalated", why, feedback=at_feedback), *(self._notes or ()))
-        edge = self._go(trigger, **({"reason": escalation[0]} if escalation else {}))
+        edge = self._go(trigger, **({"reason": code, "detail": why[:300]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
-            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
-            self._exit_reason = f"escalated: {why}"
+            log.error("%s escalated: %s", self.services.ref.id, why)
+            self._exit_reason = f"escalated: {why}"[:300]
         if edge.target is Phase.FIXING and self.services.hooks.fix is not None:
             return None  # SPEC 12.0 "10 or 0": the fix loop goes on in this run (D2)
         return None if edge.exit_code is None else ExitCode(edge.exit_code)
@@ -845,10 +847,11 @@ class Orchestrator:
     def _escalate_verifier(self) -> ExitCode:
         """L4-VER-010: the third internal verifier error in a row ends in `escalated` (exit 13); the verifier is not
         called a fourth time."""
-        reason = f"escalated: {VERIFIER_ERROR_LIMIT} consecutive internal verifier errors (see the ledger)"
-        self._notes = _sections(self._stopped_section("escalated", reason.removeprefix("escalated: ")))
-        edge = self._go(Trigger.VERIFY_FAIL_EXHAUSTED, reason=reason)
-        self._exit_reason = reason
+        detail = f"{VERIFIER_ERROR_LIMIT} consecutive internal verifier errors (see the ledger)"
+        self._notes = _sections(self._stopped_section("escalated", detail))
+        edge = self._go(Trigger.VERIFY_FAIL_EXHAUSTED, reason=VERIFIER_ERRORS, detail=detail)
+        log.error("%s escalated: %s", self.services.ref.id, detail)
+        self._exit_reason = f"escalated: {detail}"
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.HALTED)
 
     def _fix(self) -> ExitCode | None:
@@ -1242,7 +1245,7 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
         return result
     base = cfg.forge.base_branch
     try:
-        answer = make_forge(cfg, app.environ).dispatch_continuation(base)
+        answer = make_forge(cfg, app.environ, repo=app.repo).dispatch_continuation(base)
     except ForgeUnavailable:
         return result  # a local run without credentials: nothing to ask
     except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run
