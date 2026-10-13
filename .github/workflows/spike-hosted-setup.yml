@@ -180,7 +180,7 @@ jobs:
           fi
           echo "token_leak_check=clean" | tee -a "$OUT/timings.txt"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: spike-cold-${{ matrix.os }}
@@ -288,7 +288,7 @@ jobs:
           cat "$OUT/sandboxed-hello.txt"
         continue-on-error: true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: spike-warm-ubuntu-24.04
