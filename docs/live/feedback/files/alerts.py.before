@@ -1,0 +1,6 @@
+def low_stock_message(name: str, on_hand: int) -> str | None:
+    if on_hand < 0:
+        raise ValueError(f"on_hand must be non-negative, got {on_hand}")
+    if on_hand < 5:
+        return f"Restock {name}: {on_hand} left"
+    return None
