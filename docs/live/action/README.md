@@ -35,3 +35,16 @@ Step timings come from the Actions API. The spike's logs and step files are in [
   that exist there (HTTP 404 otherwise).
 - SCN-ACT-11: one release. It is deferred until after the merge to `amaster`, from a tagged `amaster` commit.
 - The skill (L4-SKL-001, L4-SKL-002; tasks 4.1–4.3) is not built.
+
+## With human feedback and Kiro (2026-10-13, integration/feedback-action)
+
+| Run | Pin | What it showed |
+|---|---|---|
+| 38328650333 | 5e83ea81 | A Kiro native unit (kiro-cli 2.30.0, API key, glm-5) went through the action to PR #3 ready, judged PASS 4/4. **SCN-ACT-06:** after a harness-only upgrade the harness cache missed and the CLI cache was restored as a hit. It also showed the gap: kiro-cli was not in that cache, doctor installed it, and a hit is never re-saved. |
+| 38329266005 | 5e83ea81 | **Defect:** on a person's push to a unit branch of a PRIVATE repository, the `base checkout` step's credential-less `git fetch` failed (`could not read Username`). Fixed in 657efb40: detach to `origin/<base>`, already fetched by `fetch-depth: 0`. The fetched form had the same step, so the fix applies there too. |
+| 38330251183 | 19a2403a | The dummy was upgraded with the new `l4 upgrade`, which re-renders the whole workflow and printed the diff (the base-checkout step, the pin, the status guard). The CLI cache key now includes the config's CLIs: a new key, a miss, and openspec, claude and kiro-cli installed and saved. The feedback loop ran to PR #3 ready again; see docs/live/feedback on the human-feedback branch. |
+
+Still open:
+- SCN-ACT-03 with the final action and `--action-copy`;
+- the action self-test workflow and one release (both after the merge to amaster);
+- the skill.
