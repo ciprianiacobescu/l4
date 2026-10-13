@@ -28,6 +28,7 @@ class FixMarker:
     chores: tuple[str, ...]  # the finding ids whose tasks run in a single phase
     test_chores: tuple[str, ...] = ()  # the chores among them that add tests (a coverage hold's); absent: fix chores
     refactors: tuple[str, ...] = ()  # the chores among them that are behaviour-preserving refactors (feedback, D5)
+    retakes: tuple[str, ...] = ()  # the feedback tasks among them whose item was taken before (review #8 follow-up)
 
 
 def fix_name(parent: str, ordinal: int) -> str:
@@ -46,7 +47,7 @@ def write_fix_marker(unit_dir: Path, marker: FixMarker) -> None:
     body = {
         "schema": MARKER_SCHEMA, "parent": marker.parent, "round": marker.round, "findings": list(marker.findings),
         "chores": list(marker.chores), "test_chores": list(marker.test_chores),
-        "refactors": list(marker.refactors),
+        "refactors": list(marker.refactors), "retakes": list(marker.retakes),
     }  # fmt: skip
     atomic_write_bytes(target, (json.dumps(body, indent=2) + "\n").encode("utf-8"))
 
@@ -64,7 +65,7 @@ def read_fix_marker(unit_dir: Path) -> FixMarker | None:
         return None
     return FixMarker(
         parent, ordinal, _strings(data.get("findings")), _strings(data.get("chores")),
-        _strings(data.get("test_chores")), _strings(data.get("refactors")),
+        _strings(data.get("test_chores")), _strings(data.get("refactors")), _strings(data.get("retakes")),
     )  # fmt: skip
 
 
@@ -111,3 +112,12 @@ def refactor_findings(unit_dir: Path, title: str) -> tuple[str, ...]:
     """The finding ids of `title` that the marker tags as refactors. A refactor id is a chore id too."""
     marker = task_marker(unit_dir)
     return tuple(f for f in marker.refactors if f in title) if marker else ()
+
+
+def chore_retakes(unit_dir: Path, title: str) -> bool:
+    """True when every chore finding of the task `title` is one of the marker's `retakes`: its feedback item was taken
+    into an earlier fix unit already, so the work may be done and "nothing left to change" completes the task. False
+    for a task that is no chore, and for a marker with no `retakes` key (an older harness wrote it)."""
+    found = chore_findings(unit_dir, title)
+    marker = task_marker(unit_dir)
+    return bool(found) and marker is not None and all(f in marker.retakes for f in found)

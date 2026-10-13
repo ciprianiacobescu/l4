@@ -239,7 +239,10 @@ def _unit_of(ctx: IntegrityContext, event: LedgerEvent) -> str:
 # contract C22: `task.red_ok` and `task.done` are written before their commits (they travel inside them) and name the
 # step `base`; the sha follows in these events, or is derived from the commits when a kill lost the line
 _COMMITTED = {"task.red_ok": "task.red_committed", "task.done": "task.green_committed"}
-_STEP_KINDS = {"task.red_ok": ("red", "already-satisfied"), "task.done": ("green", "already-satisfied", "exempt")}
+_STEP_KINDS = {
+    "task.red_ok": ("red", "already-satisfied"),
+    "task.done": ("green", "already-satisfied", "exempt", "already-done"),
+}
 
 
 def _sha(ctx: IntegrityContext, event: LedgerEvent) -> str | None:
@@ -363,7 +366,7 @@ def check_test_paths(ctx: IntegrityContext) -> Outcome:
     tag commits. People's commits are not walked (`check_tests` lists theirs)."""
     tdd = ctx.cfg.tdd
     globs = (*tdd.test_globs, *tdd.test_support_globs)
-    steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt")}
+    steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt", "already-done")}
     infra = {(unit, t.key) for unit, t in ctx.tasks if "test-infra" in task_tags(t.title)}
     hits, checked = [], 0
     for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
@@ -632,8 +635,8 @@ def check_tdd_history(ctx: IntegrityContext) -> Outcome:
         mine = by_task.get((unit, task), [])
         kinds = [c.tdd for c in mine]
         label = f"{unit} task {task}"
-        if done is not None and done.data.get("tdd") == "exempt":
-            continue
+        if done is not None and done.data.get("tdd") in ("exempt", "already-done"):
+            continue  # a fix chore, or a retaken feedback item with nothing left to change: no red, no green
         if done is not None and done.data.get("closed") and not any(kinds):
             continue  # a parent closed with no step (M1.4 `_close_parents`): no red, no green, no `L4-TDD`
         checked += 1

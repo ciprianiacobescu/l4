@@ -391,7 +391,10 @@ class KiroProvider:
             known: dict[str, tuple[str, Criterion]] = {}
         else:
             # the marker first: a fix unit's `2.n` item is read as the parent's criterion only where the marker is
-            write_fix_marker(folder, FixMarker(parent.id, round, tuple(i for f in findings for i in f.ids), *chores))
+            retakes = tuple(i for f in findings if f.chore and f.retake for i in f.ids)
+            write_fix_marker(
+                folder, FixMarker(parent.id, round, tuple(i for f in findings for i in f.ids), *chores, retakes)
+            )
             known = self._known_criteria(parent)
         items = _FixItems(parent.name, findings, delta, known)
         (folder / "bugfix.md").write_text(items.bugfix(), encoding="utf-8")

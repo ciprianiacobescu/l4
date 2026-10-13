@@ -51,6 +51,7 @@ class FeedbackRef:
     then: str | None = None
     code: str = ""
     sha256: str = ""
+    retake: bool = False  # the item had a `feedback.taken` before this fix unit: its chore may find nothing to change
 
 
 @dataclass(frozen=True)
