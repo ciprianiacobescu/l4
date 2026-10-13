@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -217,3 +218,40 @@ def test_upgrade_re_renders_the_allowed_codes(target, harness_repo, git_environ,
     new_harness_commit(harness_repo, raw)
     assert run(target, harness_repo, git_environ) == 0
     assert yaml.safe_load(include.read_text())["l4"]["allow_failure"]["exit_codes"] == [10, 11, 12, 13]
+
+
+def set_forge(config: Path, **values: str) -> None:
+    """Add keys to the `forge:` block the rendered config has, as a maintainer does."""
+    text = config.read_text()
+    assert "\nforge:\n  type: gitlab\n" in text
+    lines = "".join(f"  {key}: {json.dumps(value)}\n" for key, value in values.items())
+    config.write_text(text.replace("\nforge:\n  type: gitlab\n", "\nforge:\n  type: gitlab\n" + lines, 1))
+
+
+def test_upgrade_re_renders_the_gitlab_job_when_the_base_or_prefix_change(target, harness_repo, git_environ, raw):
+    """L4-OPS-016: the include follows `forge.base_branch` and `forge.branch_prefix`, and a second upgrade is quiet."""
+    import yaml
+
+    adopt(target, harness_repo, git_environ)
+    include = target / ".l4/ci/l4.gitlab-ci.yml"
+    assert yaml.safe_load(include.read_text())["l4"]["variables"]["L4_BASE_BRANCH"] == "main"
+    set_forge(target / ".l4/config.yaml", base_branch="l4/main", branch_prefix="bots/")
+    assert run(target, harness_repo, git_environ) == 0
+    job = yaml.safe_load(include.read_text())["l4"]
+    assert job["variables"]["L4_BASE_BRANCH"] == "l4/main"
+    assert job["rules"][1]["if"].endswith('$CI_COMMIT_BRANCH == "l4/main"')
+    assert job["rules"][2]["if"].endswith("=~ /^bots\\//")
+    before = snapshot(target)
+    assert run(target, harness_repo, git_environ) == 0
+    assert snapshot(target) == before
+
+
+def test_upgrade_refuses_an_unsafe_base_branch_and_writes_nothing(target, harness_repo, git_environ, raw, capsys):
+    adopt(target, harness_repo, git_environ)
+    set_forge(target / ".l4/config.yaml", base_branch="main'\n  evil: 1")
+    new_harness_commit(harness_repo, raw)
+    before = snapshot(target)
+    capsys.readouterr()
+    assert run(target, harness_repo, git_environ) == 2
+    assert "base branch" in capsys.readouterr().err
+    assert snapshot(target) == before

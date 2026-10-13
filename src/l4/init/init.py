@@ -156,6 +156,14 @@ def loaded_config(config_text: str) -> L4Config:
         return load_config(Path(tmp))
 
 
+def _gitlab_template(cfg: L4Config) -> str:
+    """The GitLab job for this config; a base branch or prefix that cannot be written safely is a usage error."""
+    try:
+        return render_gitlab_ci(cfg)
+    except ValueError as exc:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"init: {exc}") from None
+
+
 def validated_config(config_text: str) -> str:
     loaded_config(config_text)
     return config_text
@@ -315,7 +323,7 @@ def plan_init(
     edited: PlannedFile | None = None
     merged: PlannedFile | None = None
     if ci in ("gitlab", "both"):
-        files.append(PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644))
+        files.append(PlannedFile(TEMPLATE_RELPATH, _gitlab_template(cfg).encode(), 0o644))
         if ci_edit:
             edited, ci_notes = _ci_edit(repo, cfg, proposal)
             if edited is not None:
