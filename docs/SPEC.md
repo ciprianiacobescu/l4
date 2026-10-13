@@ -3094,6 +3094,17 @@ that cite them in `_Requirements:_` MUST be set back to `[ ]` with their parents
 requirements}`; the tasks then run test-first. Text is compared after whitespace normalisation, and an added or removed
 criterion counts as changed. An OpenSpec unit reopens nothing: the verifier judges its changed scenarios.
 
+**L4-OPS-016** The GitLab job MUST use the configured base branch and unit-branch prefix, never the project's default
+branch:
+- the job variable `L4_BASE_BRANCH` carries `forge.base_branch`;
+- the `L4-Run:` exemption and the merge trigger compare `$CI_COMMIT_BRANCH` with that literal;
+- the unit-branch rule matches the escaped `forge.branch_prefix`;
+- the base checkout uses `$L4_BASE_BRANCH`.
+
+An unsafe name is refused at render time with exit 2. A base branch such as `l4/main`, which holds the specs that are
+to be built while `main` receives only what a person promotes, works on GitLab as on GitHub. `l4 upgrade` re-renders
+the job after a change to either key.
+
 ---
 
 ## 13. Memory and lessons
@@ -6601,6 +6612,11 @@ scenario is a spec defect (§26).
 - **Given** the runbook of the release
 - **When** a person looks up a halted, an escalated, an abandoned and a waiting unit
 - **Then** each has one command and one label, and section 11 names none of the limits that L4-OPS-001..012 remove.
+
+#### SCN-OPS-26 (+) A base branch that is not the default branch works on GitLab · L4-OPS-016
+- **Given** `forge.base_branch: l4/main` and a GitLab project whose default branch is `main`
+- **When** `l4 init --ci gitlab` or `l4 upgrade` renders the job
+- **Then** the rules compare `$CI_COMMIT_BRANCH` with `"l4/main"`, `L4_BASE_BRANCH` is `l4/main`, and the base checkout detaches to `origin/l4/main`
 
 ## 24. Definition of done
 

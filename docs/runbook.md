@@ -1101,6 +1101,28 @@ escalated unit to `implementing` also.
 > **NOTE:** `l4 run --unit` on your computer does not fetch. If you pushed the edit from another computer, a stale local
 > ref can miss it. Use `l4 retry`, or fetch first.
 
+### 7.15 Use a separate base branch (for example `l4/main`)
+
+Use this when the specs that the harness builds go to their own branch, and `main` receives only what a person
+promotes. The harness then cuts unit branches from that branch and opens their PRs to it.
+
+1. Create the branch from `main`, for example `l4/main`, and push it.
+2. On that branch, set `forge.base_branch: l4/main` in `.l4/config.yaml`.
+3. Run `l4 upgrade`.
+4. Commit the changed config and CI file, and push them to `l4/main`.
+5. On GitHub, also copy `.github/workflows/l4.yml` to `main`, and push it.
+
+   GitHub starts the schedule and a dispatched run only from the file on the default branch.
+
+6. Merge a spec into `l4/main` to start its unit.
+7. Promote `l4/main` to `main` with a PR, when you are ready.
+
+> **CAUTION:** Merge `main` into `l4/main` after each change on `main`. If you do not, the base merge of verification
+> can find conflicts (7.7).
+
+> **NOTE:** The scheduled run on GitHub runs on `main`, and it checks out `l4/main` for the work. It restores the tool
+> caches, but only a push to `l4/main` saves them.
+
 ## 8. How to retry something
 
 | I want to | Do this |
@@ -1139,12 +1161,8 @@ escalated unit to `implementing` also.
 | `l4 retry` or `l4 restart` | The command acts at once. Its commit has `[skip ci]`, so the push starts no run. The command starts a run itself, unless you add `--no-run`. | By the command |
 | `l4 resume` | The command resumes the unit at once. | **No** |
 
-> **NOTE:** On GitLab, the rule for unit branches is fixed to the prefix `l4/`. If `forge.branch_prefix` is different,
-> a push to a unit branch starts no pipeline.
-
-> **NOTE:** On GitLab, the template also fixes the default branch of the project (`$CI_DEFAULT_BRANCH`) for the merge
-> trigger, the `L4-Run` exemption and the base checkout. If `forge.base_branch` is not that branch, a merge starts no
-> pipeline, and jobs check out the wrong branch.
+> **NOTE:** The CI file uses `forge.base_branch` and `forge.branch_prefix` from `.l4/config.yaml`. After you change
+> one of them, run `l4 upgrade` and commit the changed CI file.
 
 ## 10. Reference
 
@@ -1268,8 +1286,6 @@ These limits make operation more difficult. Know them before you start.
 - The capacity note names an `l4 sweep` command. It does not exist.
 - A lock does not protect a local run against a CI run on another computer. A local `l4 retry`, `l4 resume` or
   `l4 restart` while CI works on the same unit can fail with exit 1.
-- On GitLab, the pipeline rule for unit branches is fixed to the prefix `l4/`. GitLab also fixes the default branch of
-  the project for the merge trigger, the `L4-Run` exemption and the base checkout.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a
   clear message.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and

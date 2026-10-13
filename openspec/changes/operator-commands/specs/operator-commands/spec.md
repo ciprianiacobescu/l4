@@ -262,3 +262,13 @@ requirements}`, and the tasks then run test-first.
 - **GIVEN** a person's push that only re-wraps the text of criterion 2.3
 - **WHEN** the next run starts
 - **THEN** no task is reopened (the unit still re-enters, by L4-OPS-014)
+
+### Requirement: L4-OPS-016 The GitLab job uses the configured base branch and prefix
+The GitLab job SHALL use `forge.base_branch` and `forge.branch_prefix`, rendered at `l4 init` and `l4 upgrade`, in the
+`L4-Run:` exemption, the merge trigger, the unit-branch rule and the base checkout. It MUST NOT use the project's
+default branch, and an unsafe name is refused with exit 2.
+
+#### Scenario: SCN-OPS-26 (+) A base branch that is not the default branch works on GitLab
+- **GIVEN** `forge.base_branch: l4/main` and a GitLab project whose default branch is `main`
+- **WHEN** the job is rendered
+- **THEN** its rules compare with `"l4/main"` and its base checkout detaches to `origin/l4/main`
