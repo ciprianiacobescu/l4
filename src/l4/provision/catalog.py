@@ -4,6 +4,7 @@ by a drift test. Versions here are defaults; `spec.openspec.version` and `Profil
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -44,11 +45,23 @@ def catalog_pins() -> dict[str, str]:
     return pins
 
 
-def catalog_hash() -> str:
-    """The suffix of the agent-CLI cache key (L4-ACT-002): a stable hash of the pinned versions and nothing else, so a
-    new harness commit keeps the cache and a changed pin replaces it."""
-    text = json.dumps(catalog_pins(), sort_keys=True, separators=(",", ":"))
+def catalog_hash(adapters: Iterable[str] = ()) -> str:
+    """The suffix of the agent-CLI cache key (L4-ACT-002): a stable hash of the pinned versions and the sorted set of
+    agent CLIs the repository's config needs (`adapters`), so a new harness commit keeps the cache, a changed pin
+    replaces it, and a CLI that joins or leaves the role chains is a new key (a cache saved without it is not a hit).
+    With no adapters, the hash of the pins alone."""
+    needed = sorted(set(adapters))
+    document: dict[str, object] = dict(catalog_pins())
+    if needed:
+        document["clis"] = needed
+    text = json.dumps(document, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def clis_cache_hash(cfg: L4Config | None) -> str:
+    """`catalog_hash` for the agent CLIs `cfg` needs (the adapters of the profiles in the role chains, which
+    `required_tools` installs); the catalog alone for no config."""
+    return catalog_hash(adapters_in_use(cfg)) if cfg is not None else catalog_hash()
 
 
 @dataclass(frozen=True)

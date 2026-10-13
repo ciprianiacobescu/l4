@@ -167,7 +167,8 @@ MUST never print an input value.
   `uv.lock` and `README.md` for `action`, or the commit for `repository`. The action restores and saves it.
 - **The agent CLIs and bwrap,** at the paths `doctor --ci --fix` installs into (`~/.local/bin`, `~/.local/share/l4`,
   `~/.local/share/claude`, `~/.cache/l4/installers`). Key: the OS, architecture, image and `l4 ci cache-key clis`, a
-  hash of the provisioning catalog's pinned versions. It MUST NOT contain the harness commit or content hash.
+  hash of the provisioning catalog's pinned versions and of the sorted set of agent CLIs the config needs (the adapters
+  of the profiles in the role chains), so adding or removing a CLI is a new key. It MUST NOT contain the harness commit or content hash.
   npm's download cache and the harness's own `uv`, `uvx` and `l4` links are left out (the first is redundant once the
   installed copies are cached, and the second is in the harness cache).
 
@@ -282,7 +283,7 @@ of the harness package.
 | `l4 ci watch (--project ID\|PATH [--pipeline ID \| --ref REF] [--api-base URL] \| --repo OWNER/NAME [--ref REF] [--api-url URL]) [--auth-env VAR] [--auth-scheme private-token\|bearer] [--interval DUR] [--timeout DUR] [--tail N] [--token-command CMD]` | Follow a GitLab pipeline to its end (L4-INS-006): one line per job status change (`job <id> <name> (<stage>) <status> — runner #<id> <description>`), a final table, the last `N` trace lines of each failed job; a job that failed with `allow_failure` counts as success (`failed (allowed)`); exit 0 for a successful pipeline, 1 for failed, canceled, timed out (default 90 m, polling every 15 s) or an HTTP error, 2 for usage. With `--repo` (L4-GHP-012; credential default `GH_TOKEN`): the newest run of `l4.yml` on `--ref`, one line per run status change, each job's conclusion, the last `N` log lines of each failed job; exit 0 when the run's conclusion is `success`, else 1 (also on a timeout) | GitLab or GitHub (reads only) |
 | `l4 ci render --platform github\|gitlab` | Print generated CI files (used by `init`, `doctor`) | none |
 | `l4 ci render-child --plan FILE` | Print the GitLab child pipeline (one job per actionable unit) | none |
-| `l4 ci cache-key clis` | Print the key suffix of the agent-CLI cache of the GitHub setup action (L4-ACT-002): 16 hex characters, a hash of the provisioning catalog's pinned versions (uv, Node, OpenSpec, the agent CLIs) and of nothing else, so a new harness commit keeps the cache and a changed pin replaces it; any other cache name is exit 2 | none |
+| `l4 ci cache-key clis` | Print the key suffix of the agent-CLI cache of the GitHub setup action (L4-ACT-002): 16 hex characters, a hash of the provisioning catalog's pinned versions (uv, Node, OpenSpec, the agent CLIs) and of the sorted adapters of the profiles in the role chains of the config in the working directory (the pins alone without a config) and of nothing else, so a new harness commit keeps the cache and a changed pin replaces it; any other cache name is exit 2 | none |
 | `l4 ci render-setup` | Print `l4-setup.sh` with the catalog's uv version filled in (L4-PRV-020), for `bash`; the GitHub setup action runs it with `L4_SELF_PROVISION` (L4-ACT-003) | none |
 | `l4 ci map-exit CODE` | Translate an `l4` exit code into the CI platform's convention (§16): GitHub → annotation + exit 0 or 1; GitLab → annotation + the original code (so `allow_failure: exit_codes` applies) | none |
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N]` | Human command (members only): leave `halted`/`escalated`, reset breaker counters, optionally extend budgets (L4-IMP-013). It runs no agent and no gate, so it needs no sandbox; the sweep does the same for a member's `l4:resume` label (L4-CI-004) | ledger commit |
@@ -2789,7 +2790,7 @@ consumer keeps no `.l4/bin/l4-setup`:
   (`RUNNER_ENVIRONMENT=github-hosted`); `true` and `false` force it, and `L4_SELF_PROVISION` still decides what
   `doctor --ci --fix` installs (L4-PRV-023).
 - The tool cache is split in two (L4-ACT-002). The harness cache is the action's. The agent-CLI cache is keyed on the
-  provisioning catalog's pins and never on the harness, so a harness upgrade keeps it warm; it leaves out npm's
+  provisioning catalog's pins and the agent CLIs the config needs, never on the harness, so a harness upgrade keeps it warm; it leaves out npm's
   download cache and the harness's `uv`, `uvx` and `l4`. Measured on the dummy repository: 383 MB restored in 12.0 s
   became 229 MB in 3.8 s, and a warm job went from 16 s to 7 s in the action step [V: runs 38305164623, 38309137948].
 

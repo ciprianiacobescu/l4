@@ -58,7 +58,65 @@ def test_catalog_hash_does_not_depend_on_the_harness(monkeypatch):
 
 def test_cache_key_command_prints_the_suffix(capsys, tmp_path):
     assert main(["ci", "cache-key", "clis", "--repo", str(tmp_path)], environ={}) == 0
-    assert capsys.readouterr().out == catalog.catalog_hash() + "\n"
+    assert capsys.readouterr().out == catalog.catalog_hash() + "\n"  # no config: the pins alone
+
+
+def write_config(repo: Path, chains: dict[str, list[str]], profiles: dict[str, dict]) -> None:
+    (repo / ".l4").mkdir(exist_ok=True)
+    (repo / ".l4/config.yaml").write_text(yaml.safe_dump({"profiles": profiles, "roles": chains}))
+
+
+def key_of(repo: Path, capsys) -> str:
+    capsys.readouterr()
+    assert main(["ci", "cache-key", "clis", "--repo", str(repo)], environ={}) == 0
+    return capsys.readouterr().out.strip()
+
+
+def test_key_changes_when_a_profile_with_a_new_adapter_joins_a_role(tmp_path, capsys):
+    """The cache restored as a hit without kiro-cli when kiro joined the config (a key of the pins alone)."""
+    claude = {"claude": {"adapter": "claude-code", "model": "sonnet"}}
+    kiro = {"kiro": {"adapter": "kiro-cli", "model": "auto"}}
+    write_config(tmp_path, {"implementer": ["claude"]}, claude)
+    before = key_of(tmp_path, capsys)
+    write_config(tmp_path, {"implementer": ["claude", "kiro"]}, {**claude, **kiro})
+    after = key_of(tmp_path, capsys)
+    assert after != before and before != catalog.catalog_hash()
+    write_config(tmp_path, {"implementer": ["claude"]}, {**claude, **kiro})  # defined but in no chain: not installed
+    assert key_of(tmp_path, capsys) == before
+
+
+def test_key_ignores_a_model_and_a_non_cli_field(tmp_path, capsys):
+    base = {"claude": {"adapter": "claude-code", "model": "sonnet"}}
+    write_config(tmp_path, {"implementer": ["claude"]}, base)
+    before = key_of(tmp_path, capsys)
+    write_config(tmp_path, {"implementer": ["claude"]}, {"claude": {"adapter": "claude-code", "model": "opus"}})
+    assert key_of(tmp_path, capsys) == before
+    (tmp_path / ".l4/config.yaml").write_text(
+        (tmp_path / ".l4/config.yaml").read_text() + "forge:\n  base_branch: trunk\n"
+    )
+    assert key_of(tmp_path, capsys) == before
+
+
+def test_key_does_not_depend_on_the_order_of_the_chains(tmp_path, capsys):
+    both = {
+        "a": {"adapter": "claude-code", "model": "sonnet"},
+        "b": {"adapter": "codex", "model": "gpt"},
+    }
+    write_config(tmp_path, {"implementer": ["a", "b"]}, both)
+    first = key_of(tmp_path, capsys)
+    write_config(tmp_path, {"implementer": ["b", "a"]}, both)
+    assert key_of(tmp_path, capsys) == first
+
+
+def test_key_falls_back_to_the_catalog_for_an_unreadable_config(tmp_path, capsys):
+    (tmp_path / ".l4").mkdir()
+    (tmp_path / ".l4/config.yaml").write_text("roles: [not, a, mapping\n")
+    assert key_of(tmp_path, capsys) == catalog.catalog_hash()
+
+
+def test_the_action_runs_the_key_in_the_workspace():
+    clikey = next(s for s in _steps() if s.get("id") == "clikey")
+    assert clikey["working-directory"] == "${{ github.workspace }}"
 
 
 def test_cache_key_rejects_an_unknown_cache(capsys, tmp_path):
