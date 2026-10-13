@@ -30,8 +30,10 @@ from l4.ci.failing_step import (
 )
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
+from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
-from l4.gates.coverage import is_python_gate, project_python
+from l4.fsutil import UnsafeFile, reject_symlinks
+from l4.gates.coverage import cov_env, is_python_gate, project_python
 from l4.gates.e2e import e2e_configured, e2e_test_dir
 from l4.gates.hang import TIMEOUT_MARKER, HungTest, hung_tests
 from l4.gates.junit import TestCase, TestReport
@@ -87,6 +89,7 @@ from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
 from l4.specs.base import Marker, Task
+from l4.specs.fixmark import read_fix_marker
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.verifier.scan import task_tags
@@ -871,6 +874,35 @@ def _red_exit(step: StepOutcome) -> RedOutcome:
     return RedOutcome("failed", step.reason, excerpt=step.excerpt)
 
 
+def fix_gate_env(wb: Workbench) -> dict[str, str] | None:
+    """The environment of the test gate in the green step of a fix unit's task (L4-OPS-012, D12): the verifier's
+    coverage plugin, so that a failure only the measurement causes reaches the fixer as an ordinary failed gate, with
+    its log. Its output goes to a private folder of the step (`.l4-out/fix-cov`, the one place the gate sandbox can
+    write) and is never read: only the gate's pass or fail is used. None for any other unit, for a gate that does not
+    run Python, and when `.l4-out/fix-cov` is a symlink (repository content: nothing is written through it)."""
+    if read_fix_marker(wb.ref.path) is None or not is_python_gate(wb.cfg.gates.test.command):
+        return None
+    try:
+        reject_symlinks(wb.worktree, ".l4-out", "fix-cov")
+    except UnsafeFile as exc:
+        log.warning("%s: the fix gate runs without coverage: %s", wb.ref.id, exc)
+        return None
+    unit = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
+    roots = wb.cfg.verifier.evidence.module_roots
+    packages = set()
+    for path in {*wb.branch_changed_files(), *wb.changed_files()}:
+        parts = path.split("/")
+        if path.endswith(".py") and ".." not in parts and file_kind(path, unit, wb.cfg) == "code":
+            packages.add("/".join(parts[:2]) if parts[0] in roots and len(parts) > 2 else parts[0])
+    out = wb.worktree / ".l4-out" / "fix-cov"
+    shutil.rmtree(out, ignore_errors=True)
+    try:
+        return cov_env(out, sorted(packages))
+    except (ValueError, OSError) as exc:  # an unsafe path name: the gate runs as before
+        log.warning("%s: the fix gate runs without coverage: %s", wb.ref.id, exc)
+        return None
+
+
 def run_green(
     wb: Workbench, task: Task, red: RedOutcome, *, attempt: int, previous_failure: str | None = None
 ) -> GreenOutcome:
@@ -897,7 +929,7 @@ def run_green(
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
     run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate)
     hung = gate_hung(gate) if reason else []
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
@@ -1229,7 +1261,7 @@ def run_single(
         restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
         freeze_test_paths(wb, task, base, phase="single")
     run_setup(wb)
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
     reason, named = green_failures(base_report, [], gate)
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     added = (
