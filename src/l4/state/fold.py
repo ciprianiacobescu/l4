@@ -96,7 +96,8 @@ class UnitState(_Model):
     feedback: dict[str, FeedbackState] = Field(default_factory=dict)  # item id -> state, from the `feedback.*` events
     resumed_signals: list[str] = Field(default_factory=list)  # `unit.resumed{signal}`: label events acted on (one each)
     refused_signals: dict[str, str] = Field(default_factory=dict)  # `resume.refused{signal, why}`: said once each
-    halt_reason: str | None = None  # the `reason` of the edge into `halted` or `escalated`; None in any other phase
+    halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
+    halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
     hinted_heads: list[str] = Field(default_factory=list)  # `resume.hint{head}`: branch heads a halt pointer was for
     updated_at: str | None = None
 
@@ -119,7 +120,9 @@ def _phase_changed(state: UnitState, event: LedgerEvent) -> None:
     elif source in PARKING_PHASES:
         state.previous_phase = None
     state.retry_after = _text(event, "retry_after") if target == "waiting_capacity" else None
-    state.halt_reason = _text(event, "reason") if target in ("halted", "escalated") else None
+    stopped = target in ("halted", "escalated")
+    state.halt_reason = _text(event, "reason") if stopped else None
+    state.halt_detail = (_text(event, "detail") or _text(event, "reason")) if stopped else None  # L4-OPS-005
     state.phase = target
 
 
