@@ -61,6 +61,7 @@ class FeedbackState(_Model):
     evidence: str | None = None  # the judge's evidence for addressed or not_addressed
     problem: str | None = None  # `feedback.invalid{problem}`
     reason: str | None = None  # `feedback.waiting{reason}`, e.g. fix_unit_full
+    duplicate: str | None = None  # `feedback.invalid{duplicate: true}`: a copy of the heading; the item stays
 
 
 class UnitState(_Model):
@@ -283,7 +284,7 @@ def _feedback_taken(state: UnitState, event: LedgerEvent) -> None:
     state.feedback[found[0]] = FeedbackState(
         status="taken", kind=_text(event, "kind"), sha256=_text(event, "sha256"),
         round=round_ if isinstance(round_, int) and not isinstance(round_, bool) else None,
-        fix_unit=_text(event, "fix_unit"),
+        fix_unit=_text(event, "fix_unit"), duplicate=found[1].duplicate if found[1] is not None else None,
     )  # fmt: skip
 
 
@@ -318,7 +319,11 @@ def _feedback_withdrawn(state: UnitState, event: LedgerEvent) -> None:
 
 
 def _feedback_invalid(state: UnitState, event: LedgerEvent) -> None:
-    if (found := _feedback_item(state, event)) is not None:
+    if (found := _feedback_item(state, event)) is not None and event.data.get("duplicate") is True:
+        # a copy of the heading is the problem, not the item: it keeps its state and is still taken and judged
+        current = found[1] or FeedbackState(status="waiting", reason="duplicate id")
+        state.feedback[found[0]] = current.model_copy(update={"duplicate": _text(event, "problem")})
+    elif (found := _feedback_item(state, event)) is not None:
         state.feedback[found[0]] = (found[1] or FeedbackState(status="invalid")).model_copy(
             update={"status": "invalid", "problem": _text(event, "problem")}
         )

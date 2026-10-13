@@ -5,6 +5,8 @@ item also needs its variable in the changed non-test code."""
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from l4.redact import Redactor
 from l4.specs.feedback import (
     FeedbackFile,
@@ -23,6 +25,7 @@ from l4.verifier.feedback import (
     apply_addressed,
     decide_feedback,
     pending_feedback,
+    record_addressed,
 )
 from l4.verifier.fixunit import plan_fix_unit
 from l4.verifier.judge import FeedbackAnswer, build_judge_prompt
@@ -175,6 +178,9 @@ def test_both_items_addressed_close_with_events_statuses_outcomes_and_report_lin
     assert [(o.id, o.addressed) for o in result.feedback_outcomes] == [("FB-001", True), ("FB-002", True)]
     assert not [f for f in result.findings if f.source == "feedback"]
     assert result.verdict is not Verdict.FAIL  # nothing of the feedback blocks it
+    assert events_of(wb, "feedback.addressed") == []  # the yes is evidence until a PASS round (review #14)
+    result.verdict = Verdict.PASS  # the round passes
+    record_addressed(wb.ledger, result)
     added = events_of(wb, "feedback.addressed")
     assert [(e["id"], e["round"], e["sha"]) for e in added] == [("FB-001", 1, head), ("FB-002", 1, head)]
     assert added[1]["evidence"] == "src/pytdd/rounding.py:2 reads it"
@@ -216,7 +222,8 @@ def test_the_judges_yes_cannot_close_a_config_item_without_its_variable(make_ben
     assert events_of(wb, "feedback.not_addressed") == [
         {"id": "FB-002", "round": 1, "evidence": "PACK_ROUNDING not found in the changed code"}
     ]  # fmt: skip
-    assert [e["id"] for e in events_of(wb, "feedback.addressed")] == ["FB-001"]
+    assert events_of(wb, "feedback.addressed") == []  # a FAIL round closes nothing, even FB-001 (review #14)
+    assert [e["id"] for e in events_of(wb, "feedback.judged")] == ["FB-001"]
     plan = plan_fix_unit(wb.provider.criteria(wb.ref), result, result.human, ordinal=2, fix_minor=False)
     assert plan.feedback_only and [r.id for r in plan.taken] == ["FB-002"]
 
@@ -313,3 +320,141 @@ def test_the_variable_check_runs_for_config_items_only():
 
     first, second = decide_feedback(asked, [answers], has)
     assert seen == ["PACK_ROUNDING"] and not first.addressed and second.addressed
+
+
+# --- review #7: a short heading goes through take, judge and addressed ---------------------------------------------
+
+
+def test_a_short_heading_item_is_taken_judged_with_its_canonical_id_and_addressed(make_bench):
+    """L4-FBK-007, review #7: `## FB-4:` is `FB-004` for the scan, the ledger, the prompt and the judge's answer."""
+    from l4.verifier.feedback import scan_feedback
+
+    wb = make_bench([]).wb
+    (wb.ref.path / "feedback.md").write_text(
+        "# Feedback\n## FB-4: hand written\n- **Status:** submitted\n- **Kind:** tests\n\n### Feedback\nAdd a test.\n"
+    )
+    file = FeedbackFile.load(wb.ref.path)
+    [item] = scan_feedback(file, fold([], wb.ref.id)).takeable
+    assert item.id == "FB-004"
+    take(wb, "FB-004")
+    base = wb.git.run("rev-parse", "origin/main").stdout.strip()
+    result, backend = judged(wb, base, wb.head(), [yes("FB-004")])
+    assert [(o.id, o.addressed) for o in result.feedback_outcomes] == [("FB-004", True)]
+    assert "FB-004" in backend.calls[0][0].content
+
+
+# --- review #9: an item whose Status line is gone never crashes the harness's writes -------------------------------
+
+
+def drop_status_line(wb, fid: str = "FB-001") -> None:
+    path = wb.ref.path / "feedback.md"
+    text = FeedbackFile.load(wb.ref.path).data.decode()
+    item = FeedbackFile.load(wb.ref.path).get(fid)
+    section = text[item.section.start : item.section.end]
+    kept = "\n".join(ln for ln in section.split("\n") if not ln.startswith("- **Status:**"))
+    path.write_text(text.replace(section, kept))
+    assert FeedbackFile.load(wb.ref.path).get(fid).status_value is None
+
+
+def test_apply_addressed_skips_an_item_without_a_status_line(make_bench):
+    """L4-FBK-007, review #9: `set_status` raised SpecError (an L4Exit) mid-run; now the item is skipped and named."""
+    wb, base, head, _ = world(make_bench, code="import os\nMODE = os.environ['PACK_ROUNDING']\n")
+    result, _ = judged(wb, base, head, [yes("FB-001"), yes("FB-002")])
+    result.verdict = Verdict.PASS
+    drop_status_line(wb, "FB-001")
+    skipped: list[str] = []
+    apply_addressed(wb.ref.path, result, REDACTOR, skipped=skipped)
+    assert skipped == ["FB-001"]
+    file = FeedbackFile.load(wb.ref.path)
+    assert file.get("FB-002").status is FeedbackStatus.ADDRESSED and file.get("FB-001").status_value is None
+
+
+def test_a_missing_status_line_is_recorded_as_invalid_once(make_bench):
+    """review #9: `feedback.invalid{id, problem: "no Status line"}`, once."""
+    from l4.verifier.feedback import record_no_status
+
+    wb, *_ = world(make_bench)
+    for _ in range(2):
+        state = fold(read_ledger(wb.ref.path).events, wb.ref.id)
+        record_no_status(wb.ledger, state, ["FB-001"])
+    assert events_of(wb, "feedback.invalid") == [{"id": "FB-001", "problem": "no Status line"}]
+
+
+
+# --- review #14: a yes closes an item in a PASS round only -----------------------------------------------------------
+
+
+def test_a_yes_in_a_round_that_fails_for_another_reason_is_evidence_and_closes_nothing(make_bench):
+    """L4-FBK-007, review #14: FB-001 is judged addressed, FB-002 is not; the round FAILs. Nothing is addressed."""
+    wb, base, head, _ = world(make_bench)  # no PACK_ROUNDING: FB-002 fails
+    result, _ = judged(wb, base, head, [yes("FB-001"), yes("FB-002")])
+    assert result.verdict is Verdict.FAIL
+    assert events_of(wb, "feedback.addressed") == []
+    assert [(e["id"], e["round"]) for e in events_of(wb, "feedback.judged")] == [("FB-001", 1)]
+    record_addressed(wb.ledger, result)
+    assert apply_addressed(wb.ref.path, result, REDACTOR) == [] and events_of(wb, "feedback.addressed") == []
+    file = FeedbackFile.load(wb.ref.path)
+    assert file.get("FB-001").status is FeedbackStatus.TAKEN
+    state = fold(read_ledger(wb.ref.path).events, wb.ref.id)
+    assert state.feedback["FB-001"].status == "taken"  # still pending: the next round confirms it
+    assert [i.id for i in pending_feedback(state, file)] == ["FB-001"]
+    line = next(ln for ln in feedback_lines(read_ledger(wb.ref.path).events, 1) if ln.startswith("FB-001"))
+    assert line.startswith("FB-001: judged addressed, pending a PASS round")
+
+
+def test_the_pass_round_that_confirms_it_closes_it_in_that_round(make_bench):
+    """review #14: round 2 passes; `feedback.addressed` carries round 2, so the lesson of L4-FBK-009 can be written."""
+    wb, base, head, _ = world(make_bench, code="import os\nMODE = os.environ['PACK_ROUNDING']\n")
+    result, _ = judged(wb, base, head, [yes("FB-001"), yes("FB-002")])
+    result.round, result.verdict = 2, Verdict.PASS
+    record_addressed(wb.ledger, result)
+    state = fold(read_ledger(wb.ref.path).events, wb.ref.id)
+    assert (state.feedback["FB-001"].status, state.feedback["FB-001"].round) == ("addressed", 2)
+
+
+# --- review #8: pending items with no answer of this round cannot PASS --------------------------------------------
+
+
+@pytest.fixture
+def passing_criteria(monkeypatch):
+    """Every criterion aggregates to `pass` (the tests here are about the feedback items, not the traceability)."""
+    from l4.verifier import ladder
+    from l4.verifier.types import CriterionOutcome
+
+    monkeypatch.setattr(
+        ladder, "aggregate_criterion", lambda cid, alias, *a, **k: CriterionOutcome(cid, alias, "pass", "pass", "ok")
+    )
+
+
+def reused(wb, base, head, events):
+    """Round 2 reusing the steps of a round 1 that ended NEEDS_HUMAN (`_resume`)."""
+    from l4.verifier.ladder import _resume
+
+    prev = {"round": 1, "verdict": "needs_human", "subject_sha": head, "base_sha": base, "head_sha": head}
+    vc = VerifyContext(wb, Scripted(ok({})), "judge", ["impl"], 2, 60)  # type: ignore[arg-type]
+    return _resume(vc, prev, wb.provider.criteria(wb.ref), events, head)
+
+
+def test_a_reused_round_with_taken_items_the_judge_never_answered_does_not_pass(make_bench, passing_criteria):
+    """L4-FBK-007, review #8: the judge's reply was discarded and the hold accepted; the reused round used to PASS with
+    both items still `taken`. Now each becomes a not-addressed finding, so a later round judges it."""
+    wb, base, head, _ = world(make_bench)
+    result = reused(wb, base, head, [])
+    assert result.verdict is Verdict.FAIL
+    assert [f.title for f in result.findings if f.source == "feedback"] == [
+        "FB-001 not addressed: not judged in this round", "FB-002 not addressed: not judged in this round"
+    ]  # fmt: skip
+    assert [e["id"] for e in events_of(wb, "feedback.not_addressed")] == ["FB-001", "FB-002"]
+    assert all(f.feedback is not None for f in result.findings if f.source == "feedback")  # the fix unit takes them
+
+
+def test_a_reused_round_keeps_the_answers_of_the_round_it_reuses(make_bench, passing_criteria):
+    """review #8, review #14: round 1 judged both items yes and ended NEEDS_HUMAN; the reused round 2 passes and is
+    the round that closes them (the judge check is not stored, so the ledger's `feedback.judged` is what it reads)."""
+    wb, base, head, _ = world(make_bench, code="import os\nMODE = os.environ['PACK_ROUNDING']\n")
+    judged(wb, base, head, [yes("FB-001"), yes("FB-002")])  # round 1
+    result = reused(wb, base, head, read_ledger(wb.ref.path).events)
+    assert result.verdict is Verdict.PASS and not [f for f in result.findings if f.source == "feedback"]
+    assert [(o.id, o.addressed) for o in result.feedback_outcomes] == [("FB-001", True), ("FB-002", True)]
+    record_addressed(wb.ledger, result)
+    assert [(e["id"], e["round"]) for e in events_of(wb, "feedback.addressed")] == [("FB-001", 2), ("FB-002", 2)]

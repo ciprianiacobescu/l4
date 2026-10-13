@@ -260,3 +260,25 @@ def test_only_a_follow_up_gets_the_parents_file_and_only_that_file(make_repo, ra
     assert any(m(".kiro/specs/add-x/feedback.md") for m, _ in own)
     assert not any(m(".kiro/specs/add-x/tasks.md") for m, _ in own)
     assert not any(m(".kiro/specs/other/feedback.md") for m, _ in own)
+
+# --- review #6: duplicate ids never make the merge raise -----------------------------------------------------------
+
+
+def duplicated(data: bytes) -> bytes:
+    return data + b"\n---\n\n" + data[data.index(b"## FB-001") :].replace(b"round up", b"round copy")
+
+
+@pytest.mark.parametrize("where", ["ours", "theirs", "both"])
+def test_duplicate_ids_never_raise_anything_but_escalate(tmp_path: Path, where: str):
+    base = build(tmp_path, "round up", "other")
+    ours, theirs = base.replace(b"round up", b"round down"), base.replace(b"other", b"another")
+    if where in ("ours", "both"):
+        ours = duplicated(ours)
+    if where in ("theirs", "both"):
+        theirs = duplicated(theirs)
+    try:
+        merged = merge_feedback(base, ours, theirs)
+    except Escalate:
+        return
+    FeedbackFile.parse(merged)
+

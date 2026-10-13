@@ -349,3 +349,63 @@ def test_the_command_text_is_redacted_on_one_line_fields(tmp_path: Path):
     out = read(tmp_path).decode()
     assert secret not in out
     assert item(out.encode()).title.startswith("use ")
+
+
+# --- review #7: a hand-written short id is the same item as its canonical form ------------------------------------
+
+SHORT = """# Feedback
+## FB-4: hand written
+- **Status:** submitted
+- **Kind:** tests
+
+### Feedback
+Add a test for zero.
+"""
+
+
+def test_a_short_id_is_canonical_everywhere_the_harness_uses_it():
+    """L4-FBK-007, review #7: `## FB-4:` reads as `FB-004`; the heading text stays as the person wrote it."""
+    file = FeedbackFile.parse(SHORT)
+    [only] = file.items
+    assert only.id == "FB-004"
+    assert file.get("FB-4") is only and file.get("fb-004") is only and file.get("FB-004") is only
+    assert b"## FB-4: hand written" in file.data
+
+
+def test_edits_through_the_canonical_id_keep_one_index_row_for_a_short_heading():
+    """review #7: the index row written for `FB-4` is found again by the canonical id (no second row)."""
+    file = FeedbackFile.parse(SHORT).refresh_index()
+    taken = file.set_status("FB-004", FeedbackStatus.TAKEN)
+    rows = [ln for ln in taken.data.decode().splitlines() if ln.startswith("| FB-")]
+    assert len(rows) == 1 and "taken" in rows[0]
+
+
+# --- review #6: a duplicate heading is not an item -----------------------------------------------------------------
+
+
+def with_copy(unit: Path, old: str = "Move the rounding", new_text: str = "Also rename it") -> bytes:
+    """FB-001 copied below itself, as a person who forgets to renumber leaves it."""
+    data = read(unit)
+    section = data[data.index(b"## FB-001") :]
+    (unit / FEEDBACK_FILENAME).write_bytes(data + b"\n---\n\n" + section.replace(old.encode(), new_text.encode()))
+    return read(unit)
+
+
+def test_the_first_section_per_id_is_the_item_and_later_ones_are_reported_apart(tmp_path: Path):
+    """L4-FBK-004, review #6: `FB-001` twice (also as `FB-1`): one item, the copies are `duplicates`."""
+    add(tmp_path)
+    data = with_copy(tmp_path)
+    data = data.replace(b"\n## FB-001: Extract the rounding\n", b"\n## FB-1: Extract the rounding\n", 1)
+    file = FeedbackFile.parse(data)
+    assert [i.id for i in file.items] == ["FB-001"] and [i.id for i in file.duplicates] == ["FB-001"]
+    assert file.get("FB-001").text == "Move the rounding into a helper." and file.get("FB-001") is file.items[0]
+    assert file.duplicates[0].text == "Also rename it into a helper."
+
+
+def test_harness_edits_on_a_file_with_a_duplicate_never_raise_and_touch_the_first_section(tmp_path: Path):
+    add(tmp_path)
+    file = FeedbackFile.parse(with_copy(tmp_path))
+    edited = file.set_status("FB-001", FeedbackStatus.TAKEN)
+    edited = edited.set_outcome("FB-001", "Taken in round 1", redactor=REDACTOR)
+    assert edited.get("FB-001").status is FeedbackStatus.TAKEN
+    assert edited.duplicates[0].status is FeedbackStatus.SUBMITTED

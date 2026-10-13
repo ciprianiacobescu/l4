@@ -144,3 +144,37 @@ def test_the_feedback_limit_escalates_with_exit_13_and_its_note(
     assert [e["type"] for e in third.ledger() if e["type"] == "feedback.taken"] == ["feedback.taken"]
     assert len(third.events("fix.spawned")) == 1  # no second fix unit
     assert not third.adapter.requests  # step 0 failed: no agent ran
+
+
+# --- review #9: taking an item whose Status line is gone does not crash -------------------------------------------
+
+
+def test_mark_taken_skips_an_item_without_a_status_line(make_bench):
+    """L4-FBK-004, review #9: `_mark_taken` called `set_status`, which raised SpecError mid-run."""
+    from l4.specs.feedback import FeedbackFile
+    from l4.verifier.feedback import feedback_findings, scan_feedback
+    from l4.verifier.fixloop import _mark_taken
+    from l4.verifier.fixunit import plan_fix_unit
+    from l4.verifier.types import Verdict, VerifyResult
+
+    wb = make_bench([]).wb
+    for title in ("First one", "Second one"):
+        new = NewFeedback(
+            FeedbackKind.REFACTOR, title, f"{title}, please.", "Ana, 2026-10-12T15:04:00Z",
+            places=(Place("src/pytdd/pricing.py", 5, 6),),
+        )  # fmt: skip
+        append_item(wb.ref.path, "py_tdd", new, redactor=Redactor({}), validate=False)
+    file = FeedbackFile.load(wb.ref.path)
+    scan = scan_feedback(file, state())
+    result = VerifyResult("openspec:p", 1, Verdict.FAIL, "b", "h", findings=feedback_findings(scan))
+    plan = plan_fix_unit([], result, (), ordinal=1, fix_minor=False)
+    text = file.data.decode()
+    second = file.get("FB-002")
+    section = text[second.section.start : second.section.end]
+    kept = "\n".join(ln for ln in section.split("\n") if not ln.startswith("- **Status:**"))
+    (wb.ref.path / "feedback.md").write_text(text.replace(section, kept))
+    skipped: list[str] = []
+    written = _mark_taken(wb, plan, "py_tdd-fix-1", 1, skipped=skipped)
+    assert skipped == ["FB-002"] and len(written) == 1
+    after = FeedbackFile.load(wb.ref.path)
+    assert after.get("FB-001").status.value == "taken" and after.get("FB-002").status_value is None

@@ -352,7 +352,7 @@ def _parse_section(
         kind = None
     status_text = fields.get("status", "")
     return FeedbackItem(
-        id=f"FB-{number}", title=_text(title), status=_status_of(status_text) or FeedbackStatus.DRAFT,
+        id=f"FB-{int(number):03d}", title=_text(title), status=_status_of(status_text) or FeedbackStatus.DRAFT,
         status_text=status_text, kind=kind, kind_text=kind_text,
         places=tuple(p for p in map(_place_of, wheres) if p is not None),
         env=fields.get("env", "").strip("`*_ ") or None, when=pair_values.get("when") or None,
@@ -368,6 +368,7 @@ class FeedbackFile:
     items: tuple[FeedbackItem, ...]
     index: Span | None  # the lines between the index markers; None: the file has no well-formed index
     path: Path | None = None
+    duplicates: tuple[FeedbackItem, ...] = ()  # sections whose id an earlier section holds: reported, never items
 
     @classmethod
     def parse(cls, source: bytes | str, path: Path | None = None) -> "FeedbackFile":
@@ -381,15 +382,17 @@ class FeedbackFile:
             in_index = index is not None and index.start <= start < index.end
             if not fenced[number] and not in_index and (match := _HEADING.match(data[start:stop].rstrip(b"\n"))):
                 headings.append((number, match))
-        items = []
+        items: list[FeedbackItem] = []
+        duplicates: list[FeedbackItem] = []
         for position, (first, match) in enumerate(headings):
             if match.group(1) is None:
                 continue  # a section of someone else's: it ends the previous item and is never read
             last = headings[position + 1][0] if position + 1 < len(headings) else len(lines)
-            items.append(
-                _parse_section(data, lines, fenced, pairs, first, last, match.group(1).decode(), match.group(2))
-            )
-        return cls(data, tuple(items), index, path)
+            section = _parse_section(data, lines, fenced, pairs, first, last, match.group(1).decode(), match.group(2))
+            # the first section per normalised id is the item (`FB-1` and `FB-001` are one id); a later one is a
+            # copy the person forgot to renumber: the harness edits, takes and judges the first only
+            (duplicates if any(i.id == section.id for i in items) else items).append(section)
+        return cls(data, tuple(items), index, path, tuple(duplicates))
 
     @classmethod
     def load(cls, unit_dir: Path) -> "FeedbackFile | None":
@@ -496,7 +499,8 @@ def _with_index(data: bytes, parsed: FeedbackFile) -> bytes:
 def _with_row(data: bytes, index: Span, item: FeedbackItem) -> bytes:
     """Only the index row of this item changes (or is added before the end marker)."""
     row = _row(item).encode()
-    pattern = re.compile(rb"^\| " + re.escape(item.id.encode()) + rb" \|[^\r\n]*", re.MULTILINE)
+    number = str(_number(item.id) or 0).encode()  # a hand-written `| FB-4 |` row is the row of `FB-004`
+    pattern = re.compile(rb"^\| FB-0*" + number + rb" \|[^\r\n]*", re.MULTILINE)
     old = pattern.search(data, index.start, index.end)
     if old:
         return data if old.group(0) == row else _splice(data, [(Span(old.start(), old.end()), row)])

@@ -208,6 +208,9 @@ def merge_base_into(
         except Escalate as exc:
             log.warning("base merge: %s needs a human: %s", path, exc)
             unresolved.append(path)
+        except Exception as exc:  # noqa: BLE001 - a rule that fails did not resolve: the abort below is clean
+            log.warning("base merge: the resolver of %s failed (%s: %s): a conflict", path, type(exc).__name__, exc)
+            unresolved.append(path)
     resolved = tuple(sorted(plan))
     if unresolved:
         _abort(git)
