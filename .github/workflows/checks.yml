@@ -116,7 +116,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv (the version the lock was made with)
-        run: pipx install uv==0.10.0
+        # three tries: a dropped connection mid-download failed a shard once (run 38327658876, IncompleteRead)
+        run: |
+          for try in 1 2 3; do
+            pipx install uv==0.10.0 && exit 0
+            echo "uv install failed (try $try), retrying"; sleep $((try * 10))
+          done
+          exit 1
       - name: Sync the locked environment
         run: uv sync --frozen
       - name: Unit tests, shard ${{ matrix.shard }} of 8
