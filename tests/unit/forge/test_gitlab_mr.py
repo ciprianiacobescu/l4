@@ -120,3 +120,12 @@ def test_list_prs_is_newest_first(gitlab: FakeGitLab, make_forge_client):
     assert [pr.number for pr in forge.list_prs("l4/", "merged")] == [2, 1]
     gitlab.merge(1, "c" * 40)  # touched last: now the newest
     assert [pr.number for pr in forge.list_prs("l4/", "merged")] == [1, 2]
+
+
+def test_a_locked_mr_is_open_because_it_is_being_merged(gitlab: FakeGitLab, make_forge_client):
+    """Review L1: GitLab's `locked` is a merge in progress; reading it as closed would make the sweep treat the unit as
+    abandoned."""
+    forge = make_forge_client()
+    forge.create_pr(BRANCH, "main", "t", "b", draft=False)
+    gitlab.mrs[1]["state"] = "locked"
+    assert forge.get_pr(1).state == "open"

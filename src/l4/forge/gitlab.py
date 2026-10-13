@@ -52,7 +52,7 @@ _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _GIT_USERNAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _PROJECT_BOT = re.compile(r"^project_\d+_bot(?:_|$)")
-_STATES = {"opened": "open", "merged": "merged", "closed": "closed", "locked": "closed"}
+_STATES = {"opened": "open", "merged": "merged", "closed": "closed", "locked": "open"}  # locked: being merged
 _QUERY_STATES = {"open": "opened", "merged": "merged", "closed": "closed", "all": "all"}
 # A job trace with runner timestamps: `<time>Z <stream id><O|E><' ' | '+' (the line continues the previous one)>`.
 _RUNNER_PREFIX = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z [0-9a-f]{2}[OE][ +]?")

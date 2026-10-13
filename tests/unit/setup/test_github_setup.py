@@ -78,7 +78,9 @@ def test_bare_repository_is_set_up_in_one_command(run_setup, github):
     assert all(p["type"] == "branch" for p in github.policies["l4"])
     assert ("l4", "CLAUDE_CODE_OAUTH_TOKEN") in github.secrets
     assert github.variables == {"L4_SELF_PROVISION": "true"}
-    assert {"l4:intake", "l4:in_review", "l4:needs-answers", "l4:resume"} <= set(github.labels)
+    assert {"l4:intake", "l4:in_review", "l4:needs-answers", "l4:resume", "l4:retry", "l4:restart"} <= set(
+        github.labels
+    )
     assert ("POST", f"/repos/{REPO}/actions/workflows/l4.yml/dispatches") in github.requests
     assert not github.strays
 
