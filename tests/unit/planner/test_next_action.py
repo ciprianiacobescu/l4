@@ -105,3 +105,13 @@ def test_a_legacy_needs_human_round_is_offered_as_verify_so_the_run_can_raise_it
         verdicts_open=("Q-002",),
     )  # fmt: skip
     assert next_action(waiting)[0] == "none"
+
+
+@pytest.mark.parametrize("phase", ["halted", "escalated"])
+def test_a_stopped_unit_shows_the_recorded_cause(phase):
+    """L4-OPS-006: the recorded detail replaces the fixed text; without one the fixed text stays."""
+    detail = "task 1.1: max_task_attempts (3) reached in red"
+    base = facts(phase, 1, 2)
+    got = next_action(UnitFacts(**{**base.__dict__, "halt_detail": detail}))
+    assert got == ("none", f"{phase}: {detail}")
+    assert next_action(base)[1] != f"{phase}: {detail}" and next_action(base)[1].startswith(f"{phase}: ")

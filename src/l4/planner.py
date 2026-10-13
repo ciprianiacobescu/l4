@@ -64,6 +64,7 @@ class UnitFacts:
     answers_unblock: tuple[str, ...] = ()  # answered questions that free a pending task, when one is eligible
     retry_after: str | None = None  # waiting_capacity: when the earliest cool-down ends
     previous_phase: str | None = None  # waiting_capacity: the phase the unit was parked from
+    halt_detail: str | None = None  # halted or escalated: the person's text of the stop (L4-OPS-005, L4-OPS-006)
     drafts: tuple[str, ...] = ()  # an answer is written but Status is still `open`: never consumed (SCN-QMD-03)
     unreadable: tuple[str, ...] = ()  # questions whose section or Blocking tasks line could not be read
     verdicts_open: tuple[str, ...] = ()  # verdict questions the verifier asked and nobody answered
@@ -194,6 +195,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         if facts.follow_up_open:
             return "none", f"merged: feedback {ids} waits for the open follow-up {facts.follow_up_open}"
         return "follow_up", f"merged: feedback {ids} becomes a follow-up unit"
+    if phase in (Phase.HALTED.value, Phase.ESCALATED.value) and facts.halt_detail:
+        return "none", f"{phase}: {facts.halt_detail}"  # the recorded cause, not the fixed text (L4-OPS-006)
     if phase in _NOT_ACTIONABLE:
         return "none", _NOT_ACTIONABLE[phase]
     return "none", f"unknown phase {phase}"
@@ -264,6 +267,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         answers_unblock=tuple(answers_unblock(snapshot.questions, snapshot.tasks)),
         retry_after=snapshot.state.retry_after,
         previous_phase=snapshot.state.previous_phase,
+        halt_detail=snapshot.state.halt_detail,
         drafts=_issue_ids(snapshot, "unsubmitted_answer"),
         unreadable=_issue_ids(snapshot, "unreadable_section", "unreadable_blocking"),
         verdicts_open=verdicts.open,
