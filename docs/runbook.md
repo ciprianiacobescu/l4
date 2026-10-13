@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.2.0 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.2.1 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -23,7 +23,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.2.0](#11-known-limits-of-020)
+11. [Known limits of 0.2.1](#11-known-limits-of-021)
 
 ## Words used in this runbook
 
@@ -246,23 +246,26 @@ The important log lines:
 
 ### 4.3 Read the run artifact
 
-On GitLab, each run keeps the folder `.l4-out/` as a job artifact for 1 week. On GitHub, harness 0.2.0 uploads no
-artifact, because the upload step skips the hidden folder. On GitHub, use the annotation and the job log (4.2).
+On GitLab, each run keeps the folder `.l4-out/` as a job artifact for 1 week. On GitHub, each run keeps it as the
+artifact `l4-out` for 7 days, when `ci.upload_artifacts` is `true` (the default).
+
+> **NOTE:** The GitHub workflow of harness 0.2.0 uploads no artifact, because its upload step skips the hidden folder.
+> Run `l4 upgrade` with harness 0.2.1 or later to correct the workflow. Until then, use the annotation and the job log
+> (4.2).
 
 > **NOTE:** `outcome.json` holds only the units of that run. A unit that halted in an earlier run is not in it. In CI,
 > the step `plan --sweep` writes `outcome.json` first, and `run` replaces it. If `doctor` or `plan` stops the GitLab
 > script, the file is the file of the plan (no `exit_reason`), or it is absent. The folder `logs/` can hold two files.
 > The id of the run is `run_id` in `outcome.json`.
 
-On GitLab:
-
-1. Open the job page.
-2. Select **Job artifacts > Download**.
-3. Open `outcome.json`.
-4. For each unit, read `phase_after` and `exit_reason`.
-5. Open `l4.env`.
-6. Read `L4_EXIT` and `L4_PHASES`.
-7. For the full record, read `logs/<run-id>.jsonl`:
+1. Download the artifact.
+   - On GitHub: `gh run download <run-id> -n l4-out`, or the **Artifacts** list on the summary page of the run.
+   - On GitLab: on the job page, select **Job artifacts > Download**.
+2. Open `outcome.json`.
+3. For each unit, read `phase_after` and `exit_reason`.
+4. Open `l4.env`.
+5. Read `L4_EXIT` and `L4_PHASES`.
+6. For the full record, read `logs/<run-id>.jsonl`:
 
    ```sh
    # phase changes, breakers and the end of the run
@@ -271,9 +274,9 @@ On GitLab:
    jq -r 'select(.stream=="log" and (.level=="WARNING" or .level=="ERROR")) | "\(.level) \(.logger): \(.msg)"' logs/<run-id>.jsonl
    ```
 
-8. For the work of an agent, read `agent/<run-id>/`. Each step has the prompt (`.prompt.md`), the event stream
+7. For the work of an agent, read `agent/<run-id>/`. Each step has the prompt (`.prompt.md`), the event stream
    (`.jsonl`) and the error output (`.stderr`).
-9. For the gates, read `gates/<run-id>/`. Each gate has one numbered log file.
+8. For the gates, read `gates/<run-id>/`. Each gate has one numbered log file.
 
 ### 4.4 Use `l4 status` and `l4 plan` on your computer
 
@@ -523,7 +526,7 @@ The push starts a run. The unit moves when your answers free a task. `l4 plan` t
 - A verdict answer that does not start with `accept` or `reject`.
 - Answers on `<base>`, and comments on the PR.
 
-> **NOTE:** `l4 questions` is not available in 0.2.0 (exit 2). Edit the file.
+> **NOTE:** `l4 questions` is not available in 0.2.1 (exit 2). Edit the file.
 
 ### 7.2 `halted`
 
@@ -805,7 +808,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.2.0 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.2.1 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -853,7 +856,7 @@ on the unit.
 - Wait for the other run to end. The lock goes when its process stops.
 - If the line has no pid, read the pid in the file `$L4_CACHE/locks/<framework>/<name>.lock` (the default is
   `~/.cache/l4/`).
-- `l4 unlock` is not available in 0.2.0 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.2.1 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.12 Red job: exit 1, 2 or 3
@@ -891,7 +894,7 @@ Run `l4 doctor` (on a self-hosted runner, `l4 doctor --ci`). Correct each row wi
 
 ### 7.13 A PR closed without a merge, or a deleted unit branch
 
-Release 0.2.0 has no procedure for these two cases.
+Release 0.2.1 has no procedure for these two cases.
 
 - **A PR closed without a merge.** The sweep handles only merged PRs. The unit stays in `in_review`. The label
   `l4:resume` has no effect on a closed PR. For a halted or escalated unit, use procedure B of [7.2](#72-halted).
@@ -1012,7 +1015,7 @@ the prefix is. Runs create only `l4:<phase>` and `l4:needs-answers`. `l4 setup g
 | `l4 run [--unit <unit>]` | Runs units. CI runs it. | Yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.2.0. They stop with exit 2:
+These commands and options are not available in 0.2.1. They stop with exit 2:
 `l4 unlock`, `l4 questions`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -1031,7 +1034,7 @@ These commands and options are not available in 0.2.0. They stop with exit 2:
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
 
-## 11. Known limits of 0.2.0
+## 11. Known limits of 0.2.1
 
 These limits make operation more difficult. Know them before you start.
 
@@ -1042,8 +1045,6 @@ These limits make operation more difficult. Know them before you start.
 - `l4 plan` gives a fixed text for `halted` and `escalated`. It does not give the cause.
 - Only the run that stopped a unit has the reason in its log. Later runs do not mention the cause.
 - The harness writes tracebacks only with `-v` after the command name. The CI templates do not use `-v`.
-- On GitHub, 0.2.0 uploads no `l4-out` artifact, because the upload step skips the hidden folder. Use the annotation
-  and the job log. Only GitLab keeps `outcome.json` and `l4.env`.
 - Local commands need the project. With the token set, `l4 resume`, `l4 archive`, `l4 plan --sweep`, `l4 run` and
   `l4 verify` need `GITHUB_REPOSITORY` (GitHub) or `forge.gitlab.api_url` and `forge.gitlab.project` (GitLab). Without
   them, they stop with exit 2. `l4 init` does not write these values.
@@ -1051,7 +1052,7 @@ These limits make operation more difficult. Know them before you start.
   harness ignores the label.
 - The user of the forge token cannot resume a unit by label. The harness refuses the label of that user.
 - The harness reads the `l4:resume` label only on an open PR. A run creates no `l4:resume` label.
-- A PR closed without a merge leaves the unit in `in_review`. A deleted unit branch stops the run with exit 1. 0.2.0
+- A PR closed without a merge leaves the unit in `in_review`. A deleted unit branch stops the run with exit 1. 0.2.1
   has no procedure for either ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)).
 - A corrupt `ledger-pending/` on the lock ref has no procedure ([7.9](#79-corrupt-ledger)).
 - If all verdict questions are `dismissed`, the unit stays in `awaiting_human` (exit 11). `l4 resume` refuses that
