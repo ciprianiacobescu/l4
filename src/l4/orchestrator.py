@@ -418,8 +418,12 @@ class Orchestrator:
         `unit.retried{reason: "spec edited", signal: "spec_edit:<head>", by: "push"}` (it folds like a resume), and a
         unit escalated at the fix-round or feedback limit gets one round of that kind first, once for each head (a
         signal already recorded grants nothing). `implementing` needs no edge but reaches the reopening of D14 as well;
-        `fixing` defers (it has no edge)."""
+        `fixing` has no edge: the run records `spec.edit_seen` and takes the edit when the fix unit ends
+        (`_take_pending_spec_edit`), because the fix unit's own commits will bury the person's commit."""
+        self._take_pending_spec_edit()
         phase = Phase(self.state.phase) if self.state.phase else None
+        if phase is Phase.FIXING:
+            return self._see_spec_edit()
         if phase is not Phase.IMPLEMENTING and phase not in SPEC_EDIT_PHASES:
             return
         edit = self._spec_edit()
@@ -428,6 +432,35 @@ class Orchestrator:
         if phase is not Phase.IMPLEMENTING:
             self._record_spec_edit(phase, edit)
         self._reopen(edit.base)
+
+    def _see_spec_edit(self) -> None:
+        """A person's spec edit on a `fixing` unit: `spec.edit_seen{head, base, commits}`, once for each head. A pending
+        edit of an earlier head keeps its older `base` (the reopening diffs from where the spec was last the
+        harness's) and its commits."""
+        edit, pending = self._spec_edit(), self.state.pending_spec_edit
+        if edit is None or edit.signal in self.state.resumed_signals or (pending and pending.head == edit.head):
+            return
+        base = pending.base if pending else edit.base
+        commits = [
+            *(pending.commits if pending else []),
+            *(c for c in edit.shas if not pending or c not in pending.commits),
+        ]
+        self.services.ledger.append("spec.edit_seen", head=edit.head, base=base, commits=commits[-MAX_EDIT_COMMITS:])
+        self._refold()
+
+    def _take_pending_spec_edit(self) -> bool:
+        """The `spec.edit_seen` of a run that found the unit `fixing` is taken as soon as the unit is in a phase of
+        `SPEC_EDIT_PHASES`: right after the fix unit ends (`verifying`, before the verifier runs), or at the start of a
+        later run. The edge is the push's own (`_record_spec_edit`), and the Kiro tasks that cite a changed criterion
+        reopen against the recorded base."""
+        pending = self.state.pending_spec_edit
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if pending is None or phase not in SPEC_EDIT_PHASES:
+            return False
+        edit = SpecEdit(tuple(pending.commits), pending.base, pending.head)
+        self._record_spec_edit(phase, edit)
+        self._reopen(edit.base)
+        return True
 
     def _record_spec_edit(self, phase: Phase | None, edit: SpecEdit) -> None:
         ledger, extra = self.services.ledger, {"signal": edit.signal, "by": "push"}
@@ -580,6 +613,7 @@ class Orchestrator:
                 code = self._fix()
                 if code is not None:
                     return code
+                self._take_pending_spec_edit()  # the fix unit ended: a spec edit seen while fixing is taken (OPS-014)
             elif phase is Phase.CLARIFYING:
                 code = self._clarify()
                 if code is not None:

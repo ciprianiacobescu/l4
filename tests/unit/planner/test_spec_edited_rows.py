@@ -44,3 +44,14 @@ def test_the_fact_comes_from_the_snapshot():
     snap = UnitSnapshot(ref, state, [], "branch", spec_edit=SpecEdit((OTHER, SHA), "e" * 40, SHA))
     assert facts_of(snap).spec_edited == (OTHER, SHA)
     assert facts_of(UnitSnapshot(ref, state, [], "branch")).spec_edited == ()
+
+
+def test_a_pending_spec_edit_is_the_fact_when_the_branch_shows_none():
+    """L4-OPS-014: the run that was in `fixing` recorded `spec.edit_seen`; the harness commits on top of the person's
+    now, so the fact comes from the fold."""
+    from l4.state.fold import PendingSpecEdit
+
+    pending = PendingSpecEdit(head=SHA, base="e" * 40, commits=[OTHER, SHA])
+    state = UnitState(unit="openspec:x", phase="verifying", pending_spec_edit=pending)
+    ref = UnitRef(Framework.OPENSPEC, "x", Path("/nonexistent/openspec/changes/x"))
+    assert facts_of(UnitSnapshot(ref, state, [], "branch")).spec_edited == (OTHER, SHA)

@@ -128,3 +128,36 @@ def test_reopened_tasks_are_no_longer_done():
         "openspec:x",
     )
     assert state.tasks.done == ["1.1"]
+
+
+SEEN = ("spec.edit_seen", {"head": "b" * 40, "base": "a" * 40, "commits": ["c" * 40, "b" * 40]})
+
+
+def test_a_spec_edit_seen_while_fixing_is_pending_until_its_head_is_retried():
+    """L4-OPS-014: `spec.edit_seen{head, base, commits}` stays pending; only `unit.retried` with signal
+    `spec_edit:<that head>` takes it, and another head's signal does not."""
+    rows = [*TO_IMPLEMENTING, changed("implementing", "fixing", "verify_fail_fix"), SEEN]
+    state = fold(events(*rows), "openspec:x")
+    pending = state.pending_spec_edit
+    assert pending is not None and (pending.head, pending.base) == ("b" * 40, "a" * 40)
+    assert pending.commits == ["c" * 40, "b" * 40]
+    other = fold(events(*rows, ("unit.retried", {"signal": f"spec_edit:{'d' * 40}", "by": "push"})), "openspec:x")
+    assert other.pending_spec_edit is not None
+    taken = fold(events(*rows, ("unit.retried", {"signal": f"spec_edit:{'b' * 40}", "by": "push"})), "openspec:x")
+    assert taken.pending_spec_edit is None
+
+
+def test_a_spec_edit_seen_twice_or_after_its_retry_is_ignored_and_a_bad_row_too():
+    """Each head is recorded once: a head whose signal is consumed is not pending again."""
+    retry = ("unit.retried", {"signal": f"spec_edit:{'b' * 40}", "by": "push"})
+    state = fold(events(*TO_IMPLEMENTING, retry, SEEN), "openspec:x")
+    assert state.pending_spec_edit is None
+    state = fold(
+        events(*TO_IMPLEMENTING, ("spec.edit_seen", {"head": "", "base": 1}), ("spec.edit_seen", {})), "openspec:x"
+    )
+    assert state.pending_spec_edit is None
+
+
+def test_a_restart_forgets_a_pending_spec_edit():
+    state = fold(events(*TO_IMPLEMENTING, SEEN, ("unit.restarted", {"attempt": 2})), "openspec:x")
+    assert state.pending_spec_edit is None

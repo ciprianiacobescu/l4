@@ -46,6 +46,17 @@ class CiFailure(_Model):
     preexisting: list[str] = Field(default_factory=list)  # red on H and on the base: not this unit's
 
 
+class PendingSpecEdit(_Model):
+    """A person's spec push that a run saw while the unit was `fixing`, where no edge takes it (L4-OPS-014, design D13):
+    `spec.edit_seen{head, base, commits}`. `base` is the harness's last commit before the person's first one (the
+    Kiro reopening diffs against it), `head` the person's newest commit, `commits` the person's shas, oldest first.
+    It stays until `unit.retried` records the signal `spec_edit:<head>`."""
+
+    head: str
+    base: str
+    commits: list[str] = Field(default_factory=list)
+
+
 class FeedbackState(_Model):
     """One item of `feedback.md` as the ledger records it (L4-FBK-004, L4-FBK-007; design D7). `sha256` is the hash of
     the item's human content at the LAST TAKE (`feedback.taken`): an item whose current content hashes differently is
@@ -94,6 +105,7 @@ class UnitState(_Model):
     fix_rounds_counted: int = 0  # the fix units that are not feedback-only: what `verifier.max_fix_rounds` limits
     feedback_rounds_used: int = 0  # `fix.spawned{feedback_only: true}` events: feedback fix units (absent = false)
     feedback: dict[str, FeedbackState] = Field(default_factory=dict)  # item id -> state, from the `feedback.*` events
+    pending_spec_edit: PendingSpecEdit | None = None  # `spec.edit_seen` not yet taken by `unit.retried` (L4-OPS-014)
     resumed_signals: list[str] = Field(default_factory=list)  # `unit.resumed{signal}`: label events acted on (one each)
     refused_signals: dict[str, str] = Field(default_factory=dict)  # `resume.refused{signal, why}`: said once each
     halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
@@ -268,6 +280,19 @@ def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
     state.breaker_trips = 0  # M1: the other breaker counters (no_progress, same_error, oscillation) reset here too
     if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
         state.resumed_signals.append(signal)
+    if state.pending_spec_edit is not None and _text(event, "signal") == f"spec_edit:{state.pending_spec_edit.head}":
+        state.pending_spec_edit = None  # the edge was taken (L4-OPS-014)
+
+
+def _spec_edit_seen(state: UnitState, event: LedgerEvent) -> None:
+    """`spec.edit_seen{head, base, commits}` (L4-OPS-014): a person's spec push seen in `fixing`. It is pending, unless
+    the signal of that head was consumed already (each head is taken once). A row without head or base is ignored."""
+    head, base = _text(event, "head"), _text(event, "base")
+    if not head or not base or f"spec_edit:{head}" in state.resumed_signals:
+        return
+    commits = event.data.get("commits")
+    shas = [c for c in commits if isinstance(c, str)] if isinstance(commits, list) else []
+    state.pending_spec_edit = PendingSpecEdit(head=head, base=base, commits=shas or [head])
 
 
 def _unit_restarted(state: UnitState, event: LedgerEvent) -> None:
@@ -383,6 +408,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "task.started": _task_started,
     "task.done": _task_done,
     "tasks.reopened": _tasks_reopened,
+    "spec.edit_seen": _spec_edit_seen,
     "question.raised": _question_raised,
     "question.answered": _question_answered,
     "availability.selected": _availability_selected,
