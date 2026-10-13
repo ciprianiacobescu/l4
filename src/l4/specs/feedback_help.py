@@ -15,6 +15,8 @@ The unit is --unit ID, else the one named by the checked-out branch l4/<framewor
 \b
 Kinds (--kind):
   refactor     restructure code, same behaviour. Needs --at. Tests stay as they are.
+               A rename, or any change the existing tests would have to follow, is `behaviour` (--when/--then),
+               not `refactor`: refactor puts test files back, so the attempt fails.
   duplication  merge repeated code, same behaviour. Needs --at (name every place).
   tests        missing or weak tests. Takes no --env, --when or --then.
   config       a hard-coded value becomes an environment variable. Needs --at and --env NAME.
@@ -46,6 +48,8 @@ the item is refused (exit 2).
 \b
 What each kind needs:
   refactor     --at (1 to 5). Same behaviour, production code only; the tests are not changed.
+               A rename, or any change the existing tests would have to follow, is `behaviour` (--when/--then),
+               not `refactor`: refactor puts test files back, so the attempt fails.
   duplication  --at (name every place). Same behaviour, production code only.
   tests        nothing more. Missing or weak tests; production code is not changed.
   config       --at and --env NAME (capital letters, digits, _). The value written at --at is read from NAME.

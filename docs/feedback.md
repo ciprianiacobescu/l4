@@ -55,6 +55,9 @@ l4 feedback add --kind refactor --at src/billing/invoice.py:40-72 \
 `--at` is required: it shows where the code is. The lines it names are quoted into the item (at most 40 lines or 4,000
 bytes, with secrets redacted). If the agent changes only test files, the attempt fails with `nothing changed`.
 
+A rename, or any change the existing tests would have to follow, is `behaviour` (with `--when` and `--then`), not
+`refactor`: `refactor` puts test files back, so the attempt fails.
+
 ### `duplication`
 
 ```sh
