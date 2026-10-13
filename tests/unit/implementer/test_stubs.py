@@ -8,7 +8,7 @@ from textwrap import dedent
 
 import pytest
 
-from l4.implementer.stubs import classify_red_changes, enforce_red_scope, zero_value_variant
+from l4.implementer.stubs import classify_red_changes, enforce_red_scope, has_stub, zero_value_variant
 
 from .conftest import Bench
 
@@ -331,6 +331,53 @@ def test_a_guarded_stub_gets_its_guard_body_replaced_and_real_code_is_kept():
     assert "if rounding is not None:\n        return 0.0" in out and "return round(sum(prices), 2)" in out
 
 
+PARTIAL = (
+    'def pick_priority(on_hand: int, reorder_point: int) -> str:\n    """Return urgency label for a pick item."""\n'
+    "    if on_hand < 0 or reorder_point < 0:\n"
+    '        raise ValueError("on_hand and reorder_point must be non-negative")\n'
+    "    raise NotImplementedError\n"
+)  # task 2.1 (validation) was implemented before task 1.1: guards, then the bare raise (live GitHub run, Kiro glm-5)
+
+
+def test_a_partial_stub_keeps_its_guard_and_answers_the_zero_value_in_place_of_the_final_raise():
+    out = zero_value_variant(PARTIAL)
+    assert "raise ValueError('on_hand and reorder_point must be non-negative')" in out
+    assert "NotImplementedError" not in out and out.strip().splitlines()[-1].strip() == "return ''"
+    assert out.count("raise") == 1
+
+
+def test_a_full_stub_is_unchanged_in_behaviour_next_to_a_partial_one():
+    out = zero_value_variant("def f(x) -> int:\n    raise NotImplementedError\n\n" + PARTIAL)
+    assert "def f(x) -> int:\n    return 0" in out and "NotImplementedError" not in out
+
+
+def test_a_method_with_a_guard_then_the_raise_is_a_partial_stub():
+    source = (
+        "class Stock:\n    def reserve(self, n: int) -> bool:\n        if n < 0:\n            raise ValueError(n)\n"
+        "        raise NotImplementedError('later')\n"
+    )
+    out = zero_value_variant(source)
+    assert "raise ValueError(n)" in out and "NotImplementedError" not in out
+    assert out.strip().splitlines()[-1].strip() == "return False"
+
+
+@pytest.mark.parametrize(
+    ("annotation", "zero"),
+    [("int", "0"), ("bool", "False"), ("list[str]", "[]"), ("Thing | None", "None"), ("None", "pass")],
+)
+def test_a_partial_stub_zero_follows_the_return_annotation(annotation: str, zero: str):
+    out = zero_value_variant(
+        f"def f(x) -> {annotation}:\n    if x < 0:\n        raise ValueError\n    raise NotImplementedError()\n"
+    )
+    last = out.strip().splitlines()[-1].strip()
+    assert "raise ValueError" in out and last == (zero if zero == "pass" else f"return {zero}")
+
+
+def test_a_partial_stub_counts_as_a_stub_but_real_code_does_not():
+    assert has_stub(PARTIAL)
+    assert not has_stub("def f(x):\n    if x:\n        raise ValueError\n    return 1\n")
+
+
 def test_methods_are_zeroed_and_docstrings_kept():
     source = 'class C:\n    def m(self) -> str:\n        """Doc."""\n        raise NotImplementedError\n'
     assert zero_value_variant(source).splitlines()[-1].strip() == "return ''"
@@ -412,10 +459,7 @@ def test_dependency_manifests_and_runner_config_are_not_production_code(bench: B
 
 
 def test_a_stub_does_not_keep_a_default_or_annotation_that_reads_a_dropped_module_value():
-    out = rebuilt(
-        HEAD
-        + "\nRATE = 3\nRateT = int\n\n\ndef f(x=RATE, *, y: RateT = 1, z=2) -> RateT:\n    return x\n"
-    )
+    out = rebuilt(HEAD + "\nRATE = 3\nRateT = int\n\n\ndef f(x=RATE, *, y: RateT = 1, z=2) -> RateT:\n    return x\n")
     assert "RATE" not in out.source and "RateT" not in out.source
     assert "def f(x=None, *, y=1, z=2):" in out.source
     namespace: dict[str, object] = {}
