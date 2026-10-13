@@ -170,12 +170,12 @@ def capacity_section(
     if retry_after is not None and not due_now:
         when = minute_stamp(datetime.fromisoformat(retry_after))
         lines.append(
-            f"Capacity is expected back at {when}. The scheduled `l4 sweep` resumes the unit after that; without a "
+            f"Capacity is expected back at {when}. The scheduled run resumes the unit after that; without a "
             f"schedule, run a pipeline on `{base}` after {when}."
         )
     else:
         lines.append(
-            f"Once that is fixed, run a pipeline on `{base}`, or wait for the scheduled `l4 sweep`: the unit "
+            f"Once that is fixed, run a pipeline on `{base}`, or wait for the scheduled run: the unit "
             "is probed again on every run and resumes at once."
         )
     return "\n".join(lines)

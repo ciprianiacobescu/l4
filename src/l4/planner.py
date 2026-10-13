@@ -42,9 +42,9 @@ _FIXING = {Phase.FIXING.value}  # parked in the fix loop: a run takes the unit b
 _NOT_ACTIONABLE = {
     Phase.AWAITING_HUMAN.value: "awaiting_human: no new answers",
     Phase.FIXING.value: "fixing: fix units are not implemented in M0",
-    Phase.WAITING_CAPACITY.value: "waiting_capacity: M0 does not re-enter on its own",
-    Phase.HALTED.value: "halted: a member adds the label l4:resume (or runs l4 resume)",
-    Phase.ESCALATED.value: "escalated: needs l4 resume",
+    Phase.WAITING_CAPACITY.value: "waiting_capacity: run l4 retry to try the agents now",
+    Phase.HALTED.value: "halted: run l4 retry (or the label l4:retry)",
+    Phase.ESCALATED.value: "escalated: run l4 retry (or the label l4:retry)",
     Phase.REJECTED.value: "rejected: inputs unchanged",
     Phase.IN_REVIEW.value: "in_review: waiting for merge",
     Phase.ARCHIVED.value: "archived: waiting for merge",
