@@ -22,6 +22,8 @@ P, T = Phase, Trigger
 # The rows of SPEC 12.0 built so far, written out independently of the table under test.
 # every non-terminal phase but `archived` (which exists only in `on_approval`, not built): the merge request was closed
 PR_CLOSED_SOURCES = tuple(p for p in Phase if p not in (Phase.MERGED, Phase.ABANDONED, Phase.ARCHIVED))
+SPEC_EDITED_SOURCES = (P.INTAKE, P.READY, P.IMPLEMENTED, P.VERIFYING, P.VERIFIED, P.AWAITING_HUMAN, P.CLARIFYING,
+                       P.HALTED, P.ESCALATED)  # fmt: skip
 BUILT_ROWS = {
     (P.HALTED, T.RESUMED, None, None),  # M1.4: `l4 resume`
     (P.ESCALATED, T.RESUMED, None, None),  # M1.13 (W-C2): `l4 resume` with an extension, or the label (SPEC 12.0)
@@ -61,6 +63,7 @@ BUILT_ROWS = {
     (P.VERIFIED, T.BREAKER_OR_BUDGET, P.HALTED, ExitCode.HALTED),
     (P.ABANDONED, T.PR_REOPENED, None, None),  # back to the phase the merge request was closed in
     *((src, T.PR_CLOSED, P.ABANDONED, None) for src in PR_CLOSED_SOURCES),
+    *((src, T.SPEC_EDITED, P.IMPLEMENTING, None) for src in SPEC_EDITED_SOURCES),  # L4-OPS-014: a spec push
 }  # fmt: skip
 
 
@@ -75,12 +78,14 @@ def test_table_matches_spec_rows():
     assert {e.trigger for e in TRANSITIONS if P.ESCALATED in e.sources} == {
         T.RESUMED,
         T.SPEC_EDIT_SINCE_STOP,
+        T.SPEC_EDITED,
         T.PR_CLOSED,
     }
     assert P.ARCHIVED not in sources  # leaving `archived` needs the archive revert first (L4-ARC-004): not built
     assert {e.trigger for e in TRANSITIONS if P.HALTED in e.sources} == {
         T.RESUMED,
         T.SPEC_EDIT_SINCE_STOP,
+        T.SPEC_EDITED,
         T.PR_CLOSED,
     }
     assert not any(Phase.CLARIFYING in e.sources for e in TRANSITIONS if e.trigger is T.REQUIRED_ROLE_UNAVAILABLE)
@@ -203,6 +208,18 @@ def test_a_spec_edit_since_the_stop_returns_to_implementing_not_to_previous_phas
     writer, _ = writer_and_state(tmp_path)
     at = fold([], "openspec:x").model_copy(update={"phase": stopped_in.value, "previous_phase": "verifying"})
     assert transition(writer, at, T.SPEC_EDIT_SINCE_STOP).target is P.IMPLEMENTING
+
+
+def test_a_spec_edit_goes_to_implementing_from_the_phases_that_are_not_finished(tmp_path: Path):
+    """L4-OPS-014: `in_review` keeps `spec_edit_after_handoff`; `fixing` defers (no edge); `implementing` needs none."""
+    from l4.state.lifecycle import SPEC_EDIT_PHASES
+
+    assert frozenset(SPEC_EDITED_SOURCES) == SPEC_EDIT_PHASES
+    for phase in (P.IN_REVIEW, P.FIXING, P.IMPLEMENTING, P.WAITING_CAPACITY, P.MERGED, P.ABANDONED, P.REJECTED, None):
+        assert allowed_edge(phase, T.SPEC_EDITED) is None
+    writer, _ = writer_and_state(tmp_path)
+    at = fold([], "openspec:x").model_copy(update={"phase": P.HALTED.value, "previous_phase": "verifying"})
+    assert transition(writer, at, T.SPEC_EDITED).target is P.IMPLEMENTING
 
 
 def test_an_archived_unit_and_a_merged_one_are_not_abandoned_by_a_closed_merge_request(tmp_path: Path):

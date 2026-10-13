@@ -28,13 +28,14 @@ from l4.implementer.tasks import answers_unblock, open_blocking_questions, quest
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.sim.availability import ProbingAvailability, availability_json, roles_needed
 from l4.specs.questions import blocked_tasks
-from l4.state.lifecycle import TERMINAL, Phase
+from l4.state.lifecycle import SPEC_EDIT_PHASES, TERMINAL, Phase
 from l4.state.status import UnitSnapshot, snapshots
 from l4.vcs.git import Git
 from l4.verifier.verdicts import legacy_round, verdict_status
 
 PLAN_SCHEMA = "l4/plan@1"
 _TERMINAL_VALUES = {p.value for p in TERMINAL}
+_SPEC_EDIT_VALUES = {p.value for p in SPEC_EDIT_PHASES}
 _IMPLEMENT = {Phase.INTAKE.value, Phase.READY.value, Phase.IMPLEMENTING.value}
 _VERIFY = {Phase.IMPLEMENTED.value, Phase.VERIFYING.value}
 _FIXING = {Phase.FIXING.value}  # parked in the fix loop: a run takes the unit back into it (L4-OPS-009)
@@ -80,6 +81,9 @@ class UnitFacts:
     after_handoff: tuple[str, ...] = ()  # in_review: shas of the commits after H that the harness did not make
     spec_edit_after_handoff: bool = False  # in_review: those commits changed the unit folder (answers, spec edits)
     handoff_lost: bool = False  # in_review: no H on the branch (history rewritten)
+    spec_edited: tuple[
+        str, ...
+    ] = ()  # a person's commits after the harness's last one changed the unit folder (OPS-014)
     ci_failed_jobs: tuple[str, ...] = ()  # in_review: the project's CI is red on H, which is the branch head
     follow_up_items: tuple[str, ...] = ()  # merged: the feedback items (ids) a follow-up should take (L4-FBK-010)
     follow_up_open: str | None = None  # merged: the follow-up that is open, so newer items wait
@@ -139,6 +143,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         return "none", f"ledger corrupt: {facts.corrupt}"
     if facts.fix_unit_of:
         return "none", f"fix unit of {facts.fix_unit_of}: run the parent"
+    if facts.spec_edited and phase in _SPEC_EDIT_VALUES:  # a person's push re-enters the unit by itself (L4-OPS-014)
+        return "implement", f"spec edited after {phase}: {facts.spec_edited[-1][:10]}"
     pending = facts.tasks_done < facts.tasks_total
     if phase is None:
         if facts.tasks_total == 0:
@@ -246,6 +252,11 @@ def _review_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
     return facts
 
 
+def _spec_edit_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
+    edit = snapshot.spec_edit
+    return {"spec_edited": edit.shas} if edit is not None else {}
+
+
 def _follow_up_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
     offer = snapshot.follow_up
     if offer is None or not offer.items:
@@ -280,6 +291,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         fix_questions_open=fix_open,
         legacy_round=legacy_round(snapshot.state, snapshot.questions),
         **_review_facts(snapshot),
+        **_spec_edit_facts(snapshot),
         **_follow_up_facts(snapshot),
     )
 

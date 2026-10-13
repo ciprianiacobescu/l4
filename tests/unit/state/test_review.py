@@ -144,3 +144,42 @@ def test_a_forge_squash_commit_by_a_project_bot_is_not_the_harnesss(make_repo, r
     assert not is_harness(squash) and not is_harness_strict(squash)
     assert handoff_commit(b.git, "HEAD", NAME) == h  # H is still found beneath the squash commit
     assert handoff_commit(b.git, "HEAD~1", NAME) == h
+
+
+# --- L4-OPS-014: a person's spec edit since the harness's last commit ---------------------------------------------
+
+
+def test_a_spec_edit_since_the_harness_names_the_commits_and_the_harness_commit_before_them(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    last = b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None  # the head is the harness's own commit
+    first = b.commit("reword", {f"{UNIT_REL}/proposal.md": "new\n"}, bot=False, run=False)
+    second = b.commit("more", {"src/a.py": "a = 2\n"}, bot=False, run=False)
+    found = spec_edit_since_harness(b.git, "HEAD", UNIT_REL)
+    assert found is not None
+    assert (found.shas, found.base, found.head) == ((first, second), last, second)
+
+
+def test_only_files_the_harness_or_a_question_channel_owns_are_not_a_spec_edit(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    owned = {f"{UNIT_REL}/{name}": "x\n" for name in ("verification.md", "questions.md", "feedback.md")}
+    b.commit(
+        "channels", {**owned, f"{UNIT_REL}/.l4/ledger/b.jsonl": "{}\n", "src/a.py": "a = 5\n"}, bot=False, run=False
+    )
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None
+    b.commit("spec", {f"{UNIT_REL}/specs/greeting/spec.md": "x\n"}, bot=False, run=False)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is not None
+
+
+def test_a_sibling_fix_unit_folder_is_not_the_unit_folder(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    b.commit("fix unit", {f"{UNIT_REL}-fix-1/tasks.md": "- [ ] 1.1 x\n"}, bot=False, run=False)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None

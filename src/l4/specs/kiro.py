@@ -128,6 +128,33 @@ def _links_below(lines: Sequence[Line], line_number: int) -> tuple[str, ...]:
     return tuple(dict.fromkeys(refs))
 
 
+def _cites(link: str, requirement: str) -> bool:
+    """A link `2.3` cites criterion 2.3; a link `2` cites every 2.x."""
+    return link == requirement or requirement.startswith(f"{link}.")
+
+
+def cited_by_changed(tasks: Sequence[Task], changed: Collection[str]) -> list[str]:
+    """The keys of the done tasks that L4-OPS-015 reopens, in document order: every task whose `_Requirements:_` links
+    cite a changed criterion (with its descendants when it is a parent), and the parents of those."""
+    if not changed:
+        return []
+    cited: set[int] = set()
+    for index, task in enumerate(tasks):
+        if any(_cites(link, number) for link in task.links for number in changed):
+            end = index + 1
+            while end < len(tasks) and tasks[end].depth > task.depth:  # the descendants follow their parent
+                end += 1
+            cited.update(range(index, end))
+    parents: set[int] = set()
+    for index in cited:
+        depth = tasks[index].depth
+        for above in range(index - 1, -1, -1):
+            if tasks[above].depth < depth:
+                parents.add(above)
+                depth = tasks[above].depth
+    return [tasks[i].key for i in sorted(cited | parents) if tasks[i].done]
+
+
 def descendants(tasks: Sequence[Task], index: int) -> list[Task]:
     out = []
     for task in tasks[index + 1 :]:
@@ -317,6 +344,18 @@ class KiroProvider:
         self._write_done(path, task)
         while (parent := self._closable_parent(self.tasks(unit))) is not None:
             self._write_done(path, parent)
+
+    def reopen(self, unit: UnitRef, changed: Collection[str]) -> list[str]:
+        """L4-OPS-015: the done tasks that cite a changed criterion, and their parents, go back to `[ ]`
+        (`cited_by_changed`); their keys. One byte each, like the ticks; nothing is written when none cites one."""
+        tasks = self.tasks(unit)
+        keys = cited_by_changed(tasks, changed)
+        path = self.unit_dir(unit) / "tasks.md"
+        for task in tasks:
+            if task.key in keys:
+                assert task.marker_offset is not None  # the Kiro grammar admits exactly one marker byte
+                write_marker(path, task.marker_offset, task.marker_char.encode(), b" ")
+        return keys
 
     @staticmethod
     def _write_done(path: Path, task: Task) -> None:

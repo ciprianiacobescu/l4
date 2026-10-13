@@ -653,6 +653,8 @@ class Sweeper:
     def _push_hint(self, snapshot: UnitSnapshot, label: str) -> SweepAction | None:
         """A person pushed to a halted branch (a task edit, say): nothing retries it but the label or `l4 retry`, so
         say so, once per branch head (`resume.hint{head}` in the pending ledger)."""
+        if snapshot.spec_edit is not None:  # a spec edit re-enters the unit by itself at the next run (L4-OPS-014)
+            return None
         ref = snapshot.ref
         head = self.git.rev_parse(f"refs/remotes/origin/{unit_branch(ref.id, self.cfg.forge.branch_prefix)}")
         if head is None or head in snapshot.state.hinted_heads or not foreign_tail(self.git, head):
