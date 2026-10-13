@@ -10,6 +10,8 @@ This page shows what the code does today, not the full design. The parking edges
 escalated and their resume) can start from many phases, so they are drawn in a second small diagram instead of the
 main one.
 
+What to do in each phase, and how to resume or retry a unit, is in the [operations runbook](runbook.md).
+
 ## Main path
 
 ```mermaid

@@ -306,6 +306,8 @@ To ask for changes to a unit's code once its MR/PR is open (a refactor, a hard-c
 environment variable, a missing test), run `.l4/bin/l4 feedback add`, then commit and push. [docs/feedback.md](feedback.md)
 has one worked example for each kind and says what happens after the push.
 
+When a unit stops or does not move, use the [operations runbook](runbook.md).
+
 ## Conditional extras
 
 | When | Extra step |
