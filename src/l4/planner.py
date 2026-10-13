@@ -253,8 +253,10 @@ def _review_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
 
 
 def _spec_edit_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
-    edit = snapshot.spec_edit
-    return {"spec_edited": edit.shas} if edit is not None else {}
+    edit, pending = snapshot.spec_edit, snapshot.state.pending_spec_edit
+    if edit is not None:
+        return {"spec_edited": edit.shas}
+    return {"spec_edited": tuple(pending.commits)} if pending is not None else {}  # seen while fixing (L4-OPS-014)
 
 
 def _follow_up_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
