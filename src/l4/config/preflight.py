@@ -6,13 +6,14 @@ from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import require_forge_target, require_token_in_ci
+from l4.forge.urls import origin_url
 from l4.llm.system_one import ENGINES
 from l4.sandbox.caches import cache_dir
 
 
 def preflight_run_config(app: AppContext, cfg: L4Config) -> None:
     require_token_in_ci(cfg, app.environ)  # exit 3
-    require_forge_target(cfg, app.environ)  # exit 2
+    require_forge_target(cfg, app.environ, origin_url(app.repo, app.environ))  # exit 2: `origin` names a target too
     root = cache_root(app.environ, repo=app.repo).resolve()  # exit 2: relative, or inside the repository
     for name, cache in cfg.sandbox.caches.items():
         try:

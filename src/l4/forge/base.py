@@ -7,6 +7,7 @@ continuation) and 1.2 `make_forge` choosing by the origin URL; GitHub is forge-a
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Protocol, TypeVar
 from urllib.parse import urlsplit
 
@@ -202,9 +203,20 @@ class Forge(Protocol):
         """Start one more run of the harness's CI on `ref` for units a run left at its soft deadline (github-parity
         L4-GHP-004): `dispatched`, `already_queued` (one is waiting: nothing sent) or `unsupported`."""
 
+    def start_run(self, ref: str) -> "StartRun":
+        """Start the harness's CI on `ref` for an operator command (L4-OPS-002): `started`, `already_queued` (a run
+        waits: nothing sent), `refused` (the token may not start one: 401 or 403) or `unsupported` (the forge or the
+        project cannot). A refusal is an answer, never an exception; any other failure raises `ForgeError`."""
+
+    def close_pr(self, number: int, comment: str) -> PullRequest:
+        """Post `comment` on the pull request, then close it without a merge (L4-OPS-004 step 6). One that is no
+        longer open is left as it is: no comment, no write. Returns the pull request as the forge now has it; its
+        `state` (`open`, `closed` or `merged`) is also what `get_pr` says, so there is no separate state call."""
+
 
 Platform = Literal["gitlab", "github", "local"]
 Continuation = Literal["dispatched", "already_queued", "unsupported"]
+StartRun = Literal["started", "already_queued", "refused", "unsupported"]
 GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 GIT_USERNAMES = {"gitlab": "oauth2", "github": "x-access-token"}  # what git sends with the token as the password
 _SCP_URL = re.compile(r"^(?:[^@/\s]+@)?(?P<host>[A-Za-z0-9.-]+):(?P<path>[^/\s][^\s]*)$")
@@ -284,10 +296,12 @@ def require_token_in_ci(cfg: L4Config, environ: Mapping[str, str]) -> None:
     )
 
 
-def fetch_auth_config(cfg: L4Config, environ: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+def fetch_auth_config(
+    cfg: L4Config, environ: Mapping[str, str], origin_url: str | None = None
+) -> tuple[tuple[str, str], ...]:
     """The credential helper for `git fetch` of the origin; none without a forge token (a public or ssh remote) and
-    none for a local forge."""
-    platform = forge_platform(cfg, environ)
+    none for a local forge. `origin_url` names the platform outside CI (L4-OPS-011)."""
+    platform = forge_platform(cfg, environ, origin_url)
     if platform not in GIT_USERNAMES or not environ.get(cfg.forge.token_env):
         return ()
     from l4.forge.gitlab import git_auth_config
@@ -295,15 +309,21 @@ def fetch_auth_config(cfg: L4Config, environ: Mapping[str, str]) -> tuple[tuple[
     return git_auth_config(cfg.forge.token_env, username=GIT_USERNAMES[platform])
 
 
-def _gitlab_target(cfg: L4Config, environ: Mapping[str, str]) -> tuple[str, str]:
-    """API URL and project: the CI variables inside CI, `forge.gitlab` otherwise; a gap is a config error (exit 2)."""
+def _gitlab_target(cfg: L4Config, environ: Mapping[str, str], origin_url: str | None = None) -> tuple[str, str]:
+    """API URL and project: the CI variables inside CI, `forge.gitlab` otherwise, and each one still missing from the
+    `origin` remote (`https://<host>/api/v4`, the path without `.git`: L4-OPS-011); a gap is a config error (exit 2)."""
     in_ci = environ.get("GITLAB_CI") == "true"
+    remote = parse_remote_url(origin_url or "")
     api_url = (environ.get("CI_API_V4_URL") if in_ci else None) or cfg.forge.gitlab.api_url
     project = (environ.get("CI_PROJECT_ID") if in_ci else None) or cfg.forge.gitlab.project
+    if remote is not None:
+        api_url = api_url or f"https://{remote.host}/api/v4"
+        project = project or remote.path
     if not api_url or not project:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
-            "forge.gitlab.api_url and forge.gitlab.project must be set for a run outside GitLab CI",
+            "forge.gitlab.api_url and forge.gitlab.project must be set for a run outside GitLab CI "
+            "(or the origin remote must name the project)",
         )
     return api_url, project
 
@@ -324,15 +344,16 @@ def _github_target(environ: Mapping[str, str], origin_url: str | None) -> tuple[
     return repo, api
 
 
-def require_forge_target(cfg: L4Config, environ: Mapping[str, str]) -> None:
-    """With a token set, the forge needs a target: say so before the lease, a worktree or the sandbox self-test."""
-    platform = forge_platform(cfg, environ)
+def require_forge_target(cfg: L4Config, environ: Mapping[str, str], origin_url: str | None = None) -> None:
+    """With a token set, the forge needs a target: say so before the lease, a worktree or the sandbox self-test. The
+    `origin` remote counts as a target (L4-OPS-011, SCN-OPS-18)."""
+    platform = forge_platform(cfg, environ, origin_url)
     if not environ.get(cfg.forge.token_env):
         return
     if platform == "gitlab":
-        _gitlab_target(cfg, environ)
+        _gitlab_target(cfg, environ, origin_url)
     elif platform == "github":
-        _github_target(environ, None)
+        _github_target(environ, origin_url)
 
 
 def make_forge(
@@ -341,8 +362,14 @@ def make_forge(
     *,
     transport: httpx.BaseTransport | None = None,
     origin_url: str | None = None,
+    repo: Path | None = None,
 ) -> Forge:
-    """The forge of this run (`forge_platform`); `ForgeUnavailable` when a real forge has no token."""
+    """The forge of this run (`forge_platform`); `ForgeUnavailable` when a real forge has no token. `repo`: where to
+    read the `origin` remote from when the caller has not read it (L4-OPS-011); `origin_url` wins."""
+    if origin_url is None and repo is not None:
+        from l4.forge.urls import origin_url as read_origin_url
+
+        origin_url = read_origin_url(repo, environ)
     platform = forge_platform(cfg, environ, origin_url)
     if platform == "local":
         from l4.forge.local import LocalForge
@@ -355,11 +382,11 @@ def make_forge(
         if platform == "github":
             from l4.forge.github import DEFAULT_API, GitHubForge
 
-            repo, api = _github_target(environ, origin_url)
-            return GitHubForge(repo, token, api_url=api or DEFAULT_API, transport=transport)
+            slug, api = _github_target(environ, origin_url)
+            return GitHubForge(slug, token, api_url=api or DEFAULT_API, transport=transport)
         from l4.forge.gitlab import GitLabForge
 
-        api_url, project = _gitlab_target(cfg, environ)
+        api_url, project = _gitlab_target(cfg, environ, origin_url)
         return GitLabForge(api_url, project, token, transport=transport)
     except ValueError as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, str(exc)) from None
@@ -368,7 +395,6 @@ def make_forge(
 __all__ = [
     "MAX_TAIL_CHARS", "MAX_TAIL_LINES", "STICKY_MARKER", "UNFINISHED", "Forge", "ForgeAuthError", "ForgeError",
     "ForgeNotFound", "ForgeRateLimited", "ForgeUnavailable", "JobResult", "LabelEvent", "Platform", "PrState",
-    "PullRequest",
-    "RemoteUrl", "clip_log", "fetch_auth_config", "forge_platform", "forge_wanted", "make_forge", "parse_remote_url",
-    "require_forge_target", "require_token_in_ci",
+    "PullRequest", "RemoteUrl", "StartRun", "clip_log", "fetch_auth_config", "forge_platform", "forge_wanted",
+    "make_forge", "parse_remote_url", "require_forge_target", "require_token_in_ci",
 ]  # fmt: skip

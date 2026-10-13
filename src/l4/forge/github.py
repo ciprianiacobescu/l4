@@ -33,6 +33,7 @@ from l4.forge.base import (
     LabelEvent,
     PrState,
     PullRequest,
+    StartRun,
     clip_log,
     post_once,
 )
@@ -309,6 +310,22 @@ class GitHubForge:
             self._graphql(_DRAFT if draft else _READY, id=raw["node_id"])
         return self.get_pr(number) if payload or (draft is not None and draft != current.draft) else current
 
+    def close_pr(self, number: int, comment: str) -> PullRequest:
+        """The comment first (an issue comment, found again by its text after a lost response, never posted twice),
+        then `PATCH pulls/:n {state: closed}`. A pull request that is not open is returned as it is (L4-OPS-004)."""
+        current = self.get_pr(number)
+        if current.state != "open":
+            return current
+        path = f"/repos/{self._repo}/issues/{number}/comments"
+
+        def find() -> dict[str, Any] | None:
+            return next((c for c in self._pages(path) if str(c.get("body", "")) == comment), None)
+
+        if find() is None:
+            post_once(lambda: self._request("POST", path, json={"body": comment}).json(), find, self._pause)
+        self._request("PATCH", f"/repos/{self._repo}/pulls/{number}", json={"state": "closed"})
+        return self.get_pr(number)
+
     # --- labels -------------------------------------------------------------------------------------------------
 
     def ensure_labels(self, names: Sequence[str]) -> None:
@@ -434,6 +451,17 @@ class GitHubForge:
             return "already_queued"
         self._request("POST", f"{base}/dispatches", json={"ref": ref})
         return "dispatched"
+
+    def start_run(self, ref: str) -> StartRun:
+        """The dispatch of `dispatch_continuation` in the words of L4-OPS-002: `dispatched` is `started`; a token that
+        may not dispatch (401, 403) is `refused`; no `l4.yml` on the ref (404) is `unsupported`."""
+        try:
+            answer = self.dispatch_continuation(ref)
+        except ForgeAuthError:
+            return "refused"
+        except ForgeNotFound:
+            return "unsupported"
+        return "started" if answer == "dispatched" else answer
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:
         """`actions/jobs/:id/logs` answers with a redirect to a pre-signed URL; it is followed without the token

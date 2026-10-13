@@ -73,18 +73,45 @@ def test_ci_without_the_token_is_exit_3_and_names_the_variable():
     require_token_in_ci(cfg(type="local"), {"GITLAB_CI": "true"})
 
 
-def test_a_token_without_url_or_project_outside_ci_is_exit_2_in_preflight():
-    from pathlib import Path
+def _preflight_app(tmp_path, git_environ, origin: str | None, **env: str):
+    import subprocess
 
-    from l4.config.preflight import preflight_run_config
     from l4.context import AppContext
     from l4.redact import Redactor
 
-    environ = {"L4_FORGE_TOKEN": TOKEN, "HOME": "/nonexistent"}
-    app = AppContext(Path("."), None, "human", 0, "r-1", environ, Redactor({}))
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=git_environ)
+    if origin:
+        subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", origin], check=True, env=git_environ)
+    environ = {**git_environ, "L4_FORGE_TOKEN": TOKEN, "L4_CACHE": str(tmp_path.parent / "cache"), **env}
+    return AppContext(tmp_path, None, "human", 0, "r-1", environ, Redactor({}))
+
+
+def _runnable_cfg():
+    """A config whose only gap is the one a test is about (the preflight checks the roles too)."""
+    return L4Config.model_validate({
+        "profiles": {"a": {"adapter": "codex", "model": "m", "auth": "subscription", "vendor": "openai"}},
+        "roles": {"implementer": ["a"], "judges": ["a"]},
+    })  # fmt: skip
+
+
+def test_a_token_without_url_or_project_outside_ci_is_exit_2_in_preflight(tmp_path, git_environ):
+    from l4.config.preflight import preflight_run_config
+
+    app = _preflight_app(tmp_path / "r", git_environ, None)  # no origin either
     with pytest.raises(L4Exit) as err:
-        preflight_run_config(app, cfg())
+        preflight_run_config(app, _runnable_cfg())
     assert err.value.code == ExitCode.USAGE_ERROR and "forge.gitlab.api_url" in str(err.value)
+
+
+def test_a_laptop_clone_needs_no_project_setting_in_preflight(tmp_path, git_environ):
+    """SCN-OPS-18 (L4-OPS-011): a github.com origin and a token, no GITHUB_REPOSITORY: no exit 2."""
+    from l4.config.preflight import preflight_run_config
+
+    app = _preflight_app(tmp_path / "gh", git_environ, "git@github.com:o/n.git")
+    preflight_run_config(app, _runnable_cfg())
+    gitlab = _preflight_app(tmp_path / "gl", git_environ, "git@gitlab.example.com:g/sub/p.git")
+    preflight_run_config(gitlab, _runnable_cfg())
 
 
 def test_require_forge_target_is_quiet_without_a_token_or_with_a_complete_target():
