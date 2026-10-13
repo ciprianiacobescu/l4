@@ -174,6 +174,15 @@ def test_languages_and_multiple_places(ctx: Ctx):
     assert [p.label for p in item.places] == ["a.ts:1", "b.unknown", f"{SOURCE}:2"]
 
 
+def test_the_default_title_ends_on_a_word(ctx: Ctx):
+    """The default title (it also goes into the printed commit message) is cut on a word boundary, not mid-word."""
+    text = "The low-stock threshold 5 is hard-coded; read it from LOW_STOCK_THRESHOLD (an integer), default 5."
+    ctx.run("add", "--kind", "tests", "--text", text)
+    title = FeedbackFile.load(ctx.repo / FOLDER).get("FB-001").title
+    assert title == "The low-stock threshold 5 is hard-coded; read it from"  # 73 with the next word
+    assert len(title) <= 72 and text.startswith(title)
+
+
 def test_text_from_stdin_title_draft_lesson_and_by(ctx: Ctx, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("A very long first line " + "w" * 100 + "\nsecond line\n"))
     out = ctx.run("add", "--kind", "tests", "--text", "-", "--draft", "--lesson")
