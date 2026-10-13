@@ -210,6 +210,16 @@ class Git:
                     self.on_push(branch, expected or None, new)
         return done
 
+    def replace_branch(
+        self, remote: str, branch: str, expected: str, *, config: Sequence[tuple[str, str]] = ()
+    ) -> GitResult:
+        """Push HEAD over the unit branch under a lease on `expected` (`''`: the branch must not exist). The one place
+        that replaces a branch: `l4 restart` (L4-OPS-004), after the old head is kept as a ref. `PushRejected` when the
+        branch is no longer at `expected` (a person pushed since), so nothing is overwritten; unlike `push_branch` there
+        is no fast-forward check, because the new branch does not contain the old head."""
+        cancel.check()
+        return self._push(build_branch_push_args(remote, branch, expected), config, is_lost_lease)
+
     def push_lease(
         self, remote: str, sha: str, ref: str, expected: str, *, config: Sequence[tuple[str, str]] = ()
     ) -> GitResult:

@@ -90,7 +90,8 @@ from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter,
 from l4.state.lifecycle import Edge, Phase, Trigger, allowed_edge, transition
 from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
 from l4.state.reconcile import reconcile
-from l4.state.review import after_handoff, review_note, review_trigger
+from l4.state.review import _owned as harness_owned
+from l4.state.review import after_handoff, foreign_tail, review_note, review_trigger
 from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
@@ -361,25 +362,52 @@ class Orchestrator:
         by: str | None = None,
         extend_fix_rounds: int | None = None,
         extend_feedback_rounds: int | None = None,
+        event: str = "unit.resumed",
+        trigger: Trigger = Trigger.RESUMED,
+        what: str = "resume",
+        spec_edit_check: bool = False,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
         `l4 run` continues the unit. `signal` (`label:<event id>`) and `by` (`member`) say that a member's `l4:resume`
         label asked for it: one resume per signal. `extend_fix_rounds` records `budget.extended` first, so that the fold
         has the extra rounds when the verifier decides again; `extend_feedback_rounds` is the same for the feedback
-        limit (`feedback_rounds` in the same event, L4-FBK-006)."""
+        limit (`feedback_rounds` in the same event, L4-FBK-006).
+
+        `l4 retry` is the same step with its own words (L4-OPS-001): `event` is `unit.retried` (it folds like
+        `unit.resumed`), `what` is `retry` (the subject of the commit), and `trigger` is the edge of the phase it
+        leaves (`capacity_restored`, `retry_requested`). With `spec_edit_check` a halted or escalated unit whose branch
+        carries a person's change to the unit folder after the stop takes `spec_edit_since_stop` instead
+        (L4-OPS-003)."""
         before = self._refold().phase or "none"
-        self._commit_what = "resume"
+        self._commit_what = what
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
         if extend_fix_rounds or extend_feedback_rounds:
             rounds = {
                 k: v for k, v in (("fix_rounds", extend_fix_rounds), ("feedback_rounds", extend_feedback_rounds)) if v
             }
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
-        self.services.ledger.append("unit.resumed", reason=reason[:300], **extra)
+        self.services.ledger.append(event, reason=reason[:300], **extra)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
-        self._go(Trigger.RESUMED)
+        if spec_edit_check and before in (Phase.HALTED.value, Phase.ESCALATED.value) and self._edited_since_stop():
+            trigger = Trigger.SPEC_EDIT_SINCE_STOP
+        self._go(trigger)
         return UnitRunResult(self._outcome(before), ExitCode.OK)
+
+    def _edited_since_stop(self) -> bool:
+        """L4-OPS-003, SCN-OPS-06, SCN-OPS-07: a person's commits after the harness's last commit (the stop) changed a
+        file of the unit folder that is not the harness's (`.l4/`, `verification.md`). A change elsewhere, `src/`
+        for one, is not a change of the spec."""
+        s = self.services
+        tail = foreign_tail(s.git, "HEAD")
+        if not tail:
+            return False
+        rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
+        names = s.git.run("diff", "--name-only", "-z", f"{tail[0].sha}^", "HEAD", "--", f":(literal){rel}").stdout
+        prefix = rel.rstrip("/") + "/"
+        return any(
+            not harness_owned(path.removeprefix(prefix)) for path in names.split("\0") if path.startswith(prefix)
+        )
 
     def _reconcile(self) -> None:
         """A step that a killed run left half done is reconciled before anything else (L4-STA-003). A restored
@@ -1091,11 +1119,17 @@ def run_unit_in_worktree(
     resume_by: str | None = None,
     resume_extend_fix_rounds: int | None = None,
     resume_extend_feedback_rounds: int | None = None,
+    resume_event: str = "unit.resumed",
+    resume_trigger: Trigger = Trigger.RESUMED,
+    resume_what: str = "resume",
+    resume_spec_edit_check: bool = False,
     waits: RunWaits | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
-    lease is held. `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
+    lease is held. `resume_event`, `resume_trigger`, `resume_what` and `resume_spec_edit_check` make the resume an
+    `l4 retry` (L4-OPS-001, `Orchestrator.resume`). `waits`: what the run's earlier units waited for a cool-down
+    (L4-AVL-011)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
         ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
@@ -1148,6 +1182,10 @@ def run_unit_in_worktree(
                 by=resume_by,
                 extend_fix_rounds=resume_extend_fix_rounds,
                 extend_feedback_rounds=resume_extend_feedback_rounds,
+                event=resume_event,
+                trigger=resume_trigger,
+                what=resume_what,
+                spec_edit_check=resume_spec_edit_check,
             )
         )
         code, failed = result.exit_code, False

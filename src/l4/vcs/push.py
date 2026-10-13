@@ -41,6 +41,7 @@ def build_push_args(remote: str, refspecs: Sequence[str]) -> list[str]:
             raise ForcedPushRefused(f"option-like refspec refused: {spec!r}")
     return ["push", "--", remote, *refspecs]
 
+
 _NON_FAST_FORWARD = re.compile(r"^\s*! \[rejected\].*\((?:non-fast-forward|fetch first)\)", re.MULTILINE)
 # what git (client side) and a server (when the race is lost between the check and the update) say about a lease that
 # no longer holds; any other refusal, a hook or a permission, is not worth another try
@@ -48,9 +49,10 @@ LEASE_LOST = ("stale info", "failed to update ref", "cannot lock ref", "failed t
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 LOCK_REF_PREFIX = "refs/l4/locks/"
 ARCHIVED_REF_PREFIX = "refs/l4/archived/"
+ATTEMPT_REF_PREFIX = "refs/l4/attempts/"  # `l4 restart` keeps old heads here (L4-OPS-004)
 
 
-def _plain_ref(ref: str, prefix: str) -> bool:
+def _plain_ref(ref: str, prefix: str | tuple[str, ...]) -> bool:
     bad = ref.endswith("/") or re.search(r"[^A-Za-z0-9._/-]", ref) or ".." in ref
     return ref.startswith(prefix) and not bad
 
@@ -84,15 +86,16 @@ def build_lease_push_args(remote: str, sha: str, ref: str, expected: str) -> lis
 
 
 def build_retire_args(remote: str, sha: str, ref: str, archived: str) -> list[str]:
-    """Move the lock ref `ref` to `archived` (a ref that must not exist yet) in one atomic push, only if `ref` still
-    holds `sha`: the commit, and the pending ledger in it, is kept under the new name."""
+    """Move the lock ref `ref` to `archived` (a ref that must not exist yet, under `refs/l4/archived/` or, for
+    `l4 restart`, `refs/l4/attempts/`) in one atomic push, only if `ref` still holds `sha`: the commit, and the pending
+    ledger in it, is kept under the new name."""
     if not remote or remote.startswith("-"):
         raise ForcedPushRefused(f"not a remote name: {remote!r}")
     if not _OBJECT_ID.match(sha):
         raise ForcedPushRefused(f"not a commit id: {sha!r}")
     if not _plain_ref(ref, LOCK_REF_PREFIX):
         raise ForcedPushRefused(f"not a lock ref: {ref!r}")
-    if not _plain_ref(archived, ARCHIVED_REF_PREFIX):
+    if not _plain_ref(archived, (ARCHIVED_REF_PREFIX, ATTEMPT_REF_PREFIX)):
         raise ForcedPushRefused(f"not an archived ref: {archived!r}")
     return [
         "push", "--atomic", f"--force-with-lease={ref}:{sha}", f"--force-with-lease={archived}:", "--", remote,

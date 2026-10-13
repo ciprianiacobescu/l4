@@ -176,6 +176,18 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
         _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
+    "retry": ("Continue a stopped unit from where it stopped, then start a run.", lambda: [
+        _unit(True),
+        _opt("--reason", "reason", required=True, help="Why the unit is tried again (kept in the ledger)."),
+        _opt("--rounds", "rounds", type=int,
+             help="Escalated at its fix-round (or feedback) limit: how many rounds to add (default 1)."),
+        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+    ]),
+    "restart": ("Start a unit over on a new branch; the old branch head is kept as a ref.", lambda: [
+        _unit(True),
+        _opt("--reason", "reason", required=True, help="Why the unit starts over (kept in the ledger)."),
+        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+    ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
         _opt("--api-base", "api_base", help="GitLab API base (default: forge.gitlab.api_url, else from `origin`)."),
@@ -265,7 +277,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
 
 
 # the commands that change a unit's branch or the forge: a signal or the end of their CI job stops them (W-D2)
-_CANCELLABLE = frozenset({"run", "verify", "archive", "resume"})
+_CANCELLABLE = frozenset({"run", "verify", "archive", "resume", "retry", "restart"})
 
 
 def _build_app(options: Mapping[str, Any], environ: Mapping[str, str]) -> AppContext:
