@@ -104,6 +104,25 @@ def _installed_coverage() -> Any:
     return loaded
 
 
+def _pin_sqlite3() -> None:
+    """coverage.py keeps its data in SQLite: it calls `sqlite3.connect` when a test function starts (the
+    `test_function` context) and when it saves. A test that replaces `sqlite3.connect` to show that the code opens no
+    database (live: a free model's test for "the health check reads no database") then breaks coverage's own write,
+    and pytest stops with INTERNALERROR on a suite that passes without this plugin. Coverage's modules get a copy of
+    `sqlite3` taken now, before any conftest or test is imported: a test's patch changes only the real module."""
+    import importlib
+    import sqlite3
+    import types
+
+    pinned = types.ModuleType("sqlite3", sqlite3.__doc__)
+    pinned.__dict__.update(vars(sqlite3))
+    for name in ("coverage.sqlitedb", "coverage.sqldata", "coverage.numbits"):
+        with contextlib.suppress(Exception):  # a coverage.py without one of them keeps the shared module
+            module = importlib.import_module(name)
+            if getattr(module, "sqlite3", None) is sqlite3:
+                module.sqlite3 = pinned
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_load_initial_conftests(early_config: pytest.Config, parser: Any, args: list[str]) -> None:
     rc = os.environ.get("L4_COV_RC")
@@ -124,6 +143,7 @@ def pytest_load_initial_conftests(early_config: pytest.Config, parser: Any, args
             return _abandon("the coverage module is not the installed coverage.py (a repository module shadows it)")
         except Exception:  # noqa: BLE001 - ImportError, or whatever a broken install raises
             return _abandon("coverage.py is not importable in the project environment")
+        _pin_sqlite3()
         cov = coverage.Coverage(config_file=rc)
         cov.erase()
         cov.start()
