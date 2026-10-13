@@ -88,13 +88,19 @@ def test_first_release_has_no_parent_only_the_listed_paths_and_a_named_message(r
 def test_second_release_parent_is_the_first(repo: Path):
     rc = load()
     first = rc.build(repo, git(repo, "rev-parse", "HEAD"), "0.3.0")
-    changes = {"src/l4/deep/mod.py": "x = 2\n", "LICENSE": "MIT\n", "skills/l4/SKILL.md": "s\n"}
+    changes = {
+        "src/l4/deep/mod.py": "x = 2\n", "LICENSE": "MIT\n", ".claude-plugin/marketplace.json": "{}\n",
+        "plugins/l4/.claude-plugin/plugin.json": "{}\n", "plugins/l4/skills/l4/SKILL.md": "s\n",
+        "plugins/l4/tests/baseline.md": "b\n",
+    }  # fmt: skip
     second_source = commit_all(repo, changes, "two")
     second = rc.build(repo, second_source, "0.3.1")
     assert git(repo, "rev-parse", f"{second}^") == first
     assert git(repo, "rev-parse", "release") == second
     shipped = files_of(repo, second)
-    assert "LICENSE" in shipped and "skills/l4/SKILL.md" in shipped
+    assert "LICENSE" in shipped and "plugins/l4/skills/l4/SKILL.md" in shipped
+    assert ".claude-plugin/marketplace.json" in shipped and "plugins/l4/.claude-plugin/plugin.json" in shipped
+    assert "plugins/l4/tests/baseline.md" not in shipped  # the skill's test records stay out of a release
     assert not any(f.startswith(("docs/", "tests/", ".github/workflows/")) for f in shipped)
     assert git(repo, "show", f"{second}:src/l4/deep/mod.py") == "x = 2"
 

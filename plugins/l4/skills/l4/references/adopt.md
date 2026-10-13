@@ -41,8 +41,9 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/a
   `--action-copy`.
 - **Then edit `.l4/config.yaml`:**
   - **Agents that can log in on a GitHub-hosted runner** (init prints a `todo:` when the default ones cannot):
-    - Claude Code with `auth: subscription` takes `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`);
-    - kiro-cli and codex need `auth: api_key` (`KIRO_API_KEY`, `CODEX_API_KEY`);
+    - Claude Code takes `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`);
+    - kiro-cli takes `KIRO_API_KEY`;
+    - codex needs `auth: api_key` (`CODEX_API_KEY`), since its subscription login is a local file;
     - OpenCode's free models need no key.
 
     Give the implementer and the judges different vendors.

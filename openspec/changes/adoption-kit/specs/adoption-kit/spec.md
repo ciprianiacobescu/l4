@@ -131,7 +131,7 @@ Further rules:
 ### Requirement: L4-ACT-006 Releases are slim commits on a release branch
 The harness repository SHALL have `release.yml`. On a tag `src-vX.Y.Z` it MUST:
 1. build a commit on branch `release`, holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`, `LICENSE` (when
-   present), `.github/actions/l4/` and `skills/`. Its parent is the previous release commit, and its message names the
+   present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`). Its parent is the previous release commit, and its message names the
    source sha;
 2. check that its tree equals a `git archive` of those paths at the source sha;
 3. tag it `vX.Y.Z` and move `v0`;
@@ -156,7 +156,7 @@ moved, and on `workflow_dispatch`. A summary job fails when any shard fails.
 - **THEN** exactly that shard fails, and the summary job fails
 
 ### Requirement: L4-SKL-001 An installable `l4` skill
-The harness repository SHALL hold `skills/l4/SKILL.md` in the Agent Skills format:
+The harness repository SHALL hold `plugins/l4/skills/l4/SKILL.md` in the Agent Skills format:
 - frontmatter `name: l4`;
 - a description that starts "Use when…" and names the triggers (adopting L4, a unit's status, questions, feedback, an
   escalated or halted unit);
@@ -173,8 +173,8 @@ skill MUST never ask for, print or move a secret, and never tells an agent to ru
 
 ### Requirement: L4-SKL-002 The skill is written against recorded failures
 Before the skill is written, subagents without it SHALL attempt the scenarios of design D8, and their answers are
-recorded in `skills/l4/tests/baseline.md`. The same scenarios MUST then be run with the skill, with the outcomes in
-`skills/l4/tests/with-skill.md`. Every scenario that applies MUST pass, and any loophole found is closed and re-run.
+recorded in `plugins/l4/tests/baseline.md`. The same scenarios MUST then be run with the skill, with the outcomes in
+`plugins/l4/tests/with-skill.md`. Every scenario that applies MUST pass, and any loophole found is closed and re-run.
 
 #### Scenario: SCN-SKL-02 (+) The feedback kind is chosen right
 - **GIVEN** the request "the base URL is hard-coded; make it configurable"

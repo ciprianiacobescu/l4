@@ -19,9 +19,9 @@
 
 ## 4. The `l4` skill
 
-- [ ] 4.1 Baseline: run the design D8 scenarios with subagents that do not have the skill; record their answers verbatim in skills/l4/tests/baseline.md [L4-SKL-002] — test: the recorded transcripts — code: skills/l4/tests/baseline.md — verify: every scenario has an answer and a verdict
-- [ ] 4.2 Write `skills/l4/SKILL.md` (< 500 words) and `references/{adopt,operate,feedback}.md` against the recorded failures; `.claude-plugin/plugin.json` and `marketplace.json` [L4-SKL-001] [SCN-SKL-01] — test: skills/l4/tests/with-skill.md (the same scenarios with the skill) — code: skills/l4/**, .claude-plugin/** — verify: every applicable scenario passes; loopholes closed and re-run; `/plugin marketplace add` and `/plugin install` work in a fresh session
-- [ ] 4.3 Re-run the feedback scenarios once human-feedback is merged (SCN-SKL-02, SCN-SKL-03, the feedback-limit resume) [L4-SKL-002] — test: skills/l4/tests/with-skill.md — code: skills/l4/references/feedback.md — verify: they pass
+- [ ] 4.1 Baseline: run the design D8 scenarios with subagents that do not have the skill; record their answers verbatim in plugins/l4/tests/baseline.md [L4-SKL-002] — test: the recorded transcripts — code: plugins/l4/tests/baseline.md — verify: every scenario has an answer and a verdict
+- [ ] 4.2 Write `plugins/l4/skills/l4/SKILL.md` (< 500 words) and `references/{adopt,operate,feedback}.md` against the recorded failures; `.claude-plugin/plugin.json` and `marketplace.json` [L4-SKL-001] [SCN-SKL-01] — test: plugins/l4/tests/with-skill.md (the same scenarios with the skill) — code: plugins/l4/**, .claude-plugin/marketplace.json — verify: every applicable scenario passes; loopholes closed and re-run; `/plugin marketplace add` and `/plugin install` work in a fresh session
+- [ ] 4.3 Re-run the feedback scenarios once human-feedback is merged (SCN-SKL-02, SCN-SKL-03, the feedback-limit resume) [L4-SKL-002] — test: plugins/l4/tests/with-skill.md — code: plugins/l4/skills/l4/references/feedback.md — verify: they pass
 
 ## 5. SPEC, docs and live evidence
 

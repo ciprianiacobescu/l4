@@ -65,7 +65,7 @@ parallel… But always validate it."
   - The unit suite runs in shards on pull requests to `amaster`, nightly, and on demand.
   - An action self-test job runs `.github/actions/l4` from the checkout.
   - Dependabot covers the harness repository's own action pins.
-- **An installable `l4` skill** in the Agent Skills format: `skills/l4/SKILL.md` with reference files.
+- **An installable `l4` skill** in the Agent Skills format: `plugins/l4/skills/l4/SKILL.md` with reference files.
   - It is a Claude Code plugin with a marketplace entry in this repository, and Codex can load it from
     `~/.agents/skills/`.
   - It covers adopting L4, reading status, answering questions, giving feedback and resuming.
@@ -94,7 +94,7 @@ into the action on GitHub) and §21 (delivery row 18).
 ## Impact
 
 - **Harness repository:** `.github/actions/l4/action.yml`, `.github/workflows/{checks,release,action-selftest}.yml`,
-  `.github/dependabot.yml`, `skills/l4/**`, `.claude-plugin/{plugin,marketplace}.json`.
+  `.github/dependabot.yml`, `plugins/l4/**` and `.claude-plugin/marketplace.json`.
 - **Code:**
   - `src/l4/ci/github.py` and `templates/l4.github.yml`: the action form;
   - `src/l4/ci/render.py`;

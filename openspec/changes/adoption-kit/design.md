@@ -120,7 +120,7 @@ resolves to nothing is exit 2.
 
 On a tag `src-vX.Y.Z` pushed to the harness repository, `release.yml`:
 1. builds a commit on branch `release` that holds only `src/`, `pyproject.toml`, `uv.lock`, `README.md`, `LICENSE`
-   (when present), `.github/actions/l4/` and `skills/`. Its parent is the previous release commit, and its message
+   (when present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`). Its parent is the previous release commit, and its message
    names the source sha;
 2. tags it `vX.Y.Z` and moves `v0` to it;
 3. creates a GitHub release listing the source sha and the checks that passed on it.
@@ -143,18 +143,18 @@ on every job.
 ### D8. The `l4` skill
 
 - **Files:**
-  - `skills/l4/SKILL.md`: frontmatter `name: l4`, and a description that starts "Use when…" and names the triggers:
+  - `plugins/l4/skills/l4/SKILL.md`: frontmatter `name: l4`, and a description that starts "Use when…" and names the triggers:
     adopting L4, a unit's status, questions, feedback, an escalated or halted unit. The body is under 500 words;
   - references `adopt.md`, `operate.md` (status, questions, resume) and `feedback.md` (one row per kind, the mistakes
     to avoid).
 - **Packaging:**
-  - `.claude-plugin/plugin.json` (`name: l4`, the `skills/` folder);
+  - `plugins/l4/.claude-plugin/plugin.json` (`name: l4`) with the skill in `plugins/l4/skills/l4/`, and `.claude-plugin/marketplace.json` at the repository root listing it with `source: ./plugins/l4` (a plugin at the root would make the whole repository the plugin);
   - `.claude-plugin/marketplace.json` listing it, so `/plugin marketplace add ciprianiacobescu/agent-supervisor` then
     `/plugin install l4@agent-supervisor` works for anyone with read access;
-  - Codex: `cp -R skills/l4 ~/.agents/skills/`.
+  - Codex: `cp -R plugins/l4/skills/l4 ~/.agents/skills/`.
 - **Written test-first** (superpowers writing-skills):
   1. Baseline: subagents without the skill attempt the scenarios, and their failures are recorded in
-     `skills/l4/tests/baseline.md`.
+     `plugins/l4/tests/baseline.md`.
   2. The skill is written to address them.
   3. The same scenarios are run with the skill.
 

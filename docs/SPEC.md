@@ -217,7 +217,7 @@ nothing with `--dry-run`. A second run changes nothing.
 
 **L4-ACT-006** The harness repository MUST have `release.yml`. On a tag `src-vX.Y.Z` it MUST: refuse a source commit
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
-`LICENSE` (when present), `.github/actions/l4/` and `skills/`, whose parent is the previous release commit and whose
+`LICENSE` (when present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`), whose parent is the previous release commit and whose
 message names the source sha (`scripts/dev/release_commit.py`); check that its tree equals a `git archive` of those
 paths at the source sha; tag it `vX.Y.Z` and move `v0`; and create a GitHub release naming the source sha. Consumers
 pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27 MB `docs/live/` adds to the main history.
@@ -237,7 +237,7 @@ caches across a harness upgrade; `l4 init --action` on a fresh copy; a full `doc
 through the action; one release; one sharded pull-request check. Temporary deploy keys MUST be removed after their
 test.
 
-**L4-SKL-001** The harness repository MUST hold an installable `l4` skill, `skills/l4/SKILL.md`, in the Agent Skills
+**L4-SKL-001** The harness repository MUST hold an installable `l4` skill, `plugins/l4/skills/l4/SKILL.md`, in the Agent Skills
 format: frontmatter `name: l4`, a description that starts "Use when…" and names the triggers (adopting L4, a unit's
 status, questions, feedback, an escalated or halted unit), a body under 500 words, and the references `adopt.md`,
 `operate.md` and `feedback.md`. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` MUST make it
@@ -250,8 +250,8 @@ the scenarios (a configurable URL is `config` with `--env`; renaming a function 
 `refactor`; refusing to mark one's own feedback item addressed by editing `feedback.md`; a private repository is adopted
 with the action, source `action` and no key; a public one with a deploy key; a verdict question is answered with
 `accept` or `reject` first; an escalated unit at the feedback limit resumes with `l4 resume --extend-feedback-rounds`,
-once human-feedback is merged), and their answers go to `skills/l4/tests/baseline.md`. The same scenarios are then run
-with the skill (`skills/l4/tests/with-skill.md`); every scenario that applies MUST pass, and any loophole found is
+once human-feedback is merged), and their answers go to `plugins/l4/tests/baseline.md`. The same scenarios are then run
+with the skill (`plugins/l4/tests/with-skill.md`); every scenario that applies MUST pass, and any loophole found is
 closed and re-run. [Not yet built: delivery change 18, tasks 4.1–4.3.]
 
 Runtime prerequisites on the runner. `doctor` checks them. In CI they are installed only:
