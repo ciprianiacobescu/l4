@@ -80,6 +80,7 @@ def test_unit_flag_and_no_unit(ctx: Ctx):
     ctx.raw(ctx.repo, "checkout", "-q", "main")
     ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
     assert f"openspec:{UNIT}" in ctx.err and not ctx.feedback.exists()
+    ctx.raw(ctx.repo, "checkout", "-q", f"l4/openspec/{UNIT}")  # an open unit takes it on its own branch (review #12)
     ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}")
     assert ctx.feedback.exists()
     ctx.run("add", "--kind", "tests", "--text", "more", "--unit", "openspec:nope", expect=2)
@@ -378,3 +379,62 @@ def test_a_merged_unit_off_the_base_branch_is_refused(ctx: Ctx):
     _ledger(ctx.repo / FOLDER, f"openspec:{UNIT}", "in_review", "merged")  # on the unit branch
     ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
     assert "check out main" in ctx.err and not ctx.feedback.exists()
+# --- a follow-up and a fix unit take no feedback of their own (review #5) -----------------------------------------
+
+
+def _derived(ctx: Ctx, marker: str, body: dict) -> str:
+    """A unit branch whose folder carries `.l4/<marker>`; returns its name."""
+    name = f"{UNIT}-{'followup-1' if marker == 'followup.json' else 'fix-1'}"
+    folder = ctx.repo / "openspec" / "changes" / name
+    (folder / ".l4").mkdir(parents=True)
+    (folder / "proposal.md").write_text("## Why\nx\n")
+    (folder / ".l4" / marker).write_text(json.dumps(body))
+    ctx.raw(ctx.repo, "checkout", "-q", "-b", f"l4/openspec/{name}")
+    return name
+
+
+@pytest.mark.parametrize("verb", ["add", "submit", "withdraw"])
+@pytest.mark.parametrize(
+    "marker, body",
+    [
+        ("followup.json", {"schema": "l4/followup@1", "parent": f"openspec:{UNIT}", "items": []}),
+        ("fix.json", {"schema": "l4/fix-unit@1", "parent": f"openspec:{UNIT}", "round": 1, "findings": []}),
+    ],
+)
+def test_a_follow_up_or_fix_unit_takes_no_feedback_review_5(ctx: Ctx, verb: str, marker: str, body: dict):
+    """review #5: feedback written on a follow-up's own folder is never read as the parent's; refuse it (exit 2) and
+    name the parent."""
+    name = _derived(ctx, marker, body)
+    words = {"add": ("--kind", "tests", "--text", "more"), "submit": ("FB-001",), "withdraw": ("FB-001",)}[verb]
+    ctx.run(verb, *words, expect=2)
+    assert f"openspec:{UNIT}" in ctx.err and "parent" in ctx.err and name in ctx.err
+    assert not (ctx.repo / "openspec" / "changes" / name / "feedback.md").exists()
+
+
+def test_list_still_reads_a_follow_up_review_5(ctx: Ctx):
+    _derived(ctx, "followup.json", {"schema": "l4/followup@1", "parent": f"openspec:{UNIT}", "items": []})
+    assert ctx.run("list") == "no feedback\n"
+
+
+# --- --at is not case-sensitive about the folders it refuses (review #11) -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "at", [".L4/config.yaml:1", "src/.L4/x:1", f"OpenSpec/changes/{UNIT}/proposal.md:1", ".GIT/config:1"]
+)
+def test_at_refuses_the_protected_folders_whatever_their_case_review_11(ctx: Ctx, at: str):
+    (ctx.repo / "src" / ".l4").mkdir(exist_ok=True)
+    (ctx.repo / "src" / ".l4" / "x").write_text("a\n")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--at", at, expect=2)
+    assert not ctx.feedback.exists()
+
+
+
+
+# --- an open unit's feedback goes to its branch (review #12) ------------------------------------------------------
+
+
+def test_an_open_unit_off_its_branch_is_refused_with_the_switch_line_review_12(ctx: Ctx):
+    ctx.raw(ctx.repo, "checkout", "-q", "main")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}", expect=2)
+    assert f"git switch l4/openspec/{UNIT}" in ctx.err and not ctx.feedback.exists()

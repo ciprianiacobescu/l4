@@ -185,7 +185,9 @@ def run_tests_chore(make_bench, step: Step, **kw):
     red = run_red(bench.wb, UNIT_TASK, attempt=1)
     assert red.status == "ok", red.reason
     assert run_green(bench.wb, UNIT_TASK, red, attempt=1).status == "ok"
-    return bench, run_single(bench.wb, TESTS_TASK, HOLD, attempt=1, kind=kw.get("kind", "tests"))
+    return bench, run_single(
+        bench.wb, TESTS_TASK, HOLD, attempt=1, kind=kw.get("kind", "tests"), retake=kw.get("retake", False)
+    )
 
 
 def test_a_test_chore_keeps_a_new_test_file(make_bench):
@@ -234,6 +236,24 @@ def test_a_test_chore_that_adds_no_test_fails(make_bench):
     assert done.status == "failed" and done.reason == "no tests added"
     assert bench.events("task.tests_added") == []
     assert [e["task"] for e in bench.events("task.done")] == ["1.1"]  # only the unit's own task is done
+
+
+def test_a_retaken_tests_item_with_no_test_to_add_completes_as_already_done(make_bench):
+    """review #8 follow-up: the tests are there already, the judge only left the item out of its reply."""
+    bench, done = run_tests_chore(make_bench, Step(structured=result("single")), retake=True)
+    assert done.status == "ok", done.reason
+    done_events = [e for e in bench.events("task.done") if e["task"] == "1.2"]
+    assert [e["tdd"] for e in done_events] == ["already-done"]
+    assert bench.events("task.tests_added") == [] and bench.events("task.tdd_exempt") == []
+    assert "- [x] 1.2" in (bench.wb.ref.path / "tasks.md").read_text()
+
+
+def test_a_retaken_tests_item_that_adds_a_test_keeps_it(make_bench):
+    bench, done = run_tests_chore(
+        make_bench, Step(writes={"tests/test_more.py": NEW_TESTS}, structured=result("single")), retake=True
+    )
+    assert done.status == "ok" and [e["files"] for e in bench.events("task.tests_added")] == [["tests/test_more.py"]]
+    assert [e["tdd"] for e in bench.events("task.done") if e["task"] == "1.2"] == ["exempt"]
 
 
 def test_a_production_change_in_a_test_chore_fails(make_bench):

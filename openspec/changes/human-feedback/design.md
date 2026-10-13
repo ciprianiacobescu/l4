@@ -122,7 +122,8 @@ lifecycle as it is:
 
 **Takeable** means four things hold:
 - the item is valid;
-- its Status is `submitted`, or `taken`/`addressed` with content whose hash differs from the last take (D7);
+- its Status is `submitted`, or `taken`/`addressed` with content whose hash differs from the last take (D7), or `taken`
+  with a ledger state of `not_addressed` or `waiting` (D6);
 - it is not `withdrawn`;
 - `feedback.max_rounds` is not used up.
 
@@ -152,6 +153,18 @@ A `refactor` or `duplication` task runs as a harness chore (`run_single`), with 
 - At least one other file must change, else the attempt fails with `nothing changed`.
 - Every gate must pass.
 
+**Retakes (review #8 follow-up).** An item taken again (the judge said no, left it out, or it waited) may have had its
+change made already, with the judge omitting it from the reply. When every item a chore task carries is a *retake*,
+"nothing changed" (and the test chore's "no tests added") completes the task instead of failing it, so the unit does not
+escalate over a judge glitch. The flag travels with the finding: step 0 and the judge check set `FeedbackRef.retake` when
+the item had a `feedback.taken` with the same content hash, the planner copies it to the fix task's finding, and the fix
+unit's marker lists the finding under `retakes` next to `refactors`. Chosen over reading the parent's ledger inside the
+implementer: the marker is the harness's word about the task, like `refactors` and `test_chores`, so the implementer
+needs no ledger fold and an older marker simply has no retakes. The task is ticked in a commit that changes no project
+file (`L4-TDD: already-done`), and `task.done{tdd: "already-done", reason}` is skipped by the TDD-history check as an
+`exempt` task is. The parent is verified again and the judge looks at the item once more; the feedback round limit bounds
+a judge that keeps saying no.
+
 The unchanged, passing tests are the proof that behaviour did not change. This is the inverse of the test chore's
 freeze, and is recorded in the marker as `refactors`.
 
@@ -172,8 +185,15 @@ family. A missing NAME is a deterministic `not addressed`, and no judge answer c
 When an item is **not addressed**, it becomes a blocking finding (`source: "feedback"`, title
 `FB-NNN not addressed: <evidence>`). The round fails into the next feedback fix unit.
 
-When it is **addressed**, the round's evidence commit sets its Status `addressed`, writes the round and the short sha
-in its *Outcome* block, and records `feedback.addressed`.
+The judge's yes is **evidence**, recorded as `feedback.judged`. Only a PASS round closes an item: its evidence commit
+then sets the Status `addressed`, writes the round and the short sha in the *Outcome* block, and records
+`feedback.addressed`. A round that fails for another reason leaves the item `taken`, because the next fix unit can undo
+the change, and `verification.md` says `judged addressed, pending a PASS round`.
+
+A round that could PASS with pending items the judge did not answer (or whose reply was discarded) cannot: each is
+not addressed with the evidence `not judged in this round` (`FB-NNN not addressed: not judged in this round`), so a later
+round judges it. Items whose ledger state is `not_addressed` or `waiting` are takeable again at step 0, so that every
+taken item is either takeable or pending at the judge, never neither.
 
 Rejected: asking the person a verdict question on every disagreement. It adds a wait for a check that the next round
 does cheaply. The feedback round limit bounds the loop.
@@ -186,6 +206,11 @@ This mirrors L4-QMD-006.
 
 `withdrawn` before a take means the item is never taken. After a take, the item is no longer judged
 (`feedback.withdrawn`). Tasks already written still run, because a fix unit is not unwound.
+
+Ids are canonical `FB-%03d` at parse time: `FB-4` is `FB-004` in a heading, an index row, or an argument. When two
+sections hold one id, the first is the item and the others are reported once as `feedback.invalid{duplicate: true}` and
+never taken. An item with no Status line is reported invalid (`no Status line`), never a crash: the harness's writes
+(take, Outcome, addressed) skip it.
 
 ### D8. Their own round limit
 
@@ -251,6 +276,11 @@ A base run then finds a merged unit with takeable items and no open follow-up. P
 - its tasks follow D2 and D4;
 - its proposal or `bugfix.md` lists the items;
 - its marker is `.l4/followup.json {parent, items: [{id, sha256}]}`.
+
+The marker is validated in one place (`parent` a safe unit name, of the follow-up's own framework, the one its folder
+name says); an invalid marker is no follow-up, exempts nothing in the protected-path check and is a blocker there.
+`l4 feedback add|submit|withdraw` on a follow-up's or a fix unit's folder is exit 2 naming the parent, because its items
+are judged through the marker, and an open unit takes feedback only on its own branch.
 
 The items are taken in the follow-up's ledger, and the follow-up's branch sets their Status `taken` in the parent's
 file. The follow-up then runs the normal lifecycle, and its rounds judge the parent's items (D6). One follow-up per

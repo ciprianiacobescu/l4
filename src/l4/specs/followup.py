@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file
+from l4.specs.base import SAFE_NAME
 
 MARKER_SCHEMA = "l4/followup@1"
 MARKER_PATH = (".l4", "followup.json")
@@ -85,9 +86,41 @@ def _strings(value: object) -> tuple[str, ...]:
     return tuple(v for v in value if isinstance(v, str)) if isinstance(value, list) else ()
 
 
+def _own_framework(unit_dir: Path) -> str:
+    """The framework of the folder a unit sits in: an OpenSpec change is under `changes/` (or `changes/archive/`)."""
+    here = unit_dir.parent
+    home = here.parent if here.name == "archive" else here
+    return "openspec" if home.name == "changes" else "kiro"
+
+
+def marker_problem(unit_dir: Path, marker: FollowUpMarker) -> str | None:
+    """Why the marker cannot be trusted to name this unit's parent, or None. The marker is repo content, written by a
+    branch that may be a person's or an agent's: the parent must be a safe unit name, the one the follow-up's own
+    folder name says (`<parent>-followup-<n>`), and of the follow-up's own framework (review #4)."""
+    framework, _, name = marker.parent.partition(":")
+    if not SAFE_NAME.match(name) or ".." in name or "/" in name or "\\" in name:
+        return f"its parent {marker.parent!r} is not a safe unit name"
+    if framework != _own_framework(unit_dir):
+        return f"its parent {marker.parent!r} is of another framework than the unit"
+    own = _DATED.match(unit_dir.name)
+    split = split_follow_up_name(own.group("name") if own and unit_dir.parent.name == "archive" else unit_dir.name)
+    if split is None or split[0] != name:
+        return f"its parent {marker.parent!r} is not the unit its folder name says it follows"
+    return None
+
+
+def follow_up_problem(unit_dir: Path) -> str | None:
+    """`marker_problem` for the unit's own marker; None when it has none or it is sound."""
+    marker = read_follow_up_marker(unit_dir)
+    return None if marker is None else marker_problem(unit_dir, marker)
+
+
 def parent_folder(unit_dir: Path, marker: FollowUpMarker) -> Path | None:
     """The parent's folder in the follow-up's own tree: a sibling folder (a Kiro spec, an OpenSpec change that is not
-    archived yet), else the newest `archive/<date>-<name>/` of the changes folder. None when the tree holds neither."""
+    archived yet), else the newest `archive/<date>-<name>/` of the changes folder. None when the tree holds neither,
+    and for a marker that does not validate (`marker_problem`): that is no follow-up, and no path is built from it."""
+    if marker_problem(unit_dir, marker) is not None:
+        return None
     name = marker.parent.partition(":")[2]
     here = unit_dir.parent
     home = here.parent if here.name == "archive" else here  # a follow-up that is itself archived

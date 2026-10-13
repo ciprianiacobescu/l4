@@ -32,7 +32,7 @@ from l4.verifier.types import (
 VERDICT_SCHEMA_ID = "l4/verdict@1"
 MAX_CELL_CHARS = 300
 MAX_TESTS_LISTED = 50
-_JUDGED_EVENTS = ("feedback.taken", "feedback.addressed", "feedback.not_addressed")
+_JUDGED_EVENTS = ("feedback.taken", "feedback.judged", "feedback.addressed", "feedback.not_addressed")
 
 
 def _flat(text: object, limit: int = MAX_CELL_CHARS) -> str:
@@ -169,6 +169,8 @@ def feedback_lines(events: Sequence[LedgerEvent], round_no: int) -> list[str]:
         if event.type == "feedback.taken":
             kind = f" ({_flat(data.get('kind') or '', 20)})" if data.get("kind") else ""
             found[fid] = f"{fid}{kind}: taken into {_flat(data.get('fix_unit') or '-', 80)}"
+        elif event.type == "feedback.judged":  # the judge's yes; the item is closed by a PASS round only (review #14)
+            found[fid] = f"{fid}: judged addressed, pending a PASS round" + (f": {evidence}" if evidence else "")
         elif event.type == "feedback.addressed":
             sha = f" at {str(data['sha'])[:10]}" if data.get("sha") else ""
             found[fid] = f"{fid}: addressed{sha}" + (f": {evidence}" if evidence else "")

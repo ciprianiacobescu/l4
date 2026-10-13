@@ -310,6 +310,7 @@ def plan_fix_unit(
                     tuple(cand.ids), _flat(title, MAX_TITLE_CHARS), "", cand.severity.value, (),
                     chore=ref.kind in (*REFACTOR_KINDS, "tests"), tests=ref.kind == "tests",
                     refactor=ref.kind in REFACTOR_KINDS, item=ref.id, request=request_of(ref), code=ref.code,
+                    retake=ref.retake,
                 )
             )  # fmt: skip
             continue

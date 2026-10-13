@@ -102,8 +102,12 @@ from l4.verifier.feedback import (
     contains_name,
     decide_feedback,
     feedback_ref,
+    judged_outcomes,
     not_addressed_findings,
     pending_feedback,
+    record_addressed,
+    record_no_status,
+    unjudged_outcomes,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
 from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
@@ -683,6 +687,7 @@ def _resume(
         if record.status == "reused":
             _emit_step(vc, record, subject)
     result.subject_sha = subject
+    result.feedback_outcomes = judged_outcomes(events, int(prev.get("round") or 0))  # the judge check is not stored
     _finalize(vc, run, criteria, events)
     last = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
     _emit_step(vc, last, subject)
@@ -722,6 +727,25 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     result.human = [effective[t] for t in dict.fromkeys(ids) if t in effective]
     for void in regressions(effective, result.trace):  # a regression voids an accept for good (D3)
         wb.emit("human.void", question=void.question, target=void.target, reason="a tracing test fails at head")
+    result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
+    if result.verdict is Verdict.PASS:
+        _hold_unjudged(vc, result)
+
+
+def _hold_unjudged(vc: VerifyContext, result: VerifyResult) -> None:
+    """L4-FBK-007, review #8: a round with pending items and no answer of this round's judge for one of them (the reply
+    was discarded and a person accepted the hold, or the steps of an earlier round were reused) cannot PASS. Each such
+    item becomes a not-addressed outcome (`not judged in this round`), so the round fails into the next feedback fix
+    unit and the item is judged in a later round."""
+    wb = vc.wb
+    asked = _asked_feedback(wb)
+    missing = unjudged_outcomes(asked, result.feedback_outcomes)
+    if not missing:
+        return
+    result.feedback_outcomes = [*result.feedback_outcomes, *missing]
+    result.findings.extend(not_addressed_findings(missing, asked))
+    for outcome in missing:
+        wb.emit("feedback.not_addressed", id=outcome.id, round=vc.round, evidence=outcome.evidence)
     result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
 
 
@@ -994,7 +1018,8 @@ def _judge_feedback(
 ) -> None:
     """L4-FBK-007: the judge's answers and the variable check decide each item. A not-addressed item is a blocking
     finding that carries it (the round fails into the next feedback fix unit); both outcomes are recorded with the
-    round, and `apply_addressed` writes the Status and the Outcome once the round's evidence is committed."""
+    round, and `apply_addressed` writes the Status and the Outcome once the round's evidence is committed. A yes is
+    only evidence (`feedback.judged`) until a PASS round confirms it (`record_addressed`)."""
     wb = vc.wb
     texts: list[str] | None = None
 
@@ -1008,10 +1033,8 @@ def _judge_feedback(
     result.feedback_outcomes = outcomes
     result.findings.extend(not_addressed_findings(outcomes, asked))
     for outcome in outcomes:
-        if outcome.addressed:
-            wb.emit(
-                "feedback.addressed", id=outcome.id, round=vc.round, sha=result.head_sha, evidence=outcome.evidence
-            )
+        if outcome.addressed:  # evidence for this round; `feedback.addressed` waits for a PASS round (review #14)
+            wb.emit("feedback.judged", id=outcome.id, round=vc.round, evidence=outcome.evidence)
         else:
             wb.emit("feedback.not_addressed", id=outcome.id, round=vc.round, evidence=outcome.evidence)
 
@@ -1261,9 +1284,13 @@ def verify_hook(ctx: HookContext) -> Trigger:
             wb.publish_agent_logs(raw, published)
         wb.restore_ledger()
     decide_fix(ctx, wb, result)  # before the evidence is written, so that the report lists the fix unit
+    record_addressed(services.ledger, result)  # a PASS round only, and before the report reads the round's events
     paths = write_round_evidence(services.ref.path, round_no, result, services.app.redactor)
     # Status and Outcome (L4-FBK-007), in the parent's file when the unit is a follow-up (L4-FBK-010)
-    paths += apply_addressed(feedback_home(services.ref.path), result, services.app.redactor)
+    no_status: list[str] = []
+    paths += apply_addressed(feedback_home(services.ref.path), result, services.app.redactor, skipped=no_status)
+    if no_status:  # an item whose Status line is gone: recorded, never a crash (review #9)
+        record_no_status(services.ledger, fold(_events(wb), wb.ref.id), no_status)
     if result.verdict is Verdict.NEEDS_HUMAN:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
     commit_verifier_tests(wb, vc.verifier_tests, round_no)

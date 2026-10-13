@@ -4,6 +4,8 @@
 records out. A takeable item is valid, not withdrawn, and either `submitted` or `taken`/`addressed` with content that
 hashes differently from the last `feedback.taken`. Each becomes a deterministic blocking `Finding` with source
 `"feedback"`, so the round fails at step 0 like a red repository CI job and the fix unit of L4-VER-006 is written.
+An item taken before whose ledger state is `not_addressed` or `waiting` is takeable again (review #2): every taken item
+is either takeable (step 0) or pending (the judge), never neither.
 
 The take itself (`feedback.taken`, Status `taken`, the Outcome line) happens in `fixloop.after_verdict`, once the fix
 unit exists. `pending_feedback` is what a later round reads: the items taken and not yet judged.
@@ -11,7 +13,7 @@ unit exists. `pending_feedback` is what a later round reads: the items taken and
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +21,12 @@ from l4.redact import Redactor
 from l4.specs.feedback import FeedbackFile, FeedbackItem, FeedbackStatus, content_sha256, problems
 from l4.state.fold import UnitState
 from l4.verifier.judge import FeedbackAnswer
-from l4.verifier.types import FeedbackOutcome, FeedbackRef, Finding, Severity, VerifyResult
+from l4.verifier.types import FeedbackOutcome, FeedbackRef, Finding, Severity, Verdict, VerifyResult
 
 MAX_REQUEST_CHARS = 1200  # the person's text, whole up to this (L4-FBK-004)
 MAX_EVIDENCE_CHARS = 300  # the judge's evidence in a title, an Outcome line and an event
 NOT_ANSWERED = "not answered"
+NO_STATUS = "no Status line"
 Event = tuple[str, dict[str, Any]]
 
 
@@ -31,6 +34,7 @@ Event = tuple[str, dict[str, Any]]
 class FeedbackScan:
     takeable: tuple[FeedbackItem, ...] = ()
     events: tuple[Event, ...] = ()  # `feedback.changed|invalid|withdrawn`, each once (not recorded already)
+    retaken: frozenset[str] = frozenset()  # the takeable ids that an earlier `feedback.taken` already took, unchanged
 
 
 def _flat(text: str, limit: int) -> str:
@@ -40,7 +44,14 @@ def _flat(text: str, limit: int) -> str:
 
 def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
     takeable: list[FeedbackItem] = []
+    retaken: set[str] = set()
     events: list[Event] = []
+    for copy in file.duplicates if file is not None else ():
+        problem = f"duplicate id {copy.id}"  # the first section is the item; the copy is never taken
+        if (known := state.feedback.get(copy.id)) is None or known.duplicate != problem:
+            event = ("feedback.invalid", {"id": copy.id, "problem": problem, "duplicate": True})
+            if event not in events:
+                events.append(event)
     for item in file.items if file is not None else ():
         known = state.feedback.get(item.id)
         was_taken = known is not None and known.sha256 is not None
@@ -54,6 +65,10 @@ def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
         elif item.status in (FeedbackStatus.TAKEN, FeedbackStatus.ADDRESSED):
             # no take in the ledger: nothing to compare with (a Status written by hand, or a follow-up's take)
             candidate = was_taken and known is not None and digest != known.sha256
+            if not candidate and was_taken and known is not None and item.status is FeedbackStatus.TAKEN:
+                # judged not addressed, or taken and then left waiting (past MAX_FIX_TASKS, a limit, a crash before
+                # the fix unit): the file still says `taken`, and nothing else would take or judge it again (L4-FBK-007)
+                candidate = known.status in ("not_addressed", "waiting")
         else:
             candidate = False
         if not candidate:
@@ -65,8 +80,10 @@ def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
             continue
         if known is not None and was_taken and digest not in (known.sha256, known.changed_sha256):
             events.append(("feedback.changed", {"id": item.id, "previous_sha256": known.sha256, "sha256": digest}))
+        if known is not None and was_taken and digest == known.sha256:
+            retaken.add(item.id)  # the same request again (not judged addressed, or left waiting): not a new one
         takeable.append(item)
-    return FeedbackScan(tuple(takeable), tuple(events))
+    return FeedbackScan(tuple(takeable), tuple(events), frozenset(retaken))
 
 
 def feedback_ref(item: FeedbackItem) -> FeedbackRef:
@@ -80,7 +97,7 @@ def feedback_findings(scan: FeedbackScan) -> list[Finding]:
     """One blocking major finding per takeable item: the title names the item, the detail is the person's text."""
     found = []
     for item in scan.takeable:
-        ref = feedback_ref(item)
+        ref = replace(feedback_ref(item), retake=item.id in scan.retaken)
         title = f"Feedback {item.id} ({ref.kind}): {_flat(item.title, 120)}"
         found.append(Finding(Severity.MAJOR, title, _flat(item.text, MAX_REQUEST_CHARS), "feedback", feedback=ref))
     return found
@@ -143,22 +160,72 @@ def not_addressed_findings(outcomes: Sequence[FeedbackOutcome], asked: Sequence[
         Finding(
             Severity.MAJOR, f"{o.id} not addressed: {o.evidence}",
             f"Judged not addressed: {o.evidence}\n\n{_flat(refs[o.id].text, MAX_REQUEST_CHARS)}",
-            "feedback", feedback=refs[o.id],
+            "feedback", feedback=replace(refs[o.id], retake=True),  # it was taken before: it is asked about
         )  # fmt: skip
         for o in outcomes
         if not o.addressed and o.id in refs
     ]
 
 
-def apply_addressed(unit_dir: Path, result: VerifyResult, redactor: Redactor) -> list[Path]:
+def record_no_status(ledger: Any, state: UnitState, ids: Sequence[str]) -> None:
+    """`feedback.invalid{id, problem: "no Status line"}` for each id, once: an item whose Status line the person
+    deleted cannot be written to (review #9). `ledger` has `append(type, **data)`."""
+    for fid in ids:
+        known = state.feedback.get(fid)
+        if known is None or known.status != "invalid" or known.problem != NO_STATUS:
+            ledger.append("feedback.invalid", id=fid, problem=NO_STATUS)
+
+
+def judged_outcomes(events: Sequence[Any], round_: int) -> list[FeedbackOutcome]:
+    """The judge's answers of `round_` as the ledger holds them (`feedback.judged` for a yes, `feedback.not_addressed`
+    for a no): a resumed round reuses the steps of the round before, and its judge check is not stored (review #14)."""
+    found: dict[str, FeedbackOutcome] = {}
+    for event in events:
+        data = event.data
+        if event.type not in ("feedback.judged", "feedback.not_addressed") or data.get("round") != round_:
+            continue
+        fid, evidence = str(data.get("id") or ""), str(data.get("evidence") or "")
+        if fid:
+            found[fid] = FeedbackOutcome(fid, event.type == "feedback.judged", evidence)
+    return list(found.values())
+
+
+def unjudged_outcomes(asked: Sequence[FeedbackRef], outcomes: Sequence[FeedbackOutcome]) -> list[FeedbackOutcome]:
+    """A round that could PASS holds a not-addressed outcome for each pending item it has no answer for (review #8):
+    the item is checked in a later round, like an item the judge left out of its reply."""
+    answered = {o.id for o in outcomes}
+    return [FeedbackOutcome(r.id, False, "not judged in this round") for r in asked if r.id not in answered]
+
+
+def record_addressed(ledger: Any, result: VerifyResult) -> None:
+    """`feedback.addressed{id, round, sha, evidence}` for each item the judge found addressed, in a PASS round only
+    (review #14): in a round that fails for another reason the judge's yes stays evidence (`feedback.judged`), because
+    the next fix unit can undo the change."""
+    if result.verdict is not Verdict.PASS:
+        return
+    for outcome in result.feedback_outcomes:
+        if outcome.addressed:
+            ledger.append(
+                "feedback.addressed", id=outcome.id, round=result.round, sha=result.head_sha, evidence=outcome.evidence
+            )
+
+
+def apply_addressed(
+    unit_dir: Path, result: VerifyResult, redactor: Redactor, *, skipped: list[str] | None = None
+) -> list[Path]:
     """Status `addressed` and the Outcome line `Addressed in round N at <sha10>: <evidence>` for each item the round
-    found addressed, in the parent's `feedback.md` (committed with the round's evidence). The paths written."""
-    done = [o for o in result.feedback_outcomes if o.addressed]
+    found addressed, in the parent's `feedback.md` (committed with the round's evidence), in a PASS round only
+    (review #14). The paths written. An item with no Status line is skipped (its id goes to `skipped`): the harness's
+    writes never raise."""
+    done = [o for o in result.feedback_outcomes if o.addressed] if result.verdict is Verdict.PASS else []
     file = FeedbackFile.load(unit_dir) if done else None
     if file is None:
         return []
     for outcome in done:
-        if file.get(outcome.id) is not None:
+        if (item := file.get(outcome.id)) is not None and item.status_value is None:
+            if skipped is not None:
+                skipped.append(outcome.id)
+        elif item is not None:
             line = f"Addressed in round {result.round} at {result.head_sha[:10]}: {outcome.evidence}"
             file = file.set_status(outcome.id, FeedbackStatus.ADDRESSED).set_outcome(
                 outcome.id, line, redactor=redactor
