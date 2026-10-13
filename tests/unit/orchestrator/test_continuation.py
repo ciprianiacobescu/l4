@@ -46,7 +46,9 @@ def forge(monkeypatch):
 
 def _go(result, cfg=None, environ=CI):
     return orchestrator.continue_left_units(
-        SimpleNamespace(environ=environ, redactor=SimpleNamespace(redact_text=lambda t: t)), cfg or _cfg(), result
+        SimpleNamespace(environ=environ, repo=None, redactor=SimpleNamespace(redact_text=lambda t: t)),
+        cfg or _cfg(),
+        result,
     )
 
 
