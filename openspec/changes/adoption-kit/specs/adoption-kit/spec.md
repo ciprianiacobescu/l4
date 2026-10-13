@@ -89,7 +89,9 @@ Further rules:
   callers. The copy is the one the running `l4` ships (`src/l4/ci/action/action.yml`, byte-identical to
   `.github/actions/l4/action.yml`), so it works from an installed `l4` with no git checkout; `l4 upgrade` in copy mode
   refreshes it from the same copy and reports it.
-- `--dependabot` adds or merges `.github/dependabot.yml` for `github-actions`.
+- `--dependabot` adds or merges `.github/dependabot.yml` for `github-actions`. With `--action-copy` it is exit 2
+  with a one-line reason: Dependabot moves `uses:` pins, and in copy mode the pin is the `commit:` input, which it
+  cannot move.
 - The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []` unless `--runner-tag TAG` (repeatable)
   is given, and `forge.token_env: GITHUB_TOKEN` unless `--forge-token-env NAME` is given. A default role-chain profile
   that cannot log in on a hosted runner (a `subscription` profile of `codex`) is named in a `todo:` line and a

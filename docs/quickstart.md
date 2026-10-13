@@ -272,7 +272,7 @@ user, and with the key false the workflow has no upload step.
 Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
-  release arrives as a pull request on the `uses:` line. It merges into an existing file.
+  release arrives as a pull request on the `uses:` line. It merges into an existing file. It does not combine with `--action-copy` (exit 2): in copy mode the pin is the `commit:` input, which Dependabot cannot move; use `l4 upgrade --harness-ref`.
 - `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand: it re-renders the whole
   workflow from the config with the template of the harness that runs it, so run it with the target version, for
   example `uvx --from git+https://github.com/<owner>/<repo>@<sha> l4 upgrade --harness-commit <sha>`. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.

@@ -137,11 +137,10 @@ def test_copy_without_an_action_in_the_harness_is_exit_2(target: Path, git_envir
 
 
 def test_the_commit_to_commit_lists_the_workflow_and_the_action(target: Path, git_environ, copy_harness, capsys):
-    flags = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA, "--dependabot")
+    flags = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA)
     assert init(target, git_environ, *flags, "--harness", str(copy_harness)) == 0
     err = capsys.readouterr().err
     assert WORKFLOW in err.split("then commit", 1)[1] and ACTION in err.split("then commit", 1)[1]
-    assert DEPENDABOT in err.split("then commit", 1)[1]
     assert ".l4/bin/l4 setup" not in err and "uv tool install" in err  # a local l4 is the person's own
 
 
@@ -316,3 +315,11 @@ def test_copy_refuses_an_existing_action_without_force(target: Path, git_environ
     (target / ACTION).write_text("name: mine\n")
     assert init(target, git_environ, *COPY_FLAGS) == 2
     assert ACTION in capsys.readouterr().err and (target / ACTION).read_text() == "name: mine\n"
+
+
+def test_dependabot_with_the_copy_is_exit_2_in_one_line(target: Path, git_environ, capsys):
+    """Dependabot moves `uses:` pins; in copy mode the pin is the `commit:` input, which it cannot move."""
+    assert init(target, git_environ, *COPY_FLAGS, "--dependabot") == 2
+    err = capsys.readouterr().err.strip()
+    assert len(err.splitlines()) == 1 and "--dependabot" in err and "--action-copy" in err and "commit:" in err
+    assert not (target / ".l4").exists() and not (target / ".github").exists()

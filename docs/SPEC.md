@@ -194,7 +194,8 @@ base-branch rule. Its steps are: checkout; the base-branch checkout on other bra
 action under `.github/actions/l4` and uses it with source `repository`; the copy is the one the running `l4` ships
 (`src/l4/ci/action/action.yml`, byte-identical to `.github/actions/l4/action.yml`, a test holds them equal), so it works
 from an installed `l4` with no git checkout, and `--harness PATH` copies from that checkout instead; `--dependabot` adds or merges
-`.github/dependabot.yml` for `github-actions`. The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []`
+`.github/dependabot.yml` for `github-actions`; together with `--action-copy` it is exit 2 with a one-line reason (Dependabot
+moves `uses:` pins, and in copy mode the pin is the `commit:` input, which it cannot move). The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []`
 unless `--runner-tag TAG` (repeatable) names a self-hosted one, and `forge.token_env: GITHUB_TOKEN` (the workflow's own
 token) unless `--forge-token-env NAME` is given. When the default role chains name a profile that cannot log in on a hosted
 runner (a `subscription` profile of `codex`, whose login is a stored local file; `claude-code` takes

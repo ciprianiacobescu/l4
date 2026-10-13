@@ -545,6 +545,12 @@ def run_init(
             raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref needs --harness-repo URL or --action")
     pin: ActionPin | None = None
     if action:
+        if dependabot and action_copy:
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                "init: --dependabot and --action-copy exclude each other: Dependabot moves `uses:` pins, and in copy "
+                "mode the pin is the `commit:` input, which it cannot move (use `l4 upgrade --harness-ref`)",
+            )
         if ci != "github":
             raise L4Exit(ExitCode.USAGE_ERROR, "init: --action needs --ci github")
         if vendor:
