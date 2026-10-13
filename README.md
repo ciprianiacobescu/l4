@@ -22,6 +22,19 @@ cd /path/to/your-project
 gates, and prints the exact remaining steps. A second run is safe. The runner and forge steps are in the
 [quickstart](docs/quickstart.md).
 
+### The `l4` skill for coding agents
+
+The repository is also a Claude Code plugin marketplace with one skill, `l4`. It covers asking for changes with
+`l4 feedback`, answering questions, reading state, resuming a unit, and adopting L4. It needs read access to this
+repository:
+
+```
+/plugin install l4 --marketplace ciprianiacobescu/agent-supervisor
+```
+
+On older Claude Code, use `/plugin marketplace add ciprianiacobescu/agent-supervisor`, then `/plugin install l4@agent-supervisor`.
+For Codex, copy `plugins/l4/skills/l4` to `~/.agents/skills/l4`.
+
 * [Quickstart](docs/quickstart.md)
 * [Architecture](docs/architecture.md)
 * [Specification](docs/SPEC.md)
