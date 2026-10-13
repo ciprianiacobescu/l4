@@ -4,6 +4,7 @@ import pytest
 
 from l4.specs.base import CriterionIdCollision, Framework
 from l4.specs.criteria import kiro_criteria
+from l4.specs.fixmark import FixMarker, write_fix_marker
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "specs" / "kiro" / "user-auth"
 
@@ -53,7 +54,7 @@ def test_bugfix_spec_uses_its_own_numbers(tmp_path):
         "3.1 WHEN a user logs in once THEN the system SHALL CONTINUE TO work\n"
     )
     criteria = kiro_criteria(spec)
-    assert [(c.alias, c.requirement) for c in criteria] == [
+    assert [(c.alias, c.requirement) for c in criteria] == [  # review #1: outside a fix unit the 1.n stay as on main
         ("Req 1.1", "Current Behavior (Defect)"),
         ("Req 2.1", "Expected Behavior (Correct)"),
         ("Req 3.1", "Unchanged Behavior (Regression Prevention)"),
@@ -159,3 +160,86 @@ def test_the_dotted_form_counts_only_in_a_requirement_with_no_plain_item(tmp_pat
         ("Req 2.1", "C-c4518a99", "WHEN d THEN e"),  # requirement 2 read nothing before: its dotted items count
         ("Req 2.2", "C-d524c1ca", "WHEN f THEN g"),
     ]
+
+
+BUGFIX = (
+    "# Bugfix Requirements Document\n\n## Bug Analysis\n\n### Current Behavior (Defect)\n\n"
+    "1.1 WHEN a user logs in twice THEN the system opens two sessions\n\n"
+    "### Expected Behavior (Correct)\n\n"
+    "2.1 WHEN a user logs in twice THEN the system SHALL reuse the session (parent Req 1.2, C-1a2b3c4d)\n"
+    "2.2 WHEN a user logs in from a second tab THEN the system SHALL reuse the session\n\n"
+    "### Unchanged Behavior (Regression Prevention)\n\n"
+    "3.1 WHEN any other acceptance criterion of login is exercised THEN the system SHALL CONTINUE TO satisfy it\n"
+)
+
+
+def fix_unit(where: Path, *, marker: bool = True) -> Path:
+    spec = where / "login-fix-1"
+    spec.mkdir()
+    (spec / "bugfix.md").write_text(BUGFIX)
+    if marker:
+        write_fix_marker(spec, FixMarker("kiro:login", 1, ("F-aaaaaaaa",), ()))
+    return spec
+
+
+def test_the_defect_items_are_no_criteria_and_the_expected_and_unchanged_items_are(tmp_path):
+    """L4-FBK-008, SCN-FBK-20: 2.n and 3.n are read, 1.n is not."""
+    criteria = kiro_criteria(fix_unit(tmp_path))
+    assert [c.alias for c in criteria] == ["Req 2.1", "Req 2.2", "Req 3.1"]
+
+
+def test_an_expected_item_that_carries_a_parent_id_is_read_as_that_criterion(tmp_path):
+    """SCN-FBK-20: the id is the parent's, the alias stays the fix unit's own number (tasks cite `2.1`)."""
+    first, second, third = kiro_criteria(fix_unit(tmp_path))
+    assert (first.id, first.alias) == ("C-1a2b3c4d", "Req 2.1")
+    assert second.id != "C-1a2b3c4d" and third.id != "C-1a2b3c4d"
+    assert first.text.endswith("(parent Req 1.2, C-1a2b3c4d)")
+
+
+def test_a_parent_id_counts_only_in_a_fix_unit_and_only_on_an_expected_item(tmp_path):
+    """The harness marker is what makes a folder a fix unit: a person's bugfix spec cannot claim another id."""
+    (tmp_path / "plain").mkdir()
+    plain = kiro_criteria(fix_unit(tmp_path / "plain", marker=False))
+    assert "C-1a2b3c4d" not in {c.id for c in plain}
+    (tmp_path / "fix").mkdir()
+    spec = fix_unit(tmp_path / "fix")
+    unchanged = "satisfy it"
+    (spec / "bugfix.md").write_text(BUGFIX.replace(unchanged, unchanged + " (parent Req 9, C-deadbeef)"))
+    assert "C-deadbeef" not in {c.id for c in kiro_criteria(spec)}
+
+
+def test_two_expected_items_that_restate_the_same_parent_criterion_collide(tmp_path):
+    spec = fix_unit(tmp_path)
+    again = "2.2 WHEN again THEN the system SHALL reuse it (parent Req 1.2, C-1a2b3c4d)"
+    second = "2.2 WHEN a user logs in from a second tab THEN the system SHALL reuse the session"
+    (spec / "bugfix.md").write_text(BUGFIX.replace(second, again))
+    with pytest.raises(CriterionIdCollision):
+        kiro_criteria(spec)
+
+
+def test_a_bugfix_spec_without_the_marker_keeps_its_1n_items_and_validates_when_tasks_cite_them(tmp_path):
+    """review #1 (BLOCKER): Kiro's own template cites `_Requirements: 1.1_`; only a harness fix unit drops the 1.n."""
+    from l4.specs.base import Framework, UnitRef
+    from l4.specs.kiro import KiroProvider
+
+    spec = tmp_path / ".kiro" / "specs" / "login-bug"
+    spec.mkdir(parents=True)
+    (spec / "bugfix.md").write_text(BUGFIX.replace(" (parent Req 1.2, C-1a2b3c4d)", ""))
+    (spec / "design.md").write_text("# Design\n")
+    (spec / "tasks.md").write_text(
+        "# Implementation Plan\n\n- [ ] 1. Write bug condition exploration test\n  - _Requirements: 1.1_\n"
+        "- [ ] 2. Fix\n  - _Requirements: 2.1, 3.1_\n"
+    )
+    result = KiroProvider(tmp_path).validate(UnitRef(Framework.KIRO, "login-bug", spec), strict=True)
+    assert result.valid, result.issues
+
+
+def test_a_follow_up_unit_drops_the_1n_items_like_a_fix_unit(tmp_path):
+    """review #1: the harness writes a follow-up's bugfix.md in the fix-unit shape; its 1.n are the defect too."""
+    from l4.specs.followup import FollowUpMarker, write_follow_up_marker
+
+    spec = tmp_path / "login-followup-1"
+    spec.mkdir()
+    (spec / "bugfix.md").write_text(BUGFIX.replace(" (parent Req 1.2, C-1a2b3c4d)", ""))
+    write_follow_up_marker(spec, FollowUpMarker("kiro:login", ()))
+    assert [c.alias for c in kiro_criteria(spec)] == ["Req 2.1", "Req 2.2", "Req 3.1"]

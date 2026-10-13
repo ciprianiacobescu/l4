@@ -17,6 +17,7 @@ from l4.exitcodes import ExitCode, classify_exception
 from l4.log import configure_logging
 from l4.outcome import OUTCOME_COMMANDS, new_run_id, run_guarded, with_outcome
 from l4.redact import Redactor
+from l4.specs import feedback_help
 
 
 def redactor_for(environ: Mapping[str, str]) -> Redactor:
@@ -74,14 +75,31 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
              help="Harness checkout to vendor (default: the one l4 runs from)."),
         _opt("--harness-repo", "harness_repo", help="Fetch the harness at run time from this git URL, no .l4/vendor/."),
         _opt("--harness-commit", "harness_commit_pin",
-             help="With --harness-repo: the commit to fetch (default: the running harness's)."),
+             help="With --harness-repo or --action: the commit to pin (default: the running harness's)."),
+        _opt("--harness-ref", "harness_ref",
+             help="With --harness-repo or --action: a tag or branch, resolved once with git ls-remote and pinned as "
+                  "its commit sha."),
+        _flag("--action", "action", help="GitHub: the harness comes from the setup action, one pinned uses: line."),
+        _opt("--action-repo", "action_repo", help="With --action: OWNER/REPO that holds the action (default: the "
+                                                  "harness's own)."),
+        _flag("--action-copy", "action_copy", help="With --action: keep a copy of the action in the repository "
+                                                   "and fetch the harness with a deploy key."),
+        _flag("--dependabot", "dependabot", help="With --action: add github-actions to .github/dependabot.yml."),
+        _opt("--runner-tag", "runner_tag", multiple=True,
+             help="With --action: run on a self-hosted runner with this tag (repeatable); default: GitHub-hosted."),
+        _opt("--forge-token-env", "forge_token_env",
+             help="With --action: forge.token_env, the secret the job reads the forge token from "
+                  "(default: GITHUB_TOKEN, the workflow's own)."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
         _flag("--dry-run", "dry_run"),
         _opt("--harness-commit", "harness_commit_pin",
-             help="Fetched adoption: the commit to pin (default: the running harness's)."),
+             help="Fetched or action adoption: the commit to pin (default: the running harness's)."),
+        _opt("--harness-ref", "harness_ref",
+             help="Fetched or action adoption: a tag or branch, resolved once with git ls-remote and pinned as its "
+                  "commit sha."),
     ]),
     "doctor": ("Check environment, config, specs, git, forge, CI and state.", lambda: [
         _flag("--ci", "ci"), _flag("--live", "live"), _flag("--fix", "fix"), _unit(), _flag("--json", "as_json"),
@@ -110,6 +128,26 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "questions": ("List, show, answer or accept questions of a unit.", lambda: [
         click.Argument(["words"], nargs=-1), _unit(), _opt("--text", "text"),
     ]),
+    "feedback add": (feedback_help.ADD_HELP, lambda: [
+        _opt("--kind", "kind", required=True,
+             type=click.Choice(["refactor", "duplication", "tests", "config", "behaviour"], case_sensitive=False),
+             help="What the change is: refactor, duplication, tests, config or behaviour."),
+        _opt("--text", "text", required=True, help="The request. - reads standard input."),
+        _opt("--title", "title", help="Heading of the item (default: the first line of the text, 72 characters)."),
+        _opt("--at", "at", multiple=True, help="PATH[:L[-L]] the request is about (repeatable, up to 5)."),
+        _opt("--env", "env", help="config: the environment variable NAME that replaces the hard-coded value."),
+        _opt("--when", "when", help="behaviour: the condition (the WHEN of the criterion)."),
+        _opt("--then", "then", help="behaviour: the expected result (the THEN of the criterion)."),
+        _flag("--lesson", "lesson", help="Keep a lesson from this item once it is addressed."),
+        _flag("--draft", "draft", help="Write Status draft: the harness ignores it until `submit`."),
+        _unit(),
+    ]),
+    "feedback list": (feedback_help.LIST_HELP, lambda: [_unit(), _flag("--json", "as_json")]),
+    "feedback show": (feedback_help.SHOW_HELP, lambda: [
+        click.Argument(["item"]), _unit(), _flag("--json", "as_json"),
+    ]),
+    "feedback submit": (feedback_help.SUBMIT_HELP, lambda: [click.Argument(["item"]), _unit()]),
+    "feedback withdraw": (feedback_help.WITHDRAW_HELP, lambda: [click.Argument(["item"]), _unit()]),
     "lessons": ("Inspect and curate lessons.", lambda: [click.Argument(["words"], nargs=-1)]),
     "s1": ("S1 data set: export, canary, score, report, audit (M1.6).", lambda: [
         click.Argument(["words"], nargs=-1),
@@ -136,6 +174,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--extend-iterations", "extend_iterations", type=int),
         _opt("--extend-cost", "extend_cost", type=float),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
+        _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
@@ -186,6 +225,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "ci render-child": ("Print the GitLab child pipeline.", lambda: [
         _opt("--plan", "plan", required=True, type=click.Path(dir_okay=False, path_type=Path)),
     ]),
+    "ci cache-key": ("Print the key suffix of a CI cache (clis: catalog pins and config CLIs).", lambda: [
+        click.Argument(["cache"], type=str),
+    ]),
+    "ci render-setup": ("Print the runner setup script (l4-setup.sh) for bash.", lambda: []),
     "ci map-exit": ("Translate an l4 exit code into the CI platform's convention.", lambda: [
         click.Argument(["code"], type=int),
     ]),
@@ -278,7 +321,11 @@ def cli() -> None:
     """L4 harness: level-4 agentic development."""
 
 
-_GROUPS = {"ci": click.Group("ci", help="CI helpers."), "setup": click.Group("setup", help="Forge setup.")}
+_GROUPS = {
+    "ci": click.Group("ci", help="CI helpers."),
+    "setup": click.Group("setup", help="Forge setup."),
+    "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
+}
 for _group in _GROUPS.values():
     cli.add_command(_group)
 for _name, (_help, _params) in _SPECS.items():

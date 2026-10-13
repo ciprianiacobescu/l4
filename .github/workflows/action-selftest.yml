@@ -1,0 +1,46 @@
+name: action-selftest
+
+# The setup action from this very checkout (source: action), then the installed `l4` on the py_tdd fixture (L4-ACT-007).
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/l4/**"
+      - ".github/workflows/action-selftest.yml"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up l4 from this checkout
+        uses: ./.github/actions/l4
+        with:
+          source: action
+          clis: none
+          self-provision: auto
+      - name: l4 --version
+        run: l4 --version
+      - name: l4 doctor --adoption on tests/fixtures/py_tdd
+        run: |
+          # The fixture has no .l4/config.yaml, so doctor reports the missing role chains and exits 3 (findings).
+          # Anything else (0 is fine too) means doctor itself broke: usage error, crash, or a missing install.
+          rc=0
+          l4 doctor --adoption --repo tests/fixtures/py_tdd | tee doctor.txt || rc=$?
+          if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then
+            echo "::error::l4 doctor --adoption exited $rc (expected 0 or 3)"
+            exit 1
+          fi
+          grep -q 'SPEC-001' doctor.txt

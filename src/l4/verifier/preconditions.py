@@ -8,10 +8,14 @@
   one blocker per red job, `repository CI failed: <job>`, in the first round after that edge only (no `verify.verdict`
   follows it yet). The detail carries the stage, H, the job's URL and the end of its log, so a fix unit's `[chore]` task
   (which keeps the first 600 characters of the detail) names the job and shows what failed.
+- A person's `feedback.md` (L4-FBK-004): one blocker per takeable item (`verifier.feedback.scan_feedback`), source
+  `"feedback"`, so the round fails here and the fix unit of L4-VER-006 takes the item. Not read when
+  `feedback.max_rounds` is 0. The `feedback.changed|invalid|withdrawn` events of the scan are recorded by step 0.
 - Every required task is done (a Kiro optional `[ ]*` leaf may stay open), and the provider's strict validation
   passes: either failure is a blocker, so a FAIL.
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -21,11 +25,18 @@ from l4.evidence.collect import show_blob
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.tasks import required
 from l4.implementer.workbench import Workbench
+from l4.specs.base import SpecError
+from l4.specs.feedback import FeedbackFile
+from l4.state.budget import feedback_round_limit
+from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.authorship import commit_records, is_harness
 from l4.vcs.git import Git
+from l4.verifier.feedback import Event, feedback_findings, scan_feedback
 from l4.verifier.fixloop import family_units
 from l4.verifier.types import Finding, Severity
+
+log = logging.getLogger(__name__)
 
 MAX_NAMED = 5
 MAX_ISSUE_CHARS = 200
@@ -39,6 +50,7 @@ class Preconditions:
     base_sha: str  # the merge base with the base branch: the start of `git diff <base>...<head>`
     findings: list[Finding]
     ci_steps: tuple["CiStepRecord", ...] = ()  # the `ci.step` events step 0 has not recorded yet
+    feedback_events: tuple[Event, ...] = ()  # `feedback.changed|invalid|withdrawn` that step 0 has not recorded yet
 
 
 @dataclass(frozen=True)
@@ -157,6 +169,12 @@ def record_ci_steps(wb: Workbench, pre: "Preconditions") -> None:
         )  # fmt: skip
 
 
+def record_feedback(wb: Workbench, pre: "Preconditions") -> None:
+    """Write the `feedback.*` events that step 0 observed (an edit after a take, an invalid or withdrawn item)."""
+    for kind, data in pre.feedback_events:
+        wb.emit(kind, **data)
+
+
 def check_preconditions(wb: Workbench) -> Preconditions:
     if not wb.is_clean():
         raise L4Exit(ExitCode.INTERNAL_ERROR, "the unit worktree has uncommitted changes: refusing to verify")
@@ -184,6 +202,17 @@ def check_preconditions(wb: Workbench) -> Preconditions:
     if (edge := ci_edge(events)) is not None:
         records = derive_ci_steps(wb, edge, base_sha)
     findings += ci_blockers(events, {n: CiStep(n, r.command, r.reason) for n, r in records.items()})
+    feedback_events: tuple[Event, ...] = ()
+    state = fold(events, wb.ref.id)
+    if feedback_round_limit(wb.cfg, state) > 0:  # 0 turns taking off (D8)
+        try:
+            file = FeedbackFile.load(wb.ref.path)
+        except SpecError as exc:  # an unreadable file is the person's to fix; it must not stop the round
+            log.warning("%s: feedback.md is not read: %s", wb.ref.id, exc)
+            file = None
+        scan = scan_feedback(file, state)
+        findings += feedback_findings(scan)
+        feedback_events = scan.events
     recorded = {(str(e.data.get("head")), str(e.data.get("job"))) for e in events if e.type == "ci.step"}
     new = tuple(r for r in records.values() if (r.head, r.job) not in recorded)
     for unit in family_units(wb.provider, wb.ref):  # the unit and its fix units, each strictly valid
@@ -194,4 +223,4 @@ def check_preconditions(wb: Workbench) -> Preconditions:
             where = "" if unit == wb.ref else f"{unit.name}: "
             detail = where + (shown or "no detail from openspec")
             findings.append(_blocker("the unit does not validate --strict", detail))
-    return Preconditions(head, base_sha, findings, new)
+    return Preconditions(head, base_sha, findings, new, feedback_events)

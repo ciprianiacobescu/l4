@@ -90,6 +90,10 @@ class HarnessCfg(_Strict):
     # only, no credential in the URL (a private repository is reached with a deploy key); the scp form
     # `git@host:owner/repo.git` is written as `ssh://git@host/owner/repo.git`, which uv understands. None: vendored.
     repository: str | None = None
+    # How the harness reaches CI (adoption-kit L4-ACT-004): `vendored` (.l4/vendor/), `fetched` (harness.repository at
+    # harness.commit, through the shim) or `action` (the setup action, pinned in the workflow's `uses:`, no commit
+    # here). None: derived by `effective_delivery`, so a config written before this key keeps meaning what it meant.
+    delivery: Literal["vendored", "fetched", "action"] | None = None
 
     @field_validator("repository")
     @classmethod
@@ -105,9 +109,24 @@ class HarnessCfg(_Strict):
 
     @model_validator(mode="after")
     def _commit_with_repository(self) -> "HarnessCfg":
-        if self.repository is not None and self.commit is None:
+        if self.delivery == "fetched" and self.repository is None:
+            raise ValueError("harness.delivery: fetched needs harness.repository")
+        if self.delivery == "vendored" and self.repository is not None:
+            raise ValueError("harness.delivery: vendored contradicts harness.repository (a fetched harness)")
+        if self.delivery != "action" and self.repository is not None and self.commit is None:
             raise ValueError("harness.repository needs harness.commit: the fetched harness is pinned by commit SHA")
         return self
+
+
+def effective_delivery(cfg: "L4Config") -> Literal["vendored", "fetched", "action"]:
+    """The delivery in force: an explicit `harness.delivery` wins; else `fetched` when `harness.repository` is set,
+    else `vendored` (the form that never had a key: `.l4/vendor/` is its only trace, and a repository
+    without either is one `l4 init --vendor` would have written)."""
+    if cfg.harness.delivery is not None:
+        return cfg.harness.delivery
+    if cfg.harness.repository is not None:
+        return "fetched"
+    return "vendored"
 
 
 class OpenSpecCfg(_Strict):
@@ -542,6 +561,13 @@ class EvidenceCfg(_Strict):
     diff_coverage: DiffCoverageCfg = Field(default_factory=DiffCoverageCfg)
 
 
+class FeedbackCfg(_Strict):
+    """A person's requests for changes (`feedback.md`, L4-FBK-006): `max_rounds` feedback fix units per unit, counted
+    apart from `verifier.max_fix_rounds`; 0 turns taking off."""
+
+    max_rounds: int = Field(default=5, ge=0)
+
+
 class PanelCfg(_Strict):
     size: int = Field(default=1, ge=1)
     tie_breaker: bool = True
@@ -607,6 +633,16 @@ class LocksCfg(_Strict):
     lease: Duration = "30m"
 
 
+_CRON = re.compile(r"^[A-Za-z0-9*/,?#-]+( [A-Za-z0-9*/,?#-]+){4}$")
+
+
+def _cron(value: str) -> str:
+    """Five fields of a POSIX cron expression, as GitHub's `schedule:` reads them; it is written into the workflow."""
+    if not _CRON.match(value):
+        raise ValueFree("not a cron expression of five space-separated fields, for example \"*/30 * * * *\"")
+    return value
+
+
 class CiCfg(_Strict):
     platform: Literal["auto", "github", "gitlab", "local"] = "auto"
     max_parallel_units: int = Field(default=2, ge=1)
@@ -618,6 +654,12 @@ class CiCfg(_Strict):
     # the GitHub Environment the generated job runs in: the forge token and the agent credentials are secrets of it
     # (repository secrets still resolve); null leaves `environment:` out of the workflow
     github_environment: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._-]{1,255}$")] | None = "l4"
+    # the cron of the generated GitHub workflow's `schedule:` trigger; null leaves the trigger out. `l4 upgrade`
+    # re-renders the workflow, so this is where it is changed (L4-ACT-004)
+    schedule: Annotated[str, AfterValidator(_cron)] | None = "*/30 * * * *"
+    # whether the generated GitHub workflow uploads `.l4-out` (prompts and agent transcripts, secrets masked) as the
+    # artifact `l4-out`; on a public repository any signed-in user can download it, so set false there
+    upload_artifacts: bool = True
 
 
 class PriceEntry(_Strict):
@@ -668,6 +710,7 @@ class L4Config(_Strict):
     implementer: ImplementerCfg = Field(default_factory=ImplementerCfg)
     clarifier: ClarifierCfg = Field(default_factory=ClarifierCfg)
     verifier: VerifierCfg = Field(default_factory=VerifierCfg)
+    feedback: FeedbackCfg = Field(default_factory=FeedbackCfg)
     archive: dict[str, Any] = Field(default_factory=dict)
     memory: MemoryCfg = Field(default_factory=MemoryCfg)
     forge: ForgeCfg = Field(default_factory=ForgeCfg)

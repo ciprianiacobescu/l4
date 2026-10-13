@@ -8,21 +8,29 @@ import dataclasses
 import json
 import logging
 import re
-from collections.abc import Collection, Mapping, Sequence
+import shutil
+import uuid
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.specs.base import (
+    MAX_DECISION_CHARS,
+    SAFE_NAME,
     ArchiveRefused,
     ArchiveReport,
     Criterion,
+    Finding,
+    FixUnitExists,
+    FixUnitInvalid,
     Framework,
     GateReport,
     Marker,
     MarkerNotAllowed,
     ParentHasOpenChildren,
+    SpecDelta,
     SpecError,
     Task,
     Unit,
@@ -32,6 +40,8 @@ from l4.specs.base import (
 )
 from l4.specs.criteria import kiro_criteria
 from l4.specs.detect import kiro_spec_dirs
+from l4.specs.fixmark import FixMarker, chore_findings, fix_name, read_fix_marker, split_fix_name, write_fix_marker
+from l4.specs.followup import FollowUpMarker, follow_up_name, write_follow_up_marker
 from l4.specs.markers import MAX_TASKS_BYTES, Line, split_lines, write_marker
 
 log = logging.getLogger("l4.spec")
@@ -238,7 +248,13 @@ class KiroProvider:
     framework = Framework.KIRO
 
     def __init__(
-        self, repo: Path, *, root: str = ".kiro/specs", enforce: bool = False, exempt_kinds: Sequence[str] = ()
+        self,
+        repo: Path,
+        *,
+        root: str = ".kiro/specs",
+        enforce: bool = False,
+        exempt_kinds: Sequence[str] = (),
+        uuid_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
     ) -> None:
         relative = Path(root)
         if relative.is_absolute() or ".." in relative.parts or not relative.parts:
@@ -248,6 +264,7 @@ class KiroProvider:
         self._parts = relative.parts
         self._enforce = enforce
         self._exempt = tuple(exempt_kinds)
+        self._uuid = uuid_factory
 
     def list_units(self) -> list[UnitRef]:
         return [UnitRef(Framework.KIRO, d.name, d) for d in kiro_spec_dirs(self._repo, self._root)]
@@ -316,6 +333,96 @@ class KiroProvider:
                 return tasks[i]
         return None
 
+    def create_fix_unit(
+        self, parent: UnitRef, round: int, findings: Sequence[Finding], spec_delta: SpecDelta | None
+    ) -> UnitRef:
+        """`<parent>-fix-<round>` as a Kiro bugfix spec (L4-KSP-005, L4-FBK-008): `bugfix.md`, `design.md`, `tasks.md`,
+        `.config.kiro` and the fix marker, then the provider's own validation. The whole folder is removed again when
+        it does not validate, and nothing is ever written outside it. Takes what the OpenSpec writer takes."""
+        return self._create_spec(fix_name(parent.name, round), parent, round, findings, spec_delta, None)
+
+    def create_follow_up(
+        self, parent: UnitRef, n: int, findings: Sequence[Finding], spec_delta: SpecDelta | None,
+        items: Sequence[tuple[str, str]],
+    ) -> UnitRef:  # fmt: skip
+        """`<parent>-followup-<n>` as a Kiro bugfix spec (L4-FBK-010): written like a fix unit is, with
+        `.l4/followup.json` for the marker (`items`: the (id, sha256) of the parent's feedback items it takes), so it is
+        a unit that `l4 run` selects and not a fix unit of the parent."""
+        return self._create_spec(follow_up_name(parent.name, n), parent, n, findings, spec_delta, tuple(items))
+
+    def _create_spec(
+        self, name: str, parent: UnitRef, round: int, findings: Sequence[Finding], spec_delta: SpecDelta | None,
+        follow_items: tuple[tuple[str, str], ...] | None,
+    ) -> UnitRef:  # fmt: skip
+        what = "follow-up" if follow_items is not None else "fix unit"
+        if not SAFE_NAME.match(name):
+            raise SpecError(f"{name!r} is not a valid spec name")
+        ref = UnitRef(Framework.KIRO, name, self._repo.joinpath(*self._parts, name))
+        folder = self.unit_dir(ref)
+        if folder.exists():
+            raise FixUnitExists(f"{ref.id} exists; a {what} is never overwritten")
+        if not findings:
+            raise SpecError(f"a {what} needs at least one finding")
+        try:
+            self._scaffold(parent, ref, round, findings, spec_delta, follow_items)
+            report = self.validate(ref, strict=True)
+            if not report.valid:
+                errors = [i for i in report.issues if i.level == "ERROR"] or list(report.issues)
+                shown = "; ".join(f"{i.path}: {i.message}"[:200] for i in errors[:3])
+                raise FixUnitInvalid(f"{ref.id} does not validate: {shown or 'no detail'}")
+        except BaseException:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+        return ref
+
+    def _scaffold(
+        self, parent: UnitRef, ref: UnitRef, round: int, findings: Sequence[Finding], delta: SpecDelta | None,
+        follow_items: tuple[tuple[str, str], ...] | None = None,
+    ) -> None:  # fmt: skip
+        folder = ref.path
+        folder.mkdir(parents=True)
+        chores = (
+            tuple(i for f in findings if f.chore for i in f.ids),
+            tuple(i for f in findings if f.chore and f.tests for i in f.ids),
+            tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
+        )
+        if follow_items is not None:  # a unit of its own: no restated criteria of the parent, no fix marker
+            write_follow_up_marker(folder, FollowUpMarker(parent.id, follow_items, *chores))
+            known: dict[str, tuple[str, Criterion]] = {}
+        else:
+            # the marker first: a fix unit's `2.n` item is read as the parent's criterion only where the marker is
+            retakes = tuple(i for f in findings if f.chore and f.retake for i in f.ids)
+            write_fix_marker(
+                folder, FixMarker(parent.id, round, tuple(i for f in findings for i in f.ids), *chores, retakes)
+            )
+            known = self._known_criteria(parent)
+        items = _FixItems(parent.name, findings, delta, known)
+        (folder / "bugfix.md").write_text(items.bugfix(), encoding="utf-8")
+        (folder / "design.md").write_text(
+            _fix_design(parent, round, findings, follow_up=follow_items is not None), encoding="utf-8"
+        )
+        ids = {c.alias: c.id for c in self.criteria(ref)}
+        (folder / "tasks.md").write_text(_fix_tasks(findings, items.refs, ids), encoding="utf-8")
+        config = {"specId": self._uuid(), "workflowType": "requirements-first", "specType": "bugfix"}
+        (folder / ".config.kiro").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+    def _known_criteria(self, parent: UnitRef) -> dict[str, tuple[str, Criterion]]:
+        """Criterion id -> (where it is written, the criterion): the parent's, then those of its earlier fix units. A
+        fix task can cite either, since the verifier plans against the family."""
+        known: dict[str, tuple[str, Criterion]] = {}
+        for unit in self.list_units():
+            split = split_fix_name(unit.name)
+            if unit.name == parent.name:
+                label = "parent"
+            elif split is not None and split[0] == parent.name and (m := read_fix_marker(unit.path)) is not None:
+                label = unit.name if m.parent == parent.id else ""
+            else:
+                label = ""
+            if label:
+                for c in self.criteria(unit):
+                    known.setdefault(c.id, (label, c))
+        return known
+
     def done_gate(self, unit: UnitRef) -> GateReport:
         """Every required leaf done; optional leaves and open optional branches do not count (L4-KSP-001)."""
         leaves = required_leaves(self.tasks(unit))
@@ -338,8 +445,14 @@ class KiroProvider:
         return bool(tags & {k.lower() for k in self._exempt})
 
     def leaves_without_requirements(self, unit: UnitRef) -> list[Task]:
-        """SPEC-004: required leaves with no `_Requirements:_` link that are not TDD-exempt."""
-        return [t for t in required_leaves(self.tasks(unit)) if not t.links and not self.is_exempt(t)]
+        """SPEC-004: required leaves with no `_Requirements:_` link that are not TDD-exempt. A chore of a fix unit is
+        the harness's own (its finding id is in the marker's `chores`), so it needs no link whatever the configured
+        exempt kinds are (L4-FBK-008)."""
+        directory = self.unit_dir(unit)
+        return [
+            t for t in required_leaves(self.tasks(unit))
+            if not t.links and not self.is_exempt(t) and not chore_findings(directory, t.title)
+        ]  # fmt: skip
 
     def validate(self, unit: UnitRef, strict: bool = True) -> ValidationReport:
         """File presence, task grammar, the graph JSON and that every `_Requirements:_` ref resolves. A leaf with no
@@ -381,3 +494,146 @@ class KiroProvider:
             message = f"task {task.key} has no _Requirements:_ line and is not TDD-exempt"
             found.append(ValidationIssue(level, "tasks.md", message, task.line))
         return found
+
+
+# --- fix units (L4-FBK-008) ------------------------------------------------------------------------------------
+
+
+# a finding's detail and the decisions in front of it, as much as OpenSpec's proposal keeps
+MAX_ITEM_CHARS = 600 + MAX_DECISION_CHARS + 400
+_DECIDED = ("Decided by ", "Requested by ")
+_CONTINUE_TO = re.compile(r"\bTHEN\b.*\bSHALL CONTINUE TO\b")
+MAX_REQUEST_LINE = 1800  # "Requested by <By> in FB-NNN (<kind>, <places>): " and the text, whole up to 1,200 characters
+MAX_CODE_LINE = 600
+# an unnumbered sentence: a criterion no test can trace would fail traceability (L4-FBK-008)
+GENERIC_UNCHANGED = "The system SHALL CONTINUE TO satisfy every other acceptance criterion of {parent}."
+
+
+def _line(text: str, limit: int = 160) -> str:
+    """One line of plain text: model- and person-written text must not open a heading, a list or a numbered item."""
+    one = " ".join(text.split()).lstrip("#>*-+ ")
+    return one if len(one) <= limit else one[: limit - 3].rstrip() + "..."
+
+
+def _sentence(scenario: str) -> str:
+    """`- **WHEN** x` and `- **THEN** y` lines as the one line `WHEN x THEN y`."""
+    return _line(" ".join(ln.strip().removeprefix("- ") for ln in scenario.splitlines()).replace("**", ""), 600)
+
+
+class _FixItems:
+    """The numbered items of a fix unit's `bugfix.md`: `2.n` per criterion a task fixes and per scenario, and one
+    `3.n` per scenario that says `SHALL CONTINUE TO`. Everything else of the parent is kept by an unnumbered sentence.
+    `refs[i]` are the item numbers the task of `findings[i]` cites (`2.1`); a chore cites none (its `[chore]` tag
+    makes it TDD-exempt, SPEC-004)."""
+
+    def __init__(
+        self,
+        parent: str,
+        findings: Sequence[Finding],
+        delta: SpecDelta | None,
+        known: Mapping[str, tuple[str, Criterion]],
+    ) -> None:
+        self.parent, self.findings = parent, findings
+        self.expected: list[str] = []
+        self.unchanged: list[str] = []
+        self.refs: list[list[str]] = [[] for _ in findings]
+        for refs, finding in zip(self.refs, findings, strict=True):
+            for cid in dict.fromkeys(finding.criteria):
+                refs.append(self._add(self.expected, "2", self._restated(cid, known.get(cid))))
+        for requirement in delta.requirements if delta else ():
+            for scenario in requirement.scenarios:
+                text = _sentence(scenario.text)
+                kind, items = ("3", self.unchanged) if _CONTINUE_TO.search(text) else ("2", self.expected)
+                ref = self._add(items, kind, text)
+                for refs, finding in zip(self.refs, findings, strict=True):
+                    if scenario.finding in finding.ids and ref not in refs:
+                        refs.append(ref)
+        for refs in self.refs:
+            refs.sort(key=lambda r: tuple(int(n) for n in r.split(".")))
+
+    @staticmethod
+    def _add(items: list[str], kind: str, text: str) -> str:
+        if text not in items:
+            items.append(text)
+        return f"{kind}.{items.index(text) + 1}"
+
+    @staticmethod
+    def _restated(cid: str, known: tuple[str, Criterion] | None) -> str:
+        """The criterion's own text, where it is written and its id: the harness reads the item as that criterion."""
+        if known is None:
+            return f"WHEN criterion {cid} is exercised THEN the system SHALL satisfy it (parent criterion {cid})"
+        label, criterion = known
+        return f"{_line(criterion.text, MAX_ITEM_CHARS)} ({label} {criterion.alias}, {cid})"
+
+    def bugfix(self) -> str:
+        defects = "\n".join(f"1.{n} {_defect(f)}" for n, f in enumerate(self.findings, 1))
+        expected = "\n".join(f"2.{n} {text}" for n, text in enumerate(self.expected, 1))
+        generic = GENERIC_UNCHANGED.format(parent=self.parent)
+        unchanged = "\n".join([generic, *([""] if self.unchanged else []), *(
+            f"3.{n} {text}" for n, text in enumerate(self.unchanged, 1)
+        )])  # fmt: skip
+        return (
+            "# Bugfix Requirements Document\n\n## Bug Analysis\n\n### Current Behavior (Defect)\n\n"
+            f"{defects}\n\n### Expected Behavior (Correct)\n\n{expected or _NO_EXPECTED}\n\n"
+            f"### Unchanged Behavior (Regression Prevention)\n\n{unchanged}\n"
+        )
+
+
+_NO_EXPECTED = "Every task of this fix unit is a chore: no behaviour is added, and the unchanged behavior below holds."
+
+
+def _defect(finding: Finding) -> str:
+    """The finding's title and detail on one line, the human's decisions first when the detail starts with them."""
+    ids, title, detail = ", ".join(finding.ids), _line(finding.title), _line(finding.detail, MAX_ITEM_CHARS)
+    if finding.request:  # a person's request first, whole, then the lines they quoted (L4-FBK-005)
+        code = f" Quoted code: {_line(finding.code, MAX_CODE_LINE)}" if finding.code.strip() else ""
+        return f"{_line(finding.request, MAX_REQUEST_LINE)}{code} ({title}; {ids})"
+    if detail.startswith(_DECIDED):
+        return f"{detail} ({title}; {ids})"
+    return f"{title}: {detail} ({ids})" if detail else f"{title} ({ids})"
+
+
+def _fix_design(parent: UnitRef, round: int, findings: Sequence[Finding], *, follow_up: bool = False) -> str:
+    what = (
+        f"Follow-up {round} of `{parent.name}`. `{parent.name}` was merged, and a person asked for the changes below "
+        "in its `feedback.md`; each task of tasks.md names the findings it answers"
+        if follow_up
+        else f"Fix unit {round} of `{parent.name}`. The verifier found the problems below in `{parent.name}`; each "
+        "task of tasks.md names the findings it answers"
+    )
+    parts = [
+        "# Design Document\n\n## Overview\n",
+        f"{what}, and bugfix.md says what must change and what must not.\n",
+        "## Findings and Decisions\n",
+    ]
+    for finding in findings:
+        parts.append(f"### {', '.join(finding.ids)}: {_line(finding.title)}\n")
+        parts.append(
+            f"Severity: {finding.severity}. {'Chore: a single phase, no red test.' if finding.chore else ''}".strip()
+        )
+        if finding.detail:
+            parts.append("\n" + _line(finding.detail, MAX_ITEM_CHARS))
+        if finding.request:
+            parts.append("\n" + _line(finding.request, MAX_REQUEST_LINE))
+            if finding.code.strip():  # an indented block: no line of it can open a heading or a fence
+                quoted = (f"    {line}" if line.strip() else "" for line in finding.code.splitlines())
+                parts.append("\n" + "\n".join(quoted))
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def _fix_tasks(findings: Sequence[Finding], refs: Sequence[Sequence[str]], ids: Mapping[str, str]) -> str:
+    """One leaf per finding group under a parent, each with its `_Requirements:_` line, and a one-wave graph. The
+    title cites the finding ids and the criteria the task fixes; a chore carries `[chore]` and the finding ids."""
+    lines = ["# Implementation Plan", "", "- [ ] 1. Fix the findings of the verifier"]
+    leaves: list[str] = []
+    for number, (finding, cited) in enumerate(zip(findings, refs, strict=True), 1):
+        criteria = [ids[f"Req {r}"] for r in cited if f"Req {r}" in ids]
+        cites = "; ".join([", ".join(finding.ids), *([", ".join(dict.fromkeys(criteria))] if criteria else [])])
+        tag = "[chore] " if finding.chore else ""
+        lines.append(f"  - [ ] 1.{number} {tag}{_line(finding.title)} ({cites})")
+        if cited:  # a chore cites nothing: its tag makes it TDD-exempt
+            lines.append(f"    - _Requirements: {', '.join(cited)}_")
+        leaves.append(f"1.{number}")
+    graph = json.dumps({"waves": [{"id": 0, "tasks": leaves}]})
+    return "\n".join(lines) + f"\n\n## Task Dependency Graph\n\n```json\n{graph}\n```\n"

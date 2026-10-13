@@ -286,6 +286,24 @@ def test_already_satisfied_commit_matches_one_event_pair(tmp_path, git_environ):
     assert not check_tdd_history(repo.context(base, sha)).findings
 
 
+def test_an_already_done_commit_of_a_retaken_feedback_task_needs_no_red_or_green(tmp_path, git_environ):
+    """review #8 follow-up: `task.done{tdd: already-done}` with its tick-only commit is a clean history, as a fix chore
+    is, and a test path changed in such a commit is still a blocker."""
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"notes.txt": "tick\n"})
+    sha = repo.commit("tick", task="1.1", tdd="already-done")
+    repo.events = [event("task.done", 1, task="1.1", sha=sha, tdd="already-done", reason="retaken FB-001: nothing")]
+    ctx = repo.context(base, sha)
+    assert not check_tdd_history(ctx).findings and not check_test_paths(ctx).findings
+    other = tmp_path / "tampered"
+    other.mkdir()
+    repo, base = new_repo(other, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write({"tests/test_a.py": "def test_a():\n    pass\n"})
+    sha = repo.commit("tamper", task="1.1", tdd="already-done")
+    repo.events = [event("task.done", 1, task="1.1", sha=sha, tdd="already-done")]
+    assert check_test_paths(repo.context(base, sha)).findings
+
+
 def test_integrity_blocker_stops_ladder_and_every_sub_check_has_a_row(tmp_path, git_environ):
     repo, base = new_repo(tmp_path, git_environ)
     repo.write({"tests/conftest.py": "def pytest_runtest_makereport(item, call):\n    pass\n"})
@@ -731,3 +749,36 @@ def test_unread_files_do_not_hide_a_python_finding_and_a_skipped_row_blocks_noth
     rows = {c.name: c for c in report.checks}
     assert rows["content scan"].status == "skipped" and rows["suppressions"].status == "skipped"
     assert "not checked: python only" in rows["content scan"].note and not report.findings
+
+
+def _follow_up_context(tmp_path, git_environ, parent: str, edited: str = "victim"):
+    """A follow-up `add-x-followup-1` whose marker names `parent`; the branch edits `<edited>/feedback.md`."""
+    from l4.config.schema import L4Config
+    from l4.specs.followup import FollowUpMarker, write_follow_up_marker
+    from l4.vcs.git import Git
+    from l4.verifier.integrity import IntegrityContext
+
+    files = {"README.md": "x\n", f".kiro/specs/{edited}/feedback.md": "# F\n"}
+    repo, base = new_repo(tmp_path, git_environ, files)
+    unit = ".kiro/specs/add-x-followup-1"
+    (repo.path / unit).mkdir(parents=True)
+    write_follow_up_marker(repo.path / unit, FollowUpMarker(parent, ()))
+    repo.write({f".kiro/specs/{edited}/feedback.md": "# F\nedited\n", f"{unit}/tasks.md": "- [ ] 1\n"})
+    head = repo.commit("work")
+    return IntegrityContext(
+        Git(repo.path, environ=repo.environ), L4Config(), base, head, [], [], [unit], "kiro:add-x-followup-1"
+    )
+
+
+def test_a_follow_up_may_write_exactly_its_parents_feedback_file(tmp_path, git_environ):
+    out = check_protected(_follow_up_context(tmp_path, git_environ, "kiro:add-x", edited="add-x"))
+    assert not out.findings
+
+
+@pytest.mark.parametrize("parent", ["kiro:victim", "kiro:../../elsewhere", "openspec:add-x"])
+def test_an_invalid_follow_up_marker_exempts_nothing_and_raises_nothing(tmp_path, git_environ, parent):
+    """review #4: no exemption of the file it names, no ValueError from `relative_to`, a blocker that says why."""
+    out = check_protected(_follow_up_context(tmp_path, git_environ, parent))
+    details = " ".join(f.detail for f in out.findings if f.severity is Severity.BLOCKER)
+    assert ".kiro/specs/victim/feedback.md" in details  # still protected
+    assert ".l4/followup.json" in details

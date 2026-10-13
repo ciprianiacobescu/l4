@@ -362,3 +362,23 @@ def test_merge_runs_with_the_bot_identity_when_git_has_none(forked, raw, merge_t
     assert raw(repo, "log", "-1", "--format=%an <%ae>|%cn <%ce>").strip() == (
         "l4-bot <l4-bot@users.noreply.invalid>|l4-bot <l4-bot@users.noreply.invalid>"
     )
+
+
+def test_a_resolver_that_raises_leaves_the_conflict_unresolved_and_the_worktree_clean(
+    make_repo, raw, git_for, git_environ, merge_trailers
+):
+    """human-feedback review #6: ANY exception of a resolver (not only `Escalate`) is an unresolved file, so the merge
+    aborts instead of leaving the worktree mid-merge."""
+    repo = make_repo(remote=True)
+    path = "docs/file.md"
+    base = fork_over(repo, raw, git_environ, path, b"a\n", b"b\n", b"c\n", (2000, 1000))
+
+    def boom(sides):
+        raise ValueError("overlapping edits")
+
+    result = merge_base_into(
+        git_for(repo), base, message=MSG, trailers=merge_trailers, resolvers=[(lambda p: p == path, boom)]
+    )
+    assert result.kind == "conflict" and result.files == (path,)
+    assert not (repo / ".git" / "MERGE_HEAD").exists()
+    assert raw(repo, "status", "--porcelain").strip() == ""

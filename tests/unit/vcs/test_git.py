@@ -33,7 +33,7 @@ def test_every_invocation_is_hardened(make_repo, git_environ):
     for name in scrubbed:
         assert name not in git.env
     assert git.env["GIT_TERMINAL_PROMPT"] == "0" and git.env["LC_ALL"] == "C"
-    assert git.env["GIT_CONFIG_GLOBAL"] == "/dev/null"  # explicit isolation from the caller is kept
+    assert git.env["GIT_CONFIG_GLOBAL"] == git_environ["GIT_CONFIG_GLOBAL"]  # the isolation the caller gave is kept
     assert git.run("rev-parse", "--is-inside-work-tree").stdout.strip() == "true"  # GIT_DIR=/nonexistent did not win
     git.run("status", "--porcelain")
     assert git.rev_parse("HEAD") is not None

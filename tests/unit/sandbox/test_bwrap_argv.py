@@ -280,8 +280,9 @@ def test_repo_guidance_directories_are_covered_by_a_tmpfs_after_the_binds(make_s
     assert str(wt / ".kiro" / "steering") in masked
     assert argv.index(str(wt / ".claude")) > argv.index("--bind")  # a mount over a path needs the bind below it first
     assert argv.index(str(wt / ".claude")) > argv.index(str(spec.tmp_dir))  # after every bind
-    # nothing the harness hands the step is under a masked path: the private dir, caches, `.git`
-    assert not any(str(spec.tmp_dir).startswith(m + "/") for m in masked)
+    # nothing the harness hands the step is under a masked path: the private dir, caches, `.git`; the base `/tmp`
+    # tmpfs comes before every bind, so a private dir under the host's /tmp (pytest's, on Linux) is bound over it
+    assert not any(str(spec.tmp_dir).startswith(m + "/") for m in masked - {"/tmp"})
 
 
 def test_only_existing_guidance_directories_are_masked_never_created(make_spec):

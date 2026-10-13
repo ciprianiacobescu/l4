@@ -32,7 +32,7 @@ def test_the_prompt_is_the_single_template_with_no_red_rules_to_follow(make_benc
     bench = make_bench([FIX])
     run_single(bench.wb, TASK, FINDINGS, attempt=1)
     [rendered] = bench.events("prompt.rendered")
-    assert rendered["template_version"] == "contract@9+single@3" and rendered["role"] == "single"
+    assert rendered["template_version"] == "contract@10+single@3" and rendered["role"] == "single"
     prompt = bench.adapter.requests[0].prompt
     assert "Phase: SINGLE" in prompt and "Phase: RED" not in prompt and 'phase "single"' in prompt
 
@@ -185,7 +185,9 @@ def run_tests_chore(make_bench, step: Step, **kw):
     red = run_red(bench.wb, UNIT_TASK, attempt=1)
     assert red.status == "ok", red.reason
     assert run_green(bench.wb, UNIT_TASK, red, attempt=1).status == "ok"
-    return bench, run_single(bench.wb, TESTS_TASK, HOLD, attempt=1, kind=kw.get("kind", "tests"))
+    return bench, run_single(
+        bench.wb, TESTS_TASK, HOLD, attempt=1, kind=kw.get("kind", "tests"), retake=kw.get("retake", False)
+    )
 
 
 def test_a_test_chore_keeps_a_new_test_file(make_bench):
@@ -199,7 +201,7 @@ def test_a_test_chore_keeps_a_new_test_file(make_bench):
     assert "L4-TDD: exempt" in bench.wb.git.run("log", "-1", "--format=%B").stdout
     assert "tests/test_more.py" in bench.wb.git.run("show", "--name-only", "--format=", "HEAD").stdout
     [_, _, rendered] = bench.events("prompt.rendered")
-    assert rendered["template_version"] == "contract@9+single_tests@5"
+    assert rendered["template_version"] == "contract@10+single_tests@5"
     assert "Do not add tests" not in bench.adapter.requests[2].prompt
 
 
@@ -234,6 +236,24 @@ def test_a_test_chore_that_adds_no_test_fails(make_bench):
     assert done.status == "failed" and done.reason == "no tests added"
     assert bench.events("task.tests_added") == []
     assert [e["task"] for e in bench.events("task.done")] == ["1.1"]  # only the unit's own task is done
+
+
+def test_a_retaken_tests_item_with_no_test_to_add_completes_as_already_done(make_bench):
+    """review #8 follow-up: the tests are there already, the judge only left the item out of its reply."""
+    bench, done = run_tests_chore(make_bench, Step(structured=result("single")), retake=True)
+    assert done.status == "ok", done.reason
+    done_events = [e for e in bench.events("task.done") if e["task"] == "1.2"]
+    assert [e["tdd"] for e in done_events] == ["already-done"]
+    assert bench.events("task.tests_added") == [] and bench.events("task.tdd_exempt") == []
+    assert "- [x] 1.2" in (bench.wb.ref.path / "tasks.md").read_text()
+
+
+def test_a_retaken_tests_item_that_adds_a_test_keeps_it(make_bench):
+    bench, done = run_tests_chore(
+        make_bench, Step(writes={"tests/test_more.py": NEW_TESTS}, structured=result("single")), retake=True
+    )
+    assert done.status == "ok" and [e["files"] for e in bench.events("task.tests_added")] == [["tests/test_more.py"]]
+    assert [e["tdd"] for e in bench.events("task.done") if e["task"] == "1.2"] == ["exempt"]
 
 
 def test_a_production_change_in_a_test_chore_fails(make_bench):
@@ -294,4 +314,4 @@ def test_a_fix_chore_is_unchanged(make_bench):
     assert done.status == "ok", done.reason
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS  # put back, as before
     assert bench.events("task.tests_added") == []
-    assert bench.events("prompt.rendered")[-1]["template_version"] == "contract@9+single@3"
+    assert bench.events("prompt.rendered")[-1]["template_version"] == "contract@10+single@3"

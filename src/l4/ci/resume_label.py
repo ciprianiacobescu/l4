@@ -64,10 +64,20 @@ def resume_signal(
     return ResumeSignal(event.id, signal, event.user_id, level)
 
 
-def halted_section(phase: str, reason: str, unit: str, label: str) -> str:
+def halted_section(phase: str, reason: str, unit: str, label: str, *, feedback: bool = False) -> str:
     """The sticky-note section of a unit that stopped (SPEC L4-ARC-002, L4-CLI-002): why, and what continues it. The
-    halting run writes it with its last mirror sync, and the sweep writes it again around a refusal."""
+    halting run writes it with its last mirror sync, and the sweep writes it again around a refusal. `feedback`: the
+    unit is escalated at the feedback limit (L4-FBK-006), where the label and `l4 resume` extend the feedback rounds,
+    not the fix rounds."""
     why = " ".join(reason.split())[:300]
+    if phase == "escalated" and feedback:
+        return "\n".join([
+            f"### Escalated: {why}",
+            "",
+            f"To go on after reading `verification.md`, a member adds the label `{label}` to this merge request (one "
+            f"more feedback round per label event), or runs `l4 resume --unit {unit} --reason TEXT "
+            "--extend-feedback-rounds N`.",
+        ])  # fmt: skip
     if phase == "escalated":
         return "\n".join([
             f"### Escalated: {why}",

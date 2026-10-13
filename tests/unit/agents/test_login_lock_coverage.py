@@ -135,6 +135,7 @@ CLASSIFIED = {
     "eval/cellrun.py": "starts `l4 run` as a child; that process takes the lock like any other",
     "eval/env.py": OTHER, "eval/run.py": "`uv sync` and a version probe", "eval/workspace.py": OTHER,
     "gates/dryrun.py": OTHER, "gates/e2e_launch.py": OTHER, "gates/runner.py": "the project's own test gates",
+    "init/action.py": "`git ls-remote` for a harness ref (adoption-kit)",
     "llm/system_one.py": "the local System-One model server", "memory/serena.py": "the Serena MCP server",
     "s1/canary.py": OTHER, "sandbox/bwrap.py": OTHER, "sandbox/select.py": OTHER, "setup/gitlab.py": OTHER,
     "sim/runner.py": "starts the simulator child", "specs/openspec.py": OTHER, "state/environment.py": OTHER,

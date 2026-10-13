@@ -115,6 +115,15 @@ def make_setup(tmp_path: Path, *, uv: bool = True, apt: bool = True, bwrap_on_pa
         path = fakebin / name
         path.write_text("#!/bin/sh\n" + body)
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    # the rest of the system's tools, without any the fakes stand for: a missing fake must mean a missing tool, even
+    # on a host (a CI runner) that has the real `apt-get` or `bwrap`
+    sysbin = tmp_path / "sysbin"
+    sysbin.mkdir()
+    for directory in ("/usr/bin", "/bin"):
+        for entry in Path(directory).iterdir() if Path(directory).is_dir() else ():
+            skipped = entry.name in FAKES or entry.name in ("apt", "apt-cache")
+            if not skipped and not (sysbin / entry.name).exists():
+                (sysbin / entry.name).symlink_to(entry)
     sources = tmp_path / "sources"
     sources.mkdir()
     for name in ("bwrap", "uv"):  # copy sources for dpkg -x and the fake uv installer, never on PATH
@@ -129,7 +138,7 @@ def make_setup(tmp_path: Path, *, uv: bool = True, apt: bool = True, bwrap_on_pa
     log = tmp_path / "fake.log"
     github_path = tmp_path / "github_path"
     env = {
-        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "PATH": f"{fakebin}:{sysbin}",
         "HOME": str(home),
         "L4_HOME": str(tmp_path / "l4home"),
         "FAKE_LOG": str(log),

@@ -22,7 +22,8 @@ class Verdict(StrEnum):
     NEEDS_HUMAN = "NEEDS_HUMAN"
 
 
-Source = Literal["deterministic", "judge", "human"]  # "human": a judge finding the human rejected (L4-VER-013)
+# "human": a judge finding the human rejected (L4-VER-013); "feedback": a person's item of feedback.md (L4-FBK-004)
+Source = Literal["deterministic", "judge", "human", "feedback"]
 StepStatus = Literal["ok", "failed", "not_run", "reused", "unavailable"]
 CounterexampleStatus = Literal["reproduced", "not_reproduced", "unexecuted"]
 CriterionResult = Literal["pass", "needs_human", "fail", "disputed"]
@@ -32,6 +33,34 @@ def finding_id(title: str, criterion: str | None = None) -> str:
     """`F-` and 8 hex digits of the title and criterion (a reworded detail keeps its id)."""
     digest = hashlib.sha256(f"{title}\x00{criterion or ''}".encode()).hexdigest()
     return f"F-{digest[:8]}"
+
+
+@dataclass(frozen=True)
+class FeedbackRef:
+    """What the fix planner needs of one item of `feedback.md` (L4-FBK-004, L4-FBK-005): the item as step 0 read it.
+    `sha256` is `specs.feedback.content_sha256` of that reading, which `feedback.taken` records."""
+
+    id: str
+    kind: str
+    title: str
+    text: str  # the person's request, whitespace as written
+    by: str
+    places: tuple[str, ...] = ()  # `path[:start[-end]]`
+    env: str | None = None
+    when: str | None = None
+    then: str | None = None
+    code: str = ""
+    sha256: str = ""
+    retake: bool = False  # the item had a `feedback.taken` before this fix unit: its chore may find nothing to change
+
+
+@dataclass(frozen=True)
+class FeedbackOutcome:
+    """The judge check of one item in one round (L4-FBK-007): addressed or not, and the evidence either way."""
+
+    id: str
+    addressed: bool
+    evidence: str
 
 
 @dataclass(frozen=True)
@@ -45,6 +74,7 @@ class Finding:
     spec_gap: bool = False
     suggested_fix: str = ""
     id: str = ""  # `F-` and 8 hex digits of the title and criterion; set here, so a reworded detail keeps its id
+    feedback: FeedbackRef | None = None  # source "feedback" only; not stored in verdict.json (the item is in the file)
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -223,6 +253,7 @@ class FixDecision:
     not_converted: list[str] = field(default_factory=list)
     reason: str = ""
     plan: Any = None
+    code: str = ""  # an `escalate` with a machine-readable reason, the edge's `reason` (`feedback_rounds_exhausted`)
 
 
 REPLY_OUTCOMES = ("valid", "repaired", "retried", "discarded")  # how a judge's reply fared, counted per profile
@@ -253,6 +284,8 @@ class VerifyResult:
     tests: dict[str, str] = field(default_factory=dict)  # test id -> status, from the step 3 report
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
+    feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)
+    feedback_outcomes: list[FeedbackOutcome] = field(default_factory=list)  # the judge check of L4-FBK-007; not stored
     integrity: IntegrityReport | None = None
     trace: list[CriterionEvidence] = field(default_factory=list)
     audit: list[AuditRecord] = field(default_factory=list)

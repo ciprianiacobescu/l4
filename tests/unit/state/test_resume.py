@@ -125,3 +125,93 @@ def test_resume_needs_no_sandbox(world, monkeypatch):
         again = sim_app(app.config_path.parent)
         refused = run_command(again, adapters={"fake": ProfileRouter(scripted_agents(happy()))})
     assert refused.code == ExitCode.DOCTOR_FAILED
+
+
+# --- human-feedback 2.1 (L4-FBK-006, D8): `--extend-feedback-rounds` ------------------------------------------------
+
+
+def test_resume_refuses_a_feedback_round_extension_for_a_halted_unit(world):
+    """L4-FBK-006: a halted unit has no feedback rounds to extend; N must be at least 1."""
+    app, remote, run = world
+    assert run(failing_reds()).code == ExitCode.HALTED
+    with pytest.raises(L4Exit, match="halted, not escalated") as caught:
+        run_resume(app, unit=UNIT, reason="more", extend_feedback_rounds=1)
+    assert caught.value.code == ExitCode.USAGE_ERROR
+    assert not any(e["type"] in ("unit.resumed", "budget.extended") for e in events(remote))
+    with pytest.raises(L4Exit, match="--extend-feedback-rounds must be at least 1"):
+        run_resume(app, unit=UNIT, reason="more", extend_feedback_rounds=0)
+
+
+def _escalated_world(app, monkeypatch, *, halt_reason: str | None, fix_round: int = 0, feedback_used: int = 0):
+    """`resume_unit` over an escalated snapshot, the run itself stubbed: what it decides and passes on is the test."""
+    from types import SimpleNamespace
+
+    from l4.config.loader import load_config
+    from l4.state import resume as resume_module
+    from l4.state.fold import UnitState
+
+    state = UnitState(
+        unit=UNIT, phase="escalated", halt_reason=halt_reason, fix_round=fix_round, fix_rounds_counted=fix_round,
+        feedback_rounds_used=feedback_used,
+    )
+    monkeypatch.setattr(resume_module, "load_snapshot", lambda *a, **k: SimpleNamespace(state=state))
+    seen: dict = {}
+
+    def fake_run(app, cfg, git, provider, ref, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(resume_module, "run_unit_in_worktree", fake_run)
+    cfg = load_config(app.repo)
+    ref = SimpleNamespace(id=UNIT)
+    return cfg, ref, seen
+
+
+def test_a_unit_escalated_for_the_feedback_limit_needs_a_feedback_extension(world, monkeypatch):
+    """L4-FBK-006: the refusal names `feedback.max_rounds` and `--extend-feedback-rounds`, not the fix rounds."""
+    from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED
+    from l4.state.resume import resume_unit
+
+    app, _, _ = world
+    cfg, ref, seen = _escalated_world(app, monkeypatch, halt_reason=FEEDBACK_ROUNDS_EXHAUSTED, feedback_used=5)
+    message = r"feedback rounds used \(5/5, feedback.max_rounds\).*--extend-feedback-rounds"
+    with pytest.raises(L4Exit, match=message) as c:
+        resume_unit(app, cfg, None, None, ref, reason="again")
+    assert c.value.code == ExitCode.USAGE_ERROR and not seen
+    with pytest.raises(L4Exit, match="--extend-feedback-rounds"):  # fix rounds do not help it
+        resume_unit(app, cfg, None, None, ref, reason="again", extend_fix_rounds=2)
+    resume_unit(app, cfg, None, None, ref, reason="again", extend_feedback_rounds=2)
+    assert seen["resume_extend_feedback_rounds"] == 2 and seen["resume_extend_fix_rounds"] is None
+
+
+def test_a_unit_escalated_for_fix_rounds_is_not_asked_for_a_feedback_extension(world, monkeypatch):
+    from l4.state.resume import resume_unit
+
+    app, _, _ = world
+    cfg, ref, seen = _escalated_world(app, monkeypatch, halt_reason=None, fix_round=99)
+    with pytest.raises(L4Exit, match="--extend-fix-rounds"):
+        resume_unit(app, cfg, None, None, ref, reason="again")
+    resume_unit(app, cfg, None, None, ref, reason="again", extend_fix_rounds=1)
+    assert seen["resume_extend_fix_rounds"] == 1 and seen["resume_extend_feedback_rounds"] is None
+
+
+def test_the_feedback_extension_is_recorded_before_unit_resumed():
+    """L4-FBK-006: `budget.extended{feedback_rounds, by, reason}` comes first, like the fix-round extension."""
+    from l4.orchestrator import Orchestrator
+
+    appended: list[tuple[str, dict]] = []
+
+    class Ledger:
+        def append(self, kind, **data):
+            appended.append((kind, data))
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.services = type("S", (), {"ledger": Ledger()})()
+    orch._refold = lambda: type("St", (), {"phase": "escalated"})()
+    orch._go = lambda trigger: None
+    orch._outcome = lambda before: None
+    orch._notes = ()
+    orch._commit_what = ""
+    orch.resume("again", by="member", signal="label:9", extend_feedback_rounds=1)
+    assert [k for k, _ in appended] == ["budget.extended", "unit.resumed"]
+    assert appended[0][1] == {"feedback_rounds": 1, "reason": "again", "by": "member", "signal": "label:9"}

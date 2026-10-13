@@ -17,7 +17,7 @@ class CommitTrailers:
     iteration: int
     phase: str
     task: str | None = None
-    tdd: str | None = None  # red | green | already-satisfied | exempt
+    tdd: str | None = None  # red | green | already-satisfied | exempt | already-done
     agent: str | None = None
     fallback_from: str | None = None
     step: str | None = None  # `<task>/<phase>/<attempt>` until step_key lands (M1: state-vcs-locks 1.22)

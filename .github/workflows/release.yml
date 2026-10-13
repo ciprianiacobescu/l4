@@ -1,0 +1,89 @@
+name: release
+
+# A tag `src-vX.Y.Z` on the main history becomes one slim commit on branch `release` (src/, pyproject.toml, uv.lock,
+# README.md, LICENSE, .github/actions/l4/, the l4 plugin and skill), tagged `vX.Y.Z`, with `v0` moved to it (L4-ACT-006).
+# Consumers pin `vX.Y.Z`; they never download docs/live/ or the history.
+
+on:
+  push:
+    tags:
+      - "src-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release   # releases are serial: each one's parent is the previous release commit
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # push `release` and the tags, create the GitHub release
+      checks: read      # list the checks that ran on the source commit
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      SOURCE_SHA: ${{ github.sha }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the whole history and every tag
+      - name: Version from the tag
+        run: |
+          set -euo pipefail
+          version="${TAG#src-v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag $TAG is not src-vX.Y.Z"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::tag v$version already exists; a release is never rebuilt"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Refuse a source commit with a failed check
+        run: |
+          set -euo pipefail
+          failed="$(gh api "repos/${REPO}/commits/${SOURCE_SHA}/check-runs" --paginate \
+            --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name')"
+          if [ -n "$failed" ]; then
+            echo "::error::checks failed on ${SOURCE_SHA}: ${failed//$'\n'/, }"
+            exit 1
+          fi
+      - name: Build the release commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin release >/dev/null 2>&1; then
+            git fetch --no-tags origin release:refs/heads/release
+          fi
+          sha="$(python3 scripts/dev/release_commit.py --source "$SOURCE_SHA" --version "$VERSION")"
+          echo "RELEASE_SHA=$sha" >> "$GITHUB_ENV"
+          echo "release commit $sha (source $SOURCE_SHA)"
+      - name: Push the branch and the tags
+        run: |
+          set -euo pipefail
+          git push origin refs/heads/release:refs/heads/release   # fast-forward only, never forced
+          git tag "v$VERSION" "$RELEASE_SHA"
+          git push origin "refs/tags/v$VERSION"
+          git tag -f v0 "$RELEASE_SHA"
+          git push --force origin refs/tags/v0                    # the one forced ref: the moving major tag
+      - name: GitHub release
+        run: |
+          set -euo pipefail
+          passed="$(gh api "repos/${REPO}/commits/${SOURCE_SHA}/check-runs" --paginate \
+            --jq '.check_runs[] | select(.conclusion == "success") | "- " + .name' | sort -u || true)"
+          {
+            echo "Source commit: \`${SOURCE_SHA}\` (tag \`${TAG}\`)."
+            echo
+            echo "Release commit: \`${RELEASE_SHA}\` on branch \`release\`, tags \`v${VERSION}\` and \`v0\`."
+            echo
+            echo "Checks that passed on the source commit:"
+            echo "${passed:-- none recorded}"
+          } > notes.md
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file notes.md

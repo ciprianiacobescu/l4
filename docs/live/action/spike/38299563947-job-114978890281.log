@@ -1,0 +1,119 @@
+﻿2026-10-12T19:43:51.6001344Z Current runner version: '2.337.0'
+2026-10-12T19:43:51.6032473Z ##[group]Runner Image Provisioner
+2026-10-12T19:43:51.6033609Z Hosted Compute Agent
+2026-10-12T19:43:51.6034359Z Version: 20261002.596
+2026-10-12T19:43:51.6035260Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-12T19:43:51.6036171Z Build Date: 2026-10-02T22:28:27Z
+2026-10-12T19:43:51.6037291Z Worker ID: {8806623e-5610-4e22-8f45-366e1433b294}
+2026-10-12T19:43:51.6038312Z Region: westus3
+2026-10-12T19:43:51.6038976Z Cloud: Azure
+2026-10-12T19:43:51.6039703Z ##[endgroup]
+2026-10-12T19:43:51.6041871Z ##[group]Operating System
+2026-10-12T19:43:51.6042631Z Ubuntu
+2026-10-12T19:43:51.6043349Z 24.04.5
+2026-10-12T19:43:51.6044034Z LTS
+2026-10-12T19:43:51.6044709Z ##[endgroup]
+2026-10-12T19:43:51.6045377Z ##[group]Runner Image
+2026-10-12T19:43:51.6046144Z Image: ubuntu-24.04
+2026-10-12T19:43:51.6047149Z Version: 20261004.327.1
+2026-10-12T19:43:51.6048764Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-12T19:43:51.6050897Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-12T19:43:51.6052150Z ##[endgroup]
+2026-10-12T19:43:51.6053670Z ##[group]GITHUB_TOKEN Permissions
+2026-10-12T19:43:51.6056047Z Contents: read
+2026-10-12T19:43:51.6058314Z Metadata: read
+2026-10-12T19:43:51.6059020Z ##[endgroup]
+2026-10-12T19:43:51.6061395Z Secret source: Actions
+2026-10-12T19:43:51.6062677Z Cache mode: write
+2026-10-12T19:43:51.6063743Z Prepare workflow directory
+2026-10-12T19:43:51.7809633Z Prepare all required actions
+2026-10-12T19:43:51.7907243Z Getting action download info
+2026-10-12T19:43:52.1491835Z Download action repository 'ciprianiacobescu/agent-supervisor@c148939a71af774dd20a7067262ecf731f8cf3b5' (SHA:c148939a71af774dd20a7067262ecf731f8cf3b5)
+2026-10-12T19:44:01.8190651Z Getting action download info
+2026-10-12T19:44:01.9283178Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+2026-10-12T19:44:02.2925467Z Complete job name: private-action
+2026-10-12T19:44:02.3585230Z ##[group]Run ciprianiacobescu/agent-supervisor/.github/actions/l4@c148939a71af774dd20a7067262ecf731f8cf3b5
+2026-10-12T19:44:02.3585949Z with:
+2026-10-12T19:44:02.3586183Z   command: --version
+2026-10-12T19:44:02.3586410Z   source: auto
+2026-10-12T19:44:02.3586628Z   python: 3.12
+2026-10-12T19:44:02.3587001Z   uv-version: 0.12.22
+2026-10-12T19:44:02.3587369Z ##[endgroup]
+2026-10-12T19:44:02.3660119Z ##[start-action display=l4 source;id=__ciprianiacobescu_agent-supervisor.src]
+2026-10-12T19:44:02.3698153Z ##[group]Run s=$(date +%s.%N)
+2026-10-12T19:44:02.3698537Z s=$(date +%s.%N)
+2026-10-12T19:44:02.3698845Z root=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
+2026-10-12T19:44:02.3699198Z mode=$INPUT_SOURCE
+2026-10-12T19:44:02.3699464Z if [ "$mode" = auto ]; then
+2026-10-12T19:44:02.3699889Z   if [ -f "$root/pyproject.toml" ] && [ -d "$root/src/l4" ]; then mode=action; else mode=repository; fi
+2026-10-12T19:44:02.3700369Z fi
+2026-10-12T19:44:02.3700583Z case "$mode" in
+2026-10-12T19:44:02.3700811Z   action)
+2026-10-12T19:44:02.3701164Z     [ -d "$root/src/l4" ] || { echo "::error::source action, but $root holds no harness"; exit 2; }
+2026-10-12T19:44:02.3701750Z     key=$(cd "$root" && find src pyproject.toml uv.lock README.md -type f ! -path '*/__pycache__/*' 2>/dev/null \
+2026-10-12T19:44:02.3702279Z           | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-24)
+2026-10-12T19:44:02.3702629Z     echo "dir=$root" >> "$GITHUB_OUTPUT"
+2026-10-12T19:44:02.3703094Z     echo "[l4-action] the action's repository: $(find "$root" -type f | wc -l) files, $(du -sh "$root" | cut -f1)"
+2026-10-12T19:44:02.3703516Z     ;;
+2026-10-12T19:44:02.3703732Z   repository)
+2026-10-12T19:44:02.3704093Z     [[ "$INPUT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit must be 40 hex digits"; exit 2; }
+2026-10-12T19:44:02.3704863Z     [ -n "$INPUT_REPOSITORY" ] || { echo "::error::repository is required for source repository"; exit 2; }
+2026-10-12T19:44:02.3705362Z     key=$INPUT_COMMIT
+2026-10-12T19:44:02.3705631Z     ;;
+2026-10-12T19:44:02.3705932Z   *) echo "::error::source must be auto, action or repository"; exit 2 ;;
+2026-10-12T19:44:02.3706261Z esac
+2026-10-12T19:44:02.3706493Z echo "mode=$mode" >> "$GITHUB_OUTPUT"
+2026-10-12T19:44:02.3707059Z echo "key=l4-harness-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-py$INPUT_PYTHON-$mode-$key" >> "$GITHUB_OUTPUT"
+2026-10-12T19:44:02.3707803Z echo "[l4-action] source $mode, key $key ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:44:02.3928413Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:44:02.3928863Z env:
+2026-10-12T19:44:02.3929092Z   INPUT_SOURCE: auto
+2026-10-12T19:44:02.3929350Z   INPUT_COMMIT: 
+2026-10-12T19:44:02.3929582Z   INPUT_REPOSITORY: 
+2026-10-12T19:44:02.3929803Z   INPUT_PYTHON: 3.12
+2026-10-12T19:44:02.3930022Z ##[endgroup]
+2026-10-12T19:44:02.4769066Z [l4-action] the action's repository: 4597 files, 50M
+2026-10-12T19:44:02.4790820Z [l4-action] source action, key ff6e57f80dea4faa90d16f16 (0.07 s)
+2026-10-12T19:44:02.4864607Z ##[end-action id=__ciprianiacobescu_agent-supervisor.src;outcome=success;conclusion=success;duration_ms=120]
+2026-10-12T19:44:02.4870010Z ##[start-action display=restore installed harness;id=__ciprianiacobescu_agent-supervisor.restore]
+2026-10-12T19:44:02.4920219Z ##[group]Run actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-12T19:44:02.4920620Z with:
+2026-10-12T19:44:02.4921031Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-12T19:44:02.4921584Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:44:02.4921985Z   enableCrossOsArchive: false
+2026-10-12T19:44:02.4922493Z   fail-on-cache-miss: false
+2026-10-12T19:44:02.4922734Z   lookup-only: false
+2026-10-12T19:44:02.4922954Z ##[endgroup]
+2026-10-12T19:44:02.8469903Z Cache hit for: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:44:04.0786330Z Received 16879893 of 25268501 (66.8%), 16.1 MBs/sec
+2026-10-12T19:44:04.1476795Z Received 25268501 of 25268501 (100.0%), 22.6 MBs/sec
+2026-10-12T19:44:04.1483720Z Cache Size: ~24 MB (25268501 B)
+2026-10-12T19:44:04.1529979Z [command]/usr/bin/tar -xf /home/runner/work/_temp/1e44f2d7-4945-40cd-9e78-e46ea5bb194c/cache.tzst -P -C /home/runner/work/l4-dummy-action/l4-dummy-action --use-compress-program unzstd
+2026-10-12T19:44:04.4626383Z Cache restored successfully
+2026-10-12T19:44:04.4727053Z Cache restored from key: l4-harness-Linux-X64-ubuntu24-py3.12-action-ff6e57f80dea4faa90d16f16
+2026-10-12T19:44:04.4800972Z ##[end-action id=__ciprianiacobescu_agent-supervisor.restore;outcome=success;conclusion=success;duration_ms=1993]
+2026-10-12T19:44:04.4807428Z ##[start-action display=install harness;id=__ciprianiacobescu_agent-supervisor.__run]
+2026-10-12T19:44:04.4825675Z ##[end-action id=__ciprianiacobescu_agent-supervisor.__run;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-10-12T19:44:04.4828058Z ##[start-action display=save installed harness;id=__ciprianiacobescu_agent-supervisor.__actions_cache]
+2026-10-12T19:44:04.4832280Z ##[end-action id=__ciprianiacobescu_agent-supervisor.__actions_cache;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-10-12T19:44:04.4834815Z ##[start-action display=l4;id=__ciprianiacobescu_agent-supervisor.__run_2]
+2026-10-12T19:44:04.4885703Z ##[group]Run echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-12T19:44:04.4886038Z echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-12T19:44:04.4886307Z s=$(date +%s.%N)
+2026-10-12T19:44:04.4886643Z # shellcheck disable=SC2086  # the command is a list of words on purpose
+2026-10-12T19:44:04.4887352Z "$HOME/.local/bin/l4" $INPUT_COMMAND
+2026-10-12T19:44:04.4887768Z echo "[l4-action] l4 $INPUT_COMMAND ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-12T19:44:04.4944758Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-12T19:44:04.4945055Z env:
+2026-10-12T19:44:04.4945242Z   INPUT_COMMAND: --version
+2026-10-12T19:44:04.4945452Z ##[endgroup]
+2026-10-12T19:44:04.9023729Z l4, version 0.1.0
+2026-10-12T19:44:04.9322659Z [l4-action] l4 --version (0.43 s)
+2026-10-12T19:44:04.9333338Z ##[end-action id=__ciprianiacobescu_agent-supervisor.__run_2;outcome=success;conclusion=success;duration_ms=446]
+2026-10-12T19:44:04.9456951Z Cleaning up orphan processes
+

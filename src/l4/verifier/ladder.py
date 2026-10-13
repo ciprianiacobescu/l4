@@ -26,6 +26,7 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import shutil
 import time
 from collections.abc import Callable, Sequence
@@ -52,6 +53,7 @@ from l4.evidence.collect import (
     scope_evidence,
 )
 from l4.evidence.report import evidence_json
+from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, reject_symlinks
 from l4.gates.coverage import cov_env
@@ -69,15 +71,18 @@ from l4.planner import facts_of, next_action
 from l4.s1.items import item_keys_by_subject, items_from_evidence, project_key
 from l4.s1.records import append_records
 from l4.s1.shadow import run_shadow
+from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
-from l4.specs.base import Criterion, Framework
+from l4.specs.base import Criterion, Framework, SpecError
 from l4.specs.criteria import base_criteria_at
+from l4.specs.feedback import FeedbackFile
+from l4.specs.followup import feedback_home
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.status import load_snapshot, select_units
+from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
@@ -91,6 +96,18 @@ from l4.verifier.evidence import (
     reusable,
     stored_finding,
     subject_sha,
+)
+from l4.verifier.feedback import (
+    apply_addressed,
+    contains_name,
+    decide_feedback,
+    feedback_ref,
+    judged_outcomes,
+    not_addressed_findings,
+    pending_feedback,
+    record_addressed,
+    record_no_status,
+    unjudged_outcomes,
 )
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
 from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
@@ -108,7 +125,7 @@ from l4.verifier.judge import (
 )
 from l4.verifier.notes import verdict_section
 from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
-from l4.verifier.preconditions import check_preconditions, record_ci_steps
+from l4.verifier.preconditions import check_preconditions, record_ci_steps, record_feedback
 from l4.verifier.report import write_round_evidence
 from l4.verifier.s1_labels import record_human_labels
 from l4.verifier.s1_step import S1Step, S1Wiring, evidence_for, record_rows, run_step
@@ -135,6 +152,7 @@ from l4.verifier.types import (
     AuditRecord,
     CounterexampleRun,
     CriterionEvidence,
+    FeedbackRef,
     Finding,
     Severity,
     StepRecord,
@@ -423,6 +441,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         nonlocal base_sha
         pre = check_preconditions(wb)
         record_ci_steps(wb, pre)
+        record_feedback(wb, pre)
         base_sha = result.base_sha = pre.base_sha
         findings.extend(pre.findings)
         return not pre.findings, "; ".join(filter(None, [vc.base_note, *(f.title for f in pre.findings)]))
@@ -472,6 +491,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         # pass-to-pass compares with the archived specs AT THE BASE COMMIT, read from git: the worktree is at the unit's
         # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
         archived = base_criteria_at(wb.git, base_sha) if wb.ref.framework is Framework.OPENSPEC else []
+        if wb.ref.framework is Framework.KIRO and isinstance(wb.provider, FamilyProvider):
+            archived = wb.provider.merged_parent_criteria()  # a follow-up's merged parent: its folder is protected
         browser = run.e2e.report if run.e2e is not None else None
         # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
         generated, edited = previously_generated(events, wb.worktree, browser)
@@ -666,6 +687,7 @@ def _resume(
         if record.status == "reused":
             _emit_step(vc, record, subject)
     result.subject_sha = subject
+    result.feedback_outcomes = judged_outcomes(events, int(prev.get("round") or 0))  # the judge check is not stored
     _finalize(vc, run, criteria, events)
     last = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
     _emit_step(vc, last, subject)
@@ -705,6 +727,25 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     result.human = [effective[t] for t in dict.fromkeys(ids) if t in effective]
     for void in regressions(effective, result.trace):  # a regression voids an accept for good (D3)
         wb.emit("human.void", question=void.question, target=void.target, reason="a tracing test fails at head")
+    result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
+    if result.verdict is Verdict.PASS:
+        _hold_unjudged(vc, result)
+
+
+def _hold_unjudged(vc: VerifyContext, result: VerifyResult) -> None:
+    """L4-FBK-007, review #8: a round with pending items and no answer of this round's judge for one of them (the reply
+    was discarded and a person accepted the hold, or the steps of an earlier round were reused) cannot PASS. Each such
+    item becomes a not-addressed outcome (`not judged in this round`), so the round fails into the next feedback fix
+    unit and the item is judged in a later round."""
+    wb = vc.wb
+    asked = _asked_feedback(wb)
+    missing = unjudged_outcomes(asked, result.feedback_outcomes)
+    if not missing:
+        return
+    result.feedback_outcomes = [*result.feedback_outcomes, *missing]
+    result.findings.extend(not_addressed_findings(missing, asked))
+    for outcome in missing:
+        wb.emit("feedback.not_addressed", id=outcome.id, round=vc.round, evidence=outcome.evidence)
     result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
 
 
@@ -894,6 +935,35 @@ def _calibrate(vc: VerifyContext, run: _Run) -> None:
         log.warning("%s: s1 calibration rows not written: %s", wb.ref.id, exc)
 
 
+def _asked_feedback(wb: Workbench) -> list[FeedbackRef]:
+    """The items of the parent's `feedback.md` taken and not yet addressed: the judge is asked about them."""
+    try:
+        file = FeedbackFile.load(feedback_home(wb.ref.path))  # a follow-up judges its parent's items (L4-FBK-010)
+    except SpecError as exc:  # an unreadable file is the person's to fix; it must not stop the round
+        log.warning("%s: feedback.md is not read: %s", wb.ref.id, exc)
+        return []
+    return [feedback_ref(i) for i in pending_feedback(fold(_events(wb), wb.ref.id), file)]
+
+
+MAX_NAME_FILE_BYTES = 1_000_000
+
+
+def _changed_code(wb: Workbench, base_sha: str, head: str) -> list[str]:
+    """The text, at `head`, of every non-test file the family changed since `base_sha`: the harness's own files, the
+    spec and feedback files of the family's units, and the project's test files and test support files are left out."""
+    raw = wb.git.run_bytes("diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", f"{base_sha}...{head}")
+    dirs = _unit_dirs(wb)
+    found = []
+    for path in filter(None, os.fsdecode(raw).split("\0")):
+        if any(file_kind(path, unit, wb.cfg) in ("exempt", "test") for unit in dirs or [""]):
+            continue
+        if any(glob_match(g, path) for g in wb.cfg.tdd.test_support_globs):
+            continue
+        data = wb.git.run_bytes("show", f"{head}:{path}", check=False)[:MAX_NAME_FILE_BYTES]
+        found.append(data.decode("utf-8", errors="replace"))
+    return found
+
+
 def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[LedgerEvent]) -> None:
     wb, result = vc.wb, run.result
     criteria = wb.provider.criteria(wb.ref)
@@ -902,6 +972,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         run.records["9"] = StepRecord("9", "judge", "not_run", note="no criteria to judge")
         return
     ids = {c.id for c in criteria}
+    asked = _asked_feedback(wb)
 
     def judge_body() -> tuple[bool, str]:
         diff, truncated = _git_diff(wb, base_sha, result.head_sha)
@@ -910,7 +981,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             diff_truncated=truncated, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
             redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
             owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
-            round_outputs=_round_outputs(wb, result),
+            round_outputs=_round_outputs(wb, result), feedback=asked,
         )  # fmt: skip
         result.prompt_sha256 = prompt.sha256
         result.prompt_template = prompt.version
@@ -935,9 +1006,37 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         reviewed = [(a.test, a.criterion, a.adequate) for a in judged.verdict.test_adequacy]
         result.trace = apply_adequacy(result.trace, reviewed)
         result.findings.extend(inadequate_findings(result.trace))
+        if asked:
+            _judge_feedback(vc, result, asked, judged.verdict, base_sha)
         return True, f"{judged.calls} call(s)"
 
     _step(vc, run, "9", "judge", judge_body)
+
+
+def _judge_feedback(
+    vc: VerifyContext, result: VerifyResult, asked: Sequence[FeedbackRef], verdict: JudgeVerdict, base_sha: str
+) -> None:
+    """L4-FBK-007: the judge's answers and the variable check decide each item. A not-addressed item is a blocking
+    finding that carries it (the round fails into the next feedback fix unit); both outcomes are recorded with the
+    round, and `apply_addressed` writes the Status and the Outcome once the round's evidence is committed. A yes is
+    only evidence (`feedback.judged`) until a PASS round confirms it (`record_addressed`)."""
+    wb = vc.wb
+    texts: list[str] | None = None
+
+    def has_name(name: str) -> bool:
+        nonlocal texts
+        if texts is None:
+            texts = _changed_code(wb, base_sha, result.head_sha)
+        return any(contains_name(name, text) for text in texts)
+
+    outcomes = decide_feedback(asked, [verdict.feedback or []], has_name)
+    result.feedback_outcomes = outcomes
+    result.findings.extend(not_addressed_findings(outcomes, asked))
+    for outcome in outcomes:
+        if outcome.addressed:  # evidence for this round; `feedback.addressed` waits for a PASS round (review #14)
+            wb.emit("feedback.judged", id=outcome.id, round=vc.round, evidence=outcome.evidence)
+        else:
+            wb.emit("feedback.not_addressed", id=outcome.id, round=vc.round, evidence=outcome.evidence)
 
 
 def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
@@ -1185,7 +1284,13 @@ def verify_hook(ctx: HookContext) -> Trigger:
             wb.publish_agent_logs(raw, published)
         wb.restore_ledger()
     decide_fix(ctx, wb, result)  # before the evidence is written, so that the report lists the fix unit
+    record_addressed(services.ledger, result)  # a PASS round only, and before the report reads the round's events
     paths = write_round_evidence(services.ref.path, round_no, result, services.app.redactor)
+    # Status and Outcome (L4-FBK-007), in the parent's file when the unit is a follow-up (L4-FBK-010)
+    no_status: list[str] = []
+    paths += apply_addressed(feedback_home(services.ref.path), result, services.app.redactor, skipped=no_status)
+    if no_status:  # an item whose Status line is gone: recorded, never a crash (review #9)
+        record_no_status(services.ledger, fold(_events(wb), wb.ref.id), no_status)
     if result.verdict is Verdict.NEEDS_HUMAN:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
     commit_verifier_tests(wb, vc.verifier_tests, round_no)
@@ -1208,7 +1313,7 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
     app, cfg = load_app_config(app)
     preflight_run_config(app, cfg)
     git = Git(app.repo, environ=app.environ)
-    ((provider, ref),) = select_units(list(providers_for(cfg, app.repo, app.environ)), (unit,))
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
     phase = snapshot.state.phase
     answered = phase == "awaiting_human" and next_action(facts_of(snapshot))[0] == "verify"  # verdicts are in

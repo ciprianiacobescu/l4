@@ -936,6 +936,20 @@ def freeze_test_paths(wb: Workbench, task: Task, base: str, *, keep: Collection[
     )  # fmt: skip
 
 
+def _freeze_refactor(wb: Workbench, task: Task, base: str) -> bool:
+    """The step of a refactor chore: every changed path of the test or support globs goes back to `base` (a new one is
+    removed), once, as `guard.restored{task, paths, reason: "feedback_refactor"}`. True when some other file changed."""
+    tdd = wb.cfg.tdd
+    globs = (*tdd.test_globs, *tdd.test_support_globs)
+    changed = [p for p in sorted(set(wb.changed_files())) if p != wb.ledger_rel]
+    frozen = [p for p in changed if _matches(globs, p)]
+    for path in frozen:
+        _put_back(wb, base, path, wb.git.run("cat-file", "-e", f"{base}:{path}", check=False).returncode == 0)
+    if frozen:
+        wb.emit("guard.restored", task=task.key, paths=frozen, reason="feedback_refactor")
+    return len(frozen) < len(changed)
+
+
 def proved_test_files(wb: Workbench) -> list[str]:
     """Every test or support file that a red step of the unit's family froze (`task.red_ok.frozen`), in any run: the
     files that carry the red-time proofs."""
@@ -1137,6 +1151,27 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str]) -> tuple[list[str
     )
 
 
+def _already_done(wb: Workbench, task: Task, findings: Sequence[str], attempt: int) -> GreenOutcome:
+    """The task of a retaken feedback item that has nothing left to change (review #8 follow-up): no file of the
+    project changes; the task is ticked, the commit carries `L4-TDD: already-done` and the ledger says why, so that the
+    parent is verified again and the judge looks at the item once more."""
+    named = re.findall(r"\bFB-\d{3}\b", " ".join([task.title, *findings]))
+    item = ", ".join(dict.fromkeys(named)) or ", ".join(findings)
+    reason = f"retaken {item}: nothing left to change"
+    wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
+    parents = tick_completed_parents(wb.provider, wb.ref)
+    sha = wb.commit(
+        f"fix({wb.ref.name}): {task.title} already done [skip ci]", task=task.key, attempt=attempt, phase="single",
+        tdd="already-done",
+    )  # fmt: skip
+    wb.emit(
+        "task.done", task=task.key, sha=sha, parents=parents, tdd="already-done", reason=reason,
+        findings=list(findings),
+    )  # fmt: skip
+    wb.push()
+    return GreenOutcome("ok", sha=sha)
+
+
 def run_single(
     wb: Workbench,
     task: Task,
@@ -1144,7 +1179,8 @@ def run_single(
     *,
     attempt: int,
     previous_failure: str | None = None,
-    kind: Literal["fix", "tests"] = "fix",
+    kind: Literal["fix", "tests", "refactor"] = "fix",
+    retake: bool = False,
 ) -> GreenOutcome:
     """A `[chore]` task of a fix unit (D8): one agent step with no red phase, for a finding that names no criterion.
     The checks are green's with an empty must-pass list: nothing that passed at the base may fail, no new failure
@@ -1153,6 +1189,13 @@ def run_single(
     `kind="tests"` (M1.11 W5): the chore of a rejected coverage hold adds tests. `single_tests.md` is its prompt, new
     test files and tests appended to the unit's own files are kept (`review_test_chore`), a change to anything else that
     is no test file fails the attempt, at least one new test must pass, and `task.tests_added` records them.
+    `kind="refactor"` (L4-FBK-005, D5): a feedback task that changes structure and keeps behaviour. Whatever the step
+    changed under the test or test-support globs is put back (`guard.restored`), at least one other file must change,
+    and the gates then run against the original tests, which is the proof that behaviour is the same.
+    `retake` (review #8 follow-up): every feedback item of the task was taken into an earlier fix unit (the marker's
+    `retakes`), and the judge left it out of its reply or its reply was discarded, so the work may be done already. A
+    refactor that changes no non-test file, or a test chore that adds no passing test, then completes the task with
+    nothing committed but its tick (`_already_done`); a first take keeps failing (`nothing changed`, `no tests added`).
     M1: the failing tests of the finding as must-pass ids."""
     base = wb.head()
     base_report = baseline(wb, base)
@@ -1177,6 +1220,11 @@ def run_single(
             shown = ", ".join(sorted(review.non_test)[:MAX_LISTED])
             return GreenOutcome("failed", f"a test chore may add tests only: it changed non-test files: {shown}")
         kept = review.kept
+    elif kind == "refactor" and not _freeze_refactor(wb, task, base):
+        wb.discard_changes()
+        if retake:
+            return _already_done(wb, task, findings, attempt)
+        return GreenOutcome("failed", "nothing changed")
     else:  # a chore has no red phase: the tests that carry the family's proofs are put back, as green does for its own
         restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
         freeze_test_paths(wb, task, base, phase="single")
@@ -1190,6 +1238,9 @@ def run_single(
         else []
     )
     if adds_tests and not reason and not added:
+        if retake:
+            wb.discard_changes()
+            return _already_done(wb, task, findings, attempt)
         reason = "no tests added"
     elif adds_tests and not reason and attempt == 1 and (decided := decision_calling_code_wrong(wb, findings)):
         # the chore may not change the code, so tests that all pass against code the decision calls wrong assert what

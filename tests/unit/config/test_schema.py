@@ -45,7 +45,7 @@ def test_version_only_file_yields_full_defaults():
         actual = {k: v for k, v in cfg[section].items() if (section, k) not in ADDED_BEYOND_SPEC}
         assert actual == expected, section
     assert cfg["forge"]["gitlab"] == {"api_url": None, "project": None}
-    assert cfg["harness"] == {"version": None, "commit": None, "repository": None}
+    assert cfg["harness"] == {"version": None, "commit": None, "repository": None, "delivery": None}
     assert cfg["profiles"] == {}
     assert cfg["roles"]["implementer"] == [] and cfg["roles"]["judges"] == []
     assert L4Config().model_dump() == L4Config.model_validate({"version": 1}).model_dump()

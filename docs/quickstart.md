@@ -226,7 +226,67 @@ harness:
 
 OpenCode's free models need none. `l4 doctor` row PRV-001 names any variable that is missing.
 
-**The harness without committing it.** `l4 init --ci github --harness-repo git@github.com:<owner>/<harness>.git
+**The harness through the setup action (recommended).** The harness repository is itself a GitHub action. Your
+repository then holds only `.l4/config.yaml`, `.github/workflows/l4.yml` and the evidence folders: no `.l4/bin/`, no
+vendored code, no `harness.commit`. The `uses:` line of the workflow is the only pin. Pick the form that fits the
+repository:
+
+- **A private repository of the same owner as the harness: no key.**
+  1. In the harness repository, open Settings > Actions > Access and choose "Accessible from repositories owned by …".
+     Anyone who can push a workflow to a private repository of that owner can then read the harness through the
+     action, so this is the owner's choice. If the setting is later turned off, every such consumer fails at "Set up
+     job".
+  2. Adopt with a version pin:
+     ```bash
+     l4 init --ci github --action --harness-ref v0.3.0
+     ```
+     `--harness-ref` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with `git ls-remote`. The workflow gets
+     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.3.0`. A ref that resolves to nothing is exit 2. Use
+     `--action-repo OWNER/REPO` when the harness was not installed from its own repository.
+- **A public repository, or one of another owner: a copy of the action and a deploy key.** GitHub never lets a public
+  repository use a private action.
+  1. Adopt with the copy:
+     ```bash
+     l4 init --ci github --action --action-copy --harness-ref v0.3.0
+     ```
+     This writes the action under `.github/actions/l4` (the copy your `l4` ships, so no checkout of the harness is
+     needed) and a workflow that uses it with the harness's SSH URL. `l4 upgrade` refreshes that copy too.
+  2. Add a read-only deploy key to the harness repository (Settings > Deploy keys), and store its private half as the
+     environment secret `L4_HARNESS_SSH_KEY` in the environment `l4`. Use one key per consumer, so that a key can be
+     removed on its own.
+
+`l4 init --action` writes a config for a GitHub-hosted runner: `ci.runner_tags: []` and `forge.token_env: GITHUB_TOKEN`
+(the workflow's own token, so there is no forge secret to create). Pass `--runner-tag TAG` (repeatable) for a self-hosted
+runner and `--forge-token-env NAME` to use a token of your own. A hosted runner has no stored login: `codex` on a
+subscription cannot log in there, so init prints a `todo:` line naming the profile; give it `auth: api_key` and the
+secret `CODEX_API_KEY`, or name another profile in the role (`claude-code` takes `CLAUDE_CODE_OAUTH_TOKEN`).
+
+The workflow also runs on a schedule, every 30 minutes by default. On a private repository that costs about 1,400
+runner-minutes a month even when idle: set `ci.schedule` in `.l4/config.yaml` to a slower cron (for example
+`"0 * * * *"`) or to `null` for no schedule, then run `l4 upgrade`, which re-renders the workflow.
+
+On a **public** repository, set `ci.upload_artifacts: false` in `.l4/config.yaml`, and run
+`l4 upgrade`: the `l4-out` artifact (prompts and agent transcripts, secrets masked) is downloadable by any signed-in
+user, and with the key false the workflow has no upload step.
+
+Then, for both forms:
+- `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
+- `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
+  release arrives as a pull request on the `uses:` line. It merges into an existing file. It does not combine with `--action-copy` (exit 2): in copy mode the pin is the `commit:` input, which Dependabot cannot move; use `l4 upgrade --harness-ref`.
+- `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand: it re-renders the whole
+  workflow from the config with the template of the harness that runs it, so run it with the target version, for
+  example `uvx --from git+https://github.com/<owner>/<repo>@<sha> l4 upgrade --harness-commit <sha>`. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.
+- There is no `.l4/bin/l4` in this form. To run `l4` on your machine, install it:
+  `uv tool install git+ssh://git@github.com/<owner>/<harness>.git@<sha>` (`l4 doctor` row CFG-007 prints the hint
+  when none is on `PATH`).
+
+On a GitHub-hosted runner the action also installs uv and a user-space bwrap (the runner setup of the next sections
+runs inside it) and keeps two caches: the installed harness, and the agent CLIs, which a harness upgrade does not
+discard. A warm job reaches `l4` in about 7 s [V: docs/live/action/README.md].
+
+**The harness without the action.** The two older forms stay available: vendored (`l4 init --vendor`, section 1, for air-gapped runners) and fetched (below).
+
+**The harness without committing it (fetched).** `l4 init --ci github --harness-repo git@github.com:<owner>/<harness>.git
 --harness-commit <sha>` writes no `.l4/vendor/`. The job fetches that commit with uv and caches it.
 
 A private harness needs a read-only deploy key:
@@ -242,6 +302,9 @@ The `l4` job starts on a merge to the base branch, on a push to a unit branch, o
 Kiro spec) with unchecked tasks and push it: the job implements them test-first on a unit branch and opens an MR/PR.
 Questions for you appear in `questions.md` next to the spec: answer in the file and push. `.l4/bin/l4 status` (also the
 last step of the job) lists each unit with its state and what it waits for.
+To ask for changes to a unit's code once its MR/PR is open (a refactor, a hard-coded value that should be an
+environment variable, a missing test), run `.l4/bin/l4 feedback add`, then commit and push. [docs/feedback.md](feedback.md)
+has one worked example for each kind and says what happens after the push.
 
 ## Conditional extras
 

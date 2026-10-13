@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -137,7 +138,10 @@ def test_no_credential_path_is_cached():
             assert path != secret and path not in secret.parents, f"{path} caches {secret}"
     assert {str(p) for p in cached} == {
         f"/home/runner/{p}"
-        for p in (".local/bin", ".local/share/l4", ".local/share/claude", ".local/share/uv", ".cache/l4", ".cache/uv")
+        for p in (
+            ".local/bin", ".local/share/l4", ".local/share/claude", ".local/share/uv", ".cache/l4/installers",
+            ".cache/uv",
+        )
     }
 
 
@@ -184,7 +188,7 @@ def test_triggers_job_shape_and_steps():
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     assert len(checkout["uses"].split("@")[1]) == 40  # pinned to a commit
     assert [s["run"].strip() for s in job["steps"] if "run" in s] == [
-        BASE_CHECKOUT,
+        base_checkout_run(L4Config()).strip(),
         ".l4/bin/l4 doctor --ci || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 plan --sweep || .l4/bin/l4 ci map-exit $?",
         ".l4/bin/l4 run || .l4/bin/l4 ci map-exit $?",
@@ -272,11 +276,59 @@ def test_job_env_maps_exactly_the_chains_credentials():
     assert render_github_ci(cfg()) == GOLDEN.read_text()  # no chain, no credential: the env is the forge token alone
 
 
-BASE_CHECKOUT = (
-    'git fetch --quiet origin "+refs/heads/$L4_BASE_BRANCH:refs/remotes/origin/$L4_BASE_BRANCH" '
-    '&& git checkout --quiet --detach "origin/$L4_BASE_BRANCH" '
-    '&& echo "l4: base checkout $(git rev-parse HEAD)"'
-)
+def run_base_checkout(run: str, tmp_path, base: str = "main", branch: str = "l4/x/y", keep_all: bool = True):
+    """Run the rendered step's shell in a clone of a fake origin; `keep_all` is `fetch-depth: 0` (every branch)."""
+    git = lambda *a, cwd: subprocess.run(  # noqa: E731
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd, check=True, capture_output=True, text=True
+    )
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git("init", "-q", "-b", base, cwd=origin)
+    (origin / "f").write_text("base")
+    git("add", "f", cwd=origin)
+    git("commit", "-q", "-m", "base", cwd=origin)
+    git("checkout", "-q", "-b", branch, cwd=origin)
+    (origin / "f").write_text("branch")
+    git("commit", "-q", "-am", "pushed", cwd=origin)
+    work = tmp_path / "work"
+    depth = "--no-single-branch" if keep_all else "--single-branch"
+    git("clone", "-q", depth, "--branch", branch, str(origin), str(work), cwd=tmp_path)
+    done = subprocess.run(
+        ["bash", "-e", "-c", run], cwd=work, env={**os.environ, "L4_BASE_BRANCH": base}, capture_output=True, text=True
+    )
+    return done, work, git("rev-parse", base, cwd=origin).stdout.strip()
+
+
+def base_checkout_run(config: L4Config) -> str:
+    steps = parsed(config)["jobs"]["l4"]["steps"]
+    return steps[step_index(steps, lambda st: "base checkout" in st.get("run", ""))]["run"]
+
+
+def test_base_checkout_needs_no_fetch_and_no_credential():
+    """A private repository: the checkout keeps no credential, so a fetch would fail; fetch-depth 0 has the base."""
+    for tags in ([], ["agentic"]):
+        run = base_checkout_run(cfg(ci={"runner_tags": tags}))
+        assert "git fetch" not in run and "token" not in run.lower() and "http" not in run
+        assert 'echo "l4: base checkout $(git rev-parse HEAD)"' in run
+        assert "fetch-depth: 0" in run  # the error says to keep it
+    for tags in ([], ["agentic"]):
+        steps = parsed(cfg(ci={"runner_tags": tags}))["jobs"]["l4"]["steps"]
+        assert steps[0]["with"]["fetch-depth"] == 0 and steps[0]["with"]["persist-credentials"] is False
+
+
+def test_base_checkout_script_detaches_to_the_base(tmp_path):
+    done, work, base_sha = run_base_checkout(base_checkout_run(cfg()), tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert f"l4: base checkout {base_sha}" in done.stdout
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True).stdout.strip()
+    assert head == base_sha and (work / "f").read_text() == "base"
+    assert subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=work, capture_output=True).returncode != 0
+
+
+def test_base_checkout_script_errors_clearly_without_the_base_ref(tmp_path):
+    done, _, _ = run_base_checkout(base_checkout_run(cfg()), tmp_path, keep_all=False)
+    assert done.returncode == 1
+    assert "::error::origin/main" in done.stdout and "fetch-depth: 0" in done.stdout
 
 
 def test_other_branches_check_out_the_base():
@@ -290,7 +342,7 @@ def test_other_branches_check_out_the_base():
             assert "actions/checkout" in steps[at - 1]["uses"]  # right after the checkout
             assert at < step_index(steps, lambda st: ".l4/bin/" in st.get("run", ""))
             assert steps[at]["if"] == "${{ github.ref_name != env.L4_BASE_BRANCH }}"
-            assert steps[at]["run"].strip() == BASE_CHECKOUT
+            assert "git checkout --quiet --detach" in steps[at]["run"]
             assert job["env"]["L4_BASE_BRANCH"] == "main"
 
 

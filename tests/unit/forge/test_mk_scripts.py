@@ -136,7 +136,10 @@ def test_print_jwt_prints_to_a_pipe_and_refuses_a_terminal(world):
             stderr=subprocess.PIPE, text=True, check=False,
         )  # fmt: skip
         os.close(slave)
-        shown = os.read(master, 4096).decode()
+        try:
+            shown = os.read(master, 4096).decode()
+        except OSError:  # Linux reports EIO, not end of file, on a master whose closed slave was never written to
+            shown = ""
     finally:
         os.close(master)
     assert tty.returncode == 2 and JWT not in shown and JWT not in tty.stderr

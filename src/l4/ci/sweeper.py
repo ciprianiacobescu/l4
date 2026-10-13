@@ -33,9 +33,17 @@ green or running pipeline writes nothing, and a branch past H is left to the run
 The resume duty (M1.11, `l4 plan --sweep` only): a `halted` unit whose open MR carries `<prefix>resume` is resumed when
 a member set the label (`l4.ci.resume_label`: the forge's own record of who, Developer access or more, not the harness's
 user), once per label event (`unit.resumed{signal}`). An `escalated` unit whose fix rounds are used up is resumed the
-same way with `budget.extended{fix_rounds: 1}` (M1.13, W-C2): one more round per label event. A refusal (a non-member,
+same way with `budget.extended{fix_rounds: 1}` (M1.13, W-C2): one more round per label event; one escalated at the
+feedback limit (`phase.changed` reason `feedback_rounds_exhausted`) gets `budget.extended{feedback_rounds: 1}` instead
+(L4-FBK-006). A refusal (a non-member,
 the bot) is said once per event: `resume.refused{signal, why}` in the pending ledger and a section of the MR's sticky
 note.
+
+The follow-up duty (`l4 plan --sweep` only, L4-FBK-010): a `merged` unit whose `feedback.md` on the base branch has
+takeable items and no open follow-up gets its follow-up unit `<name>-followup-<n>` (`l4.follow_up`: its own branch from
+the base head, never pushed to the base). While one is open, newer items are recorded once as `feedback.waiting`
+(`reason: follow_up_open`) in the pending ledger of the parent's lock ref; an archived change has no lock ref, and
+nothing is written for it.
 
 M1: forge-and-ci 2.51 (WIP-branch cleanup, deleting the archived refs), 2.53 (closed and reopened MRs), 2.54
 (base-move refresh), state-vcs-locks 2.32 (capacity and lease resume), 2.35 (mirror repair).
@@ -53,6 +61,7 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
+from l4.follow_up import perform_follow_ups
 from l4.forge.base import (
     Forge,
     ForgeAuthError,
@@ -74,7 +83,7 @@ from l4.postmerge import ArchiveResult, MergeDetector, MergeVerdict, PostMergeAr
 from l4.progress import SWEEP_TRACE_TYPES, FilteredTrace, ProgressTrace
 from l4.specs.base import Framework, UnitRef, parse_unit_id
 from l4.specs.providers import provider_for_unit, providers_for
-from l4.state.budget import LABEL_FIX_ROUNDS, fix_rounds_exhausted
+from l4.state.budget import LABEL_FEEDBACK_ROUNDS, LABEL_FIX_ROUNDS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.ledger import LedgerEvent, LedgerWriter, ledger_path
 from l4.state.lifecycle import Phase, Trigger, transition
 from l4.state.pending import PendingLedger, read_pending
@@ -110,7 +119,7 @@ class SweepAction:
     what: Literal[
         "merged", "archive_opened", "archive_existing", "archive_pending", "archive_failed", "skipped", "retired",
         "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "ci_not_run", "resumed", "resume_refused",
-        "resume_hint",
+        "resume_hint", "follow_up", "follow_up_waiting",
     ]  # fmt: skip
     detail: str = ""
 
@@ -205,7 +214,7 @@ class Sweeper:
         *,
         retry: bool = False,
         ci: bool = False,
-        resumer: Callable[[UnitSnapshot, ResumeSignal, int], "UnitRunResult"] | None = None,
+        resumer: Callable[[UnitSnapshot, ResumeSignal, int, int], "UnitRunResult"] | None = None,
     ) -> None:
         self.app, self.cfg, self.git, self.forge = app, cfg, git, forge
         self._archiver, self._detector, self._retry, self._ci = archiver, detector, retry, ci
@@ -237,6 +246,10 @@ class Sweeper:
                 actions += self._resume_duty(snapshots, errors)
             except Exception as exc:  # noqa: BLE001 - as above
                 self._failed("resume labels", exc, errors)
+            try:
+                actions += self._follow_up_duty(snapshots, errors)
+            except Exception as exc:  # noqa: BLE001 - as above
+                self._failed("follow-ups", exc, errors)
         fatal = next((e for e in errors if not _repeats_until_fixed(e)), None)
         if fatal is not None:
             raise fatal
@@ -386,6 +399,58 @@ class Sweeper:
             finally:
                 lease.release()
 
+    # --- feedback on a merged unit (L4-FBK-010) -------------------------------------------------------------------
+
+    def _follow_up_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
+        """A merged unit whose `feedback.md` on the base has takeable items gets its follow-up unit (a branch of its
+        own; nothing is pushed to the base). While one is open, newer items are recorded as waiting, once each."""
+        actions: list[SweepAction] = []
+        merged = [s for s in snapshots if s.state.phase == Phase.MERGED.value and s.follow_up and s.follow_up.items]
+        for made in perform_follow_ups(self.app, self.cfg, self.git, merged):
+            actions.append(SweepAction(made.parent, "follow_up", f"{made.follow_up} for {', '.join(made.items)}"))
+        for snapshot in merged:
+            offer = snapshot.follow_up
+            assert offer is not None
+            if offer.open is None:
+                continue
+            ids = [
+                i.id for i in offer.items
+                if (known := snapshot.state.feedback.get(i.id)) is None
+                or (known.status, known.reason) != ("waiting", "follow_up_open")
+            ]  # fmt: skip
+            if not ids:
+                continue
+            try:
+                if (action := self._record_waiting(snapshot, ids, offer.open)) is not None:
+                    actions.append(action)
+            except Exception as exc:  # noqa: BLE001 - one unit's failure never stops the others
+                self._failed(snapshot.ref.id, exc, errors)
+        return actions
+
+    def _record_waiting(self, snapshot: UnitSnapshot, ids: list[str], follow_up: str) -> SweepAction | None:
+        """`feedback.waiting{ids, reason: "follow_up_open"}` in the pending ledger of the parent's lock ref. An
+        archived change has no lock ref any more (it was retired): the planner still says it waits, and nothing is
+        written."""
+        names = self._archiver.names(snapshot.ref)
+        if self.git.rev_parse(names.lock_ref) is None:
+            return None
+        lease = LocalFileLease(names.flock_path, unit=snapshot.ref.id, run_id=self.app.run_id)
+        try:
+            lease.acquire()
+        except Busy:
+            return None
+        run = _UnitRun(self, snapshot, names)
+        code = 1
+        try:
+            run.event("feedback.waiting", ids=ids, reason="follow_up_open", follow_up=follow_up)
+            code = 0
+            return SweepAction(snapshot.ref.id, "follow_up_waiting", f"{', '.join(ids)} wait for {follow_up}")
+        finally:
+            try:
+                run.close(code)
+            finally:
+                lease.release()
+
     # --- the `l4:resume` label (M1.11, L4-CI-004, L4-SEC-004) ----------------------------------------------------
 
     def _resume_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
@@ -429,9 +494,13 @@ class Sweeper:
         if isinstance(decision, Refusal):
             return self._refuse(snapshot, pr, decision)
         # an escalated unit with all its fix rounds used gets exactly LABEL_FIX_ROUNDS more per label event (L4-CI-004)
-        more = LABEL_FIX_ROUNDS if state.phase == Phase.ESCALATED.value and fix_rounds_exhausted(self.cfg, state) else 0
-        result = self._resumer(snapshot, decision, more)
+        # (or LABEL_FEEDBACK_ROUNDS feedback rounds when it was escalated at the feedback limit, L4-FBK-006)
+        escalated = state.phase == Phase.ESCALATED.value
+        more_feedback = LABEL_FEEDBACK_ROUNDS if escalated and feedback_rounds_exhausted(state) else 0
+        more = LABEL_FIX_ROUNDS if escalated and not more_feedback and fix_rounds_exhausted(self.cfg, state) else 0
+        result = self._resumer(snapshot, decision, more, more_feedback)
         extended = f", {more} more fix round" if more else ""
+        extended += f", {more_feedback} more feedback round" if more_feedback else ""
         log.info("%s: resumed by a member's %s label (event %d%s)", ref.id, label, decision.event_id, extended)
         return SweepAction(ref.id, "resumed", f"{decision.signal}: back in {result.outcome.phase_after}{extended}")
 
@@ -464,7 +533,7 @@ class Sweeper:
         return SweepAction(ref.id, "resume_hint", f"head {head[:10]}")
 
     def _resume_in_worktree(
-        self, snapshot: UnitSnapshot, signal: ResumeSignal, more_fix_rounds: int
+        self, snapshot: UnitSnapshot, signal: ResumeSignal, more_fix_rounds: int, more_feedback_rounds: int = 0
     ) -> "UnitRunResult":
         from l4.state.resume import resume_unit  # the orchestrator imports the planner, which imports this module
 
@@ -473,6 +542,7 @@ class Sweeper:
         return resume_unit(
             self.app, self.cfg, self.git, provider, snapshot.ref, reason=f"label {label}", signal=signal.signal,
             by="member", extend_fix_rounds=more_fix_rounds or None,
+            extend_feedback_rounds=more_feedback_rounds or None,
         )  # fmt: skip
 
     def _refuse(self, snapshot: UnitSnapshot, pr: PullRequest, refusal: Refusal) -> SweepAction | None:
@@ -503,7 +573,8 @@ class Sweeper:
         state = snapshot.state
         stopped = (
             halted_section(
-                state.phase, state.halt_reason or "see the ledger", ref.id, f"{self.cfg.forge.labels_prefix}resume"
+                state.phase, state.halt_reason or "see the ledger", ref.id, f"{self.cfg.forge.labels_prefix}resume",
+                feedback=feedback_rounds_exhausted(state),
             )
             if state.phase in (Phase.HALTED.value, Phase.ESCALATED.value)
             else None

@@ -170,6 +170,29 @@
    "items": {
     "type": "string"
    }
+  },
+  "feedback": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "addressed",
+     "evidence"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "pattern": "^FB-[0-9]{3,}$"
+     },
+     "addressed": {
+      "type": "boolean"
+     },
+     "evidence": {
+      "type": "string"
+     }
+    }
+   }
   }
  }
 }

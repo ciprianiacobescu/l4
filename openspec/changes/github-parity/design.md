@@ -93,8 +93,9 @@ It prints `[l4] continuation: <answer> (<workflow> on <base>)` and writes the an
 
 ### D5. Other branches run the base branch's harness
 
-The GitHub template gets a step after checkout. When `github.ref_name` is not the base branch, it fetches
-`+refs/heads/<base>:refs/remotes/origin/<base>`, runs `git checkout --detach origin/<base>`, and echoes
+The GitHub template gets a step after checkout. When `github.ref_name` is not the base branch, it runs
+`git checkout --detach origin/<base>` (the ref `actions/checkout` with `fetch-depth: 0` already fetched; no `git fetch`, which a
+private repository refuses without a credential; an `::error::` when the ref is missing), and echoes
 `l4: base checkout <sha>`. This is the GitLab rule (`l4.gitlab-ci.yml:39`).
 
 Without it, a push to `l4/**` by anyone with write access could change the shim, `.l4/vendor/` or `harness.commit`,

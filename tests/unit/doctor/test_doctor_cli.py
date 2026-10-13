@@ -32,7 +32,10 @@ def fake_tool(bin_dir: Path, name: str, body: str) -> None:
 
 
 @pytest.fixture
-def world(tmp_path: Path):
+def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # the root prerequisites (bubblewrap is Linux only) are the machine's business, not these tests': the same
+    # report on a Mac and on a Linux runner
+    monkeypatch.setattr("l4.doctor.checks_provision.detect_platform", lambda: "darwin-arm64")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake_tool(bin_dir, "git", '#!/bin/sh\necho "git version 2.43.0"\n')
@@ -84,7 +87,7 @@ def test_json_output_and_resolved_paths(world, capsys):
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
     expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
     expected += ["S1-001", "S1-002", "COV-001", "SANDBOX-002", "CFG-005", "MEM-002", "CI-002", "ENV-013", "EVAL-001"]
-    expected += ["ENV-014"]
+    expected += ["ENV-014", "CFG-006", "CFG-007"]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
         "CI-001",
@@ -96,6 +99,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "ENV-006",
         "ENV-007",
     }  # not GitLab; no agent CLI
+    skipped |= {"CFG-006", "CFG-007"}  # not an action adoption
     skipped |= {"S1-001", "S1-002", "COV-001", "ENV-013", "EVAL-001"}  # nothing shadowed, no tuned checkpoint or
     # Ollama host, no project interpreter, no eval baseline in this repository
     # profile; no Kiro; no Laya profile, no e2e gate

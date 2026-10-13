@@ -39,6 +39,7 @@ from l4.specs.base import (
 )
 from l4.specs.criteria import criterion_id, openspec_criteria
 from l4.specs.fixmark import FixMarker, fix_name, write_fix_marker
+from l4.specs.followup import FollowUpMarker, follow_up_name, write_follow_up_marker
 from l4.specs.markers import MAX_TASKS_BYTES, split_lines, write_marker
 
 CLI_TIMEOUT_SECONDS = 60.0
@@ -244,20 +245,35 @@ class OpenSpecProvider:
         write, then `validate --strict`. Whatever the CLI created outside the change (it writes `openspec/config.yaml`
         when the repository has none) is removed again, and so is the whole folder when it does not validate. The task
         lines cite the finding ids and the criteria: the existing ones and the ones the delta adds."""
-        name = fix_name(parent.name, round)
+        return self._create_change(fix_name(parent.name, round), parent, round, findings, spec_delta, None)
+
+    def create_follow_up(
+        self, parent: UnitRef, n: int, findings: Sequence[Finding], spec_delta: SpecDelta | None,
+        items: Sequence[tuple[str, str]],
+    ) -> UnitRef:  # fmt: skip
+        """`<parent>-followup-<n>` (L4-FBK-010): a change of its own for feedback on a merged unit, made like a fix
+        unit is (`openspec new change`, the scaffold, `validate --strict`) but with `.l4/followup.json` for the marker
+        (`items`: the (id, sha256) of the parent's feedback items it takes), so it is a unit that `l4 run` selects."""
+        return self._create_change(follow_up_name(parent.name, n), parent, n, findings, spec_delta, tuple(items))
+
+    def _create_change(
+        self, name: str, parent: UnitRef, round: int, findings: Sequence[Finding], spec_delta: SpecDelta | None,
+        follow_items: tuple[tuple[str, str], ...] | None,
+    ) -> UnitRef:  # fmt: skip
+        what = "follow-up" if follow_items is not None else "fix unit"
         if not CHANGE_NAME.match(name):
             raise SpecError(f"{name!r} is not a valid change name")
         ref = UnitRef(Framework.OPENSPEC, name, self._changes / name)
         folder = self.unit_dir(ref)
         if folder.exists():
-            raise FixUnitExists(f"{ref.id} exists; a fix unit is never overwritten")
+            raise FixUnitExists(f"{ref.id} exists; a {what} is never overwritten")
         if not findings:
-            raise SpecError("a fix unit needs at least one finding")
+            raise SpecError(f"a {what} needs at least one finding")
         root = self._changes.parent
         before = set(os.listdir(root)) if root.is_dir() else set()
         try:
             self._new_change(name, folder)
-            self._scaffold(parent, ref, round, findings, spec_delta)
+            self._scaffold(parent, ref, round, findings, spec_delta, follow_items)
             report = self.validate(ref, strict=True)
             if not report.valid:
                 errors = [i for i in report.issues if i.level == "ERROR"] or list(report.issues)
@@ -292,22 +308,38 @@ class OpenSpecProvider:
             raise OpenSpecCommandError(f"`openspec {' '.join(args)}` wrote no .openspec.yaml for {name}")
 
     def _scaffold(
-        self, parent: UnitRef, ref: UnitRef, round: int, findings: Sequence[Finding], delta: SpecDelta | None
-    ) -> None:
+        self, parent: UnitRef, ref: UnitRef, round: int, findings: Sequence[Finding], delta: SpecDelta | None,
+        follow_items: tuple[tuple[str, str], ...] | None = None,
+    ) -> None:  # fmt: skip
         folder = ref.path
         meta = folder / ".openspec.yaml"
         if delta is None:  # without it a change with no delta fails `validate --strict` [V, 1.14.0]
             text = meta.read_text(encoding="utf-8")
             meta.write_text(text + ("" if text.endswith("\n") or not text else "\n") + "skip_specs: true\n")
         new_criteria = self._write_delta(parent, folder, delta) if delta is not None else {}
-        (folder / "proposal.md").write_text(_proposal(parent, round, findings), encoding="utf-8")
+        (folder / "proposal.md").write_text(
+            _proposal(parent, round, findings, follow_up=follow_items is not None), encoding="utf-8"
+        )
         (folder / "tasks.md").write_text(_tasks(findings, new_criteria), encoding="utf-8")
+        if follow_items is not None:
+            write_follow_up_marker(
+                folder,
+                FollowUpMarker(
+                    parent.id, follow_items,
+                    tuple(i for f in findings if f.chore for i in f.ids),
+                    tuple(i for f in findings if f.chore and f.tests for i in f.ids),
+                    tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
+                ),
+            )  # fmt: skip
+            return
         write_fix_marker(
             folder,
             FixMarker(
                 parent.id, round, tuple(i for f in findings for i in f.ids),
                 tuple(i for f in findings if f.chore for i in f.ids),
                 tuple(i for f in findings if f.chore and f.tests for i in f.ids),
+                tuple(i for f in findings if f.chore and f.refactor for i in f.ids),
+                tuple(i for f in findings if f.chore and f.retake for i in f.ids),
             ),
         )  # fmt: skip
 
@@ -394,14 +426,34 @@ def _requirement(r: DeltaRequirement) -> str:
     return "\n".join(lines)
 
 
-def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding]) -> str:
+def _requests(findings: Sequence[Finding]) -> str:
+    """What the people asked for, first in the proposal (L4-FBK-005): the sentence, then the quoted code as an indented
+    block (a line of it can neither open a section nor close a fence), for each feedback finding."""
+    blocks = []
+    for f in findings:
+        if not f.request:
+            continue
+        code = "\n".join(f"    {line}" if line.strip() else "" for line in f.code.splitlines())
+        blocks.append(f.request + (f"\n\n{code}" if code else ""))
+    return "\n\n".join(blocks) + "\n\n" if blocks else ""
+
+
+def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding], *, follow_up: bool = False) -> str:
+    if follow_up:
+        cites = "\n".join(f"- {', '.join(f.ids)}: {_flat(f.title)}" for f in findings)
+        return (
+            f"# Proposal: follow-up {round} for {parent.name}\n\n## Why\n{_requests(findings)}"
+            f"`{parent.name}` was merged, and a person asked for the changes above in its `feedback.md`. This change "
+            f"carries them out; each task names the finding it answers.\n\n## What Changes\n{cites}\n\n"
+            f"## Impact\nThe code and the tests of `{parent.name}`.\n"
+        )
     cites = "\n".join(
         f"- {', '.join(f.ids)} ({f.severity}): {_flat(f.title)}"
         + (f": {_flat(f.detail, MAX_DETAIL_CHARS + MAX_DECISION_CHARS + 400)}" if f.detail else "")
         for f in findings
     )
     return (
-        f"# Proposal: fix {round} for {parent.name}\n\n## Why\n"
+        f"# Proposal: fix {round} for {parent.name}\n\n## Why\n{_requests(findings)}"
         f"The verifier found problems in `{parent.name}` that this change fixes. The findings are listed below with "
         f"their ids; each task of this change names the ones it answers.\n\n## What Changes\n{cites}\n\n"
         f"## Impact\nThe code and the tests of `{parent.name}`.\n"

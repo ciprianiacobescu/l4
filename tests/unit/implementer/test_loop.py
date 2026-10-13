@@ -171,7 +171,7 @@ def test_single_phase_budget_unchanged(make_bench, monkeypatch):
 
     calls = []
 
-    def failing(wb, task, findings, *, attempt, previous_failure, kind="fix"):
+    def failing(wb, task, findings, *, attempt, previous_failure, kind="fix", retake=False):
         calls.append(attempt)
         return SimpleNamespace(status="failed", reason="still wrong", questions=[], summary="", excerpt="")
 

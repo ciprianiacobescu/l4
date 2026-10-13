@@ -60,8 +60,10 @@ answer in `.l4-out/run.json`.
 - **THEN** nothing is posted, and the log reads `continuation: already_queued`
 
 ### Requirement: L4-GHP-005 Other branches run the base branch's harness
-For a job on any branch other than the base branch, the GitHub template SHALL fetch the base branch and check out its
-head, detached, before the first `l4` command. It SHALL echo `l4: base checkout <sha>`.
+For a job on any branch other than the base branch, the GitHub template SHALL check out the head of the base branch, detached, before
+the first `l4` command, from the branches `actions/checkout` fetched (`fetch-depth: 0`); it runs no `git fetch`, because the
+checkout keeps no credential and a private repository would refuse one. It SHALL echo `l4: base checkout <sha>` and fail
+with an `::error::` when `origin/<base>` is missing.
 
 #### Scenario: SCN-GHP-07 (−) A pushed harness change does not run
 - **GIVEN** a push to `l4/openspec/x` that changes `.l4/bin/l4`

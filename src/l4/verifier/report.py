@@ -8,8 +8,10 @@ M1: CI artifact links (the job's URL), TDD exemptions and `pre_adoption`
 tasks (verifier 1.16).
 """
 
+import contextlib
 import dataclasses
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ from l4.buildinfo import harness_commit
 from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
 from l4.redact import Redactor
+from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
 from l4.verifier.types import (
     REPLY_OUTCOMES,
     CriterionEvidence,
@@ -29,6 +32,7 @@ from l4.verifier.types import (
 VERDICT_SCHEMA_ID = "l4/verdict@1"
 MAX_CELL_CHARS = 300
 MAX_TESTS_LISTED = 50
+_JUDGED_EVENTS = ("feedback.taken", "feedback.judged", "feedback.addressed", "feedback.not_addressed")
 
 
 def _flat(text: object, limit: int = MAX_CELL_CHARS) -> str:
@@ -140,6 +144,41 @@ def _fix_lines(result: VerifyResult) -> list[str]:
     return [head, *tasks, *(f"- not converted: {_flat(n, 300)}" for n in fix.not_converted)]
 
 
+def feedback_lines(events: Sequence[LedgerEvent], round_no: int) -> list[str]:
+    """The items taken or judged in round `round_no`, one line each (design D12). `feedback.taken`, `.addressed` and
+    `.not_addressed` carry their round; `feedback.waiting` does not, so it belongs to the round whose verdict has not
+    been written yet: after the verdict of the round before. The last event of an item wins."""
+    start = 0
+    for index, event in enumerate(events):
+        round_of = event.data.get("round")
+        if event.type == "verify.verdict" and isinstance(round_of, int) and round_of < round_no:
+            start = index + 1
+    found: dict[str, str] = {}
+    for event in events[start:]:
+        data = event.data
+        if event.type == "feedback.waiting":
+            why = str(data.get("reason") or "").replace("_", " ")
+            ids = data.get("ids")
+            for fid in ids if isinstance(ids, list) else []:
+                found[str(fid)] = f"{fid}: waiting for the next round" + (f" ({why})" if why else "")
+            continue
+        if event.type not in _JUDGED_EVENTS or data.get("round") != round_no:
+            continue
+        fid = str(data.get("id") or "")
+        evidence = _flat(data.get("evidence") or "", 300)
+        if event.type == "feedback.taken":
+            kind = f" ({_flat(data.get('kind') or '', 20)})" if data.get("kind") else ""
+            found[fid] = f"{fid}{kind}: taken into {_flat(data.get('fix_unit') or '-', 80)}"
+        elif event.type == "feedback.judged":  # the judge's yes; the item is closed by a PASS round only (review #14)
+            found[fid] = f"{fid}: judged addressed, pending a PASS round" + (f": {evidence}" if evidence else "")
+        elif event.type == "feedback.addressed":
+            sha = f" at {str(data['sha'])[:10]}" if data.get("sha") else ""
+            found[fid] = f"{fid}: addressed{sha}" + (f": {evidence}" if evidence else "")
+        else:
+            found[fid] = f"{fid}: not addressed" + (f": {evidence}" if evidence else "")
+    return list(found.values())
+
+
 def render_verification_md(result: VerifyResult) -> str:
     lines = [
         f"# Verification: {_flat(result.unit, 120)}: {result.verdict.value} (round {result.round})",
@@ -233,6 +272,8 @@ def render_verification_md(result: VerifyResult) -> str:
     lines += [_finding_line(f) for f in result.findings] or ["None."]
     if result.fix is not None and (result.fix.action != "none" or result.fix.not_converted):
         lines += ["", "## Fix unit", ""] + _fix_lines(result)
+    if result.feedback:
+        lines += ["", "## Feedback", ""] + [f"- {_flat(f, 400)}" for f in result.feedback]
     if result.holds:
         lines += ["", "## Needs a human", ""] + [f"- {_flat(h, 300)}" for h in result.holds]
     if result.red_green:
@@ -304,6 +345,9 @@ def write_round_evidence(unit_dir: Path, round_no: int, result: VerifyResult, re
     `UnsafeFile`: the unit directory is repository content and the files must land inside the checkout."""
     round_dir = f"round-{round_no}"
     reject_symlinks(unit_dir, ".l4", "evidence", round_dir)
+    if not result.feedback:  # the round's `feedback.*` events, as the ledger holds them now (L4-FBK-011)
+        with contextlib.suppress(LedgerCorrupt):  # a corrupt ledger: no section
+            result = dataclasses.replace(result, feedback=feedback_lines(read_ledger(unit_dir).events, round_no))
     target = unit_dir / ".l4" / "evidence" / round_dir
     target.mkdir(parents=True, exist_ok=True)
     scrub = redactor.scrub_for_commit  # the forge host is `<forge>` in what is committed (L4-OBS-002)

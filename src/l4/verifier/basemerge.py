@@ -25,7 +25,7 @@ from l4.config.defaults import cache_root
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.workbench import HARNESS_EXCLUDES, clip_subject
 from l4.services import HookContext
-from l4.specs.harness_merge import harness_resolvers
+from l4.specs.harness_merge import follow_up_feedback_rel, harness_resolvers
 from l4.state.fold import fold
 from l4.state.ledger import ledger_path, read_ledger
 from l4.vcs.merge import BaseMergeConflict, merge_base_into
@@ -90,7 +90,10 @@ def bring_in_base(ctx: HookContext) -> BaseMerge:
     trailers = CommitTrailers(unit=s.ref.id, run_id=s.app.run_id, iteration=max(state.iteration, 1), phase="verifying")
     result = merge_base_into(
         s.git, base_sha, message=subject, trailers=trailers,
-        resolvers=harness_resolvers(unit_rel, s.ref.framework), keep_dirty=(ledger_rel,),
+        resolvers=harness_resolvers(
+            unit_rel, s.ref.framework, follow_up_feedback=follow_up_feedback_rel(s.ref.path, root)
+        ),
+        keep_dirty=(ledger_rel,),
         config=(("core.excludesFile", str(_excludes(ctx))),),
     )  # fmt: skip
     if result.kind == "conflict":

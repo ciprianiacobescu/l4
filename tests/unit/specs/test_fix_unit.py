@@ -181,3 +181,79 @@ def test_a_rejected_holds_decision_is_in_the_proposal_whole_and_redacted(parent)
     proposal = (repo / "openspec" / "changes" / fix.name / "proposal.md").read_text()
     assert "Decided by human in Q-001: the code is wrong: sub_areas must go from the rename payload" in proposal
     assert "ghp_a1B2" not in proposal
+
+
+# --- feedback tasks (human-feedback 2.3, L4-FBK-005; SCN-FBK-13, SCN-FBK-14) --------------------------------------
+
+REQUEST = "Requested by Ana, 2026-10-12T15:04:00Z in FB-001 (refactor, src/greeting.py:7): Pull the trim out."
+
+
+def feedback_finding(fid: str = "F-feed0001", kind: str = "refactor", **over) -> Finding:
+    body = {
+        "ids": (fid,), "title": f"Feedback FB-001 ({kind}): Extract the trim", "detail": "", "severity": "major",
+        "chore": kind in ("refactor", "duplication", "tests"), "tests": kind == "tests",
+        "refactor": kind in ("refactor", "duplication"), "item": "FB-001", "request": REQUEST,
+        "code": "name = name.strip()\n## Why\n```",
+    }  # fmt: skip
+    return Finding(**{**body, **over})
+
+
+def test_a_refactor_feedback_task_is_a_chore_in_the_markers_refactors_and_the_request_comes_first(parent):
+    repo, ref = parent
+    provider, _ = provider_of(repo)
+    fix = provider.create_fix_unit(ref, 1, [feedback_finding(), FINDINGS[0]], None)
+    marker = read_fix_marker(fix.path)
+    assert marker is not None
+    assert marker.chores == marker.refactors == ("F-feed0001",) and marker.test_chores == ()
+    proposal = (fix.path / "proposal.md").read_text()
+    why = proposal.split("## Why\n", 1)[1]
+    assert why.startswith(REQUEST + "\n\n    name = name.strip()\n    ## Why\n    ```\n"), why[:300]
+    assert "F-feed0001 (major): Feedback FB-001 (refactor): Extract the trim" in proposal
+    assert proposal.count("\n## Why\n") == 1  # the quoted code cannot open a section
+    [task, _] = parse_openspec_tasks((fix.path / "tasks.md").read_bytes())
+    assert task.title == "1.1 Feedback FB-001 (refactor): Extract the trim (F-feed0001)"
+    assert "skip_specs: true" in (fix.path / ".openspec.yaml").read_text()
+
+
+def test_a_tests_feedback_task_is_a_test_chore_not_a_refactor(parent):
+    repo, ref = parent
+    provider, _ = provider_of(repo)
+    fix = provider.create_fix_unit(ref, 1, [feedback_finding(kind="tests")], None)
+    marker = read_fix_marker(fix.path)
+    assert marker is not None
+    assert (marker.chores, marker.test_chores, marker.refactors) == (("F-feed0001",), ("F-feed0001",), ())
+
+
+def test_a_config_feedback_item_is_an_added_requirement_named_for_the_item(parent):
+    repo, ref = parent
+    provider, _ = provider_of(repo)
+    delta = SpecDelta(
+        (
+            DeltaRequirement(
+                "greeting",
+                "Greeting from the environment \N{EM DASH} feedback FB-001",
+                (
+                    DeltaScenario(
+                        "GREETING is set",
+                        "- **WHEN** the environment variable GREETING is set\n- **THEN** the system SHALL use it",
+                        "F-feed0001",
+                    ),
+                    DeltaScenario(
+                        "GREETING is not set",
+                        "- **WHEN** GREETING is not set\n- **THEN** the system SHALL CONTINUE TO behave as before",
+                        "F-feed0001",
+                    ),
+                ),
+            ),
+        )
+    )
+    fix = provider.create_fix_unit(ref, 1, [feedback_finding(kind="config", chore=False, refactor=False)], delta)
+    text = (fix.path / "specs" / "greeting" / "spec.md").read_text()
+    assert "### Requirement: Greeting from the environment \N{EM DASH} feedback FB-001\n" in text
+    assert "skip_specs" not in (fix.path / ".openspec.yaml").read_text()
+    criteria = openspec_criteria(fix.path)
+    assert [c.scenario for c in criteria] == ["GREETING is set", "GREETING is not set"]
+    [task] = parse_openspec_tasks((fix.path / "tasks.md").read_bytes())
+    assert task.title.endswith(f"(F-feed0001; {criteria[0].id}, {criteria[1].id})")
+    marker = read_fix_marker(fix.path)
+    assert marker is not None and marker.chores == () and marker.refactors == ()

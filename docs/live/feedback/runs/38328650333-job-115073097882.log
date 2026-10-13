@@ -1,0 +1,657 @@
+﻿2026-10-13T00:43:32.1596531Z Current runner version: '2.337.0'
+2026-10-13T00:43:32.1634721Z ##[group]Runner Image Provisioner
+2026-10-13T00:43:32.1636389Z Hosted Compute Agent
+2026-10-13T00:43:32.1637416Z Version: 20261002.596
+2026-10-13T00:43:32.1638692Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-13T00:43:32.1640127Z Build Date: 2026-10-02T22:28:27Z
+2026-10-13T00:43:32.1641438Z Worker ID: {4efdf48a-25cb-4142-93d0-7de17da75739}
+2026-10-13T00:43:32.1642747Z Region: centralus
+2026-10-13T00:43:32.1644576Z Cloud: Azure
+2026-10-13T00:43:32.1645782Z ##[endgroup]
+2026-10-13T00:43:32.1648670Z ##[group]Operating System
+2026-10-13T00:43:32.1649883Z Ubuntu
+2026-10-13T00:43:32.1650848Z 24.04.5
+2026-10-13T00:43:32.1651700Z LTS
+2026-10-13T00:43:32.1652755Z ##[endgroup]
+2026-10-13T00:43:32.1653653Z ##[group]Runner Image
+2026-10-13T00:43:32.1655269Z Image: ubuntu-24.04
+2026-10-13T00:43:32.1656385Z Version: 20261004.327.1
+2026-10-13T00:43:32.1658790Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-13T00:43:32.1661750Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-13T00:43:32.1663767Z ##[endgroup]
+2026-10-13T00:43:32.1667048Z ##[group]GITHUB_TOKEN Permissions
+2026-10-13T00:43:32.1670417Z Actions: write
+2026-10-13T00:43:32.1671401Z Checks: read
+2026-10-13T00:43:32.1672517Z Contents: write
+2026-10-13T00:43:32.1673466Z Issues: write
+2026-10-13T00:43:32.1674865Z Metadata: read
+2026-10-13T00:43:32.1676144Z PullRequests: write
+2026-10-13T00:43:32.1677251Z Statuses: write
+2026-10-13T00:43:32.1678570Z ##[endgroup]
+2026-10-13T00:43:32.1681610Z Secret source: Actions
+2026-10-13T00:43:32.1683439Z Cache mode: write
+2026-10-13T00:43:32.1685924Z Prepare workflow directory
+2026-10-13T00:43:32.2845612Z Prepare all required actions
+2026-10-13T00:43:32.2940261Z Getting action download info
+2026-10-13T00:43:33.1073041Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-13T00:43:33.2141904Z Download action repository 'ciprianiacobescu/agent-supervisor@5e83ea81806de14657217929321889a6f8f85bde' (SHA:5e83ea81806de14657217929321889a6f8f85bde)
+2026-10-13T00:43:35.5040236Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+2026-10-13T00:43:35.6413587Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+2026-10-13T00:43:35.8124372Z Getting action download info
+2026-10-13T00:43:35.9426297Z Complete job name: l4
+2026-10-13T00:43:36.0121679Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-13T00:43:36.0122402Z with:
+2026-10-13T00:43:36.0122622Z   fetch-depth: 0
+2026-10-13T00:43:36.0122861Z   persist-credentials: false
+2026-10-13T00:43:36.0123162Z   repository: ciprianiacobescu/l4-dummy-action
+2026-10-13T00:43:36.0126450Z   token: ***
+2026-10-13T00:43:36.0126723Z   ssh-strict: true
+2026-10-13T00:43:36.0126951Z   ssh-user: git
+2026-10-13T00:43:36.0127156Z   clean: true
+2026-10-13T00:43:36.0127388Z   sparse-checkout-cone-mode: true
+2026-10-13T00:43:36.0127660Z   fetch-tags: false
+2026-10-13T00:43:36.0127877Z   show-progress: true
+2026-10-13T00:43:36.0128104Z   lfs: false
+2026-10-13T00:43:36.0128312Z   submodules: false
+2026-10-13T00:43:36.0128536Z   set-safe-directory: true
+2026-10-13T00:43:36.0128803Z   allow-unsafe-pr-checkout: false
+2026-10-13T00:43:36.0129392Z env:
+2026-10-13T00:43:36.0132134Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:36.0132361Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:36.0132652Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:36.0133326Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:36.0133643Z   KIRO_API_KEY: ***
+2026-10-13T00:43:36.0133853Z ##[endgroup]
+2026-10-13T00:43:36.1358417Z Syncing repository: ciprianiacobescu/l4-dummy-action
+2026-10-13T00:43:36.1361036Z ##[group]Getting Git version info
+2026-10-13T00:43:36.1361833Z Working directory is '/home/runner/work/l4-dummy-action/l4-dummy-action'
+2026-10-13T00:43:36.1363351Z [command]/usr/bin/git version
+2026-10-13T00:43:36.1544857Z git version 2.55.0
+2026-10-13T00:43:36.1625548Z ##[endgroup]
+2026-10-13T00:43:36.1664532Z Temporarily overriding HOME='/home/runner/work/_temp/d3c62ecb-18c6-481f-b86c-a6874cbec439' before making global git config changes
+2026-10-13T00:43:36.1672301Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-13T00:43:36.1673688Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/l4-dummy-action/l4-dummy-action
+2026-10-13T00:43:36.1806051Z Deleting the contents of '/home/runner/work/l4-dummy-action/l4-dummy-action'
+2026-10-13T00:43:36.1829436Z ##[group]Determining repository object format
+2026-10-13T00:43:36.1845227Z ##[endgroup]
+2026-10-13T00:43:36.1865253Z ##[group]Initializing the repository
+2026-10-13T00:43:36.1885028Z [command]/usr/bin/git init /home/runner/work/l4-dummy-action/l4-dummy-action
+2026-10-13T00:43:36.2019759Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-13T00:43:36.2049015Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-13T00:43:36.2050508Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-13T00:43:36.2076018Z hint: call:
+2026-10-13T00:43:36.2076843Z hint:
+2026-10-13T00:43:36.2095135Z hint: 	git config --global init.defaultBranch <name>
+2026-10-13T00:43:36.2114894Z hint:
+2026-10-13T00:43:36.2132355Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-13T00:43:36.2142813Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-13T00:43:36.2154994Z hint:
+2026-10-13T00:43:36.2175022Z hint: 	git branch -m <name>
+2026-10-13T00:43:36.2204646Z hint:
+2026-10-13T00:43:36.2225542Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-13T00:43:36.2245105Z Initialized empty Git repository in /home/runner/work/l4-dummy-action/l4-dummy-action/.git/
+2026-10-13T00:43:36.2285224Z [command]/usr/bin/git remote add origin https://github.com/ciprianiacobescu/l4-dummy-action
+2026-10-13T00:43:36.2325939Z ##[endgroup]
+2026-10-13T00:43:36.2345371Z ##[group]Disabling automatic garbage collection
+2026-10-13T00:43:36.2364954Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-13T00:43:36.2407694Z ##[endgroup]
+2026-10-13T00:43:36.2408767Z ##[group]Setting up auth
+2026-10-13T00:43:36.2409555Z Removing SSH command configuration
+2026-10-13T00:43:36.2410531Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-13T00:43:36.2413781Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-13T00:43:36.3133349Z Removing HTTP extra header
+2026-10-13T00:43:36.3135225Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-13T00:43:36.3167047Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-13T00:43:36.3457200Z Removing includeIf entries pointing to credentials config files
+2026-10-13T00:43:36.3460183Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-13T00:43:36.3489839Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-13T00:43:36.3800196Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-13T00:43:36.3837943Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path /home/runner/work/_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.3875686Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.3919967Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.3968656Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.4021297Z ##[endgroup]
+2026-10-13T00:43:36.4022609Z ##[group]Fetching the repository
+2026-10-13T00:43:36.4029340Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2026-10-13T00:43:36.8267756Z From https://github.com/ciprianiacobescu/l4-dummy-action
+2026-10-13T00:43:36.8273772Z  * [new branch]      amaster    -> origin/amaster
+2026-10-13T00:43:36.8276134Z  * [new branch]      l4/openspec/add-reorder-quantity -> origin/l4/openspec/add-reorder-quantity
+2026-10-13T00:43:36.8285644Z  * [new branch]      l4/openspec/add-shelf-code -> origin/l4/openspec/add-shelf-code
+2026-10-13T00:43:36.8298024Z [command]/usr/bin/git branch --list --remote origin/amaster
+2026-10-13T00:43:36.8299371Z   origin/amaster
+2026-10-13T00:43:36.8302597Z [command]/usr/bin/git rev-parse refs/remotes/origin/amaster
+2026-10-13T00:43:36.8303656Z 7ffcfa27c9a88b0a272c6c5610531c9b3740a827
+2026-10-13T00:43:36.8306869Z ##[endgroup]
+2026-10-13T00:43:36.8307878Z ##[group]Determining the checkout info
+2026-10-13T00:43:36.8309236Z ##[endgroup]
+2026-10-13T00:43:36.8310030Z [command]/usr/bin/git sparse-checkout disable
+2026-10-13T00:43:36.8315280Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-13T00:43:36.8316971Z ##[group]Checking out the ref
+2026-10-13T00:43:36.8317789Z [command]/usr/bin/git checkout --progress --force -B amaster refs/remotes/origin/amaster
+2026-10-13T00:43:36.8410911Z Switched to a new branch 'amaster'
+2026-10-13T00:43:36.8420872Z branch 'amaster' set up to track 'origin/amaster'.
+2026-10-13T00:43:36.8447918Z ##[endgroup]
+2026-10-13T00:43:36.8511135Z [command]/usr/bin/git log -1 --format=%H
+2026-10-13T00:43:36.8532966Z 7ffcfa27c9a88b0a272c6c5610531c9b3740a827
+2026-10-13T00:43:36.8543016Z ##[group]Removing auth
+2026-10-13T00:43:36.8543941Z Removing SSH command configuration
+2026-10-13T00:43:36.8548491Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-13T00:43:36.8595906Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-13T00:43:36.9028230Z Removing HTTP extra header
+2026-10-13T00:43:36.9029506Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-13T00:43:36.9034847Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-13T00:43:36.9195883Z Removing includeIf entries pointing to credentials config files
+2026-10-13T00:43:36.9200453Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-13T00:43:36.9235356Z includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path
+2026-10-13T00:43:36.9245742Z includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path
+2026-10-13T00:43:36.9247155Z includeif.gitdir:/github/workspace/.git.path
+2026-10-13T00:43:36.9248478Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-13T00:43:36.9251625Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path
+2026-10-13T00:43:36.9276947Z /home/runner/work/_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.9287233Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-4c3b859b\-4d0f\-4127\-a9c2\-8b7e4598e463\.config
+2026-10-13T00:43:36.9334856Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path
+2026-10-13T00:43:36.9385529Z /home/runner/work/_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.9396017Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/l4-dummy-action/l4-dummy-action/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-4c3b859b\-4d0f\-4127\-a9c2\-8b7e4598e463\.config
+2026-10-13T00:43:36.9432230Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-13T00:43:36.9480340Z /github/runner_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.9484865Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-4c3b859b\-4d0f\-4127\-a9c2\-8b7e4598e463\.config
+2026-10-13T00:43:36.9533080Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-13T00:43:36.9552523Z /github/runner_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config
+2026-10-13T00:43:36.9562738Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-4c3b859b\-4d0f\-4127\-a9c2\-8b7e4598e463\.config
+2026-10-13T00:43:36.9603600Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-13T00:43:36.9859913Z Removing credentials config '/home/runner/work/_temp/git-credentials-4c3b859b-4d0f-4127-a9c2-8b7e4598e463.config'
+2026-10-13T00:43:36.9862754Z ##[endgroup]
+2026-10-13T00:43:37.0354222Z ##[group]Run ciprianiacobescu/agent-supervisor/.github/actions/l4@5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:37.0354799Z with:
+2026-10-13T00:43:37.0355022Z   self-provision: true
+2026-10-13T00:43:37.0355257Z   source: auto
+2026-10-13T00:43:37.0355459Z   python: 3.12
+2026-10-13T00:43:37.0355670Z   uv-version: 0.12.22
+2026-10-13T00:43:37.0355888Z   clis: auto
+2026-10-13T00:43:37.0356081Z env:
+2026-10-13T00:43:37.0375451Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:37.0375930Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:37.0376429Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:37.0377793Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:37.0378363Z   KIRO_API_KEY: ***
+2026-10-13T00:43:37.0378700Z ##[endgroup]
+2026-10-13T00:43:37.0443200Z ##[start-action display=l4 source;id=l4.src]
+2026-10-13T00:43:37.0483232Z ##[group]Run # Every check here runs before any download, and no message repeats an input value.
+2026-10-13T00:43:37.0484254Z # Every check here runs before any download, and no message repeats an input value.
+2026-10-13T00:43:37.0484799Z s=$(date +%s.%N)
+2026-10-13T00:43:37.0485111Z root=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)
+2026-10-13T00:43:37.0485632Z [[ "$INPUT_PYTHON" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::python must look like 3.12"; exit 2; }
+2026-10-13T00:43:37.0486298Z [[ "$INPUT_UV_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::uv-version must look like 0.12.22"; exit 2; }
+2026-10-13T00:43:37.0486977Z case "$INPUT_CLIS" in auto|none) ;; *) echo "::error::clis must be auto or none"; exit 2 ;; esac
+2026-10-13T00:43:37.0487466Z case "$INPUT_SELF_PROVISION" in
+2026-10-13T00:43:37.0487978Z   auto) if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then provision=true; else provision=auto; fi ;;
+2026-10-13T00:43:37.0488533Z   true|false) provision=$INPUT_SELF_PROVISION ;;
+2026-10-13T00:43:37.0489177Z   *) echo "::error::self-provision must be auto, true or false"; exit 2 ;;
+2026-10-13T00:43:37.0489574Z esac
+2026-10-13T00:43:37.0489785Z mode=$INPUT_SOURCE
+2026-10-13T00:43:37.0490044Z if [ "$mode" = auto ]; then
+2026-10-13T00:43:37.0490506Z   if [ -f "$root/pyproject.toml" ] && [ -d "$root/src/l4" ]; then mode=action; else mode=repository; fi
+2026-10-13T00:43:37.0490974Z fi
+2026-10-13T00:43:37.0491184Z case "$mode" in
+2026-10-13T00:43:37.0491410Z   action)
+2026-10-13T00:43:37.0492138Z     [ -d "$root/src/l4" ] || { echo "::error::source action, but the action's repository holds no harness; check the harness repository's Actions access setting, or use source repository"; exit 2; }
+2026-10-13T00:43:37.0493151Z     key=$(cd "$root" && find src pyproject.toml uv.lock README.md -type f ! -path '*/__pycache__/*' 2>/dev/null \
+2026-10-13T00:43:37.0493759Z           | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-24)
+2026-10-13T00:43:37.0494306Z     echo "dir=$root" >> "$GITHUB_OUTPUT"
+2026-10-13T00:43:37.0494845Z     echo "[l4-action] the action's repository: $(find "$root" -type f | wc -l) files, $(du -sh "$root" | cut -f1)"
+2026-10-13T00:43:37.0495350Z     ;;
+2026-10-13T00:43:37.0495561Z   repository)
+2026-10-13T00:43:37.0495965Z     [[ "$INPUT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit must be 40 hex digits"; exit 2; }
+2026-10-13T00:43:37.0496622Z     [ -n "$INPUT_REPOSITORY" ] || { echo "::error::repository is required for source repository"; exit 2; }
+2026-10-13T00:43:37.0497115Z     key=$INPUT_COMMIT
+2026-10-13T00:43:37.0497363Z     ;;
+2026-10-13T00:43:37.0497681Z   *) echo "::error::source must be auto, action or repository"; exit 2 ;;
+2026-10-13T00:43:37.0498060Z esac
+2026-10-13T00:43:37.0498670Z # The commit the ledger names: the pinned commit of `uses: ...@<sha>` or the commit input; a branch or a tag is
+2026-10-13T00:43:37.0499363Z # no commit, so none is exported then (the installed copy has no commit in direct_url.json).
+2026-10-13T00:43:37.0499825Z commit=
+2026-10-13T00:43:37.0500101Z if [ "$mode" = repository ]; then commit=$INPUT_COMMIT
+2026-10-13T00:43:37.0500541Z elif [[ "$ACTION_REF" =~ ^[0-9a-f]{40}$ ]]; then commit=$ACTION_REF; fi
+2026-10-13T00:43:37.0501026Z [ -z "$commit" ] || echo "L4_HARNESS_COMMIT=$commit" >> "$GITHUB_ENV"
+2026-10-13T00:43:37.0501387Z {
+2026-10-13T00:43:37.0501595Z   echo "mode=$mode"
+2026-10-13T00:43:37.0501857Z   echo "provision=$provision"
+2026-10-13T00:43:37.0502336Z   echo "key=l4-harness-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-py$INPUT_PYTHON-$mode-$key"
+2026-10-13T00:43:37.0502809Z } >> "$GITHUB_OUTPUT"
+2026-10-13T00:43:37.0503286Z echo "[l4-action] source $mode, key $key ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-13T00:43:37.0801849Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-13T00:43:37.0802308Z env:
+2026-10-13T00:43:37.0807460Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:37.0807787Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:37.0808107Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:37.0808987Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:37.0809378Z   KIRO_API_KEY: ***
+2026-10-13T00:43:37.0809636Z   INPUT_SOURCE: auto
+2026-10-13T00:43:37.0809892Z   INPUT_COMMIT: 
+2026-10-13T00:43:37.0810148Z   INPUT_REPOSITORY: 
+2026-10-13T00:43:37.0810410Z   INPUT_PYTHON: 3.12
+2026-10-13T00:43:37.0810675Z   INPUT_UV_VERSION: 0.12.22
+2026-10-13T00:43:37.0810980Z   INPUT_SELF_PROVISION: true
+2026-10-13T00:43:37.0811271Z   INPUT_CLIS: auto
+2026-10-13T00:43:37.0811573Z   ACTION_REF: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:37.0811920Z ##[endgroup]
+2026-10-13T00:43:37.1774595Z [l4-action] the action's repository: 4672 files, 51M
+2026-10-13T00:43:37.1816195Z [l4-action] source action, key 4499706647bd23f10892fb22 (0.09 s)
+2026-10-13T00:43:37.1851853Z ##[end-action id=l4.src;outcome=success;conclusion=success;duration_ms=140]
+2026-10-13T00:43:37.1856932Z ##[start-action display=restore installed harness;id=l4.restore]
+2026-10-13T00:43:37.1932256Z ##[group]Run actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-13T00:43:37.1932981Z with:
+2026-10-13T00:43:37.1933806Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-13T00:43:37.1935347Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-action-4499706647bd23f10892fb22
+2026-10-13T00:43:37.1936147Z   enableCrossOsArchive: false
+2026-10-13T00:43:37.1936636Z   fail-on-cache-miss: false
+2026-10-13T00:43:37.1937100Z   lookup-only: false
+2026-10-13T00:43:37.1937484Z env:
+2026-10-13T00:43:37.1941766Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:37.1942065Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:37.1942335Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:37.1943038Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:37.1943378Z   KIRO_API_KEY: ***
+2026-10-13T00:43:37.1943670Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:37.1944296Z ##[endgroup]
+2026-10-13T00:43:37.4818219Z Cache not found for input keys: l4-harness-Linux-X64-ubuntu24-py3.12-action-4499706647bd23f10892fb22
+2026-10-13T00:43:37.4933369Z ##[end-action id=l4.restore;outcome=success;conclusion=success;duration_ms=307]
+2026-10-13T00:43:37.4939416Z ##[start-action display=install harness;id=l4.install]
+2026-10-13T00:43:37.4974484Z ##[group]Run s=$(date +%s.%N)
+2026-10-13T00:43:37.4974887Z s=$(date +%s.%N)
+2026-10-13T00:43:37.4975307Z # the deploy key file goes away however this step ends, a failed install included
+2026-10-13T00:43:37.4975901Z trap 'rm -f "$RUNNER_TEMP/l4-harness-key" "$RUNNER_TEMP/l4-known-hosts"' EXIT
+2026-10-13T00:43:37.4976364Z export PATH="$HOME/.local/bin:$PATH"
+2026-10-13T00:43:37.4976903Z if ! command -v uv >/dev/null 2>&1; then
+2026-10-13T00:43:37.4977480Z   curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | env UV_NO_MODIFY_PATH=1 sh >/dev/null
+2026-10-13T00:43:37.4978253Z   echo "[l4-action] uv $UV_VERSION installed ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-13T00:43:37.4978770Z fi
+2026-10-13T00:43:37.4978975Z u=$(date +%s.%N)
+2026-10-13T00:43:37.4979231Z if [ "$MODE" = action ]; then
+2026-10-13T00:43:37.4979678Z   src="$RUNNER_TEMP/l4-harness-src"   # a copy: the build may write next to the sources
+2026-10-13T00:43:37.4980157Z   rm -rf "$src" && mkdir -p "$src"
+2026-10-13T00:43:37.4980742Z   (cd "$DIR" && tar cf - --exclude=__pycache__ src pyproject.toml uv.lock README.md 2>/dev/null) | (cd "$src" && tar xf -)
+2026-10-13T00:43:37.4981371Z   uv tool install --quiet --python "$INPUT_PYTHON" "$src"
+2026-10-13T00:43:37.4981725Z else
+2026-10-13T00:43:37.4981954Z   if [ -n "$INPUT_SSH_KEY" ]; then
+2026-10-13T00:43:37.4982240Z     umask 077
+2026-10-13T00:43:37.4982565Z     printf '%s\n' "$INPUT_SSH_KEY" > "$RUNNER_TEMP/l4-harness-key"
+2026-10-13T00:43:37.4982953Z     printf '%s\n' \
+2026-10-13T00:43:37.4983479Z       'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+2026-10-13T00:43:37.4985007Z       'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=' \
+2026-10-13T00:43:37.4988805Z       'github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=' > "$RUNNER_TEMP/l4-known-hosts"
+2026-10-13T00:43:37.4992588Z     export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/l4-harness-key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/l4-known-hosts -o StrictHostKeyChecking=yes"
+2026-10-13T00:43:37.4993309Z   fi
+2026-10-13T00:43:37.4993713Z   uv tool install --quiet --python "$INPUT_PYTHON" "git+$INPUT_REPOSITORY@$INPUT_COMMIT"
+2026-10-13T00:43:37.4994456Z fi
+2026-10-13T00:43:37.4994925Z echo "[l4-action] harness installed ($(awk -v s="$u" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-13T00:43:37.5056683Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-13T00:43:37.5057065Z env:
+2026-10-13T00:43:37.5059887Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:37.5060138Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:37.5060406Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:37.5061088Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:37.5061411Z   KIRO_API_KEY: ***
+2026-10-13T00:43:37.5061682Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:37.5062010Z   MODE: action
+2026-10-13T00:43:37.5062457Z   DIR: /home/runner/work/_actions/ciprianiacobescu/agent-supervisor/5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:37.5062960Z   INPUT_COMMIT: 
+2026-10-13T00:43:37.5063183Z   INPUT_REPOSITORY: 
+2026-10-13T00:43:37.5063401Z   INPUT_SSH_KEY: 
+2026-10-13T00:43:37.5063615Z   INPUT_PYTHON: 3.12
+2026-10-13T00:43:37.5063836Z   UV_VERSION: 0.12.22
+2026-10-13T00:43:37.5064318Z ##[endgroup]
+2026-10-13T00:43:37.8065554Z downloading uv 0.12.22 x86_64-unknown-linux-gnu
+2026-10-13T00:43:38.8288376Z [l4-action] uv 0.12.22 installed (1.31 s)
+2026-10-13T00:43:40.0329464Z [l4-action] harness installed (1.20 s)
+2026-10-13T00:43:40.0350067Z ##[end-action id=l4.install;outcome=success;conclusion=success;duration_ms=2540]
+2026-10-13T00:43:40.0353556Z ##[start-action display=save installed harness;id=l4.__actions_cache]
+2026-10-13T00:43:40.0395329Z ##[group]Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-13T00:43:40.0395723Z with:
+2026-10-13T00:43:40.0396196Z   path: ~/.local/share/uv/tools/l4harness
+~/.local/share/uv/python
+~/.local/bin/l4
+~/.local/bin/uv
+~/.local/bin/uvx
+
+2026-10-13T00:43:40.0396890Z   key: l4-harness-Linux-X64-ubuntu24-py3.12-action-4499706647bd23f10892fb22
+2026-10-13T00:43:40.0397330Z   enableCrossOsArchive: false
+2026-10-13T00:43:40.0397585Z env:
+2026-10-13T00:43:40.0400516Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:40.0400771Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:40.0401033Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:40.0401734Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:40.0402071Z   KIRO_API_KEY: ***
+2026-10-13T00:43:40.0402376Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:40.0402719Z ##[endgroup]
+2026-10-13T00:43:40.1976140Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/l4-dummy-action/l4-dummy-action --files-from manifest.txt --use-compress-program zstdmt
+2026-10-13T00:43:41.5844786Z Sent 25330616 of 25330616 (100.0%), 33.0 MBs/sec
+2026-10-13T00:43:41.7482064Z Cache saved with key: l4-harness-Linux-X64-ubuntu24-py3.12-action-4499706647bd23f10892fb22
+2026-10-13T00:43:41.7555334Z ##[end-action id=l4.__actions_cache;outcome=success;conclusion=success;duration_ms=1720]
+2026-10-13T00:43:41.7559107Z ##[start-action display=l4 on PATH;id=l4.ver]
+2026-10-13T00:43:41.7590405Z ##[group]Run echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-13T00:43:41.7591143Z echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+2026-10-13T00:43:41.7591922Z version=$("$HOME/.local/bin/l4" --version | awk '{ print $NF }')
+2026-10-13T00:43:41.7593093Z echo "version=$version" >> "$GITHUB_OUTPUT"
+2026-10-13T00:43:41.7593765Z echo "[l4-action] l4 $version"
+2026-10-13T00:43:41.7686253Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-13T00:43:41.7686917Z env:
+2026-10-13T00:43:41.7692951Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:41.7694084Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:41.7694607Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:41.7696366Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:41.7697039Z   KIRO_API_KEY: ***
+2026-10-13T00:43:41.7697582Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:41.7698210Z ##[endgroup]
+2026-10-13T00:43:42.1674781Z [l4-action] l4 0.1.0
+2026-10-13T00:43:42.1685046Z ##[end-action id=l4.ver;outcome=success;conclusion=success;duration_ms=412]
+2026-10-13T00:43:42.1687636Z ##[start-action display=agent CLI cache key;id=l4.clikey]
+2026-10-13T00:43:42.1708829Z ##[group]Run # the suffix is a hash of the catalog's pins, made by the installed harness; the harness itself is no input
+2026-10-13T00:43:42.1709655Z # the suffix is a hash of the catalog's pins, made by the installed harness; the harness itself is no input
+2026-10-13T00:43:42.1710232Z suffix=$("$HOME/.local/bin/l4" ci cache-key clis)
+2026-10-13T00:43:42.1710754Z echo "key=l4-clis-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-$suffix" >> "$GITHUB_OUTPUT"
+2026-10-13T00:43:42.1775790Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-13T00:43:42.1776168Z env:
+2026-10-13T00:43:42.1779163Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:42.1779420Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:42.1779695Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:42.1780389Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:42.1780722Z   KIRO_API_KEY: ***
+2026-10-13T00:43:42.1781008Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:42.1781349Z ##[endgroup]
+2026-10-13T00:43:42.4359957Z ##[end-action id=l4.clikey;outcome=success;conclusion=success;duration_ms=267]
+2026-10-13T00:43:42.4362483Z ##[start-action display=agent CLI cache paths;id=l4.clipaths]
+2026-10-13T00:43:42.4383622Z ##[group]Run # the one place the list is written: restored below and output for the workflow's save step
+2026-10-13T00:43:42.4384854Z # the one place the list is written: restored below and output for the workflow's save step
+2026-10-13T00:43:42.4385369Z cat >> "$GITHUB_OUTPUT" <<'L4_EOF'
+2026-10-13T00:43:42.4385684Z paths<<L4_CLI_PATHS
+2026-10-13T00:43:42.4385939Z ~/.local/bin
+2026-10-13T00:43:42.4386181Z !~/.local/bin/uv
+2026-10-13T00:43:42.4386433Z !~/.local/bin/uvx
+2026-10-13T00:43:42.4386680Z !~/.local/bin/l4
+2026-10-13T00:43:42.4386921Z ~/.local/share/l4
+2026-10-13T00:43:42.4387171Z ~/.local/share/claude
+2026-10-13T00:43:42.4387447Z ~/.cache/l4/installers
+2026-10-13T00:43:42.4387718Z L4_CLI_PATHS
+2026-10-13T00:43:42.4387941Z L4_EOF
+2026-10-13T00:43:42.4449874Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-13T00:43:42.4450245Z env:
+2026-10-13T00:43:42.4453149Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:42.4453417Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:42.4453683Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:42.4454715Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:42.4455066Z   KIRO_API_KEY: ***
+2026-10-13T00:43:42.4455354Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:42.4455704Z ##[endgroup]
+2026-10-13T00:43:42.4552786Z ##[end-action id=l4.clipaths;outcome=success;conclusion=success;duration_ms=18]
+2026-10-13T00:43:42.4555186Z ##[start-action display=restore agent CLI cache;id=l4.clis]
+2026-10-13T00:43:42.4613550Z ##[group]Run actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-10-13T00:43:42.4613952Z with:
+2026-10-13T00:43:42.4614738Z   path: ~/.local/bin
+!~/.local/bin/uv
+!~/.local/bin/uvx
+!~/.local/bin/l4
+~/.local/share/l4
+~/.local/share/claude
+~/.cache/l4/installers
+2026-10-13T00:43:42.4615536Z   key: l4-clis-Linux-X64-ubuntu24-ed728f469ce962ce
+2026-10-13T00:43:42.4615878Z   enableCrossOsArchive: false
+2026-10-13T00:43:42.4616157Z   fail-on-cache-miss: false
+2026-10-13T00:43:42.4616412Z   lookup-only: false
+2026-10-13T00:43:42.4616635Z env:
+2026-10-13T00:43:42.4619373Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:42.4619620Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:42.4619886Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:42.4620569Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:42.4620900Z   KIRO_API_KEY: ***
+2026-10-13T00:43:42.4621188Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:42.4621526Z ##[endgroup]
+2026-10-13T00:43:42.7597885Z Cache hit for: l4-clis-Linux-X64-ubuntu24-ed728f469ce962ce
+2026-10-13T00:43:43.9298987Z Received 83886080 of 240233664 (34.9%), 79.8 MBs/sec
+2026-10-13T00:43:44.9068069Z Received 240233664 of 240233664 (100.0%), 115.5 MBs/sec
+2026-10-13T00:43:44.9070331Z Cache Size: ~229 MB (240233664 B)
+2026-10-13T00:43:44.9118821Z [command]/usr/bin/tar -xf /home/runner/work/_temp/fdaa292c-ed02-43e1-8660-d73d9e086564/cache.tzst -P -C /home/runner/work/l4-dummy-action/l4-dummy-action --use-compress-program unzstd
+2026-10-13T00:43:46.3919349Z Cache restored successfully
+2026-10-13T00:43:46.4672835Z Cache restored from key: l4-clis-Linux-X64-ubuntu24-ed728f469ce962ce
+2026-10-13T00:43:46.4796338Z ##[end-action id=l4.clis;outcome=success;conclusion=success;duration_ms=4024]
+2026-10-13T00:43:46.4801582Z ##[start-action display=runner setup;id=l4.setup]
+2026-10-13T00:43:46.4832552Z ##[group]Run # the harness's own l4-setup.sh (L4-PRV-020..022), rendered by the installed harness for both sources
+2026-10-13T00:43:46.4833862Z # the harness's own l4-setup.sh (L4-PRV-020..022), rendered by the installed harness for both sources
+2026-10-13T00:43:46.4835383Z set -o pipefail
+2026-10-13T00:43:46.4835848Z s=$(date +%s.%N)
+2026-10-13T00:43:46.4836366Z export PATH="$HOME/.local/bin:$PATH"
+2026-10-13T00:43:46.4837719Z echo "L4_SELF_PROVISION=$PROVISION" >> "$GITHUB_ENV"   # `l4 doctor --ci --fix` reads the same switch
+2026-10-13T00:43:46.4838798Z l4 ci render-setup | L4_SELF_PROVISION="$PROVISION" bash
+2026-10-13T00:43:46.4839836Z echo "[l4-action] runner setup ($(awk -v s="$s" -v e="$(date +%s.%N)" 'BEGIN { printf "%.2f", e - s }') s)"
+2026-10-13T00:43:46.4906915Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-10-13T00:43:46.4907293Z env:
+2026-10-13T00:43:46.4910151Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:46.4910409Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:46.4910689Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:46.4911394Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:46.4911726Z   KIRO_API_KEY: ***
+2026-10-13T00:43:46.4912021Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:46.4912374Z   PROVISION: true
+2026-10-13T00:43:46.4912607Z ##[endgroup]
+2026-10-13T00:43:46.7329561Z [HSU-01] INFO runner facts — RUNNER_ENVIRONMENT=github-hosted CI_DISPOSABLE_ENVIRONMENT=unset ImageOS=ubuntu24 kernel=6.17.0-1022-azure user=runner uv_on_path=yes bwrap_on_path=yes kernel.apparmor_restrict_unprivileged_userns=1
+2026-10-13T00:43:46.7446167Z [HSU-02] OK uv — already present: uv 0.12.22 (x86_64-unknown-linux-gnu) at /home/runner/.local/bin/uv
+2026-10-13T00:43:46.7485643Z [HSU-03] FIXED GITHUB_PATH — appended ~/.local/bin
+2026-10-13T00:43:46.7541965Z [HSU-04] INFO bwrap link — removed ~/.local/bin/bwrap, it failed the self-test: bwrap: setting up uid map: Permission denied
+2026-10-13T00:43:46.7599134Z [HSU-04] INFO bwrap — cached /home/runner/.local/share/l4/bwrap/usr/bin/bwrap fails the self-test, not downloading again: bwrap: setting up uid map: Permission denied
+2026-10-13T00:43:46.7831586Z [HSU-05] FIXED root step — kernel.apparmor_restrict_unprivileged_userns set to 0 (was 1; now 0)
+2026-10-13T00:43:46.7911414Z [HSU-06] INFO bwrap after the sysctl — self-test passes via user-space
+2026-10-13T00:43:46.7930789Z [HSU-09] INFO bwrap final — sandbox usable by runner: yes, via user-space
+2026-10-13T00:43:46.8002774Z [HSU-99] OK summary — uv=uv 0.12.22 (x86_64-unknown-linux-gnu) bwrap=user-space total 0 s
+2026-10-13T00:43:46.8053277Z [l4-action] runner setup (0.30 s)
+2026-10-13T00:43:46.8065789Z ##[end-action id=l4.setup;outcome=success;conclusion=success;duration_ms=326]
+2026-10-13T00:43:46.8069178Z ##[start-action display=l4 command;id=l4.__run]
+2026-10-13T00:43:46.8073953Z ##[end-action id=l4.__run;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-10-13T00:43:46.8137123Z ##[group]Run l4 doctor --ci --fix || l4 ci map-exit $?
+2026-10-13T00:43:46.8137583Z l4 doctor --ci --fix || l4 ci map-exit $?
+2026-10-13T00:43:46.8201296Z shell: /usr/bin/bash -e {0}
+2026-10-13T00:43:46.8201573Z env:
+2026-10-13T00:43:46.8204742Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:46.8205028Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:46.8205299Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:46.8205997Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:46.8206353Z   KIRO_API_KEY: ***
+2026-10-13T00:43:46.8206641Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:46.8206996Z   L4_SELF_PROVISION: true
+2026-10-13T00:43:46.8207240Z ##[endgroup]
+2026-10-13T00:43:48.7245341Z [l4] provision: installing kiro-cli
+2026-10-13T00:43:48.9749794Z [l4] provision: saved installer https://cli.kiro.dev/install sha256=d8dd659c11c156002942f09443b6cb7904959004d4e7f1f73777fdbb2d909b54
+2026-10-13T00:43:52.5473376Z id           severity  status  message                                                                                                                                             fix
+2026-10-13T00:43:52.5475451Z -----------  --------  ------  --------------------------------------------------------------------------------------------------------------------------------------------------
+2026-10-13T00:43:52.5477382Z CI-001       error     skip    not a GitLab CI job                                                                                                                                 -
+2026-10-13T00:43:52.5479032Z CI-002       error     skip    ci.platform is github                                                                                                                               -
+2026-10-13T00:43:52.5480626Z CFG-002      error     pass    role chains and profiles are consistent                                                                                                             -
+2026-10-13T00:43:52.5482250Z CFG-005      warn      pass    no explicitly set list drops a default                                                                                                              -
+2026-10-13T00:43:52.5483815Z CFG-006      error     pass    the setup action is pinned at 5e83ea81806d                                                                                                          -
+2026-10-13T00:43:52.5485751Z CFG-007      info      pass    l4 on PATH: /home/runner/.local/share/uv/tools/l4harness/bin/l4                                                                                     -
+2026-10-13T00:43:52.5487338Z ENV-001      error     pass    Python 3.12.3, uv present                                                                                                                           -
+2026-10-13T00:43:52.5488712Z ENV-002      error     pass    git 2.55                                                                                                                                            -
+2026-10-13T00:43:52.5490156Z ENV-003      error     pass    OpenSpec 1.14.0 via /usr/local/bin/node                                                                                                             -
+2026-10-13T00:43:52.5491595Z ENV-004      error     pass    2 agent CLI(s) present                                                                                                                              -
+2026-10-13T00:43:52.5492972Z ENV-014      warn      pass    no stored login looks wiped                                                                                                                         -
+2026-10-13T00:43:52.5495161Z SPEC-001     error     pass    openspec, kiro                                                                                                                                      -
+2026-10-13T00:43:52.5496559Z SPEC-002     error     pass    1 Kiro unit(s) validate                                                                                                                             -
+2026-10-13T00:43:52.5498315Z SPEC-004     warn      pass    1 Kiro unit(s): every leaf cites a requirement                                                                                                      -
+2026-10-13T00:43:52.5499923Z PRV-001      warn      pass    claude-judge claude-code ready; kiro kiro-cli ready                                                                                                 -
+2026-10-13T00:43:52.5501473Z PRV-002      warn      pass    no root-only prerequisite is missing                                                                                                                -
+2026-10-13T00:43:52.5502996Z MEM-001      warn      pass    no .serena/memories/harness/lessons.md yet                                                                                                          -
+2026-10-13T00:43:52.5504833Z MEM-002      warn      pass    git ignores none of the harness memory paths                                                                                                        -
+2026-10-13T00:43:52.5506708Z ENV-006      warn      skip    no roles.s1_judge profile uses engine laya-local                                                                                                    -
+2026-10-13T00:43:52.5508569Z ENV-007      warn      skip    no e2e gate, or verifier.playwright.enabled is false                                                                                                -
+2026-10-13T00:43:52.5510786Z ENV-008      warn      fail    serena not found on PATH (pin 1.7.0): lessons still reach the prompt                                                                                prereqs.sh --with-serena
+2026-10-13T00:43:52.5512781Z ENV-013      warn      skip    no System-One profile uses engine ollama                                                                                                            -
+2026-10-13T00:43:52.5514879Z S1-001       warn      skip    verifier.s1.shadow names no profile                                                                                                                 -
+2026-10-13T00:43:52.5516684Z S1-002       warn      skip    no System-One profile names a tuned checkpoint path                                                                                                 -
+2026-10-13T00:43:52.5518781Z COV-001      warn      skip    no project interpreter yet: gates.setup creates it inside the run, which checks coverage.py again right after it (the doctor.check event, COV-001)  -
+2026-10-13T00:43:52.5520993Z SANDBOX-002  error     pass    no container-daemon socket is reachable from the agent or the gate sandbox                                                                          -
+2026-10-13T00:43:52.5523008Z EVAL-001     warn      skip    no eval baseline under docs/eval/                                                                                                                   -
+2026-10-13T00:43:52.5524358Z 
+2026-10-13T00:43:52.5524775Z fix  uv  already present  uv 0.12.22
+2026-10-13T00:43:52.5525461Z fix  node  already present  node 22.23.3
+2026-10-13T00:43:52.5526150Z fix  openspec  already present  openspec 1.14.0
+2026-10-13T00:43:52.5526864Z fix  claude  already present  claude 2.1.288
+2026-10-13T00:43:52.5527510Z fix  kiro-cli  applied  kiro-cli 2.30.0
+2026-10-13T00:43:52.5527988Z 
+2026-10-13T00:43:52.5528319Z cache: /home/runner/.cache/l4
+2026-10-13T00:43:52.5528919Z home:  /home/runner/.local/share/l4
+2026-10-13T00:43:52.6192330Z ##[group]Run l4 plan --sweep || l4 ci map-exit $?
+2026-10-13T00:43:52.6192937Z l4 plan --sweep || l4 ci map-exit $?
+2026-10-13T00:43:52.6260501Z shell: /usr/bin/bash -e {0}
+2026-10-13T00:43:52.6260798Z env:
+2026-10-13T00:43:52.6263600Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:52.6263869Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:52.6264312Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:52.6265025Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:52.6265371Z   KIRO_API_KEY: ***
+2026-10-13T00:43:52.6265664Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:52.6266026Z   L4_SELF_PROVISION: true
+2026-10-13T00:43:52.6266272Z ##[endgroup]
+2026-10-13T00:43:55.6728230Z openspec:add-reorder-quantity: ci: H 817b58d097: no workflow ran on the hand-off commit; pushes made with GITHUB_TOKEN start no runs (use a token that does, or a GitHub App)
+2026-10-13T00:43:55.6730814Z openspec:add-shelf-code: ci: H 8337c5b079: no workflow ran on the hand-off commit; pushes made with GITHUB_TOKEN start no runs (use a token that does, or a GitHub App)
+2026-10-13T00:43:55.7479062Z UNIT                           PHASE      TASKS  NEXT       REASON
+2026-10-13T00:43:55.7480321Z kiro:add-low-stock-message     -          0/4    implement  pending tasks
+2026-10-13T00:43:55.7481853Z openspec:add-reorder-quantity  in_review  1/1    none       in_review: waiting for merge
+2026-10-13T00:43:55.7483266Z openspec:add-shelf-code        in_review  1/1    none       in_review: waiting for merge
+2026-10-13T00:43:55.8045109Z ##[group]Run l4 run || l4 ci map-exit $?
+2026-10-13T00:43:55.8045789Z l4 run || l4 ci map-exit $?
+2026-10-13T00:43:55.8108836Z shell: /usr/bin/bash -e {0}
+2026-10-13T00:43:55.8109124Z env:
+2026-10-13T00:43:55.8111920Z   GITHUB_TOKEN: ***
+2026-10-13T00:43:55.8112190Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:43:55.8112463Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:43:55.8113169Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:43:55.8113504Z   KIRO_API_KEY: ***
+2026-10-13T00:43:55.8113794Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:43:55.8114520Z   L4_SELF_PROVISION: true
+2026-10-13T00:43:55.8114783Z ##[endgroup]
+2026-10-13T00:43:56.7723210Z [l4] run: spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written
+2026-10-13T00:43:57.4683108Z [l4] kiro:add-low-stock-message run r-20261013T0043Z-f8c5 started (iteration 1, harness 5e83ea81806d)
+2026-10-13T00:43:57.9419007Z [l4] kiro:add-low-stock-message phase none → intake (unit_discovered_pending)
+2026-10-13T00:43:57.9420621Z [l4] kiro:add-low-stock-message phase intake → ready (intake_all_pass)
+2026-10-13T00:45:03.6931753Z [l4] implementer: kiro ok (binary 2.30.0 · auth api_key · quota 9.4% used (credits) · hello 35.7s) → selected
+2026-10-13T00:45:03.6937567Z [l4] kiro:add-low-stock-message implementer: kiro ok → selected
+2026-10-13T00:45:03.6963034Z [l4] kiro:add-low-stock-message phase ready → implementing (lease_acquired)
+2026-10-13T00:45:03.7012639Z [l4] kiro:add-low-stock-message task 1.1 started: 1.1 Create alerts module with low_stock_message function and unit tests
+2026-10-13T00:45:04.1591960Z [l4] kiro:add-low-stock-message gate seed pass (exit 0)
+2026-10-13T00:45:04.4241104Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:45:04.4961791Z [l4] kiro:add-low-stock-message gate coverage-check fail (exit 1) — exit code 1
+2026-10-13T00:45:04.4963955Z [l4] implementer: kiro:add-low-stock-message: COV-001: coverage.py is not importable by .venv/bin/python: diff coverage will be recorded not_run; add coverage to the project's dev dependencies
+2026-10-13T00:45:04.4972491Z [l4] kiro:add-low-stock-message doctor COV-001 fail: coverage.py is not importable by .venv/bin/python: diff coverage will be recorded not_run
+2026-10-13T00:45:04.9716149Z [l4] kiro:add-low-stock-message gate baseline pass (exit 0, 3 tests: 3 passed, 0 failed)
+2026-10-13T00:46:12.2233279Z [l4] kiro:add-low-stock-message agent red task 1.1 ok (67.2s)
+2026-10-13T00:46:12.3735408Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:46:12.9020272Z [l4] kiro:add-low-stock-message gate test fail (exit 1, 7 tests: 3 passed, 4 failed) — exit code 1
+2026-10-13T00:46:13.3972358Z [l4] kiro:add-low-stock-message gate test-zero fail (expected: zero values must fail) (exit 1, 7 tests: 5 passed, 2 failed) — exit code 1
+2026-10-13T00:46:13.4152034Z [l4] implementer: 1.1: red attempt 1 failed: vacuous: C-79953eae (its tests pass or error against the zero-value stubs: tests.test_alerts::test_low_stock_message_returns_none_above_threshold, tests.test_alerts::test_low_stock_message_returns_none_at_threshold); a test must fail by assertion on the answer (for an object, assert `result is not None` or isinstance first, then on its attributes). If the scenario's answer is the zero value itself (0, "", [], None, False), C-79953eae still needs a test that fails on the zero-value stubs: assert a real answer in the same test too, or tag a test that asserts a real answer with C-79953eae as well, for example tests.test_alerts::test_low_stock_message_returns_restock_message_at_zero: @pytest.mark.l4("C-2fec7147", "C-79953eae")
+2026-10-13T00:46:13.4158836Z [l4] kiro:add-low-stock-message task 1.1 red attempt 1 failed: vacuous: C-79953eae (its tests pass or error against the zero-value stubs: tests.test_alerts::test_low_stock_message_returns_none_above_threshold, tests.test_a…
+2026-10-13T00:47:22.1699748Z [l4] kiro:add-low-stock-message agent red task 1.1 ok (68.7s)
+2026-10-13T00:47:22.2676365Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:47:22.7957004Z [l4] kiro:add-low-stock-message gate test fail (exit 1, 7 tests: 3 passed, 4 failed) — exit code 1
+2026-10-13T00:47:23.3427076Z [l4] kiro:add-low-stock-message gate test-zero fail (expected: zero values must fail) (exit 1, 7 tests: 3 passed, 4 failed) — exit code 1
+2026-10-13T00:47:23.3845584Z [l4] kiro:add-low-stock-message task 1.1 red ok: 4 new test(s) failing as expected
+2026-10-13T00:47:23.3940075Z [l4] kiro:add-low-stock-message commit 2564eaca63 test(add-low-stock-message): red for 1.1 [skip ci]
+2026-10-13T00:47:24.5106540Z [l4] kiro:add-low-stock-message pushed l4/kiro/add-low-stock-message 7ffcfa27c9..2564eaca63
+2026-10-13T00:47:26.8065002Z [l4] kiro:add-low-stock-message MR https://github.com/ciprianiacobescu/l4-dummy-action/pull/3 (draft)
+2026-10-13T00:47:28.7711999Z [l4] kiro:add-low-stock-message MR !3 labels: l4:implementing
+2026-10-13T00:47:28.8488220Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:48:22.7641160Z [l4] kiro:add-low-stock-message agent green task 1.1 ok (53.9s)
+2026-10-13T00:48:22.8580446Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:48:23.3332642Z [l4] kiro:add-low-stock-message gate test pass (exit 0, 7 tests: 7 passed, 0 failed)
+2026-10-13T00:48:23.3361410Z [l4] kiro:add-low-stock-message task 1.1 green ok: all tests passing
+2026-10-13T00:48:23.3458592Z [l4] kiro:add-low-stock-message commit 05370a2f7b feat(add-low-stock-message): 1.1 Create alerts module with low_stock_message function and unit test…
+2026-10-13T00:48:24.3871586Z [l4] kiro:add-low-stock-message pushed l4/kiro/add-low-stock-message 2564eaca63..05370a2f7b
+2026-10-13T00:48:24.3898414Z [l4] kiro:add-low-stock-message task 2.1 started: 2.1 Add validation for negative on_hand values with unit tests
+2026-10-13T00:48:24.4715003Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:48:24.9456199Z [l4] kiro:add-low-stock-message gate baseline pass (exit 0, 7 tests: 7 passed, 0 failed)
+2026-10-13T00:49:18.6659022Z [l4] kiro:add-low-stock-message agent red task 2.1 ok (53.7s)
+2026-10-13T00:49:18.7628915Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:49:19.2408218Z [l4] kiro:add-low-stock-message gate test pass (exit 0, 9 tests: 9 passed, 0 failed)
+2026-10-13T00:49:19.7931679Z [l4] kiro:add-low-stock-message gate test-presatisfied fail (expected: zero values must fail) (exit 1, 9 tests: 3 passed, 6 failed) — exit code 1
+2026-10-13T00:49:19.8295597Z [l4] kiro:add-low-stock-message task 2.1 already satisfied: 2 new tests pass on the base, no green step
+2026-10-13T00:49:19.8399136Z [l4] kiro:add-low-stock-message commit 64cf859215 test(add-low-stock-message): 2.1 already satisfied [skip ci]
+2026-10-13T00:49:20.8795791Z [l4] kiro:add-low-stock-message pushed l4/kiro/add-low-stock-message 05370a2f7b..64cf859215
+2026-10-13T00:49:20.8819217Z [l4] kiro:add-low-stock-message phase implementing → implemented (all_leaves_done)
+2026-10-13T00:49:24.3216417Z [l4] kiro:add-low-stock-message MR !3 labels: l4:implemented
+2026-10-13T00:49:24.3223704Z [l4] kiro:add-low-stock-message phase implemented → verifying (verification_started)
+2026-10-13T00:49:27.2726652Z [l4] kiro:add-low-stock-message MR !3 labels: l4:verifying
+2026-10-13T00:49:30.9987785Z [l4] judges: claude-judge ok (binary 2.1.288 · auth subscription · quota skipped · hello 2.3s) → selected
+2026-10-13T00:49:30.9995184Z [l4] kiro:add-low-stock-message judges: claude-judge ok → selected
+2026-10-13T00:49:31.1794678Z [l4] kiro:add-low-stock-message gate setup pass (exit 0)
+2026-10-13T00:49:31.7119374Z [l4] kiro:add-low-stock-message gate test pass (exit 0, 9 tests: 9 passed, 0 failed)
+2026-10-13T00:49:38.9701990Z [l4] kiro:add-low-stock-message verify judge (profile claude-judge): ok (1 call(s), claude-sonnet-5-5)
+2026-10-13T00:49:38.9706975Z [l4] kiro:add-low-stock-message cost +$0.0441 (judge), run total $0.0441
+2026-10-13T00:49:39.0075800Z [l4] kiro:add-low-stock-message commit 97d8360335 docs(add-low-stock-message): verification round 1 [skip ci]
+2026-10-13T00:49:39.9992383Z [l4] kiro:add-low-stock-message pushed l4/kiro/add-low-stock-message 64cf859215..97d8360335
+2026-10-13T00:49:40.0018427Z [l4] kiro:add-low-stock-message verdict PASS (round 1, 4/4 criteria pass, 1 finding(s))
+2026-10-13T00:49:40.0084362Z [l4] kiro:add-low-stock-message phase verifying → verified (verify_pass)
+2026-10-13T00:49:43.0106612Z [l4] kiro:add-low-stock-message MR !3 labels: l4:verified
+2026-10-13T00:49:43.0266277Z [l4] kiro:add-low-stock-message commit 2b9b358a9a docs(add-low-stock-message): hand off to review
+2026-10-13T00:49:44.0336325Z [l4] kiro:add-low-stock-message pushed l4/kiro/add-low-stock-message 97d8360335..2b9b358a9a
+2026-10-13T00:49:46.1333670Z [l4] kiro:add-low-stock-message MR https://github.com/ciprianiacobescu/l4-dummy-action/pull/3 marked ready for review
+2026-10-13T00:49:46.1341171Z [l4] kiro:add-low-stock-message phase verified → in_review (hand_off_pushed)
+2026-10-13T00:49:48.8408619Z [l4] kiro:add-low-stock-message MR !3 labels: l4:in_review
+2026-10-13T00:49:50.0699600Z [l4] kiro:add-low-stock-message run finished: exit 0 in 352.6s, cost $0.0441
+2026-10-13T00:49:50.0701618Z [l4] kiro:add-low-stock-message summary: branch l4/kiro/add-low-stock-message head 2b9b358a9a base 7ffcfa27c9 MR https://github.com/ciprianiacobescu/l4-dummy-action/pull/3
+2026-10-13T00:49:51.3709089Z [l4] artefacts: /home/runner/work/l4-dummy-action/l4-dummy-action/.l4-out/agent/r-20261013T0043Z-f8c5/, /home/runner/work/l4-dummy-action/l4-dummy-action/.l4-out/gates/r-20261013T0043Z-f8c5/ (CI: job artifacts)
+2026-10-13T00:49:51.4424797Z ##[group]Run l4 status
+2026-10-13T00:49:51.4425229Z l4 status
+2026-10-13T00:49:51.4487559Z shell: /usr/bin/bash -e {0}
+2026-10-13T00:49:51.4487950Z env:
+2026-10-13T00:49:51.4490849Z   GITHUB_TOKEN: ***
+2026-10-13T00:49:51.4491234Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:49:51.4491628Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:49:51.4492445Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:49:51.4492960Z   KIRO_API_KEY: ***
+2026-10-13T00:49:51.4493394Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:49:51.4493883Z   L4_SELF_PROVISION: true
+2026-10-13T00:49:51.4494572Z ##[endgroup]
+2026-10-13T00:49:52.3646374Z UNIT                           PHASE      ITER  TASKS  OPEN-Q  VERDICT  SOURCE
+2026-10-13T00:49:52.3647564Z kiro:add-low-stock-message     in_review  1     4/4    -       PASS     branch
+2026-10-13T00:49:52.3648587Z openspec:add-reorder-quantity  in_review  1     1/1    -       PASS     branch
+2026-10-13T00:49:52.3649620Z openspec:add-shelf-code        in_review  1     1/1    -       PASS     branch
+2026-10-13T00:49:52.4207442Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+2026-10-13T00:49:52.4208281Z with:
+2026-10-13T00:49:52.4208655Z   name: l4-out
+2026-10-13T00:49:52.4209058Z   path: .l4-out/
+2026-10-13T00:49:52.4209485Z   retention-days: 7
+2026-10-13T00:49:52.4209909Z   if-no-files-found: warn
+2026-10-13T00:49:52.4210362Z   compression-level: 6
+2026-10-13T00:49:52.4210794Z   overwrite: false
+2026-10-13T00:49:52.4211222Z   include-hidden-files: false
+2026-10-13T00:49:52.4211690Z   archive: true
+2026-10-13T00:49:52.4212058Z env:
+2026-10-13T00:49:52.4218258Z   GITHUB_TOKEN: ***
+2026-10-13T00:49:52.4218722Z   L4_JOB_TIMEOUT_MINUTES: 180
+2026-10-13T00:49:52.4219197Z   L4_BASE_BRANCH: amaster
+2026-10-13T00:49:52.4220495Z   CLAUDE_CODE_OAUTH_TOKEN: ***
+2026-10-13T00:49:52.4221076Z   KIRO_API_KEY: ***
+2026-10-13T00:49:52.4221596Z   L4_HARNESS_COMMIT: 5e83ea81806de14657217929321889a6f8f85bde
+2026-10-13T00:49:52.4222208Z   L4_SELF_PROVISION: true
+2026-10-13T00:49:52.4222691Z ##[endgroup]
+2026-10-13T00:49:52.5923243Z ##[warning]No files were found with the provided path: .l4-out/. No artifacts will be uploaded.
+2026-10-13T00:49:52.6181142Z Post job cleanup.
+2026-10-13T00:49:52.7285406Z [command]/usr/bin/git version
+2026-10-13T00:49:52.7365741Z git version 2.55.0
+2026-10-13T00:49:52.7443267Z Temporarily overriding HOME='/home/runner/work/_temp/07b2b792-95ee-49f6-9331-a269a65048a0' before making global git config changes
+2026-10-13T00:49:52.7449255Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-13T00:49:52.7469845Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/l4-dummy-action/l4-dummy-action
+2026-10-13T00:49:52.7491840Z Removing SSH command configuration
+2026-10-13T00:49:52.7506569Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-13T00:49:52.7571062Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-13T00:49:52.7913263Z Removing HTTP extra header
+2026-10-13T00:49:52.7915265Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-13T00:49:52.7972698Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-13T00:49:52.8351619Z Removing includeIf entries pointing to credentials config files
+2026-10-13T00:49:52.8374925Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-13T00:49:52.8405348Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-13T00:49:52.8996236Z Cleaning up orphan processes
+
