@@ -92,3 +92,11 @@ def test_a_lock_ref_hook_decline_is_not_a_credential_hint():
 def test_only_a_real_non_fast_forward_says_so():
     out = explain(err(_fixture("non-fast-forward.stderr.txt"), PushRejected, 1))
     assert out.code is ExitCode.INTERNAL_ERROR and "non-fast-forward" in str(out) and "never forces" in str(out)
+
+
+def test_a_deleted_branch_names_l4_restart():
+    """L4-OPS-009: the unit branch was deleted on the forge: the message names the command that starts the unit over."""
+    out = explain(err(" ! [rejected] HEAD -> x (stale info)", PushRejected, 1))
+    assert out.code is ExitCode.INTERNAL_ERROR
+    assert "l4 restart --unit openspec:x --reason TEXT" in str(out)
+    assert "rerun the unit" not in str(out) and "never forces" in str(out)

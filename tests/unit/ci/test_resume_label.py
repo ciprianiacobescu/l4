@@ -54,8 +54,8 @@ def test_the_escalated_section_says_how_the_unit_goes_on():
 
     text = halted_section("escalated", "fix rounds used 3/3", "openspec:x", "l4:resume")
     assert text.startswith("### Escalated: fix rounds used 3/3")
-    assert "adds the label `l4:resume`" in text and "one more fix round" in text
-    assert "l4 resume --unit openspec:x --reason TEXT --extend-fix-rounds N" in text
+    assert "adds the label `l4:retry`" in text and "one more fix round" in text
+    assert "`l4 retry --unit openspec:x --reason TEXT`" in text and "--extend" not in text and "resume" not in text
     assert "Neither the label" not in text
 
 
@@ -64,8 +64,8 @@ def test_the_escalated_section_at_the_feedback_limit_names_feedback_rounds():
 
     text = halted_section("escalated", "feedback_rounds_exhausted", "openspec:x", "l4:resume", feedback=True)
     assert text.startswith("### Escalated: feedback_rounds_exhausted")
-    assert "adds the label `l4:resume`" in text and "one more feedback round per label event" in text
-    assert "l4 resume --unit openspec:x --reason TEXT --extend-feedback-rounds N" in text
+    assert "adds the label `l4:retry`" in text and "one more feedback round per label event" in text
+    assert "`l4 retry --unit openspec:x --reason TEXT`" in text and "--extend" not in text and "resume" not in text
     assert "fix round" not in text and "--extend-fix-rounds" not in text
 
 
@@ -76,3 +76,34 @@ def test_the_spec_says_the_label_gives_one_fix_round_to_an_escalated_unit():
     spec = " ".join(spec.split())
     assert "An `escalated` unit whose fix rounds are used up gets one more fix round per label event" in spec
     assert "`budget.extended{fix_rounds: 1, by: member, signal}`" in spec
+
+
+def test_a_halted_note_names_retry_not_resume():
+    from l4.ci.resume_label import halted_section
+
+    text = halted_section("halted", "max_task_attempts", "openspec:x", "l4:resume")  # the caller still passes `resume`
+    assert text.startswith("### Halted: max_task_attempts")
+    assert "adds the label `l4:retry`" in text and "`l4 retry --unit openspec:x --reason TEXT`" in text
+    assert "resume" not in text
+
+
+def test_a_refusal_names_the_command_that_works():
+    """L4-OPS-008: the token owner's own label points at the command; every other refusal names it too."""
+    own = resume_signal(
+        ["l4:retry"], [add(20, BOT, "l4:retry")], label="l4:retry", own_id=BOT, access=lambda uid: LEVELS.get(uid),
+        consumed=(), unit="openspec:x", command="l4 retry",
+    )  # fmt: skip
+    assert isinstance(own, Refusal)
+    assert own.why.endswith("use l4 retry --unit openspec:x --reason TEXT, or ask another member")
+    other = resume_signal(
+        ["l4:restart"], [add(21, STRANGER, "l4:restart")], label="l4:restart", own_id=BOT,
+        access=lambda uid: LEVELS.get(uid), consumed=(), unit="openspec:x", command="l4 restart",
+    )  # fmt: skip
+    assert isinstance(other, Refusal) and "not a member" in other.why
+    assert "l4 restart --unit openspec:x --reason TEXT" in other.why
+
+
+def test_the_refused_note_header_is_unchanged():
+    from l4.ci.resume_label import resume_refused_note
+
+    assert resume_refused_note({"label:1": "why"}).startswith("### The `l4:resume` label was not honoured")
