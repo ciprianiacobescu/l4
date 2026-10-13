@@ -37,6 +37,7 @@ PLAN_SCHEMA = "l4/plan@1"
 _TERMINAL_VALUES = {p.value for p in TERMINAL}
 _IMPLEMENT = {Phase.INTAKE.value, Phase.READY.value, Phase.IMPLEMENTING.value}
 _VERIFY = {Phase.IMPLEMENTED.value, Phase.VERIFYING.value}
+_FIXING = {Phase.FIXING.value}  # parked in the fix loop: a run takes the unit back into it (L4-OPS-009)
 _NOT_ACTIONABLE = {
     Phase.AWAITING_HUMAN.value: "awaiting_human: no new answers",
     Phase.FIXING.value: "fixing: fix units are not implemented in M0",
@@ -96,7 +97,9 @@ class PlanEntry:
 
 def _after_capacity(facts: UnitFacts, now: datetime) -> tuple[str, str] | None:
     """The `waiting_capacity` row (forge-and-ci 2.32, reduced): the previous phase's action once `retry_after` has
-    passed, `none` before that. A park without a readable `retry_after`, or from another phase, stays as it was."""
+    passed, `none` before that. A park from `fixing` is continued by a run too (`implement`: the run drives the fix unit).
+    A park without a readable `retry_after`, or from another phase, stays as it was (the park always records one now,
+    L4-OPS-009)."""
     try:
         due = datetime.fromisoformat(facts.retry_after or "")
     except ValueError:
@@ -106,7 +109,7 @@ def _after_capacity(facts: UnitFacts, now: datetime) -> tuple[str, str] | None:
     if due > now:
         return "none", f"waiting_capacity until {facts.retry_after}"
     previous = facts.previous_phase
-    action = "implement" if previous in _IMPLEMENT else "verify" if previous in _VERIFY else None
+    action = "implement" if previous in _IMPLEMENT | _FIXING else "verify" if previous in _VERIFY else None
     return (action, f"capacity: retry_after {facts.retry_after} passed") if action else None
 
 

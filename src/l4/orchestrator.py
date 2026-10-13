@@ -467,7 +467,7 @@ class Orchestrator:
         self._record_limit(exc)
         context: dict[str, object] = {"reason": str(exc)[:200]}
         retry_after = _retry_after(exc)
-        if retry_after is None and isinstance(exc, RoleUnavailable):  # nothing says when: look again after the default
+        if retry_after is None:  # nothing says when, whatever the cause: look again after the default (L4-OPS-009)
             wait = timedelta(seconds=duration_seconds(self.cfg.availability.default_cooldown))
             retry_after = iso_utc(self.services.factory.now() + wait)
         if retry_after:

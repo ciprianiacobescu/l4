@@ -23,6 +23,14 @@ def test_once_retry_after_has_passed_the_previous_phases_action_is_next():
         assert reason == "capacity: retry_after 2026-10-04T12:00:00Z passed"
 
 
+def test_a_unit_parked_while_fixing_is_continued_by_a_run():
+    """L4-OPS-009, SCN-OPS-02: `fixing` is the previous phase of a park in the fix loop; `implement` is the action that
+    drives the run back into it (`capacity_restored`, then the fix unit's tasks)."""
+    action, reason = next_action(facts("fixing", "2026-10-04T12:00:00Z"), NOW)
+    assert action == "implement" and reason == "capacity: retry_after 2026-10-04T12:00:00Z passed"
+    assert next_action(facts("fixing", "2026-10-04T12:00:01Z"), NOW)[0] == "none"
+
+
 def test_the_clock_defaults_to_now():
     assert next_action(facts("implementing", "2020-01-01T00:00:00Z"))[0] == "implement"
     assert next_action(facts("implementing", "2999-01-01T00:00:00Z"))[0] == "none"
