@@ -17,6 +17,11 @@ def facts(**over) -> UnitFacts:
         ({"verdicts_ready": ("Q-001",), "verdicts_open": ("Q-002",)}, "none", "verdicts open: Q-002"),
         ({"verdicts_open": ("Q-001",)}, "none", "verdicts open: Q-001"),
         ({"verdicts_invalid": ("Q-001",)}, "none", "must start with accept or reject: Q-001"),
+        (
+            {"verdicts_open": ("Q-001",), "verdicts_dismissed": ("Q-001",)},
+            "none",
+            "Q-001: a verdict question cannot be dismissed: start the answer with accept or reject",
+        ),
         ({"verdicts_ready": ("Q-001",), "verdicts_invalid": ("Q-002",)}, "none", "Q-002"),
         ({}, "none", "awaiting_human: no new answers"),  # no verdict facts: the M1.1 reason, unchanged
     ],
