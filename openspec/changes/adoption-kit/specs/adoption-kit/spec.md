@@ -81,7 +81,7 @@ github-parity's triggers, permissions, environment, concurrency, timeout and bas
 4. `l4 plan --sweep`;
 5. `l4 run`;
 6. `l4 status`;
-7. upload `.l4-out`.
+7. upload `.l4-out` (unless `ci.upload_artifacts` is false).
 
 Further rules:
 - It MUST NOT write `.l4/bin/l4`, `.l4/bin/l4-setup` or `harness.commit`. The `uses:` sha is the only pin.
@@ -94,6 +94,8 @@ Further rules:
   `# TODO:` config line; the person's agents are not changed.
 - The `schedule:` trigger is `ci.schedule`: a cron string (default `"*/30 * * * *"`) or `null` for no trigger; it is
   rendered into both GitHub workflow forms and moved by `l4 upgrade`.
+- The upload of `.l4-out` (the artifact `l4-out`) is a step only while `ci.upload_artifacts` is true (the default); a
+  public repository sets it to false, because any signed-in user can download the artifact.
 - `l4 doctor` MUST check that the `uses:` line names a 40-hex sha and, for source `repository`, that its `commit`
   input matches it.
 

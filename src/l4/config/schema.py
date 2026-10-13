@@ -657,6 +657,9 @@ class CiCfg(_Strict):
     # the cron of the generated GitHub workflow's `schedule:` trigger; null leaves the trigger out. `l4 upgrade`
     # re-renders the workflow, so this is where it is changed (L4-ACT-004)
     schedule: Annotated[str, AfterValidator(_cron)] | None = "*/30 * * * *"
+    # whether the generated GitHub workflow uploads `.l4-out` (prompts and agent transcripts, secrets masked) as the
+    # artifact `l4-out`; on a public repository any signed-in user can download it, so set false there
+    upload_artifacts: bool = True
 
 
 class PriceEntry(_Strict):

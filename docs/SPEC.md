@@ -197,7 +197,9 @@ runner (a `subscription` profile of `codex`, whose login is a stored local file;
 `CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets), init MUST print a `todo:` line (and write a
 `# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents. The
 `schedule:` trigger of both GitHub workflow forms is `ci.schedule` (a cron string, default `"*/30 * * * *"`; `null`
-leaves the trigger out), re-rendered by `l4 upgrade`.
+leaves the trigger out), re-rendered by `l4 upgrade`. The upload of `.l4-out` (the artifact `l4-out`: prompts and agent
+transcripts, secrets masked) is a step of both forms only while `ci.upload_artifacts` is true (the default); on a public
+repository any signed-in user can download the artifact, so it is set to false there.
 `l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
 on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `fetched` or `action` (§3.2).
 
@@ -729,6 +731,8 @@ ci:
                                    # credentials); null: the job names none (L4-PRV-027)
   schedule: "*/30 * * * *"         # the cron of the generated GitHub workflow's `schedule:` trigger; null: no
                                    # schedule. `l4 upgrade` re-renders the workflow, so change it here (L4-ACT-004)
+  upload_artifacts: true           # false: the generated GitHub workflows have no upload-artifact step (a public
+                                   # repository: any signed-in user can download the `l4-out` artifact)
 
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)
@@ -3211,7 +3215,7 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
   `persist-credentials: false`); the base-branch checkout on other branches; the setup action
   `uses: <owner>/<repo>/.github/actions/l4@<sha> # <ref>` (`id: l4`; source `repository` adds `source`, `repository`,
   `commit` and `ssh-key: ${{ secrets.L4_HARNESS_SSH_KEY }}`); `l4 doctor --ci --fix`; `l4 plan --sweep`; `l4 run`;
-  `l4 status`; the upload of `.l4-out`; and, on a hosted runner, `actions/cache/save` for the agent CLIs. The save step
+  `l4 status`; the upload of `.l4-out` (unless `ci.upload_artifacts` is false); and, on a hosted runner, `actions/cache/save` for the agent CLIs. The save step
   runs on the base branch, after success, when `steps.l4.outputs.clis-cache-hit != 'true'`, and reads
   `path: ${{ steps.l4.outputs.clis-cache-paths }}` and `key: ${{ steps.l4.outputs.clis-cache-key }}`.
   - **Why the paths come from the action.** A cache is versioned by its exact path list, so a save with a literal list

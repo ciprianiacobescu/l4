@@ -264,6 +264,10 @@ The workflow also runs on a schedule, every 30 minutes by default. On a private 
 runner-minutes a month even when idle: set `ci.schedule` in `.l4/config.yaml` to a slower cron (for example
 `"0 * * * *"`) or to `null` for no schedule, then run `l4 upgrade`, which re-renders the workflow.
 
+On a **public** repository, set `ci.upload_artifacts: false` in `.l4/config.yaml`, and run
+`l4 upgrade`: the `l4-out` artifact (prompts and agent transcripts, secrets masked) is downloadable by any signed-in
+user, and with the key false the workflow has no upload step.
+
 Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new

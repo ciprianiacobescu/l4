@@ -39,3 +39,15 @@ def test_upgrade_moves_the_schedule_with_the_config(target: Path, git_environ):
     set_ci(target, schedule=None)
     upgrade(target, git_environ)
     assert "schedule" not in on()
+
+
+def test_upgrade_drops_and_restores_the_upload_with_the_config(target: Path, git_environ):
+    adopt(target, git_environ)
+    workflow = target / WORKFLOW
+    assert "upload-artifact" in workflow.read_text()
+    set_ci(target, upload_artifacts=False)
+    upgrade(target, git_environ)
+    assert "upload-artifact" not in workflow.read_text()
+    set_ci(target, upload_artifacts=True)
+    upgrade(target, git_environ)
+    assert "upload-artifact" in workflow.read_text()
