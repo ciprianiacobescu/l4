@@ -98,6 +98,7 @@ class UnitState(_Model):
     refused_signals: dict[str, str] = Field(default_factory=dict)  # `resume.refused{signal, why}`: said once each
     halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
     halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
+    restarts: int = 0  # `unit.restarted` events: how many times `l4 restart` began the unit again (L4-OPS-004)
     hinted_heads: list[str] = Field(default_factory=list)  # `resume.hint{head}`: branch heads a halt pointer was for
     updated_at: str | None = None
 
@@ -260,6 +261,22 @@ def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
         state.resumed_signals.append(signal)
 
 
+def _unit_restarted(state: UnitState, event: LedgerEvent) -> None:
+    """`unit.restarted{attempt, previous_head, reason, by, signal}` (L4-OPS-004): `l4 restart` replaced the branch, so the
+    unit starts again with no phase and every counter at zero. Kept: `restarts` (counted), `iteration` and `cost_usd`
+    (the run count only grows; spent money stays spent), the signals already acted on (a label event acts once, also
+    when it asked for the restart). Everything else, the agent sessions included, goes with the old work."""
+    fresh = UnitState(unit=state.unit)
+    keep = {
+        "restarts": state.restarts + 1, "iteration": state.iteration, "cost_usd": state.cost_usd,
+        "resumed_signals": list(state.resumed_signals), "refused_signals": dict(state.refused_signals),
+    }  # fmt: skip
+    for name in UnitState.model_fields:
+        setattr(state, name, keep.get(name, getattr(fresh, name)))
+    if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
+        state.resumed_signals.append(signal)
+
+
 def _budget_extended(state: UnitState, event: LedgerEvent) -> None:
     """`l4 resume --extend-fix-rounds N` / `--extend-feedback-rounds N` and a member's `l4:resume` label on an escalated
     unit (L4-IMP-013, L4-FBK-006). Other
@@ -370,6 +387,8 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "ci.preexisting": _ci_preexisting,
     "breaker.tripped": _breaker_tripped,
     "unit.resumed": _unit_resumed,
+    "unit.retried": _unit_resumed,  # `l4 retry` and the `l4:retry` label: the same fold as a resume (L4-OPS-001)
+    "unit.restarted": _unit_restarted,
     "budget.extended": _budget_extended,
     "feedback.taken": _feedback_taken,
     "feedback.addressed": _feedback_judged("addressed"),
