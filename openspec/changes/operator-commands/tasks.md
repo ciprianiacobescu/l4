@@ -42,7 +42,12 @@
 - [ ] 6.2 `l4 status --unit U` prints the detail block with `Next: <command>`. `--json` carries `reason` and `next`. (L4-OPS-006)
 - [ ] 6.3 `l4 plan` uses `halt_detail` for `halted` and `escalated`, and the dismissed-verdict reason from 2.3. (L4-OPS-006)
 
-## 7. Docs and SPEC (wave 3)
+## 9. Spec pushes (wave 3, options A and D chosen on 2026-10-13)
+
+- [ ] 9.1 The planner fact `spec_edited` (the person's commits since the harness's last commit that change the unit folder outside `.l4/`, `verification.md`, `questions.md`, `feedback.md` and fix-unit folders). The lifecycle trigger `spec_edited` from D13's phases to `implementing`. The orchestrator takes it at the start of the run with `unit.retried{reason: "spec edited", signal: "spec_edit:<sha>"}`, plus one round for a unit escalated at a limit, once per head. `fixing` defers the edit. `l4 run --unit` and the planner treat a halted or escalated unit with a spec edit as actionable. Tests SCN-OPS-20..22. (L4-OPS-014)
+- [ ] 9.2 Kiro: diff the criteria of `requirements.md` between the harness's last commit and the head (whitespace normalised, by id, added and removed count), reopen the citing tasks and their parents in the commit `chore(<name>): reopen tasks <keys> for changed requirements <ids> [skip ci]`, and record `tasks.reopened`. Tests SCN-OPS-23 and SCN-OPS-24. (L4-OPS-015)
+
+## 7. Docs and SPEC (wave 4)
 
 - [ ] 7.1 SPEC: the L4-OPS-001..013 requirement texts in the operations section, delivery row 19, and the new lifecycle rows in 12.0. `scripts/check_spec.py` reports nothing uncovered or undefined.
 - [ ] 7.2 `docs/runbook.md`: each stuck situation gets one command and one label. Section 11 drops the limits this change removes. The text stays in ASD-STE100.
@@ -54,6 +59,8 @@
 - [ ] 8.1 An independent review of the whole change on the session model. Fix every confirmed finding.
 - [ ] 8.2 The full suite is green on the 8 CI shards.
 - [ ] 8.3 Live validation on the GitHub dummy, with evidence in `docs/live/operator-commands/`:
+  - a spec push to an escalated or verified unit that re-enters it by itself;
+  - a Kiro criterion reworded on the unit branch, whose citing task is reopened and run red then green;
   - a halted unit, `l4 retry` by command, and the started run;
   - an escalated unit, `l4:retry` by label;
   - `l4 restart` by command, and `l4:restart` by label;

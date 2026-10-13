@@ -51,8 +51,12 @@ An independent review of the operations runbook (docs/runbook.md, 2026-10-13) co
   - a new unit branch starts from the base head, with the unit's spec as the old branch had it and its task boxes as
     the base branch has them;
   - the next run implements the unit again.
-- **A spec correction on the unit branch counts.** A person's change to the unit folder after a stop sends the unit to
-  `implementing` at the next retry, as it already does in review.
+- **A spec push to the unit branch re-enters the unit by itself (option A).**
+  - A person's change to the unit folder sends the unit to `implementing` at the next run, from any phase that is
+    not finished, halted and escalated included. Before, that happened only in review.
+  - On Kiro, the tasks that cite a changed requirement are reopened and run test-first again (option D).
+  - `l4 retry` stays as the explicit way (option B).
+  - The CI triggers do not change.
 - **The cause is shown.**
   - `l4 status` gets a `REASON` column.
   - `l4 status --unit U` prints the cause and the exact command that moves the unit.

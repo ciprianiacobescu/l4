@@ -216,3 +216,49 @@ Each requirement SHALL be proven on GitHub, with run ids and evidence under `doc
 - the `REASON` column in a CI `l4 status` step.
 
 The GitLab pipeline start SHALL be proven by a recorded API exchange or a live call.
+
+### Requirement: L4-OPS-014 A spec push to the unit branch re-enters the unit by itself
+A person's commit on the unit branch, after the harness's last commit, that changes the unit folder outside `.l4/`,
+`verification.md`, `questions.md`, `feedback.md` and fix-unit folders SHALL send the unit to `implementing` at the next
+run. It applies from `intake`, `ready`, `implemented`, `verifying`, `verified`, `awaiting_human`, `clarifying`, `halted`
+and `escalated`, with the trigger `spec_edited`, and the run records `unit.retried{reason: "spec edited", signal:
+"spec_edit:<sha>"}`.
+- **`in_review`** keeps `spec_edit_after_handoff`.
+- **`fixing`** takes the edit after its fix unit ends.
+- **A unit escalated at a limit** gets one round of that kind, once per head.
+- **A push with no unit-folder change** keeps today's behaviour.
+- The triggers of the CI workflow MUST NOT change.
+
+#### Scenario: SCN-OPS-20 (+) A spec push to an escalated unit starts it again
+- **GIVEN** a unit escalated with `fix rounds used 3/3`, and a person's push that edits `proposal.md` on its branch
+- **WHEN** the next run starts
+- **THEN** `budget.extended{fix_rounds: 1}` and `unit.retried{reason: "spec edited"}` are recorded, the unit is `implementing`, and no `l4 retry` was needed
+
+#### Scenario: SCN-OPS-21 (+) A spec push to a verified unit is verified again before the hand-off
+- **GIVEN** a `verified` unit, and a person's push that rewords a requirement before the hand-off
+- **WHEN** the next run starts
+- **THEN** the unit goes to `implementing`, then `verifying`, and it is not handed off on the old verdict
+
+#### Scenario: SCN-OPS-22 (−) Answers are not a spec edit
+- **GIVEN** a unit in `awaiting_human`, and a person's push that changes only `questions.md`
+- **WHEN** the next run starts
+- **THEN** the answers path decides as today, and no `spec_edited` edge is taken
+
+### Requirement: L4-OPS-015 A changed Kiro requirement reopens its tasks
+On a Kiro unit, when a spec edit (L4-OPS-014) changes acceptance criteria in `requirements.md`, the tasks that cite them
+in `_Requirements:_` SHALL be set back to `[ ]` with their parents. This happens in a harness commit
+`chore(<name>): reopen tasks <keys> for changed requirements <ids> [skip ci]`, with `tasks.reopened{tasks,
+requirements}`, and the tasks then run test-first.
+- Text is compared after whitespace normalisation.
+- Added and removed criteria count as changed.
+- An OpenSpec unit reopens nothing: its changed scenarios are judged by the verifier.
+
+#### Scenario: SCN-OPS-23 (+) A reworded criterion is implemented again
+- **GIVEN** a Kiro unit whose task 2.1 cites `_Requirements: 2.3_`, and a person's push that rewords criterion 2.3
+- **WHEN** the next run starts
+- **THEN** task 2.1 is `[ ]` again in a `chore(...): reopen tasks 2.1 for changed requirements 2.3 [skip ci]` commit, and it runs red then green
+
+#### Scenario: SCN-OPS-24 (−) A re-wrapped line changes nothing
+- **GIVEN** a person's push that only re-wraps the text of criterion 2.3
+- **WHEN** the next run starts
+- **THEN** no task is reopened (the unit still re-enters, by L4-OPS-014)

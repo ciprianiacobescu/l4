@@ -202,6 +202,44 @@ The test gate of a fix unit's green step runs with the verifier's coverage plugi
 output goes to the step's private folder, and only the pass or fail is used. A failure that only the measurement causes
 then reaches the fixer as an ordinary failed gate, with its log.
 
+### D13. A spec push re-enters the unit by itself (option A, chosen 2026-10-13)
+
+The maintainer's report: "after that [branch] is created, if I want to change something in the specs there or update
+it, it's not possible and it won't trigger another implementation". The maintainer chose options A, B and D of the
+trade-off analysis. The triggers stay as they are (the base branch plus `<prefix>**`), with no push to every branch.
+
+- **A spec edit** is a person's commit on the unit branch after the harness's last commit. "A person's" means not made
+  by the harness, the rule `foreign_tail` applies. The commit must change a file of the unit folder outside `.l4/`,
+  `verification.md`, `questions.md` and `feedback.md`, which keep their own paths: answers, verdicts and feedback.
+  Fix-unit folders `<name>-fix-*` do not count.
+- **The rule.** The planner reports a spec edit as the fact `spec_edited` (the shas). The next run takes the new
+  trigger `spec_edited` to `implementing`. It applies from every phase that is not finished: `intake`, `ready`,
+  `implemented`, `verifying`, `verified`, `awaiting_human`, `clarifying`, `halted` and `escalated`. The run records
+  `unit.retried{reason: "spec edited", signal: "spec_edit:<head sha>", by: "push"}`.
+- **`in_review`** keeps its existing `spec_edit_after_handoff`.
+- **`fixing`** takes the edit when its fix unit ends: the parent is then `verifying`, and the rule applies.
+- **`implementing`** needs no edge. The run already reads the new tasks, and D14 reopens the changed ones.
+- **A stop at a limit:** a spec edit on a unit escalated at the fix-round or feedback limit grants one round of that
+  kind, `budget.extended{…: 1, signal: "spec_edit:<sha>"}`, once for each head. A person's edit is a decision, as a
+  retry is.
+- **`l4 retry` (option B)** stays. It is the explicit way, and it takes a spec edit the same way (D2).
+- **Not a spec edit:** a push with no unit-folder change keeps today's behaviour. A spec edit pushed to the base
+  branch is not taken (option E was not chosen); it reaches the unit at the next verification's base merge.
+
+### D14. A changed Kiro requirement reopens the tasks that cite it (option D)
+
+- **On a Kiro unit,** the changed requirements are the acceptance criteria whose text differs between
+  `requirements.md` at the harness's last commit and at the head. They are matched by id: `2.3`, or a requirement's
+  number `2` for all its criteria. Added and removed criteria count as changed.
+- **The tasks that cite them** in `_Requirements:_` are set back to `[ ]` in a harness commit,
+  `chore(<name>): reopen tasks <keys> for changed requirements <ids> [skip ci]`. Their parents are reopened too, and
+  the event `tasks.reopened{tasks, requirements}` is recorded.
+- **Then the tasks run test-first.** A red step that finds the new criterion already met is confirmed as satisfied, as
+  today.
+- **On an OpenSpec unit,** tasks seldom cite requirements, so nothing is reopened. The changed scenarios get new
+  criterion ids, the verifier judges the new text, and every unmet criterion becomes a fix task (one round later).
+- **Requirement text is compared after whitespace normalisation,** so a re-wrapped line is not a change.
+
 ## Risks / Trade-offs
 
 - **Restart replaces a branch** → the old head is pushed to the attempts ref first, the push uses a lease, and the
@@ -211,6 +249,8 @@ then reaches the fixer as an ordinary failed gate, with its log.
   remote. The message says to run it again when the run ends.
 - **`same_failure` can stop a fix that would have worked in one more round** → a retry gives that round. The detail
   says so.
+- **A spec push starts agent work at once (D13)** → an unfinished spec edit can wait behind `[skip ci]`. The
+  re-entry needs no extra command, by the maintainer's choice.
 - **The new `l4 status` column changes the table** → scripts that parse the table must use `--json`. The runbook
   already says so.
 - **The GitLab pipeline API may be refused for a project token** → the start falls back to printing the command (D3).
