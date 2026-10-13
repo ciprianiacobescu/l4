@@ -190,7 +190,13 @@ base-branch rule. Its steps are: checkout; the base-branch checkout on other bra
 `l4 status`; the upload of `.l4-out`; and, on a hosted runner, the CLI cache save step (§16.2). It MUST NOT write
 `.l4/bin/l4`, `.l4/bin/l4-setup` or `harness.commit`: the `uses:` sha is the only pin. `--action-copy` writes the
 action under `.github/actions/l4` and uses it with source `repository`; `--dependabot` adds or merges
-`.github/dependabot.yml` for `github-actions`. `l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
+`.github/dependabot.yml` for `github-actions`. The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []`
+unless `--runner-tag TAG` (repeatable) names a self-hosted one, and `forge.token_env: GITHUB_TOKEN` (the workflow's own
+token) unless `--forge-token-env NAME` is given. When the default role chains name a profile that cannot log in on a hosted
+runner (a `subscription` profile of `codex`, whose login is a stored local file; `claude-code` takes
+`CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets), init MUST print a `todo:` line (and write a
+`# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents.
+`l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
 on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `fetched` or `action` (§3.2).
 
 **L4-ACT-005** `l4 init` and `l4 upgrade` MUST accept `--harness-ref REF`: REF is resolved once with
@@ -264,7 +270,7 @@ of the harness package.
 
 | Command | Purpose | Side effects |
 |---|---|---|
-| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file (L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
+| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
 | `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
@@ -710,7 +716,7 @@ ci:
   max_parallel_units: 2
   time_budget: auto                # auto (from platform limits / job timeout) | duration
   soft_deadline_margin: 20m
-  runner_tags: [agentic]           # GitLab
+  runner_tags: [agentic]           # GitLab; GitHub: [] = a GitHub-hosted runner (what `l4 init --action` writes)
   continuation: dispatch           # dispatch | schedule-only
   self_provision: auto             # auto | true | false : doctor --fix installs missing user-local tools (L4-DOC-002);
                                    # auto = false only when the platform reports a disposable environment

@@ -254,6 +254,12 @@ repository:
      environment secret `L4_HARNESS_SSH_KEY` in the environment `l4`. Use one key per consumer, so that a key can be
      removed on its own.
 
+`l4 init --action` writes a config for a GitHub-hosted runner: `ci.runner_tags: []` and `forge.token_env: GITHUB_TOKEN`
+(the workflow's own token, so there is no forge secret to create). Pass `--runner-tag TAG` (repeatable) for a self-hosted
+runner and `--forge-token-env NAME` to use a token of your own. A hosted runner has no stored login: `codex` on a
+subscription cannot log in there, so init prints a `todo:` line naming the profile; give it `auth: api_key` and the
+secret `CODEX_API_KEY`, or name another profile in the role (`claude-code` takes `CLAUDE_CODE_OAUTH_TOKEN`).
+
 Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new

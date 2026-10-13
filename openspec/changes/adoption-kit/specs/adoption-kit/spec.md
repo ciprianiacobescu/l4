@@ -88,6 +88,10 @@ Further rules:
 - `--action-copy` writes the action under `.github/actions/l4` and uses it with source `repository`, for public
   callers.
 - `--dependabot` adds or merges `.github/dependabot.yml` for `github-actions`.
+- The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []` unless `--runner-tag TAG` (repeatable)
+  is given, and `forge.token_env: GITHUB_TOKEN` unless `--forge-token-env NAME` is given. A default role-chain profile
+  that cannot log in on a hosted runner (a `subscription` profile of `codex`) is named in a `todo:` line and a
+  `# TODO:` config line; the person's agents are not changed.
 - `l4 doctor` MUST check that the `uses:` line names a 40-hex sha and, for source `repository`, that its `commit`
   input matches it.
 

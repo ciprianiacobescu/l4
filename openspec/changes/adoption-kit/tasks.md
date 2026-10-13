@@ -29,3 +29,7 @@
   - Done: docs/SPEC.md (L4-INS-001/004/005, L4-ACT-001..008 and L4-SKL-001..002 as requirements before the runtime prerequisites, §15 and §16.2 action form, §21.0 this repository's CI, SCN-ACT-01..13 and SCN-SKL-01..03 in §23.18), docs/quickstart.md (GitHub through the action), docs/live/action/README.md.
   - Still open: SCN-ACT-03 with the final action and `--action-copy`; SCN-ACT-06 (harness-only upgrade keeps the CLI cache); the action self-test (runs only from the default branch); one release (after the merge to amaster); the skill (4.1–4.3); the full-suite run.
 - [ ] 5.2 Live on the dummy repository: both sources private and public, the caches across a harness upgrade, `l4 init --action` on a fresh copy, a seed unit end to end through the action, one release, one sharded pull-request check; step timings from the Actions API; temporary deploy keys removed; record under docs/live/action/ [L4-ACT-008] [SCN-ACT-13] — test: the run ids and timings — code: none — verify: ids recorded
+
+## 6. Integration gaps found by baseline runs
+
+- [x] 6.1 `l4 init --action` writes a hosted-runner config: `ci.runner_tags: []` (`--runner-tag TAG`, repeatable, for self-hosted), `forge.token_env: GITHUB_TOKEN` (`--forge-token-env NAME`), and a `todo:` line for a profile that cannot log in on a hosted runner [L4-ACT-004] — test: tests/unit/init/test_init_action.py — code: src/l4/init/init.py, src/l4/agents/credentials.py, src/l4/cli.py — verify: uv run pytest tests/unit/init -q

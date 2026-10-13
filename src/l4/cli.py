@@ -85,6 +85,11 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--action-copy", "action_copy", help="With --action: keep a copy of the action in the repository "
                                                    "and fetch the harness with a deploy key."),
         _flag("--dependabot", "dependabot", help="With --action: add github-actions to .github/dependabot.yml."),
+        _opt("--runner-tag", "runner_tag", multiple=True,
+             help="With --action: run on a self-hosted runner with this tag (repeatable); default: GitHub-hosted."),
+        _opt("--forge-token-env", "forge_token_env",
+             help="With --action: forge.token_env, the secret the job reads the forge token from "
+                  "(default: GITHUB_TOKEN, the workflow's own)."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),

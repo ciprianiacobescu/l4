@@ -231,3 +231,61 @@ def test_the_written_workflow_passes_actionlint(target: Path, git_environ, copy_
         argv = ["actionlint", "-no-color", "-config-file", str(fresh / "actionlint.yaml"), str(fresh / WORKFLOW)]
         done = subprocess.run(argv, capture_output=True, text=True, check=False, cwd=fresh)
         assert done.returncode == 0, done.stdout + done.stderr
+
+
+# --- a config that runs on a GitHub-hosted runner (baseline gap 3) -------------------------------------------------
+
+
+def test_an_action_adoption_is_hosted_and_uses_the_workflow_token(target: Path, git_environ):
+    assert init(target, git_environ, *BASE) == 0
+    written = yaml.safe_load((target / ".l4/config.yaml").read_text())
+    assert written["ci"]["runner_tags"] == [] and written["forge"]["token_env"] == "GITHUB_TOKEN"
+    cfg = load_config(target)
+    assert cfg.ci.runner_tags == [] and cfg.forge.token_env == "GITHUB_TOKEN"
+    text = (target / WORKFLOW).read_text()
+    assert "runs-on: ubuntu-24.04" in text and "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text
+    assert "self-provision" in text and "clis: none" not in text
+
+
+def test_runner_tags_and_a_token_variable_are_the_persons_to_set(target: Path, git_environ):
+    assert init(target, git_environ, *BASE, "--runner-tag", "agentic", "--runner-tag", "big",
+                "--forge-token-env", "MY_TOKEN") == 0  # fmt: skip
+    cfg = load_config(target)
+    assert cfg.ci.runner_tags == ["agentic", "big"] and cfg.forge.token_env == "MY_TOKEN"
+    text = (target / WORKFLOW).read_text()
+    assert 'runs-on: ["self-hosted", "agentic", "big"]' in text and "MY_TOKEN: ${{ secrets.MY_TOKEN }}" in text
+
+
+@pytest.mark.parametrize("flags", [("--runner-tag", "x"), ("--forge-token-env", "X")])
+def test_runner_tag_and_token_env_need_action(target: Path, git_environ, capsys, flags):
+    assert init(target, git_environ, "--harness-repo", "git@github.com:o/h.git", "--harness-commit", SHA, *flags) == 2
+    assert flags[0] in capsys.readouterr().err and not (target / ".l4").exists()
+
+
+def test_a_bad_token_variable_name_is_exit_2(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE, "--forge-token-env", "not a name") == 2
+    assert not (target / ".l4/config.yaml").exists()
+
+
+def test_the_default_codex_profile_gets_a_todo_naming_it(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE) == 0
+    err = capsys.readouterr().err
+    todo = next(line for line in err.splitlines() if line.startswith("todo: profile codex"))
+    assert "roles.implementer" in todo and "CODEX_API_KEY" in todo
+    assert "profile claude-code" not in err  # CLAUDE_CODE_OAUTH_TOKEN takes a subscription token as a secret
+    assert "# TODO: profile codex" in (target / ".l4/config.yaml").read_text()
+
+
+def test_no_login_todo_on_a_self_hosted_runner(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE, "--runner-tag", "agentic") == 0
+    assert "profile codex" not in capsys.readouterr().err
+
+
+def test_which_profiles_can_log_in_on_a_hosted_runner():
+    from l4.agents.credentials import hosted_login_problem
+
+    assert hosted_login_problem("codex", "subscription") and hosted_login_problem("codex", None)
+    assert hosted_login_problem("codex", "api_key") is None
+    assert hosted_login_problem("claude-code", "subscription") is None
+    assert hosted_login_problem("kiro-cli", "subscription") is None
+    assert hosted_login_problem("opencode", None) is None
