@@ -10,7 +10,8 @@
 #   harness  the installed tool, uv's Pythons and the l4/uv/uvx links, keyed l4-harness-<os>-<arch>-<image>-py<python>-
 #            <source>-<hash>. Restored and saved by this action.
 #   clis     the agent CLIs and bwrap, at the paths `l4 doctor --ci --fix` installs into, keyed
-#            l4-clis-<os>-<arch>-<image>-<hash of the catalog's pins> (never the harness). Restored here when the key
+#            l4-clis-<os>-<arch>-<image>-<hash of the catalog's pins and of the agent CLIs the config needs> (never the
+#            harness). Restored here when the key
 #            has no hit; the WORKFLOW saves it after `l4 doctor --ci --fix`, with actions/cache/save and the outputs
 #            clis-cache-key and clis-cache-paths, when clis-cache-hit is not 'true'.
 name: L4 harness
@@ -200,8 +201,10 @@ runs:
       id: clikey
       if: inputs.clis != 'none'
       shell: bash
+      working-directory: ${{ github.workspace }}
       run: |
-        # the suffix is a hash of the catalog's pins, made by the installed harness; the harness itself is no input
+        # the suffix is a hash of the catalog's pins and of the agent CLIs the config in the workspace needs, made by the
+        # installed harness (the pins alone without a config); the harness itself is no input
         suffix=$("$HOME/.local/bin/l4" ci cache-key clis)
         echo "key=l4-clis-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-$suffix" >> "$GITHUB_OUTPUT"
     - name: agent CLI cache paths

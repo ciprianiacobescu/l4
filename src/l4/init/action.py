@@ -1,5 +1,5 @@
 """The action form of an adoption (adoption-kit L4-ACT-004, L4-ACT-005, D4, D5): resolving `--harness-ref` to a sha,
-reading the pin out of a workflow, and moving it (`l4 upgrade`) by editing the lines that hold it and nothing else."""
+and reading the pin out of a workflow. `l4 upgrade` moves it by re-rendering the whole workflow (`l4.init.upgrade`)."""
 
 import re
 import subprocess
@@ -15,13 +15,6 @@ from l4.exitcodes import ExitCode, L4Exit
 LS_REMOTE_TIMEOUT_S = 60
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
-_USES = re.compile(
-    r"^(?P<lead>[ \t]*(?:-[ \t]+)?uses:[ \t]*)(?P<action>\S+/" + re.escape(ACTION_PATH) + r")@(?P<pin>[^\s#]+)"
-    r"(?P<tail>[ \t]*#.*)?(?P<eol>\r?\n?)$"
-)
-_COMMIT = re.compile(
-    r"^(?P<lead>[ \t]*commit:[ \t]*)(?P<quote>[\"']?)(?P<sha>[^\s\"'#]+)(?P=quote)(?P<tail>[ \t]*(?:#.*)?)$"
-)
 _SSH_REPO = re.compile(r"^ssh://git@github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$")
 
 
@@ -103,79 +96,4 @@ def read_pin(workflow_text: str) -> WorkflowPin | None:
             if action == f"./{ACTION_PATH}" or action.endswith(f"/{ACTION_PATH}"):
                 inputs = step.get("with")
                 return WorkflowPin(uses, pin or None, inputs if isinstance(inputs, dict) else {})
-    return None
-
-
-def repin(text: str, *, sha: str, ref: str | None) -> str:
-    """The workflow with its pin moved to `sha`: the `uses:` line (`@<sha> # <ref>`, no comment without a ref) of a
-    published action, or the `commit` input of a local copy. Every other byte stays. Exit 2 when the workflow holds
-    neither line, or the edit does not read back."""
-    lines = text.splitlines(keepends=True)
-    before = read_pin(text)
-    changed = False
-    if before is not None and before.local:
-        in_step = False
-        for i, raw in enumerate(lines):
-            body = raw.rstrip("\r\n")
-            if re.match(r"^\s*(?:-\s+)?id:\s*l4\s*$", body):
-                in_step = True
-            match = _COMMIT.match(body) if in_step else None
-            if match:
-                lines[i] = f"{match['lead']}{match['quote']}{sha}{match['quote']}{match['tail']}{raw[len(body) :]}"
-                changed = True
-                break
-    elif before is not None:
-        for i, raw in enumerate(lines):
-            match = _USES.match(raw)
-            if match:
-                comment = f" # {ref}" if ref else ""
-                lines[i] = f"{match['lead']}{match['action']}@{sha}{comment}{match['eol']}"
-                changed = True
-                break
-    new = "".join(lines)
-    after = read_pin(new)
-    if not changed or after is None or after.effective != sha:
-        raise L4Exit(
-            ExitCode.USAGE_ERROR,
-            "upgrade: cannot find the pin of the setup action in .github/workflows/l4.yml (a `uses: …/"
-            f"{ACTION_PATH}@<sha>` line, or the `commit` input of `uses: ./{ACTION_PATH}`); edit it by hand",
-        )
-    return new
-
-
-SAVE_STEP_NAME = "save agent CLI cache"
-SAVE_PATH_OUTPUT = "${{ steps.l4.outputs.clis-cache-paths }}"
-_SAVE_NAME = re.compile(r"^(?P<indent>[ \t]*)-[ \t]+name:[ \t]*[\"']?" + re.escape(SAVE_STEP_NAME) + r"[\"']?[ \t]*$")
-_PATH_BLOCK = re.compile(r"^(?P<lead>[ \t]*path:)[ \t]*\|[-+]?[ \t]*$")
-
-
-def migrate_save_paths(text: str) -> str | None:
-    """The workflow with the literal path list of its `save agent CLI cache` step replaced by the action's output
-    (`path: ${{ steps.l4.outputs.clis-cache-paths }}`), or None when the step is absent or already reads the output.
-    Only the lines of that `path: |` block change (L4-ACT-002): the action holds the list, so a workflow that repeats it
-    stops matching the restore when the harness changes it."""
-    lines = text.splitlines(keepends=True)
-    for i, raw in enumerate(lines):
-        named = _SAVE_NAME.match(raw.rstrip("\r\n"))
-        if not named:
-            continue
-        dash = len(named["indent"])
-        for j in range(i + 1, len(lines)):
-            body = lines[j].rstrip("\r\n")
-            indent = len(body) - len(body.lstrip())
-            if body.strip() and indent <= dash:
-                break  # the next step
-            block = _PATH_BLOCK.match(body)
-            if not block:
-                continue
-            end = j + 1
-            while end < len(lines):
-                inner = lines[end].rstrip("\r\n")
-                if inner.strip() and len(inner) - len(inner.lstrip()) <= len(block["lead"]) - len("path:"):
-                    break
-                end += 1
-            eol = lines[j][len(body) :] or "\n"
-            lines[j:end] = [f"{block['lead']} {SAVE_PATH_OUTPUT}{eol}"]
-            return "".join(lines)
-        return None
     return None
