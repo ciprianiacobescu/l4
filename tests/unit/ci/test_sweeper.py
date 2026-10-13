@@ -1,5 +1,6 @@
 # ruff: noqa: F811
 import json
+import sys
 
 import pytest
 
@@ -665,7 +666,7 @@ def plan_sweep(run) -> int:
     return main(["plan", "--sweep", "--repo", str(run.tdd.repo)], environ=run.tdd.environ)
 
 
-def test_a_member_label_resumes_a_halted_unit_once(halted, use_fake_gitlab):
+def test_a_member_label_resumes_a_halted_unit_once(halted, use_fake_gitlab, operator):
     set_label(use_fake_gitlab, 100, MEMBER)
     assert plan_sweep(halted) == 0
     [resumed] = halted.events("unit.resumed")
@@ -676,7 +677,7 @@ def test_a_member_label_resumes_a_halted_unit_once(halted, use_fake_gitlab):
     assert len(halted.events("unit.resumed")) == 1
 
 
-def test_a_non_member_label_is_ignored_and_said_once(halted, use_fake_gitlab, capsys):
+def test_a_non_member_label_is_ignored_and_said_once(halted, use_fake_gitlab, operator, capsys):
     set_label(use_fake_gitlab, 101, STRANGER)
     capsys.readouterr()
     assert plan_sweep(halted) == 0
@@ -691,14 +692,14 @@ def test_a_non_member_label_is_ignored_and_said_once(halted, use_fake_gitlab, ca
     assert [e["signal"] for e in halted.events("resume.refused")] == ["label:101", "label:102"]
 
 
-def test_the_bot_s_own_label_is_refused(halted, use_fake_gitlab):
+def test_the_bot_s_own_label_is_refused(halted, use_fake_gitlab, operator):
     set_label(use_fake_gitlab, 103, BOT)
     assert plan_sweep(halted) == 0
     assert halted.events("unit.resumed") == []
     assert "harness" in halted.events("resume.refused")[0]["why"]
 
 
-def test_the_same_label_event_never_resumes_twice(halted, use_fake_gitlab, run_l4):  # noqa: F811
+def test_the_same_label_event_never_resumes_twice(halted, use_fake_gitlab, operator, run_l4):  # noqa: F811
     set_label(use_fake_gitlab, 100, MEMBER)
     plan_sweep(halted)
     again = run_l4([Step(structured=result("red"))], implementer={"max_task_attempts": 1})  # halts again
@@ -711,8 +712,42 @@ def test_the_same_label_event_never_resumes_twice(halted, use_fake_gitlab, run_l
     assert [e["signal"] for e in again.events("unit.resumed")] == ["label:100", "label:104"]
 
 
-def escalated_snapshot(tdd_repo, *, fix_round: int, halt_reason: str | None = None, feedback_used: int = 0):
-    """The unit as the sweep reads it, with its phase and fix rounds set (the ledger is that of the halted unit)."""
+class Operator:
+    """What the sweep asks of `l4.state.retry` and `l4.state.restart` (written by another change of the series): the
+    calls are recorded; a retry then does what `l4 resume` does, so the ledger of the run stays real."""
+
+    def __init__(self) -> None:
+        self.retries: list[dict] = []
+        self.restarts: list[dict] = []
+
+    def retry_unit(self, app, cfg, git, provider, ref, *, reason, signal=None, by=None, rounds=None):
+        from l4.state.resume import resume_unit
+
+        self.retries.append({"unit": ref.id, "reason": reason, "signal": signal, "by": by, "rounds": rounds})
+        return resume_unit(app, cfg, git, provider, ref, reason=reason, signal=signal, by=by)
+
+    def restart_unit(self, app, cfg, git, provider, ref, *, reason, signal=None, by=None):
+        from types import SimpleNamespace
+
+        self.restarts.append({"unit": ref.id, "reason": reason, "signal": signal, "by": by})
+        return SimpleNamespace(
+            attempt=2, previous_head="a" * 40, attempt_ref=f"refs/l4/attempts/{ref.id.replace(':', '/')}/1",
+            branch_head="b" * 40, closed_pr=1,
+        )  # fmt: skip
+
+
+@pytest.fixture
+def operator(monkeypatch):
+    from types import SimpleNamespace
+
+    fake = Operator()
+    monkeypatch.setitem(sys.modules, "l4.state.retry", SimpleNamespace(retry_unit=fake.retry_unit))
+    monkeypatch.setitem(sys.modules, "l4.state.restart", SimpleNamespace(restart_unit=fake.restart_unit))
+    return fake
+
+
+def phase_snapshot(tdd_repo, phase: str, *, previous: str | None = None, halt_reason: str | None = None):
+    """The unit as the sweep reads it, with its phase set (the ledger is that of the halted unit)."""
     from l4.config.loader import load_config
     from l4.specs.openspec import OpenSpecProvider
     from l4.vcs.git import Git
@@ -722,85 +757,209 @@ def escalated_snapshot(tdd_repo, *, fix_round: int, halt_reason: str | None = No
     git.run("fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
     provider = OpenSpecProvider(tdd_repo.repo, tdd_repo.environ)
     [snap] = [load_snapshot(provider, git, ref, branch_prefix="l4/") for ref in provider.list_units()]
-    snap.state.phase = "escalated"
-    snap.state.fix_round = snap.state.fix_rounds_counted = fix_round
+    snap.state.phase = phase
+    snap.state.previous_phase = previous
     snap.state.halt_reason = halt_reason
-    snap.state.feedback_rounds_used = feedback_used
+    snap.state.pr = None
     return cfg, git, snap
 
 
-def sweep_escalated(
-    tdd_repo, monkeypatch, *, fix_round: int, halt_reason: str | None = None, feedback_used: int = 0
-) -> tuple[list, list[tuple[str, int, int]]]:
-    """Run the sweep over an escalated snapshot with the resume itself stubbed: what the sweep decides is the test."""
-    from types import SimpleNamespace
-
+def sweep_phase(tdd_repo, phase: str, *, previous: str | None = None, halt_reason: str | None = None):
+    """Run the sweep over a snapshot with its phase set: what the sweep decides is the test."""
     from l4.context import AppContext
     from l4.redact import Redactor
 
-    cfg, git, snap = escalated_snapshot(
-        tdd_repo, fix_round=fix_round, halt_reason=halt_reason, feedback_used=feedback_used
-    )
-    calls: list[tuple[str, int, int]] = []
-
-    def resumer(self, snapshot, signal, more, more_feedback):
-        calls.append((signal.signal, more, more_feedback))
-        return SimpleNamespace(outcome=SimpleNamespace(phase_after="verifying"))
-
-    monkeypatch.setattr(sweeper_module.Sweeper, "_resume_in_worktree", resumer)
+    cfg, git, snap = phase_snapshot(tdd_repo, phase, previous=previous, halt_reason=halt_reason)
     app = AppContext(tdd_repo.repo, None, "human", 0, "r-20261006T1800Z-ab12", tdd_repo.environ, Redactor({}))
-    return sweeper_module.sweep(app, cfg, git, [snap], ci=True), calls
+    return sweeper_module.sweep(app, cfg, git, [snap], ci=True), snap
 
 
-def test_a_member_label_resumes_an_escalated_unit_with_one_more_fix_round(
-    halted, use_fake_gitlab, tdd_repo, monkeypatch
-):
-    set_label(use_fake_gitlab, 105, MEMBER)
-    actions, calls = sweep_escalated(tdd_repo, monkeypatch, fix_round=99)  # more than any limit: all rounds are used
-    assert [a.what for a in actions] == ["resumed"] and "1 more fix round" in actions[0].detail
-    assert calls == [("label:105", 1, 0)]
+def test_a_retry_label_retries_a_halted_unit_once(halted, use_fake_gitlab, operator):
+    """L4-OPS-008: `l4:retry` is `l4 retry`, by a member, with the label event as its signal."""
+    set_label(use_fake_gitlab, 110, MEMBER, name="l4:retry")
+    assert plan_sweep(halted) == 0
+    assert operator.retries == [
+        {"unit": "openspec:add-discount-codes", "reason": "label l4:retry", "signal": "label:110", "by": "member",
+         "rounds": None}
+    ]  # fmt: skip
+    assert operator.restarts == []
+    assert plan_sweep(halted) == 0  # the event is in the ledger now: nothing again
+    assert len(operator.retries) == 1
 
 
-def test_a_member_label_on_a_unit_escalated_at_the_feedback_limit_gives_one_feedback_round(
-    halted, use_fake_gitlab, tdd_repo, monkeypatch
-):
-    """L4-FBK-006: `budget.extended{feedback_rounds: 1}` instead of `fix_rounds: 1`, once per label event."""
-    set_label(use_fake_gitlab, 107, MEMBER)
-    actions, calls = sweep_escalated(
-        tdd_repo, monkeypatch, fix_round=99, halt_reason="feedback_rounds_exhausted", feedback_used=5
-    )  # the fix rounds are used up as well: the reason decides which budget the label extends
-    assert [a.what for a in actions] == ["resumed"] and "1 more feedback round" in actions[0].detail
-    assert calls == [("label:107", 0, 1)]
+def test_the_resume_label_is_a_retry(halted, use_fake_gitlab, operator):
+    set_label(use_fake_gitlab, 111, MEMBER)  # l4:resume
+    assert plan_sweep(halted) == 0
+    assert [(r["reason"], r["signal"]) for r in operator.retries] == [("label l4:resume", "label:111")]
 
 
-def test_the_label_on_an_escalated_unit_with_rounds_left_grants_no_extension(
-    halted, use_fake_gitlab, tdd_repo, monkeypatch
-):
-    set_label(use_fake_gitlab, 106, MEMBER)
-    actions, calls = sweep_escalated(tdd_repo, monkeypatch, fix_round=0)  # escalated for another reason
-    assert [a.what for a in actions] == ["resumed"] and calls == [("label:106", 0, 0)]
+def test_a_restart_label_restarts_the_unit(halted, use_fake_gitlab, operator, capsys):
+    """SCN-OPS-14: a member's `l4:restart` calls the restart, with the label event as its signal."""
+    set_label(use_fake_gitlab, 112, MEMBER, name="l4:restart")
+    assert plan_sweep(halted) == 0
+    assert operator.retries == []
+    assert operator.restarts == [
+        {"unit": "openspec:add-discount-codes", "reason": "label l4:restart", "signal": "label:112",
+         "by": "member"}
+    ]  # fmt: skip
+    assert "started over" in capsys.readouterr().err
+
+
+def test_a_non_member_restart_label_is_refused_with_the_command(halted, use_fake_gitlab, operator):
+    set_label(use_fake_gitlab, 113, STRANGER, name="l4:restart")
+    assert plan_sweep(halted) == 0
+    assert operator.restarts == []
+    [refused] = halted.events("resume.refused")
+    assert "l4 restart --unit openspec:add-discount-codes --reason TEXT" in refused["why"]
+
+
+def test_the_token_owners_retry_label_names_the_command(halted, use_fake_gitlab, operator):
+    set_label(use_fake_gitlab, 114, BOT, name="l4:retry")
+    assert plan_sweep(halted) == 0
+    assert operator.retries == []
+    [refused] = halted.events("resume.refused")
+    assert refused["why"].endswith(
+        "use l4 retry --unit openspec:add-discount-codes --reason TEXT, or ask another member"
+    )
+    assert "`l4 retry --unit openspec:add-discount-codes --reason TEXT`" in use_fake_gitlab.notes[1][-1]["body"]
+
+
+def test_the_newest_of_two_operator_labels_acts_and_the_other_is_said_once(halted, use_fake_gitlab, operator):
+    set_label(use_fake_gitlab, 115, MEMBER, name="l4:restart")
+    set_label(use_fake_gitlab, 116, MEMBER, name="l4:retry")
+    assert plan_sweep(halted) == 0
+    assert [r["signal"] for r in operator.retries] == ["label:116"] and operator.restarts == []
+    [superseded] = halted.events("resume.refused")
+    assert superseded["signal"] == "label:115" and "newer" in superseded["why"]
+
+
+@pytest.mark.parametrize("phase", ["halted", "escalated", "waiting_capacity"])
+def test_a_retry_label_acts_on_the_phases_a_retry_continues(halted, use_fake_gitlab, tdd_repo, operator, phase):
+    set_label(use_fake_gitlab, 117, MEMBER, name="l4:retry")
+    actions, _ = sweep_phase(tdd_repo, phase, previous="implementing")
+    assert [a.what for a in actions] == ["resumed"]
+    assert [(r["signal"], r["rounds"]) for r in operator.retries] == [("label:117", None)]  # the phase decides rounds
+
+
+@pytest.mark.parametrize("phase", ["implementing", "in_review", "abandoned"])
+def test_a_retry_label_on_another_phase_is_left_alone(halted, use_fake_gitlab, tdd_repo, operator, phase):
+    set_label(use_fake_gitlab, 118, MEMBER, name="l4:retry")
+    actions, _ = sweep_phase(tdd_repo, phase, previous="implementing")
+    assert [a for a in actions if a.what in ("resumed", "resume_refused")] == [] and operator.retries == []
+
+
+@pytest.mark.parametrize("phase", ["halted", "escalated", "waiting_capacity", "implementing", "in_review"])
+def test_a_restart_label_on_an_open_mr_acts_in_any_started_phase(halted, use_fake_gitlab, tdd_repo, operator, phase):
+    set_label(use_fake_gitlab, 119, MEMBER, name="l4:restart")
+    actions, _ = sweep_phase(tdd_repo, phase, previous="implementing")
+    assert [a.what for a in actions] == ["restarted"] and [r["signal"] for r in operator.restarts] == ["label:119"]
+
+
+def test_a_restart_label_on_the_closed_mr_of_an_abandoned_unit_acts(halted, use_fake_gitlab, tdd_repo, operator):
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    set_label(use_fake_gitlab, 120, MEMBER, name="l4:restart")
+    actions, _ = sweep_phase(tdd_repo, "abandoned", previous="in_review")
+    assert [a.what for a in actions] == ["restarted"] and operator.retries == []
+
+
+def test_a_restart_label_on_a_merged_unit_is_ignored(halted, use_fake_gitlab, tdd_repo, operator):
+    set_label(use_fake_gitlab, 121, MEMBER, name="l4:restart")
+    sweep_phase(tdd_repo, "merged")
+    assert operator.restarts == []
 
 
 def test_a_non_member_label_on_an_escalated_unit_is_refused_like_on_a_halted_one(
-    halted, use_fake_gitlab, tdd_repo, monkeypatch
+    halted, use_fake_gitlab, tdd_repo, operator
 ):
-    set_label(use_fake_gitlab, 107, STRANGER)
-    actions, calls = sweep_escalated(tdd_repo, monkeypatch, fix_round=99)
-    assert [a.what for a in actions] == ["resume_refused"] and calls == []
+    set_label(use_fake_gitlab, 107, STRANGER, name="l4:retry")
+    actions, _ = sweep_phase(tdd_repo, "escalated", previous="verifying", halt_reason="fix_rounds_exhausted")
+    assert [a.what for a in actions] == ["resume_refused"] and operator.retries == []
     assert "not a member" in actions[0].detail and "escalated" not in actions[0].detail
 
 
-def test_the_note_around_a_refusal_at_the_feedback_limit_names_feedback_rounds(
-    halted, use_fake_gitlab, tdd_repo, monkeypatch
-):
-    set_label(use_fake_gitlab, 108, STRANGER)
-    sweep_escalated(tdd_repo, monkeypatch, fix_round=99, halt_reason="feedback_rounds_exhausted", feedback_used=5)
+def test_the_note_around_a_refusal_at_the_feedback_limit_names_retry(halted, use_fake_gitlab, tdd_repo, operator):
+    set_label(use_fake_gitlab, 108, STRANGER, name="l4:retry")
+    sweep_phase(tdd_repo, "escalated", previous="verifying", halt_reason="feedback_rounds_exhausted")
     body = use_fake_gitlab.notes[1][-1]["body"]
-    assert "--extend-feedback-rounds N" in body and "one more feedback round per label event" in body
-    assert "--extend-fix-rounds" not in body
+    assert "one more feedback round per label event" in body and "`l4 retry --unit " in body
+    assert "--extend" not in body and "l4 resume" not in body
 
 
-def test_the_resume_commit_carries_l4_run_and_skip_ci(halted, use_fake_gitlab):
+# --- a merge request closed without a merge (L4-OPS-009, SCN-OPS-16) ----------------------------------------------
+
+
+def test_a_closed_mr_abandons_the_unit_and_the_note_names_restart(halted, use_fake_gitlab, tdd_repo, operator):
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    actions, snap = sweep_phase(tdd_repo, "in_review")
+    assert [a.what for a in actions] == ["abandoned"] and snap.state.phase == "abandoned"
+    pending = pending_unit_events(tdd_repo)
+    assert [e for e in pending if e["type"] == "pr.closed"][-1]["number"] == 1
+    changed = [e for e in pending if e["type"] == "phase.changed"][-1]
+    assert (changed["from"], changed["to"], changed["trigger"]) == ("in_review", "abandoned", "pr_closed")
+    body = use_fake_gitlab.notes[1][-1]["body"]
+    assert "### Abandoned: the merge request was closed without a merge" in body
+    assert (
+        "To start the unit over, a member adds the label l4:restart to this merge request, or runs "
+        "l4 restart --unit openspec:add-discount-codes --reason TEXT."
+    ) in body
+
+
+def test_a_closed_mr_is_taken_once(halted, use_fake_gitlab, tdd_repo, operator):
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    sweep_phase(tdd_repo, "halted", previous="implementing")
+    actions, _ = sweep_phase(tdd_repo, "abandoned", previous="halted")  # what the second sweep reads from the ledger
+    assert actions == []
+    assert len([e for e in pending_unit_events(tdd_repo) if e["type"] == "pr.closed"]) == 1
+
+
+@pytest.mark.parametrize("phase", ["merged", "abandoned"])
+def test_a_terminal_unit_with_a_closed_mr_is_not_abandoned_again(halted, use_fake_gitlab, tdd_repo, phase):
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    actions, _ = sweep_phase(tdd_repo, phase, previous="in_review")
+    assert [a.what for a in actions if a.what == "abandoned"] == []
+
+
+def test_a_closed_mr_that_is_not_the_units_is_left_alone(halted, use_fake_gitlab, tdd_repo, operator):
+    """The unit's ledger names another MR (the unit was started over): the old, closed one says nothing."""
+    from l4.context import AppContext
+    from l4.redact import Redactor
+
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    cfg, git, snap = phase_snapshot(tdd_repo, "implementing")
+    snap.state.pr = f"{WEB}/-/merge_requests/9"
+    app = AppContext(tdd_repo.repo, None, "human", 0, "r-20261006T1800Z-ab12", tdd_repo.environ, Redactor({}))
+    assert [a.what for a in sweeper_module.sweep(app, cfg, git, [snap], ci=True)] == []
+    assert snap.state.phase == "implementing"
+
+
+def test_a_reopened_mr_returns_the_abandoned_unit_to_its_phase(halted, use_fake_gitlab, tdd_repo, operator):
+    actions, snap = sweep_phase(tdd_repo, "abandoned", previous="in_review")  # the MR is open again
+    assert [a.what for a in actions] == ["reopened"] and snap.state.phase == "in_review"
+    changed = [e for e in pending_unit_events(tdd_repo) if e["type"] == "phase.changed"][-1]
+    assert (changed["from"], changed["to"], changed["trigger"]) == ("abandoned", "in_review", "pr_reopened")
+
+
+def test_the_closed_mr_duty_is_part_of_plan_sweep_only(halted, use_fake_gitlab, tdd_repo, operator):
+    from l4.context import AppContext
+    from l4.redact import Redactor
+
+    use_fake_gitlab.mrs[1]["state"] = "closed"
+    cfg, git, snap = phase_snapshot(tdd_repo, "in_review")
+    app = AppContext(tdd_repo.repo, None, "human", 0, "r-20261006T1800Z-ab12", tdd_repo.environ, Redactor({}))
+    assert sweeper_module.sweep(app, cfg, git, [snap], ci=False) == []
+
+
+def pending_unit_events(tdd_repo) -> list[dict]:
+    """The pending ledger of the halted unit's lock ref, as the sweeps wrote it."""
+    from l4.vcs.git import Git
+
+    git = Git(tdd_repo.repo, environ=tdd_repo.environ)
+    git.run("fetch", "-q", "origin", "+refs/l4/*:refs/l4/*")
+    files = read_pending_files(git, "refs/l4/locks/openspec/add-discount-codes")
+    return [json.loads(line) for _, data in sorted(files.items()) for line in data.decode().splitlines()]
+
+
+def test_the_resume_commit_carries_l4_run_and_skip_ci(halted, use_fake_gitlab, operator):
     set_label(use_fake_gitlab, 100, MEMBER)
     plan_sweep(halted)
     message = halted.raw(halted.tdd.origin, "log", "-1", "--format=%B", "l4/openspec/add-discount-codes")
@@ -808,7 +967,7 @@ def test_the_resume_commit_carries_l4_run_and_skip_ci(halted, use_fake_gitlab):
     assert "L4-Run: r-" in message
 
 
-def test_a_push_on_a_halted_branch_names_the_label_once(halted, use_fake_gitlab, tdd_repo, raw, capsys):
+def test_a_push_on_a_halted_branch_names_the_label_once(halted, use_fake_gitlab, operator, tdd_repo, raw, capsys):
     clone = tdd_repo.repo.parent / "owner"
     branch = "l4/openspec/add-discount-codes"
     raw(tdd_repo.repo.parent, "clone", "-q", "--branch", branch, str(tdd_repo.origin), str(clone))
@@ -818,7 +977,7 @@ def test_a_push_on_a_halted_branch_names_the_label_once(halted, use_fake_gitlab,
     raw(clone, "push", "-q", "origin", branch)
     capsys.readouterr()
     assert plan_sweep(halted) == 0
-    hint = "a person pushed after the halt: add the label l4:resume to resume"
+    hint = "a person pushed after the halt: add the label l4:retry or run l4 retry"
     assert capsys.readouterr().err.count(hint) == 1
     assert plan_sweep(halted) == 0
     assert capsys.readouterr().err.count(hint) == 0  # once per head

@@ -1,10 +1,11 @@
 """Who may retry or restart a stopped unit by label (SPEC L4-SEC-004, L4-CI-004, SCN-RES-01, L4-OPS-008), pure.
 
-The labels `l4:retry`, `l4:resume` (the same as retry) and `l4:restart` are a signal only when the forge itself says a member set it: the latest `add` event of the label
-names the user (`LabelEvent.user_id`), and that user must have at least Developer access (30) and must not be the
-token's own user. The project's bot is a Developer too (probed live, level 30), so a level check alone would accept
-the harness's own label; it is excluded by id. One label event is one action: its id (`label:<id>`) is recorded in
-`unit.retried{signal}` or `unit.restarted{signal}` and an id already recorded is never acted on again.
+The labels `l4:retry`, `l4:resume` (the same) and `l4:restart` are a signal only when the forge itself says a member
+set it: the latest `add` event of the label names the user (`LabelEvent.user_id`), and that user must have at least
+Developer access (30) and must not be the token's own user. The project's bot is a Developer too (probed live, level
+30), so a level check alone would accept the harness's own label; it is excluded by id. One label event is one action:
+its id (`label:<id>`) is recorded in `unit.retried{signal}` or `unit.restarted{signal}` and an id already recorded is
+never acted on again.
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
