@@ -2640,7 +2640,9 @@ A fix unit all of whose consumed blocking findings have `source: "feedback"` is 
 `feedback.max_rounds` (§3.2; default 5, 0 turns taking off), raised by `budget.extended{feedback_rounds}` (L4-IMP-013).
 On a FAIL whose fix unit would be a feedback fix unit and whose feedback limit is used up, the unit goes to `escalated`
 (exit 13, label `l4:escalated`) with `phase.changed{reason: "feedback_rounds_exhausted"}` and the note `feedback round
-limit reached (N)` in the sticky comment; `l4 resume --extend-feedback-rounds N` or the resume label continues it. A fix
+limit reached (N)` in the sticky comment; `l4 resume --extend-feedback-rounds N` or the resume label continues it, and the
+comment's resume line says so (`--extend-feedback-rounds N`, "one more feedback round per label event"), not the fix-round
+wording of a fix-limit escalation. A fix
 unit that also consumes a non-feedback finding (a red repository CI job, a gate failure) is a normal fix round, counted
 by `max_fix_rounds`, and its feedback items are still marked taken.
 
