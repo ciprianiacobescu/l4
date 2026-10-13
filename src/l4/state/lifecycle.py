@@ -16,6 +16,11 @@ M1.9 builds the review re-entry rows of SPEC 12.0, with `in_review` as the only 
 -> `verifying` (a commit after H that the harness did not make), `spec_edit_after_handoff` -> `implementing` (answers or
 spec edits after H) and `repository_ci_failed` -> `verifying` (the project's own CI is red on H). None has an exit
 code: the run goes on.
+operator-commands (L4-OPS-001, -003, -009) adds the rows an operator's verb or a closed merge request needs:
+`halted | escalated -> implementing` on `spec_edit_since_stop` (a person changed the unit folder after the stop),
+`in_review -> verifying` on `retry_requested`, `verifying | verified -> halted` on `breaker_or_budget` (a secret in
+the push halts in any phase), every non-terminal phase `-> abandoned` on `pr_closed` (not `archived`, which exists only
+in `on_approval`), and `abandoned -> previous phase` on `pr_reopened`.
 """
 
 from enum import StrEnum
@@ -77,6 +82,10 @@ class Trigger(StrEnum):
     SPEC_EDIT_AFTER_HANDOFF = "spec_edit_after_handoff"
     REPOSITORY_CI_FAILED = "repository_ci_failed"
     RESUMED = "resumed"
+    SPEC_EDIT_SINCE_STOP = "spec_edit_since_stop"
+    RETRY_REQUESTED = "retry_requested"
+    PR_CLOSED = "pr_closed"
+    PR_REOPENED = "pr_reopened"
 
 
 class Edge(NamedTuple):
@@ -112,7 +121,12 @@ TRANSITIONS: tuple[Edge, ...] = (
     _edge({Phase.CLARIFYING}, Trigger.CLARIFIER_ANSWERED_ALL, Phase.IMPLEMENTING),
     _edge({Phase.CLARIFYING}, Trigger.CLARIFIER_NEEDS_HUMAN, Phase.AWAITING_HUMAN, ExitCode.AWAITING_HUMAN),
     _edge({Phase.IMPLEMENTING}, Trigger.ALL_LEAVES_DONE, Phase.IMPLEMENTED),
-    _edge({Phase.IMPLEMENTING, Phase.FIXING}, Trigger.BREAKER_OR_BUDGET, Phase.HALTED, ExitCode.HALTED),
+    _edge(
+        {Phase.IMPLEMENTING, Phase.FIXING, Phase.VERIFYING, Phase.VERIFIED},
+        Trigger.BREAKER_OR_BUDGET,
+        Phase.HALTED,
+        ExitCode.HALTED,
+    ),
     _edge({Phase.IMPLEMENTED}, Trigger.VERIFICATION_STARTED, Phase.VERIFYING),
     _edge({Phase.VERIFYING}, Trigger.VERIFY_PASS, Phase.VERIFIED),
     _edge({Phase.VERIFYING}, Trigger.VERIFY_FAIL_FIX, Phase.FIXING, ExitCode.CONTINUE),
@@ -131,6 +145,12 @@ TRANSITIONS: tuple[Edge, ...] = (
     # `l4 resume` or a member's label; from `escalated` it needs a fix-round extension when the rounds are used up
     # (L4-IMP-013, checked by `state.resume`, not by the table)
     _edge({Phase.HALTED, Phase.ESCALATED}, Trigger.RESUMED, None),
+    # operator-commands: a person changed the unit folder since the stop, so the unit implements again (L4-OPS-003)
+    _edge({Phase.HALTED, Phase.ESCALATED}, Trigger.SPEC_EDIT_SINCE_STOP, Phase.IMPLEMENTING),
+    _edge({Phase.IN_REVIEW}, Trigger.RETRY_REQUESTED, Phase.VERIFYING),  # `l4 retry` / `l4:retry` (L4-OPS-001)
+    # the merge request was closed without a merge, or reopened before any restart (L4-OPS-009)
+    _edge(set(Phase) - {Phase.MERGED, Phase.ABANDONED, Phase.ARCHIVED}, Trigger.PR_CLOSED, Phase.ABANDONED),
+    _edge({Phase.ABANDONED}, Trigger.PR_REOPENED, None),
 )
 
 
@@ -143,9 +163,12 @@ def all_edges() -> list[tuple[Phase | None, Trigger, Phase | None]]:
     return [(src, e.trigger, e.target) for e in TRANSITIONS for src in e.sources]
 
 
-def transition(writer: LedgerWriter, state: UnitState, trigger: Trigger, **context: object) -> Edge:
+def transition(
+    writer: LedgerWriter, state: UnitState, trigger: Trigger, *, detail: str | None = None, **context: object
+) -> Edge:
     """Append exactly one `phase.changed` and return the edge (its `exit_code` is the run's exit code, if any).
-    An undeclared edge raises `IllegalTransition` and writes nothing."""
+    An undeclared edge raises `IllegalTransition` and writes nothing. `detail` (L4-OPS-005): the person's text for a
+    stop, next to `reason`, its code; written only when given, so an old caller's event is unchanged."""
     try:
         current = Phase(state.phase) if state.phase is not None else None
     except ValueError:
@@ -161,6 +184,8 @@ def transition(writer: LedgerWriter, state: UnitState, trigger: Trigger, **conte
             raise IllegalTransition(f"{trigger.value}: no remembered phase to return to") from None
         edge = edge._replace(target=target)
     code = int(edge.exit_code) if edge.exit_code is not None else None
+    if detail is not None:
+        context["detail"] = detail
     writer.append(
         "phase.changed", **{"from": current.value if current else None}, to=target.value,
         trigger=trigger.value, exit_code=code, **context,
