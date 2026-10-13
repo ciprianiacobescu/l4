@@ -239,6 +239,17 @@ trade-off analysis. The triggers stay as they are (the base branch plus `<prefix
 - **On an OpenSpec unit,** tasks seldom cite requirements, so nothing is reopened. The changed scenarios get new
   criterion ids, the verifier judges the new text, and every unmet criterion becomes a fix task (one round later).
 - **Requirement text is compared after whitespace normalisation,** so a re-wrapped line is not a change.
+- **Stale tests (found live, 2026-10-14).** A test written for the old text of a changed criterion contradicts the new
+  text: criterion 1.3 changed from `none` to `ok`, while the existing test still asserted `none`. The rule that a red
+  step never changes an existing test made the implementer (Kiro, glm-5) ask a question instead of implementing.
+  - **Recording:** the reopen records the old ids of the changed criteria (`tasks.reopened{…, stale_criteria}`).
+  - **Which tests:** a test whose trace contains a stale id is stale.
+  - **What the red step may do:** in the reopened task's red step, a stale test may be replaced: deleted, or rewritten
+    under a new name for the new id.
+  - **Exemptions:** the red verdict ("existing tests were changed", "red broke existing tests") and the verifier's
+    "a pre-existing test was deleted" exempt stale tests, and record `tests.superseded{tests, criteria}`.
+  - **The prompt** names the stale tests and the new criterion.
+  - **Every other existing test** stays protected.
 
 ## Risks / Trade-offs
 
