@@ -99,9 +99,10 @@ def spec_edit_since_harness(git: Git, head: str, unit_rel: str) -> SpecEdit | No
     folder that is not the harness's (`.l4/`, `verification.md`) and has no channel of its own (`questions.md`,
     `feedback.md`: answers, verdicts and feedback keep their paths). A change elsewhere (`src/`) and a fix-unit folder,
     which is a sibling of the unit folder, are not a change of the spec. One rule for the push (`spec_edited`) and the
-    retry (`spec_edit_since_stop`). The tail is bounded by the author rule (`is_harness`, not the strict one): a person's
-    rebase makes the person the committer of every harness commit and must not turn them into a spec edit (review M2).
-    A file that is the same at the harness's last commit and at the head is no edit: the diff is the net change."""
+    retry (`spec_edit_since_stop`). The tail is bounded by the author rule (`is_harness`, not the strict one): a
+    person's rebase makes the person the committer of every harness commit and must not turn them into a spec edit
+    (review M2). A file that is the same at the harness's last commit and at the head is no edit: the diff is the net
+    change."""
     tail = foreign_tail(git, head, strict=False)
     base = git.rev_parse(f"{tail[0].sha}^") if tail else None
     if not tail or base is None:
