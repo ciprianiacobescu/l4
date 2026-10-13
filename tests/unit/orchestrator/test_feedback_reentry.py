@@ -135,3 +135,30 @@ def test_feedback_pushed_before_the_handoff_waits_for_the_units_own_verification
     [taken] = run.events("feedback.taken")
     assert taken["id"] == "FB-001" and taken["round"] == 1
     assert "- [x] 1.1" in run.pushed(f"{UNIT_DIR}/tasks.md")
+
+
+def test_a_retaken_item_whose_work_is_done_completes_its_task_and_the_next_judge_closes_it(
+    in_review, run_l4, tdd_repo, raw, use_fake_gitlab, tmp_path
+):
+    """review #8 follow-up: the judge leaves FB-001 out of its reply, so the PASS round fails it as not judged; the
+    item is taken again into fix unit 2, whose refactor finds nothing left to change (it was done in unit 1) and
+    completes as already done; the parent is verified again and the judge answers yes in the PASS round."""
+    human_commit(tdd_repo, raw, {FEEDBACK: feedback_text(tmp_path, {})}, "ask for a refactor")
+    nothing = Step(structured=result("single"))
+    run = run_l4([CHORE, JUDGE, nothing, JUDGE_FB1])
+    assert run.code == 0, run.adapter.requests[-1].prompt[-500:]
+    assert [v["verdict"] for v in run.events("verify.verdict")] == ["PASS", "FAIL", "FAIL", "PASS"]
+    first, second = run.events("fix.spawned")
+    assert (first["fix_unit"], second["fix_unit"]) == (FIX_UNIT, "add-discount-codes-fix-2")
+    assert [t["fix_unit"] for t in run.events("feedback.taken")] == [FIX_UNIT, "add-discount-codes-fix-2"]
+    fix2 = "add-discount-codes-fix-2"
+    marker = json.loads(raw(tdd_repo.origin, "show", f"{BRANCH}:openspec/changes/{fix2}/.l4/fix.json"))
+    assert marker["retakes"] == marker["refactors"] == second["findings"]
+    marker1 = json.loads(raw(tdd_repo.origin, "show", f"{BRANCH}:openspec/changes/{FIX_UNIT}/.l4/fix.json"))
+    assert marker1["retakes"] == []
+    [skipped] = [e for e in run.events("task.done") if e.get("tdd") == "already-done"]
+    assert skipped["reason"] == "retaken FB-001: nothing left to change"
+    assert run.events("task.attempt_failed") == [] and run.events("breaker.tripped") == []
+    [addressed] = run.events("feedback.addressed")
+    assert (addressed["id"], addressed["round"]) == ("FB-001", 4)
+    assert "**Status:** addressed" in raw(tdd_repo.origin, "show", f"{BRANCH}:{FEEDBACK}")

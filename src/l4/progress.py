@@ -297,6 +297,8 @@ class ProgressTrace:
     def _done(self, e: LedgerEvent) -> tuple[int, str] | None:
         if e.data.get("tdd") == "already-satisfied":
             return None  # `_red_ok` already said so; there was no green step to report
+        if e.data.get("tdd") == "already-done":
+            return logging.INFO, f"task {e.data.get('task')} done: {e.data.get('reason')}"
         return logging.INFO, f"task {e.data.get('task')} green ok: all tests passing"
 
     def _attempt_failed(self, e: LedgerEvent) -> tuple[int, str]:

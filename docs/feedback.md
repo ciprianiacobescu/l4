@@ -124,6 +124,11 @@ l4 feedback add --kind behaviour --at src/inventory/reorder.py:7 \
 You can also edit `feedback.md` by hand. The file explains its own format at the top. An item is read only when its
 **Status** is `submitted`.
 
+Ids are written `FB-NNN`; a short id is read as the same item, so `FB-4` is `FB-004` (in a heading, an index row or a
+command). If two sections end up with the same id (a bad merge, a copied section), the first one is the item. The
+others are never taken, and the note and the run log report each once as `invalid: duplicate id FB-004`. An item whose
+**Status** line you deleted is reported as `invalid: no Status line`; put the line back (`submitted`) to send it.
+
 ## What happens after the push
 
 - **The pull request is ready (in review).** Your push sends the unit back to work: the harness only counts an
@@ -139,6 +144,16 @@ You can also edit `feedback.md` by hand. The file explains its own format at the
 - **An item is not addressed.** It comes back as a finding (`FB-001 not addressed: …`), and the next round works on it
   again. The note says why. When it is addressed, its Status becomes `addressed` and its *Outcome* block says
   `Addressed in round N at <commit>: <evidence>`.
+- **The judge says yes in a round that fails for another reason.** The item is not closed yet: a later fix unit could
+  undo the change. It stays `taken` (the note keeps saying `taken into <fix unit>`), and that round's `verification.md`
+  lists it under `## Feedback` as `FB-001: judged addressed, pending a PASS round`. Only a round that passes sets
+  `addressed` and writes the *Outcome* line. If the judge does not answer for the item at all, a round that would
+  pass fails with `FB-001 not addressed: not judged in this round`, and the item is taken again.
+- **An item comes back and there is nothing left to do.** When the item was taken before and the change is already in the
+  code (the judge simply left it out of its reply), the agent has nothing to change. A refactor or a test request that
+  was taken before then completes with no change (the run log says `task 1.1 done: retaken FB-001: nothing left to
+  change`) instead of failing, and the unit is checked again, so the judge looks at the item once more. A first take that
+  changes nothing still fails, and an item whose text you changed counts as new.
 - **You change an item's text after it was taken.** It is taken again.
 - **The unit was already merged.** Check out the base branch and run `l4 feedback add --unit <framework>:<name> …`. It
   writes `feedback.md` into the unit's folder there (the newest `openspec/changes/archive/<date>-<name>/` when

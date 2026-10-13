@@ -286,6 +286,24 @@ def test_already_satisfied_commit_matches_one_event_pair(tmp_path, git_environ):
     assert not check_tdd_history(repo.context(base, sha)).findings
 
 
+def test_an_already_done_commit_of_a_retaken_feedback_task_needs_no_red_or_green(tmp_path, git_environ):
+    """review #8 follow-up: `task.done{tdd: already-done}` with its tick-only commit is a clean history, as a fix chore
+    is, and a test path changed in such a commit is still a blocker."""
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({"notes.txt": "tick\n"})
+    sha = repo.commit("tick", task="1.1", tdd="already-done")
+    repo.events = [event("task.done", 1, task="1.1", sha=sha, tdd="already-done", reason="retaken FB-001: nothing")]
+    ctx = repo.context(base, sha)
+    assert not check_tdd_history(ctx).findings and not check_test_paths(ctx).findings
+    other = tmp_path / "tampered"
+    other.mkdir()
+    repo, base = new_repo(other, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write({"tests/test_a.py": "def test_a():\n    pass\n"})
+    sha = repo.commit("tamper", task="1.1", tdd="already-done")
+    repo.events = [event("task.done", 1, task="1.1", sha=sha, tdd="already-done")]
+    assert check_test_paths(repo.context(base, sha)).findings
+
+
 def test_integrity_blocker_stops_ladder_and_every_sub_check_has_a_row(tmp_path, git_environ):
     repo, base = new_repo(tmp_path, git_environ)
     repo.write({"tests/conftest.py": "def pytest_runtest_makereport(item, call):\n    pass\n"})

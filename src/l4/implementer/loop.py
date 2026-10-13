@@ -31,7 +31,7 @@ from l4.implementer.tdd import (
 from l4.implementer.unfreeze import unfreeze_note
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Task
-from l4.specs.fixmark import chore_findings, chore_kind
+from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
 from l4.specs.questions import QUESTIONS_FILENAME, NewQuestion, QuestionKind, QuestionsFile, raise_questions
 
 log = logging.getLogger("l4.implementer")
@@ -191,7 +191,7 @@ def run_task(wb: Workbench, task: Task) -> TaskOutcome:
             attempts["green"] += 1
             done = run_single(
                 wb, task, chore, attempt=attempts["green"], previous_failure=retry,
-                kind=chore_kind(wb.ref.path, task.title) or "fix",
+                kind=chore_kind(wb.ref.path, task.title) or "fix", retake=chore_retakes(wb.ref.path, task.title),
             )  # fmt: skip
             if done.status == "ok":
                 return TaskOutcome("done")

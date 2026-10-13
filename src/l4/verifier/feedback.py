@@ -13,7 +13,7 @@ unit exists. `pending_feedback` is what a later round reads: the items taken and
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,7 @@ Event = tuple[str, dict[str, Any]]
 class FeedbackScan:
     takeable: tuple[FeedbackItem, ...] = ()
     events: tuple[Event, ...] = ()  # `feedback.changed|invalid|withdrawn`, each once (not recorded already)
+    retaken: frozenset[str] = frozenset()  # the takeable ids that an earlier `feedback.taken` already took, unchanged
 
 
 def _flat(text: str, limit: int) -> str:
@@ -43,6 +44,7 @@ def _flat(text: str, limit: int) -> str:
 
 def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
     takeable: list[FeedbackItem] = []
+    retaken: set[str] = set()
     events: list[Event] = []
     for copy in file.duplicates if file is not None else ():
         problem = f"duplicate id {copy.id}"  # the first section is the item; the copy is never taken
@@ -78,8 +80,10 @@ def scan_feedback(file: FeedbackFile | None, state: UnitState) -> FeedbackScan:
             continue
         if known is not None and was_taken and digest not in (known.sha256, known.changed_sha256):
             events.append(("feedback.changed", {"id": item.id, "previous_sha256": known.sha256, "sha256": digest}))
+        if known is not None and was_taken and digest == known.sha256:
+            retaken.add(item.id)  # the same request again (not judged addressed, or left waiting): not a new one
         takeable.append(item)
-    return FeedbackScan(tuple(takeable), tuple(events))
+    return FeedbackScan(tuple(takeable), tuple(events), frozenset(retaken))
 
 
 def feedback_ref(item: FeedbackItem) -> FeedbackRef:
@@ -93,7 +97,7 @@ def feedback_findings(scan: FeedbackScan) -> list[Finding]:
     """One blocking major finding per takeable item: the title names the item, the detail is the person's text."""
     found = []
     for item in scan.takeable:
-        ref = feedback_ref(item)
+        ref = replace(feedback_ref(item), retake=item.id in scan.retaken)
         title = f"Feedback {item.id} ({ref.kind}): {_flat(item.title, 120)}"
         found.append(Finding(Severity.MAJOR, title, _flat(item.text, MAX_REQUEST_CHARS), "feedback", feedback=ref))
     return found
@@ -156,7 +160,7 @@ def not_addressed_findings(outcomes: Sequence[FeedbackOutcome], asked: Sequence[
         Finding(
             Severity.MAJOR, f"{o.id} not addressed: {o.evidence}",
             f"Judged not addressed: {o.evidence}\n\n{_flat(refs[o.id].text, MAX_REQUEST_CHARS)}",
-            "feedback", feedback=refs[o.id],
+            "feedback", feedback=replace(refs[o.id], retake=True),  # it was taken before: it is asked about
         )  # fmt: skip
         for o in outcomes
         if not o.addressed and o.id in refs
