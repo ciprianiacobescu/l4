@@ -113,7 +113,9 @@ commit sha followed by a comment naming the ref (`@<sha> # v0.3.0`). `harness.co
 `.l4/bin/` holds nothing. `--harness-ref REF` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with
 `git ls-remote <repository> REF` when the file is written, so the sha is fixed and the comment says which release it
 was; a ref that resolves to nothing is exit 2. `l4 upgrade --harness-ref REF` or `--harness-commit SHA` rewrites the
-`uses:` line, and the `commit` input of a copy of the action (source `repository`), and changes nothing else.
+`uses:` line, and the `commit` input of a copy of the action (source `repository`); in copy mode it also refreshes
+`.github/actions/l4/action.yml` from the copy the running `l4` ships and reports it (`changed
+.github/actions/l4/action.yml`); it changes nothing else.
 Doctor CFG-006 checks that the pin is a 40-hex sha and that the two agree. Dependabot reads the `uses:` line and
 proposes a newer release tag as a pull request.
 
@@ -189,8 +191,21 @@ base-branch rule. Its steps are: checkout; the base-branch checkout on other bra
 `uses: <owner>/<repo>/.github/actions/l4@<sha> # <ref>`; `l4 doctor --ci --fix`; `l4 plan --sweep`; `l4 run`;
 `l4 status`; the upload of `.l4-out`; and, on a hosted runner, the CLI cache save step (§16.2). It MUST NOT write
 `.l4/bin/l4`, `.l4/bin/l4-setup` or `harness.commit`: the `uses:` sha is the only pin. `--action-copy` writes the
-action under `.github/actions/l4` and uses it with source `repository`; `--dependabot` adds or merges
-`.github/dependabot.yml` for `github-actions`. `l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
+action under `.github/actions/l4` and uses it with source `repository`; the copy is the one the running `l4` ships
+(`src/l4/ci/action/action.yml`, byte-identical to `.github/actions/l4/action.yml`, a test holds them equal), so it works
+from an installed `l4` with no git checkout, and `--harness PATH` copies from that checkout instead; `--dependabot` adds or merges
+`.github/dependabot.yml` for `github-actions`; together with `--action-copy` it is exit 2 with a one-line reason (Dependabot
+moves `uses:` pins, and in copy mode the pin is the `commit:` input, which it cannot move). The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []`
+unless `--runner-tag TAG` (repeatable) names a self-hosted one, and `forge.token_env: GITHUB_TOKEN` (the workflow's own
+token) unless `--forge-token-env NAME` is given. When the default role chains name a profile that cannot log in on a hosted
+runner (a `subscription` profile of `codex`, whose login is a stored local file; `claude-code` takes
+`CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets), init MUST print a `todo:` line (and write a
+`# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents. The
+`schedule:` trigger of both GitHub workflow forms is `ci.schedule` (a cron string, default `"*/30 * * * *"`; `null`
+leaves the trigger out), re-rendered by `l4 upgrade`. The upload of `.l4-out` (the artifact `l4-out`: prompts and agent
+transcripts, secrets masked) is a step of both forms only while `ci.upload_artifacts` is true (the default); on a public
+repository any signed-in user can download the artifact, so it is set to false there.
+`l4 doctor` MUST check the pin (CFG-006) and report whether an `l4` is
 on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `fetched` or `action` (§3.2).
 
 **L4-ACT-005** `l4 init` and `l4 upgrade` MUST accept `--harness-ref REF`: REF is resolved once with
@@ -264,8 +279,8 @@ of the harness package.
 
 | Command | Purpose | Side effects |
 |---|---|---|
-| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file (L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
-| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input) | writes files (§1) |
+| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
+| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
 | `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents |
@@ -710,7 +725,7 @@ ci:
   max_parallel_units: 2
   time_budget: auto                # auto (from platform limits / job timeout) | duration
   soft_deadline_margin: 20m
-  runner_tags: [agentic]           # GitLab
+  runner_tags: [agentic]           # GitLab; GitHub: [] = a GitHub-hosted runner (what `l4 init --action` writes)
   continuation: dispatch           # dispatch | schedule-only
   self_provision: auto             # auto | true | false : doctor --fix installs missing user-local tools (L4-DOC-002);
                                    # auto = false only when the platform reports a disposable environment
@@ -719,6 +734,10 @@ ci:
                                    # the variable L4_SELF_PROVISION (true|false|auto) overrides this key when set (L4-PRV-019)
   github_environment: l4           # the GitHub Environment whose secrets the generated job reads (forge token, agent
                                    # credentials); null: the job names none (L4-PRV-027)
+  schedule: "*/30 * * * *"         # the cron of the generated GitHub workflow's `schedule:` trigger; null: no
+                                   # schedule. `l4 upgrade` re-renders the workflow, so change it here (L4-ACT-004)
+  upload_artifacts: true           # false: the generated GitHub workflows have no upload-artifact step (a public
+                                   # repository: any signed-in user can download the `l4-out` artifact)
 
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)
@@ -2640,7 +2659,9 @@ A fix unit all of whose consumed blocking findings have `source: "feedback"` is 
 `feedback.max_rounds` (§3.2; default 5, 0 turns taking off), raised by `budget.extended{feedback_rounds}` (L4-IMP-013).
 On a FAIL whose fix unit would be a feedback fix unit and whose feedback limit is used up, the unit goes to `escalated`
 (exit 13, label `l4:escalated`) with `phase.changed{reason: "feedback_rounds_exhausted"}` and the note `feedback round
-limit reached (N)` in the sticky comment; `l4 resume --extend-feedback-rounds N` or the resume label continues it. A fix
+limit reached (N)` in the sticky comment; `l4 resume --extend-feedback-rounds N` or the resume label continues it, and the
+comment's resume line says so (`--extend-feedback-rounds N`, "one more feedback round per label event"), not the fix-round
+wording of a fix-limit escalation. A fix
 unit that also consumes a non-feedback finding (a red repository CI job, a gate failure) is a normal fix round, counted
 by `max_fix_rounds`, and its feedback items are still marked taken.
 
@@ -3199,7 +3220,7 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
   `persist-credentials: false`); the base-branch checkout on other branches; the setup action
   `uses: <owner>/<repo>/.github/actions/l4@<sha> # <ref>` (`id: l4`; source `repository` adds `source`, `repository`,
   `commit` and `ssh-key: ${{ secrets.L4_HARNESS_SSH_KEY }}`); `l4 doctor --ci --fix`; `l4 plan --sweep`; `l4 run`;
-  `l4 status`; the upload of `.l4-out`; and, on a hosted runner, `actions/cache/save` for the agent CLIs. The save step
+  `l4 status`; the upload of `.l4-out` (unless `ci.upload_artifacts` is false); and, on a hosted runner, `actions/cache/save` for the agent CLIs. The save step
   runs on the base branch, after success, when `steps.l4.outputs.clis-cache-hit != 'true'`, and reads
   `path: ${{ steps.l4.outputs.clis-cache-paths }}` and `key: ${{ steps.l4.outputs.clis-cache-key }}`.
   - **Why the paths come from the action.** A cache is versioned by its exact path list, so a save with a literal list

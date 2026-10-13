@@ -287,6 +287,14 @@ def test_help_has_one_example_per_kind(ctx: Ctx):
     assert "only edit feedback.md" in flat and "only edits feedback.md" in flat and "commit and push" in flat
 
 
+def test_help_says_a_rename_is_behaviour_not_refactor(ctx: Ctx):
+    for words in (["feedback", "--help"], ["feedback", "add", "--help"]):
+        assert main(words, environ=ctx.environ) == 0
+        flat = " ".join(ctx.capsys.readouterr().out.split())
+        assert "A rename, or any change the existing tests would have to follow, is `behaviour`" in flat, words
+        assert "refactor puts test files back, so the attempt fails" in flat, words
+
+
 # --- after the merge (human-feedback 5.1, L4-FBK-010) -------------------------------------------------------------
 
 

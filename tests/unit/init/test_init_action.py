@@ -137,11 +137,10 @@ def test_copy_without_an_action_in_the_harness_is_exit_2(target: Path, git_envir
 
 
 def test_the_commit_to_commit_lists_the_workflow_and_the_action(target: Path, git_environ, copy_harness, capsys):
-    flags = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA, "--dependabot")
+    flags = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA)
     assert init(target, git_environ, *flags, "--harness", str(copy_harness)) == 0
     err = capsys.readouterr().err
     assert WORKFLOW in err.split("then commit", 1)[1] and ACTION in err.split("then commit", 1)[1]
-    assert DEPENDABOT in err.split("then commit", 1)[1]
     assert ".l4/bin/l4 setup" not in err and "uv tool install" in err  # a local l4 is the person's own
 
 
@@ -231,3 +230,96 @@ def test_the_written_workflow_passes_actionlint(target: Path, git_environ, copy_
         argv = ["actionlint", "-no-color", "-config-file", str(fresh / "actionlint.yaml"), str(fresh / WORKFLOW)]
         done = subprocess.run(argv, capture_output=True, text=True, check=False, cwd=fresh)
         assert done.returncode == 0, done.stdout + done.stderr
+
+
+# --- a config that runs on a GitHub-hosted runner (baseline gap 3) -------------------------------------------------
+
+
+def test_an_action_adoption_is_hosted_and_uses_the_workflow_token(target: Path, git_environ):
+    assert init(target, git_environ, *BASE) == 0
+    written = yaml.safe_load((target / ".l4/config.yaml").read_text())
+    assert written["ci"]["runner_tags"] == [] and written["forge"]["token_env"] == "GITHUB_TOKEN"
+    cfg = load_config(target)
+    assert cfg.ci.runner_tags == [] and cfg.forge.token_env == "GITHUB_TOKEN"
+    text = (target / WORKFLOW).read_text()
+    assert "runs-on: ubuntu-24.04" in text and "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text
+    assert "self-provision" in text and "clis: none" not in text
+
+
+def test_runner_tags_and_a_token_variable_are_the_persons_to_set(target: Path, git_environ):
+    assert init(target, git_environ, *BASE, "--runner-tag", "agentic", "--runner-tag", "big",
+                "--forge-token-env", "MY_TOKEN") == 0  # fmt: skip
+    cfg = load_config(target)
+    assert cfg.ci.runner_tags == ["agentic", "big"] and cfg.forge.token_env == "MY_TOKEN"
+    text = (target / WORKFLOW).read_text()
+    assert 'runs-on: ["self-hosted", "agentic", "big"]' in text and "MY_TOKEN: ${{ secrets.MY_TOKEN }}" in text
+
+
+@pytest.mark.parametrize("flags", [("--runner-tag", "x"), ("--forge-token-env", "X")])
+def test_runner_tag_and_token_env_need_action(target: Path, git_environ, capsys, flags):
+    assert init(target, git_environ, "--harness-repo", "git@github.com:o/h.git", "--harness-commit", SHA, *flags) == 2
+    assert flags[0] in capsys.readouterr().err and not (target / ".l4").exists()
+
+
+def test_a_bad_token_variable_name_is_exit_2(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE, "--forge-token-env", "not a name") == 2
+    assert not (target / ".l4/config.yaml").exists()
+
+
+def test_the_default_codex_profile_gets_a_todo_naming_it(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE) == 0
+    err = capsys.readouterr().err
+    todo = next(line for line in err.splitlines() if line.startswith("todo: profile codex"))
+    assert "roles.implementer" in todo and "CODEX_API_KEY" in todo
+    assert "profile claude-code" not in err  # CLAUDE_CODE_OAUTH_TOKEN takes a subscription token as a secret
+    assert "# TODO: profile codex" in (target / ".l4/config.yaml").read_text()
+
+
+def test_no_login_todo_on_a_self_hosted_runner(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE, "--runner-tag", "agentic") == 0
+    assert "profile codex" not in capsys.readouterr().err
+
+
+def test_which_profiles_can_log_in_on_a_hosted_runner():
+    from l4.agents.credentials import hosted_login_problem
+
+    assert hosted_login_problem("codex", "subscription") and hosted_login_problem("codex", None)
+    assert hosted_login_problem("codex", "api_key") is None
+    assert hosted_login_problem("claude-code", "subscription") is None
+    assert hosted_login_problem("kiro-cli", "subscription") is None
+    assert hosted_login_problem("opencode", None) is None
+
+
+# --- copy mode from an installed l4, and its upgrade (baseline gap 6) -----------------------------------------------
+
+
+COPY_FLAGS = ("--action", "--action-copy", "--action-repo", "o/harness", "--harness-commit", SHA)
+
+
+def test_copy_needs_no_checkout_of_the_harness(target: Path, git_environ, monkeypatch):
+    """An installed `l4` is not a git checkout: the action comes from the package."""
+    from l4.init.action import packaged_action
+
+    def no_checkout(harness):
+        raise AssertionError("the harness checkout was looked for")
+
+    monkeypatch.setattr("l4.init.init.harness_root", no_checkout)
+    assert init(target, git_environ, *COPY_FLAGS) == 0
+    assert (target / ACTION).read_bytes() == packaged_action()
+    assert (target / ACTION).stat().st_mode & 0o777 == 0o644
+    assert yaml.safe_load((target / WORKFLOW).read_text())["jobs"]["l4"]["steps"][2]["uses"] == "./.github/actions/l4"
+
+
+def test_copy_refuses_an_existing_action_without_force(target: Path, git_environ, capsys):
+    (target / ".github/actions/l4").mkdir(parents=True)
+    (target / ACTION).write_text("name: mine\n")
+    assert init(target, git_environ, *COPY_FLAGS) == 2
+    assert ACTION in capsys.readouterr().err and (target / ACTION).read_text() == "name: mine\n"
+
+
+def test_dependabot_with_the_copy_is_exit_2_in_one_line(target: Path, git_environ, capsys):
+    """Dependabot moves `uses:` pins; in copy mode the pin is the `commit:` input, which it cannot move."""
+    assert init(target, git_environ, *COPY_FLAGS, "--dependabot") == 2
+    err = capsys.readouterr().err.strip()
+    assert len(err.splitlines()) == 1 and "--dependabot" in err and "--action-copy" in err and "commit:" in err
+    assert not (target / ".l4").exists() and not (target / ".github").exists()

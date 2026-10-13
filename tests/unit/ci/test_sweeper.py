@@ -790,6 +790,16 @@ def test_a_non_member_label_on_an_escalated_unit_is_refused_like_on_a_halted_one
     assert "not a member" in actions[0].detail and "escalated" not in actions[0].detail
 
 
+def test_the_note_around_a_refusal_at_the_feedback_limit_names_feedback_rounds(
+    halted, use_fake_gitlab, tdd_repo, monkeypatch
+):
+    set_label(use_fake_gitlab, 108, STRANGER)
+    sweep_escalated(tdd_repo, monkeypatch, fix_round=99, halt_reason="feedback_rounds_exhausted", feedback_used=5)
+    body = use_fake_gitlab.notes[1][-1]["body"]
+    assert "--extend-feedback-rounds N" in body and "one more feedback round per label event" in body
+    assert "--extend-fix-rounds" not in body
+
+
 def test_the_resume_commit_carries_l4_run_and_skip_ci(halted, use_fake_gitlab):
     set_label(use_fake_gitlab, 100, MEMBER)
     plan_sweep(halted)

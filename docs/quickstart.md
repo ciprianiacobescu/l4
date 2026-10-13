@@ -249,15 +249,30 @@ repository:
      ```bash
      l4 init --ci github --action --action-copy --harness-ref v0.3.0
      ```
-     This writes the action under `.github/actions/l4` and a workflow that uses it with the harness's SSH URL.
+     This writes the action under `.github/actions/l4` (the copy your `l4` ships, so no checkout of the harness is
+     needed) and a workflow that uses it with the harness's SSH URL. `l4 upgrade` refreshes that copy too.
   2. Add a read-only deploy key to the harness repository (Settings > Deploy keys), and store its private half as the
      environment secret `L4_HARNESS_SSH_KEY` in the environment `l4`. Use one key per consumer, so that a key can be
      removed on its own.
 
+`l4 init --action` writes a config for a GitHub-hosted runner: `ci.runner_tags: []` and `forge.token_env: GITHUB_TOKEN`
+(the workflow's own token, so there is no forge secret to create). Pass `--runner-tag TAG` (repeatable) for a self-hosted
+runner and `--forge-token-env NAME` to use a token of your own. A hosted runner has no stored login: `codex` on a
+subscription cannot log in there, so init prints a `todo:` line naming the profile; give it `auth: api_key` and the
+secret `CODEX_API_KEY`, or name another profile in the role (`claude-code` takes `CLAUDE_CODE_OAUTH_TOKEN`).
+
+The workflow also runs on a schedule, every 30 minutes by default. On a private repository that costs about 1,400
+runner-minutes a month even when idle: set `ci.schedule` in `.l4/config.yaml` to a slower cron (for example
+`"0 * * * *"`) or to `null` for no schedule, then run `l4 upgrade`, which re-renders the workflow.
+
+On a **public** repository, set `ci.upload_artifacts: false` in `.l4/config.yaml`, and run
+`l4 upgrade`: the `l4-out` artifact (prompts and agent transcripts, secrets masked) is downloadable by any signed-in
+user, and with the key false the workflow has no upload step.
+
 Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
-  release arrives as a pull request on the `uses:` line. It merges into an existing file.
+  release arrives as a pull request on the `uses:` line. It merges into an existing file. It does not combine with `--action-copy` (exit 2): in copy mode the pin is the `commit:` input, which Dependabot cannot move; use `l4 upgrade --harness-ref`.
 - `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand: it re-renders the whole
   workflow from the config with the template of the harness that runs it, so run it with the target version, for
   example `uvx --from git+https://github.com/<owner>/<repo>@<sha> l4 upgrade --harness-commit <sha>`. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.

@@ -573,7 +573,8 @@ class Sweeper:
         state = snapshot.state
         stopped = (
             halted_section(
-                state.phase, state.halt_reason or "see the ledger", ref.id, f"{self.cfg.forge.labels_prefix}resume"
+                state.phase, state.halt_reason or "see the ledger", ref.id, f"{self.cfg.forge.labels_prefix}resume",
+                feedback=feedback_rounds_exhausted(state),
             )
             if state.phase in (Phase.HALTED.value, Phase.ESCALATED.value)
             else None

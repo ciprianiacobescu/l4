@@ -59,6 +59,16 @@ def test_the_escalated_section_says_how_the_unit_goes_on():
     assert "Neither the label" not in text
 
 
+def test_the_escalated_section_at_the_feedback_limit_names_feedback_rounds():
+    from l4.ci.resume_label import halted_section
+
+    text = halted_section("escalated", "feedback_rounds_exhausted", "openspec:x", "l4:resume", feedback=True)
+    assert text.startswith("### Escalated: feedback_rounds_exhausted")
+    assert "adds the label `l4:resume`" in text and "one more feedback round per label event" in text
+    assert "l4 resume --unit openspec:x --reason TEXT --extend-feedback-rounds N" in text
+    assert "fix round" not in text and "--extend-fix-rounds" not in text
+
+
 def test_the_spec_says_the_label_gives_one_fix_round_to_an_escalated_unit():
     from pathlib import Path
 

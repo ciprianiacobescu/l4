@@ -83,6 +83,7 @@ from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
 from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
 from l4.state.breaker import consecutive_verifier_errors
+from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED
 from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
@@ -758,11 +759,11 @@ class Orchestrator:
     def _events(self) -> list[LedgerEvent]:
         return self._ledger().events
 
-    def _stopped_section(self, phase: str, reason: str) -> str:
+    def _stopped_section(self, phase: str, reason: str, *, feedback: bool = False) -> str:
         """Redacted, like the capacity section: the reason can quote a test's error line, and the note goes to the
         forge as it is."""
         s = self.services
-        section = halted_section(phase, reason, s.ref.id, f"{self.cfg.forge.labels_prefix}resume")
+        section = halted_section(phase, reason, s.ref.id, f"{self.cfg.forge.labels_prefix}resume", feedback=feedback)
         return s.app.redactor.redact_text(section)
 
     def _halt(self, reason: str) -> ExitCode:
@@ -806,7 +807,8 @@ class Orchestrator:
         escalation = self._ctx.shared.pop("escalation", None)  # (reason, note): the feedback limit (L4-FBK-006)
         if trigger is Trigger.VERIFY_FAIL_EXHAUSTED:
             why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
-            self._notes = (self._stopped_section("escalated", why), *(self._notes or ()))
+            at_feedback = bool(escalation) and escalation[0] == FEEDBACK_ROUNDS_EXHAUSTED
+            self._notes = (self._stopped_section("escalated", why, feedback=at_feedback), *(self._notes or ()))
         edge = self._go(trigger, **({"reason": escalation[0]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
             why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"

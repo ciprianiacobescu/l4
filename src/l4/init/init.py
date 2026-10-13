@@ -23,6 +23,7 @@ import yaml
 from pydantic import ValidationError
 
 from l4 import __version__
+from l4.agents.credentials import hosted_login_problem
 from l4.buildinfo import github_slug, harness_commit, harness_origin
 from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH, ActionPin, render_github_action_ci, render_github_ci
 from l4.ci.render import (
@@ -41,7 +42,7 @@ from l4.config.schema import HarnessCfg, L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.init.action import remote_url, resolve_ref
+from l4.init.action import packaged_action, remote_url, resolve_ref
 from l4.init.ciedit import merge_include
 from l4.init.dependabot import DEPENDABOT_RELPATH, merge_dependabot
 from l4.init.ecosystem import M0_GATES, Proposal, detect_python, propose_gates
@@ -58,6 +59,31 @@ MAX_GITIGNORE_BYTES = 1024 * 1024
 GATES = M0_GATES  # the gates of a repository without a readable pyproject.toml (L4-GAT-003)
 
 
+DEFAULT_PROFILES: dict[str, dict[str, str]] = {
+    "codex": {"adapter": "codex", "vendor": "openai", "auth": "subscription"},
+    "claude-code": {"adapter": "claude-code", "vendor": "anthropic", "auth": "subscription"},
+}
+DEFAULT_ROLES: dict[str, list[str]] = {"implementer": ["codex"], "judges": ["claude-code"]}
+HOSTED_FORGE_TOKEN = "GITHUB_TOKEN"  # the workflow's own token: an action adoption's default (adoption-kit D6)
+
+
+def hosted_login_todos(
+    profiles: Mapping[str, Mapping[str, str]] = DEFAULT_PROFILES, roles: Mapping[str, list[str]] = DEFAULT_ROLES
+) -> tuple[str, ...]:
+    """One todo per profile of a role chain that cannot log in on a GitHub-hosted runner (see
+    `l4.agents.credentials.hosted_login_problem`): the person's agents are theirs to choose, so it only says what."""
+    todos = []
+    seen: set[str] = set()
+    for role, chain in roles.items():
+        for name in chain:
+            profile = profiles.get(name, {})
+            problem = None if name in seen else hosted_login_problem(profile.get("adapter"), profile.get("auth"))
+            seen.add(name)
+            if problem:
+                todos.append(f"profile {name} (roles.{role}) cannot log in on a GitHub-hosted runner: {problem}")
+    return tuple(todos)
+
+
 def render_config(
     commit: str | None,
     ci: str = "gitlab",
@@ -66,6 +92,9 @@ def render_config(
     proposal: Proposal | None = None,
     repository: str | None = None,
     delivery: str | None = None,
+    runner_tags: tuple[str, ...] | None = None,
+    token_env: str | None = None,
+    todos: tuple[str, ...] = (),
 ) -> str:
     """The M0 pair of SPEC 3.2: Codex implements, Claude Code judges, a different vendor each. Models are left to the
     CLIs' defaults; set `model` and `options.reasoning_effort` on a profile to pin them. `ci`: the platform, or `both`
@@ -73,7 +102,9 @@ def render_config(
     (the repository ignores the paths memory would commit, M1.8 A5). `proposal`: the gates read from pyproject.toml,
     with a `# TODO:` line for each assumption (M1.8 A2, L4-INS-003); without it the M0 gates. `repository`: the
     harness is fetched at run time from that URL at `commit` (L4-GHP-010), not vendored. `delivery: action`: the
-    harness comes from the setup action, whose pin is the workflow's `uses:` line: no version and no commit here."""
+    harness comes from the setup action, whose pin is the workflow's `uses:` line: no version and no commit here.
+    `runner_tags` (written as `ci.runner_tags`, `()` meaning GitHub-hosted) and `token_env` (`forge.token_env`) are
+    written only when given; `todos` are extra `# TODO:` lines at the top."""
     platform = "auto" if ci == "both" else ci
     pins = (
         {"delivery": "action"}
@@ -85,16 +116,13 @@ def render_config(
         "harness": pins,
         "spec": {"frameworks": ["openspec"]},
         "gates": proposal.gates if proposal else GATES,
-        "profiles": {
-            "codex": {"adapter": "codex", "vendor": "openai", "auth": "subscription"},
-            "claude-code": {"adapter": "claude-code", "vendor": "anthropic", "auth": "subscription"},
-        },
-        "roles": {"implementer": ["codex"], "judges": ["claude-code"]},
-        "forge": {"type": platform},
-        "ci": {"platform": platform},
+        "profiles": DEFAULT_PROFILES,
+        "roles": DEFAULT_ROLES,
+        "forge": {"type": platform, **({"token_env": token_env} if token_env else {})},
+        "ci": {"platform": platform, **({"runner_tags": list(runner_tags)} if runner_tags is not None else {})},
         **({} if memory else {"memory": {"enabled": False}}),
     }
-    todos = "".join(f"# TODO: {todo}\n" for todo in (proposal.todos if proposal else ()))
+    todos = "".join(f"# TODO: {todo}\n" for todo in (*todos, *(proposal.todos if proposal else ())))
     return (
         "# Written by `l4 init`; see docs/SPEC.md 3.2 for every key.\n" + todos + yaml.safe_dump(body, sort_keys=False)
     )
@@ -202,7 +230,10 @@ def _fetched_pins(repository: str, commit: str) -> tuple[str, str]:
 
 
 def _action_file(harness: Path | None) -> bytes:
-    """The setup action of the harness checkout (`--action-copy`): the consumer keeps its own copy of it."""
+    """The setup action for `--action-copy`: the consumer keeps its own copy of it. `--harness PATH` names a checkout
+    to copy it from; without it the copy is the one the running `l4` ships (no checkout is needed)."""
+    if harness is None:
+        return packaged_action()
     root = harness_root(harness)
     relative = f"{ACTION_PATH}/action.yml"
     try:
@@ -247,11 +278,15 @@ def plan_init(
     fetched: tuple[str, str] | None = None,
     action: ActionPin | None = None,
     dependabot: bool = False,
+    runner_tags: tuple[str, ...] = (),
+    token_env: str = HOSTED_FORGE_TOKEN,
 ) -> InitPlan:
     """Everything init will write, or an exit-2 refusal naming what is in the way. `fetched`: (repository, commit) of a
     harness fetched at run time (L4-GHP-010): the fetched shim, and no vendored copy. `action`: the harness comes from
     the setup action (L4-ACT-004): the config, the action-form workflow, the action itself with `action.copy`, and no
-    `.l4/bin/` file at all; `dependabot` adds or merges `.github/dependabot.yml`."""
+    `.l4/bin/` file at all; `dependabot` adds or merges `.github/dependabot.yml`. An action adoption runs on a
+    GitHub-hosted runner unless `runner_tags` are given, and uses the workflow's own `GITHUB_TOKEN` unless `token_env`
+    says otherwise; a profile that cannot log in there is named in a todo."""
     vendor: VendorSource | None = None
     repository: str | None = None
     if action is not None:
@@ -263,9 +298,11 @@ def plan_init(
         repository, commit = _fetched_pins(*fetched)
     ignored = ignored_harness_paths(repo, environ)  # `.serena/` in .gitignore: neither the seed nor lessons commit
     proposal = propose_gates(detect_python(repo))
+    login_todos = hosted_login_todos() if action is not None and not runner_tags else ()
     config_text = render_config(
         None if action else commit, ci, memory=not ignored, proposal=proposal, repository=repository,
-        delivery="action" if action else None,
+        delivery="action" if action else None, runner_tags=runner_tags if action else None,
+        token_env=token_env if action else None, todos=login_todos,
     )  # fmt: skip
     cfg = loaded_config(config_text)
     files = [PlannedFile(str(CONFIG_RELPATH), config_text.encode(), 0o644)]
@@ -318,7 +355,7 @@ def plan_init(
         in_the_way,
         notes,
         marker,
-        proposal.todos,
+        (*login_todos, *proposal.todos),
     )
 
 
@@ -469,7 +506,7 @@ def _action_notes(pin: ActionPin) -> tuple[str, ...]:
         f"commit {WORKFLOW_RELPATH} and .l4/, push, then run `l4 setup github` (with an `l4` of your own, see the "
         "last note): it "
         "creates the environment `l4` whose secrets the job reads (agent keys with `--secret NAME=ENVVAR`; the forge "
-        "token is L4_FORGE_TOKEN there, or the workflow's own GITHUB_TOKEN with `forge.token_env: GITHUB_TOKEN`)",
+        "token is the workflow's own GITHUB_TOKEN, `forge.token_env: GITHUB_TOKEN`, so there is none to set)",
         who,
         f"there is no .l4/bin/l4: install one to run commands here, `uv tool install git+https://github.com/"
         f"{pin.repository}@{pin.sha}`",
@@ -493,11 +530,14 @@ def run_init(
     action_copy: bool = False,
     dependabot: bool = False,
     harness_ref: str | None = None,
+    runner_tag: tuple[str, ...] = (),
+    forge_token_env: str | None = None,
 ) -> ExitCode:
     if harness_ref is not None and harness_commit_pin is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref and --harness-commit exclude each other")
     if not action:
-        extras = (("--action-repo", action_repo), ("--action-copy", action_copy), ("--dependabot", dependabot))
+        extras = (("--action-repo", action_repo), ("--action-copy", action_copy), ("--dependabot", dependabot),
+                  ("--runner-tag", runner_tag), ("--forge-token-env", forge_token_env))
         for flag, used in extras:
             if used:
                 raise L4Exit(ExitCode.USAGE_ERROR, f"init: {flag} needs --action")
@@ -505,6 +545,12 @@ def run_init(
             raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref needs --harness-repo URL or --action")
     pin: ActionPin | None = None
     if action:
+        if dependabot and action_copy:
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                "init: --dependabot and --action-copy exclude each other: Dependabot moves `uses:` pins, and in copy "
+                "mode the pin is the `commit:` input, which it cannot move (use `l4 upgrade --harness-ref`)",
+            )
         if ci != "github":
             raise L4Exit(ExitCode.USAGE_ERROR, "init: --action needs --ci github")
         if vendor:
@@ -533,7 +579,8 @@ def run_init(
         fetched = (harness_repo, fetched_pin)
     plan = plan_init(
         app.repo, app.environ, force=force, harness=harness, ci=ci or "gitlab", ci_edit=not no_ci_edit, fetched=fetched,
-        action=pin, dependabot=dependabot,
+        action=pin, dependabot=dependabot, runner_tags=tuple(runner_tag),
+        token_env=forge_token_env or HOSTED_FORGE_TOKEN,
     )  # None was refused  # fmt: skip
     apply_plan(app.repo, plan)
     for planned in plan.files:

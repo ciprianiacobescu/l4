@@ -81,13 +81,25 @@ github-parity's triggers, permissions, environment, concurrency, timeout and bas
 4. `l4 plan --sweep`;
 5. `l4 run`;
 6. `l4 status`;
-7. upload `.l4-out`.
+7. upload `.l4-out` (unless `ci.upload_artifacts` is false).
 
 Further rules:
 - It MUST NOT write `.l4/bin/l4`, `.l4/bin/l4-setup` or `harness.commit`. The `uses:` sha is the only pin.
 - `--action-copy` writes the action under `.github/actions/l4` and uses it with source `repository`, for public
-  callers.
-- `--dependabot` adds or merges `.github/dependabot.yml` for `github-actions`.
+  callers. The copy is the one the running `l4` ships (`src/l4/ci/action/action.yml`, byte-identical to
+  `.github/actions/l4/action.yml`), so it works from an installed `l4` with no git checkout; `l4 upgrade` in copy mode
+  refreshes it from the same copy and reports it.
+- `--dependabot` adds or merges `.github/dependabot.yml` for `github-actions`. With `--action-copy` it is exit 2
+  with a one-line reason: Dependabot moves `uses:` pins, and in copy mode the pin is the `commit:` input, which it
+  cannot move.
+- The config it writes MUST run on a GitHub-hosted runner: `ci.runner_tags: []` unless `--runner-tag TAG` (repeatable)
+  is given, and `forge.token_env: GITHUB_TOKEN` unless `--forge-token-env NAME` is given. A default role-chain profile
+  that cannot log in on a hosted runner (a `subscription` profile of `codex`) is named in a `todo:` line and a
+  `# TODO:` config line; the person's agents are not changed.
+- The `schedule:` trigger is `ci.schedule`: a cron string (default `"*/30 * * * *"`) or `null` for no trigger; it is
+  rendered into both GitHub workflow forms and moved by `l4 upgrade`.
+- The upload of `.l4-out` (the artifact `l4-out`) is a step only while `ci.upload_artifacts` is true (the default); a
+  public repository sets it to false, because any signed-in user can download the artifact.
 - `l4 doctor` MUST check that the `uses:` line names a 40-hex sha and, for source `repository`, that its `commit`
   input matches it.
 

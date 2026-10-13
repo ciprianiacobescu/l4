@@ -99,6 +99,28 @@ def credential_secrets(cfg: L4Config) -> list[str]:
     return sorted(names)
 
 
+UPLOAD_STEP = """\
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: l4-out
+          path: .l4-out/
+          retention-days: 7"""
+
+
+def _upload_step(cfg: L4Config) -> str:
+    """The step that uploads `.l4-out` (prompts and agent transcripts, secrets masked), or nothing when
+    `ci.upload_artifacts` is false: on a public repository any signed-in user can download the artifact."""
+    return UPLOAD_STEP if cfg.ci.upload_artifacts else ""
+
+
+def _schedule_block(cfg: L4Config) -> str:
+    """The `schedule:` trigger from `ci.schedule` (the cron as a JSON string), or nothing when it is null."""
+    if cfg.ci.schedule is None:
+        return ""
+    return f"  schedule:\n    - cron: {json.dumps(cfg.ci.schedule)}"
+
+
 def _environment_block(name: str | None) -> str:
     if name is None:
         return ""
@@ -178,6 +200,8 @@ def render_github_ci(cfg: L4Config) -> str:
         "RUNS_ON": runs_on,
         "TOKEN_ENV": cfg.forge.token_env,  # an environment variable name: the schema admits letters, digits, _
         "DOCTOR": "doctor --ci --fix" if hosted else doctor_command(cfg, "github"),
+        "SCHEDULE": _schedule_block(cfg),
+        "UPLOAD": _upload_step(cfg),
         "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
         "CREDENTIAL_ENV": "\n".join(f"      {name}: ${{{{ secrets.{name} }}}}" for name in credential_secrets(cfg)),
         "HARNESS_KEY": _harness_key_step(cfg),
@@ -281,6 +305,8 @@ def render_github_action_ci(cfg: L4Config, pin: ActionPin) -> str:
             "RUNS_ON": json.dumps(["self-hosted", *tags]) if tags else HOSTED_RUNNER,
             "TOKEN_ENV": cfg.forge.token_env,
             "DOCTOR": "doctor --ci --fix" if hosted else doctor_command(cfg, "github"),
+            "SCHEDULE": _schedule_block(cfg),
+            "UPLOAD": _upload_step(cfg),
             "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
             "CREDENTIAL_ENV": "\n".join(f"      {n}: ${{{{ secrets.{n} }}}}" for n in credential_secrets(cfg)),
             "ACTION_STEP": _action_step(cfg, pin, hosted=hosted),

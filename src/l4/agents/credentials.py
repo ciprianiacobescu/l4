@@ -33,6 +33,18 @@ def credential_variable(adapter: str | None, auth: str | None) -> str | None:
     return None
 
 
+def hosted_login_problem(adapter: str | None, auth: str | None) -> str | None:
+    """Why a profile cannot log in on a GitHub-hosted runner, or None when it can. A hosted runner is a fresh machine
+    with no stored login, so the credential must arrive as a CI secret, in `credential_variable`'s variable: codex on a
+    subscription has none (its ChatGPT login is a file under ~/.codex), the others do."""
+    if (auth or "subscription") == "subscription" and adapter == "codex":
+        return (
+            "its subscription login is a stored local file (~/.codex) that a GitHub-hosted runner does not have; "
+            "use auth: api_key (the secret CODEX_API_KEY) or name another profile in the role"
+        )
+    return None
+
+
 def credential_in(environ: Mapping[str, str], variable: str | None) -> str | None:
     """The value of `variable` in `environ`, or None when it is unset or blank."""
     value = (environ.get(variable) or "").strip() if variable else ""
