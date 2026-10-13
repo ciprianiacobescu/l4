@@ -40,6 +40,13 @@ def is_hook_refusal(stderr: str) -> bool:
     return any(marker in low for marker in _HOOK_REFUSAL)
 
 
+def _unit_of(branch: str) -> str:
+    """`openspec:x` for the branch `l4/openspec/x` (the last two segments are framework and name); `<unit>` when the
+    branch is not shaped like that."""
+    parts = branch.split("/")
+    return f"{parts[-2]}:{parts[-1]}" if len(parts) >= 3 else "<unit>"
+
+
 def explain_push_failure(
     exc: GitError, *, branch: str, token_env: str, environ: Mapping[str, str], redact: Callable[[str], str]
 ) -> PushFailed:
@@ -49,7 +56,8 @@ def explain_push_failure(
     if isinstance(exc, PushRejected) and "stale info" in exc.stderr:
         hint = (
             "the unit branch was deleted or moved on the forge since this run last saw it; it is never recreated "
-            "or overwritten (the harness never forces). A person decides: restore the branch or rerun the unit"
+            "or overwritten (the harness never forces). A person decides: restore the branch, or start the unit over "
+            f"from the base with `l4 restart --unit {_unit_of(branch)} --reason TEXT` (L4-OPS-009)"
         )
         return PushFailed(ExitCode.INTERNAL_ERROR, redact(f"{head}. {hint}"))
     if isinstance(exc, PushRejected):

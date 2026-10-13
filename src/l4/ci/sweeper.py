@@ -30,14 +30,20 @@ is not red on the base head either is recorded as `ci.failed` (with the end of i
 both as `ci.preexisting`, under the unit's lease and published to the lock ref; the next `l4 run` takes the edge. A
 green or running pipeline writes nothing, and a branch past H is left to the run. Once per H.
 
-The resume duty (M1.11, `l4 plan --sweep` only): a `halted` unit whose open MR carries `<prefix>resume` is resumed when
-a member set the label (`l4.ci.resume_label`: the forge's own record of who, Developer access or more, not the harness's
-user), once per label event (`unit.resumed{signal}`). An `escalated` unit whose fix rounds are used up is resumed the
-same way with `budget.extended{fix_rounds: 1}` (M1.13, W-C2): one more round per label event; one escalated at the
-feedback limit (`phase.changed` reason `feedback_rounds_exhausted`) gets `budget.extended{feedback_rounds: 1}` instead
-(L4-FBK-006). A refusal (a non-member,
-the bot) is said once per event: `resume.refused{signal, why}` in the pending ledger and a section of the MR's sticky
-note.
+The label duty (M1.11, L4-OPS-008, `l4 plan --sweep` only): a `halted`, `escalated` or `waiting_capacity` unit whose
+open MR carries `<prefix>retry` or `<prefix>resume` is retried (`l4.state.retry.retry_unit`: the phase decides what a
+retry does, a round added at a round limit included, L4-CI-004, L4-FBK-006), and a started unit whose open MR carries
+`<prefix>restart` is started over (`l4.state.restart.restart_unit`); `restart` is also read on the closed MR of an
+`abandoned` unit. A label counts when a member set it (`l4.ci.resume_label`: the forge's own record of who, Developer
+access or more, not the harness's user), once per label event (`unit.retried{signal}`, `unit.restarted{signal}`). When
+two operator labels are waiting, the newest event acts and the other is refused. A refusal (a non-member, the bot) is
+said once per event: `resume.refused{signal, why}` in the pending ledger, the text naming the command that works, and
+a section of the MR's sticky note.
+
+The closed-MR duty (L4-OPS-009, `l4 plan --sweep` only): a started, non-terminal unit whose newest MR is closed without
+a merge records `pr.closed{number}` and takes `pr_closed` (`abandoned`), with a note that names `l4 restart`; an
+`abandoned` unit whose newest MR is open again takes `pr_reopened`. An MR that is not the unit's (the ledger names
+another, or the unit was started over) is no evidence.
 
 The follow-up duty (`l4 plan --sweep` only, L4-FBK-010): a `merged` unit whose `feedback.md` on the base branch has
 takeable items and no open follow-up gets its follow-up unit `<name>-followup-<n>` (`l4.follow_up`: its own branch from
@@ -51,12 +57,20 @@ M1: forge-and-ci 2.51 (WIP-branch cleanup, deleting the archived refs), 2.53 (cl
 
 import logging
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from l4.ci.repo_ci import evaluate_ci, red_jobs, unfinished
-from l4.ci.resume_label import Refusal, ResumeSignal, halted_section, resume_refused_note, resume_signal
+from l4.ci.resume_label import (
+    Refusal,
+    ResumeSignal,
+    abandoned_section,
+    halted_section,
+    resume_refused_note,
+    resume_signal,
+    retry_label,
+)
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -83,7 +97,7 @@ from l4.postmerge import ArchiveResult, MergeDetector, MergeVerdict, PostMergeAr
 from l4.progress import SWEEP_TRACE_TYPES, FilteredTrace, ProgressTrace
 from l4.specs.base import Framework, UnitRef, parse_unit_id
 from l4.specs.providers import provider_for_unit, providers_for
-from l4.state.budget import LABEL_FEEDBACK_ROUNDS, LABEL_FIX_ROUNDS, feedback_rounds_exhausted, fix_rounds_exhausted
+from l4.state.budget import feedback_rounds_exhausted
 from l4.state.ledger import LedgerEvent, LedgerWriter, ledger_path
 from l4.state.lifecycle import Phase, Trigger, transition
 from l4.state.pending import PendingLedger, read_pending
@@ -97,10 +111,13 @@ from l4.vcs.push import LOCK_REF_PREFIX, PushRejected
 
 if TYPE_CHECKING:
     from l4.orchestrator import UnitRunResult
+    from l4.state.restart import RestartResult
 
 log = logging.getLogger("l4.sweeper")
 
 _SWEPT = {Phase.IN_REVIEW.value, Phase.MERGED.value}
+_RETRIED = frozenset({Phase.HALTED.value, Phase.ESCALATED.value, Phase.WAITING_CAPACITY.value})  # where retry works
+_ENDED = frozenset({Phase.MERGED.value, Phase.ARCHIVED.value})  # no operator label and no closed MR changes these
 MAX_TAILS = 3  # failed jobs whose log tail goes into `ci.failed`; the others are listed by name
 MAX_TAIL_LINES = 40
 MAX_TAIL_CHARS = 3000
@@ -119,7 +136,7 @@ class SweepAction:
     what: Literal[
         "merged", "archive_opened", "archive_existing", "archive_pending", "archive_failed", "skipped", "retired",
         "done", "ci_failed", "ci_preexisting", "ci_waiting", "ci_green", "ci_not_run", "resumed", "resume_refused",
-        "resume_hint", "follow_up", "follow_up_waiting",
+        "resume_hint", "restarted", "abandoned", "reopened", "follow_up", "follow_up_waiting",
     ]  # fmt: skip
     detail: str = ""
 
@@ -214,14 +231,13 @@ class Sweeper:
         *,
         retry: bool = False,
         ci: bool = False,
-        resumer: Callable[[UnitSnapshot, ResumeSignal, int, int], "UnitRunResult"] | None = None,
     ) -> None:
         self.app, self.cfg, self.git, self.forge = app, cfg, git, forge
         self._archiver, self._detector, self._retry, self._ci = archiver, detector, retry, ci
-        self._resumer = resumer or self._resume_in_worktree
         self.urls = app_forge_urls(app, cfg)  # what a ledger commits for the forge host, and how its URLs compare
         self._merged: dict[str, list[PullRequest]] | None = None
         self._open: dict[str, PullRequest] | None = None
+        self._newest: dict[str, PullRequest] | None = None
 
     def run(self, snapshots: Sequence[UnitSnapshot]) -> list[SweepAction]:
         candidates = [s for s in snapshots if s.state.phase in _SWEPT]
@@ -243,9 +259,13 @@ class Sweeper:
             self._failed("lock refs", exc, errors)
         if self._ci:
             try:
+                actions += self._closed_duty(snapshots, errors)
+            except Exception as exc:  # noqa: BLE001 - as above
+                self._failed("closed merge requests", exc, errors)
+            try:
                 actions += self._resume_duty(snapshots, errors)
             except Exception as exc:  # noqa: BLE001 - as above
-                self._failed("resume labels", exc, errors)
+                self._failed("operator labels", exc, errors)
             try:
                 actions += self._follow_up_duty(snapshots, errors)
             except Exception as exc:  # noqa: BLE001 - as above
@@ -451,20 +471,50 @@ class Sweeper:
             finally:
                 lease.release()
 
-    # --- the `l4:resume` label (M1.11, L4-CI-004, L4-SEC-004) ----------------------------------------------------
+    # --- a merge request closed without a merge (L4-OPS-009) -------------------------------------------------------
 
-    def _resume_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
-        held = [s for s in snapshots if s.state.phase in (Phase.HALTED.value, Phase.ESCALATED.value)]
-        if not held:
-            return []
-        open_mrs = self._open_mrs()
-        if open_mrs is None:
-            return []
-        label = f"{self.cfg.forge.labels_prefix}resume"
-        actions = []
-        for snapshot in held:
+    def _newest_mrs(self) -> dict[str, PullRequest] | None:
+        """The newest MR (any state) of each of the harness' branches by source branch: one listing per sweep. None when
+        the forge cannot be asked (only a credential problem is raised)."""
+        if self._newest is None:
             try:
-                action = self._resume_one(snapshot, open_mrs, label)
+                found = self.forge.list_prs(self.cfg.forge.branch_prefix, "all")
+            except ForgeAuthError:
+                raise
+            except ForgeError as exc:
+                first = (str(exc).splitlines() or [type(exc).__name__])[0]
+                log.error("the MRs could not be listed: %s", self.app.redactor.redact_text(first))
+                return None
+            self._newest = {}
+            for pr in sorted(found, key=lambda p: p.number):
+                self._newest[pr.head_branch] = pr
+        return self._newest
+
+    def _units_mr(self, snapshot: UnitSnapshot, newest: dict[str, PullRequest]) -> PullRequest | None:
+        """The newest MR of the unit's branch, when it is the unit's: the one its ledger names, else (none was
+        recorded) the newest of a unit that was never started over. After a restart the old MR is closed and the unit
+        has none yet: that MR says nothing about the new work."""
+        pr = newest.get(unit_branch(snapshot.ref.id, self.cfg.forge.branch_prefix))
+        if pr is None:
+            return None
+        wanted = snapshot.state.pr
+        if wanted is None:
+            return pr if snapshot.state.restarts == 0 else None
+        return pr if self.urls.canonical(pr.url) == self.urls.canonical(wanted) else None
+
+    def _closed_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
+        live = [s for s in snapshots if s.state.phase is not None and s.state.phase not in _ENDED]
+        newest = self._newest_mrs() if live else None
+        if newest is None:
+            return []
+        actions = []
+        for snapshot in live:
+            pr = self._units_mr(snapshot, newest)
+            abandoned = snapshot.state.phase == Phase.ABANDONED.value
+            if pr is None or (pr.state, abandoned) not in (("closed", False), ("open", True)):
+                continue
+            try:
+                action = self._close_or_reopen(snapshot, pr)
             except Exception as exc:  # noqa: BLE001 - one unit's failure never stops the others
                 self._failed(snapshot.ref.id, exc, errors)
                 continue
@@ -472,40 +522,136 @@ class Sweeper:
                 actions.append(action)
         return actions
 
-    def _resume_one(self, snapshot: UnitSnapshot, open_mrs: dict[str, PullRequest], label: str) -> SweepAction | None:
+    def _close_or_reopen(self, snapshot: UnitSnapshot, pr: PullRequest) -> SweepAction | None:
+        """`pr.closed{number}` and `pr_closed`, or `pr_reopened`, in the pending ledger under the unit's lease; the
+        snapshot follows, so the label duty of the same sweep sees the new phase."""
         ref, state = snapshot.ref, snapshot.state
-        pr = open_mrs.get(unit_branch(ref.id, self.cfg.forge.branch_prefix))
-        if pr is None or label not in pr.labels:
-            return self._push_hint(snapshot, label) if state.phase == Phase.HALTED.value else None
+        closing = pr.state == "closed"
+        names = self._archiver.names(ref)
+        lease = LocalFileLease(names.flock_path, unit=ref.id, run_id=self.app.run_id)
+        try:
+            lease.acquire()
+        except Busy as busy:
+            log.info("%s: locked by another run, the MR state is recorded next time: %s", ref.id, busy)
+            return None
+        run = _UnitRun(self, snapshot, names)
+        code = 1
+        was = state.phase
+        try:
+            if closing:
+                run.event("pr.closed", number=pr.number)
+                run.transition(snapshot, Trigger.PR_CLOSED, pr=pr.number)
+            else:
+                run.transition(snapshot, Trigger.PR_REOPENED, pr=pr.number)
+            run.publish()
+            code = 0
+        finally:
+            try:
+                run.close(code)
+            finally:
+                lease.release()
+        if closing:
+            state.previous_phase, state.phase = was, Phase.ABANDONED.value
+            log.warning("%s: MR !%s was closed without a merge: abandoned; l4 restart starts the unit over", ref.id,
+                        pr.number)  # fmt: skip
+            self._note(snapshot, pr, abandoned_section(ref.id, f"{self.cfg.forge.labels_prefix}restart"))
+            return SweepAction(ref.id, "abandoned", f"MR !{pr.number} was closed without a merge")
+        state.phase, state.previous_phase = state.previous_phase, None
+        log.info("%s: MR !%s is open again: back in %s", ref.id, pr.number, state.phase)
+        return SweepAction(ref.id, "reopened", f"MR !{pr.number} is open again: back in {state.phase}")
+
+    def _note(self, snapshot: UnitSnapshot, pr: PullRequest, body: str) -> None:
+        try:
+            self.forge.upsert_sticky_note(pr.number, body)
+        except ForgeAuthError:
+            raise
+        except ForgeError as exc:  # the note is a courtesy: the ledger carries the phase
+            log.warning("%s: the sticky note could not be written: %s", snapshot.ref.id,
+                        self.app.redactor.redact_text(str(exc)))  # fmt: skip
+
+    # --- the operator labels `retry`, `resume` and `restart` (M1.11, L4-CI-004, L4-SEC-004, L4-OPS-008) --------------
+
+    def _resume_duty(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
+        held = [s for s in snapshots if s.state.phase is not None and s.state.phase not in _ENDED]
+        if not held:
+            return []
+        newest = self._newest_mrs()
+        if newest is None:
+            return []
+        actions = []
+        for snapshot in held:
+            try:
+                action = self._resume_one(snapshot, newest)
+            except Exception as exc:  # noqa: BLE001 - one unit's failure never stops the others
+                self._failed(snapshot.ref.id, exc, errors)
+                continue
+            if action is not None:
+                actions.append(action)
+        return actions
+
+    def _resume_one(self, snapshot: UnitSnapshot, newest: dict[str, PullRequest]) -> SweepAction | None:
+        ref, state = snapshot.ref, snapshot.state
+        prefix = self.cfg.forge.labels_prefix
+        retry, resume, restart = f"{prefix}retry", f"{prefix}resume", f"{prefix}restart"
+        pr = newest.get(unit_branch(ref.id, self.cfg.forge.branch_prefix))
+        abandoned = state.phase == Phase.ABANDONED.value
+        # retry: where a retry continues, on the open MR; restart: any started unit on its open MR, and an abandoned
+        # unit on its closed one
+        reads = {
+            retry: pr is not None and pr.state == "open" and state.phase in _RETRIED,
+            resume: pr is not None and pr.state == "open" and state.phase in _RETRIED,
+            restart: pr is not None and (pr.state == "open" or (abandoned and pr.state == "closed")),
+        }
+        if pr is None or not any(label in pr.labels for label in (retry, resume, restart)):
+            return self._push_hint(snapshot, retry) if state.phase == Phase.HALTED.value else None
         try:
             events = self.forge.label_events(pr.number)
-            decision = resume_signal(
-                pr.labels, events, label=label, own_id=self.forge.own_user_id(),
-                access=self.forge.member_access, consumed={*state.resumed_signals, *state.refused_signals},
-            )  # fmt: skip
+            own_id = self.forge.own_user_id()
+            decisions = {}
+            for label, read in reads.items():
+                if not read:
+                    continue
+                decision = resume_signal(
+                    pr.labels, events, label=label, own_id=own_id, access=self.forge.member_access,
+                    consumed={*state.resumed_signals, *state.refused_signals}, unit=ref.id,
+                    command="l4 restart" if label == restart else "l4 retry",
+                )  # fmt: skip
+                if decision is not None:
+                    decisions[label] = decision
         except ForgeAuthError:
             raise
         except ForgeError as exc:  # not a refusal: the forge could not say, and the next sweep asks again
             first = (str(exc).splitlines() or [type(exc).__name__])[0]
-            log.error("%s: who set %s could not be read: %s", ref.id, label, self.app.redactor.redact_text(first))
+            log.error(
+                "%s: who set the operator label could not be read: %s", ref.id, self.app.redactor.redact_text(first)
+            )
             return None
-        if decision is None:
-            return None
-        if isinstance(decision, Refusal):
-            return self._refuse(snapshot, pr, decision)
-        # an escalated unit with all its fix rounds used gets exactly LABEL_FIX_ROUNDS more per label event (L4-CI-004)
-        # (or LABEL_FEEDBACK_ROUNDS feedback rounds when it was escalated at the feedback limit, L4-FBK-006)
-        escalated = state.phase == Phase.ESCALATED.value
-        more_feedback = LABEL_FEEDBACK_ROUNDS if escalated and feedback_rounds_exhausted(state) else 0
-        more = LABEL_FIX_ROUNDS if escalated and not more_feedback and fix_rounds_exhausted(self.cfg, state) else 0
-        result = self._resumer(snapshot, decision, more, more_feedback)
-        extended = f", {more} more fix round" if more else ""
-        extended += f", {more_feedback} more feedback round" if more_feedback else ""
-        log.info("%s: resumed by a member's %s label (event %d%s)", ref.id, label, decision.event_id, extended)
-        return SweepAction(ref.id, "resumed", f"{decision.signal}: back in {result.outcome.phase_after}{extended}")
+        signals = {label: d for label, d in decisions.items() if isinstance(d, ResumeSignal)}
+        winner = max(signals, key=lambda label: signals[label].event_id, default=None)
+        acted: SweepAction | None = None
+        for label, decision in sorted(decisions.items(), key=lambda item: item[1].event_id):
+            if isinstance(decision, Refusal):
+                self._refuse(snapshot, pr, decision, label)
+                acted = SweepAction(ref.id, "resume_refused", f"{decision.signal}: {decision.why}")
+            elif label != winner:
+                superseded = Refusal(
+                    decision.event_id, decision.signal, "a newer operator label on this merge request acts instead"
+                )
+                self._refuse(snapshot, pr, superseded, label)
+        if winner is None:
+            return acted
+        signal = signals[winner]
+        if winner == restart:
+            restarted = self._restart_in_worktree(snapshot, signal, winner)
+            log.info("%s: started over by a member's %s label (event %d): attempt %s", ref.id, winner, signal.event_id,
+                     restarted.attempt)  # fmt: skip
+            return SweepAction(ref.id, "restarted", f"{signal.signal}: started over, attempt {restarted.attempt}")
+        result = self._retry_in_worktree(snapshot, signal, winner)
+        log.info("%s: retried by a member's %s label (event %d)", ref.id, winner, signal.event_id)
+        return SweepAction(ref.id, "resumed", f"{signal.signal}: back in {result.outcome.phase_after}")
 
     def _push_hint(self, snapshot: UnitSnapshot, label: str) -> SweepAction | None:
-        """A person pushed to a halted branch (a task edit, say): nothing resumes it but the label or `l4 resume`, so
+        """A person pushed to a halted branch (a task edit, say): nothing retries it but the label or `l4 retry`, so
         say so, once per branch head (`resume.hint{head}` in the pending ledger)."""
         ref = snapshot.ref
         head = self.git.rev_parse(f"refs/remotes/origin/{unit_branch(ref.id, self.cfg.forge.branch_prefix)}")
@@ -529,23 +675,28 @@ class Sweeper:
                 run.close(code)
             finally:
                 lease.release()
-        log.warning("%s: halted; a person pushed after the halt: add the label %s to resume", ref.id, label)
+        log.warning("%s: halted; a person pushed after the halt: add the label %s or run l4 retry", ref.id, label)
         return SweepAction(ref.id, "resume_hint", f"head {head[:10]}")
 
-    def _resume_in_worktree(
-        self, snapshot: UnitSnapshot, signal: ResumeSignal, more_fix_rounds: int, more_feedback_rounds: int = 0
-    ) -> "UnitRunResult":
-        from l4.state.resume import resume_unit  # the orchestrator imports the planner, which imports this module
+    def _retry_in_worktree(self, snapshot: UnitSnapshot, signal: ResumeSignal, label: str) -> "UnitRunResult":
+        from l4.state.retry import retry_unit  # the orchestrator imports the planner, which imports this module
 
         provider = provider_for_unit(providers_for(self.cfg, self.app.repo, self.app.environ), snapshot.ref.id)
-        label = f"{self.cfg.forge.labels_prefix}resume"
-        return resume_unit(
+        return retry_unit(
             self.app, self.cfg, self.git, provider, snapshot.ref, reason=f"label {label}", signal=signal.signal,
-            by="member", extend_fix_rounds=more_fix_rounds or None,
-            extend_feedback_rounds=more_feedback_rounds or None,
+            by="member", rounds=None,
         )  # fmt: skip
 
-    def _refuse(self, snapshot: UnitSnapshot, pr: PullRequest, refusal: Refusal) -> SweepAction | None:
+    def _restart_in_worktree(self, snapshot: UnitSnapshot, signal: ResumeSignal, label: str) -> "RestartResult":
+        from l4.state.restart import restart_unit
+
+        provider = provider_for_unit(providers_for(self.cfg, self.app.repo, self.app.environ), snapshot.ref.id)
+        return restart_unit(
+            self.app, self.cfg, self.git, provider, snapshot.ref, reason=f"label {label}", signal=signal.signal,
+            by="member",
+        )  # fmt: skip
+
+    def _refuse(self, snapshot: UnitSnapshot, pr: PullRequest, refusal: Refusal, label: str) -> None:
         """Said once per label event: a warning line, `resume.refused` in the pending ledger and a section of the MR's
         sticky note."""
         ref = snapshot.ref
@@ -555,7 +706,7 @@ class Sweeper:
             lease.acquire()
         except Busy as busy:
             log.info("%s: locked by another run, the refusal is said next time: %s", ref.id, busy)
-            return None
+            return
         run = _UnitRun(self, snapshot, names)
         code = 1
         try:
@@ -567,29 +718,23 @@ class Sweeper:
                 run.close(code)
             finally:
                 lease.release()
-        log.warning("%s: the %sresume label (event %d) was not honoured: %s", ref.id, self.cfg.forge.labels_prefix,
-                    refusal.event_id, refusal.why)  # fmt: skip
-        refused = {**snapshot.state.refused_signals, refusal.signal: refusal.why}
+        log.warning("%s: the %s label (event %d) was not honoured: %s", ref.id, label, refusal.event_id, refusal.why)
+        snapshot.state.refused_signals[refusal.signal] = refusal.why  # a later label of the same sweep sees it
         state = snapshot.state
-        stopped = (
-            halted_section(
+        if state.phase in (Phase.HALTED.value, Phase.ESCALATED.value):
+            stopped = halted_section(
                 state.phase,
                 state.halt_reason or "see the ledger",
                 ref.id,
-                f"{self.cfg.forge.labels_prefix}resume",
+                retry_label(f"{self.cfg.forge.labels_prefix}resume"),
                 feedback=feedback_rounds_exhausted(state),
-            )
-            if state.phase in (Phase.HALTED.value, Phase.ESCALATED.value)
-            else None
-        )  # the halting run's section stays: the note is rewritten whole
-        body = "\n\n".join(part for part in (stopped, resume_refused_note(refused)) if part)
-        try:
-            self.forge.upsert_sticky_note(pr.number, body)
-        except ForgeAuthError:
-            raise
-        except ForgeError as exc:  # the note is a courtesy: the ledger and the warning line carry the refusal
-            log.warning("%s: the sticky note could not be written: %s", ref.id, self.app.redactor.redact_text(str(exc)))
-        return SweepAction(ref.id, "resume_refused", f"{refusal.signal}: {refusal.why}")
+            )  # the halting run's section stays: the note is rewritten whole
+        elif state.phase == Phase.ABANDONED.value:
+            stopped = abandoned_section(ref.id, f"{self.cfg.forge.labels_prefix}restart")
+        else:
+            stopped = None
+        body = "\n\n".join(part for part in (stopped, resume_refused_note(state.refused_signals)) if part)
+        self._note(snapshot, pr, body)
 
     # --- the project's own CI on H -------------------------------------------------------------------------------
 
