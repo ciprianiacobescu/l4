@@ -205,7 +205,7 @@ is `docs/plan/proposal-experience-graph.md` (main checkout, not committed). Its 
   (`Requirement › Scenario`). For a Kiro finding (alias `Req n.m`), or a finding with no criterion, the second part is
   empty.
 - **Failure class** of a `task.attempt_failed.reason`: the first line, cut before the first `:` or ` (`, then `norm`,
-  then at most 80 characters. Two examples from live ledgers:
+  then at most 120 characters. Two examples from live ledgers:
   - `no new test traces C-e25f06d8: tag …` gives `no new test traces <criterion>`;
   - ``lint gate `ruff …` failed (exit code 1):`` gives ``lint gate `…` failed``.
 - **Counts are of distinct units** (and rounds or attempts), never of findings ids.
@@ -261,10 +261,12 @@ candidates use `max(N, 3)`. All text passes D12's redaction.
    a deterministic gate or a lint rule; the report writes nothing.
 6. **Spec-gap hotspots.** Per capability: units, `spec`-blame findings, product and ambiguous questions, and
    NEEDS_HUMAN rounds. Kiro capabilities are units, and the header says so.
-7. **Profiles by role.** Per `(role, profile)`: tasks, the share of tasks that passed on the first attempt, the mean
-   attempts per task, and the first-round PASS share for implementer profiles (`verdict.json profiles.implementer`).
-   Tasks have no kinds yet (memory-lessons design, "Risks"), so there is no breakdown by task kind. The eval
-   scorecards stay the authority for comparing models.
+7. **Profiles by role.** Per `(role, profile)`: the runs that selected it. For implementer profiles also: the tasks
+   with a failed attempt, the failed attempts, the mean failed attempts per such task, and the first-round PASS count
+   and share (`verdict.json profiles.implementer`). The graph cannot give a first-attempt pass share: a task that
+   passes at its first attempt leaves no record, so a task is visible only through an injected prompt or a failed
+   attempt. The section says so. Tasks have no kinds yet (memory-lessons design, "Risks"), so there is no breakdown
+   by task kind. The eval scorecards stay the authority for comparing models.
 8. **Stops.** Per stop code: units, and how each ended (retried, restarted, merged, still stopped).
 
 A line with no data says `none (n = 0)`. Sorting is by count (descending), then by key, so equal inputs give equal
@@ -390,7 +392,8 @@ Nothing in this change reaches an agent automatically. Every route goes through 
    - Spec-gap hotspots tell spec authors which capabilities produced `spec` blame, questions and NEEDS_HUMAN rounds.
    - A person may also read them while preparing a yolo-mode readiness review. That review does not read them.
    - Fewer gaps mean fewer clarifier stops and fewer verdict questions for the implementer.
-4. **A better profile order.** Profiles by role show first-attempt success per implementer profile. A person may
+4. **A better profile order.** Profiles by role show failed attempts and the first-round PASS share per implementer
+   profile (not a first-attempt pass share: the graph has no record of a task that passed first time). A person may
    reorder `roles.implementer`, and `l4 eval --compare` stays the authority before a change.
 5. **Less lost work on stuck units.** `kg why <unit>` shows the attempts and repeated stops, so a person picks
    `l4 retry` or `l4 restart` with the history in front of them.

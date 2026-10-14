@@ -22,8 +22,8 @@ that were injected; tasks are distinct `(unit, task)`. A failure follows an inje
 the same run and task with a higher `seq`. A finding follows it when its recurrence key is a key the lesson is linked to
 (by dedupe key only, L4-KG-005), it is raised in the same attempt, and its round has a time later than the injection.
 A round with no time is never counted: nothing is guessed. The section says that it shows what followed a lesson, not
-what the lesson caused. A failure class is cut at 80 characters (L4-KG-006), so a long reason loses its last letters
-(the class of the `NotImplementedError` reason ends `notimplementederro`).
+what the lesson caused. A failure class is cut at 120 characters (L4-KG-006), so the class of the `NotImplementedError`
+reason is kept whole.
 
 The index holds three gaps, and the report says so where they matter. It has no record of a task that passed at its
 first attempt (a task is visible only through an injected prompt or a failed attempt), so the profiles section counts

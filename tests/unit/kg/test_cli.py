@@ -1,15 +1,11 @@
 """The `l4 kg` handlers (L4-KG-002, L4-KG-009, L4-KG-011; SCN-KG-02, SCN-KG-03, SCN-KG-04, SCN-KG-05, SCN-KG-19,
 SCN-KG-21, SCN-KG-22 report part, SCN-KG-23).
 
-The handlers run through `l4.cli.main` on the `kg_repo` fixture. `report`, `why` and `propose` are other modules
-(agent E): where one is needed, the test puts a stand-in in `sys.modules` (the handler imports it by name, so the
-stand-in wins whether or not the real module exists) and checks the contract of `l4.kg.cli`'s docstring.
+The handlers run through `l4.cli.main` on the `kg_repo` fixture, with the real `report`, `why` and `propose`
+modules of `l4.kg`.
 """
 
-import importlib.util
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -41,35 +37,6 @@ def kg(repo, *args: str, **env: str) -> int:
 def index_files(repo) -> dict[str, bytes]:
     folder = index_dir(repo.app())
     return {path.name: path.read_bytes() for path in sorted(folder.iterdir())}
-
-
-@pytest.fixture
-def stand_ins(monkeypatch):
-    """Stand-ins for the modules of agent E. `calls` records what the handlers passed."""
-    calls: dict[str, list] = {"report": [], "why": [], "propose": []}
-
-    def install(name: str, **functions) -> None:
-        module = ModuleType(f"l4.kg.{name}")
-        for key, value in functions.items():
-            setattr(module, key, value)
-        monkeypatch.setitem(sys.modules, f"l4.kg.{name}", module)
-
-    def report(nodes, edges, manifest, *, min_units):
-        calls["report"].append((len(nodes), len(edges), manifest, min_units))
-        return "# Report\n\nunits: n = 2\n"
-
-    def why(nodes, edges, ident):
-        calls["why"].append(ident)
-        return f"timeline of {ident}"
-
-    def propose(app, cfg, git, nodes, edges, *, min_units, dry_run, today):
-        calls["propose"].append((min_units, dry_run, today))
-        return "nothing to propose (n = 0)"
-
-    install("report", report=report)
-    install("why", why=why)
-    install("propose", propose=propose)
-    return calls
 
 
 # --- build ---------------------------------------------------------------------------------------------------------
@@ -124,7 +91,7 @@ def test_a_folder_that_is_no_repository_exits_2(tmp_path, git_environ, capsys):
     assert "not a git repository" in capsys.readouterr().err
 
 
-def test_a_fault_after_the_first_rename_exits_1_and_the_next_read_rebuilds(seeded, stand_ins, monkeypatch, capsys):
+def test_a_fault_after_the_first_rename_exits_1_and_the_next_read_rebuilds(seeded, monkeypatch, capsys):
     """SCN-KG-03"""
     assert kg(seeded, "build") == 0
     clean = index_files(seeded)
@@ -164,16 +131,17 @@ def kg_report(repo, capsys, *args: str):
 # --- report, why, propose: the index first ---------------------------------------------------------------------------
 
 
-def test_report_builds_a_missing_index_and_says_so_on_stderr_only(seeded, stand_ins, capsys):
+def test_report_builds_a_missing_index_and_says_so_on_stderr_only(seeded, capsys):
     got = kg_report(seeded, capsys)
-    assert got.out == "# Report\n\nunits: n = 2\n"
+    assert got.out.startswith("# Experience report\n") and "Units: n = 2 units" in got.out
+    assert "Base ref: refs/remotes/origin/" in got.out and "committed 20" in got.out  # the date comes from git log
     assert "index rebuilt (no index)" in got.err
     again = kg_report(seeded, capsys)
     assert "index rebuilt" not in again.err and again.out == got.out
-    assert stand_ins["report"][-1][3] == 2  # --min-units defaults to 2
+    assert "a key needs at least n = 2 units" in got.out  # --min-units defaults to 2
 
 
-def test_report_rebuilds_when_a_ref_moved_or_the_index_is_damaged(seeded, stand_ins, capsys):
+def test_report_rebuilds_when_a_ref_moved_or_the_index_is_damaged(seeded, capsys):
     kg_report(seeded, capsys)
     seeded.unit("openspec:c", runs=[seeded.run(("task.red_ok", {"task": "1.1"}))])
     assert "index rebuilt (refs moved)" in kg_report(seeded, capsys).err
@@ -182,14 +150,14 @@ def test_report_rebuilds_when_a_ref_moved_or_the_index_is_damaged(seeded, stand_
     assert "index rebuilt" not in kg_report(seeded, capsys).err
 
 
-def test_report_passes_min_units_and_rejects_less_than_one(seeded, stand_ins, capsys):
-    kg_report(seeded, capsys, "--min-units", "5")
-    assert stand_ins["report"][-1][3] == 5
+def test_report_passes_min_units_and_rejects_less_than_one(seeded, capsys):
+    got = kg_report(seeded, capsys, "--min-units", "5")
+    assert "a key needs at least n = 5 units" in got.out
     assert kg(seeded, "report", "--min-units", "0") == 2
     assert "--min-units" in capsys.readouterr().err
 
 
-def test_all_three_commands_run_with_no_network_and_read_only_git(seeded, stand_ins, monkeypatch):
+def test_all_three_commands_run_with_no_network_and_read_only_git(seeded, monkeypatch):
     """SCN-KG-02: sockets raise, and the recording Git refuses any subcommand outside the read-only list."""
     import socket
 
@@ -214,7 +182,7 @@ def ignore(repo, line: str) -> None:
     exclude.write_text(exclude.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
 
 
-def test_a_report_file_that_git_would_commit_is_refused(seeded, stand_ins, capsys):
+def test_a_report_file_that_git_would_commit_is_refused(seeded, capsys):
     """SCN-KG-19"""
     assert kg(seeded, "report", "--out", "docs/report.md") == 2
     assert "docs/report.md is not git-ignored: use .l4-out/kg/ or a path outside the repository" in (
@@ -224,76 +192,71 @@ def test_a_report_file_that_git_would_commit_is_refused(seeded, stand_ins, capsy
     assert not index_dir(seeded.app()).exists() or not list(index_dir(seeded.app()).iterdir())
 
 
-def test_a_tracked_path_is_refused_even_when_a_pattern_matches_it(seeded, stand_ins, capsys):
+def test_a_tracked_path_is_refused_even_when_a_pattern_matches_it(seeded, capsys):
     seeded.git.run("update-index", "--add", "--cacheinfo", "100644," + seeded.git.write_blob(b"x") + ",keep.md")
     ignore(seeded, "keep.md")
     assert kg(seeded, "report", "--out", "keep.md") == 2
     assert "not git-ignored" in capsys.readouterr().err
 
 
-def test_an_ignored_path_inside_the_repository_is_written(seeded, stand_ins, capsys):
+def test_an_ignored_path_inside_the_repository_is_written(seeded, capsys):
     ignore(seeded, ".l4-out/")
     assert kg(seeded, "report", "--out", ".l4-out/kg/report.md") == 0
-    assert (seeded.root / ".l4-out/kg/report.md").read_text(encoding="utf-8") == "# Report\n\nunits: n = 2\n"
+    assert (seeded.root / ".l4-out/kg/report.md").read_text(encoding="utf-8").startswith("# Experience report\n")
     assert capsys.readouterr().out.strip() == "report written to .l4-out/kg/report.md"
 
 
-def test_a_path_outside_the_repository_is_allowed(seeded, stand_ins, tmp_path):
+def test_a_path_outside_the_repository_is_allowed(seeded, tmp_path):
     target = tmp_path / "elsewhere" / "report.md"
     assert kg(seeded, "report", "--out", str(target)) == 0
-    assert target.read_text(encoding="utf-8").startswith("# Report")
+    assert target.read_text(encoding="utf-8").startswith("# Experience report")
 
 
-def test_a_folder_as_out_is_refused(seeded, stand_ins, tmp_path):
+def test_a_folder_as_out_is_refused(seeded, tmp_path):
     assert kg(seeded, "report", "--out", str(tmp_path)) == 2
 
 
 # --- why -------------------------------------------------------------------------------------------------------------
 
 
-def test_why_prints_what_the_module_returns_for_a_unit_in_the_index(seeded, stand_ins, capsys):
+def test_why_prints_what_the_module_returns_for_a_unit_in_the_index(seeded, capsys):
     assert kg(seeded, "why", "openspec:a") == 0
-    assert capsys.readouterr().out.strip() == "timeline of openspec:a"
-    assert stand_ins["why"] == ["openspec:a"]
+    out = capsys.readouterr().out
+    assert "openspec:a" in out and "task.red_ok" not in out.split("\n")[0]
 
 
-def test_why_with_an_id_of_no_accepted_form_lists_the_forms(seeded, stand_ins, capsys):
+def test_why_with_an_id_of_no_accepted_form_lists_the_forms(seeded, capsys):
     """SCN-KG-21"""
     assert kg(seeded, "why", "X-1") == 2
     err = capsys.readouterr().err
     for form in ("openspec:<name>", "F-<8 hex>", "L-<8 hex>", "r-", "<unit>#Q-<n>"):
         assert form in err
-    assert stand_ins["why"] == []
 
 
-def test_why_with_an_id_that_is_not_in_the_index_exits_2(seeded, stand_ins, capsys):
+def test_why_with_an_id_that_is_not_in_the_index_exits_2(seeded, capsys):
     assert kg(seeded, "why", "openspec:nope") == 2
     assert "not in the index" in capsys.readouterr().err
     assert kg(seeded, "why", "F-00000000") == 2
-    assert stand_ins["why"] == []
 
 
 # --- propose ---------------------------------------------------------------------------------------------------------
 
 
-def test_propose_passes_the_options_and_today(seeded, stand_ins, capsys):
+def test_propose_passes_the_options_and_writes_nothing_on_a_dry_run(seeded, capsys):
     assert kg(seeded, "propose", "--min-units", "3", "--dry-run") == 0
-    min_units, dry_run, today = stand_ins["propose"][-1]
-    assert (min_units, dry_run) == (3, True)
-    assert len(today) == 10 and today[4] == "-"
-    assert capsys.readouterr().out.strip() == "nothing to propose (n = 0)"
+    assert "no pattern recurs in at least n = 3 units" in capsys.readouterr().out
     assert kg(seeded, "propose", "--min-units", "0") == 2
+    assert seeded.status() == ""
 
 
 # --- redaction and the repository key --------------------------------------------------------------------------------
 
 
 def test_the_report_text_is_redacted_again(seeded, monkeypatch, capsys):
-    """SCN-KG-22, report part: a value of a redaction variable never reaches stdout or the file, even from a module."""
+    """SCN-KG-22, report part: a value of a redaction variable never reaches stdout or the file, even when a later
+    change of `report` lets one through."""
     secret = "s3cret-token-value-1234"
-    module = ModuleType("l4.kg.report")
-    module.report = lambda nodes, edges, manifest, *, min_units: f"leak {secret}\n"
-    monkeypatch.setitem(sys.modules, "l4.kg.report", module)
+    monkeypatch.setattr(kg_cli.report_module, "render", lambda *args, **kwargs: f"leak {secret}\n")
     app = seeded.app()
     app.redactor.adopt(Redactor({"KG_SECRET": secret}))
     assert kg_cli.run_kg_report(app) == 0
@@ -301,7 +264,7 @@ def test_the_report_text_is_redacted_again(seeded, monkeypatch, capsys):
     assert secret not in out and "leak " in out
 
 
-def test_two_repositories_never_mix(kg_repo, make_repo, git_environ, tmp_path, stand_ins, monkeypatch):
+def test_two_repositories_never_mix(kg_repo, make_repo, git_environ, tmp_path, monkeypatch):
     """SCN-KG-23"""
     other_root = make_repo("other")
     assert store.repo_key(other_root) != store.repo_key(kg_repo.root)
@@ -335,7 +298,7 @@ def lessons_cli(repo, *args: str) -> int:
     return main(["lessons", *args, "--repo", str(repo.root)], environ={**repo.environ, "L4_CACHE": str(repo.cache)})
 
 
-def test_promote_through_the_cli_commits_only_the_lessons_file(seeded, stand_ins):
+def test_promote_through_the_cli_commits_only_the_lessons_file(seeded):
     """The last leg of 6.4 with a hand-written draft: `--yes` and `--from` reach `promote`, and git shows the inbox
     files before it and nothing after it but one new commit."""
     from l4.memory.lessons import Lesson, LessonsFile, lesson_id, render_lessons
@@ -361,7 +324,7 @@ def test_promote_through_the_cli_commits_only_the_lessons_file(seeded, stand_ins
     assert seeded._raw(seeded.root, "show", "--name-only", "--format=", "HEAD").split() == [LESSONS]
 
 
-def test_no_commit_keeps_the_proposal(seeded, stand_ins):
+def test_no_commit_keeps_the_proposal(seeded):
     from l4.memory.lessons import Lesson, LessonsFile, lesson_id, render_lessons
 
     key = "kg-a-other-class"
@@ -376,7 +339,6 @@ def test_no_commit_keeps_the_proposal(seeded, stand_ins):
     assert f" M {LESSONS}" in porcelain(seeded) or f"?? {LESSONS}" in porcelain(seeded)
 
 
-@pytest.mark.skipif(importlib.util.find_spec("l4.kg.propose") is None, reason="agent E's propose is not merged yet")
 def test_build_report_why_propose_then_promote_on_the_real_modules(kg_repo, capsys):
     """6.4 with the real `report`, `why` and `propose`: a failure class that recurs in two units becomes a draft; a
     person edits it; `l4 lessons promote` makes the one commit."""

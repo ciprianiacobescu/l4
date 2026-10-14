@@ -15,7 +15,6 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -133,20 +132,6 @@ def test_the_run_path_never_loads_the_graph_code():
 # --- by behaviour --------------------------------------------------------------------------------------------------
 
 
-def real_or_stand_in(monkeypatch) -> None:
-    """The modules of agent E, or, while they are not merged, stand-ins that follow the contract of `l4.kg.cli`."""
-    import importlib.util
-
-    if importlib.util.find_spec("l4.kg.report") is None:
-        stand = {"report": ("report", lambda nodes, edges, manifest, *, min_units: "# Report\n")}
-        stand["why"] = ("why", lambda nodes, edges, ident: f"timeline of {ident}")
-        stand["propose"] = ("propose", lambda app, cfg, git, nodes, edges, **kw: "nothing to propose (n = 0)")
-        for module_name, (function, body) in stand.items():
-            module = ModuleType(f"l4.kg.{module_name}")
-            setattr(module, function, body)
-            monkeypatch.setitem(sys.modules, f"l4.kg.{module_name}", module)
-
-
 @pytest.fixture
 def history(kg_repo):
     kg_repo.unit("openspec:a", runs=[kg_repo.run(("task.red_ok", {"task": "1.1"}))])
@@ -161,7 +146,8 @@ def history(kg_repo):
 
 def test_no_network_no_model_and_read_only_git(history, monkeypatch):
     """SCN-KG-02"""
-    real_or_stand_in(monkeypatch)
+    for name in ("report", "why", "propose"):  # the real modules, not stand-ins
+        assert Path(sys.modules[f"l4.kg.{name}"].__file__).parent == Path(kg_cli.__file__).parent
 
     def no_socket(*args, **kwargs):
         raise AssertionError("the network was used")

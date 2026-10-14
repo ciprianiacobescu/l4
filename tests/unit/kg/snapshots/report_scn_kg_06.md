@@ -14,7 +14,7 @@
 
 This shows what followed each lesson, not what the lesson caused. A lesson is linked to a finding key only by its dedupe key.
 
-- L-09421538 "UI criteria need an end-to-end test" (n = 3 prompts): injected 1 unit / 1 task / 3 prompts, followed by 1 failure (red: new tests fail with an error that is neither an assertion nor notimplementederro)
+- L-09421538 "UI criteria need an end-to-end test" (n = 3 prompts): injected 1 unit / 1 task / 3 prompts, followed by 1 failure (red: new tests fail with an error that is neither an assertion nor notimplementederror)
 
 ## Recurring attempt failures (approximate)
 

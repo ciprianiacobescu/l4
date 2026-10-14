@@ -264,8 +264,9 @@ def test_scn_kg_16_the_live_case_is_injected_and_followed_by_one_failure(kg_repo
     events = [prompt(), failed(reason=RED_REASON), prompt(), prompt(role="green")]
     kg_repo.unit("openspec:a", where="branch", runs=[kg_repo.run(*events)])
     (line,) = lines_of(report(kg_repo), "Lessons")
-    # the class is cut at 80 characters (L4-KG-006), so the text of SCN-KG-16 loses its last letter: see the report
-    assert f"injected 1 unit / 1 task / 3 prompts, followed by 1 failure (red: {failure_class(RED_REASON)})" in line
+    whole = "new tests fail with an error that is neither an assertion nor notimplementederror"
+    assert failure_class(RED_REASON) == whole  # kept whole at 120 characters (L4-KG-006)
+    assert f"injected 1 unit / 1 task / 3 prompts, followed by 1 failure (red: {whole})" in line
     assert line.startswith(f'- {LESSON_ID} "UI criteria need an end-to-end test" (n = 3 prompts)')
     assert "n = " in line
 

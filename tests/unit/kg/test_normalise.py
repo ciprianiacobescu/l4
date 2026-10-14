@@ -77,7 +77,7 @@ LIVE_REASONS = [
     ("lint gate `.venv/bin/ruff check --extend-exclude .l4 .` failed (exit code 1):\nI001 Import block",
      "lint gate `…` failed"),
     ("new tests fail with an error that is neither an assertion nor NotImplementedError: tests.test_a::test_b",
-     "new tests fail with an error that is neither an assertion nor notimplementederror"[:80]),  # cut at 80
+     "new tests fail with an error that is neither an assertion nor notimplementederror"),  # kept whole: 82 characters
     ("the agent step ended with status error: result invalid: summary: required",
      "the agent step ended with status error"),
     ("the agent step ended with status error: kiro-cli exited with code 4 (runError at init)",
@@ -96,9 +96,9 @@ def test_failure_class_is_cut_at_the_first_paren_or_colon_outside_a_backticked_s
     assert failure_class("it failed (exit code 2): detail") == "it failed"
 
 
-def test_failure_class_is_at_most_80_characters_with_no_trailing_space():
+def test_failure_class_is_at_most_120_characters_with_no_trailing_space():
     got = failure_class("word " * 40)
-    assert len(got) <= 80 and got == got.rstrip()
+    assert len(got) <= 120 and got == got.rstrip()
 
 
 def test_failure_class_of_an_empty_or_blank_first_line():

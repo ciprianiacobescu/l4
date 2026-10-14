@@ -21,18 +21,15 @@ check runs before the index is built, so a refused `--out` writes nothing at all
 Everything printed or written passes `redact_text` and then `scrub_for_commit` once more (L4-KG-011, design D12): the
 index is redacted already, and this keeps a later change of `report`, `why` or `propose` from leaking a value.
 
-`report`, `why` and `propose` live in their own modules (`l4.kg.report.report`, `l4.kg.why.why`,
-`l4.kg.propose.propose`); they are imported inside the handler that needs them, so `build` works without them. Their
-contract with this module:
+`report`, `why` and `propose` live in their own modules and are called through their real API:
 
-- `report(nodes, edges, manifest, *, min_units) -> str`: the markdown text;
-- `why(nodes, edges, ident) -> str`: the timeline or the 1-hop view; `ident` is an id of an accepted form that is a
-  node of the graph;
-- `propose(app, cfg, git, nodes, edges, *, min_units, dry_run, today) -> str`: writes the inbox files unless
-  `dry_run`, and returns the text to print (the files for `--dry-run`, else the list of paths and the warnings).
+- `report.render(nodes, edges, *, base_ref, base_sha, base_date, skipped, warnings, min_units, redactor) -> str`;
+  the base date is read here with the read-only `git log -1 --format=%cI <base sha>`;
+- `why.explain(nodes, edges, target, *, redactor) -> str`;
+- `propose.propose(nodes, edges, *, repo, git, min_units, dry_run, today, redactor) -> ProposeResult`, whose `render()`
+  is printed (it writes the inbox files unless `dry_run`).
 """
 
-import importlib
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -46,9 +43,12 @@ from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import atomic_write_bytes
+from l4.kg import propose as propose_module
+from l4.kg import report as report_module
+from l4.kg import why as why_module
 from l4.kg.extract import extract
 from l4.kg.model import Edge, Node
-from l4.kg.sources import FETCH_ATTEMPTS, collect, ref_shas
+from l4.kg.sources import FETCH_ATTEMPTS, REMOTE, collect, ref_shas
 from l4.kg.store import IndexState, Manifest, index_dir, read_index, write_index
 from l4.vcs.git import Git, GitError
 
@@ -82,6 +82,7 @@ class Graph:
     nodes: list[Node]
     edges: list[Edge]
     manifest: Manifest
+    warnings: tuple[str, ...] = ()  # of the build this run made; empty when the index was read
 
 
 def _say(app: AppContext, text: str, *, err: bool = False) -> None:
@@ -115,9 +116,9 @@ def _build(app: AppContext, cfg: L4Config, git: Git, folder: Path) -> tuple[Grap
     manifest = write_index(folder, extracted.nodes, extracted.edges, refs=collected.refs, skipped=extracted.skipped)
     state = read_index(folder, collected.refs)
     if state.status == "ok" and state.manifest is not None:
-        graph = Graph(state.nodes, state.edges, state.manifest)
+        graph = Graph(state.nodes, state.edges, state.manifest, tuple(extracted.warnings))
     else:  # the index is fine on disk; this run keeps what it built
-        graph = Graph(list(extracted.nodes), list(extracted.edges), manifest)
+        graph = Graph(list(extracted.nodes), list(extracted.edges), manifest, tuple(extracted.warnings))
     return graph, extracted.warnings, collected.not_local
 
 
@@ -192,11 +193,14 @@ def run_kg_report(app: AppContext, *, out: Path | str | None = None, min_units: 
         if out is not None:
             targets.append(_check_out(checked, git, out))
 
-    app, _cfg, _git_, graph = _load(app, precheck)
+    app, cfg, git, graph = _load(app, precheck)
     target = targets[0] if targets else None
-    module = importlib.import_module("l4.kg.report")
+    base_ref, base_sha, base_date = _base_facts(cfg, git, graph)
     text = app.redactor.scrub_for_commit(app.redactor.redact_text(
-        module.report(graph.nodes, graph.edges, graph.manifest, min_units=min_units)
+        report_module.render(
+            graph.nodes, graph.edges, base_ref=base_ref, base_sha=base_sha, base_date=base_date,
+            skipped=graph.manifest.skipped, warnings=graph.warnings, min_units=min_units, redactor=app.redactor,
+        )
     ))  # fmt: skip
     text = text if text.endswith("\n") else text + "\n"
     if target is None:
@@ -206,6 +210,20 @@ def run_kg_report(app: AppContext, *, out: Path | str | None = None, min_units: 
     atomic_write_bytes(target, text.encode("utf-8"))
     _say(app, f"report written to {out}")
     return ExitCode.OK
+
+
+def _base_facts(cfg: L4Config, git: Git, graph: Graph) -> tuple[str, str | None, str | None]:
+    """The base ref the index was read at, its commit and its commit date. The date is not in the index (L4-KG-003):
+    it comes from the read-only `git log -1 --format=%cI`."""
+    named = f"refs/remotes/{REMOTE}/{cfg.forge.base_branch}"
+    sha = graph.manifest.refs.get(named)
+    ref = named
+    if sha is None:
+        ref, sha = "HEAD", git.rev_parse("HEAD")
+    if sha is None:
+        return ref, None, None
+    date = git.run("log", "-1", "--format=%cI", sha, check=False).stdout.strip()
+    return ref, sha, date or None
 
 
 def _check_min_units(min_units: int) -> None:
@@ -226,8 +244,7 @@ def run_kg_why(app: AppContext, *, id: str) -> ExitCode:  # noqa: A002 - the opt
     app, _cfg, _git_, graph = _load(app)
     if ident not in {node.id for node in graph.nodes}:
         raise _unknown_id(ident, "not in the index:")
-    module = importlib.import_module("l4.kg.why")
-    _say(app, module.why(graph.nodes, graph.edges, ident))
+    _say(app, why_module.explain(graph.nodes, graph.edges, ident, redactor=app.redactor))
     return ExitCode.OK
 
 
@@ -235,9 +252,12 @@ def run_kg_propose(app: AppContext, *, min_units: int = DEFAULT_MIN_UNITS, dry_r
     """`l4 kg propose [--min-units N] [--dry-run]`: draft lessons in the inbox for a person; never a lesson."""
     _check_min_units(min_units)
     app, cfg, git, graph = _load(app)
-    module = importlib.import_module("l4.kg.propose")
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    text = module.propose(app, cfg, git, graph.nodes, graph.edges, min_units=min_units, dry_run=dry_run, today=today)
+    today = datetime.now(UTC).date()
+    result = propose_module.propose(
+        graph.nodes, graph.edges, repo=app.repo, git=git, min_units=min_units, dry_run=dry_run, today=today,
+        redactor=app.redactor,
+    )  # fmt: skip
+    text = result.render().rstrip("\n")
     if text:
         _say(app, text)
     return ExitCode.OK

@@ -117,7 +117,7 @@ Recurrence SHALL be counted in distinct units, never by finding id, with the nor
 - **A finding's key** is the normalised title and the normalised criterion alias without its capability part. The
   second part is empty for a Kiro alias or when there is no criterion.
 - **An attempt failure's class** is the first line of its `reason`, cut before the first `:` or ` (`, normalised, and
-  cut to 80 characters.
+  cut to 120 characters.
 
 Every report section that uses a key MUST say `approximate`.
 
@@ -169,6 +169,9 @@ The section MUST state that it shows what followed a lesson, not what the lesson
 `l4 kg report [--out PATH] [--min-units N]` SHALL write markdown with the sections of design D8, in its order:
 coverage, lessons, recurring attempt failures, recurring findings, gate candidates (at least `max(N, 3)` units),
 spec-gap hotspots, profiles by role, and stops. N defaults to 2.
+- The profiles section MUST count what the records show (runs per profile; for implementer profiles the failed
+  attempts, the tasks with a failed attempt and the first-round PASS share) and MUST say that it gives no
+  first-attempt pass share, because a task that passes at its first attempt leaves no record.
 - Every line that carries a number MUST name its *n*, and an empty section MUST say `none (n = 0)`.
 - Lines are sorted by count, then by key.
 - The output goes to stdout by default. `--out` inside the repository MUST name a git-ignored path, else the command

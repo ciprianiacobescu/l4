@@ -11,14 +11,14 @@ same mistake as one that names one. It then folds case and collapses whitespace.
 `recurrence_key(title, alias, framework)` is `norm(title) + " | " + norm(requirement › scenario)`. The second part
 is empty for a Kiro alias (`Req n.m`) and when there is no criterion. `failure_class(reason)` is the first line of an
 attempt failure's reason, cut before the first `:` or ` (` that is outside a backticked span, normalised, and cut to
-80 characters. Both are approximate: two different mistakes can share a key, and one reworded mistake can get two. Every
-report line that uses a key says so.
+120 characters. Both are approximate: two different mistakes can share a key, and one reworded mistake can get two.
+Every report line that uses a key says so.
 """
 
 import re
 import unicodedata
 
-FAILURE_CLASS_MAX = 80
+FAILURE_CLASS_MAX = 120
 KEY_SEPARATOR = " | "
 ALIAS_SEPARATOR = "›"
 
