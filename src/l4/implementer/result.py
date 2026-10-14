@@ -172,20 +172,26 @@ def check_criteria(
     family_criteria: Collection[str],
     new_tests: Mapping[str, TestCase],
     trace_hint: str = TRACE_HINT_EITHER,
+    exempt: Collection[str] = (),
 ) -> CriteriaCheck:
     """The criteria a red step covers (L4-IMP-005): `criteria_ids` when it lists any, else whatever the new tests
     trace. Each must belong to the unit's family and have a new test that traces it. `trace_hint` is how the retry
     message tells the agent to trace: `TRACE_HINT_PYTEST` or `TRACE_HINT_NAME` (what `trace_rules` decides for the
-    test gate); the one caller, `tdd.py`, does not pass it yet, so the default names both forms."""
+    test gate); the one caller, `tdd.py`, does not pass it yet, so the default names both forms. `exempt`: cited
+    criteria that need no NEW test (L4-OPS-015): in the red step of a task a spec edit reopened, the criteria the edit
+    left unchanged, whose tests already exist. A cited criterion in `exempt` that no new test traces is not a failure
+    and is left out of `tracing`; a changed or added criterion still needs its test."""
     traces = {test_id: trace_ids(case) for test_id, case in new_tests.items()}
     untraced = tuple(sorted(i for i, ids in traces.items() if not ids))
     cited = tuple(sorted(set(result.criteria_ids) or set().union(*traces.values())))
     tracing = {c: tuple(sorted(i for i, ids in traces.items() if c in ids)) for c in cited}
+    waived = {c for c in cited if c in exempt and not tracing[c]}
+    tracing = {c: t for c, t in tracing.items() if c not in waived}
     if not cited:
         error = f"no criterion is covered: {trace_hint}"
     elif unknown := [c for c in cited if c not in family_criteria]:
         error = f"criteria that are not one of this unit's: {', '.join(unknown)}"
-    elif untraced_cited := [c for c in cited if not tracing[c]]:
+    elif untraced_cited := [c for c in cited if c not in waived and not tracing[c]]:
         error = f"no new test traces {', '.join(untraced_cited)}: {trace_hint}"
     else:
         error = ""

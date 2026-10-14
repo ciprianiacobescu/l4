@@ -46,6 +46,20 @@ def stale_changes(
     ]  # fmt: skip
 
 
+def is_reopened(events: Sequence[LedgerEvent], task: str) -> bool:
+    """Whether `tasks.reopened` names `task` and no `task.done` of it has followed (a fix unit's events are another
+    unit's): the task is back in its red step for an edited spec (L4-OPS-015)."""
+    reopened = False
+    for event in events:
+        if event.data.get("fix_unit"):
+            continue
+        if event.type == "tasks.reopened" and task in (event.data.get("tasks") or []):
+            reopened = True
+        elif event.type == "task.done" and event.data.get("task") == task:
+            reopened = False
+    return reopened
+
+
 def pending_stale(events: Sequence[LedgerEvent], task: str) -> list[dict[str, Any]]:
     """The stale-criterion entries (`stale_changes`) the ledger holds for `task`: every `tasks.reopened` that names
     it, until a `task.done` of it (a fix unit's events are another unit's). The reopened task keeps them while it is

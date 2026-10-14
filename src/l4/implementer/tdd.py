@@ -69,7 +69,7 @@ from l4.implementer.guards import (
     restore_test_paths,
 )
 from l4.implementer.prompt import PromptContext, collect_sources, defuse, render_prompt, result_values_line
-from l4.implementer.reopen import pending_stale
+from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
     RESULT_SCHEMA,
     ImplementerResult,
@@ -234,6 +234,17 @@ def stale_for(wb: Workbench, task: Task, base: TestReport) -> StaleTests | None:
     changes = pending_stale(_ledger_events(wb), task.key)
     tests = stale_tests(base, {str(c["old_id"]) for c in changes})
     return StaleTests(tests, tuple(changes)) if tests else None
+
+
+def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset[str]:
+    """The criteria whose tests already exist and that a spec edit left alone, for the red step of a reopened task
+    (L4-OPS-015): the ids the base tests trace, less the NEW ids of the changed criteria. Empty for a task no
+    `tasks.reopened` holds open: a normal red step needs a new test for every criterion it cites."""
+    events = _ledger_events(wb)
+    if not is_reopened(events, task.key):
+        return frozenset()
+    changed = {str(c["new_id"]) for c in pending_stale(events, task.key) if c.get("new_id")}
+    return frozenset({i for case in base.tests.values() for i in trace_ids(case)} - changed)
 
 
 def _first_line(case: TestCase) -> str:
@@ -709,6 +720,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             family,
             {i: report.tests[i] for i in new_ids},
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
+            exempt=unchanged_criteria(wb, task, base_report),
         )
         for test in check.untraced:
             wb.emit("test.untraced", task=task.key, test=test)
