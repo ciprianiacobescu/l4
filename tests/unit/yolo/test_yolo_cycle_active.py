@@ -348,7 +348,8 @@ def test_a_limit_stops_the_plan(world, limits, restarts, cost, reason):
     world.plan(limits=limits)
     world.activate()
     world.seed(ev("unit.dispatched", unit=A, run="r0"))
-    world.step({"a": world.snapshot("a", "implementing", restarts=restarts, cost_usd=cost)})
+    world.restarts("a", restarts)
+    world.step({"a": world.snapshot("a", "implementing", cost_usd=cost)})
     assert state(world).stop_reason == reason
 
 
@@ -356,17 +357,54 @@ def test_scn_yolo_27_one_restart_is_within_two_attempts_and_a_resume_extends(wor
     world.plan(limits={"max_unit_attempts": 2})
     world.activate()
     world.seed(ev("unit.dispatched", unit=A, run="r0"))
-    assert world.step({"a": world.snapshot("a", "implementing", restarts=1)}).allow == frozenset({A})
-    world.step({"a": world.snapshot("a", "implementing", restarts=2)})
-    assert state(world).stop_reason == "limit_attempts"
+    world.restarts("a", 1)
+    assert world.step({"a": world.snapshot("a", "implementing")}).allow == frozenset({A})
+    world.restarts("a", 2)
+    world.step({"a": world.snapshot("a", "implementing")})
+    assert state(world).stop_reason == "limit_attempts" and state(world).stop_unit == A
     world.seed(ev("plan.resumed", by="alice", reason="ok", extend={"attempts": 1}))
-    assert world.step({"a": world.snapshot("a", "implementing", restarts=2)}).allow == frozenset({A})
+    assert world.step({"a": world.snapshot("a", "implementing")}).allow == frozenset({A})
 
 
-def test_the_run_limit_is_checked_before_a_dispatch_not_after_the_last_one(world):
+def test_scn_yolo_31_a_restart_keeps_the_cost_and_the_attempts_of_the_plan(world):  # review #1, R1
+    world.plan(limits={"max_unit_attempts": 3, "max_cost_usd": 100})
+    world.activate()
+    world.step({"a": world.snapshot("a", None, cost_usd=0.0)})  # attempt 1
+    assert last(world, "plan.charged") == {"unit": A, "attempt": 1, "cost_usd": 0.0, "runs": 1}
+    world.step({"a": world.snapshot("a", "implementing", cost_usd=2.0)})  # still attempt 1: it costs $2 so far
+    assert last(world, "plan.charged") == {"unit": A, "attempt": 1, "cost_usd": 2.0, "runs": 2}
+    world.restarts("a", 1)  # `l4 restart`: the unit's ledger starts again at zero
+    world.step({"a": world.snapshot("a", "implementing", cost_usd=1.5)})
+    assert last(world, "plan.charged") == {"unit": A, "attempt": 2, "cost_usd": 1.5, "runs": 1}
+    folded = state(world)
+    assert folded.used.cost_usd == 3.5 and folded.used.attempts == {A: 2}
+    world.restarts("a", 2)
+    world.step({"a": world.snapshot("a", "implementing", cost_usd=0.5)})
+    assert state(world).used.cost_usd == 4.0 and state(world).used.attempts == {A: 3}
+    world.restarts("a", 3)  # a fourth attempt: past max_unit_attempts 3, stopped before another run is dispatched
+    runs = len([e for e in world.events() if e.type == "unit.dispatched"])
+    world.step({"a": world.snapshot("a", "implementing", cost_usd=0.0)})
+    assert state(world).stop_reason == "limit_attempts" and state(world).stop_unit == A
+    assert len([e for e in world.events() if e.type == "unit.dispatched"]) == runs
+
+
+def test_the_cost_of_every_attempt_counts_against_the_cost_limit(world):  # review #1: a restart zeroes the unit's cost
+    world.plan(limits={"max_cost_usd": 5, "max_unit_attempts": 9})
+    world.activate()
+    world.seed(ev("unit.dispatched", unit=A, run="r0"), ev("plan.charged", unit=A, attempt=1, cost_usd=3.0, runs=1))
+    world.restarts("a", 1)
+    world.step({"a": world.snapshot("a", "implementing", cost_usd=2.0)})  # 3.0 + 2.0 = 5.0: the limit
+    assert state(world).stop_reason == "limit_cost"
+
+
+def test_the_run_limit_stops_at_the_limit_and_not_one_run_after(world):  # R3: used >= limit
     world.plan(limits={"max_runs": 2})
     world.activate()
-    world.seed(ev("unit.dispatched", unit=A, run="r0"), ev("unit.dispatched", unit=A, run="r1"))
+    world.seed(
+        ev("unit.dispatched", unit=A, run="r0"),
+        ev("unit.dispatched", unit=A, run="r1"),
+        ev("plan.charged", unit=A, attempt=1, cost_usd=0.0, runs=2),
+    )
     assert state(world).status == "active"
     world.step({"a": world.snapshot("a", "implementing")})  # a third dispatch: refused
     assert state(world).stop_reason == "limit_runs"

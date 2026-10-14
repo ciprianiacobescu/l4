@@ -26,6 +26,22 @@ def _usd(value: float) -> str:
     return f"${value:.2f}"
 
 
+def _charged(events: Sequence[PlanEvent], unit: str) -> tuple[float, int, int] | None:
+    """(cost, runs, attempts) a unit was charged over all its attempts (R1): the maximum per attempt, summed, and the
+    highest attempt; None when the plan never charged it. A charge without an attempt counts as attempt 1."""
+    cost: dict[int, float] = {}
+    runs: dict[int, int] = {}
+    for event in events:
+        if event.type != "plan.charged" or event.data.get("unit") != unit:
+            continue
+        attempt = int(event.data.get("attempt", 1) or 0)
+        cost[attempt] = max(cost.get(attempt, 0.0), float(event.data.get("cost_usd") or 0))
+        runs[attempt] = max(runs.get(attempt, 0), int(event.data.get("runs") or 0))
+    if not cost:
+        return None
+    return sum(cost.values()), sum(runs.values()), max(cost)
+
+
 def promotion_sentence(plan: Plan) -> str:
     if plan.promotion is None:
         return "No promotion target is set. Promotion was not performed."
@@ -78,7 +94,10 @@ def render_report(
             lines.append(f"- Post-merge check: {post.get('status')} with profile {post.get('profile')}{detail}")
         else:
             lines.append("- Post-merge check: not run")
-        if folded is not None:
+        charged = _charged(events, unit.id)
+        if charged is not None:  # the plan's own figures: they survive a restart of the unit (R1)
+            lines.append(f"- Usage: {_usd(charged[0])}, {charged[1]} run(s), {charged[2]} attempt(s)")
+        elif folded is not None:
             lines.append(
                 f"- Usage: {_usd(folded.cost_usd)}, {folded.iteration} run(s), {folded.restarts + 1} attempt(s)"
             )
@@ -94,6 +113,9 @@ def render_report(
         lines.append(f"- {batch.id} (profile {batch.acceptance_profile}): {result}")
     lines += ["", "## Usage", ""]
     lines.append(f"- Cost: {_usd(state.used.cost_usd)}")
+    review = _charged(events, "plan:review")
+    if review is not None:
+        lines.append(f"- Of which the readiness review: {_usd(review[0])}")
     lines.append(f"- Runs that dispatched a unit: {sum(1 for e in events if e.type == 'unit.dispatched')}")
     lines.append("")
     return "\n".join(lines)

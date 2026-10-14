@@ -112,6 +112,13 @@ class CycleWorld:
             f"{base}/tasks.md": "- [ ] 1.1 do it\n",
         }
 
+    def restarts(self, name: str, count: int) -> None:
+        """`l4 restart` `count` times: each keeps the old head at `refs/l4/attempts/<fw>/<name>/<n>` on origin (R1), so
+        the unit is on attempt 1 + count."""
+        head = sh(self.repo, "rev-parse", "HEAD")
+        for n in range(1, count + 1):
+            sh(self.repo, "push", "-q", "origin", f"{head}:refs/l4/attempts/openspec/{name}/{n}")
+
     def push_main(self) -> str:
         sh(self.repo, "push", "-q", "origin", "main")
         sh(self.repo, "fetch", "-q", "origin")

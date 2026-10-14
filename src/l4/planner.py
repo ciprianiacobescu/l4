@@ -249,6 +249,15 @@ def with_plan_holds(
     return shown
 
 
+def plan_file_notes(app: AppContext) -> list[str]:
+    """One line for each plan file that is not a JSON object: it holds no unit (R8), so a person who expects it to hold
+    its units is told. No plan file, no line."""
+    from l4.yolo.cycle import unreadable_plan_files
+    from l4.yolo.plans import plan_files
+
+    return unreadable_plan_files(plan_files(app.repo))
+
+
 def _issue_ids(snapshot: UnitSnapshot, *kinds: str) -> tuple[str, ...]:
     issues = snapshot.questions.issues if snapshot.questions else ()
     return tuple(dict.fromkeys(i.question_id for i in issues if i.kind in kinds))
@@ -377,6 +386,8 @@ def run_plan(
                 click.echo(app.redactor.redact_text(f"{action.unit}: ci: {action.detail}"), err=True)
         rows = snapshots(app, cfg, units)  # the sweep wrote pending events: fold them
     entries = with_plan_holds(app, cfg, rows, compute_plan([facts_of(s) for s in rows]))
+    for note in plan_file_notes(app):  # stderr: stdout is the plan, and `--json` must stay JSON
+        click.echo(app.redactor.redact_text(note), err=True)
     found: dict[str, Any] | None = None
     lines: list[str] = []
     if probe:

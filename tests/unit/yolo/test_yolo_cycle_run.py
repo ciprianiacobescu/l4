@@ -141,7 +141,8 @@ def test_an_active_plan_runs_only_its_dispatched_unit_and_starts_the_next_run_on
 def test_a_plan_step_with_no_work_left_starts_no_run_and_runs_no_unit(world, run):
     world.plan()
     world.activate()
-    world.seed(ev("plan.waiting", reason="unit_awaiting_human", unit=A))
+    world.seed(ev("unit.dispatched", unit=A, run="r0"), ev("plan.waiting", reason="unit_awaiting_human", unit=A))
+    run.snapshots["a"] = world.snapshot("a", "awaiting_human")  # the question is still open: the cause is still there
     run()
     assert run.runner.chosen == [] and run.forge.started == []
 
