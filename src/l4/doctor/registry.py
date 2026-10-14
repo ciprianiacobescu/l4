@@ -39,6 +39,7 @@ def doctor_scopes(*, ci: bool, adoption: bool, no_gates: bool) -> frozenset[Scop
 CHECK_MODULES = (
     "l4.doctor.checks_agents", "l4.doctor.checks_spec", "l4.doctor.checks_provision", "l4.doctor.checks_memory",
     "l4.doctor.checks_s1", "l4.doctor.checks_sandbox", "l4.doctor.checks_gates", "l4.doctor.checks_eval",
+    "l4.doctor.checks_yolo",
 )  # fmt: skip
 
 
