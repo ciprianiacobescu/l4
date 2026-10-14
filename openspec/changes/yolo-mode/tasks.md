@@ -41,8 +41,8 @@
 
 ## 7. Documentation (wave 1, agent E: `docs/SPEC.md`, `docs/yolo-mode.md`, `docs/runbook.md`, skill `operate.md`, `README.md`, `docs/state-diagram.md`)
 
-- [ ] 7.1 SPEC: section 12.5 with L4-YOLO-001..016, the scenarios SCN-YOLO-01..29, the delivery row, §3.2 `yolo.profiles`, the `merge_policy` line. `scripts/check_spec.py docs/SPEC.md` passes. (L4-YOLO-016)
-- [ ] 7.2 `docs/yolo-mode.md` (user guide) and runbook section "Delivery plans" with every stop reason and what clears it (SCN-YOLO-29); the skill's `operate.md`; one README line. (L4-YOLO-016)
+- [x] 7.1 SPEC: section 12.5 with L4-YOLO-001..016, the scenarios SCN-YOLO-01..29, the delivery row, §3.2 `yolo.profiles`, the `merge_policy` line. `scripts/check_spec.py docs/SPEC.md` passes. (L4-YOLO-016)
+- [x] 7.2 `docs/yolo-mode.md` (user guide) and runbook section "Delivery plans" with every stop reason and what clears it (SCN-YOLO-29); the skill's `operate.md`; one README line. (L4-YOLO-016)
 
 ## 8. Integration and review (orchestrator)
 
