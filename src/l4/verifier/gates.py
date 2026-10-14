@@ -9,9 +9,12 @@ The end-to-end gate (`gates.e2e`, served by `l4.gates.e2e`) is part of step 3 wh
 M1: verifier 1.7 (extra gates), 1.8 (`flaky_repeats`).
 """
 
+import hashlib
 import os
+import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from l4.ci.failing_step import STEP_GATE_PREFIX, ChoreCiStep
 from l4.config.schema import L4Config
@@ -47,9 +50,34 @@ class TestGateOutcome:
         return not self.findings
 
 
+DIGEST_LINES, DIGEST_LENGTH = 30, 12
+_VOLATILE = (  # what differs between two runs of the same failure, removed in this order
+    re.compile(r"\x1b\[[0-9;]*[A-Za-z]"),  # colours
+    re.compile(r"\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:?\d\d)?"),  # timestamps
+    re.compile(r"(?<![\w.])/[^\s:'\"),;]+"),  # absolute paths
+    re.compile(r"\b(?:0x)?[0-9a-fA-F]{7,}\b"),  # hex ids and addresses
+    re.compile(r"\d+"),
+)
+
+
+def log_digest(path: Path) -> str | None:
+    """A failed gate's fingerprint (review M5, L4-OPS-007): the last 30 lines of its log with colours, timestamps,
+    absolute paths, hex ids and digits removed, sha256, 12 characters. The same crash twice gives the same digest, two
+    different lint errors do not. None when the log cannot be read."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-DIGEST_LINES:]
+    except OSError:
+        return None
+    text = "\n".join(line.rstrip() for line in lines)
+    for pattern in _VOLATILE:
+        text = pattern.sub("", text)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:DIGEST_LENGTH]
+
+
 def _line(wb: Workbench, name: str, command: str, result: GateResult) -> GateLine:
     log = os.path.relpath(result.log_path, wb.out_dir.parent)
-    return GateLine(name, command, result.status, result.reason, log)
+    digest = log_digest(result.log_path) if result.status == "fail" else None
+    return GateLine(name, command, result.status, result.reason, log, digest)
 
 
 def _blocker(name: str, command: str, reason: str, log: str | None) -> Finding:
@@ -112,7 +140,7 @@ def _judged(wb: Workbench, name: str, command: str, reports_key: str, result: Ga
         reason = f"report missing: {reports_key} is empty"
     elif result.status == "pass":
         return out
-    out.gate = GateLine(line.name, line.command, "fail", reason, line.log)
+    out.gate = GateLine(line.name, line.command, "fail", reason, line.log, log_digest(result.log_path))
     out.findings.append(_blocker(name, command, reason, line.log))
     return out
 

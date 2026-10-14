@@ -189,9 +189,7 @@ def valid_glob(pattern: str) -> bool:
     return bool(pattern.strip()) and not pure.is_absolute() and ".." not in pure.parts and "\\" not in pattern
 
 
-def lint(
-    file: LessonsFile, *, max_lessons: int, max_bytes: int, archived_ids: Collection[str] = ()
-) -> list[Problem]:
+def lint(file: LessonsFile, *, max_lessons: int, max_bytes: int, archived_ids: Collection[str] = ()) -> list[Problem]:
     """What `l4 lessons lint` and doctor MEM-001 report: unique ids, `id == lesson_id(dedupe key)`, scopes, caps and
     a `Supersedes` that points somewhere."""
     problems: list[Problem] = []
@@ -216,9 +214,7 @@ def lint(
     return problems
 
 
-def select_lessons(
-    file: LessonsFile, task_paths: Sequence[str], task_kinds: Sequence[str] = ()
-) -> list[Lesson]:
+def select_lessons(file: LessonsFile, task_paths: Sequence[str], task_kinds: Sequence[str] = ()) -> list[Lesson]:
     """A lesson applies when (it has no globs or a task path matches one) and (it has no kinds or one is the task's).
     Id order. # M1: memory-lessons 2.1 gives tasks kinds; 2.2 drops a superseded lesson."""
     chosen = []
@@ -228,4 +224,3 @@ def select_lessons(
         if paths_ok and kinds_ok:
             chosen.append(lesson)
     return chosen
-

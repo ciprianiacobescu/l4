@@ -20,7 +20,7 @@ def _ctx(tmp_path: Path, platform: str) -> SimpleNamespace:
     unit.mkdir(parents=True)
     services = SimpleNamespace(
         ref=SimpleNamespace(path=unit), worktree=tmp_path, names=SimpleNamespace(branch="l4/openspec/u"),
-        app=SimpleNamespace(environ={}),
+        app=SimpleNamespace(environ={}, repo=tmp_path),
     )  # fmt: skip
     url = "https://github.com/o/r" if platform == "github" else "https://gl.test/g/p"
     cfg = L4Config.model_validate({"forge": {"type": platform}})

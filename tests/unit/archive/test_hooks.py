@@ -211,8 +211,8 @@ def test_a_halted_unit_note_names_the_reason_and_the_label(run_l4, forge_env, us
     (note,) = use_fake_gitlab.notes[1]
     body = note["body"]
     assert "### Halted: task 1.1: max_task_attempts (1) reached in red; last failure: no tests added" in body
-    assert "a member adds the label `l4:resume` to this merge request" in body
-    assert "`l4 resume --unit openspec:add-discount-codes --reason TEXT`" in body
+    assert "a member adds the label `l4:retry` to this merge request" in body
+    assert "`l4 retry --unit openspec:add-discount-codes --reason TEXT`" in body
     assert use_fake_gitlab.mrs[1]["labels"] == ["l4:halted"]
 
 
@@ -242,7 +242,7 @@ def test_an_escalated_unit_note_says_how_a_resume_goes_on():
 
     text = halted_section("escalated", "verification failed and no fix round is left", "openspec:x", "l4:resume")
     assert text.startswith("### Escalated: verification failed and no fix round is left")
-    assert "one more fix round per label event" in text and "--extend-fix-rounds N" in text
+    assert "one more fix round per label event" in text and "`l4 retry --unit openspec:x --reason TEXT`" in text
 
 
 def test_the_section_goes_when_the_unit_resumes(run_l4, tdd_repo, forge_env, use_fake_gitlab):
@@ -254,3 +254,19 @@ def test_the_section_goes_when_the_unit_resumes(run_l4, tdd_repo, forge_env, use
     assert main(argv, environ=tdd_repo.environ) == 0
     assert use_fake_gitlab.notes[1][0]["body"].endswith("Nothing is waiting for a human answer.")
     assert use_fake_gitlab.mrs[1]["labels"] == ["l4:implementing"]
+
+
+def test_the_run_creates_the_operator_labels_once_and_never_puts_them_on_the_mr(
+    run_l4, install_hooks, forge_env, use_fake_gitlab
+):
+    """L4-OPS-008: a member can find `l4:retry`, `l4:restart` and `l4:resume`; the run only creates them."""
+    gitlab = use_fake_gitlab
+    passing_verifier(install_hooks)
+    run_l4([red_step(), green_step()])
+    operator = {"l4:retry", "l4:restart", "l4:resume"}
+    assert operator <= set(gitlab.labels)
+    created = [b["name"] for m, p, q, b in gitlab.requests if m == "POST" and p.endswith("/labels")]
+    assert sorted(n for n in created if n in operator) == sorted(operator)  # once each, over every phase change
+    assert not operator & set(gitlab.mrs[1]["labels"])
+    for _, _, _, body in gitlab.requests:
+        assert not operator & set((body or {}).get("add_labels", "").split(","))

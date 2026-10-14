@@ -70,7 +70,7 @@ _COMMENT_ENTITY = re.compile(r"&((?:amp;)*)lt;!--")
 
 
 def _neutralise_comments(text: str) -> str:
-    """"<!--" would let an agent write the index markers, or hide text from the human reader. An entity that already
+    """ "<!--" would let an agent write the index markers, or hide text from the human reader. An entity that already
     looks like the replacement gains one `amp;`, so `_restore_comments` is an exact inverse."""
     return _COMMENT_ENTITY.sub(lambda m: f"&amp;{m.group(1)}lt;!--", text).replace("<!--", "&lt;!--")
 
@@ -239,15 +239,15 @@ class Question:
     answer_text: str  # comments removed, stripped
     context_text: str = ""  # the `### Context` and `### Options` bodies as written (neutralised, see `unescape_text`)
     options_text: str = ""
+    restarted: bool = False  # the Status is `superseded by restart`: no successor, and nothing is held
+    superseded_round: int | None = None  # the Status is `superseded by round <n>`: a later round replaced it
 
 
 @dataclass(frozen=True)
 class QuestionIssue:
     """Something a human should be told about (sticky note, SPEC 11): the parse itself never fails."""
 
-    kind: Literal[
-        "unknown_status", "unsubmitted_answer", "empty_answer", "unreadable_blocking", "unreadable_section"
-    ]
+    kind: Literal["unknown_status", "unsubmitted_answer", "empty_answer", "unreadable_blocking", "unreadable_section"]
     question_id: str
     detail: str = ""
 
@@ -263,6 +263,9 @@ _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _STATUS_WORD = re.compile(r"[A-Za-z][A-Za-z-]*")
 _TASK_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _SUCCESSOR = re.compile(r"\bsuperseded\s+by\s+`?(Q-\d+)", re.IGNORECASE)
+_RESTART_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+restart\b", re.IGNORECASE)
+SUPERSEDED_BY_RESTART = "superseded by restart"  # `l4 restart` (L4-OPS-004): the question belongs to the old attempt
+_ROUND_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+round\s+(\d+)\b", re.IGNORECASE)
 _QUESTION_HEADING = re.compile(rb"^## Q-(\d+):")
 _ANSWERED = frozenset({QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED, QuestionStatus.ANSWERED_BY_CLARIFIER})
 
@@ -375,6 +378,8 @@ def _parse_section(
         answer_text=_visible(data[answer.body.start : answer.body.end]) if answer else "",
         context_text=_visible(data[context.body.start : context.body.end]) if context else "",
         options_text=_visible(data[options.body.start : options.body.end]) if options else "",
+        restarted=bool(_RESTART_SUPERSEDED.search(fields.get("status", ""))) and not successor,
+        superseded_round=int(later.group(1)) if (later := _ROUND_SUPERSEDED.search(fields.get("status", ""))) else None,
     )  # fmt: skip
 
 
@@ -454,6 +459,23 @@ class QuestionsFile:
         if question.status_value is None:
             raise SpecError(f"{qid} has no Status line")
         return _edited(self, [(question.status_value, status.value.encode())], row_of=qid)
+
+    def supersede_by_restart(self, qid: str) -> "QuestionsFile":
+        """Status `superseded by restart` (L4-OPS-004): the question was about the old attempt, and no question took
+        over. Unlike a bare `superseded` it holds no task (see `holds`). The index row follows."""
+        question = _require(self, qid)
+        if question.status_value is None:
+            raise SpecError(f"{qid} has no Status line")
+        return _edited(self, [(question.status_value, SUPERSEDED_BY_RESTART.encode())], row_of=qid)
+
+    def supersede_by_round(self, qid: str, round_no: int) -> "QuestionsFile":
+        """Status `superseded by round <n>` (L4-OPS-014): a verdict question of an earlier verification round that a
+        later round replaced (a person fixed the spec instead of answering). Like `superseded by restart` it holds no
+        task (see `holds`). The index row follows."""
+        question = _require(self, qid)
+        if question.status_value is None:
+            raise SpecError(f"{qid} has no Status line")
+        return _edited(self, [(question.status_value, f"superseded by round {round_no}".encode())], row_of=qid)
 
     def set_suggestion(self, qid: str, text: str, *, redactor: Redactor) -> "QuestionsFile":
         """Replace the body of the *Clarifier suggestion* block, or add the block before `### Answer`. The text is
@@ -551,13 +573,15 @@ def holds(
     """Per question id, the pending task keys it still holds back (L4-QMD-005); empty sets are left out. Fail closed
     where the file cannot be read: a question whose Blocking tasks line is unreadable, and an id in `unreadable`
     (`QuestionsFile.unreadable_ids`), hold every pending task. A superseded question holds the tasks its named
-    successor does not list: with no successor in the file nothing took over."""
+    successor does not list: with no successor in the file nothing took over. The exceptions are `superseded by
+    restart` (`l4 restart`) and `superseded by round <n>` (L4-OPS-014): the question of an old attempt or round,
+    which holds nothing."""
     every, all_questions = frozenset(pending), list(questions)
     by_id = {q.id: q for q in all_questions}
     held = {qid: every for qid in unreadable}
     for q in all_questions:
-        if is_answered(q):
-            continue
+        if is_answered(q) or (q.status is QuestionStatus.SUPERSEDED and (q.restarted or q.superseded_round)):
+            continue  # a question that a restart or a later round superseded belongs to the old attempt
         if not q.blocking_readable:
             held[q.id] = every
             continue

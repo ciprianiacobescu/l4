@@ -34,6 +34,7 @@ class FakeGitHub:
     users: dict[int, str] = field(default_factory=dict)  # user id -> login (GET /user/:id)
     permissions: dict[str, dict] = field(default_factory=dict)  # login -> collaborator permission body
     queued_runs: int = 0  # workflow runs the `status=queued` listing finds
+    dispatch_status: int = 204  # the answer of a workflow_dispatch (403: the token may not start workflows)
     hosts_seen: list[tuple[str, bool]] = field(default_factory=list)  # (host, request carried a token)
 
     def transport(self) -> httpx.MockTransport:
@@ -124,6 +125,8 @@ class FakeGitHub:
         if m := re.fullmatch(rf"/repos/{REPO}/actions/workflows/([^/]+)/runs", path):
             return httpx.Response(200, json={"total_count": self.queued_runs, "workflow_runs": []})
         if m := re.fullmatch(rf"/repos/{REPO}/actions/workflows/([^/]+)/dispatches", path):
+            if self.dispatch_status != 204:
+                return httpx.Response(self.dispatch_status, json={"message": "Resource not accessible by integration"})
             return httpx.Response(204)
         if m := re.fullmatch(rf"/repos/{REPO}", path):
             return httpx.Response(200, json={"html_url": f"https://github.test/{REPO}"})
@@ -169,7 +172,7 @@ class FakeGitHub:
         if pr is None:
             return httpx.Response(404, json={"message": "Not Found"})
         if method == "PATCH":
-            pr.update({k: v for k, v in body.items() if k in ("title", "body")})
+            pr.update({k: v for k, v in body.items() if k in ("title", "body", "state")})
         return httpx.Response(200, json=pr)
 
     def _graphql(self, body: dict) -> httpx.Response:

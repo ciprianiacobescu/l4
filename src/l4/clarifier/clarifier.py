@@ -35,7 +35,7 @@ from l4.clarifier.router import NoS1, Router, build_s1_judge
 from l4.config.schema import ClarifierCfg
 from l4.exitcodes import L4Exit
 from l4.forge.base import forge_platform
-from l4.forge.urls import blob_url
+from l4.forge.urls import blob_url, origin_url
 from l4.implementer.prompt import collect_sources
 from l4.implementer.tasks import answers_unblock, open_blocking_questions
 from l4.implementer.tdd import RoleLimit
@@ -310,7 +310,8 @@ def sticky_location(ctx: HookContext) -> tuple[str, str, str | None]:
     s = ctx.services
     path = (s.ref.path.resolve().relative_to(s.worktree.resolve()) / QUESTIONS_FILENAME).as_posix()
     base = ctx.shared.get("project_url")
-    platform = forge_platform(ctx.cfg, s.app.environ)  # GitHub has no `/-/` separator (live run 38175559320)
+    # GitHub has no `/-/` separator (live run 38175559320)
+    platform = forge_platform(ctx.cfg, s.app.environ, origin_url(s.app.repo, s.app.environ))
     link = blob_url(base, s.names.branch, path, platform) if base else None
     return path, s.names.branch, link
 

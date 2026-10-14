@@ -11,6 +11,8 @@ from l4.specs.questions import QuestionsFile, QuestionStatus
 
 from ..implementer.conftest import green_step, red_step
 from ..orchestrator.conftest import BRANCH, UNIT_DIR, edit_questions_on_origin, new_origin_main
+from .conftest import judge_reply
+from .test_ladder import CRITERIA
 from .test_ladder_depth import JUDGE, red_known_only
 
 
@@ -225,3 +227,29 @@ def test_a_base_conflict_ends_its_unit_with_exit_1_and_the_units_after_it_still_
     assert set(units) == {"openspec:add-discount-codes", "openspec:add-zzz"}
     assert units["openspec:add-discount-codes"]["phase_after"] == "verifying"
     assert units["openspec:add-zzz"]["phase_after"] != "none"
+
+
+MAJOR = {"severity": "major", "title": "t", "detail": "d", "evidence": []}
+
+
+def test_a_spec_edit_and_a_passing_round_supersede_the_unanswered_verdict_question(run_l4, valid_spec, tdd_repo, raw):
+    """L4-OPS-014: round 1 asks Q-001, a person edits the spec instead of answering, round 2 passes. Q-001 is
+    `superseded by round 2`: no open question in the ledger fold (so no `l4:needs-answers`), none in the file."""
+    first = run_l4([red_step(), green_step(), Step(structured=judge_reply(CRITERIA, findings=[MAJOR]))])
+    assert first.code == 11 and [e["id"] for e in first.events("question.raised")] == ["Q-001"]
+    new_origin_main(tdd_repo, raw, {"README.md": "unrelated\n"})  # keep origin main moving, as a team does
+    clone = tdd_repo.repo.parent / "human-spec"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    proposal = clone / UNIT_DIR / "proposal.md"
+    proposal.write_text(proposal.read_text() + "\nA person clarified the proposal.\n")
+    raw(clone, "add", "-A")
+    raw(clone, "commit", "-q", "-m", "clarify the proposal")
+    raw(clone, "push", "-q", "origin", BRANCH)
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+    second = run_l4([JUDGE])  # the tasks are done: only the judge runs
+    assert second.code == 0 and second.outcome["units"][0]["verdict"] == "PASS"
+    assert [e["ids"] for e in second.events("question.superseded")] == [["Q-001"]]
+    text = raw(tdd_repo.origin, "show", f"{BRANCH}:{UNIT_DIR}/questions.md")
+    assert "- **Status:** superseded by round 2\n" in text
+    file = QuestionsFile.parse(text)
+    assert file.get("Q-001").status is QuestionStatus.SUPERSEDED  # type: ignore[union-attr]

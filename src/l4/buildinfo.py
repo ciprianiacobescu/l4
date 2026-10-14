@@ -38,7 +38,9 @@ def harness_commit() -> str | None:
     return commit if isinstance(commit, str) else _installed_commit()
 
 
-_GITHUB_REPO = re.compile(r"^(?:https://|ssh://git@|git@)github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+_GITHUB_REPO = re.compile(
+    r"^(?:https://|ssh://git@|git@)github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
+)
 
 
 def github_slug(url: str) -> str | None:

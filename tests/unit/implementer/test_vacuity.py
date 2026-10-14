@@ -70,6 +70,28 @@ def test_call_only_test_is_vacuous_and_zero_edge_case_next_to_sibling_is_fine(st
     assert sha(pricing) == before  # restored byte for byte
 
 
+PARTIAL_STUB = (
+    "def pick_priority(on_hand: int, reorder_point: int) -> str:\n    if on_hand < 0 or reorder_point < 0:\n"
+    '        raise ValueError("negative")\n    raise NotImplementedError\n'
+)  # an earlier task's guards, then the bare raise of the task under test
+
+
+def test_red_tests_for_a_guarded_partial_stub_pass_the_check_and_a_type_only_test_is_still_vacuous(make_bench):
+    bench = make_bench([])
+    wb = bench.wb
+    pricing = wb.worktree / "src/pytdd/pricing.py"
+    pricing.write_text(pricing.read_text() + "\n\n" + PARTIAL_STUB)
+    (wb.worktree / "tests/test_red.py").write_text(
+        f'import pytest\nfrom pytdd.pricing import pick_priority\n\n\n@pytest.mark.l4("{C1}")\n'
+        "def test_type_only():\n    assert isinstance(pick_priority(0, 5), str)\n\n\n"
+        f'@pytest.mark.l4("{C2}")\ndef test_urgent():\n    assert pick_priority(0, 5) == "urgent"\n'
+    )
+    run_setup(wb)
+    tracing = {C1: ["tests.test_red::test_type_only"], C2: ["tests.test_red::test_urgent"]}
+    result = vacuity_check(wb, ["src/pytdd/pricing.py"], tracing)
+    assert set(result.vacuous) == {C1} and set(result.proofs) == {C2}
+
+
 def test_a_criterion_whose_only_test_has_the_zero_answer_is_vacuous(staged: tuple[Bench, Path]):
     bench, _ = staged
     result = vacuity_check(bench.wb, ["src/pytdd/pricing.py"], {C2: ["tests.test_red::test_zero_is_the_answer"]})

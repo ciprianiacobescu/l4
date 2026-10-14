@@ -118,9 +118,10 @@ def test_the_rendered_contract_follows_the_test_gate():
     pytest_ctx = ctx()
     vitest_ctx = PromptContext("openspec:u", "codex", "1.1", "1.1 Task", (), (), VITEST)
     marker = 'Tag every test with `@pytest.mark.l4("C-xxxxxxxx")` for each criterion id (listed below) that it checks, '
-    assert marker + "and report those ids as `criteria_ids`. Untagged tests do not count" in render_prompt(
-        "red", pytest_ctx
-    ).text
+    assert (
+        marker + "and report those ids as `criteria_ids`. Untagged tests do not count"
+        in render_prompt("red", pytest_ctx).text
+    )
     assert '@pytest.mark.l4("<criterion>", "<other criterion>")' in render_prompt("red", pytest_ctx).text
     for role in ("red", "green", "single"):
         text = render_prompt(role, vitest_ctx).text  # type: ignore[arg-type]
@@ -150,3 +151,20 @@ def test_the_stub_sentence_is_empty_for_pytest_and_language_neutral_otherwise():
     vitest_ctx = PromptContext("openspec:u", "codex", "1.1", "1.1 Task", (), (), VITEST)
     assert after_stub + stub in render_prompt("red", vitest_ctx).text
     assert "{trace_" not in render_prompt("green", vitest_ctx).text
+
+
+def test_a_reopened_tasks_unchanged_criterion_needs_no_new_test_but_the_changed_one_does():
+    """L4-OPS-015: the red step of a task a spec edit reopened; A is unchanged (its test exists), B has a new id."""
+    ok = check_criteria(result(A, B), FAMILY, new(test_b=(B,)), exempt={A})
+    assert ok.error == "" and ok.cited == (A, B) and ok.tracing == {B: ("t::test_b",)}
+    missing = check_criteria(result(A, B), FAMILY, new(test_a=(A,)), exempt={A})
+    assert B in missing.error and A not in missing.error
+
+
+def test_without_exempt_every_cited_criterion_still_needs_a_new_test():
+    assert A in check_criteria(result(A, B), FAMILY, new(test_b=(B,))).error
+
+
+def test_an_exempt_criterion_a_new_test_traces_stays_traced():
+    check = check_criteria(result(A, B), FAMILY, new(test_a=(A,), test_b=(B,)), exempt={A})
+    assert check.error == "" and set(check.tracing) == {A, B}

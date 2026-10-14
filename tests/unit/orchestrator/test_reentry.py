@@ -304,6 +304,17 @@ def test_a_label_resumed_unit_retries_only_the_halted_task(
     assert [e["task"] for e in halted.events("task.done")] == ["1.1"]
     assert gitlab.mrs[1]["labels"] == ["l4:halted"]
 
+    import sys
+    from types import SimpleNamespace
+
+    from l4.state.resume import resume_unit
+
+    # `l4.state.retry` is written by another change of the series: until it is merged, a retry is a resume here.
+    # With the real `retry_unit` the event is `unit.retried` (drop this stand-in and read that event then).
+    def retry_unit(app, cfg, git, provider, ref, *, reason, signal=None, by=None, rounds=None):
+        return resume_unit(app, cfg, git, provider, ref, reason=reason, signal=signal, by=by)
+
+    monkeypatch.setitem(sys.modules, "l4.state.retry", SimpleNamespace(retry_unit=retry_unit))
     gitlab.mrs[1]["labels"].append("l4:resume")  # a member sets the label; the forge records who
     gitlab.label_events[1] = [
         {"id": 200, "action": "add", "user": {"id": 3}, "label": {"name": "l4:resume"}, "created_at": "2026-10-06"}

@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.2.1 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.3.0 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -23,7 +23,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.2.1](#11-known-limits-of-021)
+11. [Known limits of 0.3.0](#11-known-limits-of-030)
 
 ## Words used in this runbook
 
@@ -40,6 +40,9 @@ Other documents:
 | member | A person with write access (GitHub) or Developer access or higher (GitLab). |
 | token | The forge token. The variable that `forge.token_env` names holds it: `L4_FORGE_TOKEN` by default, `GITHUB_TOKEN` in the setup-action form. |
 | run | One CI job of the harness, or one `l4 run` command. |
+| retry | Continue a unit from the place where it stopped: `l4 retry` or the label `l4:retry`. |
+| restart | Start a unit again on a new branch: `l4 restart` or the label `l4:restart`. |
+| operator label | The label `l4:retry`, `l4:resume` or `l4:restart` on the PR of a unit. |
 
 ## 1. Read this first
 
@@ -47,23 +50,22 @@ Other documents:
 > 10 (progress) gives a notice. Exit 11, 12 and 13 (a stop) give a yellow warning. On GitLab, the job shows
 > `failed (allowed)`. Read the annotation or the note.
 
-> **CAUTION: The `l4 status` table does not show why a unit stopped.** It shows the phase only. Read the note or the CI
-> log of the run that stopped the unit (section 4).
+> **NOTE: The `l4 status` table shows why a unit stopped.** The column `REASON` has the cause, cut at 60 characters.
+> `l4 status --unit <unit>` shows the full cause and the next command (section 4).
 
-> **CAUTION: `l4 resume` and the `l4:resume` label do not start a run.** Start a run after them (section 6), or wait
-> for the schedule.
+> **CAUTION: The operator labels and `l4 resume` do not start a run.** `l4 retry` and `l4 restart` start a run, unless
+> you add `--no-run`. After you add a label, start a run (section 6) or wait for the schedule.
 
-> **CAUTION: Do not use `l4 run --unit` to resume a unit or to look at a unit.** On a halted or escalated unit it does
-> not resume the unit. With a forge token on Linux with bubblewrap, it pushes a ledger commit and it can remove the
-> `l4:resume` label. On other phases it runs agents from your computer. To see what a run would do, use
-> `l4 run --dry-run` ([10.4](#104-commands-for-operation)).
+> **CAUTION: Do not use `l4 run --unit` to retry a unit or to look at a unit.** On a halted or escalated unit it exits
+> 13 and changes nothing. On other phases it runs agents from your computer. To continue a stopped unit, use
+> `l4 retry`. To see what a run would do, use `l4 run --dry-run` ([10.4](#104-commands-for-operation)).
 
 > **CAUTION: Do not edit the ledger (the `.l4/` folders) or `verification.md`.** The harness owns these files. A
 > changed ledger can make the unit `corrupt`, or change its state with no error. The harness stops all work on a
 > `corrupt` unit.
 
 > **CAUTION: Do not increase `verifier.max_fix_rounds` or `feedback.max_rounds` to free one unit.** These values
-> apply to all units. Use the flags of `l4 resume` or the label (section 7.3).
+> apply to all units. Use `l4 retry` or the label `l4:retry` (section 7.3). They add the rounds for one unit.
 
 > **CAUTION: Do not write the text `L4-Run:` in a commit message.** The harness marks its own commits with it. When the
 > newest commit of a push to a branch other than `<base>` has it, CI does not start.
@@ -82,16 +84,20 @@ On GitHub, a red job shows process exit 1 for each code except 10, 11, 12 and 13
 
 | What you see | Probable state | Procedure |
 |---|---|---|
+| `l4 status` shows the phase `halted` | `halted` | [7.2](#72-halted) |
+| `l4 status` shows the phase `escalated` | `escalated` | [7.3](#73-escalated) |
 | The note starts with `### Halted:` | `halted` | [7.2](#72-halted) |
 | The note starts with `### Escalated:` | `escalated` | [7.3](#73-escalated) |
+| The note starts with `### Abandoned:` | `abandoned` | [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch) |
 | The note has `### Waiting for you: a human answer`, or the PR has the label `l4:needs-answers` | `awaiting_human`, or `fixing` when the heading ends with `(fix unit …)` | [7.1](#71-awaiting_human-a-question-waits-for-you) |
 | The note has `### Waiting for capacity` | `waiting_capacity` | [7.4](#74-waiting_capacity-no-agent-is-available) |
 | The note has `### Base merge needed`, and each run exits 1 | `verifying`, with a merge conflict | [7.7](#77-base-merge-conflict) |
 | The note has `### Re-verifying after the hand-off` | `verifying` or `implementing` again (the note says which) | [7.5](#75-in_review-the-pr-is-ready) |
-| The note has ``### The `l4:resume` label was not honoured`` | `halted` or `escalated` | [7.2](#72-halted), procedure A, step 10 |
+| The note has ``### The `l4:resume` label was not honoured`` | `halted`, `escalated`, `waiting_capacity` or `abandoned` | [7.2](#72-halted), step 8 of the label procedure |
 | The note has `### The Kiro done-gate did not pass after the merge` | `merged` | [7.6](#76-after-the-merge) |
 | The PR is ready for review and has the label `l4:in_review` | `in_review` | [7.5](#75-in_review-the-pr-is-ready) |
-| The PR is closed with no merge, or the unit branch is deleted | `in_review`, or the phase before the deletion | [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch) |
+| The PR is closed with no merge, or the unit branch is deleted | `abandoned`, or the phase before the deletion | [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch) |
+| You want to change the spec of a unit that has a branch | any phase that is not finished | [7.14](#714-change-the-spec-of-a-unit-that-has-a-branch) |
 | The job is red with exit 14 (the unit usually has no PR yet) | rejected | [7.8](#78-rejected-unit-exit-14) |
 | `l4 status` shows the phase `corrupt` | corrupt ledger | [7.9](#79-corrupt-ledger) |
 | The log has `is locked by another run: skipped` | locked | [7.11](#711-locked-unit) |
@@ -99,6 +105,22 @@ On GitHub, a red job shows process exit 1 for each code except 10, 11, 12 and 13
 | The job is red with exit 16 | cancelled run | [7.10](#710-cancelled-or-timed-out-run-exit-16) |
 | The log says `nothing to do: no unit has a next step`, but you expect work | — | [Section 4](#4-find-the-state-and-the-cause), then [section 9](#9-what-your-push-does) |
 | No run started after your push | — | [Section 9](#9-what-your-push-does) |
+
+Each stuck unit has one command and one label. Use the command from your computer. Use the label on the PR. A label
+needs a member who is not the user of the forge token.
+
+| The unit is | Command | Label |
+|---|---|---|
+| `halted` | `l4 retry --unit <unit> --reason "<why>"` | `l4:retry` |
+| `escalated` | `l4 retry --unit <unit> --reason "<why>"` (at a round limit it adds a round) | `l4:retry` |
+| `waiting_capacity`, and you want it to continue now | `l4 retry --unit <unit> --reason "<why>"` | `l4:retry` |
+| `in_review`, and you want a new verification | `l4 retry --unit <unit> --reason "<why>"` | None. Use the command. |
+| `merged`, and the archive or the done-gate failed | `l4 retry --unit <unit> --reason "<why>"` | None. Use the command. |
+| `abandoned` (the PR was closed with no merge) | `l4 restart --unit <unit> --reason "<why>"` | `l4:restart` |
+| Any started unit that you want to start again | `l4 restart --unit <unit> --reason "<why>"` | `l4:restart` |
+
+The label `l4:resume` means `l4:retry`. The command `l4 resume` does the same as `l4 retry` for a halted or an
+escalated unit. It starts no run.
 
 ## 3. The states of a unit
 
@@ -125,19 +147,24 @@ stateDiagram-v2
   verifying --> verified: PASS
   verified --> fixing: minor findings
   verified --> in_review: hand-off
-  in_review --> verifying: your commit, or red CI
+  in_review --> verifying: your commit, red CI or retry
   in_review --> implementing: answers, spec edit or feedback
   in_review --> merged: a person merges
   implementing --> halted: breaker
   fixing --> halted: breaker
   verifying --> escalated: cannot fix alone
-  halted --> implementing: resume (or to fixing)
-  escalated --> verifying: resume
+  halted --> implementing: retry (or to fixing)
+  escalated --> verifying: retry
+  in_review --> abandoned: PR closed with no merge
+  abandoned --> [*]: restart starts a new branch
   merged --> [*]
 ```
 
 `waiting_capacity` is not in the diagram. A unit can go there from `ready`, `implementing`, `implemented`, `verifying`
-or `fixing`. It returns to the same phase. [state-diagram.md](state-diagram.md) has all the transitions.
+or `fixing`. It returns to the same phase. A PR closed with no merge makes every phase except `merged` `abandoned`. The
+diagram shows only `in_review`. A push that changes the spec ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch))
+sends many phases to `implementing`. The diagram does not show it. [state-diagram.md](state-diagram.md) has all the
+transitions.
 
 | Phase | What it means | Who acts next | Exit code | Procedure |
 |---|---|---|---|---|
@@ -155,33 +182,47 @@ or `fixing`. It returns to the same phase. [state-diagram.md](state-diagram.md) 
 | `waiting_capacity` | No agent of a necessary role is available. | Harness, sometimes a **person** | 12 | [7.4](#74-waiting_capacity-no-agent-is-available) |
 | `halted` | A breaker stopped the unit. | **Person** | 13 | [7.2](#72-halted) |
 | `escalated` | Verification failed, and the harness cannot continue alone. | **Person** | 13 | [7.3](#73-escalated) |
+| `abandoned` | A person closed the PR with no merge. | **Person** | — | [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch) |
 
 A fix unit is a small unit that the harness writes when verification fails. Its folder is next to the unit folder, with
 the name `<name>-fix-<n>`, on the same branch. You never run a fix unit. The harness runs it as part of its parent.
 
 ## 4. Find the state and the cause
 
-The cause of a stop is in these places. Examine them in this sequence.
+The harness records the cause of each stop. The cause has a short code (`reason`) and a text (`detail`). Examine these
+places in this sequence.
 
-| Place | Halted | Escalated by verification | Feedback limit | 3 verifier errors |
-|---|---|---|---|---|
-| 1. The note on the PR | Yes | Yes (`Round <n> ended FAIL: <cause>.`) | Yes | Yes |
-| 2. The CI log of the run that stopped the unit | Yes | Only the verdict line | Yes | Yes |
-| 3. `outcome.json` of that run | Yes | A general text: read `verification.md` | Yes | Yes |
-| 4. `l4 status --json`, field `halt_reason` | Yes | **No** (empty) | The code only (`feedback_rounds_exhausted`) | Yes |
-| 5. `verification.md` on the branch, section `## Fix unit` | — | Yes | Yes | **No** |
-| 6. The ledger | Yes | Only the phase change | Yes | Yes |
-| The `l4 status` table | **No** | **No** | **No** | **No** |
-| The `l4 plan` table | **No** (a fixed text) | **No** | **No** | **No** |
+| Place | What it shows |
+|---|---|
+| 1. `l4 status` (column `REASON`) | The `detail` of a halted or escalated unit, cut at 60 characters. For other phases: the open question ids, or `until <time>`. |
+| 2. `l4 status --unit <unit>` | `Cause:` (the full `detail`), `Stopped in run:` (the run id), `Or:` (the label) and `Next:` (the command). |
+| 3. The note on the PR | The heading `### Halted: <detail>` or `### Escalated: <detail>`, and what to do. |
+| 4. `l4 plan` (column `REASON`) | `halted: <detail>` or `escalated: <detail>`. |
+| 5. The CI log of the run that stopped the unit | The line `[l4] run: <unit> halted: <detail>` or `[l4] run: <unit> escalated: <detail>`. |
+| 6. `l4 status --unit <unit> --json` | `halt_reason` (the code), `halt_detail` (the text), `reason` and `next`. |
+| 7. `outcome.json` of that run | `exit_reason` of the unit. |
+| 8. `verification.md` on the branch, section `## Fix unit` | The round that failed. Only for an escalation by verification. |
+| 9. The ledger | The `phase.changed` event, with `reason` and `detail`. |
 
-"Escalated by verification" means one of four causes. The fix rounds are used. No finding can become a fix task. The
-framework has no fix units. The harness could not create the fix unit.
+> **NOTE:** A unit that stopped before harness 0.3.0 has no `detail` in its ledger. The `REASON` column then shows the
+> old text, and `halt_reason` can be empty. The note can say "no fix round is left" also when rounds are left. Use
+> `l4 retry`, and read `verification.md` for the cause.
+
+> **NOTE:** After a refused label, the heading of the note shows the short code of the cause (for example
+> `fix_rounds_exhausted`), not the text. Read `Cause:` in `l4 status --unit <unit>`.
+
+The codes of `halt_reason` are:
+
+| State | Codes |
+|---|---|
+| `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `fix_records` |
+| `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors` |
 
 ### 4.1 Read the note on the PR
 
-> **NOTE:** The note is not a permanent record. A resume replaces the text with `Nothing is waiting for a human
-> answer.` A resume also clears `halt_reason`. After a resume, only the CI log of the run that halted the unit (4.2), its GitLab
-> artifact (4.3) and the ledger (4.5) keep the cause.
+> **NOTE:** The note is not a permanent record. A retry replaces the text with `Nothing is waiting for a human
+> answer.` A retry also clears `halt_reason` and `halt_detail`. After a retry, only the CI log of the run that stopped
+> the unit (4.2), its GitLab artifact (4.3) and the ledger (4.5) keep the cause.
 
 1. Open the PR of the unit. Its source branch is `<branch>`.
 2. Find the comment of the harness. It starts with a heading of level 3 (`###`).
@@ -232,7 +273,8 @@ The important log lines:
 
 | Line | What it tells you |
 |---|---|
-| `[l4] run: <unit> halted: <reason>` | Why the unit halted. This is the full text. |
+| `[l4] run: <unit> halted: <detail>` | Why the unit halted. This is the full text. |
+| `[l4] run: <unit> escalated: <detail>` | Why the unit escalated. This is the full text. |
 | `[l4] <unit> phase <from> → <to> (<trigger>)` | A phase change. |
 | `[l4] <unit> task <k> <red\|green> attempt <n> failed: <reason>` | Why one attempt failed. The phase can also be `single`. For a fix unit, `[<fix unit>]` follows the unit id. The reason is cut. The full text is on the line `[l4] implementer: <k>: <phase> attempt <n> failed: …`. |
 | `[l4] <unit> halted: <code> (task <k>)` | The short code of the breaker. |
@@ -240,7 +282,11 @@ The important log lines:
 | `[l4] run: <unit>: waiting_capacity, retry_after <time>: <why>` | No agent is available, and when the harness tries again. With no recorded time, the line is `[l4] run: <why>`. |
 | `[l4] run: <unit> rejected: <reasons>` | The spec is not correct (exit 14). |
 | `[l4] run: <unit>: internal error: <Type>: <message>` | One unit stopped with an error. The other units go on. |
-| `[l4] sweeper: <unit>: …` | Merges, archives, CI results and the `l4:resume` label. |
+| `[l4] sweeper: <unit>: …` | Merges, archives, CI results, closed PRs and the operator labels. |
+| `[l4] retry: <unit> retried: now <phase>` | The result of `l4 retry`. |
+| `[l4] sweeper: <unit>: retried by a member's l4:retry label (event <n>)` | The sweep acted on the label `l4:retry` or `l4:resume`. |
+| `[l4] sweeper: <unit>: started over by a member's l4:restart label (event <n>): attempt <n>` | The sweep restarted the unit. |
+| `[l4] sweeper: <unit>: MR !<n> was closed without a merge: abandoned; l4 restart starts the unit over` | The PR was closed. The unit is `abandoned`. |
 | `[l4] run: nothing to do: no unit has a next step` | No unit needs the harness. |
 | `[l4] cli: internal error: <type>: <message>` | The command stopped with an error (exit 1). |
 
@@ -302,6 +348,7 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
    | Column | Meaning |
    |---|---|
    | `PHASE` | The phase. `corrupt` means that the ledger cannot be read. `-` means that no run started the unit. |
+   | `REASON` | The cause of a stop, cut at 60 characters (`halted`, `escalated`). The open question ids (`awaiting_human`). `until <time>` (`waiting_capacity`). `-` for other phases. |
    | `ITER` | The number of harness invocations that wrote to the ledger of the unit. |
    | `TASKS` | Done and total required tasks of `tasks.md`. |
    | `OPEN-Q` | The ids of open questions. |
@@ -309,7 +356,26 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
    | `SOURCE` | `branch`: from the unit branch. `worktree`: from your checkout (no branch found). `archive`: from an archived OpenSpec change that has `feedback.md`. |
    | `FEEDBACK` | The count of feedback items in each state. It shows only when a unit has feedback. |
 
-3. Show the full state of one unit:
+3. Show one unit with the full cause and the next step:
+
+   ```sh
+   l4 status --unit <unit>
+   ```
+
+   The output has these lines, under the table:
+
+   ```text
+   Phase: halted
+   Cause: task 1.1: max_task_attempts (3) reached in red; last failure: …
+   Stopped in run: <run id>
+   Or: add the label l4:retry
+   Next: l4 retry --unit <unit> --reason TEXT
+   ```
+
+   `Cause:` and `Stopped in run:` show only while the unit is stopped. `Or:` shows only for a unit that a label
+   moves. `Next:` is the bare command. For a unit that waits for an answer, it names the file and the question ids.
+
+4. Show the full state of one unit:
 
    ```sh
    l4 status --unit <unit> --json
@@ -317,22 +383,26 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
 
    | Field | Meaning |
    |---|---|
-   | `halt_reason` | Why the unit halted or escalated. It is empty after a resume. It is also empty for an escalation by verification, except the feedback limit (the code only) and 3 verifier errors (the full text). |
-   | `previous_phase` | The phase that a resume returns to. |
+   | `halt_reason` | The code of the cause of the stop ([section 4](#4-find-the-state-and-the-cause)). It is empty after a retry. |
+   | `halt_detail` | The text of the cause. It is empty after a retry. |
+   | `reason` | The text that the column `REASON` shows, whole. |
+   | `next` | The command or the action that moves the unit. |
+   | `previous_phase` | The phase that a retry returns to. |
    | `retry_after` | When the harness tries the agents again (`waiting_capacity`). |
-   | `fix_rounds_counted`, `fix_rounds_extra` | Fix rounds used, and rounds added by a resume. The limit is `verifier.max_fix_rounds` (default 3) plus `fix_rounds_extra`. |
-   | `feedback_rounds_used`, `feedback_rounds_extra` | Feedback rounds used, and rounds added by a resume. The limit is `feedback.max_rounds` (default 5) plus `feedback_rounds_extra`. |
-   | `refused_signals` | `l4:resume` labels that the harness did not accept, and why. |
+   | `fix_rounds_counted`, `fix_rounds_extra` | Fix rounds used, and rounds added by a retry or a resume. The limit is `verifier.max_fix_rounds` (default 3) plus `fix_rounds_extra`. |
+   | `feedback_rounds_used`, `feedback_rounds_extra` | Feedback rounds used, and rounds added by a retry or a resume. The limit is `feedback.max_rounds` (default 5) plus `feedback_rounds_extra`. |
+   | `refused_signals` | Operator labels that the harness did not accept, and why. |
    | `ci_failure` | The red jobs of your own CI on the hand-off commit. |
 
-4. Show the next action of each unit:
+5. Show the next action of each unit:
 
    ```sh
    l4 plan
    ```
 
    The column `NEXT` is `implement`, `clarify`, `verify`, `hand_off`, `follow_up` or `none`. The value `none` means
-   that the harness does nothing for this unit. The column `REASON` tells you who must act.
+   that the harness does nothing for this unit. The column `REASON` tells you why, and who must act. For a halted or
+   escalated unit, it holds the recorded cause.
 
 ### 4.5 Read the ledger
 
@@ -353,17 +423,17 @@ Use the ledger only when the other places do not give the cause. Do not change i
   git show refs/l4/locks/<framework>/<name>:ledger-pending/
   ```
 
-- **At all times**, the events of the sweep go to the lock ref. These are `resume.refused`, `resume.hint`, `ci.failed`
-  and `archive.failed`.
+- **At all times**, the events of the sweep go to the lock ref. These are `resume.refused`, `resume.hint`, `ci.failed`,
+  `pr.closed` and `archive.failed`.
 
-A halt is a `breaker.tripped` event, then a `phase.changed` event with `"to": "halted"`. Only `phase.changed` has the
-full text of the reason in `reason`. `breaker.tripped` has a short code in `reason` (for example `max_task_attempts`)
-and the details in `last_failure`, `detail` or `paths`.
+A halt is a `breaker.tripped` event, then a `phase.changed` event with `"to": "halted"`. The event `phase.changed`
+has the code in `reason` and the text in `detail`. `breaker.tripped` has a short code in `reason` (for example
+`max_task_attempts`) and the details in `last_failure`, `detail` or `paths`.
 
 ## 5. Prepare your computer for l4 commands
 
-> **CAUTION:** Do step 6. Without it, `l4 resume`, `l4 archive`, `l4 plan --sweep`, `l4 run` and `l4 verify` stop with
-> exit 2 when the token is set.
+> **CAUTION:** Do step 6 when `origin` does not name the project. Without it, `l4 retry`, `l4 restart`, `l4 archive`,
+> `l4 plan --sweep`, `l4 run` and `l4 verify` stop with exit 2 when the token is set.
 
 > **CAUTION:** Do not write the token in a file or in a command line that the shell keeps in its history.
 
@@ -378,15 +448,18 @@ and the details in `last_failure`, `detail` or `paths`.
 4. Pull.
 5. Fetch the unit branches and the lock refs (the command of [4.4](#44-use-l4-status-and-l4-plan-on-your-computer),
    step 1).
-6. Tell `l4` which project to use.
-   - GitHub: set the variable `GITHUB_REPOSITORY`:
+6. Check that `l4` finds the project.
+   - `l4` reads the project from `origin`: `owner/name` of a github.com `origin`, or the host and the path of a GitLab
+     `origin`. Most clones need nothing more.
+   - If `origin` is another host, set the variable `GITHUB_REPOSITORY` (GitHub):
 
      ```sh
      export GITHUB_REPOSITORY=<owner>/<name>
      ```
 
-   - GitLab: set `forge.gitlab.api_url` and `forge.gitlab.project` in `.l4/config.yaml` on `<base>`.
-   - If `forge.type` is `auto`, `l4` uses GitLab outside CI. Set the GitLab values.
+   - For GitLab, you can set `forge.gitlab.api_url` and `forge.gitlab.project` in `.l4/config.yaml` on `<base>`. The
+     configured values win over `origin`.
+   - If `forge.type` is `auto` and `origin` is on github.com, `l4` uses GitHub. Otherwise it uses GitLab outside CI.
 7. If the command needs the token (see the table below), put the token in the environment. The token must be able to
    push and to edit PRs. Use the variable that `forge.token_env` names. The example uses the default name:
 
@@ -401,6 +474,7 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 | `l4 status`, `l4 plan` | No | No | No |
 | `l4 plan --sweep` | No | No | Yes |
 | `l4 feedback …` | No | No | No (git only) |
+| `l4 retry`, `l4 restart` | No | No | Yes. The push, the labels and the start of a run need it. |
 | `l4 resume` | No | No | Yes, so that the note and the labels change |
 | `l4 archive` | No | No | Yes |
 | `l4 run`, `l4 verify` | **Yes** | **Yes** | Yes |
@@ -415,7 +489,8 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 ## 6. Start a run
 
 Each CI run checks out the head of `<base>`, plans all units and runs the units that have a next action. You cannot
-start a CI run for one unit. A run that you start on a unit branch does the same as a run on `<base>`.
+start a CI run for one unit. A run that you start on a unit branch does the same as a run on `<base>`. `l4 retry`
+and `l4 restart` start a run for you, unless you add `--no-run`.
 
 **On GitHub:**
 
@@ -502,8 +577,9 @@ The push starts a run. The unit moves when your answers free a task. `l4 plan` t
 
 **For verdict questions** (`- **Kind:** verdict`; the title starts with `Criterion C-…`, `Finding F-…` or `Hold H-…`):
 
-- Set the Status to `answered`. Do not use `accepted` or `dismissed` for a verdict question. If all verdict questions
-  are `dismissed`, the unit cannot move.
+- Set the Status to `answered`. Do not use `accepted` or `dismissed` for a verdict question. The harness reads
+  `dismissed` as `open`. The note and `l4 plan` then say `Q-NNN: a verdict question cannot be dismissed: start the
+  answer with accept or reject`.
 - Start the answer with the word `accept` or `reject`. Then give your reason. `accept` waives a criterion, a finding
   or a hold.
 - A `reject` fails the criterion and starts a fix round, but only while fix rounds are left. Otherwise the unit
@@ -526,121 +602,133 @@ The push starts a run. The unit moves when your answers free a task. `l4 plan` t
 - A verdict answer that does not start with `accept` or `reject`.
 - Answers on `<base>`, and comments on the PR.
 
-> **NOTE:** `l4 questions` is not available in 0.2.1 (exit 2). Edit the file.
+> **NOTE:** `l4 questions` is not available in 0.3.0 (exit 2). Edit the file.
 
 ### 7.2 `halted`
 
-A breaker stopped the unit during `implementing` or `fixing`. Read the reason (section 4). Then find it in this table.
+A breaker stopped the unit during `implementing` or `fixing`. A secret in the outgoing commits can halt a unit in
+`verifying` and `verified` also. Read the cause (section 4). Then find it in this table.
 
-| The reason starts with | Cause | What to do before you resume |
-|---|---|---|
-| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. |
-| ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
-| `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
-| `secret in the outgoing commits, push blocked: <path> (<kind>)` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. Do not resume: the PR shows `l4:halted`, but the unit is still in `implementing` or `fixing` (`l4 status`). `l4 resume` stops with exit 2, and the harness ignores the label. Start a run (section 6). |
-| `<unit> is fixing but no fix unit is open`, or `the fix unit <x> is not a fix unit of <unit>` | The fix records do not agree. | Report it as a harness defect. |
+| The cause starts with | Code | Cause | What to do before you retry |
+|---|---|---|---|
+| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. |
+| ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | `unselectable_task` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
+| `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | `baseline_failed` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
+| `secret in the outgoing commits, push blocked: <path> (<kind>)` | `secret_in_push` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. |
+| `<unit> is fixing but no fix unit is open`, or `the fix unit <x> is not a fix unit of <unit>` | `fix_records` | The fix records do not agree. | Report it as a harness defect. |
 
 > **CAUTION:** If you do not correct the cause, the unit halts again in the next run.
 
-> **NOTE:** A push to a halted branch does not resume the unit. The log then shows
-> `halted; a person pushed after the halt: add the label l4:resume to resume`.
+> **NOTE:** For a secret, the run discards its commits that were not pushed. The commits hold the secret. The run then
+> pushes the halt alone, with no code. The remote branch gets no commit with the secret from this run. If the secret
+> comes from the agent, it can come back.
 
-> **NOTE:** For a secret, the harness does not push the halt. The ledger on `<branch>` stays in `implementing` or
-> `fixing`. In `verifying` or at the hand-off, the phase does not change, and the run ends with exit 13. The next run
-> starts the step again from the last pushed commit. If the secret comes from the agent, it can come back.
+> **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
+> next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not
+> move the unit. The log then shows `halted; a person pushed after the halt: add the label l4:retry or run l4 retry`.
 
-Except for a secret, you can resume in two ways: procedure A (the label) or procedure B (the command). Both give the
-unit new task attempts.
+Retry the unit with the command or with the label. Both give the unit new task attempts.
 
-**Procedure A: the `l4:resume` label (recommended)**
+**The command: `l4 retry`**
 
-> **CAUTION:** The harness reads the label only on an open PR. For a closed PR, use procedure B. The harness refuses
-> the label of the user of the forge token. If the forge token is your personal token, use procedure B, or ask another
-> member to add the label.
-
-1. Correct the cause.
-2. Push the correction.
-3. Make sure that you are a member, and that you are not the user of the forge token.
-4. If the project has no label `l4:resume`, create it. Runs create only `l4:<phase>` and `l4:needs-answers`.
-5. Add the label `l4:resume` to the PR.
-6. Start a run on `<base>` (section 6), or wait for the schedule.
-7. Make sure that the log of that run has
-   `[l4] sweeper: <unit>: resumed by a member's l4:resume label (event <n>)`. For an escalation at a limit, the line
-   ends `(event <n>, 1 more fix round)` or `(event <n>, 1 more feedback round)`. The same run then continues the unit.
-8. Make sure that `l4 status` shows the new phase.
-9. Do not add the label again. The harness removes it after the resume.
-10. If the note shows ``### The `l4:resume` label was not honoured``, read the reason under it:
-    - `the label was set by a user who is not a member of the project`: ask a member to add the label.
-    - `the label was set by a member below Developer access (level <n>)`: ask a member with Developer access or
-      higher to add the label.
-    - `the label was set by the harness's own user`: ask another person to add the label.
-    - `the forge does not say who set the label`, or `the harness cannot tell which user is its own, so no label is
-      honoured`: a new label does not help. Use procedure B.
-11. If a new label can fix the reason, remove the label.
-12. Then ask a member to add the label again. Only a new "add" event counts.
-
-**Procedure B: the `l4 resume` command**
-
-> **NOTE:** `l4 resume` writes the commit `chore(<name>): resume [skip ci]` to `<branch>`. Its help says "members
-> only", but the command does not check membership. Your push permission on `<branch>` decides.
+> **NOTE:** `l4 retry` writes the commit `chore(<name>): retry [skip ci]` to `<branch>`. It fetches the base branch
+> and the unit branches first. It does not check membership. Your push permission on `<branch>` decides.
 
 > **CAUTION:** A CI run never holds the lock of this computer. If a CI run works on the same unit, the push of
-> `l4 resume` fails with exit 1 (non-fast-forward). Make sure that no CI run works on the unit.
+> `l4 retry` fails with exit 1 (non-fast-forward). Make sure that no CI run works on the unit.
 
 1. Do the steps of section 5, with the token.
 2. Correct the cause.
 3. Push the correction.
-4. Resume the unit:
+4. Retry the unit:
 
    ```sh
-   l4 resume --unit <unit> --reason "<why the unit can continue now>"
+   l4 retry --unit <unit> --reason "<why the unit can continue now>"
    ```
 
-5. Make sure that the log has `[l4] resume: <unit> resumed: back in <phase>`. The phase is `implementing` or `fixing`
-   for a halted unit, and `verifying` for an escalated unit.
-6. If the line says `back in halted` or `back in escalated`, do step 4 again after the other `l4` process ends. The
-   log then also has `is locked by another run: skipped`.
-7. Start a run on `<base>` (section 6), or wait for the schedule.
+5. Make sure that the log has `[l4] retry: <unit> retried: now <phase>`. The phase is `implementing` or `fixing` for
+   a halted unit. It is `implementing` also when you changed the spec since the stop.
+6. Read the last line of the output:
+   - `run started on <base>`: a run works on the unit now.
+   - `a run is already queued on <base>`: a run starts soon.
+   - `start a run with: …`: the forge did not start a run. Do the command in the line.
+7. If you do not want a run now, add `--no-run` to the command. Start a run later (section 6).
+8. If the line says `now halted`, do step 4 again after the other `l4` process ends. The log then also has
+   `is locked by another run: skipped`.
+
+**The label: `l4:retry`**
+
+> **CAUTION:** The harness reads the label only on an open PR. For a closed PR, use `l4 restart`
+> ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). The harness refuses the label of the user of the
+> forge token. If the forge token is your personal token, use the command, or ask another member to add the label.
+
+1. Correct the cause.
+2. Push the correction.
+3. Make sure that you are a member, and that you are not the user of the forge token.
+4. Add the label `l4:retry` to the PR. The label `l4:resume` has the same effect. A run creates both labels. If the
+   project has no such label, create it.
+5. Start a run on `<base>` (section 6), or wait for the schedule. The label starts no run.
+6. Make sure that the log of that run has
+   `[l4] sweeper: <unit>: retried by a member's l4:retry label (event <n>)`. For an escalation at a limit, the unit
+   gets one more round of that kind. The same run then continues the unit.
+7. Make sure that `l4 status` shows the new phase. Do not add the label again. The harness removes it after the retry.
+8. If the note shows ``### The `l4:resume` label was not honoured``, read the reason under it. Each reason names the
+   command that works. Do that command. Or follow the advice for the reason:
+   - `the label was set by a user who is not a member of the project`: ask a member to add the label.
+   - `the label was set by a member below Developer access (level <n>)`: ask a member with Developer access or
+     higher to add the label.
+   - `the label was set by the harness's own user`: use `l4 retry`, or ask another person to add the label.
+   - `the forge does not say who set the label`, or `the harness cannot tell which user is its own, so no label is
+     honoured`: a new label does not help. Use the command.
+   - `a newer operator label on this merge request acts instead`: no action is necessary. The newer label acts.
+9. If a new label can fix the reason, remove the label. Then ask a member to add the label again. Only a new "add"
+   event counts.
+
+**`l4 resume` and `l4:resume`**
+
+`l4 resume --unit <unit> --reason "<why>"` still works for a halted or an escalated unit. It writes the commit
+`chore(<name>): resume [skip ci]`. It starts no run and does not look for a spec edit. Use `l4 retry` instead.
 
 ### 7.3 `escalated`
 
-Verification failed, and the harness cannot continue alone. A resume returns the unit to `verifying`.
+Verification failed, and the harness cannot continue alone. A retry returns the unit to `verifying`. If you changed the
+spec since the stop, a retry sends the unit to `implementing`.
 
-> **CAUTION:** For the first four causes below, the first heading is
-> `### Escalated: verification failed and no fix round is left (see verification.md)`, also when rounds are left. After
-> a refused label, it is `### Escalated: see the ledger`. Read the cause in the line `Round <n> ended FAIL: <cause>.`
-> of the note. If that line is gone, read `## Fix unit` in `verification.md` on `<branch>`.
-
-| Cause (in `verification.md` or the note) | What to do | How to resume |
+| Cause (code) | What the detail says | What to do |
 |---|---|---|
-| `fix rounds used <n>/<m>` | Read `## Findings` and `## Criteria`. Decide whether more fix rounds can help. If the spec is wrong, correct the spec on `<branch>`. | `--extend-fix-rounds <n>`, or the label (one round each time) |
-| `no finding of this round can be converted into a fix task` | Read the `not converted` lines. For example, a rejected verdict with no `WHEN … THEN …` needs a new answer with a scenario. | Plain resume, or the label |
-| `<framework> has no fix units` | Report it as a harness defect. The framework cannot make fix units. | — |
-| `the fix unit could not be created: <error>` | Read the error. If it names a spec file that you can correct, correct the file on `<branch>`. If not, report a harness defect. | Plain resume, or the label, after you correct the file. A plain resume with no correction repeats the failure. |
-| `feedback round limit reached (<n>)` | Feedback items used all rounds (`feedback.max_rounds`). | `--extend-feedback-rounds <n>`, or the label (one round each time) |
-| `3 consecutive internal verifier errors` | The verifier stopped with an internal error three times. Read `[l4] run: <unit>: the verifier failed again: <type>: <message>` in the CI log and the `verify.error` events in the ledger. Correct the cause, or report a harness defect. | Plain resume, or the label |
+| `fix_rounds_exhausted` | `fix rounds used <n>/<m>` | Read `## Findings` and `## Criteria`. Decide whether more fix rounds can help. If the spec is wrong, correct the spec on `<branch>`. The retry adds the rounds (one, or `--rounds <n>`). |
+| `no_convertible_finding` | `no finding of this round can be converted into a fix task` | Read the `not converted` lines. For example, a rejected verdict with no `WHEN … THEN …` needs a new answer with a scenario. A plain retry is enough. |
+| `no_fix_units` | `<framework> has no fix units` | Report it as a harness defect. The framework cannot make fix units. |
+| `fix_unit_not_created` | `the fix unit could not be created: <error>` | Read the error. If it names a spec file that you can correct, correct the file on `<branch>`. If not, report a harness defect. A plain retry with no correction repeats the failure. |
+| `feedback_rounds_exhausted` | `feedback round limit reached (<n>)` | Feedback items used all rounds (`feedback.max_rounds`). The retry adds the rounds. |
+| `same_failure` | `round <n> failed the same way as round <n-1>: …` | The same gates or tests failed in two rounds, and nobody changed the branch between them. Read the gates and tests that fail. Correct the cause on `<branch>`. A retry with no change fails again. |
+| `verifier_errors` | `3 consecutive internal verifier errors` | The verifier stopped with an internal error three times. Read `[l4] run: <unit>: the verifier failed again: <type>: <message>` in the CI log and the `verify.error` events in the ledger. Correct the cause, or report a harness defect. |
 
 > **CAUTION:** If nothing changed, the next verification fails the same way, and the unit escalates again.
 
 **Procedure:**
 
-1. Read the note.
+1. Read the cause (section 4).
 2. Read `verification.md` on `<branch>`.
 3. If it is necessary, correct the cause.
 4. Push the correction.
-5. Resume the unit with procedure A or B of [7.2](#72-halted).
-6. For procedure B, add the flag from the table to the command:
+5. Retry the unit with the command or the label of [7.2](#72-halted). At a round limit, the retry adds one round of the
+   kind that is used up:
 
    ```sh
-   l4 resume --unit <unit> --reason "<why>" --extend-fix-rounds 1
-   l4 resume --unit <unit> --reason "<why>" --extend-feedback-rounds 1
+   l4 retry --unit <unit> --reason "<why>"
+   l4 retry --unit <unit> --reason "<why>" --rounds 2
    ```
 
-   The command refuses a flag on a halted unit. It refuses a resume of a feedback-limit escalation without
-   `--extend-feedback-rounds`. It refuses a resume of a fix-limit escalation without `--extend-fix-rounds`. It accepts
-   `--extend-fix-rounds` on any other escalation. The error message tells you the correct flag.
+6. Use `--rounds <n>` only for an escalation at a limit. The command refuses `--rounds` for a unit that is not
+   escalated (exit 2). If the unit has rounds left, the command ignores `--rounds` and prints a warning. The label adds
+   one round for each label event.
+7. Start a run, if the output does not say that a run started (section 6).
 
-7. Start a run (section 6).
+`l4 resume --unit <unit> --reason "<why>" --extend-fix-rounds <n>` and `--extend-feedback-rounds <n>` still work. The
+command refuses a flag on a halted unit. It refuses a resume of a feedback-limit escalation without
+`--extend-feedback-rounds`. It refuses a resume of a fix-limit escalation without `--extend-fix-rounds`. The error
+message tells you the correct flag. A retry has no such rule.
 
 ### 7.4 `waiting_capacity`: no agent is available
 
@@ -655,8 +743,9 @@ If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. T
 
 **What you see:** the note `### Waiting for capacity`, with each profile and why it cannot run.
 
-> **NOTE:** The last line of the note can say `Capacity is expected back at <time>` also when CI does not continue the
-> unit. This is true after a park from `fixing`, and for a usage limit with no reset time. Use `l4 plan` to know.
+The harness always records a time to try again (`retry_after`). When the cause gives no time, the time is now plus
+`availability.default_cooldown`. CI continues the unit after that time. This is true for a unit that waits from
+`fixing` also.
 
 **Procedure:**
 
@@ -668,28 +757,29 @@ If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. T
 6. Push `<base>`.
 7. Run `l4 plan --unit <unit>`.
 8. Read REASON in the table:
-   - `waiting_capacity until <time>`: wait until that time.
+   - `waiting_capacity until <time>`: wait until that time, or continue the unit now (the next procedure).
    - `capacity: retry_after <time> passed`: start a run (section 6).
-   - `waiting_capacity: M0 does not re-enter on its own`: do the procedure below for a unit that CI does not continue.
+   - `waiting_capacity: M0 does not re-enter on its own`: the ledger is old and has no time. Continue the unit now
+     (the next procedure).
 9. Make sure that the unit moves. Run `l4 status`, or read the log of the run.
 
-**A unit that CI does not continue**
+**Continue the unit now**
 
-CI does not continue the unit in two cases: the unit came from `fixing`, or the harness recorded no time. This is the
-one case where you use `l4 run --unit`.
-
-> **CAUTION:** A run on your computer and a run in CI do not share a lock. Make sure that no CI run works on the unit.
+`l4 retry` ignores `retry_after`. It returns the unit to the phase from which it waited.
 
 1. Do the steps of section 5, with the token.
-2. Make sure that no CI run works on the unit.
-3. Run `l4 run --unit <unit>` on a Linux computer with bubblewrap and the agent CLIs.
+2. Correct the cause (the steps above).
+3. Run:
 
-> **NOTE:** The note says "The scheduled `l4 sweep` resumes the unit". There is no `l4 sweep` command. It means the
-> scheduled CI run.
+   ```sh
+   l4 retry --unit <unit> --reason "<why>"
+   ```
+
+4. Or add the label `l4:retry` to the PR, and start a run (section 6).
 
 To examine one profile again on a self-hosted runner, run `l4 probe <profile> --role <role> --no-cache`. The role is
 `implementer`, `verifier_agent` or `judges`. When the probe passes, it removes the wait time of that profile on that
-runner. The unit still waits until its `retry_after`.
+runner. The unit still waits until its `retry_after`, unless you retry it.
 
 ### 7.5 `in_review`: the PR is ready
 
@@ -701,19 +791,16 @@ The unit passed verification. The PR waits for a person.
 - **Merge it.** Use any merge method. The harness never merges.
 - **Ask for changes.** Use `l4 feedback add` on `<branch>`, then commit and push. [feedback.md](feedback.md) tells you
   how.
-- **Answer or change the spec.** A change in the unit folder after the hand-off sends the unit to `implementing`.
+- **Answer or change the spec.** A change in the unit folder after the hand-off sends the unit to `implementing`
+  ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
 - **Push your own commit.** A commit that is not from the harness sends the unit to `verifying`. The PR becomes a
   draft again, and the note shows `### Re-verifying after the hand-off`. When verification passes, the harness hands
   off again.
 
-  To verify the unit again with no change, push an empty commit:
-
-  ```sh
-  git commit --allow-empty -m "verify again"
-  git push
-  ```
-
-- **Close the PR with no merge.** The unit stays in `in_review`. See [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch).
+- **Verify again with no change.** Run `l4 retry --unit <unit> --reason "<why>"`. The unit goes to `verifying` (the
+  trigger is `retry_requested`). There is no label for this case. The command is the one way.
+- **Close the PR with no merge.** The next sweep makes the unit `abandoned`. See
+  [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch).
 
 **Your own CI is red on the hand-off commit:** the next run sends the unit to `verifying` (`repository_ci_failed`), and
 the fix loop tries to correct it. If the same jobs are also red on `<base>`, the harness records `ci.preexisting` and
@@ -721,8 +808,8 @@ does nothing.
 
 **Your own CI did not run on the hand-off commit (GitHub):** the push of the harness used `GITHUB_TOKEN`, and GitHub
 starts no workflow for such a push. The log shows `no workflow ran on the hand-off commit`. Use a personal access token
-or a GitHub App token as the forge token. The label of the owner of that token is refused. To resume a unit, use
-procedure B of [7.2](#72-halted), or ask another member to add the label.
+or a GitHub App token as the forge token. The harness refuses the label of the owner of that token. To continue a unit,
+use `l4 retry` ([7.2](#72-halted)), or ask another member to add the label.
 
 To use your own token in the setup-action form, where `forge.token_env` is `GITHUB_TOKEN`:
 
@@ -746,11 +833,14 @@ The next run on `<base>` sees the merge. A merge is a push to `<base>`, so it st
   the unit folder changes. To try again now:
 
   1. Do the steps of section 5, with the token.
-  2. Run:
+  2. Run one of these commands. They do the same for a merged unit:
 
      ```sh
+     l4 retry --unit <unit> --reason "<why>"
      l4 archive --unit <unit> --retry
      ```
+
+     `l4 retry` exits 2 if the unit has no recorded archive or done-gate failure.
 
 - **Feedback after the merge:** the next run makes a follow-up unit `<name>-followup-<n>` with its own branch and PR.
   [feedback.md](feedback.md) tells you how.
@@ -803,12 +893,13 @@ Correct the config on `<base>`. The unit is rejected in each run until you corre
 
 `l4 status` shows the phase `corrupt`. `l4 plan` shows `ledger corrupt: <file>:<line> …`. CI runs skip the unit, and
 their exit code does not change. `l4 run --unit`, `l4 verify` and `l4 resume` on the unit stop with exit 1.
+`l4 retry` does not move the unit.
 
 The cause is a changed ledger file. It has a line that is not correct, a sequence number that goes back, or an event of
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.2.1 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.3.0 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -851,12 +942,12 @@ on the unit.
 
 > **CAUTION:** A run on your computer and a run in CI do not share this lock. Do not run `l4 run` or `l4 verify` on
 > your computer while CI works on the same unit. The push of the second run is refused (exit 1), and the work of that
-> run is lost. A local `l4 resume` while CI works on the same unit also fails with exit 1.
+> run is lost. A local `l4 retry`, `l4 resume` or `l4 restart` while CI works on the same unit can also fail with exit 1.
 
 - Wait for the other run to end. The lock goes when its process stops.
 - If the line has no pid, read the pid in the file `$L4_CACHE/locks/<framework>/<name>.lock` (the default is
   `~/.cache/l4/`).
-- `l4 unlock` is not available in 0.2.1 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.3.0 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.12 Red job: exit 1, 2 or 3
@@ -894,15 +985,144 @@ Run `l4 doctor` (on a self-hosted runner, `l4 doctor --ci`). Correct each row wi
 
 ### 7.13 A PR closed without a merge, or a deleted unit branch
 
-Release 0.2.1 has no procedure for these two cases.
+**A PR closed without a merge.** The next sweep makes the unit `abandoned`. The note on the PR gets the heading
+``### Abandoned: the merge request was closed without a merge``. This happens from every phase except `merged`.
 
-- **A PR closed without a merge.** The sweep handles only merged PRs. The unit stays in `in_review`. The label
-  `l4:resume` has no effect on a closed PR. For a halted or escalated unit, use procedure B of [7.2](#72-halted).
-- **A deleted unit branch.** The next run stops with exit 1. The log says `the unit branch was deleted or moved on the
-  forge`. The harness never recreates or overwrites the branch. A person decides: restore the branch, or run the unit
-  again.
+Choose one of these:
 
-Do not close the PR of a unit that you want to keep. Do not delete the branch of that unit.
+- **Continue the same unit.** Open the PR again before you restart. The next sweep returns the unit to the phase that it
+  had.
+- **Start the unit over.** Use `l4 restart` (the procedure below), or add the label `l4:restart` to the closed PR.
+
+**A deleted unit branch.** The next run stops with exit 1. The log says `the unit branch was deleted or moved on the
+forge`, and it names `l4 restart`. Choose one of these:
+
+- **Restore the branch.** Push the old head to `<branch>`.
+- **Start the unit over.** Use `l4 restart` (the procedure below). The restart has no old branch to read. It cuts the
+  new branch from `<base>`, and the unit folder is the folder on `<base>`.
+
+**Restart a unit**
+
+> **CAUTION:** A restart replaces the branch `<branch>`. The harness first keeps the old head as the ref
+> `refs/l4/attempts/<framework>/<name>/<n>`. The harness never deletes this ref. Do not delete it.
+
+> **CAUTION:** A restart does not keep the ledger, `verification.md`, the evidence and the fix units of the old branch.
+> It keeps the unit folder (the spec, `questions.md` and `feedback.md`). The task boxes are as `<base>` has them. All
+> tasks run again.
+
+1. Do the steps of section 5, with the token.
+2. Make sure that no run works on the unit.
+3. Push the spec corrections that you want to `<branch>`, if the branch exists. The restart takes the unit folder from
+   the branch.
+4. Start the unit over:
+
+   ```sh
+   l4 restart --unit <unit> --reason "<why>"
+   ```
+
+5. Read the output. It says `<unit> restarted attempt <n>`, the attempts ref, and the PR that the command closed.
+6. Read the last line of the output:
+   - `run started on <base>`: a run works on the unit now.
+   - `start a run with: …`: the forge did not start a run. Do the command in the line.
+7. If you do not want a run now, add `--no-run` to the command. Start a run later (section 6).
+8. Make sure that `l4 plan --unit <unit>` shows `implement`. The next run opens a new PR.
+
+The command refuses an unstarted unit, a `merged` unit and a locked unit (exit 2). It fails with exit 1 and the message
+`the branch moved: run l4 restart again` when a person pushed to the branch during the restart. The branch, the PR and
+the refs are then as they were. Do the command again. If the harness cannot close the old PR, the restart still
+succeeds. The log then says `close it by hand`. Close the PR in the forge.
+
+A merged change gets a follow-up unit ([feedback.md](feedback.md)), not a restart.
+
+**The label: `l4:restart`**
+
+1. Make sure that you are a member, and that you are not the user of the forge token.
+2. Add the label `l4:restart` to the PR. The PR is open, or it is the closed PR of an `abandoned` unit.
+3. Start a run on `<base>` (section 6), or wait for the schedule.
+4. Make sure that the log of that run has
+   `[l4] sweeper: <unit>: started over by a member's l4:restart label (event <n>): attempt <n>`. The same run then
+   implements the unit again.
+
+If the harness refuses the label, the note shows the reason and the command that works (see the label procedure in
+[7.2](#72-halted), step 8).
+
+### 7.14 Change the spec of a unit that has a branch
+
+Change the spec on the unit branch `<branch>`. A push to `<branch>` re-enters the unit by itself. You do not use a
+command. The CI triggers do not change: a push to `<base>` or to a branch with the prefix of `forge.branch_prefix`.
+
+**Which files count:** a file in the unit folder, except these:
+
+- the folder `.l4/` and the file `verification.md` (the harness owns them);
+- `questions.md` (use the answer procedure, [7.1](#71-awaiting_human-a-question-waits-for-you));
+- `feedback.md` (use `l4 feedback`, [feedback.md](feedback.md)).
+
+A fix-unit folder `<name>-fix-<n>` does not count. A change outside the unit folder does not count.
+
+**What happens:**
+
+- The unit goes to `implementing` at the next run, from these phases: `intake`, `ready`, `implemented`, `verifying`,
+  `verified`, `awaiting_human`, `clarifying`, `halted` and `escalated`.
+- The ledger gets `unit.retried` with the reason `spec edited`. `l4 plan` shows `spec edited after <phase>`.
+- A unit in `in_review` goes to `implementing` as before (`spec_edit_after_handoff`,
+  [7.5](#75-in_review-the-pr-is-ready)).
+- A unit in `fixing` takes the edit when its fix unit ends.
+- A unit that is escalated at the fix-round or the feedback limit gets one round of that kind, one time for each head.
+- A unit in `implementing` reads the new spec in the next run. It needs no phase change.
+
+**Kiro units:** if you change an acceptance criterion in `requirements.md`, the harness opens the tasks that cite it
+(`_Requirements:_`) again. It sets them to `[ ]` with their parent tasks. It does this in a commit
+`chore(<name>): reopen tasks <keys> for changed requirements <ids> [skip ci]`. The tasks then run test-first. The
+harness compares the text after it normalises the spaces. A line that you only wrap again changes nothing. A criterion
+that you add or remove counts as changed.
+
+**OpenSpec units:** the harness opens no task again. The verifier judges the changed scenarios. Each criterion that is
+not met becomes a fix task, one round later.
+
+> **CAUTION:** A spec push starts agent work at once. If your edit is not finished, add `[skip ci]` to the commit
+> message. Push again, with no `[skip ci]`, when the edit is complete. The next run reads all commits.
+
+> **CAUTION:** A spec edit on `<base>` does not reach the unit. It reaches the unit at the next base merge of a
+> verification. Make the edit on `<branch>`.
+
+1. Switch to `<branch>`.
+2. Pull.
+3. Change the spec files in the unit folder.
+4. Commit. Add `[skip ci]` to the message if the edit is not finished.
+5. Push.
+6. Make sure that `l4 plan --unit <unit>` shows `implement` with the reason `spec edited after <phase>`.
+
+To go on at once from your computer, use `l4 retry`. It fetches before it reads the branch, and it sends a halted or an
+escalated unit to `implementing` also.
+
+> **NOTE:** `l4 run --unit` on your computer does not fetch. If you pushed the edit from another computer, a stale local
+> ref can miss it. Use `l4 retry`, or fetch first.
+
+### 7.15 Use a separate base branch (for example `l4/main`)
+
+Use this when the specs that the harness builds go to their own branch, and `main` receives only what a person
+promotes. The harness then cuts unit branches from that branch and opens their PRs to it.
+
+1. Create the branch from `main`, for example `l4/main`, and push it.
+2. On that branch, set `forge.base_branch: l4/main` in `.l4/config.yaml`.
+3. Run `l4 upgrade`.
+4. Commit the changed config and CI file, and push them to `l4/main`.
+5. On GitHub, also copy `.github/workflows/l4.yml` to `main`, and push it.
+
+   GitHub starts the schedule and a dispatched run only from the file on the default branch.
+
+6. Merge a spec into `l4/main` to start its unit.
+7. Promote `l4/main` to `main` with a PR, when you are ready.
+
+> **CAUTION:** Merge `main` into `l4/main` after each change on `main`. If you do not, the base merge of verification
+> can find conflicts (7.7).
+
+> **CAUTION:** After you move the pin with `l4 upgrade`, a push to an open unit branch still runs the harness that
+> the unit branch pins. The new pin reaches that branch when verification merges the base into it. To use the new
+> harness at once, start a run on the base branch (section 6).
+
+> **NOTE:** The scheduled run on GitHub runs on `main`, and it checks out `l4/main` for the work. It restores the tool
+> caches, but only a push to `l4/main` saves them.
 
 ## 8. How to retry something
 
@@ -911,14 +1131,18 @@ Do not close the PR of a unit that you want to keep. Do not delete the branch of
 | Run the harness again now | Start a run on `<base>` ([section 6](#6-start-a-run)). |
 | See what a run would do, with no change | `l4 run --dry-run` ([10.4](#104-commands-for-operation)). |
 | Run a red job again | Use **Re-run jobs** (GitHub) or **Retry** (GitLab). It uses the commit of the first run. After you push a correction to `<base>`, start a new run. |
-| Retry a task that used all its attempts | The unit is `halted`. Correct the cause, then resume ([7.2](#72-halted)). |
+| Retry a task that used all its attempts | The unit is `halted`. Correct the cause, then `l4 retry` or the label `l4:retry` ([7.2](#72-halted)). |
+| Give an escalated unit more fix rounds | `l4 retry … [--rounds <n>]`, or the label `l4:retry` ([7.3](#73-escalated)). |
+| Give an escalated unit more feedback rounds | `l4 retry … [--rounds <n>]`, or the label `l4:retry` ([7.3](#73-escalated)). |
+| Try an escalated unit again after a repeated failure | Change something, then `l4 retry`. A retry with no change fails again ([7.3](#73-escalated)). |
+| Verify a unit in review again | `l4 retry --unit <unit> --reason "<why>"` ([7.5](#75-in_review-the-pr-is-ready)). |
+| Continue a unit that waits for capacity | Correct the cause, then `l4 retry`, or start a run ([7.4](#74-waiting_capacity-no-agent-is-available)). |
 | Continue after I answered a question | Push the answers ([7.1](#71-awaiting_human-a-question-waits-for-you)). The push starts a run. |
-| Give an escalated unit more fix rounds | `l4 resume … --extend-fix-rounds <n>`, or the label ([7.3](#73-escalated)). |
-| Give an escalated unit more feedback rounds | `l4 resume … --extend-feedback-rounds <n>`, or the label ([7.3](#73-escalated)). |
-| Verify a unit in review again | Push a commit to `<branch>`. An empty commit is enough ([7.5](#75-in_review-the-pr-is-ready)). |
-| Continue a unit that waits for capacity | Correct the cause, then start a run ([7.4](#74-waiting_capacity-no-agent-is-available)). |
-| Try an archive again | `l4 archive --unit <unit> --retry` ([7.6](#76-after-the-merge)). |
-| Use a refused `l4:resume` label again | A member removes the label and adds it again ([7.2](#72-halted)). For some reasons, use procedure B. |
+| Change the spec of a unit | Change the spec on `<branch>` and push ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). |
+| Start a unit over | `l4 restart --unit <unit> --reason "<why>"`, or the label `l4:restart` ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). |
+| Continue a unit whose PR a person closed | Open the PR again, or start the unit over ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). |
+| Try an archive again | `l4 retry --unit <unit> --reason "<why>"`, or `l4 archive --unit <unit> --retry` ([7.6](#76-after-the-merge)). |
+| Use a refused operator label again | Do the command that the note names. Or a member removes the label and adds it again ([7.2](#72-halted)). |
 | Continue after a cancelled run | Start a run ([7.10](#710-cancelled-or-timed-out-run-exit-16)). |
 
 ## 9. What your push does
@@ -927,20 +1151,19 @@ Do not close the PR of a unit that you want to keep. Do not delete the branch of
 |---|---|---|
 | A commit to `<branch>` when the unit is `in_review`, outside the unit folder | The unit goes to `verifying`. | Yes |
 | A change to the unit folder when the unit is `in_review` (spec, `tasks.md`, `questions.md`, `feedback.md`) | The unit goes to `implementing`. | Yes |
+| A change to the spec files of the unit folder in another phase that is not finished ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)) | The unit goes to `implementing` at the next run. A halted or escalated unit also. | Yes |
 | Answers in `questions.md` when the unit is `awaiting_human` | The unit moves when the answers free a task. | Yes |
 | `feedback.md` before the hand-off | The items wait for the next verification. | Yes |
-| A push to a `halted` branch | The unit stays `halted`. The log tells you to add `l4:resume`. | Yes, but the unit does not resume |
+| A push to a `halted` branch that changes no spec file | The unit stays `halted`. The log tells you to add `l4:retry` or to run `l4 retry`. | Yes, but the unit does not continue |
 | A push to `<base>` (a merge also) | The harness examines merges, archives and new units. | Yes |
 | A commit message with the text `L4-Run:` (the newest commit of a push to a branch other than `<base>`) | Nothing. | **No** |
-| A commit message with `[skip ci]` or `[ci skip]`, or `git push -o ci.skip` (GitLab) | Nothing now. The next run reads the commit. | **No** |
-| The `l4:resume` label, or `l4 resume` | `l4 resume` resumes the unit at once. The label: the next run resumes it. | **No** |
+| A commit message with `[skip ci]` or `[ci skip]`, or `git push -o ci.skip` (GitLab) | Nothing now. The next run reads the commit. Use it for an edit that is not finished. | **No** |
+| The label `l4:retry`, `l4:resume` or `l4:restart` | The next run acts on the label. | **No** |
+| `l4 retry` or `l4 restart` | The command acts at once. Its commit has `[skip ci]`, so the push starts no run. The command starts a run itself, unless you add `--no-run`. | By the command |
+| `l4 resume` | The command resumes the unit at once. | **No** |
 
-> **NOTE:** On GitLab, the rule for unit branches is fixed to the prefix `l4/`. If `forge.branch_prefix` is different,
-> a push to a unit branch starts no pipeline.
-
-> **NOTE:** On GitLab, the template also fixes the default branch of the project (`$CI_DEFAULT_BRANCH`) for the merge
-> trigger, the `L4-Run` exemption and the base checkout. If `forge.base_branch` is not that branch, a merge starts no
-> pipeline, and jobs check out the wrong branch.
+> **NOTE:** The CI file uses `forge.base_branch` and `forge.branch_prefix` from `.l4/config.yaml`. After you change
+> one of them, run `l4 upgrade` and commit the changed CI file.
 
 ## 10. Reference
 
@@ -958,7 +1181,7 @@ On GitHub, each code except 0 and 10 to 13 gives process exit 1. Read the real c
 | 10 | `continue` | Progress. More work is necessary in a next run. | Green, blue notice | `failed (allowed)` | Nothing. |
 | 11 | `awaiting_human` | A question waits for a person. | Green, yellow warning | `failed (allowed)` | [7.1](#71-awaiting_human-a-question-waits-for-you) |
 | 12 | `waiting_capacity` | No agent of a necessary role is available. | Green, yellow warning | `failed (allowed)` | [7.4](#74-waiting_capacity-no-agent-is-available) |
-| 13 | `halted` | A breaker stopped the unit, or the unit escalated. | Green, yellow warning | `failed (allowed)` | [7.2](#72-halted), [7.3](#73-escalated) |
+| 13 | `halted` | A breaker stopped the unit, or the unit escalated. `l4 run --unit` on a stopped unit also exits 13. | Green, yellow warning | `failed (allowed)` | [7.2](#72-halted), [7.3](#73-escalated) |
 | 14 | `rejected` | The spec is not correct, or no spec framework was found. | Red | Red | [7.8](#78-rejected-unit-exit-14) |
 | 15 | `regression` | `l4 eval --compare` found a regression. | Red | Red | Examine the scorecard. |
 | 16 | `cancelled` | A signal stopped the run. The run pushes nothing after the signal. | Red | Red | [7.10](#710-cancelled-or-timed-out-run-exit-16) |
@@ -976,46 +1199,51 @@ When a run works on more than one unit, the exit code is the most severe one, in
 |---|---|---|
 | `l4:<phase>` | Harness | The phase of the unit, for example `l4:halted` or `l4:in_review`. One at a time. |
 | `l4:needs-answers` | Harness | The unit has open questions. |
-| `l4:resume` | A member who is not the user of the forge token | Resume a halted or escalated unit. For an escalation at a limit, it adds one round. The harness removes it after use. |
+| `l4:retry` | A member who is not the user of the forge token | Continue a unit in `halted`, `escalated` or `waiting_capacity`, like `l4 retry`. For an escalation at a limit, it adds one round. The harness removes it after use. |
+| `l4:resume` | A member who is not the user of the forge token | The same as `l4:retry`. |
+| `l4:restart` | A member who is not the user of the forge token | Start the unit over, like `l4 restart`. The PR is open, or it is the closed PR of an `abandoned` unit. |
 
-The prefix `l4:` comes from `forge.labels_prefix`. The note and the log of the harness always say `l4:resume`, whatever
-the prefix is. Runs create only `l4:<phase>` and `l4:needs-answers`. `l4 setup github` creates `l4:resume`.
-`l4 setup gitlab` creates no labels.
+The prefix `l4:` comes from `forge.labels_prefix`. The note and the log of the harness name the labels with the prefix
+that you set. Each run that sets the phase labels of a PR also creates the three operator labels. `l4 setup github`
+creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 
 ### 10.3 Headings of the note
 
 | Heading | Meaning | Procedure |
 |---|---|---|
-| `### Halted: <reason>` | A breaker stopped the unit. | [7.2](#72-halted) |
-| `### Escalated: <reason>` | Verification failed, and the harness cannot continue alone. | [7.3](#73-escalated) |
+| `### Halted: <detail>` | A breaker stopped the unit. The note names `l4 retry` and the label. | [7.2](#72-halted) |
+| `### Abandoned: the merge request was closed without a merge` | A person closed the PR. The note names `l4 restart` and the label. | [7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch) |
+| `### Escalated: <detail>` | Verification failed, and the harness cannot continue alone. The note names `l4 retry` and the label. | [7.3](#73-escalated) |
 | `### Escalated: the verifier failed this unit and it cannot be fixed automatically` | The findings of the last round. It comes after the heading above. | [7.3](#73-escalated) |
 | `### Waiting for you: a human answer` | Questions wait for you. With `(fix unit …)`, they are in the fix unit, and the unit stays in `fixing`. | [7.1](#71-awaiting_human-a-question-waits-for-you) |
 | `### Waiting for capacity` | No agent is available. | [7.4](#74-waiting_capacity-no-agent-is-available) |
 | `### Base merge needed` | The merge of `<base>` into `<branch>` has conflicts. | [7.7](#77-base-merge-conflict) |
 | `### Re-verifying after the hand-off` | A commit after the hand-off, or red CI. The unit goes back to `verifying` or to `implementing` (the note says which). | [7.5](#75-in_review-the-pr-is-ready) |
-| ``### The `l4:resume` label was not honoured`` | The harness refused the label. The reason follows. | [7.2](#72-halted) |
+| ``### The `l4:resume` label was not honoured`` | The harness refused an operator label (`l4:retry`, `l4:resume` or `l4:restart`). The heading keeps the old text. The reason follows, with the command that works. | [7.2](#72-halted) |
 | `### The Kiro done-gate did not pass after the merge` | A required Kiro task is not done on `<base>`. | [7.6](#76-after-the-merge) |
 | `### Your feedback` | The state of each feedback item. | [feedback.md](feedback.md) |
-| `Nothing is waiting for a human answer.` | No question waits for a person. It does not show who must act: in `in_review` a person merges, and after a resume a person starts a run. | — |
+| `Nothing is waiting for a human answer.` | No question waits for a person. It does not show who must act: in `in_review` a person merges, and after a label a person starts a run. | — |
 
 ### 10.4 Commands for operation
 
 | Command | What it does | Changes state |
 |---|---|---|
-| `l4 status [--unit <unit>] [--json]` | Shows the phase of each unit. `--json` shows the full state. | No |
+| `l4 status [--unit <unit>] [--json]` | Shows the phase and the cause of each unit. With `--unit`, it shows `Cause:`, `Or:` and `Next:`. `--json` shows the full state. | No |
 | `l4 plan [--unit <unit>] [--json]` | Shows the next action of each unit, and why. | No |
-| `l4 plan --sweep` | Records merges, archives, CI results and `l4:resume` labels. CI runs it. | Yes |
+| `l4 plan --sweep` | Records merges, archives, CI results, closed PRs and operator labels. CI runs it. | Yes |
 | `l4 doctor [--ci] [--live] [--fix]` | Examines the environment, the config and the agents. | `--fix` installs tools |
-| `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>]` | Resumes a halted or escalated unit at once. | Yes |
+| `l4 retry --unit <unit> --reason <text> [--rounds <n>] [--no-run]` | Continues a unit in `halted`, `escalated`, `waiting_capacity` or `in_review` at once, and starts a run. For a merged unit, it is the archive retry. | Yes |
+| `l4 restart --unit <unit> --reason <text> [--no-run]` | Starts a unit over on a new branch, keeps the old head as a ref, closes the old PR, and starts a run. | Yes |
+| `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>]` | Resumes a halted or escalated unit at once. It starts no run. Use `l4 retry`. | Yes |
 | `l4 archive --unit <unit> [--retry]` | Runs the archive or the done-gate of a merged unit. | Yes |
 | `l4 feedback add\|list\|show\|submit\|withdraw` | Writes or shows feedback items. | Edits `feedback.md` only |
 | `l4 probe [<profile>] [--role <role>] [--no-cache]` | Examines the availability of agent profiles. With `--no-cache`, it clears the wait time of the profile on that runner when the probe passes. | See the description |
 | `l4 ci watch` | Follows a pipeline or a run to its end. It needs a token in `GITLAB_TOKEN` or `GH_TOKEN`, or `--auth-env <variable>`. | No |
 | `l4 run --dry-run` | Shows what a run would do. It starts no lease, worktree or agent, and it pushes nothing. It writes the prompts to `.l4-out/dry-run/`. The last line is `would exit <n>`. The exit code is 0. | No |
-| `l4 run [--unit <unit>]` | Runs units. CI runs it. | Yes |
+| `l4 run [--unit <unit>]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. | Yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.2.1. They stop with exit 2:
+These commands and options are not available in 0.3.0. They stop with exit 2:
 `l4 unlock`, `l4 questions`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -1025,7 +1253,7 @@ These commands and options are not available in 0.2.1. They stop with exit 2:
 |---|---|---|
 | `questions.md` | Unit folder, on `<branch>` | Yes: the `### Answer` and the `- **Status:**` line of a question. |
 | `feedback.md` | Unit folder, on `<branch>` | Use `l4 feedback`. |
-| Spec files and `tasks.md` | Unit folder | Yes. After the hand-off, a change sends the unit to `implementing`. |
+| Spec files and `tasks.md` | Unit folder | Yes. A change sends the unit to `implementing` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). |
 | `verification.md` | Unit folder, on `<branch>` | **No.** The harness writes it at each round. |
 | `.l4/ledger/*.jsonl` | Unit folder, on `<branch>` | **No.** A change can make the unit `corrupt`. |
 | `.l4/evidence/round-<n>/` | Unit folder, on `<branch>` | **No.** The record of each round. |
@@ -1034,39 +1262,31 @@ These commands and options are not available in 0.2.1. They stop with exit 2:
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
 
-## 11. Known limits of 0.2.1
+## 11. Known limits of 0.3.0
 
 These limits make operation more difficult. Know them before you start.
 
-- The `l4 status` table shows no reason for a stop and no wait time. Use `--json`, the note or the CI log.
-- `halt_reason` is empty for each escalation by verification, except the feedback limit (the code only) and 3 verifier
-  errors (the full text). It is also empty after a resume. Read `verification.md`.
-- The note headline of an escalation says "no fix round is left" also when rounds are left ([7.3](#73-escalated)).
-- `l4 plan` gives a fixed text for `halted` and `escalated`. It does not give the cause.
-- Only the run that stopped a unit has the reason in its log. Later runs do not mention the cause.
+- Only the run that stopped a unit has the cause in its log. Later CI runs do not mention it. Read the `REASON` column
+  of `l4 status`, or `l4 status --unit <unit>`.
+- A unit that stopped before harness 0.3.0 has no recorded `detail`. Its `REASON` shows the old text, its
+  `halt_reason` can be empty, and its note can say "no fix round is left" also when rounds are left.
+- After a refused operator label, the heading of the note shows the short code of the cause, not the text.
 - The harness writes tracebacks only with `-v` after the command name. The CI templates do not use `-v`.
-- Local commands need the project. With the token set, `l4 resume`, `l4 archive`, `l4 plan --sweep`, `l4 run` and
-  `l4 verify` need `GITHUB_REPOSITORY` (GitHub) or `forge.gitlab.api_url` and `forge.gitlab.project` (GitLab). Without
-  them, they stop with exit 2. `l4 init` does not write these values.
-- A secret halt cannot be resumed. The unit stays in `implementing` or `fixing`, `l4 resume` stops with exit 2, and the
-  harness ignores the label.
-- The user of the forge token cannot resume a unit by label. The harness refuses the label of that user.
-- The harness reads the `l4:resume` label only on an open PR. A run creates no `l4:resume` label.
-- A PR closed without a merge leaves the unit in `in_review`. A deleted unit branch stops the run with exit 1. 0.2.1
-  has no procedure for either ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)).
+- Local commands find the project from `origin` when `origin` is on github.com (GitHub) or on a GitLab host. For
+  another origin, set `GITHUB_REPOSITORY` (GitHub) or `forge.gitlab.api_url` and `forge.gitlab.project` (GitLab).
+  Without them, the commands that need the project stop with exit 2.
+- The harness reads the labels `l4:retry` and `l4:resume` only on an open PR of a unit in `halted`, `escalated` or `waiting_capacity`.
+  For a unit in `in_review` or `merged`, use the command. The label `l4:restart` is also read on the closed PR of an
+  `abandoned` unit.
 - A corrupt `ledger-pending/` on the lock ref has no procedure ([7.9](#79-corrupt-ledger)).
-- If all verdict questions are `dismissed`, the unit stays in `awaiting_human` (exit 11). `l4 resume` refuses that
-  phase. Edit the file again with the Status `answered`.
-- `l4 resume` does not check membership, although its help says "members only".
-- A unit that waits for capacity from `fixing`, or with no recorded time, does not continue in CI
-  ([7.4](#74-waiting_capacity-no-agent-is-available)).
-- The capacity note names an `l4 sweep` command. It does not exist.
-- `l4 run --unit` on a halted or escalated unit pushes a ledger commit when a forge token is set, and it can remove the
-  `l4:resume` label.
-- A lock does not protect a local run against a CI run on another computer. A local `l4 resume` while CI works on the
-  same unit fails with exit 1.
-- On GitLab, the pipeline rule for unit branches is fixed to the prefix `l4/`. GitLab also fixes the default branch of
-  the project for the merge trigger, the `L4-Run` exemption and the base checkout.
+- `l4 retry` and `l4 resume` do not check membership, although the help of `l4 resume` says "members only".
+- `l4 resume` starts no run. `l4 retry` starts one. Both take a spec edit that a person pushed before.
+- `l4 run --unit` on your computer does not fetch. A stale local ref can miss a spec edit that someone pushed from
+  another computer. Use `l4 retry`, which fetches.
+- A spec push during `fixing` or `waiting_capacity`, and one that `l4 verify` finds, is recorded and waits until the fix unit
+  ends, capacity is restored or the next `l4 run` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)).
+- A lock does not protect a local run against a CI run on another computer. A local `l4 retry`, `l4 resume` or
+  `l4 restart` while CI works on the same unit can fail with exit 1.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a
   clear message.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and

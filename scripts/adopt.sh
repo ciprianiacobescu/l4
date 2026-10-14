@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # adopt.sh — adopt this harness in the repository you are standing in (clone-and-adopt bootstrap).
 #
-#   git clone https://github.com/ciprianiacobescu/agent-supervisor.git ~/l4
+#   git clone https://github.com/ciprianiacobescu/l4.git ~/l4
 #   cd /path/to/your-project && ~/l4/scripts/adopt.sh
 #
 # adopt.sh [--repo DIR] [--ci gitlab|github] [--framework openspec|kiro] [--commit] [--no-install] [--no-gates] [--dry-run]

@@ -149,8 +149,8 @@ on every job.
     to avoid).
 - **Packaging:**
   - `plugins/l4/.claude-plugin/plugin.json` (`name: l4`) with the skill in `plugins/l4/skills/l4/`, and `.claude-plugin/marketplace.json` at the repository root listing it with `source: ./plugins/l4` (a plugin at the root would make the whole repository the plugin);
-  - `.claude-plugin/marketplace.json` listing it, so `/plugin marketplace add ciprianiacobescu/agent-supervisor` then
-    `/plugin install l4@agent-supervisor` works for anyone with read access;
+  - `.claude-plugin/marketplace.json` listing it, so `/plugin marketplace add ciprianiacobescu/l4` then
+    `/plugin install l4@l4-harness` works for anyone with read access;
   - Codex: `cp -R plugins/l4/skills/l4 ~/.agents/skills/`.
 - **Written test-first** (superpowers writing-skills):
   1. Baseline: subagents without the skill attempt the scenarios, and their failures are recorded in

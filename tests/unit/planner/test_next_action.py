@@ -30,9 +30,9 @@ def facts(
         ("awaiting_human", 1, 2, "none", "awaiting_human: no new answers"),
         ("clarifying", 1, 2, "clarify", "clarifying"),
         ("fixing", 2, 2, "none", "fixing"),
-        ("waiting_capacity", 1, 2, "none", "waiting_capacity"),
-        ("halted", 1, 2, "none", "halted: a member adds the label l4:resume"),
-        ("escalated", 2, 2, "none", "escalated: needs l4 resume"),
+        ("waiting_capacity", 1, 2, "none", "waiting_capacity: run l4 retry to try the agents now"),
+        ("halted", 1, 2, "none", "halted: run l4 retry (or the label l4:retry)"),
+        ("escalated", 2, 2, "none", "escalated: run l4 retry (or the label l4:retry)"),
         ("rejected", 0, 2, "none", "rejected: inputs unchanged"),
         ("in_review", 2, 2, "none", "in_review: waiting for merge"),
         ("archived", 2, 2, "none", "archived"),
@@ -49,7 +49,7 @@ def test_every_lifecycle_phase_maps_to_expected_action_and_reason(phase, done, t
 def test_the_halted_reason_names_the_label():
     action, reason = next_action(facts("halted", 1, 2))
     assert action == "none"
-    assert reason == "halted: a member adds the label l4:resume (or runs l4 resume)"
+    assert reason == "halted: run l4 retry (or the label l4:retry)"
 
 
 def test_awaiting_human_with_submitted_answers_implements_and_names_them():
@@ -105,3 +105,13 @@ def test_a_legacy_needs_human_round_is_offered_as_verify_so_the_run_can_raise_it
         verdicts_open=("Q-002",),
     )  # fmt: skip
     assert next_action(waiting)[0] == "none"
+
+
+@pytest.mark.parametrize("phase", ["halted", "escalated"])
+def test_a_stopped_unit_shows_the_recorded_cause(phase):
+    """L4-OPS-006: the recorded detail replaces the fixed text; without one the fixed text stays."""
+    detail = "task 1.1: max_task_attempts (3) reached in red"
+    base = facts(phase, 1, 2)
+    got = next_action(UnitFacts(**{**base.__dict__, "halt_detail": detail}))
+    assert got == ("none", f"{phase}: {detail}")
+    assert next_action(base)[1] != f"{phase}: {detail}" and next_action(base)[1].startswith(f"{phase}: ")

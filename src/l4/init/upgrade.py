@@ -69,6 +69,14 @@ def _refuse(message: str) -> L4Exit:
     return L4Exit(ExitCode.USAGE_ERROR, f"upgrade: {message}")
 
 
+def _gitlab_template(cfg: L4Config) -> str:
+    """The GitLab job for the config as it is now (L4-OPS-016): a changed base branch or prefix changes the file."""
+    try:
+        return render_gitlab_ci(cfg)
+    except ValueError as exc:
+        raise _refuse(str(exc)) from None
+
+
 def rewrite_pins(text: str, *, version: str | None, commit: str) -> str:
     """Replace the scalars of `harness.version` and `harness.commit` and nothing else: the quotes of each value, a
     trailing comment, the line endings and every other line stay. Refuses a file where either is not a plain
@@ -176,7 +184,12 @@ class UpgradePlan:
 
 
 def plan_upgrade(
-    repo: Path, environ: Mapping[str, str], harness: Path | None, pin: str | None = None, ref: str | None = None
+    repo: Path,
+    environ: Mapping[str, str],
+    harness: Path | None,
+    pin: str | None = None,
+    ref: str | None = None,
+    action_repo: str | None = None,
 ) -> UpgradePlan:
     if pin is not None and ref is not None:
         raise _refuse("--harness-ref and --harness-commit exclude each other")
@@ -195,7 +208,9 @@ def plan_upgrade(
     loaded = load_config(repo)  # it must load as it is, or the human has a problem that an upgrade should not hide
     delivery = effective_delivery(loaded)
     if delivery == "action":
-        return _plan_action(repo, loaded, old_config, environ, harness, pin, ref)
+        return _plan_action(repo, loaded, old_config, environ, harness, pin, ref, action_repo)
+    if action_repo is not None:
+        raise _refuse("--action-repo is for an adoption by the setup action (harness.delivery: action)")
     if delivery == "fetched":
         return _plan_fetched(repo, loaded, old_config, harness, pin, ref, environ)
     if pin is not None or ref is not None:
@@ -210,7 +225,7 @@ def plan_upgrade(
         PlannedFile(str(CONFIG_RELPATH), new_config.encode("utf-8"), 0o644),
         PlannedFile(SHIM_RELPATH, render_shim().encode(), 0o755),
         PlannedFile(SETUP_RELPATH, render_setup().encode(), 0o755),
-        PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644),
+        PlannedFile(TEMPLATE_RELPATH, _gitlab_template(loaded).encode(), 0o644),
     )
     differing = tuple(p for p in wanted if not _same(repo / p.path, p.data))
     seeded = tuple(_serena_seed(repo, loaded))
@@ -248,10 +263,14 @@ def _plan_action(
     harness: Path | None,
     pin: str | None,
     ref: str | None,
+    action_repo: str | None = None,
 ) -> UpgradePlan:
     """An action adoption (L4-ACT-005): the workflow is re-rendered from the config with the template of the harness
     that runs and the new pin (`@<sha> # <REF>`, or the `commit` input of a copy of the action), as the fetched form's
-    upgrade re-renders its CI file, so a fix in the template reaches the adoption."""
+    upgrade re-renders its CI file, so a fix in the template reaches the adoption. `action_repo` (OWNER/REPO) moves the
+    pin to another repository: GitHub redirects git and the API after a repository is renamed, but not a `uses:` line
+    (live, 2026-10-14: `Unable to resolve action. Repository not found`). A copy of the action names the harness by its
+    git URL, which redirects, so it keeps its repository."""
     if harness is not None:
         raise _refuse("--harness vendors a checkout; this adoption gets its harness from the setup action")
     try:
@@ -262,12 +281,16 @@ def _plan_action(
     except (UnsafeFile, UnicodeDecodeError) as exc:
         raise _refuse(f"cannot read {WORKFLOW_RELPATH}: {exc}") from None
     found = read_pin(text)
-    if found is None or found.repository is None:
+    if found is None or (found.repository is None and action_repo is None):
         raise _refuse(
             f"cannot find the setup action (and its repository) in {WORKFLOW_RELPATH}; edit its `uses:` line by hand"
         )
+    if action_repo is not None and found.local:
+        raise _refuse("--action-repo moves a `uses:` pin; a copy of the setup action keeps its git URL (it redirects)")
+    repository = action_repo or found.repository
+    assert repository is not None
     if ref is not None:
-        sha = resolve_ref(remote_url(found.repository), ref, environ)
+        sha = resolve_ref(remote_url(repository), ref, environ)
     else:
         sha = pin or harness_commit() or ""
         if not sha:
@@ -277,7 +300,7 @@ def _plan_action(
         except ValidationError:
             raise _refuse(f"--harness-commit must be 40 lowercase hex characters, not {sha!r}") from None
     try:
-        pinned = ActionPin(found.repository, sha, ref, copy=found.local)
+        pinned = ActionPin(repository, sha, ref, copy=found.local)
     except ValueError as exc:
         raise _refuse(f"cannot move the pin: {exc}") from None
     new = render_github_action_ci(loaded, pinned)
@@ -335,7 +358,7 @@ def _plan_fetched(
     ]
     platform = loaded.ci.platform
     if platform in ("gitlab", "auto") and (repo / TEMPLATE_RELPATH).exists():
-        wanted.append(PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644))
+        wanted.append(PlannedFile(TEMPLATE_RELPATH, _gitlab_template(new_cfg).encode(), 0o644))
     if platform in ("github", "auto") and (repo / WORKFLOW_RELPATH).exists():
         wanted.append(PlannedFile(WORKFLOW_RELPATH, render_github_ci(new_cfg).encode(), 0o644))
     return UpgradePlan(
@@ -373,8 +396,9 @@ def run_upgrade(
     dry_run: bool = False,
     harness_commit_pin: str | None = None,
     harness_ref: str | None = None,
+    action_repo: str | None = None,
 ) -> ExitCode:
-    plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin, harness_ref)
+    plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin, harness_ref, action_repo)
     verb = "would change" if dry_run else "changed"
     if plan.vendor is not None and plan.vendor_differs:
         click.echo(

@@ -144,3 +144,96 @@ def test_a_forge_squash_commit_by_a_project_bot_is_not_the_harnesss(make_repo, r
     assert not is_harness(squash) and not is_harness_strict(squash)
     assert handoff_commit(b.git, "HEAD", NAME) == h  # H is still found beneath the squash commit
     assert handoff_commit(b.git, "HEAD~1", NAME) == h
+
+
+# --- L4-OPS-014: a person's spec edit since the harness's last commit ---------------------------------------------
+
+
+def test_a_spec_edit_since_the_harness_names_the_commits_and_the_harness_commit_before_them(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    last = b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None  # the head is the harness's own commit
+    first = b.commit("reword", {f"{UNIT_REL}/proposal.md": "new\n"}, bot=False, run=False)
+    second = b.commit("more", {"src/a.py": "a = 2\n"}, bot=False, run=False)
+    found = spec_edit_since_harness(b.git, "HEAD", UNIT_REL)
+    assert found is not None
+    assert (found.shas, found.base, found.head) == ((first, second), last, second)
+
+
+def test_only_files_the_harness_or_a_question_channel_owns_are_not_a_spec_edit(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    owned = {f"{UNIT_REL}/{name}": "x\n" for name in ("verification.md", "questions.md", "feedback.md")}
+    b.commit(
+        "channels", {**owned, f"{UNIT_REL}/.l4/ledger/b.jsonl": "{}\n", "src/a.py": "a = 5\n"}, bot=False, run=False
+    )
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None
+    b.commit("spec", {f"{UNIT_REL}/specs/greeting/spec.md": "x\n"}, bot=False, run=False)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is not None
+
+
+def test_a_sibling_fix_unit_folder_is_not_the_unit_folder(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    b.commit("fix unit", {f"{UNIT_REL}-fix-1/tasks.md": "- [ ] 1.1 x\n"}, bot=False, run=False)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None
+
+
+def test_a_persons_rebase_with_no_unit_folder_change_is_no_spec_edit(make_repo, raw, git_for):
+    """Review M2: a rebase makes the person the committer of every harness commit, so none is strict any more; the
+    spec-edit scan is bounded by the author rule (bot author and `L4-Run`, kept by a rebase) and finds no edit."""
+    from l4.state.review import foreign_tail, spec_edit_since_harness
+
+    repo = make_repo()
+    for j in range(60):  # more history than the scan reads: a strict scan would walk into it
+        (repo / "hist.txt").write_text(str(j))
+        raw(repo, "add", "-A")
+        raw(repo, "commit", "-q", "-m", f"old history {j}")
+    raw(repo, "checkout", "-q", "-b", "l4/openspec/add-x")
+    b = Branch(repo, raw, git_for(repo))
+    b.commit("task 1.1", {f"{UNIT_REL}/tasks.md": "- [x] 1.1 a\n", "src/a.py": "a = 1\n"}, bot=True)
+    b.commit("ledger", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None
+    raw(repo, "checkout", "-q", "main")
+    (repo / "other.txt").write_text("x")
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "unrelated change on main")
+    raw(repo, "checkout", "-q", "l4/openspec/add-x")
+    raw(repo, "rebase", "-q", "main")
+    assert (
+        foreign_tail(b.git, "HEAD") != ()
+    )  # the strict rule sees the replayed commits as a person's (review re-entry)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None
+
+
+def test_a_persons_commit_after_a_rebase_is_still_a_spec_edit_from_the_replayed_harness_commit(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    last = b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    raw(b.repo, "checkout", "-q", "main")
+    raw(b.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+    raw(b.repo, "checkout", "-q", "l4/openspec/add-x")
+    raw(b.repo, "rebase", "-q", "main")
+    replayed = b.raw(b.repo, "rev-parse", "HEAD").strip()
+    assert replayed != last
+    person = b.commit("reword", {f"{UNIT_REL}/proposal.md": "new\n"}, bot=False, run=False)
+    found = spec_edit_since_harness(b.git, "HEAD", UNIT_REL)
+    assert found is not None and (found.shas, found.base) == ((person,), replayed)
+
+
+def test_a_unit_folder_file_the_same_at_the_boundary_and_at_the_head_is_no_spec_edit(make_repo, raw, git_for):
+    from l4.state.review import spec_edit_since_harness
+
+    b = _branch(make_repo, raw, git_for)
+    b.commit("stop", {f"{UNIT_REL}/.l4/ledger/a.jsonl": "{}\n"}, bot=True)
+    before = (b.repo / UNIT_REL / "tasks.md").read_text()
+    b.commit("edit", {f"{UNIT_REL}/tasks.md": "- [ ] 9.9 changed\n"}, bot=False, run=False)
+    b.commit("undo", {f"{UNIT_REL}/tasks.md": before}, bot=False, run=False)
+    assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None

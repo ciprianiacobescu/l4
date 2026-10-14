@@ -144,7 +144,9 @@ def render_evidence_json(data: dict[str, Any]) -> list[str]:
         None
         if scope is None
         else ScopeOutcome(
-            note=scope["note"], skipped=scope["skipped"], declared=list(scope["declared"]),
+            note=scope["note"],
+            skipped=scope["skipped"],
+            declared=list(scope["declared"]),
             files=[FileScope(**f) for f in scope["files"]],
         )  # fmt: skip
     )
@@ -159,7 +161,10 @@ def render_evidence_json(data: dict[str, Any]) -> list[str]:
                 )
                 for f in dc["functions"]
             ],
-            dc["status"], dc["reason"], tuple(dc["unmeasured_files"]), tuple(dc.get("other_files", ())),
+            dc["status"],
+            dc["reason"],
+            tuple(dc["unmeasured_files"]),
+            tuple(dc.get("other_files", ())),
         )  # fmt: skip
     )
     ran_out = (

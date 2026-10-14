@@ -213,7 +213,9 @@ on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `
 (`--harness-ref` or `--harness-commit`) re-renders the workflow from the config with the template of the harness that
 runs it and the new pin (the `uses:` line, and the `commit` input of source `repository`), so a template fix reaches
 the adoption; it prints `re-rendered .github/workflows/l4.yml (N lines changed)` and the changed lines, and writes
-nothing with `--dry-run`. A second run changes nothing.
+nothing with `--dry-run`. A second run changes nothing. `--action-repo OWNER/REPO` moves the `uses:` pin to another
+repository, for a harness repository that was renamed or moved: GitHub redirects git and the API, but not a `uses:`
+line. A copy of the action keeps its git URL (it redirects), so `--action-repo` is refused for it.
 
 **L4-ACT-006** The harness repository MUST have `release.yml`. On a tag `src-vX.Y.Z` it MUST: refuse a source commit
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
@@ -241,7 +243,7 @@ test.
 format: frontmatter `name: l4`, a description that starts "Use when…" and names the triggers (adopting L4, a unit's
 status, questions, feedback, an escalated or halted unit), a body under 500 words, and the references `adopt.md`,
 `operate.md` and `feedback.md`. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` MUST make it
-installable with `/plugin marketplace add` and `/plugin install l4@agent-supervisor`; for Codex the folder is copied to
+installable with `/plugin marketplace add` and `/plugin install l4@l4-harness`; for Codex the folder is copied to
 `~/.agents/skills/`. The skill MUST never ask for, print or move a secret, and never tell an agent to run an agent CLI
 by hand on a runner. [Not yet built: delivery change 18, tasks 4.1–4.3.]
 
@@ -280,11 +282,11 @@ of the harness package.
 | Command | Purpose | Side effects |
 |---|---|---|
 | `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
-| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
+| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF] [--action-repo OWNER/REPO]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
-| `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents |
-| `l4 status [--unit ID] [--json] [--rebuild]` | Show units, phases, open questions, last verdict, cool-downs; `--rebuild` re-folds `state.json` from the ledger | none (`--rebuild` rewrites `state.json`) |
+| `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents; `--unit` on a `halted` or `escalated` unit exits 13 before the lease and changes nothing (L4-OPS-010) |
+| `l4 status [--unit ID] [--json] [--rebuild]` | Show units, phases, the cause of a stop (`REASON` column, cut to 60 characters), open questions, last verdict, cool-downs; `--unit ID` prints the phase, `Cause:`, `Stopped in run:`, an `Or:` line with the label that moves the unit and `Next:` with the command; `--json` carries `reason` and `next` (L4-OPS-006); `--rebuild` re-folds `state.json` from the ledger | none (`--rebuild` rewrites `state.json`) |
 | `l4 probe [PROFILE…] [--role ROLE] [--json] [--no-cache]` | Run availability probes | probe cache |
 | `l4 verify --unit ID [--dry-run]` | Run only the verifier on a unit | evidence files, commits |
 | `l4 s1 export --out DIR [--source FILE]… [--seed N] [--allow-gaps]` \| `canary [--also-repo P]… [--target N] [--min-test N] [--max-variants N] [--test-command CMD] [--out FILE] [--allow-gaps]` \| `score --profile P --dataset FILE --out FILE [--max-requests N] [--gate GATE.json]` \| `report ANSWERS… --dataset FILE [--gate GATE.json] [--profile TUNED] [--out FILE]` \| `audit --dataset DIR [--sample N \| --import FILE]` | System-One data set (M1.6): export ground-truth items from the calibration files (the only door to training data: engine answers are never read), generate labelled canary items from committed units (the canary runs the unit gate command and no browser: a unit's e2e test files, `e2e/**` and the directory `gates.e2e.command` runs, are left out of the tests-ran check and counted as `e2e_skipped:<project>:<unit>`, so the unit's other items still count; running them through `gates.e2e` needs a sandbox and a server and is not done), score a data set with a `backend: system-one` profile, compare engines against the ground truth, audit the labels by hand. `export` and `canary` exit 2 when a split is empty or a quota is unmet; `score` and `report` exit 2 on a data set without or with a damaged `manifest.json`; `score` alone may load a tuned checkpoint whose gate ran and failed | files under `$L4_CACHE/s1` and the paths given; no engine for `export`, `canary`, `audit` |
@@ -306,7 +308,9 @@ of the harness package.
 | `l4 ci cache-key clis` | Print the key suffix of the agent-CLI cache of the GitHub setup action (L4-ACT-002): 16 hex characters, a hash of the provisioning catalog's pinned versions (uv, Node, OpenSpec, the agent CLIs) and of the sorted adapters of the profiles in the role chains of the config in the working directory (the pins alone without a config) and of nothing else, so a new harness commit keeps the cache and a changed pin replaces it; any other cache name is exit 2 | none |
 | `l4 ci render-setup` | Print `l4-setup.sh` with the catalog's uv version filled in (L4-PRV-020), for `bash`; the GitHub setup action runs it with `L4_SELF_PROVISION` (L4-ACT-003) | none |
 | `l4 ci map-exit CODE` | Translate an `l4` exit code into the CI platform's convention (§16): GitHub → annotation + exit 0 or 1; GitLab → annotation + the original code (so `allow_failure: exit_codes` applies) | none |
-| `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only): leave `halted`/`escalated`, reset breaker counters, optionally extend budgets (L4-IMP-013). It runs no agent and no gate, so it needs no sandbox; the sweep does the same for a member's `l4:resume` label (L4-CI-004) | ledger commit |
+| `l4 retry --unit ID --reason TEXT [--rounds N] [--no-run]` | Continue a stopped unit from where it stopped, by its phase (L4-OPS-001): `halted` back, `escalated` back to `verifying` (at a round limit `--rounds N` adds N fix or feedback rounds, default 1), `waiting_capacity` back now, `in_review` to `verifying`, `merged` the archive retry; any other phase exit 2 with what moves the unit. A person's change of the unit folder since the stop sends the unit to `implementing` (L4-OPS-003). Fetches first; runs no agent, gate or sandbox; then starts the harness's CI on the base branch unless `--no-run` (L4-OPS-002); a refused start prints how to start one and exits 0. The sweep does the same for a member's `l4:retry` label (L4-OPS-008) | ledger commit `chore(<name>): retry [skip ci]`, push, forge call |
+| `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
+| `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`. Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 eval [--impl P]… [--judge P]… [--ref-judge P] [--unit ID]… [--k N] --out DIR [--cell-timeout DUR] [--resume] [--idle-check CMD] [--runner] [--dry-run]` \| `--warm-cache` \| `--compare OLD [--new FILE \| --baseline-dir DIR] [--max-drop X] [--allow-seed-change] [--require-all] [--json]` | Measure profiles on the fixed seed set through the real implement and verify paths and write a scorecard (§20.1); compare two scorecards and exit 15 when a profile regressed | `--out` files; `--warm-cache` fills the uv cache of the eval |
 
 All commands MUST accept `--config PATH`, `--repo PATH`, `--log-format human|json` and `-v/-q`.
@@ -2796,7 +2800,7 @@ phase; the archive on approval is the `in_review → archived` transition.
 | `intake` | all checks pass | `ready` | — |
 | `ready` | lease acquired and implementer selected | `implementing` | — |
 | `ready`, `implementing`, `implemented`, `verifying`, `fixing`, `clarifying` | a **required** role has no usable profile (L4-AVL-010, L4-VER-015) | `waiting_capacity` (previous phase remembered) | 12 |
-| `waiting_capacity` | `retry_after` passed and selection succeeds | previous phase | — |
+| `waiting_capacity` | `retry_after` passed and selection succeeds, or `l4 retry` / `l4:retry` (L4-OPS-001) | previous phase | — |
 | `implementing` | blocking questions raised and clarifier available | `clarifying` | — |
 | `implementing` | blocking questions raised, clarifier unavailable/disabled, or no eligible task remains while questions are open | `awaiting_human` | 11 |
 | `clarifying` | every blocking question answered | `implementing` | — |
@@ -2804,7 +2808,7 @@ phase; the archive on approval is the `in_review → archived` transition.
 | `awaiting_human` | answers submitted (explicit Status) unblock ≥ 1 eligible task | `implementing` | — |
 | `awaiting_human` | all verdict questions answered (L4-VER-013) | `verifying` | — |
 | `implementing` | all non-optional leaves `[x]` | `implemented` | — |
-| `implementing`, `verifying`, `fixing` | breaker or budget (L4-IMP-008/009) | `halted` | 13 |
+| `implementing`, `fixing`, `verifying`, `verified` | breaker or budget (L4-IMP-008/009); a secret in the outgoing commits halts in any of these (L4-OPS-009) | `halted` | 13 |
 | `implemented` | — | `verifying` | — |
 | `verifying` | PASS | `verified` | — |
 | `verifying` | FAIL and fewer than `max_fix_rounds` (+ extensions) fix units (feedback fix units are not counted, L4-FBK-006) | `fixing` (fix unit created) | 10 or 0 |
@@ -2820,13 +2824,16 @@ phase; the archive on approval is the `in_review → archived` transition.
 | `in_review` | approval for H (`on_approval` mode), re-check passes, archive succeeds | `archived` | 0 |
 | `in_review` | approval for H, but the base-merge re-check of steps 0–3 fails | `verifying` | — |
 | `in_review` | approval for H, but archive fails | `escalated` | 13 |
+| `in_review` | `l4 retry` or the label `retry` (`retry_requested`, L4-OPS-001) | `verifying` | — |
 | `in_review`, `archived` | human pushes answers or spec edits after H (approval voided, archive reverted) | `implementing` | — |
 | `in_review`, `archived` | any other commit after H not made by the harness (approval voided, archive reverted) | `verifying` | — |
 | `archived` | base moved and re-check required (L4-ARC-006) | stays `archived` (draft → revert → merge → steps 0–3 → re-archive → ready); on failure `verifying` | — |
 | `in_review`, `archived` | PR merged (archived-ness decided from the merge tree, L4-ARC-003) | `merged` | 0 |
-| any non-terminal | PR closed unmerged | `abandoned` | 0 |
-| `abandoned` | PR reopened | phase before `abandoned` | — |
-| `halted`, `escalated` | `l4 resume` by a member (with the needed budget extension, L4-IMP-013) | phase before halting | — |
+| any phase but `merged`, `abandoned` and `archived` | PR closed unmerged (`pr_closed`, L4-OPS-009) | `abandoned` | — |
+| `abandoned` | PR reopened before any restart (`pr_reopened`) | phase before `abandoned` | — |
+| `halted`, `escalated` | `l4 resume` or `l4 retry` by a member, or the label `retry` / `resume` (with the needed budget extension, L4-IMP-013, L4-OPS-001) | phase before halting | — |
+| `halted`, `escalated` | `l4 retry` finds a person's change of the unit folder since the stop (`spec_edit_since_stop`, L4-OPS-003) | `implementing` | — |
+| `intake`, `ready`, `implemented`, `verifying`, `verified`, `awaiting_human`, `clarifying`, `halted`, `escalated` | a person's push changed the unit folder (`spec_edited`, L4-OPS-014) | `implementing` | — |
 | any non-terminal | the unit's spec no longer validates | `rejected` | 14 |
 
 `merged` and `abandoned` are terminal (until reopened). With the default `archive.mode: post_merge_pr`,
@@ -2956,6 +2963,149 @@ pushed. The harness records `base.conflict` and `verify.step{step: "0", status: 
 sets the sticky note section "Base merge needed" and ends that unit with exit 1 and no verdict, with
 `exit_reason` "base merge conflict: merge <base> into <branch> by hand and push" in `outcome.json`; the other units of the
 run still run. Every run exits 1 for that unit until a human merges the base into the branch and pushes.
+
+### 12.4 Operator commands (OPS)
+
+A person gets every stuck unit moving with one command or one label: `retry` continues the unit where it stopped,
+`restart` starts it over and keeps the old work as a ref. The cause of every stop is recorded and shown. No git or forge
+work by hand is needed. The decisions are in `openspec/changes/operator-commands/design.md` (D1..D14).
+
+**L4-OPS-001** `l4 retry --unit ID --reason TEXT [--rounds N] [--no-run]` MUST act on the unit's recorded phase:
+- `halted`: back to the phase before the halt (`resumed`), with new task attempts.
+- `escalated`: back to `verifying`. At the fix-round limit it first adds N fix rounds (default 1), and at the feedback
+  limit N feedback rounds (`budget.extended`); `same_failure` at the limit counts as the fix-round limit. With rounds
+  left, `--rounds` is ignored with a warning.
+- `waiting_capacity`: back to the phase before the wait now (`capacity_restored`); `retry_after` is ignored.
+- `in_review`: to `verifying` (`retry_requested`).
+- `merged`: the retry is the archive retry (`l4 archive --unit ID --retry`): a recorded archive or done-gate failure is
+  cleared and tried again. Without such a failure the retry exits 2.
+
+Every other phase, and an unstarted unit, MUST be refused with exit 2 and a message that names what moves the unit
+(`abandoned`: `l4 restart`; `awaiting_human`: the open question ids and the file; a phase the harness continues by
+itself: the next run). `--rounds` on a unit that is not `escalated` MUST be refused with exit 2. A retry MUST record
+`unit.retried{reason, by, signal}`, commit `chore(<name>): retry [skip ci]` and push it, and run no agent, gate or
+sandbox. `l4 resume` stays: it is the retry restricted to `halted` and `escalated`, with its flags and refusals, and it
+keeps recording `unit.resumed`, starts no run and does not look for a spec edit (L4-OPS-003).
+
+**L4-OPS-002** After its push, `l4 retry` MUST ask the forge to start the harness's CI on the base branch: on GitHub a
+`workflow_dispatch` of `l4.yml` (a run that waits already counts as started), on GitLab `POST /projects/:id/pipeline`.
+The output says `run started on <base>`, `a run is already queued on <base>`, or, when the forge refuses or cannot start
+a run or no token is set, `start a run with: <the exact command or page>`; the exit code is then still 0. `--no-run`
+skips the start. A label never starts a run: the sweep that reads it is already in a run.
+
+**L4-OPS-003** When a person changed the unit folder of a `halted` or `escalated` unit after the stop, `l4 retry` MUST
+send the unit to `implementing` (`spec_edit_since_stop`) instead of back. A change counts when it is in the commits at
+the end of the first-parent chain of the unit branch that the harness did not make, and it touches a file of the unit
+folder other than `.l4/`, `verification.md`, `questions.md` and `feedback.md`. A fix-unit folder and a change outside
+the unit folder do not count. `l4 retry` fetches the base branch and the unit branches before it reads them.
+
+**L4-OPS-004** `l4 restart --unit ID --reason TEXT [--no-run]` MUST do these steps in order:
+1. refuse an unstarted, `merged` or locked unit, or a run with no forge token (exit 2), writing nothing;
+2. keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>`, and the lock ref as `…/<n>-locks`; the harness never
+   deletes a ref there;
+3. build the unit folder from the old branch without `.l4/`, `verification.md` and fix-unit folders, keep `questions.md`
+   and `feedback.md`, and set the task boxes to the base branch's (`[ ]` for a task the base lacks);
+4. create a new branch from the base head with the commit `chore(<name>): restart, attempt <n> [skip ci]`, which holds
+   the folder and a ledger file with `unit.restarted{attempt, previous_head, reason, by, signal}`;
+5. push it with a lease on the old head;
+6. close the old PR with a comment that names the attempts ref;
+7. start a run (L4-OPS-002).
+
+A lost lease MUST leave the branch, the PR and the refs as they were (exit 1, `the branch moved: run l4 restart
+again`). A branch that was deleted has no old head: the restart keeps only the lock ref and cuts from the base alone. A
+failure to close the old PR is logged (`close it by hand`) and does not fail the restart. The fold MUST read
+`unit.restarted` as a new start: no phase, counters at zero, `restarts` counted.
+
+**L4-OPS-005** Each `phase.changed` into `halted` or `escalated` MUST carry `reason` (a code) and `detail` (the text a
+person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are, for `halted`: `max_task_attempts`,
+`unselectable_task`, `baseline_failed`, `secret_in_push`, `fix_records`; for `escalated`: `fix_rounds_exhausted`,
+`no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`,
+`verifier_errors`. The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
+An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
+older ledger without `detail` folds as before.
+
+**L4-OPS-006** The `l4 status` table MUST have a `REASON` column after `PHASE`, cut to 60 characters: `detail` for
+`halted` and `escalated`, the open question ids for `awaiting_human`, `until <time>` for `waiting_capacity`, and `-`
+otherwise. `l4 status --unit ID` MUST print the phase, `Cause:` (whole), `Stopped in run:` (the run id of the stop), an
+`Or: add the label <prefix>retry` (or `restart`) line for a unit that a label moves, and last `Next:` with the bare
+command that moves the unit (`l4 retry --unit ID --reason TEXT`, `l4 restart --unit ID --reason TEXT`, or the answer
+path of a question). `--json` MUST carry `reason` and `next`. `l4 plan` MUST use the recorded `detail` for `halted` and
+`escalated`.
+
+**L4-OPS-007** After a FAIL round the fix loop MUST compare its failure with the previous round's. The failure is the
+sorted set of the failed gate names, the failing test ids of a failed test gate (JUnit reports) and the exit code of a
+gate with no report. When the set is not empty, equals the previous round's and no person's commit came between the
+rounds, the unit MUST escalate with `same_failure` and `round <n> failed the same way as round <n-1>: …`. Judge
+findings are not part of the set.
+
+**L4-OPS-008** The sweep MUST honour `<prefix>retry` and `<prefix>resume` as `l4 retry`, and `<prefix>restart` as
+`l4 restart`, with the member rule of L4-SEC-004 (the forge's own record of who set the label, Developer access or
+more, not the token's user). Each label event acts once (`label:<id>` in `unit.retried{signal}` or
+`unit.restarted{signal}`). `retry` and `resume` are read on the open PR of a `halted`, `escalated` or `waiting_capacity`
+unit; `restart` on the open PR of a started unit, or on the closed PR of an `abandoned` unit. Each run that ensures the
+phase labels MUST ensure the three operator labels too. A refusal MUST name the command that works: for the token's own
+user, `l4 retry --unit <unit> --reason TEXT`.
+
+**L4-OPS-009** No stop is a dead end:
+- A secret in the outgoing commits MUST halt the unit with the halt recorded (`secret_in_push`): the run discards its
+  unpushed commits (a hard reset of the worktree to `origin/<branch>`), records `breaker.tripped` and the halted edge,
+  and pushes the ledger alone. `verifying` and `verified` take the halted edge too.
+- `waiting_capacity` MUST always record `retry_after` (now plus `availability.default_cooldown` when the cause gives
+  none) and MUST continue from every parked phase, `fixing` included.
+- A PR closed without a merge MUST make the unit `abandoned` (`pr.closed`, trigger `pr_closed`) from any phase that is
+  not `merged`, `abandoned` or `archived`, with the note `### Abandoned: the merge request was closed without a merge`
+  that names `l4 restart`. A PR reopened before a restart returns the unit to its phase (`pr_reopened`).
+- A deleted unit branch MUST name `l4 restart --unit <unit> --reason TEXT` in its message.
+- A verdict question with Status `dismissed` MUST read as `open`; the note and the plan reason say `Q-NNN: a verdict
+  question cannot be dismissed: start the answer with accept or reject`.
+
+**L4-OPS-010** `l4 run --unit ID` on a `halted` or `escalated` unit MUST exit 13 before the lease, print the cause and
+`Next: l4 retry --unit ID --reason TEXT`, and write no ledger, commit, push or label. A unit with a person's spec edit
+after the stop is not refused (L4-OPS-014).
+
+**L4-OPS-011** When `GITHUB_REPOSITORY` is not set, the GitHub target MUST be the `owner/name` of a github.com `origin`.
+When the GitLab API URL and project are not set in the forge section of the config, the GitLab target MUST be
+`https://<host>/api/v4` and the `origin` path without `.git`. Configured values win. `forge.type: auto` with a github.com `origin` is GitHub.
+
+**L4-OPS-012** The test gate of a fix unit's green step MUST run with the verifier's coverage plugin. Its output goes to
+the step's private folder, and only the gate's pass or fail is used.
+
+**L4-OPS-013** `docs/runbook.md` MUST give one command and one label for each stuck situation, and its section 11 MUST
+drop the limits that this change removes. Each OPS requirement MUST be proven live on GitHub, with run ids and evidence
+under `docs/live/operator-commands/`: a halted unit retried by command with a started run, an escalated unit retried by
+label, a restart by command and by label, a closed PR made `abandoned` and then restarted, a spec push that re-enters a
+unit, a reworded Kiro criterion that reopens its task, and the `REASON` column in a CI `l4 status` step. The GitLab
+pipeline start MUST be proven by a recorded API exchange or a live call.
+
+**L4-OPS-014** A person's push to the unit branch, after the harness's last commit, that changes a file of the unit
+folder other than `.l4/`, `verification.md`, `questions.md` and `feedback.md` (a fix-unit folder does not count) MUST
+send the unit to `implementing` (`spec_edited`) at the next run. It applies from `intake`, `ready`, `implemented`,
+`verifying`, `verified`, `awaiting_human`, `clarifying`, `halted` and `escalated`, and the run records
+`unit.retried{reason: "spec edited", signal: "spec_edit:<sha>", by: "push"}`.
+- `in_review` keeps `spec_edit_after_handoff`.
+- A push during `fixing` is recorded and taken when the fix unit ends.
+- A unit escalated at the fix-round or feedback limit gets one round of that kind, once for each head.
+- A push with no change of the unit folder keeps its old behaviour (answers and feedback use their own paths).
+- The triggers of the CI workflow MUST NOT change: the base branch and `<prefix>**`.
+
+`l4 run --unit` outside CI does not fetch, so a stale ref can miss a remote spec edit; `l4 retry` fetches.
+
+**L4-OPS-015** On a Kiro unit, when a spec edit (L4-OPS-014) changes acceptance criteria in `requirements.md`, the tasks
+that cite them in `_Requirements:_` MUST be set back to `[ ]` with their parents, in a harness commit
+`chore(<name>): reopen tasks <keys> for changed requirements <ids> [skip ci]` with the event `tasks.reopened{tasks,
+requirements}`; the tasks then run test-first. Text is compared after whitespace normalisation, and an added or removed
+criterion counts as changed. An OpenSpec unit reopens nothing: the verifier judges its changed scenarios.
+
+**L4-OPS-016** The GitLab job MUST use the configured base branch and unit-branch prefix, never the project's default
+branch:
+- the job variable `L4_BASE_BRANCH` carries `forge.base_branch`;
+- the `L4-Run:` exemption and the merge trigger compare `$CI_COMMIT_BRANCH` with that literal;
+- the unit-branch rule matches the escaped `forge.branch_prefix`;
+- the base checkout uses `$L4_BASE_BRANCH`.
+
+An unsafe name is refused at render time with exit 2. A base branch such as `l4/main`, which holds the specs that are
+to be built while `main` receives only what a person promotes, works on GitLab as on GitHub. `l4 upgrade` re-renders
+the job after a change to either key.
 
 ---
 
@@ -3670,6 +3820,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 16 | `github-parity` | a full run on GitHub-hosted runners with the workflow's `GITHUB_TOKEN`: the bot identity, the GitHub soft deadline and `workflow_dispatch` continuation, the base-branch harness on other branches, resume by label, honest hand-off CI, the harness fetched at run time instead of vendored (only config, shims and evidence stay in the repository), `l4 setup github`, `l4 ci watch` on GitHub (L4-GHP-001..013; implemented and live-tested, `openspec/changes/github-parity/`, `docs/live/github/`) | the public dummy-repository run of L4-GHP-013 |
 | 17 | `human-feedback` | a person asks for changes with `l4 feedback add` and a push: `feedback.md` in the unit folder (kinds refactor, duplication, tests, config, behaviour), items taken at step 0 of the next round into a fix unit task of their kind (a refactor chore with frozen tests, a test chore, or red/green against a written or built criterion), the judge's check of every item, a feedback round limit apart from `max_fix_rounds`, lessons from feedback, follow-up units after the merge, Kiro fix units as bugfix specs (L4-KSP-005) (L4-FBK-001..013; approved 2026-10-12, `openspec/changes/human-feedback/`) | the Kiro dummy-repository run of L4-FBK-013 |
 | 18 | `adoption-kit` | the harness as a GitHub setup action (`.github/actions/l4`: source `action` for the owner's private repositories with no key, source `repository` with a deploy key for the rest), separate caches for the harness and the agent CLIs, `l4 init --action` (a short workflow and one `uses:` pin, no `.l4/bin/`), `--harness-ref` version pins and Dependabot, slim release commits, the harness repository's own sharded test CI, and an installable `l4` skill (L4-ACT-001..008, L4-SKL-001..002; approved 2026-10-12 after spike `l4-action`, `openspec/changes/adoption-kit/`) | the dummy-repository runs of L4-ACT-008 |
+| 19 | `operator-commands` | a stuck unit moves with one command or one label: `l4 retry` / `l4:retry` continues it by its phase and starts a run, `l4 restart` / `l4:restart` starts it over on a new branch and keeps the old head as a ref, `l4:resume` and `l4 resume` still work; the cause of every stop recorded and shown (`REASON` column, `Next:` line); a repeated failure escalates as `same_failure`; a secret halt, a capacity park from `fixing`, a closed PR, a deleted branch and a dismissed verdict question are no longer dead ends; the forge target found from `origin`; the fixer's green gate runs under coverage; a spec push to the unit branch re-enters the unit, and a changed Kiro criterion reopens the tasks that cite it (L4-OPS-001..015; approved 2026-10-13, `openspec/changes/operator-commands/`) | the GitHub dummy-repository runs of L4-OPS-013 |
 
 ---
 
@@ -6243,7 +6394,7 @@ scenario is a spec defect (§26).
 
 #### SCN-ACT-01 (+) A private repository of the same owner needs no key · L4-ACT-001
 - **Given** a private repository of the harness owner, and the harness repository's Actions access `user`
-- **When** a job runs `uses: <owner>/agent-supervisor/.github/actions/l4@<sha>` and then `l4 --version`
+- **When** a job runs `uses: <owner>/l4/.github/actions/l4@<sha>` and then `l4 --version`
 - **Then** the job succeeds with source `action` and no secret configured.
 
 #### SCN-ACT-02 (−) A public repository cannot use the private action · L4-ACT-001
@@ -6313,8 +6464,8 @@ scenario is a spec defect (§26).
 
 #### SCN-SKL-01 (+) Installed from the repository · L4-SKL-001
 - **Given** a Claude Code session with read access to the harness repository
-- **When** the person runs `/plugin marketplace add ciprianiacobescu/agent-supervisor` and
-  `/plugin install l4@agent-supervisor`
+- **When** the person runs `/plugin marketplace add ciprianiacobescu/l4` and
+  `/plugin install l4@l4-harness`
 - **Then** the skill `l4` is listed and loads.
 
 #### SCN-SKL-02 (+) The feedback kind is chosen right · L4-SKL-002
@@ -6326,6 +6477,148 @@ scenario is a spec defect (§26).
 - **Given** the request "rename `calc` to `compute`; the tests call `calc`"
 - **When** an agent with the skill chooses the kind
 - **Then** it chooses `behaviour`, with `--when`/`--then`, and says why.
+
+### 23.19 Operator commands (OPS)
+
+#### SCN-OPS-01 (+) An escalated unit at the fix-round limit needs no flag · L4-OPS-001
+- **Given** a unit escalated with `fix rounds used 3/3`
+- **When** `l4 retry --unit U --reason "spec corrected" --no-run` runs
+- **Then** `budget.extended{fix_rounds: 1}` and `unit.retried` are recorded, the unit is back in `verifying`, and the
+  push is `chore(<name>): retry [skip ci]`.
+
+#### SCN-OPS-02 (+) A unit that waits for capacity from `fixing` continues · L4-OPS-001, L4-OPS-009
+- **Given** a unit in `waiting_capacity` that was parked from `fixing`, with no `retry_after`
+- **When** `l4 retry` runs
+- **Then** the unit is back in `fixing`, and `l4 plan` says `implement`.
+
+#### SCN-OPS-03 (−) A unit that waits for an answer is refused · L4-OPS-001
+- **Given** a unit in `awaiting_human` with the open question Q-002
+- **When** `l4 retry` runs
+- **Then** it exits 2 with `retry: U is awaiting_human: answer Q-002 in questions.md on l4/<fw>/<name>, then push`, and
+  records nothing.
+
+#### SCN-OPS-04 (+) The retry starts the workflow on GitHub · L4-OPS-002
+- **Given** a halted unit on GitHub and a forge token that may dispatch workflows
+- **When** `l4 retry --unit U --reason TEXT` runs
+- **Then** a `workflow_dispatch` run of `l4.yml` on the base branch starts, and the output says `run started on <base>`.
+
+#### SCN-OPS-05 (−) A refused start still exits 0 and says how · L4-OPS-002
+- **Given** a token that may push but not start pipelines
+- **When** `l4 retry` runs
+- **Then** the retry is pushed, the output names the command that starts a run, and the exit code is 0.
+
+#### SCN-OPS-06 (+) A reworded requirement reaches an escalated unit · L4-OPS-003
+- **Given** an escalated Kiro unit, and a person's commit to `requirements.md` on its branch after the escalation
+- **When** `l4 retry` runs
+- **Then** the unit is in `implementing` (`spec_edit_since_stop`), and the next verification judges the reworded
+  requirement.
+
+#### SCN-OPS-07 (−) A change outside the unit folder does not count · L4-OPS-003
+- **Given** a halted unit, and a person's commit after the halt that changes only `src/`
+- **When** `l4 retry` runs
+- **Then** the unit goes back to the phase before the halt, not to `implementing`.
+
+#### SCN-OPS-08 (+) A poisoned unit starts over with the corrected spec · L4-OPS-004
+- **Given** an escalated unit whose branch has a person's correction to `requirements.md`
+- **When** `l4 restart --unit U --reason "start over" --no-run` runs
+- **Then** `refs/l4/attempts/<fw>/<name>/1` holds the old head, the PR is closed, and the new branch has the corrected
+  `requirements.md`, the base's task boxes, no `.l4/evidence`, and a ledger with `unit.restarted`; `l4 plan` says
+  `implement`.
+
+#### SCN-OPS-09 (−) A person's push during the restart wins · L4-OPS-004
+- **Given** a person pushes to the unit branch after the restart read its head
+- **When** the restart pushes the new branch
+- **Then** the lease fails, the restart exits 1 with `the branch moved: run l4 restart again`, and the PR stays open.
+
+#### SCN-OPS-10 (+) A non-convertible finding is named · L4-OPS-005
+- **Given** a FAIL round whose only finding cannot become a fix task, with fix rounds left
+- **When** the unit escalates
+- **Then** `phase.changed` has `reason: no_convertible_finding` and its `detail`, and the note headline is
+  `### Escalated: <detail>`.
+
+#### SCN-OPS-11 (+) The halt cause is in the table · L4-OPS-006
+- **Given** a unit halted by `max_task_attempts`
+- **When** `l4 status` runs
+- **Then** its row shows `halted` and the cause cut to 60 characters, and `l4 status --unit U` ends with `Next: l4 retry
+  --unit U --reason TEXT`, after an `Or: add the label l4:retry` line.
+
+#### SCN-OPS-12 (+) The same crashed test twice stops the loop · L4-OPS-007
+- **Given** round 1 failed with the test gate's `INTERNALERROR` and no report, and a fix round ran
+- **When** round 2 fails with the same gate and exit code
+- **Then** the unit is escalated with `same_failure` after round 2, and no second fix unit is written.
+
+#### SCN-OPS-13 (−) A different failure gets its fix round · L4-OPS-007
+- **Given** round 1 failed on test A and round 2 fails on test B
+- **When** round 2 ends
+- **Then** a fix unit is written as before.
+
+#### SCN-OPS-14 (+) A member's restart label starts the unit over · L4-OPS-008
+- **Given** an escalated unit with an open PR, and a member adds `l4:restart`
+- **When** the next run's sweep reads it
+- **Then** the restart of L4-OPS-004 runs, and the same run's `l4 run` implements the unit again.
+
+#### SCN-OPS-15 (+) A secret halt can be retried · L4-OPS-009
+- **Given** a run whose outgoing commits contain a secret
+- **When** the run ends
+- **Then** the remote branch has no new code commit, its ledger shows `halted` with `secret_in_push`, and `l4 retry`
+  after the person's correction is accepted.
+
+#### SCN-OPS-16 (+) A closed PR is not a dead end · L4-OPS-009
+- **Given** an `in_review` unit whose PR a person closed without a merge
+- **When** the next sweep runs
+- **Then** the unit is `abandoned`, and `l4 restart` on it is accepted.
+
+#### SCN-OPS-17 (−) The resume label survives a manual run · L4-OPS-010
+- **Given** a halted unit whose PR carries `l4:resume`
+- **When** `l4 run --unit U` runs with a forge token
+- **Then** it exits 13, the branch head is unchanged, and the label is still on the PR.
+
+#### SCN-OPS-18 (+) A laptop retry needs no project setting · L4-OPS-011
+- **Given** a clone whose `origin` is `git@github.com:o/n.git`, a token, and no `GITHUB_REPOSITORY`
+- **When** `l4 retry` runs
+- **Then** it acts on `o/n` and does not exit 2.
+
+#### SCN-OPS-19 (+) A failure under coverage reaches the fixer · L4-OPS-012
+- **Given** a fix task whose test passes without coverage and fails under the coverage plugin
+- **When** its green step runs
+- **Then** the gate fails in that step, and the attempt's retry prompt carries the gate log.
+
+#### SCN-OPS-20 (+) A spec push to an escalated unit starts it again · L4-OPS-014
+- **Given** a unit escalated with `fix rounds used 3/3`, and a person's push that edits `proposal.md` on its branch
+- **When** the next run starts
+- **Then** `budget.extended{fix_rounds: 1}` and `unit.retried{reason: "spec edited"}` are recorded, the unit is in
+  `implementing`, and no `l4 retry` was needed.
+
+#### SCN-OPS-21 (+) A spec push to a verified unit is verified again before the hand-off · L4-OPS-014
+- **Given** a `verified` unit, and a person's push that rewords a requirement before the hand-off
+- **When** the next run starts
+- **Then** the unit goes to `implementing`, then to `verifying`, and it is not handed off on the old verdict.
+
+#### SCN-OPS-22 (−) Answers are not a spec edit · L4-OPS-014
+- **Given** a unit in `awaiting_human`, and a person's push that changes only `questions.md`
+- **When** the next run starts
+- **Then** the answers path decides as before, and no `spec_edited` edge is taken.
+
+#### SCN-OPS-23 (+) A reworded criterion is implemented again · L4-OPS-015
+- **Given** a Kiro unit whose task 2.1 cites `_Requirements: 2.3_`, and a person's push that rewords criterion 2.3
+- **When** the next run starts
+- **Then** task 2.1 is `[ ]` again in a `chore(...): reopen tasks 2.1 for changed requirements 2.3 [skip ci]` commit, and
+  it runs red and then green.
+
+#### SCN-OPS-24 (−) A re-wrapped line changes nothing · L4-OPS-015
+- **Given** a person's push that only re-wraps the text of criterion 2.3
+- **When** the next run starts
+- **Then** no task is reopened (the unit still re-enters, by L4-OPS-014).
+
+#### SCN-OPS-25 (+) The runbook has one command and one label per stuck situation · L4-OPS-013
+- **Given** the runbook of the release
+- **When** a person looks up a halted, an escalated, an abandoned and a waiting unit
+- **Then** each has one command and one label, and section 11 names none of the limits that L4-OPS-001..012 remove.
+
+#### SCN-OPS-26 (+) A base branch that is not the default branch works on GitLab · L4-OPS-016
+- **Given** `forge.base_branch: l4/main` and a GitLab project whose default branch is `main`
+- **When** `l4 init --ci gitlab` or `l4 upgrade` renders the job
+- **Then** the rules compare `$CI_COMMIT_BRANCH` with `"l4/main"`, `L4_BASE_BRANCH` is `l4/main`, and the base checkout detaches to `origin/l4/main`
 
 ## 24. Definition of done
 

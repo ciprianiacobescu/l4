@@ -1,0 +1,375 @@
+"""Every escalation of the fix loop records its cause (L4-OPS-005, SCN-OPS-10), and a repeated failure ends the loop
+at once (L4-OPS-007, SCN-OPS-12, SCN-OPS-13)."""
+
+import dataclasses
+import json
+from pathlib import Path
+
+import pytest
+
+from l4.state.ledger import LedgerEvent
+from l4.verifier import fixloop
+from l4.verifier.fixloop import failure_set, repeated_failure
+from l4.verifier.gates import log_digest
+from l4.verifier.types import Finding, GateLine, Severity, Verdict, VerifyResult
+
+from ..implementer.conftest import green_step
+from . import test_ladder_fix as ladder_fix
+from .test_ladder_fix import FIX_UNIT, chore_fix, noqa_green, red_step
+
+no_fix_loop = ladder_fix.no_fix_loop  # the fixtures of the fix loop's end-to-end suite
+with_verifier = ladder_fix.with_verifier
+
+BOT = ("l4-bot", "l4-bot@users.noreply.invalid")
+
+
+def gate(name: str, status: str = "fail", reason: str = "exit code 1", digest: str | None = None) -> dict:
+    return {"name": name, "command": name, "status": status, "reason": reason, "log": None, "digest": digest}
+
+
+# --- the failure set (D7) ----------------------------------------------------------------------------------------
+
+
+def test_the_failure_set_names_failed_gates_failing_tests_and_the_exit_code_of_a_gate_with_no_report():
+    gates = [gate("lint", "pass", ""), gate("test", reason="exit code 1; failing: a")]
+    tests = {"tests.test_a::test_x": "failed", "tests.test_a::test_y": "passed", "tests.test_b::test_z": "error"}
+    assert failure_set(gates, tests) == {"test", "tests.test_a::test_x", "tests.test_b::test_z"}
+    assert failure_set([gate("test", reason="exit code 3")], {}) == {"test", "test:exit 3"}
+    assert failure_set([gate("lint")], {}) == {"lint", "lint:exit 1"}
+    assert failure_set([gate("test", reason="report missing: gates.test.reports is empty")], {}) == {
+        "test",
+        "test:report missing: gates.test.reports is empty",
+    }
+
+
+def test_a_failed_gate_with_no_report_adds_the_digest_of_its_last_error_lines():  # review M5
+    assert failure_set([gate("lint", digest="ab12cd34ef56")], {}) == {"lint", "lint:exit 1", "lint:log ab12cd34ef56"}
+    assert failure_set([gate("test", digest="ab12cd34ef56")], {"t::a": "failed"}) == {"test", "t::a"}  # a JUnit report
+
+
+def write_log(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "gate.log"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_the_same_internal_error_twice_has_the_same_digest(tmp_path):
+    where = "INTERNALERROR> File \"{}/site/x.py\", line {}, in f\nINTERNALERROR> KeyError: 'a' at {} {}\n"
+    first = where.format("/tmp/run-1", 120, "0x7f3a9c01", "2026-10-13T09:00:01Z")
+    second = where.format("/home/ci/run-2", 98, "0x7f11ab02", "2026-10-13T10:41:59Z")
+    assert log_digest(write_log(tmp_path, first)) == log_digest(write_log(tmp_path, second))
+    assert len(log_digest(write_log(tmp_path, first))) == 12
+
+
+def test_two_different_lint_errors_have_different_digests(tmp_path):
+    one = "src/a.py:3:1: F401 `os` imported but unused\nFound 1 error.\n"
+    two = "src/a.py:9:5: E722 Do not use bare `except`\nFound 1 error.\n"
+    assert log_digest(write_log(tmp_path, one)) != log_digest(write_log(tmp_path, two))
+
+
+def test_only_the_last_thirty_lines_count_and_a_missing_log_has_no_digest(tmp_path):
+    head = "".join(f"noise {c}\n" for c in "abcdefghij")
+    tail = "".join(f"error line {chr(97 + i)}\n" for i in range(30))
+    assert log_digest(write_log(tmp_path, head + tail)) == log_digest(write_log(tmp_path, tail))
+    assert log_digest(tmp_path / "missing.log") is None
+
+
+def test_the_same_lint_error_twice_is_a_repeat_and_two_different_ones_are_not(unit):
+    git, repo, path, head = unit
+    previous(path, head, [gate("lint", digest="aaaaaaaaaaaa")])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    assert repeated_failure(path, git, [], current(now, [gate("lint", digest="aaaaaaaaaaaa")])) is not None
+    assert repeated_failure(path, git, [], current(now, [gate("lint", digest="bbbbbbbbbbbb")])) is None
+
+
+def test_a_round_with_no_failed_gate_has_an_empty_failure_set():
+    assert failure_set([gate("lint", "pass", "")], {"t::a": "passed"}) == frozenset()
+
+
+# --- the comparison with the previous round ----------------------------------------------------------------------
+
+
+def commit(git, repo: Path, author: tuple[str, str], subject: str, *, trailer: bool = True) -> str:
+    git.run("add", "-A")
+    extra = ["--trailer", "L4-Run: r-1"] if trailer else []
+    git.run("-c", f"user.name={author[0]}", "-c", f"user.email={author[1]}", "commit", "-q", "-m", subject, *extra)
+    return git.run("rev-parse", "HEAD").stdout.strip()
+
+
+@pytest.fixture
+def unit(tmp_path: Path, git_for):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = git_for(repo)
+    git.run("init", "-q", "-b", "main")
+    (repo / "a.txt").write_text("a")
+    head = commit(git, repo, BOT, "base")
+    path = repo / "u"
+    path.mkdir()
+    return git, repo, path, head
+
+
+def previous(
+    path: Path,
+    head: str,
+    gates: list[dict],
+    tests: dict | None = None,
+    *,
+    verdict: str = "FAIL",
+    n: int = 1,
+    findings: list[Finding] | None = None,
+):
+    folder = path / ".l4" / "evidence" / f"round-{n}"
+    folder.mkdir(parents=True, exist_ok=True)
+    body = {"round": n, "verdict": verdict, "head_sha": head, "gates": gates, "tests": tests or {}}
+    body["findings"] = [{**dataclasses.asdict(f), "severity": f.severity.value} for f in findings or []]
+    (folder / "verdict.json").write_text(json.dumps(body))
+
+
+def current(
+    head: str, gates: list[dict], tests: dict | None = None, n: int = 2, findings: list[Finding] | None = None
+) -> VerifyResult:
+    result = VerifyResult("u", n, Verdict.FAIL, "b", head)
+    result.findings = findings or []
+    result.gates = [
+        GateLine(g["name"], g["command"], g["status"], g["reason"], g["log"], g.get("digest")) for g in gates
+    ]
+    result.tests = tests or {}
+    return result
+
+
+def test_the_same_crashed_test_gate_twice_is_a_repeat(unit):  # SCN-OPS-12
+    git, repo, path, head = unit
+    crash = [gate("test", reason="exit code 3")]
+    previous(path, head, crash)
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    detail = repeated_failure(path, git, [], current(now, crash))
+    assert detail == "round 2 failed the same way as round 1: test, test:exit 3"
+
+
+def test_a_different_failing_test_is_not_a_repeat(unit):  # SCN-OPS-13
+    git, repo, path, head = unit
+    previous(path, head, [gate("test")], {"t::a": "failed"})
+    assert repeated_failure(path, git, [], current(head, [gate("test")], {"t::b": "failed"})) is None
+
+
+def test_an_empty_failure_set_is_never_a_repeat(unit):
+    git, _, path, head = unit
+    previous(path, head, [gate("lint", "pass", "")])
+    assert repeated_failure(path, git, [], current(head, [gate("lint", "pass", "")])) is None
+
+
+def test_a_round_without_a_previous_round_or_after_a_non_fail_round_is_not_a_repeat(unit):
+    git, _, path, head = unit
+    crash = [gate("test", reason="exit code 3")]
+    assert repeated_failure(path, git, [], current(head, crash)) is None
+    previous(path, head, crash, verdict="NEEDS_HUMAN")
+    assert repeated_failure(path, git, [], current(head, crash)) is None
+
+
+def test_a_commit_of_a_person_between_the_rounds_gives_the_next_round(unit):
+    git, repo, path, head = unit
+    crash = [gate("test", reason="exit code 3")]
+    previous(path, head, crash)
+    (repo / "b.txt").write_text("person")
+    commit(git, repo, ("alice", "alice@example.invalid"), "I fixed it", trailer=False)
+    (repo / "c.txt").write_text("harness")
+    now = commit(git, repo, BOT, "docs(u): verification round 2")
+    assert repeated_failure(path, git, [], current(now, crash)) is None
+
+
+def test_an_unknown_previous_head_is_not_a_repeat(unit):
+    git, _, path, head = unit
+    crash = [gate("test", reason="exit code 3")]
+    previous(path, "0" * 40, crash)
+    assert repeated_failure(path, git, [], current(head, crash)) is None
+
+
+def event(kind: str, seq: int, **data) -> LedgerEvent:
+    from datetime import UTC, datetime
+
+    return LedgerEvent(datetime.now(UTC), "r", "u", seq, kind, data)
+
+
+def test_a_retry_after_the_previous_round_gives_the_next_round(unit):
+    git, _, path, head = unit
+    crash = [gate("test", reason="exit code 3")]
+    previous(path, head, crash)
+    events = [event("verify.verdict", 1, round=1, verdict="FAIL")]
+    assert repeated_failure(path, git, events, current(head, crash)) is not None
+    for kind in ("unit.retried", "unit.resumed"):
+        assert repeated_failure(path, git, [*events, event(kind, 2)], current(head, crash)) is None
+
+
+def test_the_detail_is_cut_to_200_characters(unit):
+    git, _, path, head = unit
+    tests = {f"tests.test_module_{i}::test_case_{i}": "failed" for i in range(30)}
+    previous(path, head, [gate("test")], tests)
+    detail = repeated_failure(path, git, [], current(head, [gate("test")], tests))
+    assert detail is not None and detail.startswith("round 2 failed the same way as round 1: ")
+    assert len(detail.split(": ", 1)[1]) <= 200
+
+
+# --- the causes, end to end ---------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def escalation(monkeypatch):
+    """What `after_verdict` left in `ctx.shared["escalation"]` at each call."""
+    seen: list = []
+    import l4.verifier.ladder as ladder
+
+    original = ladder.after_verdict
+
+    def spy(ctx, wb, result, trigger):
+        out = original(ctx, wb, result, trigger)
+        seen.append(ctx.shared.get("escalation"))
+        return out
+
+    monkeypatch.setattr(ladder, "after_verdict", spy)
+    return seen
+
+
+def test_the_fix_round_limit_sets_its_code_and_its_text(run_l4, valid_spec, with_verifier, escalation):
+    with_verifier(max_fix_rounds=0)
+    run = run_l4([red_step(), noqa_green()])
+    assert run.code == 13
+    assert escalation[-1] == ("fix_rounds_exhausted", "fix rounds used 0/0")
+
+
+def test_a_fix_unit_that_cannot_be_created_sets_its_code(run_l4, valid_spec, monkeypatch, escalation):
+    from l4.specs.base import FixUnitInvalid
+    from l4.verifier.fixloop import FamilyProvider
+
+    def broken(self, *args, **kwargs):
+        raise FixUnitInvalid("nope")
+
+    monkeypatch.setattr(FamilyProvider, "create_fix_unit", broken)
+    run = run_l4([red_step(), noqa_green()])
+    assert run.code == 13
+    code, detail = escalation[-1]
+    assert code == "fix_unit_not_created" and detail.startswith("the fix unit could not be created: ")
+
+
+def test_a_repeated_failure_escalates_with_same_failure_and_writes_no_second_fix_unit(
+    run_l4, valid_spec, escalation
+):  # SCN-OPS-12
+    run = run_l4([red_step(), green_step(), chore_fix(), chore_fix()], lint=["sh -c 'echo broken; exit 1'"])
+    assert run.code == 13 and run.triggers()[-1] == "verify_fail_exhausted"
+    assert [e["verdict"] for e in run.events("verify.verdict")] == ["FAIL", "FAIL"]
+    assert len(run.events("fix.spawned")) == 1  # no fix unit 2
+    code, detail = escalation[-1]
+    assert code == "same_failure"
+    assert detail.startswith("round 2 failed the same way as round 1: ")
+    assert "lint, lint:exit 1, lint:log " in detail  # the digest (M5)
+
+
+LINT_BY_CONTENT = (
+    "sh -c 'if grep -q UNUSED src/pytdd/pricing.py; then echo unused-name-found; else echo other-error; fi; exit 1'"
+)
+
+
+def test_a_lint_gate_that_fails_with_another_error_is_not_a_repeat(run_l4, valid_spec, escalation):  # review M5
+    """The first round fails on one lint error, the fix round on another: that is progress, so a second fix unit is
+    written; only round 3, which fails exactly as round 2 did, is the repeat."""
+    run = run_l4([red_step(), noqa_green(), chore_fix(), chore_fix(), chore_fix()], lint=[LINT_BY_CONTENT])
+    assert [e["verdict"] for e in run.events("verify.verdict")][:2] == ["FAIL", "FAIL"]
+    assert len(run.events("fix.spawned")) == 2
+    assert escalation[-1][0] == "same_failure" and escalation[-1][1].startswith(
+        "round 3 failed the same way as round 2"
+    )
+
+
+def test_a_framework_without_fix_units_sets_its_code(run_l4, valid_spec, monkeypatch, escalation):
+    monkeypatch.setattr(fixloop.FamilyProvider, "can_fix", property(lambda self: False))
+    run = run_l4([red_step(), noqa_green()])
+    assert run.code == 13
+    assert escalation[-1] == ("no_fix_units", "openspec has no fix units")
+
+
+def test_a_round_with_no_convertible_finding_sets_its_code(run_l4, valid_spec, monkeypatch, escalation):  # SCN-OPS-10
+    original = fixloop.plan_fix_unit
+    monkeypatch.setattr(fixloop, "plan_fix_unit", lambda *a, **k: dataclasses.replace(original(*a, **k), groups=()))
+    run = run_l4([red_step(), noqa_green()])
+    assert run.code == 13
+    detail = "no finding of this round can be converted into a fix task"
+    assert escalation[-1] == ("no_convertible_finding", detail)
+
+
+# --- the fixer runs what the verifier runs (L4-OPS-012) -----------------------------------------------------------
+
+COVERAGE_ONLY = (
+    "import sys\n\n\ndef test_runs_without_the_coverage_plugin():\n"
+    '    assert "coverage" not in sys.modules, "coverage.py is loaded by the coverage plugin"\n'
+)
+
+
+@pytest.fixture
+def coverage_only_test(tdd_repo, raw) -> None:
+    """The repository holds a test that passes unless the coverage plugin is loaded (a green step may not add tests)."""
+    (tdd_repo.repo / "tests" / "test_coverage_only.py").write_text(COVERAGE_ONLY)
+    raw(tdd_repo.repo, "add", "-A")
+    raw(tdd_repo.repo, "commit", "-q", "-m", "a test that sees the coverage plugin")
+    raw(tdd_repo.repo, "push", "-q", "origin", "main")
+
+
+def test_a_failure_that_only_the_coverage_plugin_causes_reaches_the_fixer(
+    run_l4, valid_spec, coverage_only_test
+):  # SCN-OPS-19
+    run = run_l4([red_step(), noqa_green(), chore_fix(), chore_fix()], implementer={"max_task_attempts": 2})
+    fix_gates = [e for e in run.events("gate.finished") if e.get("fix_unit") == FIX_UNIT and e["name"] == "test"]
+    assert fix_gates and fix_gates[0]["status"] == "fail"
+    assert "test_runs_without_the_coverage_plugin" in run.adapter.requests[3].prompt  # the retry prompt
+
+
+# --- a deterministic finding with every gate passing (D7) -----------------------------------------------------------
+
+
+def blocker(title: str, source: str = "deterministic", severity: Severity = Severity.BLOCKER) -> Finding:
+    return Finding(severity, title, f"{title}: detail of this round", source)  # type: ignore[arg-type]
+
+
+def row(finding: Finding) -> dict:
+    return {**dataclasses.asdict(finding), "severity": finding.severity.value}
+
+
+def test_the_failure_set_holds_the_ids_of_deterministic_blocking_findings_only():
+    freeze = blocker("a frozen test or support file changed between red and green")
+    found = failure_set(
+        [gate("lint", "pass", "")],
+        {},
+        [row(f) for f in (freeze, blocker("judge says", "judge"), blocker("n", severity=Severity.MINOR))],
+    )
+    assert found == {f"finding {freeze.id}"}
+
+
+def test_the_same_deterministic_blocker_in_two_rounds_is_a_repeat_with_every_gate_passing(unit):
+    git, repo, path, head = unit
+    freeze = blocker("a frozen test or support file changed between red and green")
+    previous(path, head, [gate("lint", "pass", "")], findings=[freeze])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    reworded = dataclasses.replace(freeze, detail="task 1.1: tests/test_other.py")  # the detail may change, the id not
+    detail = repeated_failure(path, git, [], current(now, [gate("lint", "pass", "")], findings=[reworded]))
+    assert detail == f"round 2 failed the same way as round 1: finding {freeze.id}"
+
+
+def test_a_different_deterministic_blocker_is_not_a_repeat(unit):
+    git, repo, path, head = unit
+    previous(path, head, [], findings=[blocker("a pre-existing test was deleted")])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    assert (
+        repeated_failure(path, git, [], current(now, [], findings=[blocker("a skip or xfail marker was added")]))
+        is None
+    )
+
+
+def test_a_judge_finding_alone_is_never_a_repeat(unit):
+    git, repo, path, head = unit
+    previous(path, head, [], findings=[blocker("judge", "judge")])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    assert repeated_failure(path, git, [], current(now, [], findings=[blocker("judge", "judge")])) is None

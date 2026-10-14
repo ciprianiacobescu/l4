@@ -264,4 +264,3 @@ def install_planned(
             action = _apply(ctx, tools[action.tool], action)
         done.append(action)
     return done
-

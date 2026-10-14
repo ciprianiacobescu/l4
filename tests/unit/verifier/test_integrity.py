@@ -239,6 +239,41 @@ def test_runner_config_change_between_red_and_green_is_a_blocker(tmp_path, git_e
     assert not check_freeze(quiet.context(red2, green2)).findings  # sections other than pytest and coverage may change
 
 
+def _two_cycles(tmp_path, git_environ, *, green_edits_test: bool):
+    """A task with two red/green cycles (a `tasks.reopened` after a reworded criterion): the second red rewrites the
+    test file; the second green changes it again only when `green_edits_test`."""
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    red1 = repo.commit("red", task="1.1", tdd="red")
+    repo.write({"src/a.py": "X = 1\n"})
+    green1 = repo.commit("green", task="1.1", tdd="green")
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 2\n"})  # the reopened red rewrites the test
+    red2 = repo.commit("red", task="1.1", tdd="red")
+    repo.write(
+        {"src/a.py": "X = 2\n", **({"tests/test_a.py": "def test_a():\n    assert 3\n"} if green_edits_test else {})}
+    )
+    green2 = repo.commit("green", task="1.1", tdd="green")
+    frozen = ["tests/test_a.py"]
+    repo.events = [
+        event("task.red_ok", 1, task="1.1", sha=red1, frozen=frozen),
+        event("task.done", 2, task="1.1", sha=green1),
+        event("task.red_ok", 3, task="1.1", sha=red2, frozen=frozen),
+        event("task.done", 4, task="1.1", sha=green2),
+    ]
+    return repo, base, green2
+
+
+def test_a_reopened_tasks_second_red_may_rewrite_the_test_its_first_red_froze(tmp_path, git_environ):
+    repo, base, green = _two_cycles(tmp_path, git_environ, green_edits_test=False)
+    out = check_freeze(repo.context(base, green))
+    assert out.findings == []
+
+
+def test_a_green_that_changes_a_frozen_test_inside_the_second_cycle_is_still_a_blocker(tmp_path, git_environ):
+    repo, base, green = _two_cycles(tmp_path, git_environ, green_edits_test=True)
+    [finding] = check_freeze(repo.context(base, green)).findings
+    assert "tests/test_a.py" in finding.detail
+
+
 def _history(tmp_path, git_environ, *, red: bool = True, green: bool = True, wrong_sha: bool = False):
     repo, base = new_repo(tmp_path, git_environ)
     repo.write({"tests/test_a.py": "def test_a():\n    assert 1\n"})

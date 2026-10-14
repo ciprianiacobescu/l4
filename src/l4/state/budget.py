@@ -5,6 +5,7 @@ from l4.config.schema import L4Config
 from l4.state.fold import UnitState
 
 FEEDBACK_ROUNDS_EXHAUSTED = "feedback_rounds_exhausted"  # `phase.changed{to: escalated, reason}`
+VERIFIER_ERRORS = "verifier_errors"  # the third internal verifier error in a row (L4-VER-010, L4-OPS-005)
 LABEL_FEEDBACK_ROUNDS = 1  # one `l4:resume` label event on a unit escalated for the feedback limit (L4-FBK-006)
 LABEL_FIX_ROUNDS = 1  # one `l4:resume` label event on an escalated unit with its fix rounds used up (L4-CI-004)
 

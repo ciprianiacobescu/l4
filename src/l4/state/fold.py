@@ -24,6 +24,9 @@ class _Model(BaseModel):
 class TaskProgress(_Model):
     done: list[str] = Field(default_factory=list)  # task keys, sorted
     in_progress: str | None = None
+    # task key -> the criterion ids that a spec edit made stale for it (`tasks.reopened{stale_criteria}`, L4-OPS-015),
+    # until the task is done again
+    stale: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class QuestionState(_Model):
@@ -44,6 +47,26 @@ class CiFailure(_Model):
     pipeline: int | str | None = None
     jobs: list[dict[str, Any]] = Field(default_factory=list)  # {name, stage, url, tail}
     preexisting: list[str] = Field(default_factory=list)  # red on H and on the base: not this unit's
+
+
+class PendingSpecEdit(_Model):
+    """A person's spec push that a run saw while the unit was `fixing` or `waiting_capacity` (or under `l4 verify`),
+    where no edge takes it (L4-OPS-014, design D13, review M3):
+    `spec.edit_seen{head, base, commits}`. `base` is the harness's last commit before the person's first one (the
+    Kiro reopening diffs against it), `head` the person's newest commit, `commits` the person's shas, oldest first.
+    It stays until `unit.retried` records the signal `spec_edit:<head>`."""
+
+    head: str
+    base: str
+    commits: list[str] = Field(default_factory=list)
+
+
+class ReturnState(_Model):
+    """What a closed MR must give back (L4-OPS-009): the phase the unit closed from and that phase's own
+    `previous_phase`. `abandoned` parks the unit like `halted` does, so `previous_phase` alone cannot hold both."""
+
+    phase: str | None = None
+    previous_phase: str | None = None
 
 
 class FeedbackState(_Model):
@@ -94,9 +117,13 @@ class UnitState(_Model):
     fix_rounds_counted: int = 0  # the fix units that are not feedback-only: what `verifier.max_fix_rounds` limits
     feedback_rounds_used: int = 0  # `fix.spawned{feedback_only: true}` events: feedback fix units (absent = false)
     feedback: dict[str, FeedbackState] = Field(default_factory=dict)  # item id -> state, from the `feedback.*` events
+    pending_spec_edit: PendingSpecEdit | None = None  # `spec.edit_seen` not yet taken by `unit.retried` (L4-OPS-014)
     resumed_signals: list[str] = Field(default_factory=list)  # `unit.resumed{signal}`: label events acted on (one each)
     refused_signals: dict[str, str] = Field(default_factory=dict)  # `resume.refused{signal, why}`: said once each
-    halt_reason: str | None = None  # the `reason` of the edge into `halted` or `escalated`; None in any other phase
+    halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
+    halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
+    restarts: int = 0  # `unit.restarted` events: how many times `l4 restart` began the unit again (L4-OPS-004)
+    closed_from: ReturnState | None = None  # `pr.closed` (or the `pr_closed` edge) until `pr_reopened` gives it back
     hinted_heads: list[str] = Field(default_factory=list)  # `resume.hint{head}`: branch heads a halt pointer was for
     updated_at: str | None = None
 
@@ -114,12 +141,23 @@ def _phase_changed(state: UnitState, event: LedgerEvent) -> None:
     target, source = _text(event, "to"), _text(event, "from")
     if target is None:
         return
+    trigger = _text(event, "trigger")
+    if trigger == "pr_closed" and (
+        state.closed_from is None or state.closed_from.phase != source
+    ):  # no `pr.closed` before
+        state.closed_from = ReturnState(phase=source, previous_phase=state.previous_phase)
     if target in PARKING_PHASES:
         state.previous_phase = source
     elif source in PARKING_PHASES:
         state.previous_phase = None
+    if trigger == "pr_reopened":  # L4-OPS-009: the phase it closed from, with that phase's own previous phase
+        if state.closed_from is not None and state.closed_from.phase == target:
+            state.previous_phase = state.closed_from.previous_phase
+        state.closed_from = None
     state.retry_after = _text(event, "retry_after") if target == "waiting_capacity" else None
-    state.halt_reason = _text(event, "reason") if target in ("halted", "escalated") else None
+    stopped = target in ("halted", "escalated")
+    state.halt_reason = _text(event, "reason") if stopped else None
+    state.halt_detail = (_text(event, "detail") or _text(event, "reason")) if stopped else None  # L4-OPS-005
     state.phase = target
 
 
@@ -143,6 +181,26 @@ def _task_done(state: UnitState, event: LedgerEvent) -> None:
         state.tasks.done = sorted({*state.tasks.done, task})
         if state.tasks.in_progress == task:
             state.tasks.in_progress = None
+        state.tasks.stale.pop(task, None)  # the reopened task is green again: its stale tests are replaced
+        parents = event.data.get("parents")
+        for parent in parents if isinstance(parents, list) else ():
+            if isinstance(parent, str):
+                state.tasks.stale.pop(parent, None)
+
+
+def _tasks_reopened(state: UnitState, event: LedgerEvent) -> None:
+    """`tasks.reopened{tasks, requirements, stale_criteria}` (L4-OPS-015): a spec edit changed criteria that these Kiro
+    tasks cite, so their boxes are `[ ]` again and they are no longer done. The old ids of the changed criteria are
+    kept on each reopened task (`tasks.stale`) until its `task.done`: tests that trace them may be replaced."""
+    reopened = event.data.get("tasks")
+    if isinstance(reopened, list):
+        gone = {t for t in reopened if isinstance(t, str)}
+        state.tasks.done = [t for t in state.tasks.done if t not in gone]
+        stale = event.data.get("stale_criteria")
+        if isinstance(stale, list) and stale:
+            ids = [i for i in stale if isinstance(i, str)]
+            for task in sorted(gone):
+                state.tasks.stale[task] = sorted({*state.tasks.stale.get(task, []), *ids})
 
 
 def _question_id(event: LedgerEvent) -> str | None:
@@ -166,6 +224,16 @@ def _question_answered(state: UnitState, event: LedgerEvent) -> None:
         state.questions.open = [q for q in state.questions.open if q != qid]
         if qid not in state.questions.answered:
             state.questions.answered.append(qid)
+
+
+def _question_superseded(state: UnitState, event: LedgerEvent) -> None:
+    """`question.superseded{ids, round}` (L4-OPS-014): a later verification round replaced these verdict questions, so
+    they are neither open nor answered."""
+    ids = event.data.get("ids")
+    if isinstance(ids, list):
+        fix = _fix_unit(event)
+        gone = {f"{fix}/{i}" if fix else i for i in ids if isinstance(i, str)}
+        state.questions.open = [q for q in state.questions.open if q not in gone]
 
 
 def _availability_selected(state: UnitState, event: LedgerEvent) -> None:
@@ -247,12 +315,52 @@ def _ci_preexisting(state: UnitState, event: LedgerEvent) -> None:
         state.ci_heads.setdefault(head, "preexisting")
 
 
+def _pr_closed(state: UnitState, event: LedgerEvent) -> None:
+    """`pr.closed{number, from_phase, from_previous}` (L4-OPS-009), written just before the `pr_closed` edge: the return
+    state of the unit. An event without the two fields (the sweeper writes `{number}`) takes them from the state at
+    this moment, which is the state the edge leaves."""
+    data = event.data
+    phase = _text(event, "from_phase") if "from_phase" in data else state.phase
+    previous = _text(event, "from_previous") if "from_previous" in data else state.previous_phase
+    state.closed_from = ReturnState(phase=phase, previous_phase=previous)
+
+
 def _breaker_tripped(state: UnitState, event: LedgerEvent) -> None:
     state.breaker_trips += 1
 
 
 def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
     state.breaker_trips = 0  # M1: the other breaker counters (no_progress, same_error, oscillation) reset here too
+    if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
+        state.resumed_signals.append(signal)
+    if state.pending_spec_edit is not None and _text(event, "signal") == f"spec_edit:{state.pending_spec_edit.head}":
+        state.pending_spec_edit = None  # the edge was taken (L4-OPS-014)
+
+
+def _spec_edit_seen(state: UnitState, event: LedgerEvent) -> None:
+    """`spec.edit_seen{head, base, commits}` (L4-OPS-014): a person's spec push seen where no edge takes
+    it. It is pending, unless the signal of that head was consumed already (each head is taken once). A row without
+    head or base is ignored."""
+    head, base = _text(event, "head"), _text(event, "base")
+    if not head or not base or f"spec_edit:{head}" in state.resumed_signals:
+        return
+    commits = event.data.get("commits")
+    shas = [c for c in commits if isinstance(c, str)] if isinstance(commits, list) else []
+    state.pending_spec_edit = PendingSpecEdit(head=head, base=base, commits=shas or [head])
+
+
+def _unit_restarted(state: UnitState, event: LedgerEvent) -> None:
+    """`unit.restarted{attempt, previous_head, reason, by, signal}` (L4-OPS-004): `l4 restart` replaced the branch, so
+    the unit starts again with no phase and every counter at zero. Kept: `restarts` (counted), `iteration` and
+    `cost_usd` (the run count only grows; spent money stays spent), the signals already acted on (a label event acts
+    once, also when it asked for the restart). Everything else, the agent sessions included, goes with the old work."""
+    fresh = UnitState(unit=state.unit)
+    keep = {
+        "restarts": state.restarts + 1, "iteration": state.iteration, "cost_usd": state.cost_usd,
+        "resumed_signals": list(state.resumed_signals), "refused_signals": dict(state.refused_signals),
+    }  # fmt: skip
+    for name in UnitState.model_fields:
+        setattr(state, name, keep.get(name, getattr(fresh, name)))
     if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
         state.resumed_signals.append(signal)
 
@@ -353,8 +461,11 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "phase.changed": _phase_changed,
     "task.started": _task_started,
     "task.done": _task_done,
+    "tasks.reopened": _tasks_reopened,
+    "spec.edit_seen": _spec_edit_seen,
     "question.raised": _question_raised,
     "question.answered": _question_answered,
+    "question.superseded": _question_superseded,
     "availability.selected": _availability_selected,
     "agent.session": _agent_session,
     "budget.cost": _budget_cost,
@@ -365,8 +476,11 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "pr.updated": _pr_updated,
     "ci.failed": _ci_failed,
     "ci.preexisting": _ci_preexisting,
+    "pr.closed": _pr_closed,
     "breaker.tripped": _breaker_tripped,
     "unit.resumed": _unit_resumed,
+    "unit.retried": _unit_resumed,  # `l4 retry` and the `l4:retry` label: the same fold as a resume (L4-OPS-001)
+    "unit.restarted": _unit_restarted,
     "budget.extended": _budget_extended,
     "feedback.taken": _feedback_taken,
     "feedback.addressed": _feedback_judged("addressed"),

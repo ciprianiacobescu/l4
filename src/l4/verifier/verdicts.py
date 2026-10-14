@@ -31,6 +31,7 @@ from l4.redact import Redactor
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise
 from l4.specs.questions import (
+    QUESTIONS_FILENAME,
     NewQuestion,
     Question,
     QuestionKind,
@@ -265,6 +266,7 @@ class VerdictQuestions:
     open: tuple[str, ...] = ()  # asked, not answered
     ready: tuple[str, ...] = ()  # answered with `accept` or `reject`, not yet consumed
     invalid: tuple[str, ...] = ()  # answered, but the first word is neither
+    dismissed: tuple[str, ...] = ()  # Status `dismissed`: refused, read as open (L4-OPS-009); also in `open`
 
     @property
     def any(self) -> bool:
@@ -272,10 +274,15 @@ class VerdictQuestions:
 
 
 def verdict_status(file: QuestionsFile | None, consumed: Collection[str] = ()) -> VerdictQuestions:
-    """The verdict questions that still matter: consumed, dismissed and superseded ones are left out."""
-    open_, ready, invalid = [], [], []
+    """The verdict questions that still matter: consumed and superseded ones are left out. A verdict question cannot be
+    dismissed (the harness needs an accept or a reject): a `dismissed` one reads as open and is named in `dismissed`."""
+    open_, ready, invalid, dismissed = [], [], [], []
     for q in _verdict_questions(file):
-        if q.id in consumed or q.status in (QuestionStatus.DISMISSED, QuestionStatus.SUPERSEDED):
+        if q.id in consumed or q.status is QuestionStatus.SUPERSEDED:
+            continue
+        if q.status is QuestionStatus.DISMISSED:
+            open_.append(q.id)
+            dismissed.append(q.id)
             continue
         answer = effective_answer(q) if is_answered(q) else None
         if answer is None:
@@ -284,7 +291,7 @@ def verdict_status(file: QuestionsFile | None, consumed: Collection[str] = ()) -
             invalid.append(q.id)
         else:
             ready.append(q.id)
-    return VerdictQuestions(tuple(open_), tuple(ready), tuple(invalid))
+    return VerdictQuestions(tuple(open_), tuple(ready), tuple(invalid), tuple(dismissed))
 
 
 def _raised(events: Iterable[LedgerEvent]) -> dict[str, Mapping[str, Any]]:
@@ -561,4 +568,57 @@ def raise_verdict_questions(
             "question.raised", id=qid, kind="verdict", source="verifier", target=target, text_sha256=sha,
             round=round_no, title=titles.get(qid, ""), **({"covers": quoted_ids} if quoted_ids else {}),
         )  # fmt: skip
+    return ids
+
+
+def verdict_targets(
+    outcomes: Sequence[CriterionOutcome], findings: Sequence[Finding], holds: Sequence[str] = ()
+) -> list[str]:
+    """The targets a NEEDS_HUMAN round asks a person about: the criteria that are `needs_human` or `disputed`, the
+    judge-only blocking findings and the holds (the ones `raise_verdict_questions` makes questions of)."""
+    return [
+        *(o.id for o in outcomes if o.result in ("needs_human", "disputed")),
+        *(f.id for f in findings if f.source == "judge" and f.blocking),
+        *(hold_id(h) for h in holds),
+    ]
+
+
+def supersede_stale_verdicts(
+    unit_dir: Path,
+    *,
+    existing: QuestionsFile | None,
+    consumed: Collection[str],
+    events: Iterable[LedgerEvent],
+    ledger: EventSink,
+    round_no: int,
+    current: Collection[str] = (),
+) -> list[str]:
+    """A verification round ends (any verdict): every verdict question of an EARLIER round that is still `open`
+    (asked and not answered, or a draft under `open`) becomes `superseded by round <n>` (L4-OPS-014: a person fixed
+    the spec instead of answering, and this round judged the new subject). `question.superseded{ids, round}` takes the
+    ids out of `questions.open`, so `l4:needs-answers` and the "Waiting for you" note go. Untouched: an answered or
+    consumed question (its answer was used), a question of this round, a `dismissed` one, a question the harness never
+    raised, any non-verdict question, and a question whose target is in `current` (this round asks it again, and
+    `raise_verdict_questions` kept the waiting one). Returns the ids."""
+    if existing is None:
+        return []
+    raised = _raised(events)
+    ids = [
+        q.id
+        for q in _verdict_questions(existing)
+        if q.status is QuestionStatus.OPEN
+        and q.status_value is not None
+        and q.id not in consumed
+        and isinstance(round_ := raised.get(q.id, {}).get("round"), int)
+        and not isinstance(round_, bool)
+        and round_ < round_no
+        and target_of(q) not in current
+    ]
+    if not ids:
+        return []
+    file = existing
+    for qid in ids:
+        file = file.supersede_by_round(qid, round_no)
+    file.save(unit_dir / QUESTIONS_FILENAME)
+    ledger.append("question.superseded", ids=ids, round=round_no)
     return ids

@@ -388,7 +388,8 @@ def test_a_protected_set_guards_the_family_namespace():
 
 def test_a_fix_2_step_cannot_rewrite_fix_1(run_l4, valid_spec):
     still_bad = chore_fix()
-    still_bad.writes = {"src/pytdd/pricing.py": IMPL + "\nUNUSED = 2  # noqa: E501\n"}
+    # a finding set unlike round 1's: the same one twice would be `same_failure` (D7)
+    still_bad.writes = {"src/pytdd/pricing.py": IMPL + "\nUNUSED = 2  # noqa: E501\nNOSEC = 1  # nosec\n"}
     second = chore_fix()
     second.writes = {
         **second.writes,
