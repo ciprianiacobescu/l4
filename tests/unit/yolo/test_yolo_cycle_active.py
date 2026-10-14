@@ -427,3 +427,15 @@ def test_a_ref_that_moves_twice_ends_the_step_for_this_run(world, monkeypatch):
     step = world.step()
     assert step.allow == frozenset() and step.start_next_run is False and len(world.events()) == n
     assert any("moved twice" in a for a in step.actions)
+
+
+def test_one_plan_step_per_run_a_review_of_another_plan_dispatches_nothing(tmp_path):
+    world = CycleWorld(tmp_path, units=("a", "b", "c"))
+    world.plan(deps={}, batches=[{"id": "b1", "units": [{"id": A}, {"id": B, "depends_on": [A]}]}])
+    world.activate()
+    world.plan(plan_id="p2", deps={}, batches=[{"id": "b1", "units": [{"id": unit_id("c")}]}])
+    step = world.step()
+    assert world.kinds("p2") == ["plan.admitted", "plan.reviewed"]
+    assert step.allow == frozenset() and step.start_next_run is False
+    assert "unit.dispatched" not in world.kinds()  # the active plan waits for the next run
+    assert world.step().allow == frozenset({A})  # nothing left to review: the active plan's step

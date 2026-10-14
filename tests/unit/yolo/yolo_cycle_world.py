@@ -187,6 +187,22 @@ class CycleWorld:
     def digests(self, names: Sequence[str] | None = None) -> dict[str, str]:
         return {unit_id(n): unit_digest(self.git, "origin/main", f"openspec/changes/{n}") for n in names or self.units}
 
+    def reviewed(self, text: str | None = None, *, plan_id: str = PLAN, order: Sequence[str] | None = None) -> None:
+        """admitted and reviewed (every unit READY), as the CI step leaves the ledger before an activation."""
+        text = text or (self.repo / ".l4" / "plans" / f"{plan_id}.json").read_text(encoding="utf-8")
+        digest = plan_digest(text)
+        units = {u: {"verdict": "READY", "digest": d, "findings": []} for u, d in self.digests().items()}
+        self.seed(
+            ev(
+                "plan.admitted",
+                plan_digest=digest,
+                order=list(order or [unit_id(n) for n in self.units]),
+                merge=json.loads(text)["merge"],
+            ),
+            ev("plan.reviewed", plan_digest=digest, units=units, batches={}),
+            plan_id=plan_id,
+        )
+
     def activate(
         self,
         text: str | None = None,
@@ -194,21 +210,22 @@ class CycleWorld:
         plan_id: str = PLAN,
         order: Sequence[str] | None = None,
         limits: dict | None = None,
-    ) -> None:  # fmt: skip
-        """admitted, reviewed (every unit READY) and activated, as `l4 yolo activate` leaves the ledger."""
+    ) -> None:
+        """reviewed and activated, as `l4 yolo activate` leaves the ledger."""
         text = text or (self.repo / ".l4" / "plans" / f"{plan_id}.json").read_text(encoding="utf-8")
-        digest = plan_digest(text)
-        digests = self.digests()
+        self.reviewed(text, plan_id=plan_id, order=order)
         doc = json.loads(text)
         self.seed(
-            ev("plan.admitted", plan_digest=digest, order=list(order or [unit_id(n) for n in self.units]),
-               merge=doc["merge"]),
-            ev("plan.reviewed", plan_digest=digest,
-               units={u: {"verdict": "READY", "digest": d, "findings": []} for u, d in digests.items()}, batches={}),
-            ev("plan.activated", plan_digest=digest, digests=digests,
-               limits=limits if limits is not None else doc.get("limits", {}), by="alice", reason="go"),
+            ev(
+                "plan.activated",
+                plan_digest=plan_digest(text),
+                digests=self.digests(),
+                limits=limits if limits is not None else doc.get("limits", {}),
+                by="alice",
+                reason="go",
+            ),
             plan_id=plan_id,
-        )  # fmt: skip
+        )
 
     # --- the units --------------------------------------------------------------------------------------------------
 

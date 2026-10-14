@@ -21,6 +21,7 @@ import click
 
 from l4.ci.sweeper import sweep as run_sweep
 from l4.config.redaction import load_app_config
+from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import plan_exit_code
 from l4.forge.urls import ForgeUrls, app_forge_urls
@@ -225,7 +226,7 @@ def compute_plan(units: Sequence[UnitFacts]) -> list[PlanEntry]:
 
 
 def with_plan_holds(
-    app: AppContext, cfg: Any, rows: Sequence[UnitSnapshot], entries: list[PlanEntry]
+    app: AppContext, cfg: L4Config, rows: Sequence[UnitSnapshot], entries: list[PlanEntry]
 ) -> list[PlanEntry]:
     """Delivery plans (yolo-mode L4-YOLO-010, SCN-YOLO-30): a unit a plan holds is not actionable and shows why
     (`held by plan p1 (reviewed)`, `waits for openspec:a (not integrated)`, `not in the active plan p1`). Read-only: the

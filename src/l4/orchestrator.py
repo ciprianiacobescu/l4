@@ -1353,7 +1353,7 @@ def run_command(
         found = discover(cfg, git, providers, units)  # the new units are on their own branches now
     step = yolo_step(
         app, cfg, git, found, adapters=adapters,
-        all_units=(lambda: discover(cfg, git, providers, ())) if units else None,
+        all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
     )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
     for line in step.actions:
         log.info("%s", line)

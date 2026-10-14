@@ -217,18 +217,20 @@ def yolo_step(
     now: Callable[[], datetime] | None = None,
     confirm_wait_s: float = 30.0,
     all_units: Callable[[], Sequence[tuple[SpecProvider, UnitSnapshot]]] | None = None,
+    read_only: bool = False,
 ) -> PlanStep:
     """The plan step of this run (module text). `forge`, `adapters`, `profiles`, `sandbox` and `now` replace what the
     run would build (tests and `l4 simulate`); `confirm_wait_s` is how long the step waits for the forge to show a
     merged pull request. `all_units` discovers every unit when `found` holds only the units a command named
-    (`l4 run --unit`): the plan needs them all, and is read only when a plan file exists."""
+    (`l4 run --unit`): the plan needs them all, and is read only when a plan file exists. `read_only` (a run that names
+    units): which units may run is answered from the plan's state, and nothing is reviewed, recorded or started."""
     files = plan_files(app.repo)
     if not files:
         return PlanStep(allow=None)
     if all_units is not None:
         found = all_units()
     step = _Step(app, cfg, git, found, files, forge, adapters, profiles, sandbox, now, confirm_wait_s)
-    return step.run()
+    return step.preview() if read_only else step.run()
 
 
 class _Step:
@@ -277,6 +279,16 @@ class _Step:
         log.info("plan %s: %s", plan_id, text)
 
     # --- run --------------------------------------------------------------------------------------------------------
+
+    def preview(self) -> PlanStep:
+        """What `l4 run --unit` may run, without a record: the current or eligible unit of the active plan, else every
+        unit no plan holds (L4-YOLO-010)."""
+        self._load()
+        live = live_plan(self.files, self._states(), self.target)
+        if live is None or live.plan is None:
+            return self._result(None, start_next_run=False)
+        eligible = next_eligible(live.plan, self.ctxs[live.plan_id].state, self._phases()).unit
+        return self._result(frozenset({eligible} if eligible else ()), start_next_run=False, plan_id=live.plan_id)
 
     def run(self) -> PlanStep:
         for attempt in (1, 2):
@@ -388,6 +400,12 @@ class _Step:
         self._line(ctx.plan_id, f"stopped ({reason}{f', {unit}' if unit else ''}){f': {shown}' if shown else ''}")
         return self._result(frozenset(), start_next_run=False, plan_id=ctx.plan_id)
 
+    def _after_review(self, ctx: _Ctx) -> PlanStep:
+        """The step was a review (or a refusal): one plan step per run, so while another plan is active nothing of it
+        is dispatched in this run."""
+        live = live_plan(self.files, self._states(), self.target)
+        return self._result(frozenset() if live is not None else None, start_next_run=False, plan_id=ctx.plan_id)
+
     # --- 1. reviews -------------------------------------------------------------------------------------------------
 
     def _reviews(self) -> PlanStep | None:
@@ -415,7 +433,7 @@ class _Step:
             findings = [{"code": "invalid", "subject": ctx.plan_id, "text": e} for e in file.invalid.errors]
             self._write(ctx, [self._event("plan.refused", plan_digest=digest, findings=findings)])
             self._line(ctx.plan_id, f"refused: {'; '.join(file.invalid.errors)}")
-            return self._result(None, start_next_run=False, plan_id=ctx.plan_id)
+            return self._after_review(ctx)
         plan = file.plan
         rev = self._target_rev()
         folders = unit_infos(self.app.repo, self.found, plan.unit_ids(), check_intake=False)
@@ -431,7 +449,7 @@ class _Step:
                 return None
             self._write(ctx, [self._event("plan.refused", plan_digest=digest, findings=findings)])
             self._line(ctx.plan_id, f"refused: {len(findings)} finding(s): {findings[0]['text']}")
-            return self._result(None, start_next_run=False, plan_id=ctx.plan_id)
+            return self._after_review(ctx)
         try:
             result, cost = review_plan_costed(
                 self.app, self.cfg, plan, infos, git=self.git, rev=rev, adapters=self.adapters, sandbox=self.sandbox
@@ -439,7 +457,7 @@ class _Step:
         except (RoleLimit, RoleUnavailable) as exc:
             reason = self.app.redactor.redact_text(str(exc) or type(exc).__name__).splitlines()[0][:200]
             self._line(ctx.plan_id, f"the review waits, no judge could run ({reason}); a later run tries again")
-            return self._result(None, start_next_run=False, plan_id=ctx.plan_id)
+            return self._after_review(ctx)
         events = []
         order = list(admission.order)
         if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
@@ -460,7 +478,7 @@ class _Step:
         self._write(ctx, events)
         verdicts = ", ".join(f"{u}={v.verdict}" for u, v in result.units.items())
         self._line(ctx.plan_id, f"reviewed ({verdicts})")
-        return self._result(None, start_next_run=False, plan_id=ctx.plan_id)
+        return self._after_review(ctx)
 
     @staticmethod
     def _reviewed_current(state: PlanState, digest: str, current: Mapping[str, str]) -> bool:

@@ -1,0 +1,164 @@
+"""`l4 run` with delivery plans (L4-YOLO-010, L4-YOLO-012): the plan's `allow` filters what runs, a unit named with
+`--unit` that the plan does not let run exits 13 before any lease, the next run is started once, and a repository with
+no plan file behaves as before. The discovery, the unit runs and the forge are replaced; the plan step is real."""
+
+import logging
+
+import pytest
+
+import l4.orchestrator as orch
+from l4.exitcodes import ExitCode
+from l4.forge.base import ForgeError
+from l4.forge.local import LocalForge
+from l4.outcome import CommandResult
+
+from .yolo_cycle_world import CycleWorld, ev, unit_id
+
+A, B = unit_id("a"), unit_id("b")
+
+
+class Runner:
+    """What `run_units` was asked to run."""
+
+    def __init__(self) -> None:
+        self.chosen: list[list[str]] = []
+
+    def __call__(self, app, cfg, git, chosen, *, adapters):
+        self.chosen.append([ref.id for _, ref in chosen])
+        return CommandResult(ExitCode.OK, [])
+
+
+class StartRunForge(LocalForge):
+    def __init__(self, answer="started", error=None):
+        super().__init__()
+        self.answer, self.error, self.started = answer, error, []
+
+    def start_run(self, ref):
+        self.started.append(ref)
+        if self.error:
+            raise self.error
+        return self.answer
+
+
+@pytest.fixture
+def world(tmp_path):
+    return CycleWorld(tmp_path)
+
+
+@pytest.fixture
+def run(world, monkeypatch):
+    runner, forge = Runner(), StartRunForge()
+    snapshots = {}
+
+    def discover(cfg, git, providers, wanted=()):
+        return [(p, s) for p, s in world.found(snapshots) if not wanted or s.ref.id in wanted]
+
+    monkeypatch.setattr(orch, "load_app_config", lambda app: (app, world.cfg))
+    monkeypatch.setattr(orch, "preflight_run_config", lambda app, cfg: None)
+    monkeypatch.setattr(orch, "require_framework", lambda cfg, repo: None)
+    monkeypatch.setattr(orch, "refresh_refs", lambda app, cfg, git: None)
+    monkeypatch.setattr(orch, "providers_for", lambda cfg, repo, environ: [])
+    monkeypatch.setattr(orch, "discover", discover)
+    monkeypatch.setattr(orch, "perform_follow_ups", lambda app, cfg, git, snaps: [])
+    monkeypatch.setattr(orch, "run_units", runner)
+    monkeypatch.setattr(orch, "make_forge", lambda cfg, environ, repo=None, **kw: forge)
+    monkeypatch.setattr(orch, "log_artefacts", lambda *a: None)
+    monkeypatch.setattr(
+        "l4.yolo.cycle.review_plan_costed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no review here"))
+    )
+
+    def go(**kw):
+        return orch.run_command(world.app, **kw)
+
+    go.runner, go.forge, go.snapshots = runner, forge, snapshots
+    return go
+
+
+def test_a_repository_with_no_plan_file_runs_exactly_as_before(world, run):
+    result = run()
+    assert run.runner.chosen == [[A, B]] and result.code == ExitCode.OK
+    assert run.forge.started == []
+    assert world.git.run("ls-remote", "origin", "refs/l4/plans/*").stdout.strip() == ""
+    assert run(units=(B,)).code == ExitCode.OK and run.runner.chosen[-1] == [B]  # --unit is not filtered either
+
+
+def test_scn_yolo_30_units_of_a_plan_that_is_not_active_do_not_start(world, run):
+    world.plan()
+    world.reviewed()
+    result = run()
+    assert run.runner.chosen == [] and result.code == ExitCode.OK  # "nothing to do": the plan holds both
+    refused = run(units=(A,))
+    assert refused.units[0].exit_reason == "run: openspec:a is held by plan p1 (reviewed)"
+
+
+def test_scn_yolo_21_a_direct_run_cannot_jump_the_order(world, run):
+    world.plan()
+    world.activate()
+    world.seed(ev("unit.dispatched", unit=A, run="r0"))
+    before = world.kinds()
+    result = run(units=(B,))
+    assert result.code == ExitCode.HALTED
+    (outcome,) = result.units
+    assert outcome.exit_reason == "run: openspec:b waits for openspec:a (not integrated) (plan p1)"
+    assert run.runner.chosen == [] and world.kinds() == before  # no lease, no run, nothing recorded
+    assert run.forge.started == []
+
+
+def test_a_named_unit_that_a_plan_holds_exits_13_with_the_plan_and_its_status(world, run):
+    world.plan()
+    world.seed(ev("plan.admitted", plan_digest="d", order=[A, B]))
+    result = run(units=(A,))
+    assert result.code == ExitCode.HALTED
+    assert result.units[0].exit_reason == "run: openspec:a is held by plan p1 (admitted)"
+
+
+def test_a_unit_outside_the_active_plan_exits_13(run, world):
+    world.plan(deps={}, batches=[{"id": "b1", "units": [{"id": A}]}])
+    world.activate(order=[A])
+    result = run(units=(B,))
+    assert result.code == ExitCode.HALTED
+    assert result.units[0].exit_reason == "run: openspec:b is not in the active plan p1"
+
+
+def test_the_eligible_unit_may_be_named_and_runs_without_a_record(world, run):
+    world.plan()
+    world.activate()
+    before = world.kinds()
+    result = run(units=(A,))
+    assert result.code == ExitCode.OK and run.runner.chosen == [[A]]
+    assert world.kinds() == before  # a named run reads the plan, it does not step it
+
+
+def test_an_active_plan_runs_only_its_dispatched_unit_and_starts_the_next_run_once(world, run):
+    world.plan()
+    world.activate()
+    run()
+    assert run.runner.chosen == [[A]]
+    assert world.kinds()[-2:] == ["unit.dispatched", "plan.charged"]
+    assert run.forge.started == ["main"]
+
+
+def test_a_plan_step_with_no_work_left_starts_no_run_and_runs_no_unit(world, run):
+    world.plan()
+    world.activate()
+    world.seed(ev("plan.waiting", reason="unit_awaiting_human", unit=A))
+    run()
+    assert run.runner.chosen == [] and run.forge.started == []
+
+
+def test_a_forge_that_cannot_start_the_run_is_a_warning_not_a_failure(world, run, caplog):
+    world.plan()
+    world.activate()
+    run.forge.error = ForgeError("boom")
+    with caplog.at_level(logging.WARNING):
+        result = run()
+    assert result.code == ExitCode.OK
+    assert any("next run was not started" in r.getMessage() for r in caplog.records)
+
+
+def test_the_answer_of_start_run_is_logged(world, run, caplog):
+    world.plan()
+    world.activate()
+    with caplog.at_level(logging.INFO):
+        run()
+    assert any("next run on main: started" in r.getMessage() for r in caplog.records)
