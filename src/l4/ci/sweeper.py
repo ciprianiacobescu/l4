@@ -989,7 +989,7 @@ class Sweeper:
         if head is None:
             outcome_text = f"the archive branch {branch} is not on origin"
         else:
-            outcome = merge_archive_guarded(self.app, self.cfg, self.git, head, self.cfg.forge.base_branch)
+            outcome = merge_archive_guarded(self.app, self.cfg, self.git, head, self.cfg.forge.base_branch, pr=pr)
             outcome_text = "" if outcome.status == "merged" else f"{outcome.status}: {outcome.detail}"
         if not outcome_text:
             run.event("archive.merged", head=head, number=pr.number)

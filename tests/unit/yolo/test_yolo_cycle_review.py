@@ -56,7 +56,7 @@ def test_the_judges_cost_is_charged_as_a_running_total(world):
     world.judge = type(world.judge)([Step(structured=READY, cost_usd=0.5) for _ in range(6)])
     world.step()  # two units and their batch: three calls
     (charged,) = [e.data for e in world.events() if e.type == "plan.charged"]
-    assert charged["unit"] == "plan:review" and charged["cost_usd"] == 1.5
+    assert charged["unit"] == "plan:review" and charged["cost_usd"] == 1.5 and charged["attempt"] == 0
     world.commit({"openspec/changes/a/specs/x/spec.md": "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"})
     world.push_main()
     world.step()  # reviewed again: the key holds the running total, because the fold keeps the maximum per key
@@ -114,12 +114,17 @@ def test_units_outside_every_plan_run_while_no_plan_is_active(world):
     assert step.refusals[A] == "is held by plan p1 (reviewed)"
 
 
-def test_scn_a_cancelled_plan_releases_its_units(world):
+def test_scn_yolo_34_a_cancelled_plan_still_holds_its_units(world):  # R8, review #8
     world.plan()
     world.step()
     world.seed(ev("plan.cancelled", by="alice", reason="no"))
     step = world.step()
-    assert step.allow == frozenset({A, B})
+    assert step.allow == frozenset()
+    assert step.refusals[A] == "is held by plan p1 (cancelled)"
+    world.git.run("rm", "-q", ".l4/plans/p1.json")  # removing the file from the target releases them
+    world.git.run("commit", "-q", "-m", "drop the plan")
+    world.push_main()
+    assert world.step().allow is None  # no plan file on the target: the units are ordinary units again
 
 
 def fold_cost(world) -> float:

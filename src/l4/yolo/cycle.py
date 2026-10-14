@@ -23,9 +23,20 @@ The first thing that applies is done, in this order:
    else the dispatch of the one eligible unit.
 3. Every stop and the completion write `report.md` into the plan ref and `.l4-out/yolo/<plan>.md` (D12).
 
-A `waiting` or `stopped` plan does nothing in its step: `l4 yolo resume` is how it goes on (D10's table). Its units
-stay held. The facts of a push that already happened (the merge) are appended again with a fresh lease when the ref
-moved, because they are true whatever the plan now says.
+A `stopped` plan does nothing in its step: `l4 yolo resume` is how it goes on (D10's table). A `waiting` plan goes on
+by itself when the cause is gone: each step reads its current unit again, and when that unit is no longer waiting for a
+person or for capacity the step records `plan.resumed{by: "harness"}` and carries on in the same step (the dispatch or
+the merge). `l4 yolo resume` stays available for a waiting plan too. The units of a waiting or stopped plan stay held.
+The facts of a push that already happened (the merge) are appended again with a fresh lease when the ref moved, because
+they are true whatever the plan now says; the request to merge is recorded BEFORE the push, under the lease, and only
+while the plan, read again, is still active (R5).
+
+The usage is charged per attempt (R1): `plan.charged{unit, attempt, cost_usd, runs}` where the attempt is 1 + the number
+of the unit's `refs/l4/attempts/<fw>/<name>/*` refs on origin. The judge's cost is `plan.charged{unit: "plan:review",
+attempt: 0}`. The limits are `limits.reached_at` on the folded state, with the cost and the attempt of the unit that is
+running now added (R3). The plan file is frozen at the activation (R2): a file whose digest differs, or that is no
+longer a plan, stops the plan with `inputs_changed` (subject `plan`). Every merged unit that is not integrated is
+post-checked before anything is dispatched, a person's merges included (R10).
 """
 
 import logging
@@ -49,20 +60,25 @@ from l4.state.fold import UnitState
 from l4.state.status import UnitSnapshot
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
-from l4.vcs.names import unit_branch
-from l4.yolo.admit import FINISHED_PHASES, admit, next_eligible
-from l4.yolo.digest import plan_digest, unit_digest
-from l4.yolo.merge import confirm_merged, merge_guarded, remote_tip
+from l4.vcs.push import ATTEMPT_REF_PREFIX
+from l4.yolo.admit import FINISHED_PHASES, admit, merged_not_integrated, next_eligible
+from l4.yolo.digest import RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.limits import reached_at
+from l4.yolo.merge import NO_LONGER_ALLOWED, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
     PLAN_ID,
     Eligibility,
+    MergeOutcome,
+    Plan,
     PlanEvent,
     PlanMoved,
     PlanState,
     ProfileResult,
+    ReviewResult,
+    Verdict,
     YoloStep,
 )
-from l4.yolo.plans import PlanFile, held_by, plan_files, unit_infos
+from l4.yolo.plans import PlanFile, holds_of, plan_files, unit_infos
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import review_plan_costed
 from l4.yolo.report import render_report
@@ -133,8 +149,13 @@ def plan_holds(
     """The units that get no new agent work from the plans, with the reason (design D10): a unit listed in a plan that
     is not final is held (`held by plan p1 (reviewed)`); in the active plan only the current or eligible unit is
     free and the others wait for what `next_eligible` says; while a plan is active a unit outside every plan is
-    `not in the active plan p1`. A unit the plan has integrated is no hold."""
-    held = held_by(states, files)
+    `not in the active plan p1`. A unit the plan has integrated is no hold. A cancelled plan still holds its units, and
+    a plan file that is not a plan holds the ids its JSON names, shown as `invalid` (R8)."""
+    invalid = {f.plan_id for f in files if f.plan is None}
+    held = {
+        unit: (pid, "invalid" if pid in invalid else status)
+        for unit, (pid, status) in holds_of(states, files).held.items()
+    }
     live = live_plan(files, states, target)
     eligibility: Eligibility | None = None
     if live is not None and live.plan is not None:
@@ -155,6 +176,30 @@ def plan_holds(
         elif live is not None:
             holds[unit] = Hold(f"not in the active plan {live.plan_id}", f"is not in the active plan {live.plan_id}")
     return holds
+
+
+def review_batches(plan: Plan, result: ReviewResult) -> dict[str, Verdict]:
+    """The batch verdicts of a review, with an entry for EVERY batch of more than one unit (R11): the activation wants
+    one for each, so a batch the judge could not read (a unit with no folder) is recorded as BLOCKED, never left out."""
+    batches = dict(result.batches)
+    for batch in plan.batches:
+        if len(batch.units) > 1 and batch.id not in batches:
+            finding = {
+                "criterion": "completeness",
+                "severity": "blocking",
+                "text": f"batch {batch.id} was not reviewed: a unit of it has no folder to read",
+            }
+            batches[batch.id] = Verdict("BLOCKED", (finding,))
+    return batches
+
+
+def unreadable_plan_files(files: Sequence[PlanFile]) -> list[str]:
+    """One line per plan file that is not a JSON object: it holds no unit, so `l4 plan` and `l4 yolo status` say so
+    instead of leaving its units to start on their own unnoticed (R8)."""
+    return [
+        f"plan file {f.path} is not a JSON object and holds no unit: {'; '.join(f.invalid.errors) if f.invalid else ''}"
+        for f in holds_of({}, files).unreadable
+    ]
 
 
 def auto_plan_units(app: AppContext, cfg: L4Config, git: Git) -> frozenset[str]:
@@ -249,6 +294,7 @@ class _Step:
         self.target = cfg.forge.base_branch
         self.ctxs: dict[str, _Ctx] = {}
         self.actions: list[str] = []
+        self._attempts: dict[str, int | None] = {}  # unit id -> 1 + its attempt refs on origin (None: not readable)
 
     # --- loading ----------------------------------------------------------------------------------------------------
 
@@ -286,6 +332,12 @@ class _Step:
         self._load()
         live = live_plan(self.files, self._states(), self.target)
         if live is None or live.plan is None:
+            for (
+                ctx
+            ) in self.ctxs.values():  # a waiting plan whose cause is gone goes on at the next run: its unit may run
+                if ctx.file.plan is not None and ctx.file.plan.target == self.target and self._cause_gone(ctx):
+                    return self._result(frozenset({ctx.state.current} if ctx.state.current else ()),
+                                        start_next_run=False, plan_id=ctx.plan_id)  # fmt: skip
             return self._result(None, start_next_run=False)
         eligible = next_eligible(live.plan, self.ctxs[live.plan_id].state, self._phases()).unit
         return self._result(frozenset({eligible} if eligible else ()), start_next_run=False, plan_id=live.plan_id)
@@ -298,12 +350,19 @@ class _Step:
                 done = self._reviews()
                 if done is not None:
                     return done
+                self._wake()
                 live = live_plan(self.files, self._states(), self.target)
                 if live is not None and live.plan_id in self.ctxs:
                     return self._live(self.ctxs[live.plan_id])
+                stopped = self._file_changed()
+                if stopped is not None:
+                    return stopped
                 return self._result(None, start_next_run=False)
             except PlanMoved:
                 log.info("the plan ref moved (attempt %d): reading it again", attempt)
+            except RevisionMissing as exc:
+                log.warning("no plan step in this run: %s", exc)
+                return self._result(frozenset(), start_next_run=False, extra=(f"plan step skipped: {exc}",))
         log.warning("the plan ref moved twice: no plan step in this run")
         return self._result(frozenset(), start_next_run=False, extra=("plan step skipped: the plan ref moved twice",))
 
@@ -373,6 +432,15 @@ class _Step:
     def _target_rev(self) -> str:
         return self.git.rev_parse(f"refs/remotes/origin/{self.target}") or "HEAD"
 
+    def _target_ref(self) -> str:
+        """The target as a revision name: the tracking ref, else the checkout (CI checks out the target head)."""
+        ref = f"refs/remotes/origin/{self.target}"
+        return ref if self.git.rev_parse(ref) else "HEAD"
+
+    def _digest(self, unit: str, folder: str) -> str:
+        """The digest of a unit now: on its branch when it has one on origin, else on the target (D3, R3)."""
+        return current_unit_digest(self.git, self.cfg, unit, folder, self._target_ref())
+
     def _report(self, ctx: _Ctx, events: Sequence[PlanEvent]) -> str:
         assert ctx.file.plan is not None
         state = fold_plan(ctx.plan_id, [*ctx.read.events, *events])
@@ -384,6 +452,9 @@ class _Step:
         )  # fmt: skip
 
     def _with_report(self, ctx: _Ctx, events: Sequence[PlanEvent]) -> None:
+        if ctx.file.plan is None:  # a file that is no plan has nothing to report on: only the stop is recorded
+            self._write(ctx, events, facts=True)
+            return
         text = self._report(ctx, events)
         self._write(ctx, events, files={"report.md": text}, facts=True)
         out = self.app.out_dir / "yolo" / f"{ctx.plan_id}.md"
@@ -400,11 +471,13 @@ class _Step:
         self._line(ctx.plan_id, f"stopped ({reason}{f', {unit}' if unit else ''}){f': {shown}' if shown else ''}")
         return self._result(frozenset(), start_next_run=False, plan_id=ctx.plan_id)
 
-    def _after_review(self, ctx: _Ctx) -> PlanStep:
+    def _after_review(self, ctx: _Ctx, *, start_next_run: bool = False) -> PlanStep:
         """The step was a review (or a refusal): one plan step per run, so while another plan is active nothing of it
         is dispatched in this run."""
         live = live_plan(self.files, self._states(), self.target)
-        return self._result(frozenset() if live is not None else None, start_next_run=False, plan_id=ctx.plan_id)
+        return self._result(
+            frozenset() if live is not None else None, start_next_run=start_next_run, plan_id=ctx.plan_id
+        )
 
     # --- 1. reviews -------------------------------------------------------------------------------------------------
 
@@ -437,11 +510,12 @@ class _Step:
         plan = file.plan
         rev = self._target_rev()
         folders = unit_infos(self.app.repo, self.found, plan.unit_ids(), check_intake=False)
-        current = {u: unit_digest(self.git, rev, i.folder) for u, i in folders.items()}
+        current = {u: self._digest(u, i.folder) for u, i in folders.items()}
         if self._reviewed_current(state, digest, current):
             return None
         infos = unit_infos(self.app.repo, self.found, plan.unit_ids())
-        admission = admit(plan, known_units=infos, cfg=self.cfg)
+        held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
+        admission = admit(plan, known_units=infos, cfg=self.cfg, held=held)
         if not admission.ok:
             findings = [{"code": f.code, "subject": f.subject, "text": f.text} for f in admission.findings]
             last = _last(ctx.read.events, "plan.refused")
@@ -454,10 +528,10 @@ class _Step:
             result, cost = review_plan_costed(
                 self.app, self.cfg, plan, infos, git=self.git, rev=rev, adapters=self.adapters, sandbox=self.sandbox
             )
-        except (RoleLimit, RoleUnavailable) as exc:
+        except (RoleLimit, RoleUnavailable) as exc:  # `JudgeFailed` is a `RoleUnavailable`: nothing is recorded (R9)
             reason = self.app.redactor.redact_text(str(exc) or type(exc).__name__).splitlines()[0][:200]
             self._line(ctx.plan_id, f"the review waits, no judge could run ({reason}); a later run tries again")
-            return self._after_review(ctx)
+            return self._after_review(ctx, start_next_run=False)
         events = []
         order = list(admission.order)
         if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
@@ -466,7 +540,9 @@ class _Step:
             uid: {"verdict": v.verdict, "digest": v.digest, "findings": list(v.findings)}
             for uid, v in result.units.items()
         }
-        batches = {bid: {"verdict": v.verdict, "findings": list(v.findings)} for bid, v in result.batches.items()}
+        batches = {
+            bid: {"verdict": v.verdict, "findings": list(v.findings)} for bid, v in review_batches(plan, result).items()
+        }
         events.append(self._event("plan.reviewed", plan_digest=digest, units=units, batches=batches))
         if cost > 0:
             total = cost + max(
@@ -474,7 +550,7 @@ class _Step:
                  if e.type == "plan.charged" and e.data.get("unit") == REVIEW_KEY),
                 default=0.0,
             )  # fmt: skip
-            events.append(self._event("plan.charged", unit=REVIEW_KEY, cost_usd=round(total, 6), runs=0, attempts=0))
+            events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
         self._write(ctx, events)
         verdicts = ", ".join(f"{u}={v.verdict}" for u, v in result.units.items())
         self._line(ctx.plan_id, f"reviewed ({verdicts})")
@@ -488,74 +564,88 @@ class _Step:
 
     # --- 2. the active plan -----------------------------------------------------------------------------------------
 
-    def _limits(self, ctx: _Ctx) -> dict[str, object]:
-        assert ctx.file.plan is not None
-        return dict(ctx.state.limits) if ctx.state.limits else ctx.file.plan.limits.model_dump(mode="json")
+    # --- attempts, limits (R1, R3) ----------------------------------------------------------------------------------
 
-    def _deadline(self, ctx: _Ctx) -> datetime | None:
-        raw: object = self._limits(ctx).get("deadline")
+    def _attempt(self, ctx: _Ctx, snap: UnitSnapshot) -> int:
+        """The attempt the unit is on: 1 + the number of its `refs/l4/attempts/<fw>/<name>/<n>` refs on origin (`l4
+        restart` keeps each old head there, R1). When origin cannot be asked, the highest attempt already charged
+        stands: an attempt number never goes down."""
+        unit = snap.ref.id
+        if unit not in self._attempts:
+            pattern = f"{ATTEMPT_REF_PREFIX}{snap.ref.framework.value}/{snap.ref.name}/*"
+            try:
+                listing = self.git.run(
+                    "ls-remote", "origin", pattern, config=fetch_auth_config(self.cfg, self.app.environ)
+                ).stdout
+                refs = [line.split("\t")[-1].strip() for line in listing.splitlines() if "\t" in line]
+                self._attempts[unit] = 1 + sum(1 for ref in refs if ref.rsplit("/", 1)[-1].isdigit())
+            except GitError as exc:
+                log.warning("%s: its attempt refs could not be listed: %s", unit, str(exc).splitlines()[0][:200])
+                self._attempts[unit] = None
+        counted = self._attempts[unit]
+        return max(counted or 1, ctx.state.used.attempts.get(unit, 1))
+
+    @staticmethod
+    def _charged_of(ctx: _Ctx, unit: str, attempt: int) -> tuple[float, int]:
+        """The cost and the runs `plan.charged` already holds for one attempt of a unit (the fold's maximum)."""
+        cost, runs = 0.0, 0
         for event in ctx.read.events:
-            extend = event.data.get("extend") if event.type == "plan.resumed" else None
-            if isinstance(extend, dict) and extend.get("deadline"):
-                raw = extend["deadline"]  # the latest extension replaces the frozen deadline
-        if not raw:
-            return None
-        try:
-            stamp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+            same = event.type == "plan.charged" and event.data.get("unit") == unit
+            if same and int(event.data.get("attempt", 1) or 0) == attempt:
+                cost = max(cost, float(event.data.get("cost_usd") or 0))
+                runs = max(runs, int(event.data.get("runs") or 0))
+        return cost, runs
 
-    def _limit_reached(self, ctx: _Ctx, *, dispatching: bool) -> tuple[str, str, str | None] | None:
-        """(stop reason, detail, unit) of the first limit reached (D11): cost, runs, attempts per unit, deadline."""
+    def _limit_state(self, ctx: _Ctx, unit: str | None) -> PlanState:
+        """The folded state with what `unit` has used and the ledger does not hold yet: the cost its ledger shows now
+        and the attempt it is on. Only that unit runs (the plan is serial), and its charge is written at its next
+        dispatch or integration, so without this a limit would fire one run late."""
+        state = ctx.state
+        snap = self.snaps.get(unit) if unit else None
+        if unit is None or snap is None or unit in state.integrated:
+            return state
+        attempt = self._attempt(ctx, snap)
+        charged_cost, _ = self._charged_of(ctx, unit, attempt)
+        used = state.used.model_copy(deep=True)
+        used.cost_usd += max(0.0, snap.state.cost_usd - charged_cost)
+        used.attempts[unit] = max(used.attempts.get(unit, 0), attempt)
+        return state.model_copy(update={"used": used})
+
+    def _limit_reached(self, ctx: _Ctx, unit: str | None) -> tuple[str, str, str | None] | None:
+        """(stop reason, detail, unit) of the first limit reached (D11, R3): `limits.reached_at` on the state."""
         assert ctx.file.plan is not None
-        state, limits = ctx.state, self._limits(ctx)
-        plan_units = ctx.file.plan.unit_ids()
-        review = max((float(e.data.get("cost_usd") or 0) for e in ctx.read.events
-                      if e.type == "plan.charged" and e.data.get("unit") == REVIEW_KEY), default=0.0)  # fmt: skip
-        live_cost = sum(self.snaps[u].state.cost_usd for u in plan_units if u in self.snaps)
-        cost = max(state.used.cost_usd, live_cost + review)
-        max_cost = limits.get("max_cost_usd")
-        if isinstance(max_cost, int | float) and cost >= float(max_cost) + state.extended.cost_usd:
-            return "limit_cost", f"${cost:.2f} spent of ${float(max_cost) + state.extended.cost_usd:.2f}", None
-        runs = sum(1 for e in ctx.read.events if e.type == "unit.dispatched")
-        max_runs = limits.get("max_runs")
-        if isinstance(max_runs, int) and not isinstance(max_runs, bool):
-            allowed = max_runs + state.extended.runs
-            if runs > allowed or (dispatching and runs >= allowed):
-                return "limit_runs", f"{runs} run(s) dispatched of {allowed}", None
-        max_attempts = limits.get("max_unit_attempts")
-        if isinstance(max_attempts, int) and not isinstance(max_attempts, bool):
-            for unit in plan_units:
-                snap = self.snaps.get(unit)
-                if snap is None or unit in state.integrated:
-                    continue
-                extra = state.extended.attempts.get("*", 0) + state.extended.attempts.get(unit, 0)
-                attempts = 1 + snap.state.restarts
-                if attempts > max_attempts + extra:
-                    return "limit_attempts", f"{unit} is on attempt {attempts} of {max_attempts + extra}", unit
-        deadline = self._deadline(ctx)
-        if deadline is not None and self._now() >= deadline:
-            return "limit_deadline", f"the deadline {deadline.strftime('%Y-%m-%dT%H:%M:%SZ')} has passed", None
-        return None
+        return reached_at(
+            self._limit_state(ctx, unit), now=self._now(), fallback=ctx.file.plan.limits.model_dump(mode="json")
+        )
 
     def _inputs_changed(self, ctx: _Ctx) -> str | None:
         """The first plan unit, not integrated and not merged, whose folder differs from its digest frozen at the
-        activation. The current unit is read on its branch when it has one, the others at the target head (D3, D10)."""
+        activation. A unit is read on its branch when it has one, else at the target head (D3, R3)."""
         assert ctx.file.plan is not None
-        state, rev = ctx.state, self._target_rev()
+        state = ctx.state
         pending = [u for u in ctx.file.plan.unit_ids() if u not in state.integrated and state.digests.get(u)]
         infos = unit_infos(self.app.repo, self.found, pending, check_intake=False)
         for unit in pending:
             snap, info = self.snaps.get(unit), infos.get(unit)
             if snap is None or info is None or unit in state.merged or snap.state.phase in FINISHED_PHASES:
                 continue
-            where = rev
-            if unit == state.current:
-                branch = self.git.rev_parse(f"refs/remotes/origin/{unit_branch(unit, self.cfg.forge.branch_prefix)}")
-                where = branch or rev
-            if unit_digest(self.git, where, info.folder) != state.digests[unit]:
+            if self._digest(unit, info.folder) != state.digests[unit]:
                 return unit
+        return None
+
+    def _file_changed(self) -> PlanStep | None:
+        """An active plan that `live_plan` does not pick because its file is no longer a plan, or no longer aims at this
+        target (R2): stopped as `inputs_changed`, subject `plan`. A valid file on this target is checked in `_live`."""
+        for ctx in self.ctxs.values():
+            if ctx.state.status != "active":
+                continue
+            if ctx.file.plan is None:
+                detail = f"the plan file {ctx.file.path} is no longer a valid plan"
+            elif ctx.file.plan.target != self.target and plan_digest(ctx.file.text) != ctx.state.activated_digest:
+                detail = f"the plan file {ctx.file.path} changed after the activation"
+            else:
+                continue
+            return self._stop(ctx, "inputs_changed", detail, "plan")
         return None
 
     def _unit_action(self, snap: UnitSnapshot) -> str:
@@ -568,11 +658,15 @@ class _Step:
         plan, state = ctx.file.plan, ctx.state
         if remote_tip(self.git, self.cfg, self.app.environ, self.target) is None:
             return self._stop(ctx, "target_missing", f"the target branch {self.target} does not exist on origin")
+        if state.activated_digest is not None and plan_digest(ctx.file.text) != state.activated_digest:
+            return self._stop(
+                ctx, "inputs_changed", f"the plan file {ctx.file.path} changed after the activation", "plan"
+            )
         if (unit := self._inputs_changed(ctx)) is not None:
             return self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after the activation", unit)
-        if (limit := self._limit_reached(ctx, dispatching=False)) is not None:
-            return self._stop(ctx, limit[0], limit[1], limit[2])
         current = state.current
+        if (limit := self._limit_reached(ctx, current)) is not None:
+            return self._stop(ctx, limit[0], limit[1], limit[2])
         snap = self.snaps.get(current) if current else None
         if current and snap is None:
             return self._stop(ctx, "unit_missing", f"{current} is not among the units of the target", current)
@@ -582,18 +676,49 @@ class _Step:
                 return self._stop(ctx, f"unit_{phase}", snap.state.halt_detail or snap.state.halt_reason, current)
             if phase not in FINISHED_PHASES and phase in WAIT_PHASES and self._unit_action(snap) not in _ACTIONABLE:
                 return self._wait(ctx, phase, current, snap)
-            if phase == "in_review" and plan.merge == "auto":
-                step = self._merge(ctx, snap)
-                if step is not None:
-                    return step
-            if phase in FINISHED_PHASES and current not in state.integrated:
-                return self._integrate(ctx, current, snap, via_merge=None)
+        pending = merged_not_integrated(plan, state, self._phases())  # R10: every merged unit is post-checked first
+        for unit in pending:
+            if (merged := self.snaps.get(unit)) is None:
+                return self._stop(ctx, "unit_missing", f"{unit} is not among the units of the target", unit)
+            return self._integrate(ctx, unit, merged, via_merge=None)
+        if current and snap is not None and (snap.state.phase or "") == "in_review" and plan.merge == "auto":
+            step = self._merge(ctx, snap)
+            if step is not None:
+                return step
         batch = self._batch(ctx)
         if batch is not None:
             return batch
         if self._complete(ctx):
             return self._completed(ctx)
         return self._dispatch(ctx)
+
+    def _cause_gone(self, ctx: _Ctx) -> str | None:
+        """For a waiting plan: why it may go on (`the cause is gone: <unit> is <phase>`), None while its current unit
+        still waits for a person or for capacity with nothing to run. The unit's phase and next action are read again
+        here, so an answered question or a capacity that is back wakes the plan without a person."""
+        state = ctx.state
+        if state.status != "waiting":
+            return None
+        unit = state.current
+        snap = self.snaps.get(unit) if unit else None
+        if snap is None:
+            return f"the cause is gone: {unit or 'the current unit'} is not among the units of the target"
+        phase = snap.state.phase or ""
+        if phase in WAIT_PHASES and phase not in FINISHED_PHASES and self._unit_action(snap) not in _ACTIONABLE:
+            return None
+        return f"the cause is gone: {unit} is {phase or 'not started'}"
+
+    def _wake(self) -> None:
+        """A waiting plan on this target whose cause is gone records `plan.resumed{by: harness}` and the step goes on
+        in the same run (D10, the orchestrator's decision on the docs: the plan continues by itself)."""
+        for ctx in list(self.ctxs.values()):
+            if ctx.file.plan is None or ctx.file.plan.target != self.target:
+                continue
+            why = self._cause_gone(ctx)
+            if why is None:
+                continue
+            self._write(ctx, [self._event("plan.resumed", by="harness", reason=why)])
+            self._line(ctx.plan_id, f"resumed: {why}")
 
     def _wait(self, ctx: _Ctx, phase: str, unit: str, snap: UnitSnapshot) -> PlanStep:
         from l4.planner import facts_of, next_action
@@ -621,8 +746,14 @@ class _Step:
             forge = self._forge_for_merge()
         except ForgeUnavailable as exc:
             return self._stop(ctx, "merge_refused", f"no forge to ask: {exc}", unit)
-        out = merge_guarded(self.app, self.cfg, self.git, forge, snap)
+        out = merge_guarded(
+            self.app, self.cfg, self.git, forge, snap, before_push=lambda to_be: self._merge_requested(ctx, unit, to_be)
+        )
         if out.status == "not_ready":
+            if out.detail == NO_LONGER_ALLOWED:  # the plan, read again under the lease, is not active (R5)
+                ctx.refresh(ctx.store.read())
+                self._line(ctx.plan_id, f"{unit} is not merged: {NO_LONGER_ALLOWED}")
+                return self._result(frozenset(), start_next_run=False, plan_id=ctx.plan_id)
             if "does not exist on origin" in out.detail:
                 return self._stop(ctx, "target_missing", out.detail)
             self._line(ctx.plan_id, f"{unit} is not ready to merge: {out.detail}")
@@ -635,13 +766,28 @@ class _Step:
         if not confirm_merged(forge, self.git, self.cfg, out.pr, out.head, wait_s=self.confirm_wait_s):
             log.warning("%s: %s was pushed to %s, but the target does not show it as its tip", unit, out.head[:10],
                         self.target)  # fmt: skip
-        merged = [
-            self._event("unit.merge_requested", unit=unit, head=out.head, target_before=out.target_before),
-            self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=out.head),
-        ]
+        merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=out.head)]
         self._write(ctx, merged, facts=True)
         self._line(ctx.plan_id, f"{unit} merged into {self.target} at {out.head[:10]}")
         return self._integrate(ctx, unit, snap, via_merge=out.head)
+
+    def _merge_requested(self, ctx: _Ctx, unit: str, to_be: MergeOutcome) -> bool:
+        """The `before_push` of the guarded merge (D8, R5): read the plan ref again and push only while the plan is
+        still active on this unit; record `unit.merge_requested` with the lease first, so a plan cancelled or stopped
+        after the step read it never merges, and a push that happens is always preceded by its request. A lost lease
+        answers False: the next run decides again."""
+        fresh = ctx.store.read()
+        state = fold_plan(ctx.plan_id, fresh.events)
+        if state.status != "active" or state.current not in (None, unit):
+            return False
+        request = self._event("unit.merge_requested", unit=unit, head=to_be.head, target_before=to_be.target_before,
+                              pr=to_be.pr)  # fmt: skip
+        try:
+            head = ctx.store.append([request], expect=fresh.head)
+        except PlanMoved:
+            return False
+        ctx.refresh(PlanRead(head, [*fresh.events, request], dict(fresh.files)))
+        return True
 
     def _stale(self, ctx: _Ctx, snap: UnitSnapshot, detail: str) -> PlanStep:
         from l4.state.retry import retry_unit  # retry imports the orchestrator, which imports this module
@@ -709,7 +855,7 @@ class _Step:
         merged = _last(ctx.read.events, "unit.merged", unit)
         merge_commit = head or (str(merged.data.get("merge_commit")) if merged else None) or revision
         return {
-            "receipt_id": f"{ctx.plan_id}/{unit}/{snap.state.restarts + 1}",
+            "receipt_id": f"{ctx.plan_id}/{unit}/{self._attempt(ctx, snap)}",
             "unit_id": unit,
             "plan_id": ctx.plan_id,
             "repository": self._repository(),
@@ -725,12 +871,13 @@ class _Step:
         }
 
     def _charged(self, ctx: _Ctx, unit: str, snap: UnitSnapshot, *, extra_run: int = 0) -> PlanEvent:
-        """`plan.charged` carries the unit's totals (the fold keeps the maximum per unit): its folded cost, the runs the
-        plan dispatched it for, and 1 + restarts attempts."""
-        runs = sum(1 for e in ctx.read.events if e.type == "unit.dispatched" and e.data.get("unit") == unit)
+        """`plan.charged{unit, attempt, cost_usd, runs}` carries the totals of the unit's current attempt (R1): its
+        folded cost (a restart starts a new unit ledger, so that is this attempt's), and the runs the plan dispatched
+        it for in this attempt. The fold keeps the maximum per (unit, attempt) and sums the attempts."""
+        attempt = self._attempt(ctx, snap)
+        cost, runs = self._charged_of(ctx, unit, attempt)
         return self._event(
-            "plan.charged", unit=unit, cost_usd=snap.state.cost_usd, runs=runs + extra_run,
-            attempts=1 + snap.state.restarts,
+            "plan.charged", unit=unit, attempt=attempt, cost_usd=max(cost, snap.state.cost_usd), runs=runs + extra_run
         )  # fmt: skip
 
     def _batch(self, ctx: _Ctx) -> PlanStep | None:
@@ -794,10 +941,7 @@ class _Step:
         plan, state = ctx.file.plan, ctx.state
         eligibility = next_eligible(plan, state, self._phases())
         unit = eligibility.unit
-        if unit is None:
-            finished = next((u for u, why in eligibility.waiting.items() if "post-merge check" in why), None)
-            if finished is not None and finished in self.snaps:  # merged by a person before the plan got to it
-                return self._integrate(ctx, finished, self.snaps[finished], via_merge=None)
+        if unit is None:  # a unit merged and not integrated was post-checked before (R10): nothing else is eligible
             reason = next(iter(eligibility.waiting.values()), "no unit is eligible")
             self._line(ctx.plan_id, f"nothing to dispatch: {reason}")
             return self._result(frozenset(), start_next_run=False, plan_id=ctx.plan_id)
@@ -808,11 +952,11 @@ class _Step:
         if not actionable:
             self._line(ctx.plan_id, f"{unit} ({snap.state.phase or 'not started'}) has nothing to run now")
             return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
-        if (limit := self._limit_reached(ctx, dispatching=True)) is not None:
+        if (limit := self._limit_reached(ctx, unit)) is not None:
             return self._stop(ctx, limit[0], limit[1], limit[2])
-        events = [
-            self._event("unit.dispatched", unit=unit, run=self.app.run_id),
+        events = [  # the charge first: the fold gives a new attempt its own stale retry when it sees the dispatch (D8)
             self._charged(ctx, unit, snap, extra_run=1),
+            self._event("unit.dispatched", unit=unit, run=self.app.run_id),
         ]
         self._write(ctx, events)
         self._line(ctx.plan_id, f"dispatched {unit} ({snap.state.phase or 'not started'})")
@@ -835,5 +979,7 @@ __all__ = [
     "live_plan",
     "local_states",
     "plan_holds",
+    "review_batches",
+    "unreadable_plan_files",
     "yolo_step",
 ]
