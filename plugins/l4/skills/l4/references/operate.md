@@ -74,7 +74,25 @@ use a label. A command needs the forge token in the environment; the project com
 
 ## Merging
 
-- The harness never merges. A person merges the ready PR with any method.
+- The harness never merges, except a unit of an active delivery plan with `merge: auto` (see Delivery plans below). A person merges the ready PR with any method.
 - The next base run detects the merge:
   - **OpenSpec:** it opens an archive PR unless the merge already archived the change;
   - **Kiro:** it runs the done-gate on the base and records it.
+
+## Delivery plans (`l4 yolo`)
+
+A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches, limits, `merge: human|auto`. Full guide:
+`docs/yolo-mode.md`; stops and how to clear them: `docs/runbook.md` section 12. Commands:
+
+- `l4 yolo check PLAN`: admission only (cycles, unknown units, target is the base branch, open questions). Exit 0 or 2. Changes nothing.
+- `l4 yolo review PLAN`: CI reviews the plan (READY / NEEDS_REVISION / BLOCKED per unit). `--local` runs it here.
+- `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
+  the review is for the current inputs and everything is READY. `merge: auto` also needs `forge.merge_policy: auto`.
+- `l4 yolo status [PLAN] [--json]`: state, units, usage against limits, stop reason, `Next:`.
+- `l4 yolo cancel PLAN --reason "…"`: no new dispatch or merge, for good.
+- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: after the cause of a
+  stop is gone (`l4 retry` the unit first for `unit_halted` / `unit_escalated`). `inputs_changed` and `unit_rejected` need
+  `review` and `activate` again. Usage is never reset.
+- `l4 yolo report PLAN`: the report. Promotion of the base branch to `main` is always manual.
+
+While a plan is active, `l4 run --unit U` exits 13 for a unit that is not the current one.

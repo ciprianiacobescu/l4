@@ -41,6 +41,7 @@ For Codex, copy `plugins/l4/skills/l4` to `~/.agents/skills/l4`.
 
 * [Quickstart](docs/quickstart.md)
 * [Operations runbook](docs/runbook.md): the states of a unit, why a unit stops, and how to resume or retry
+* [Delivery plans](docs/yolo-mode.md): order units by dependency and, with two opt-ins, merge them automatically into the integration branch
 * [Architecture](docs/architecture.md)
 * [Specification](docs/SPEC.md)
 * [Research evidence](docs/research/README.md)
