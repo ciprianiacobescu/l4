@@ -49,7 +49,7 @@ def test_the_first_eligible_unit_is_dispatched_and_the_next_run_is_started(world
     active(world)
     step = world.step()
     assert step.allow == frozenset({A}) and step.start_next_run is True
-    assert kinds(world)[-2:] == ["unit.dispatched", "plan.charged"]
+    assert kinds(world)[-2:] == ["plan.charged", "unit.dispatched"]
     assert last(world, "unit.dispatched") == {"unit": A, "run": "r-20261014T1000Z-0001"}
     assert state(world).current == A
     assert step.refusals[B] == "waits for openspec:a (not integrated) (plan p1)"  # SCN-YOLO-21's text for `l4 run`
@@ -159,6 +159,26 @@ def test_a_second_stale_merge_stops_the_plan(world, monkeypatch):
     world.step(snaps)
     got = state(world)
     assert got.status == "stopped" and got.stop_reason == "merge_refused" and got.stop_unit == A
+
+
+def test_a_new_attempt_gets_its_own_stale_retry(world, monkeypatch):  # review #1 (also affected), D8
+    head, snaps = merge_ready(world)
+    world.seed(
+        ev("plan.charged", unit=A, attempt=1, cost_usd=0.0, runs=1), ev("unit.merge_refused", unit=A, reason="stale")
+    )
+    world.restarts("a", 1)  # `l4 restart`: the unit is on attempt 2
+    world.step({"a": world.snapshot("a", "implementing")})  # its first dispatch in attempt 2
+    assert state(world).stale_merges == {} and state(world).used.attempts == {A: 2}
+    world.person_moves_target()
+    calls = []
+
+    def retry(app, cfg, git, provider, ref, **kw):
+        calls.append(ref.id)
+        return UnitRunResult(UnitOutcome(unit=ref.id, phase_before="in_review", phase_after="verifying"), ExitCode.OK)
+
+    monkeypatch.setattr("l4.state.retry.retry_unit", retry)
+    step = world.step(snaps)
+    assert calls == [A] and state(world).status == "active" and step.start_next_run is True
 
 
 def test_scn_yolo_16_a_protected_target_stops_the_plan_with_the_forges_message(world):
@@ -451,7 +471,7 @@ def test_a_moved_ref_is_read_again_once(world, monkeypatch):
 
     monkeypatch.setattr(PlanStore, "append", flaky)
     step = world.step()
-    assert step.allow == frozenset({A}) and kinds(world)[-2:] == ["unit.dispatched", "plan.charged"]
+    assert step.allow == frozenset({A}) and kinds(world)[-2:] == ["plan.charged", "unit.dispatched"]
 
 
 def test_a_ref_that_moves_twice_ends_the_step_for_this_run(world, monkeypatch):

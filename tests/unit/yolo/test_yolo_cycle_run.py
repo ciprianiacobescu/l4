@@ -134,7 +134,7 @@ def test_an_active_plan_runs_only_its_dispatched_unit_and_starts_the_next_run_on
     world.activate()
     run()
     assert run.runner.chosen == [[A]]
-    assert world.kinds()[-2:] == ["unit.dispatched", "plan.charged"]
+    assert world.kinds()[-2:] == ["plan.charged", "unit.dispatched"]
     assert run.forge.started == ["main"]
 
 

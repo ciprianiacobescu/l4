@@ -140,6 +140,7 @@ CLASSIFIED = {
     "s1/canary.py": OTHER, "sandbox/bwrap.py": OTHER, "sandbox/select.py": OTHER, "setup/gitlab.py": OTHER,
     "sim/runner.py": "starts the simulator child", "specs/openspec.py": OTHER, "state/environment.py": OTHER,
     "vcs/git.py": OTHER,
+    "yolo/readiness.py": "wires `run_process` into the Factory's ProbeCtx; the judge is the gated impl of `for_role`",
 }  # fmt: skip
 
 

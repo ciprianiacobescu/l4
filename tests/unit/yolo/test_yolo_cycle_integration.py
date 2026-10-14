@@ -245,7 +245,7 @@ def test_an_answered_question_wakes_a_waiting_plan_and_the_same_step_dispatches(
     resumed = last(world, "plan.resumed")
     assert resumed["by"] == "harness" and resumed["reason"] == "the cause is gone: openspec:a is awaiting_human"
     assert state(world).status == "active"
-    assert world.kinds()[-3:] == ["plan.resumed", "unit.dispatched", "plan.charged"]
+    assert world.kinds()[-3:] == ["plan.resumed", "plan.charged", "unit.dispatched"]
     assert step.allow == frozenset({A}) and step.start_next_run is True
 
 

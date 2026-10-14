@@ -954,9 +954,9 @@ class _Step:
             return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
         if (limit := self._limit_reached(ctx, unit)) is not None:
             return self._stop(ctx, limit[0], limit[1], limit[2])
-        events = [
-            self._event("unit.dispatched", unit=unit, run=self.app.run_id),
+        events = [  # the charge first: the fold gives a new attempt its own stale retry when it sees the dispatch (D8)
             self._charged(ctx, unit, snap, extra_run=1),
+            self._event("unit.dispatched", unit=unit, run=self.app.run_id),
         ]
         self._write(ctx, events)
         self._line(ctx.plan_id, f"dispatched {unit} ({snap.state.phase or 'not started'})")
