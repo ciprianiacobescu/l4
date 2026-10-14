@@ -213,7 +213,9 @@ on `PATH` when the shim is absent (CFG-007). `harness.delivery` is `vendored`, `
 (`--harness-ref` or `--harness-commit`) re-renders the workflow from the config with the template of the harness that
 runs it and the new pin (the `uses:` line, and the `commit` input of source `repository`), so a template fix reaches
 the adoption; it prints `re-rendered .github/workflows/l4.yml (N lines changed)` and the changed lines, and writes
-nothing with `--dry-run`. A second run changes nothing.
+nothing with `--dry-run`. A second run changes nothing. `--action-repo OWNER/REPO` moves the `uses:` pin to another
+repository, for a harness repository that was renamed or moved: GitHub redirects git and the API, but not a `uses:`
+line. A copy of the action keeps its git URL (it redirects), so `--action-repo` is refused for it.
 
 **L4-ACT-006** The harness repository MUST have `release.yml`. On a tag `src-vX.Y.Z` it MUST: refuse a source commit
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
@@ -280,7 +282,7 @@ of the harness package.
 | Command | Purpose | Side effects |
 |---|---|---|
 | `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
-| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
+| `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF] [--action-repo OWNER/REPO]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
 | `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents; `--unit` on a `halted` or `escalated` unit exits 13 before the lease and changes nothing (L4-OPS-010) |

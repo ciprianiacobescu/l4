@@ -234,3 +234,31 @@ def test_dry_run_reports_the_rerender_and_writes_nothing(target: Path, harness_r
     assert upgrade(target, harness_remote.environ, "--harness-ref", "v0.4.0", "--dry-run") == 0
     assert "would re-render" in capsys.readouterr().out
     assert (target / WORKFLOW).read_text() == old
+
+
+def test_upgrade_moves_the_pin_to_a_renamed_repository(target: Path, harness_remote: HarnessRemote):
+    """GitHub redirects git and the API after a rename, not a `uses:` line (live 2026-10-14: `Unable to resolve action.
+    Repository not found`): `--action-repo` moves the pin, and a second run changes nothing."""
+    adopt(target, harness_remote)
+    before = (target / WORKFLOW).read_text()
+    assert upgrade(target, harness_remote.environ, "--action-repo", "o/l4", "--harness-commit", SHA) == 0
+    after = (target / WORKFLOW).read_text()
+    assert changed_lines(before, after) == [
+        (
+            f"        uses: o/harness/.github/actions/l4@{harness_remote.old} # v0.3.0",
+            f"        uses: o/l4/.github/actions/l4@{SHA}",
+        )
+    ]
+    assert upgrade(target, harness_remote.environ, "--action-repo", "o/l4", "--harness-commit", SHA) == 0
+    assert (target / WORKFLOW).read_text() == after
+
+
+def test_action_repo_is_refused_for_a_copy_of_the_action(
+    target: Path, harness_remote: HarnessRemote, copy_harness, capsys
+):
+    flags = ("--action", "--action-copy", "--harness", str(copy_harness), "--action-repo", "o/harness")
+    assert init(target, harness_remote.environ, *flags, "--harness-ref", "v0.3.0") == 0
+    before = (target / WORKFLOW).read_text()
+    assert upgrade(target, harness_remote.environ, "--action-repo", "o/l4", "--harness-commit", SHA) == 2
+    assert "copy of the setup action" in capsys.readouterr().err
+    assert (target / WORKFLOW).read_text() == before

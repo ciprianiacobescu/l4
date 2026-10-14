@@ -100,6 +100,9 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--harness-ref", "harness_ref",
              help="Fetched or action adoption: a tag or branch, resolved once with git ls-remote and pinned as its "
                   "commit sha."),
+        _opt("--action-repo", "action_repo",
+             help="Action adoption: OWNER/REPO that now holds the setup action, after the harness repository was "
+                  "renamed or moved (GitHub does not redirect a `uses:` line); the pin moves there."),
     ]),
     "doctor": ("Check environment, config, specs, git, forge, CI and state.", lambda: [
         _flag("--ci", "ci"), _flag("--live", "live"), _flag("--fix", "fix"), _unit(), _flag("--json", "as_json"),
