@@ -341,3 +341,39 @@ def test_the_git_calls_are_read_only_plus_add_and_commit(repo: Repo, monkeypatch
     allowed = {"rev-parse", "diff", "ls-files", "var", "add", "commit"}
     assert {call[0] for call in seen} <= allowed
     assert {"add", "commit"} <= {call[0] for call in seen}
+
+
+# review #6: the person's identity may live only in GIT_AUTHOR_* / GIT_COMMITTER_*, which `Git` scrubs
+
+
+def identity_app(repo: Repo, tmp_path: Path, **person: str) -> AppContext:
+    empty = tmp_path / "empty.gitconfig"
+    empty.write_text("")
+    environ = {**repo.environ, "GIT_CONFIG_GLOBAL": str(empty), **person}
+    return AppContext(
+        repo=repo.path, config_path=None, log_format="human", verbosity=0, run_id="r-20261014T1000Z-0001",
+        environ=environ, redactor=Redactor({}),
+    )  # fmt: skip
+
+
+PERSON = {
+    "GIT_AUTHOR_NAME": "Env Person", "GIT_AUTHOR_EMAIL": "env@person.example",
+    "GIT_COMMITTER_NAME": "Env Person", "GIT_COMMITTER_EMAIL": "env@person.example",
+}  # fmt: skip
+
+
+def test_an_identity_only_in_the_environment_is_the_one_committed(repo: Repo, tmp_path: Path):
+    repo.put_draft()
+    app = identity_app(repo, tmp_path, **PERSON)
+    promote(app, repo.cfg, LID, yes=True)
+    assert repo.raw(repo.path, "log", "-1", "--format=%an|%ae|%cn|%ce").strip() == (
+        "Env Person|env@person.example|Env Person|env@person.example"
+    )
+
+
+def test_an_identity_that_git_can_only_guess_is_refused(repo: Repo, tmp_path: Path):
+    proposal = repo.put_draft()
+    app = identity_app(repo, tmp_path)  # no user.* in any config, none in the environment
+    before = repo.head()
+    refused(lambda: promote(app, repo.cfg, LID, yes=True), containing="identity")
+    nothing_written(repo, before, proposal)

@@ -7,7 +7,8 @@ The order is fixed, and every refusal is exit 2 before anything is written: `mem
 terminal), then `apply_candidates`, then the commit. The checkout must be a branch that is not under
 `forge.branch_prefix` (a person's commit to `.serena/memories/harness/` on a unit branch is a protected-path blocker,
 `verifier/integrity.py`), with nothing staged and a clean, parseable lessons file, so the commit holds the lessons paths
-and nothing else. The commit carries the person's git identity and no `L4-*` trailer: the trailers mark harness
+and nothing else. The commit carries the person's git identity (from the config or from `GIT_AUTHOR_*` and `GIT_COMMITTER_*`; git never
+guesses one, and the command exits 2 when it would have to) and no `L4-*` trailer: the trailers mark harness
 commits, and a person made this one. It is never signed and runs no hook (`Git` turns hooks off). Git is used
 read-only, plus `add` and `commit`; the module never touches the network (L4-KG-001). Imported only by
 `l4.memory.cli`.
@@ -32,6 +33,8 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 
 EVIDENCE_SUFFIX = ".evidence.md"
+IDENTITY_VARS = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+STRICT_IDENTITY = (("user.useConfigOnly", "true"),)  # git then fails instead of guessing a name from the host
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,15 @@ def _refuse(message: str) -> L4Exit:
 
 def _is_terminal() -> bool:
     return sys.stdin.isatty()
+
+
+def person_git(app: AppContext, git: Git | None = None) -> Git:
+    """`git` with the person's identity variables put back. `Git` scrubs `GIT_AUTHOR_*` and `GIT_COMMITTER_*` (the
+    harness's commits are the bot's), but this commit is the person's: an identity that lives only in the
+    environment must reach it, or git would guess one from the host (review #6)."""
+    git = git if git is not None else Git(app.repo, environ=app.environ)
+    git.env.update({name: app.environ[name] for name in IDENTITY_VARS if app.environ.get(name)})
+    return git
 
 
 def check_checkout(app: AppContext, cfg: L4Config, git: Git, *, commit: bool = True) -> None:
@@ -83,8 +95,14 @@ def check_checkout(app: AppContext, cfg: L4Config, git: Git, *, commit: bool = T
     refusal = problem or next(iter(parse_lessons(text).problems), None)
     if refusal is not None:
         raise _refuse(f"{relative} has a problem, run `l4 lessons lint`: {refusal.message}")
-    if commit and git.run("var", "GIT_AUTHOR_IDENT", check=False).returncode != 0:
-        raise _refuse("git has no author identity: set user.name and user.email, or use --no-commit")
+    if commit:
+        git = person_git(app, git)
+        for var in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
+            if git.run("var", var, check=False, config=STRICT_IDENTITY).returncode != 0:
+                raise _refuse(
+                    "git has no identity to commit with (it would only guess one): set user.name and user.email, "
+                    "or GIT_AUTHOR_* and GIT_COMMITTER_*, or use --no-commit"
+                )
 
 
 def _scope(lesson: Lesson) -> str:
@@ -115,7 +133,7 @@ def promote(
         raise _refuse("memory.enabled is false: no lesson is written")
     proposal = find_proposal(app.repo, lid, from_dir)
     lesson = parse_proposal(proposal, lid)
-    git = Git(app.repo, environ=app.environ)
+    git = person_git(app)
     check_checkout(app, cfg, git, commit=commit)
     _show(app, lesson)
     if not yes:
@@ -158,6 +176,7 @@ def _commit(git: Git, lid: str, paths: tuple[str, ...], inbox_path: str) -> str:
         git.run(
             "commit", "--quiet", "--no-verify", "--no-gpg-sign",
             "-m", f"chore(memory): lesson {lid} promoted [skip ci]", "-m", f"Promoted-from: {inbox_path}",
+            config=STRICT_IDENTITY,
         )  # fmt: skip
         return git.run("rev-parse", "HEAD").stdout.strip()
     except GitError as exc:
