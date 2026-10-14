@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 SCHEMA = "l4/delivery-plan@1"
 PLANS_DIR = ".l4/plans"
@@ -48,10 +48,20 @@ class PlanBatch(_Strict):
 
 
 class PlanLimits(_Strict):
-    max_cost_usd: float | None = None
-    max_unit_attempts: int = 2
-    max_runs: int | None = None
+    """The plan's limits (D11). R12: at least one attempt and one run, a cost of zero or more, a deadline with a time
+    zone (a naive one cannot be compared with the clock)."""
+
+    max_cost_usd: float | None = Field(default=None, ge=0)
+    max_unit_attempts: int = Field(default=2, ge=1)
+    max_runs: int | None = Field(default=None, ge=1)
     deadline: datetime | None = None
+
+    @field_validator("deadline")
+    @classmethod
+    def _deadline_has_a_zone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.utcoffset() is None:
+            raise ValueError("the deadline must carry a time zone (for example 2026-12-31T18:00:00Z)")
+        return value
 
 
 class Promotion(_Strict):
@@ -180,13 +190,14 @@ class PlanMoved(Exception):
 class Usage(BaseModel):
     cost_usd: float = 0.0
     runs: int = 0
-    attempts: dict[str, int] = Field(default_factory=dict)  # unit id -> attempts charged
+    attempts: dict[str, int] = Field(default_factory=dict)  # unit id -> highest attempt charged (R1)
 
 
 class PlanState(BaseModel):
     plan_id: str
     status: PlanStatus = "new"
-    plan_digest: str | None = None
+    plan_digest: str | None = None  # the plan file's digest: the latest admitted one, the activated one once active
+    activated_digest: str | None = None  # R2: frozen by `plan.activated`; a plan file that differs stops the plan
     merge: MergeMode | None = None
     order: list[str] = Field(default_factory=list)
     findings: list[dict[str, str]] = Field(default_factory=list)  # of the latest `plan.refused`
@@ -207,6 +218,7 @@ class PlanState(BaseModel):
     wait_reason: str | None = None
     used: Usage = Field(default_factory=Usage)
     extended: Usage = Field(default_factory=Usage)
+    extended_deadline: datetime | None = None  # R3: the latest deadline a `l4 yolo resume --extend-deadline` set (UTC)
     activated_by: str | None = None
     completed_revision: str | None = None
 

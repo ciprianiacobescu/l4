@@ -1,6 +1,7 @@
 """fold_plan: every event of design D4, the status rules, usage that never goes down (L4-YOLO-006, -013, -014)."""
 
 import logging
+from datetime import UTC, datetime
 
 import pytest
 
@@ -127,7 +128,7 @@ def test_reactivation_after_inputs_changed_replaces_digests_and_keeps_usage():
     s = fold(
         ACTIVATED,
         ev("unit.dispatched", unit="openspec:a"),
-        ev("plan.charged", unit="openspec:a", cost_usd=3.5, runs=2, attempts=1),
+        ev("plan.charged", unit="openspec:a", attempt=1, cost_usd=3.5, runs=2),
         ev("plan.stopped", reason="inputs_changed", unit="openspec:a"),
         ev("plan.reviewed", plan_digest="pd2", units={"openspec:a": {"verdict": "READY", "digest": "da2"}}),
         ev("plan.activated", plan_digest="pd2", digests={"openspec:a": "da2"}, limits={"max_runs": 9}, by="you"),
@@ -161,7 +162,7 @@ def test_completed_clears_current_and_wait():
 
 def test_stale_merges_count_and_reset_only_when_attempts_grew():
     u = "openspec:a"
-    base = [ACTIVATED, ev("plan.charged", unit=u, attempts=1), ev("unit.dispatched", unit=u)]
+    base = [ACTIVATED, ev("plan.charged", unit=u, attempt=1), ev("unit.dispatched", unit=u)]
     s = fold(*base, ev("unit.merge_refused", unit=u, reason="stale"))
     assert s.stale_merges == {u: 1}
     s = fold(*base, ev("unit.merge_refused", unit=u, reason="stale"), ev("unit.dispatched", unit=u))
@@ -171,7 +172,7 @@ def test_stale_merges_count_and_reset_only_when_attempts_grew():
     s = fold(
         *base,
         ev("unit.merge_refused", unit=u, reason="stale"),
-        ev("plan.charged", unit=u, attempts=2),
+        ev("plan.charged", unit=u, attempt=2),
         ev("unit.dispatched", unit=u),
     )
     assert s.stale_merges == {}  # a new attempt
@@ -179,36 +180,63 @@ def test_stale_merges_count_and_reset_only_when_attempts_grew():
     assert s.stale_merges == {}
 
 
-def test_usage_is_per_unit_maximum_and_summed():
+def test_usage_is_per_unit_attempt_maximum_and_summed():
     s = fold(
         ACTIVATED,
-        ev("plan.charged", unit="a", cost_usd=1.0, runs=1, attempts=1),
-        ev("plan.charged", unit="b", cost_usd=2.0, runs=3, attempts=1),
-        ev("plan.charged", unit="a", cost_usd=1.5, runs=2, attempts=1),
+        ev("plan.charged", unit="a", attempt=1, cost_usd=1.0, runs=1),
+        ev("plan.charged", unit="b", attempt=1, cost_usd=2.0, runs=3),
+        ev("plan.charged", unit="a", attempt=1, cost_usd=1.5, runs=2),
+        ev("plan.charged", unit="a", attempt=1, cost_usd=1.0, runs=1),  # a repeat or a lower figure counts once
     )
     assert (s.used.cost_usd, s.used.runs, s.used.attempts) == (3.5, 5, {"a": 1, "b": 1})
 
 
-def test_usage_never_goes_down_after_a_restart_like_sequence():
-    """SCN-YOLO-27's precondition: a unit restart resets the unit's own counters, not the plan's."""
+def test_a_charge_without_attempt_counts_as_attempt_1():
+    """An older ledger: `plan.charged{unit, cost_usd, runs, attempts}` has no `attempt`."""
+    s = fold(
+        ACTIVATED,
+        ev("plan.charged", unit="a", cost_usd=1.0, runs=1, attempts=1),
+        ev("plan.charged", unit="a", cost_usd=2.0, runs=2, attempts=1),
+    )
+    assert (s.used.cost_usd, s.used.runs, s.used.attempts) == (2.0, 2, {"a": 1})
+
+
+def test_charges_of_every_attempt_add_up_across_restarts():
+    """Review #1 (R1): three attempts of $2 each are $6 and 3 attempts, whatever the unit fold said after a restart."""
     u = "openspec:a"
     events = [
         ACTIVATED,
-        ev("unit.dispatched", unit=u),
-        ev("plan.charged", unit=u, cost_usd=2.0, runs=3, attempts=1),
-        ev("plan.stopped", reason="unit_halted", unit=u),
-        ev("plan.resumed", by="me", reason="retry"),
-        ev("plan.charged", unit=u, cost_usd=0.0, runs=0, attempts=0),  # the restart zeroed the unit's counters
-        ev("unit.dispatched", unit=u),
-        ev("plan.charged", unit=u, cost_usd=2.0, runs=3, attempts=2),
+        ev("plan.charged", unit=u, attempt=1, cost_usd=2.0, runs=1),
+        ev("plan.charged", unit=u, attempt=2, cost_usd=2.0, runs=1),
+        ev("plan.charged", unit=u, attempt=2, cost_usd=0.0, runs=0),  # a later, lower figure of attempt 2
+        ev("plan.charged", unit=u, attempt=3, cost_usd=2.0, runs=1),
     ]
+    s = fold_plan("p1", events)
+    assert (s.used.cost_usd, s.used.runs, s.used.attempts) == (6.0, 3, {u: 3})
     seen = [fold_plan("p1", events[: i + 1]).used for i in range(len(events))]
     for before, after in zip(seen, seen[1:], strict=False):
         assert after.cost_usd >= before.cost_usd and after.runs >= before.runs
         assert all(after.attempts.get(k, 0) >= v for k, v in before.attempts.items())
-    assert seen[-1].attempts == {u: 2}
-    s = fold_plan("p1", events)
-    assert s.status == "active" and s.used.cost_usd == 2.0
+
+
+def test_plan_keys_are_charged_but_are_not_units():
+    s = fold_plan("p1", [ACTIVATED, ev("plan.charged", unit="plan:review", attempt=0, cost_usd=0.5, runs=0),
+                         ev("plan.charged", unit="plan:review", attempt=0, cost_usd=0.75, runs=0),
+                         ev("plan.charged", unit="a", attempt=1, cost_usd=1.0, runs=1)])  # fmt: skip
+    assert s.used.cost_usd == 1.75 and s.used.attempts == {"a": 1}
+
+
+def test_stale_retry_resets_in_a_third_attempt_too():
+    """Review #1: the reset of `stale_merges` needs the attempts to keep growing past 2."""
+    u = "openspec:a"
+    s = fold(
+        ACTIVATED,
+        ev("plan.charged", unit=u, attempt=2),
+        ev("unit.merge_refused", unit=u, reason="stale"),
+        ev("plan.charged", unit=u, attempt=3),
+        ev("unit.dispatched", unit=u),
+    )
+    assert s.stale_merges == {}
 
 
 def test_resume_extends_the_limits():
@@ -221,6 +249,22 @@ def test_resume_extends_the_limits():
     )
     assert (s.extended.cost_usd, s.extended.runs, s.extended.attempts) == (12.5, 5, {"a": 1, "*": 1})
     assert s.used.cost_usd == 0
+
+
+def test_resume_extends_the_deadline_to_the_latest():
+    s = fold(
+        ACTIVATED,
+        ev("plan.stopped", reason="limit_deadline"),
+        ev("plan.resumed", by="me", extend={"deadline": "2026-12-01T00:00:00Z"}),
+        ev("plan.stopped", reason="limit_deadline"),
+        ev("plan.resumed", by="me", extend={"deadline": "2026-11-01T00:00:00Z"}),
+        ev("plan.stopped", reason="limit_deadline"),
+        ev("plan.resumed", by="me", extend={"deadline": "not a time"}),
+        ev("plan.stopped", reason="limit_deadline"),
+        ev("plan.resumed", by="me", extend={"deadline": "2026-12-02T01:00:00+01:00"}),
+    )
+    assert s.extended_deadline == datetime(2026, 12, 2, 0, 0, tzinfo=UTC)
+    assert fold(ACTIVATED).extended_deadline is None
 
 
 def test_resume_without_extend_and_junk_extend():
@@ -240,3 +284,70 @@ def test_unknown_events_are_ignored_and_logged(caplog):
 )
 def test_an_event_without_its_unit_changes_nothing(kind):
     assert fold(ACTIVATED, ev(kind)) == fold(ACTIVATED)
+
+
+# --- R2: the activated plan is frozen; R2: no stop or resume before activation (reviews #2 and #12) ---------------
+
+
+def _active_then(*later):
+    return fold(
+        ev("plan.admitted", plan_digest="AAAA", order=["openspec:a", "openspec:b"], merge="auto"),
+        ev("plan.reviewed", plan_digest="AAAA", units={"openspec:a": {"verdict": "READY", "digest": "d1"}}),
+        ev("plan.activated", plan_digest="AAAA", digests={"openspec:a": "d1"}, limits={}, by="me"),
+        *later,
+    )
+
+
+def test_activation_freezes_the_digest():
+    s = _active_then()
+    assert s.activated_digest == "AAAA" and s.plan_digest == "AAAA"
+    assert fold(ev("plan.admitted", plan_digest="x")).activated_digest is None
+
+
+def test_admitted_refused_reviewed_while_active_change_only_review_fields():
+    """Review #2: an edited plan file was re-admitted and re-reviewed, and then ran without a new activation."""
+    s = _active_then(
+        ev("plan.admitted", plan_digest="BBBB", order=["openspec:b", "openspec:c"], merge="human"),
+        ev("plan.refused", findings=[{"code": "cycle", "subject": "p1", "text": "x"}]),
+        ev("plan.reviewed", plan_digest="BBBB", units={"openspec:c": {"verdict": "BLOCKED"}}),
+    )
+    assert s.status == "active" and s.activated_digest == "AAAA" and s.plan_digest == "AAAA"
+    assert s.order == ["openspec:a", "openspec:b"] and s.merge == "auto"
+    assert s.review == {"openspec:c": "BLOCKED"} and s.review_plan_digest == "BBBB"
+    assert s.findings == [{"code": "cycle", "subject": "p1", "text": "x"}]
+
+
+@pytest.mark.parametrize("stop", [[], [ev("plan.stopped", reason="inputs_changed")], [ev("plan.waiting", reason="w")]])
+def test_review_events_do_not_change_the_status_of_an_activated_plan(stop):
+    s = _active_then(*stop, ev("plan.refused", findings=[]), ev("plan.admitted", plan_digest="B", order=[]))
+    assert s.status == _active_then(*stop).status and s.order == ["openspec:a", "openspec:b"]
+
+
+def test_reactivation_adopts_the_admission_of_that_plan_digest_and_freezes_the_new_digest():
+    s = _active_then(
+        ev("plan.stopped", reason="inputs_changed", unit="openspec:a"),
+        ev("plan.admitted", plan_digest="BBBB", order=["openspec:b", "openspec:a"], merge="human"),
+        ev("plan.activated", plan_digest="BBBB", digests={"openspec:a": "d2"}, limits={}, by="you"),
+    )
+    assert s.status == "active" and s.activated_digest == "BBBB" and s.plan_digest == "BBBB"
+    assert s.order == ["openspec:b", "openspec:a"] and s.merge == "human"
+    s = _active_then(
+        ev("plan.admitted", plan_digest="CCCC", order=["openspec:z"]),
+        ev("plan.activated", plan_digest="BBBB", digests={}, limits={}),
+    )
+    assert s.order == ["openspec:a", "openspec:b"]  # the admission was for another plan digest
+
+
+@pytest.mark.parametrize("before", [[], [ev("plan.admitted", plan_digest="AAAA", order=["openspec:a"])]])
+def test_stopped_and_resumed_before_activation_are_ignored(before):
+    """Review #12: a stop written before the activation (`target_missing`) let a resume make the plan active."""
+    stopped = fold(*before, ev("plan.stopped", reason="target_missing"))
+    assert stopped.status == fold(*before).status and stopped.stop_reason is None
+    s = fold(*before, ev("plan.stopped", reason="target_missing"), ev("plan.resumed", by="x", reason="y"))
+    assert s.status == fold(*before).status != "active" and s.digests == {}
+    assert s.activated_digest is None and s.extended.cost_usd == 0
+
+
+def test_an_activation_after_cancel_or_completion_is_ignored():
+    s = fold(ACTIVATED, ev("plan.cancelled", by="me"), ev("plan.activated", plan_digest="zz", digests={"u": "d"}))
+    assert s.status == "cancelled" and s.activated_digest == "pd" and s.digests == {"openspec:a": "da"}
