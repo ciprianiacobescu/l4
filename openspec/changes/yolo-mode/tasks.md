@@ -17,8 +17,8 @@
 
 ## 3. Review and post-merge checks (wave 1, agent C: `yolo/readiness.py`, `yolo/postcheck.py`, `yolo/prompts/readiness.md`, `yolo/schemas/readiness.schema.json`)
 
-- [ ] 3.1 The readiness prompt and schema (D5); `review_plan()` through the judge's adapter machinery, read-only tools; parse and the two override rules. Tests with the fake adapter: SCN-YOLO-08, SCN-YOLO-09, a READY unit, a batch review. (L4-YOLO-004)
-- [ ] 3.2 `run_profile()` (D9): a detached worktree at a revision, the existing gate runner and sandbox, kinds from `yolo.profiles`, `all`, `none`, a profile with nothing to run is `error`, cleanup. Tests with a temp repo and shell gates. (L4-YOLO-009)
+- [x] 3.1 The readiness prompt and schema (D5); `review_plan()` through the judge's adapter machinery, read-only tools; parse and the two override rules. Tests with the fake adapter: SCN-YOLO-08, SCN-YOLO-09, a READY unit, a batch review. (L4-YOLO-004)
+- [x] 3.2 `run_profile()` (D9): a detached worktree at a revision, the existing gate runner and sandbox, kinds from `yolo.profiles`, `all`, `none`, a profile with nothing to run is `error`, cleanup. Tests with a temp repo and shell gates. (L4-YOLO-009)
 
 ## 4. Guarded merge and the destination check (wave 1, agent D: `yolo/merge.py`, `ci/sweeper.py` `_own_mr`, `postmerge.py` `merge_archive_guarded`)
 

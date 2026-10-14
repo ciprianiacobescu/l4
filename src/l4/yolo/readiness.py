@@ -150,7 +150,9 @@ def _unit_subject(
         shown = _folder_blocks(dep_folder) if dep_folder is not None else "(its folder is not known)"
         prerequisites.append(f"### {dep}" + (f" ({dep_folder.path})" if dep_folder else "") + f"\n{shown}")
     batch_deps = [f"- batch {b}" for b in batch.depends_on]
-    entry = data_block("plan entry", _entry(unit)) + f"\n(in batch {batch.id}; plan {plan.plan_id}, target {plan.target})"
+    entry = (
+        data_block("plan entry", _entry(unit)) + f"\n(in batch {batch.id}; plan {plan.plan_id}, target {plan.target})"
+    )
     values = {
         "SUBJECT_KIND": "unit",
         "SUBJECT_ID": unit.id,
@@ -167,7 +169,9 @@ def _batch_subject(plan: Plan, batch: PlanBatch, folders: Mapping[str, FolderTex
         "SUBJECT_ID": batch.id,
         "ENTRY": data_block("plan entry", _entry(batch)) + f"\n(plan {plan.plan_id}, target {plan.target})",
         "DEPENDENCIES": "\n".join(f"- batch {b}" for b in batch.depends_on) or "(none: the batch depends on nothing)",
-        "FOLDERS": "\n\n".join(f"### {u.id} ({folders[u.id].path})\n{_folder_blocks(folders[u.id])}" for u in batch.units),
+        "FOLDERS": "\n\n".join(
+            f"### {u.id} ({folders[u.id].path})\n{_folder_blocks(folders[u.id])}" for u in batch.units
+        ),
     }
     return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values))
 
@@ -191,7 +195,11 @@ def verdict_of(answer: Any, *, digest: str | None = None) -> Verdict:
     if said == "READY" and any(f["severity"] == "blocking" for f in findings):
         said = "NEEDS_REVISION"
     return Verdict(
-        said, findings, tuple(map(str, answer.get("assumptions", ()))), tuple(map(str, answer.get("missing", ()))), digest
+        said,
+        findings,
+        tuple(map(str, answer.get("assumptions", ()))),
+        tuple(map(str, answer.get("missing", ()))),
+        digest,
     )
 
 
@@ -212,7 +220,8 @@ class _Calls:
         common = git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
         home = Path(app.environ["HOME"]) if app.environ.get("HOME") else Path.home()
         self.spec = SandboxSpec(
-            "agent", self.cwd, Path(common), self.tmp, home, expand_credential_paths(cfg.sandbox.credential_paths, home),
+            "agent", self.cwd, Path(common), self.tmp, home,
+            expand_credential_paths(cfg.sandbox.credential_paths, home),
             adapter=selected.profile.adapter, network=True, runner_tmp=runner_tmp_paths(app.environ),
         )  # fmt: skip
         self.count = 0
@@ -259,7 +268,9 @@ class _Calls:
             messages = [
                 *first,
                 *echo,
-                Msg("user", f"Your reply did not satisfy the schema ({problem}). Reply again with the JSON object only."),
+                Msg(
+                    "user", f"Your reply did not satisfy the schema ({problem}). Reply again with the JSON object only."
+                ),
             ]
         return _with_digest(blocked(f"schema_invalid: {detail or 'no valid answer'}"), digest), cost
 
@@ -302,7 +313,9 @@ def review_plan_costed(
             info, folder = units.get(unit.id), folders[unit.id]
             digest = digest_fn(git, rev, info.folder) if digest_fn and info and not folder.empty else None
             if folder.empty:
-                note = f"the folder of {unit.id} has no files at {rev[:10]}" if info else f"{unit.id} is not a known unit"
+                note = (
+                    f"the folder of {unit.id} has no files at {rev[:10]}" if info else f"{unit.id} is not a known unit"
+                )
                 result_units[unit.id] = _with_digest(blocked(f"unit_missing: {note}"), digest)
                 continue
             deps = [
@@ -359,4 +372,12 @@ def review_plan(
     return result
 
 
-__all__ = ["READINESS_SCHEMA", "FolderText", "Subject", "read_folder", "review_plan", "review_plan_costed", "verdict_of"]
+__all__ = [
+    "READINESS_SCHEMA",
+    "FolderText",
+    "Subject",
+    "read_folder",
+    "review_plan",
+    "review_plan_costed",
+    "verdict_of",
+]

@@ -4,12 +4,13 @@ being asked without any tool. The judge is a scripted `FakeAdapter`; nothing cal
 import json
 
 import pytest
-from .yolo_review_world import SPEC_A, SPEC_B, World, make_cfg, plan_of
 
 from l4.agents.fake import FakeAdapter, Step
 from l4.availability.errors import RoleUnavailable
 from l4.yolo.model import UnitInfo
 from l4.yolo.readiness import review_plan, review_plan_costed
+
+from .yolo_review_world import SPEC_A, SPEC_B, World, make_cfg, plan_of
 
 A, B = "openspec:data-contract", "openspec:service-api"
 
@@ -100,9 +101,7 @@ def test_a_minor_finding_leaves_ready_alone(world):
 def test_a_batch_with_two_units_is_reviewed_as_a_whole(world):
     plan = plan_of({A: [], B: [A]})
     gap = {"criterion": "batch_acceptance", "severity": "major", "text": "no end-to-end check"}
-    fake = judge(
-        Step(structured=answer()), Step(structured=answer()), Step(structured=answer("NEEDS_REVISION", [gap]))
-    )
+    fake = judge(Step(structured=answer()), Step(structured=answer()), Step(structured=answer("NEEDS_REVISION", [gap])))
     result = review(world, plan, fake)
     assert set(result.units) == {A, B} and result.units[A].verdict == result.units[B].verdict == "READY"
     assert result.batches["b1"].verdict == "NEEDS_REVISION" and result.batches["b1"].findings == (gap,)

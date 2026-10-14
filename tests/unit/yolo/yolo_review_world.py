@@ -78,9 +78,7 @@ def plan_of(units: dict[str, list[str]], *, batches: list[tuple[str, list[str]]]
         "plan_id": "p1",
         "target": "main",
         "merge": "human",
-        "batches": [
-            {"id": bid, "units": [{"id": u, "depends_on": units[u]} for u in ids]} for bid, ids in groups
-        ],
+        "batches": [{"id": bid, "units": [{"id": u, "depends_on": units[u]} for u in ids]} for bid, ids in groups],
     }
     plan = load_plan(json.dumps(doc))
     assert isinstance(plan, Plan), plan
