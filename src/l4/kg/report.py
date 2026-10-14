@@ -202,7 +202,7 @@ def _by_failure_class(v: View) -> dict[str, list[Edge]]:
     return classes
 
 
-def _failure_rows(v: View, floor: int) -> list[tuple[str, set[str], list[Edge]]]:
+def failure_rows(v: View, floor: int) -> list[tuple[str, set[str], list[Edge]]]:
     rows = []
     for cls, found in _by_failure_class(v).items():
         units = {v.unit_of_run(e.from_id) for e in found}
@@ -213,7 +213,7 @@ def _failure_rows(v: View, floor: int) -> list[tuple[str, set[str], list[Edge]]]
 
 def _recurring_failures(v: View, floor: int) -> list[str]:
     lines = []
-    for cls, units, found in _failure_rows(v, floor):
+    for cls, units, found in failure_rows(v, floor):
         phases = Counter(str(e.attrs.get("phase") or "?") for e in found)
         blame: Counter[str] = Counter()
         for e in found:
@@ -229,31 +229,31 @@ def _recurring_failures(v: View, floor: int) -> list[str]:
 # --- 4. recurring findings ----------------------------------------------------------------------------------
 
 
-class _Raised:
+class Raised:
     """One RAISED edge with the unit, the key and the blame of its finding."""
 
     def __init__(self, edge: Edge, unit: str, key: str, blame: Sequence[str]) -> None:
         self.edge, self.unit, self.key, self.blame = edge, unit, key, blame
 
 
-def _raised(v: View) -> list[_Raised]:
+def raised_findings(v: View) -> list[Raised]:
     out = []
     for edge in v.of_type("RAISED"):
         keys = [k.to_id.removeprefix("recurrence:") for k in v.out(edge.to_id, "KEYED")]
         blame = v.blame_of(edge.to_id, of="finding") or ["unknown"]
         for key in keys:
-            out.append(_Raised(edge, v.unit_of_round(edge.from_id), key, blame))
+            out.append(Raised(edge, v.unit_of_round(edge.from_id), key, blame))
     return out
 
 
-def _by_key(raised: Iterable[_Raised]) -> dict[str, list[_Raised]]:
-    keys: dict[str, list[_Raised]] = defaultdict(list)
+def by_key(raised: Iterable[Raised]) -> dict[str, list[Raised]]:
+    keys: dict[str, list[Raised]] = defaultdict(list)
     for row in raised:
         keys[row.key].append(row)
     return keys
 
 
-def _per_unit(rows: Sequence[_Raised], value) -> dict[str, int]:
+def _per_unit(rows: Sequence[Raised], value) -> dict[str, int]:
     """For each value, the number of distinct units that have it."""
     seen: dict[str, set[str]] = defaultdict(set)
     for row in rows:
@@ -264,7 +264,7 @@ def _per_unit(rows: Sequence[_Raised], value) -> dict[str, int]:
 
 def _recurring_findings(v: View, floor: int) -> list[str]:
     rows = []
-    for key, found in _by_key(_raised(v)).items():
+    for key, found in by_key(raised_findings(v)).items():
         units = sorted({r.unit for r in found})
         if len(units) >= floor:
             rows.append((key, units, found))
@@ -286,13 +286,13 @@ def _recurring_findings(v: View, floor: int) -> list[str]:
 
 def _gate_candidates(v: View, floor: int) -> list[str]:
     rows: list[tuple[int, str, str]] = []
-    for key, found in _by_key(r for r in _raised(v) if r.edge.attrs.get("source") == "deterministic").items():
+    for key, found in by_key(r for r in raised_findings(v) if r.edge.attrs.get("source") == "deterministic").items():
         units = {r.unit for r in found}
         if len(units) >= floor:
             rounds = len({r.edge.from_id for r in found})
             text = f"finding {display_key(key)}: {n_of(len(units), 'unit')}, {n_of(rounds, 'round')}"
             rows.append((len(units), f"1 {key}", text))
-    for cls, units, found in _failure_rows(v, floor):
+    for cls, units, found in failure_rows(v, floor):
         rows.append(
             (len(units), f"0 {cls}", f"failure class {cls}: {n_of(len(units), 'unit')}, {n_of(len(found), 'attempt')}")
         )
