@@ -1,6 +1,6 @@
 """`l4 setup gitlab` (M1.8 A10, L4-INS-006): the forge side of adoption, in the CLI instead of three scripts.
 
-Reads the project, checks the runner the `l4` job would take, checks the include on the default branch, makes sure the
+Reads the project, checks the runner the `l4` job would take, checks the include on the base branch, makes sure the
 `l4-bot` access token and the masked CI/CD variable `L4_FORGE_TOKEN` (environment scope `l4`) exist, sets `--secret`
 variables, makes sure the `l4 sweep` schedule exists and triggers one pipeline that runs the adoption check on the
 runner. Idempotent: a second run with the same arguments sends only GETs (and the check pipeline). Every line it prints
@@ -85,6 +85,7 @@ class SetupOptions:
     watch: bool = False
     dry_run: bool = False
     verify_base: str = ""
+    base_branch: str | None = None  # `forge.base_branch` of the config; None: the project's default branch (L4-OPS-016)
 
 
 class Emitter:
@@ -154,12 +155,18 @@ class Setup:
         self.values = dict(secret_values or {})  # variable name -> value read from the environment
         self.project: dict[str, Any] = {}
         self._variables: list[dict[str, Any]] | None = None
-        self.include_found = False  # the default branch's .gitlab-ci.yml includes the harness template
+        self.include_found = False  # the base branch's .gitlab-ci.yml includes the harness template
         self.pipeline_id: int | None = None
 
     @property
     def pid(self) -> str:
         return str(self.project["id"])
+
+    def base_ref(self) -> str | None:
+        """The branch the harness job runs on: `forge.base_branch` when the config names one, else the project's default
+        branch. The include, the schedule and the check pipeline belong there: with a separate integration branch (a
+        delivery plan's `staging`, L4-YOLO-007) the default branch has no harness job."""
+        return self.o.base_branch or self.project.get("default_branch") or None
 
     # --- the project ------------------------------------------------------------------------------------------
 
@@ -252,10 +259,10 @@ class Setup:
         untagged = ", runs untagged jobs" if detail.get("run_untagged") else ""
         return (", ".join(tags) or "(none)") + untagged
 
-    # --- the include on the default branch --------------------------------------------------------------------
+    # --- the include on the base branch --------------------------------------------------------------------
 
     def include_check(self) -> None:
-        branch = self.project.get("default_branch")
+        branch = self.base_ref()
         emit = self.emit
         if not branch:
             emit.row("WARN", ".gitlab-ci.yml", "the project has no default branch yet: push your adoption commit first")
@@ -443,14 +450,14 @@ class Setup:
     # --- the sweep schedule ---------------------------------------------------------------------------------
 
     def sweep_schedule(self) -> None:
-        """One schedule, `l4 sweep`, on the default branch (SPEC L4-CI-001, L4-CI-004): the sweeper resumes parked
+        """One schedule, `l4 sweep`, on the base branch (SPEC L4-CI-001, L4-CI-004): the sweeper resumes parked
         units and repairs mirrors on a clock, with no one to push. Created, kept, updated or reactivated; never
         duplicated (it is found by its description)."""
         o, emit = self.o, self.emit
         if not o.schedule:
             emit.row("OK", "schedule l4 sweep", "skipped (--no-schedule)")
             return
-        ref = self.project.get("default_branch") or "main"
+        ref = self.base_ref() or "main"
         found = [
             s
             for s in self.api.get_paged(f"projects/{self.pid}/pipeline_schedules")
@@ -493,12 +500,12 @@ class Setup:
     # --- the adoption check -----------------------------------------------------------------------------------
 
     def check_pipeline(self) -> None:
-        """One pipeline on the default branch with `L4_ADOPTION_CHECK=1`: the template's doctor line then adds
+        """One pipeline on the base branch with `L4_ADOPTION_CHECK=1`: the template's doctor line then adds
         `--adoption`, so GATE-001 runs the gates on the runner and its platform (a laptop cannot see a failure that is
         Linux-only). Triggered after the token exists (the first pipeline is not the red one of CI-001), and not when a
-        row already failed or the include is not on the default branch (there is no `l4` job to check)."""
+        row already failed or the include is not on the base branch (there is no `l4` job to check)."""
         o, emit = self.o, self.emit
-        ref = self.project.get("default_branch")
+        ref = self.base_ref()
         if not o.pipeline:
             emit.row("OK", "pipeline", "skipped (--no-pipeline)")
             return
@@ -506,7 +513,7 @@ class Setup:
             emit.row(
                 "OK",
                 "pipeline",
-                f"(dry run: would trigger one on {ref or 'the default branch'} with {ADOPTION_VARIABLE}=1)",
+                f"(dry run: would trigger one on {ref or 'the base branch'} with {ADOPTION_VARIABLE}=1)",
             )
             return
         if emit.failed:
@@ -514,7 +521,7 @@ class Setup:
             return
         if not ref or not self.include_found:
             emit.row(
-                "WARN", "pipeline", "not triggered: the default branch has no .gitlab-ci.yml that includes the harness"
+                "WARN", "pipeline", "not triggered: the base branch has no .gitlab-ci.yml that includes the harness"
             )
             return
         created = self.api.post(
@@ -752,6 +759,7 @@ def run_setup_gitlab(
         watch,
         dry_run,
         verify,
+        cfg.forge.base_branch if config_file.is_file() else None,
     )
     app.redactor.adopt(
         Redactor({"setup:credential": credential, **{f"setup:{n}": v for n, v in secret_values.items()}})
