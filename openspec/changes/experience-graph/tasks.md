@@ -27,11 +27,11 @@ from this file and design.md; the review in 8.1 is independent. No line edits a 
 
 ## 4. Extraction and blame (wave 2, agent D: `kg/extract.py`, `kg/blame.py`, `tests/unit/kg/test_extract.py`, `test_blame.py`)
 
-- [ ] 4.1 Ledger edges: `HAS_RUN`, `USED_PROFILE{role}` (`availability.selected`), `INJECTED{task, role}` (`prompt.rendered{task, lessons}`, the role from the event), `ATTEMPT_FAILED{task, phase, attempt}` (class from 1.4), `ASKED{kind, answered_by}`, `STOPPED{phase, detail}` (`phase.changed` into `halted`/`escalated`), `RETRIED`, `RESTARTED`, with `src = <sha10>:<path>#<seq>`. (L4-KG-005)
-- [ ] 4.2 `verdict.json` edges: `HAS_ROUND`, `VERDICT`, `RAISED{severity, source, spec_gap}`, `ABOUT`, `IN_CAPABILITY` (OpenSpec: the first part of the alias; Kiro: the unit), `KEYED`, `GATE_FAILED`, with JSON-pointer `src`. The changed files of a round only when both shas are local, else `files_unknown`. Test: SCN-KG-10 resolves every `src` with `git cat-file`. (L4-KG-005)
-- [ ] 4.3 The lesson link by dedupe key only (`LESSON_RULES[key].finding_title` → its recurrence key; `kg-*` → its pattern). The `Source` line is never parsed. Test: SCN-KG-11. (L4-KG-005)
-- [ ] 4.4 `blame.classify` as one pure function with D6's table, first match wins. A table-driven test with one row per rule plus `unknown`. Tests: SCN-KG-14, SCN-KG-15. (L4-KG-007)
-- [ ] 4.5 Redaction: every text field through `app.redactor.redact_text`, then `scrub_for_commit`, before it enters a node or an edge. Test: SCN-KG-22 (the index part). (L4-KG-011)
+- [x] 4.1 Ledger edges: `HAS_RUN`, `USED_PROFILE{role}` (`availability.selected`), `INJECTED{task, role}` (`prompt.rendered{task, lessons}`, the role from the event), `ATTEMPT_FAILED{task, phase, attempt}` (class from 1.4), `ASKED{kind, answered_by}`, `STOPPED{phase, detail}` (`phase.changed` into `halted`/`escalated`), `RETRIED`, `RESTARTED`, with `src = <sha10>:<path>#<seq>`. (L4-KG-005)
+- [x] 4.2 `verdict.json` edges: `HAS_ROUND`, `VERDICT`, `RAISED{severity, source, spec_gap}`, `ABOUT`, `IN_CAPABILITY` (OpenSpec: the first part of the alias; Kiro: the unit), `KEYED`, `GATE_FAILED`, with JSON-pointer `src`. The changed files of a round only when both shas are local, else `files_unknown`. Test: SCN-KG-10 resolves every `src` with `git cat-file`. (L4-KG-005)
+- [x] 4.3 The lesson link by dedupe key only (`LESSON_RULES[key].finding_title` → its recurrence key; `kg-*` → its pattern). The `Source` line is never parsed. Test: SCN-KG-11. (L4-KG-005)
+- [x] 4.4 `blame.classify` as one pure function with D6's table, first match wins. A table-driven test with one row per rule plus `unknown`. Tests: SCN-KG-14, SCN-KG-15. (L4-KG-007)
+- [x] 4.5 Redaction: every text field through `app.redactor.redact_text`, then `scrub_for_commit`, before it enters a node or an edge. Test: SCN-KG-22 (the index part). (L4-KG-011)
 
 ## 5. Report, why, propose (wave 3, agent E: `kg/report.py`, `kg/why.py`, `kg/propose.py`, `tests/unit/kg/test_report.py`, `test_why.py`, `test_propose.py`, `tests/unit/kg/snapshots/`)
 
