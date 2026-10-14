@@ -157,6 +157,17 @@ def admit(
 
     unit_ids = {u.id for u in units}
     batch_ids = {b.id for b in plan.batches}
+    for dup in _duplicates([x.id for x in plan.exclude]):
+        add("duplicate_id", dup, f"unit {dup} is excluded more than once")
+    for excluded in dict.fromkeys(x.id for x in plan.exclude):
+        if excluded in unit_ids:
+            add("excluded_and_planned", excluded, f"unit {excluded} is both planned and excluded")
+        if known_units.get(excluded) is None:
+            add(
+                "unknown_unit",
+                excluded,
+                f"excluded unit {excluded} was not found by a spec provider on the target head",
+            )
     profiles = set(cfg.yolo.profiles)
     for batch in plan.batches:
         for dep in batch.depends_on:

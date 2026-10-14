@@ -459,7 +459,7 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
             ctx.say(error)
         ctx.say(f"{plan_id}: not admitted")
         return ExitCode.USAGE_ERROR
-    units = _read_units(ctx, rev, file.plan.unit_ids(), intake=True)
+    units = _read_units(ctx, rev, file.plan.known_ids(), intake=True)
     admission = admit(file.plan, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id))
     if not admission.ok:
         ctx.say(f"{plan_id}: not admitted ({len(admission.findings)} finding(s))")
@@ -498,7 +498,7 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         raise L4Exit(
             ExitCode.USAGE_ERROR, f"review: {plan_id} is {state.status}: a plan is reviewed before it is activated"
         )
-    units = _read_units(ctx, rev, parsed.unit_ids(), intake=True)
+    units = _read_units(ctx, rev, parsed.known_ids(), intake=True)
     admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
     if not admission.ok:
         lines = _findings_text(admission, plan_id)
@@ -587,7 +587,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"activate: {plan_id} is stopped ({state.stop_reason}): run l4 yolo status {plan_id}, "
             f"then l4 yolo resume {plan_id} --reason TEXT",
         )
-    units = _read_units(ctx, rev, parsed.unit_ids(), intake=True)
+    units = _read_units(ctx, rev, parsed.known_ids(), intake=True)
     admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
     if not admission.ok:
         raise L4Exit(
@@ -782,6 +782,7 @@ def _describe(
                 row["waits"] = waiting[uid]
             rows.append(row)
         out["units"] = rows
+        out["excluded"] = [{"id": x.id, "reason": x.reason} for x in plan.exclude]
         out["batches"] = [
             {
                 "id": b.id, "units": [u.id for u in b.units],
@@ -829,6 +830,7 @@ def _render(d: dict[str, Any]) -> str:
             mark = " (current)" if u["current"] else ""
             wait = f"; {u['waits']}" if u.get("waits") else ""
             lines.append(f"    {u['id']}: {state}{mark}{wait}")
+    lines += [f"  excluded: {x['id']} ({x['reason']})" for x in d.get("excluded", [])]
     multi = [b for b in d.get("batches", []) if len(b["units"]) > 0]
     if multi:
         lines.append("  batches:")
