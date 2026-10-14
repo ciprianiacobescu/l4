@@ -73,7 +73,8 @@ def test_a_still_failing_second_round_escalates_again_and_one_more_extension_giv
     assert resume(tdd_repo, "--extend-fix-rounds", "1") == 0
     again = run_l4([still_bad(2)])
     assert again.code == 13 and again.outcome["units"][0]["phase_after"] == "escalated"
-    assert "fix rounds used 2/2" in again.pushed(f"{UNIT_DIR}/verification.md")
+    # the same finding as the round before, every gate passing: `same_failure` (D7) ends it before the limit would
+    assert "failed the same way as round 3" in again.pushed(f"{UNIT_DIR}/verification.md")
     assert resume(tdd_repo) == 2  # the rounds are used up again, and the extension is not carried over
     assert resume(tdd_repo, "--extend-fix-rounds", "1") == 0
     third = run_l4([chore_fix(), judge()])

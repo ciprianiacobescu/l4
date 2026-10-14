@@ -312,7 +312,8 @@ def test_no_rounds_left_escalates_the_unit_with_exit_13(run_l4, valid_spec, with
 def test_a_second_fail_after_the_only_fix_round_escalates(run_l4, valid_spec, with_verifier):
     with_verifier(max_fix_rounds=1)
     still_bad = chore_fix()
-    still_bad.writes = {"src/pytdd/pricing.py": IMPL + "\nUNUSED = 2  # noqa: E501\n"}
+    # a second, different deterministic finding: the same one twice would be `same_failure` (D7), not the limit
+    still_bad.writes = {"src/pytdd/pricing.py": IMPL + "\nUNUSED = 2  # noqa: E501\nNOSEC = 1  # nosec\n"}
     run = run_l4([red_step(), noqa_green(), still_bad])
     assert run.code == 13
     assert [e["verdict"] for e in run.events("verify.verdict")] == ["FAIL", "FAIL"]
