@@ -64,7 +64,7 @@ from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
 from l4.verifier.notes import escalation_section
 from l4.verifier.provenance import introduction_problem
 from l4.verifier.report import write_round_evidence
-from l4.verifier.types import FixDecision, Verdict, VerifyResult
+from l4.verifier.types import FixDecision, Severity, Verdict, VerifyResult
 
 
 def is_fix_unit(ref: UnitRef) -> bool:
@@ -424,16 +424,21 @@ FIX_ROUNDS_EXHAUSTED, NO_CONVERTIBLE_FINDING, NO_FIX_UNITS = (
 FIX_UNIT_NOT_CREATED, SAME_FAILURE = "fix_unit_not_created", "same_failure"  # `ctx.shared["escalation"]` codes (D5)
 MAX_SAME_DETAIL = 200  # characters of the failure set in the `same_failure` detail
 TEST_GATES = ("test", "e2e")
+_BLOCKING = (Severity.BLOCKER.value, Severity.MAJOR.value)
 _EXIT = re.compile(r"exit code (-?\d+)")
 _RETRY_EVENTS = ("unit.retried", "unit.resumed")  # a person's decision to try again: the next round is judged anew
 
 
-def failure_set(gates: Iterable[Mapping[str, object]], tests: Mapping[str, str]) -> frozenset[str]:
+def failure_set(
+    gates: Iterable[Mapping[str, object]], tests: Mapping[str, str], findings: Iterable[Mapping[str, object]] = ()
+) -> frozenset[str]:
     """What a FAIL round failed on (D7): the name of each failed gate, the failing test ids of a failed test gate, and
     for a failed gate with no failing test the exit code (`<gate>:exit <code>`, else the head of its reason) and the
     digest of its last error lines (`<gate>:log <digest>`, review M5: two lint errors are two failures, the same crash
-    twice is one). Judge findings are not part of it: their wording changes between rounds. `gates` are the
-    `verdict.json` rows."""
+    twice is one). The id of each blocking finding of source `deterministic` (an integrity or ladder blocker: its id
+    comes from its title and criterion, so it is the same in every round) is in it as `finding <id>`: a round that
+    fails on such a finding alone, every gate passing, still has a set. Judge, human and feedback findings are not
+    part of it: their wording changes between rounds. `gates` and `findings` are the `verdict.json` rows."""
     failing = sorted(i for i, status in tests.items() if status in ("failed", "error"))
     found: set[str] = set()
     for row in gates:
@@ -449,6 +454,9 @@ def failure_set(gates: Iterable[Mapping[str, object]], tests: Mapping[str, str])
         found.add(f"{name}:exit {code.group(1)}" if code else f"{name}:{reason.split(';', 1)[0].strip()[:80]}")
         if digest := row.get("digest"):
             found.add(f"{name}:log {digest}")
+    for row in findings:
+        if row.get("source") == "deterministic" and row.get("severity") in _BLOCKING and row.get("id"):
+            found.add(f"finding {row['id']}")
     return frozenset(found)
 
 
@@ -482,11 +490,15 @@ def repeated_failure(unit_dir: Path, git: Git, events: Sequence[LedgerEvent], re
     if found is None:
         return None
     before, data = found
-    gates, tests = data.get("gates"), data.get("tests")
+    gates, tests, earlier = data.get("gates"), data.get("tests"), data.get("findings") or []
     if data.get("verdict") != Verdict.FAIL.value or not isinstance(gates, list) or not isinstance(tests, dict):
         return None
-    now = failure_set((asdict(g) for g in result.gates), result.tests)
-    if not now or now != failure_set((g for g in gates if isinstance(g, dict)), tests):
+    now_findings = ({**asdict(f), "severity": f.severity.value} for f in result.findings)
+    now = failure_set((asdict(g) for g in result.gates), result.tests, now_findings)
+    before_set = failure_set(
+        (g for g in gates if isinstance(g, dict)), tests, (f for f in earlier if isinstance(f, dict))
+    )
+    if not now or now != before_set:
         return None
     head = str(data.get("head_sha") or "")
     if not head or git.run("cat-file", "-e", f"{head}^{{commit}}", check=False).returncode != 0:

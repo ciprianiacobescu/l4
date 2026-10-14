@@ -142,13 +142,18 @@ After a verification round fails, the fix loop compares its failure with the pre
 sorted set of:
 - the failed gate names;
 - for a failed test gate, the failing test ids from its JUnit report;
-- for a gate with no report, the gate name and its exit code.
+- for a gate with no report, the gate name and its exit code;
+- the id of each blocker or major finding that is deterministic (an integrity or ladder finding, source
+  `deterministic` in `verdict.json`). Its id comes from its title and criterion, so it is the same in every round.
+  A round that fails on such a finding alone, with every gate passing, has a set, and the same finding in the next
+  round ends the loop.
 
 The rule:
 - If the set is not empty, equals the previous round's, and no person's commit came between the two rounds, the unit
   escalates with `same_failure`.
 - The detail is `round <n> failed the same way as round <n-1>: <set, cut>`.
-- Judge findings are not part of the set, because their wording changes between rounds.
+- Judge findings (and human and feedback findings) are not part of the set, because their wording changes between
+  rounds.
 
 ### D8. Labels
 
