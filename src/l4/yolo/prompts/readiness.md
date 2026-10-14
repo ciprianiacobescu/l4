@@ -27,7 +27,10 @@ Rules:
 Your final message is the JSON object only, matching the schema you were given.
 
 <!-- material -->
-# Review of {{SUBJECT_KIND}} {{SUBJECT_ID}}
+# Review of {{SUBJECT_KIND}}
+
+## Subject
+{{SUBJECT_ID}}
 
 ## Plan entry
 {{ENTRY}}

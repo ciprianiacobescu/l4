@@ -150,10 +150,10 @@ def test_a_unit_whose_folder_is_missing_is_blocked_without_a_model_call(world):
     assert fake.requests == []
 
 
-def test_a_judge_that_cannot_answer_is_blocked_with_its_reason(world):
-    fake = judge(Step(status="error"))
-    verdict = review(world, plan_of({A: []}), fake).units[A]
-    assert verdict.verdict == "BLOCKED" and verdict.findings[0]["text"].startswith("judge_error: ")
+def test_a_judge_that_cannot_answer_raises_so_no_review_is_recorded(world):
+    """R9 (review #11): a timeout or an error is not a verdict (the old behaviour recorded BLOCKED)."""
+    with pytest.raises(RoleUnavailable, match="judge_error: "):
+        review(world, plan_of({A: []}), judge(Step(status="error")))
 
 
 def test_no_judge_profile_is_role_unavailable(world):
