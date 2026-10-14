@@ -24,6 +24,9 @@ class _Model(BaseModel):
 class TaskProgress(_Model):
     done: list[str] = Field(default_factory=list)  # task keys, sorted
     in_progress: str | None = None
+    # task key -> the criterion ids that a spec edit made stale for it (`tasks.reopened{stale_criteria}`, L4-OPS-015),
+    # until the task is done again
+    stale: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class QuestionState(_Model):
@@ -178,15 +181,26 @@ def _task_done(state: UnitState, event: LedgerEvent) -> None:
         state.tasks.done = sorted({*state.tasks.done, task})
         if state.tasks.in_progress == task:
             state.tasks.in_progress = None
+        state.tasks.stale.pop(task, None)  # the reopened task is green again: its stale tests are replaced
+        parents = event.data.get("parents")
+        for parent in parents if isinstance(parents, list) else ():
+            if isinstance(parent, str):
+                state.tasks.stale.pop(parent, None)
 
 
 def _tasks_reopened(state: UnitState, event: LedgerEvent) -> None:
-    """`tasks.reopened{tasks, requirements}` (L4-OPS-015): a spec edit changed criteria that these Kiro tasks cite, so
-    their boxes are `[ ]` again and they are no longer done."""
+    """`tasks.reopened{tasks, requirements, stale_criteria}` (L4-OPS-015): a spec edit changed criteria that these Kiro
+    tasks cite, so their boxes are `[ ]` again and they are no longer done. The old ids of the changed criteria are
+    kept on each reopened task (`tasks.stale`) until its `task.done`: tests that trace them may be replaced."""
     reopened = event.data.get("tasks")
     if isinstance(reopened, list):
         gone = {t for t in reopened if isinstance(t, str)}
         state.tasks.done = [t for t in state.tasks.done if t not in gone]
+        stale = event.data.get("stale_criteria")
+        if isinstance(stale, list) and stale:
+            ids = [i for i in stale if isinstance(i, str)]
+            for task in sorted(gone):
+                state.tasks.stale[task] = sorted({*state.tasks.stale.get(task, []), *ids})
 
 
 def _question_id(event: LedgerEvent) -> str | None:

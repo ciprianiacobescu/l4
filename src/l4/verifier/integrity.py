@@ -184,11 +184,35 @@ def _by_people(commits_: list[list[str]]) -> bool:
     return bool(commits_) and not any(is_harness(r) for r in commits_)
 
 
+def _superseded(ctx: IntegrityContext) -> list[str]:
+    """The test ids (`classname::name`) of every `tests.superseded` event: stale tests a reopened task's red step
+    replaced (L4-OPS-015). The harness writes them from the base report's traces; an agent cannot add one."""
+    found: list[str] = []
+    for e in ctx.events:
+        if e.type == "tests.superseded" and isinstance(e.data.get("tests"), list):
+            found += [t for t in e.data["tests"] if isinstance(t, str)]
+    return found
+
+
+def _is_superseded(superseded: Sequence[str], path: str, name: str) -> bool:
+    """A recorded id `tests.test_long::test_long` names the function `name` of the module `path` (a parametrised
+    `name[x]` and a class between module and function count; the module must match, so a same-named test elsewhere
+    stays protected)."""
+    module = path.removesuffix(".py").replace("/", ".")
+    for test in superseded:
+        where, _, tail = test.rpartition("::")
+        if tail.split("[", 1)[0] == name and (where == module or where.startswith(f"{module}.")):
+            return True
+    return False
+
+
 def check_tests(ctx: IntegrityContext) -> Outcome:
     """A `test_*` function that exists at the base and is gone at head is a blocker (a test moved to another changed
-    file is not gone); so is a skip, skipif or xfail marker, or a `pytest.skip(` call, that head has and the base
-    did not (new tests included). Per commit (L4-SEC-004, M1.9): one that only people's commits introduced is allowed
-    and listed (`Outcome.human_tests`); any harness commit that introduced it too keeps it a blocker."""
+    file is not gone), unless a `tests.superseded` event records it as stale (a spec edit changed the criterion it
+    traced and the reopened task's red step replaced it, L4-OPS-015: listed in the note); so is a skip, skipif or
+    xfail marker, or a `pytest.skip(` call, that head has and the base did not (new tests included). Per commit
+    (L4-SEC-004, M1.9): one that only people's commits introduced is allowed and listed (`Outcome.human_tests`);
+    any harness commit that introduced it too keeps it a blocker."""
     globs = ctx.cfg.tdd.test_globs
     changed = {p: s for p, s in _changed(ctx.git, ctx.base_sha, ctx.head_sha).items() if p.endswith(".py")}
     files = {p: s for p, s in changed.items() if _matches(globs, p) and not _in_unit_dirs(ctx, p)}
@@ -198,12 +222,16 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
     for path, status in files.items():
         if status != "D":
             head_defined |= scan.defined_tests(_text(ctx.git, ctx.head_sha, path))
-    deleted, skipped, human = [], [], []
+    deleted, skipped, human, replaced = [], [], [], []
+    recorded = _superseded(ctx)
     for path, status in sorted(files.items()):
         before = _text(ctx.git, ctx.base_sha, path)
         after = "" if status == "D" else _text(ctx.git, ctx.head_sha, path)
         for name in sorted(scan.defined_tests(before) - scan.defined_tests(after)):
             if name in head_defined:
+                continue
+            if _is_superseded(recorded, path, name):
+                replaced.append(f"{path}::{name}")
                 continue
             who = _introducers(
                 ctx, path, lambda b, a, n=name: n in scan.defined_tests(b) and n not in scan.defined_tests(a)
@@ -225,6 +253,8 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
     if skipped:
         findings.append(_blocker("a skip or xfail marker was added", _listed(skipped)))
     extra = f" (+{len(human)} by humans, listed)" if human else ""
+    if replaced:
+        extra += f"; superseded by a changed criterion, not deleted: {_listed(replaced)}"
     return Outcome(findings, f"{len(files)} test file(s) compared with the base{extra}", human_tests=human)
 
 

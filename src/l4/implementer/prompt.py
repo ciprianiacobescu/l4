@@ -60,6 +60,10 @@ class PromptContext:
     # How a test names the criteria it checks (`{trace_rule}` in the templates, L4-CRT-002). None: decided from
     # `gate_command` by `trace_rules` (the pytest marker for a pytest gate, else the id in the test name).
     trace_rule: str | None = None
+    # red only (L4-OPS-015): the tests of the base that trace a criterion a spec edit changed, and the changes
+    # (`requirement`, `old_id`, `old_text`, `new_id`, `new_text`); both empty unless the task was reopened by an edit
+    stale_tests: tuple[str, ...] = ()
+    stale_changes: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -178,6 +182,28 @@ def _criteria_section(ctx: PromptContext) -> tuple[str, str]:
     return title, f"# Criteria of this unit\n{lead}\n" + data_block("criteria", listing)
 
 
+def _stale_section(ctx: PromptContext) -> str:
+    """The red step of a reopened task (L4-OPS-015): which tests were written for the old text of a changed
+    criterion, and what the criterion says now."""
+    changes = "\n".join(
+        f"- Requirement {c.get('requirement')}: id {c.get('old_id')} -> "
+        + (f"{c.get('new_id')}" if c.get("new_id") else "(removed)")
+        + f"\n  old text: {c.get('old_text')}\n  new text: {c.get('new_text') or '(removed)'}"
+        for c in ctx.stale_changes
+    )
+    tests = "\n".join(f"- {t}" for t in ctx.stale_tests)
+    return (
+        "# Stale tests\nA spec edit changed the criteria below after these tests were written, so the tests assert "
+        "the OLD text and contradict the new one. They must be replaced, not kept: delete each one, or rewrite it "
+        "under a NEW name for the new criterion id. The harness does not count a stale test that is gone or fails as "
+        "a regression. Your red test for the new id is a new test (a new name) and fails against the current code. "
+        "Every other existing test stays as it is: do not change or delete it.\n"
+        + data_block("changed criteria", changes)
+        + "\n"
+        + data_block("stale tests", tests)
+    )
+
+
 def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     if role not in ("red", "green", "single"):
         raise ValueError(f"no prompt template for role {role!r}")
@@ -205,6 +231,8 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             f"# Tests unfrozen by a human answer\nThe human answer to {by} names these frozen test files, so you may "
             "change them as the answer says; every other test stays frozen.\n" + data_block("unfrozen tests", listing)
         )
+    if role == "red" and ctx.stale_tests:
+        parts.append(_stale_section(ctx))
     rules = _trace_rules(ctx)
     phase_text = phase.body.strip("\n").replace("{result_values}", result_values_line(RESULT_SCHEMA, role))
     fills = (("{trace_rule}", rules.rule), ("{trace_also}", rules.also), ("{trace_form}", rules.form))

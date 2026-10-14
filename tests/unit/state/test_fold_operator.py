@@ -130,6 +130,21 @@ def test_reopened_tasks_are_no_longer_done():
     assert state.tasks.done == ["1.1"]
 
 
+def test_the_stale_ids_stay_on_the_reopened_task_until_it_is_done_again():
+    """L4-OPS-015: `tasks.reopened{stale_criteria}` is kept per task (`tasks.stale`) and cleared by its `task.done`."""
+    rows = [
+        *TO_IMPLEMENTING,
+        ("task.done", {"task": "2.1", "parents": ["2"]}),
+        ("tasks.reopened", {"tasks": ["2.1", "2"], "requirements": ["2.3"], "stale_criteria": ["C-0123abcd", 7]}),
+        ("tasks.reopened", {"tasks": ["2.1"], "requirements": ["2.2"], "stale_criteria": ["C-89abcdef"]}),
+    ]
+    state = fold(events(*rows), "openspec:x")
+    assert state.tasks.stale == {"2.1": ["C-0123abcd", "C-89abcdef"], "2": ["C-0123abcd"]}
+    done = fold(events(*rows, ("task.done", {"task": "2.1", "parents": ["2"]})), "openspec:x")
+    assert done.tasks.stale == {}
+    assert fold(events(*TO_IMPLEMENTING), "openspec:x").tasks.stale == {}  # an OpenSpec unit never has any
+
+
 SEEN = ("spec.edit_seen", {"head": "b" * 40, "base": "a" * 40, "commits": ["c" * 40, "b" * 40]})
 
 
