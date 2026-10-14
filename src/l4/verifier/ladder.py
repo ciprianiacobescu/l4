@@ -259,29 +259,17 @@ def _events(wb: Workbench) -> list[LedgerEvent]:
 
 
 def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
-    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop). The ids of a replaced
-    cycle are not expected any more (L4-OPS-015): those that a `tests.superseded` event lists (stale tests a reopened
-    task's red step replaced, unless a later `task.red_ok` names the id again), and those of a task's earlier red
-    cycles when `tasks.reopened` named the task and a later `task.red_ok` of it followed, unless that red names them
-    again; a task with a `tests.superseded` record has its replaced tests named, so only those go. Any other test that
-    a red added stays expected, so one that vanishes unrecorded is still a blocker."""
+    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop). A test that a
+    `tests.superseded` event lists (a stale test that a reopened task's red step replaced, L4-OPS-015) is not expected
+    any more, unless a later `task.red_ok` names it again. Every other test a red step added stays expected, so one
+    that vanishes without that record is still a blocker, also in a reopened task."""
     found: dict[str, str] = {}
-    recorded = {str(e.data.get("task", "")) for e in events if e.type == "tests.superseded"}
-    reopened: set[str] = set()  # tasks named by `tasks.reopened` since their last red step
     for e in events:
-        task = str(e.data.get("task", ""))
-        if e.type == "tasks.reopened":
-            reopened |= {str(t) for t in e.data.get("tasks") or () if isinstance(t, str)}
-        elif e.type == "tests.superseded":
+        if e.type == "tests.superseded":
             for t in e.data.get("tests") or ():
                 found.pop(str(t), None)
         elif e.type == "task.red_ok":
-            now = {str(t) for t in e.data.get("tests", [])}
-            if task in reopened:
-                reopened.discard(task)
-                for t in [t for t, owner in found.items() if owner == task and t not in now and task not in recorded]:
-                    del found[t]  # the earlier cycle's test, replaced by this red step
-            found.update(dict.fromkeys(now, task))
+            found.update(dict.fromkeys((str(t) for t in e.data.get("tests", [])), str(e.data.get("task", ""))))
     return found
 
 

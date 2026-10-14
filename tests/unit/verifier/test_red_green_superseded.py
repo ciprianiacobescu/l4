@@ -34,14 +34,16 @@ def test_superseded_tests_of_a_reopened_task_are_no_longer_expected():
     assert _red_green(two_cycles()) == {KEPT: "1.1", LOW: "1.1"}
 
 
-def test_the_replaced_cycle_is_dropped_even_without_a_superseded_record():
-    assert _red_green(two_cycles(superseded=False)) == {LOW: "1.1"}
+def test_without_a_superseded_record_the_earlier_cycle_stays_expected():
+    """Only `tests.superseded` releases a test: a reopened task whose red step dropped a test without that record
+    (an unchanged criterion's test, say) keeps it expected, so the gate reports it."""
+    assert _red_green(two_cycles(superseded=False)) == {SOON: "1.1", KEPT: "1.1", LOW: "1.1"}
 
 
-def test_a_test_listed_again_by_the_later_cycle_stays_expected():
-    events = two_cycles(superseded=False)
+def test_a_superseded_test_listed_again_by_the_later_cycle_stays_expected():
+    events = two_cycles()
     events[-1] = ev(5, "task.red_ok", task="1.1", tests=[LOW, SOON])
-    assert set(_red_green(events)) == {LOW, SOON}
+    assert set(_red_green(events)) == {LOW, SOON, KEPT}
 
 
 def test_a_unit_that_was_never_reopened_expects_every_red_test():
