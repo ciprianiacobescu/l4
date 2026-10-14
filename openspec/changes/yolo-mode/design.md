@@ -275,9 +275,16 @@ process in the CI job, after the agents of the run have exited.
 @dataclass(frozen=True) class YoloStep: allow: frozenset[str] | None; actions: tuple[str, ...]; start_next_run: bool
 ```
 
-- `allow` is `None` when no plan is active on the target (nothing changes), else the set of unit ids `l4 run` may
-  dispatch in this run (empty, or the one eligible unit). Units outside the plan are not dispatched; the sweep in
+- `allow` is `None` when no plan file is on the target (nothing changes), else the set of unit ids `l4 run` may
+  dispatch in this run. A unit listed in a plan file on the target is **held by that plan**: only the plan's own step
+  dispatches it, and only while the plan is active and the unit is eligible. Until then it waits with the reason
+  `held by plan <id> (<status>)`, whatever the plan's status (new, refused, reviewed, stopped, cancelled). This lets a
+  person push the specs and the plan in one commit without the units starting on their own. To release a unit, remove
+  it from the plan file (a plan change, so a new review). While a plan is active, units outside every plan get no new
+  agent work either (`not in the active plan <id>`); with no active plan they run as today. The sweep in
   `l4 plan --sweep` still observes every unit (merges, closed PRs, labels, CI duty).
+- Admission needs the intake result of units that have not run yet: the step uses the providers' side-effect-free
+  validation (the checks `orchestrator._validate_kiro` and `_lint_scenarios` run, without writing a ledger).
 - Per run, the step does the first of these that applies, then returns:
   1. For each plan file without a current review: admit, then review it (`plan.admitted`/`plan.refused`,
      `plan.reviewed`). One plan per run.

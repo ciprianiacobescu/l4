@@ -160,8 +160,14 @@ profile with no gate to run MUST be an error, never a pass. A failure MUST stop 
 A plan unit SHALL be dispatched only when every unit it depends on, directly or through a batch prerequisite, is
 integrated, and every prerequisite batch is accepted. A unit's branch MUST NOT exist before that. `l4 run --unit U` MUST
 obey the same rule: a plan unit that is not eligible, or a unit outside an active plan, exits 13 before the lease, with
-the reason, and writes nothing. While a plan is active, units outside it MUST get no new agent work; the sweep MUST still
-observe them.
+the reason, and writes nothing. A unit listed in a plan file on the target MUST be dispatched only by that plan's step,
+while the plan is active; in every other plan status it waits with `held by plan <id> (<status>)`. While a plan is
+active, units outside every plan MUST get no new agent work. The sweep MUST still observe every unit.
+
+#### Scenario: SCN-YOLO-30 (−) Specs pushed with their plan do not start on their own
+- **GIVEN** one commit on the target that adds the unit folders of `a` and `b` and a plan that lists them, not yet activated
+- **WHEN** the CI run for that push happens
+- **THEN** the plan is admitted and reviewed, no branch of `a` or `b` is created, and `l4 plan` shows both as `held by plan p1 (reviewed)`
 
 #### Scenario: SCN-YOLO-20 (+) B starts only after A is integrated
 - **GIVEN** an active plan with `b` depending on `a`, and `a` merged but its post-merge check not yet run
