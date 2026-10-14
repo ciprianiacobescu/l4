@@ -24,6 +24,7 @@ Other documents:
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
 11. [Known limits of 0.3.0](#11-known-limits-of-030)
+13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
 ## Words used in this runbook
 
@@ -1292,3 +1293,120 @@ These limits make operation more difficult. Know them before you start.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and
   `budgets.same_error_repeats` are in the config, but no breaker uses them.
 - The commands and options of [10.4](#104-commands-for-operation) that are not available.
+
+<!-- Section 12 is not on this branch. The change yolo-mode adds it on another branch. This section is numbered 13 to avoid a merge conflict. -->
+
+## 13. Reading the history (`l4 kg`)
+
+The `l4 kg` commands let you read the history of all units of one repository. You start them by hand. No run, no
+sweep and no agent starts them. They never change a unit. They never call a model, a forge or the network.
+
+Use them to find mistakes that repeat across units, to see what followed a lesson, and to choose between `l4 retry`
+and `l4 restart`. The numbers are small in most repositories. Each line of a report shows its *n*. Read the *n*
+before you act on a number.
+
+### 13.1 What each command does
+
+| Command | What it does |
+|---|---|
+| `l4 kg build` | Builds the index of the history. It prints what it read and what it skipped. |
+| `l4 kg report [--out <path>] [--min-units <n>]` | Prints a markdown report. It builds the index first when the index is missing or old. `--min-units` is the least number of units for a repeated pattern. The default is 2. |
+| `l4 kg why <id>` | Explains one record. For a unit, it prints the timeline of the unit. For `F-<8 hex>`, `L-<8 hex>`, a run id or `<unit>#Q-<n>`, it prints the records next to it. An unknown id stops with exit 2 and lists the forms that work. |
+| `l4 kg propose [--min-units <n>] [--dry-run]` | Writes a draft lesson to the inbox for each repeated pattern that no lesson covers. A person finishes the draft. |
+
+The report has these sections, in this order: coverage, lessons, repeated attempt failures, repeated findings, gate
+candidates, spec-gap hotspots, profiles by role, and stops. An empty section says `none (n = 0)`. A section that
+matches records by their text says `approximate`.
+
+The lesson section shows what followed a lesson. It does not show what the lesson caused.
+
+### 13.2 What the commands read
+
+The commands read only objects that are committed in git:
+
+- the base branch, which includes the OpenSpec archive and the Kiro specs;
+- the unit branches `origin/<branch prefix><framework>/<name>`;
+- the lock refs, which hold the ledger lines that are not pushed yet;
+- the local refs `refs/l4/attempts/<framework>/<name>/<n>`, which hold the old attempts of a restarted unit;
+- the lessons file and its `_archive/` folder.
+
+The commands never run `git fetch`. They never write a ref, the git index or a tracked file. An input that is corrupt,
+too large or not a regular file is skipped. The coverage section counts each skip by its reason.
+
+### 13.3 Where the index is
+
+The index is a set of three files. It is not in the repository.
+
+1. Find the cache root. It is `$L4_CACHE`, and the default is `~/.cache/l4/`.
+2. Open the folder `kg/<key>/` in the cache root. The key is 16 hex digits of the hash of the path of the repository.
+3. Read `manifest.json` for the refs that the build read, the counts and the skips.
+
+Each repository has its own folder. A command never reads the index of another repository.
+
+> **NOTE:** If `L4_CACHE` points inside the repository, the command stops with exit 2. Set `L4_CACHE` to a folder
+> outside the repository.
+
+You can delete the folder at any time. The next `l4 kg report` builds the index again. The same refs give the same
+files. If a build fails, it leaves the last complete index as it was.
+
+### 13.4 Fetch the old attempts of a restarted unit
+
+The report cannot read an attempt that is not on your computer. The coverage section counts it as
+`attempt_not_local`, and prints the command that fetches it.
+
+1. Run `git fetch origin 'refs/l4/attempts/*:refs/l4/attempts/*'`.
+2. Run `l4 kg report` again.
+3. Make sure that the coverage section no longer shows `attempt_not_local`.
+
+### 13.5 Save a report
+
+By default, the report goes to the terminal.
+
+1. Run `l4 kg report --out .l4-out/kg/report.md`.
+2. Open the file.
+
+> **CAUTION:** `--out` inside the repository must name a path that git ignores. Otherwise the command stops with exit 2
+> and writes nothing. The folder `.l4-out/` is ignored. A path outside the repository also works.
+
+### 13.6 Promote a draft to a lesson
+
+`l4 kg propose` writes a draft. It does not write a lesson. It does not stage or commit. It writes two files to
+`.serena/memories/inbox/kg-<date>/`: the draft `<L-id>.md` and the evidence `<L-id>.evidence.md`. A draft quotes only
+failure classes, titles of deterministic findings, gate names, rule names and globs. It never quotes a judge finding,
+a question, an answer or the output of an agent.
+
+If git does not ignore the inbox folder, the command prints a warning. Add the folder to `.gitignore`.
+
+1. Run `l4 kg propose --dry-run`. Read the list of drafts that the command would write.
+2. Run `l4 kg propose`.
+3. Open the draft and the evidence file.
+4. Replace the line that starts with `TODO(person):` with your advice for the agent.
+5. Change the scope globs if the scope is too wide.
+6. Switch to `<base>`. Do not use a unit branch.
+7. Run `l4 lessons promote <L-id>`. Read the lesson and its scope. Answer the question.
+8. Make sure that the output shows the commit `chore(memory): lesson <L-id> promoted [skip ci]`.
+9. Push the commit.
+
+The command refuses with exit 2, and writes nothing, in these cases:
+
+- The draft still has its `TODO(person):` line, or the body is empty.
+- The draft is not one valid lesson, or its id does not match its dedupe key.
+- HEAD is detached, or HEAD is on a branch under `forge.branch_prefix`. A commit to `.serena/memories/harness/` on a
+  unit branch is a protected-path blocker. Promote on `<base>`.
+- A file is staged, or the lessons file has changes that you did not commit.
+- `memory.enabled` is `false`.
+- There is no terminal and you did not use `--yes`.
+
+Use `--from <dir>` when two inbox folders hold the same id. Use `--no-commit` to write the lesson and to keep the draft.
+The command then prints the two git lines that finish the work.
+
+The harness injects the lesson into a later task when the paths of the task match the scope of the lesson. A lesson
+with no scope goes to every task.
+
+### 13.7 Where a report may be saved
+
+> **WARNING:** A report from a client repository must never go into the `docs/live/` folder of the harness. It holds
+> the text of the client's units.
+
+A report from a test repository can go into `docs/live/` after one check. Run `scripts/dev/scrub.py check`. Save the
+report only when the check is clean.

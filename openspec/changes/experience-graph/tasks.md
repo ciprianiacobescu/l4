@@ -50,7 +50,7 @@ from this file and design.md; the review in 8.1 is independent. No line edits a 
 
 ## 7. Docs and SPEC (wave 4; 7.1 lands in the same commit as 6.2, because `tests/unit/test_spec_commands.py` needs a SPEC 2.1 row for every handler)
 
-- [ ] 7.1 SPEC:
+- [x] 7.1 SPEC:
   - four rows in 2.1 (`l4 kg build`, `l4 kg report [--out PATH] [--min-units N]`, `l4 kg why ID`, `l4 kg propose [--min-units N] [--dry-run]`), each with its side effects (cache-root index; inbox files);
   - the `l4 lessons [list|lint|promote ID]` row gets `[--from DIR] [--yes] [--no-commit]`;
   - a new §13.1 "Experience graph (manual)" with L4-KG-001..014;
@@ -59,8 +59,8 @@ from this file and design.md; the review in 8.1 is independent. No line edits a 
   - delivery row 20 `experience-graph`.
 
   `python3 scripts/check_spec.py docs/SPEC.md` reports nothing uncovered or undefined.
-- [ ] 7.2 `docs/runbook.md`: a section "Reading the history (`l4 kg`)", with what each command reads, where the index lives, how to fetch the attempts refs, how to promote a draft, and the rule that a report from a client repository never goes into the harness's `docs/live/`, and one from a test repository only after `scripts/dev/scrub.py check`. ASD-STE100.
-- [ ] 7.3 README: the feature state (manual, report only, n is small today). `openspec/changes/memory-lessons/tasks.md` 3.8 is marked done with a pointer to this change.
+- [x] 7.2 `docs/runbook.md`: a section "Reading the history (`l4 kg`)", with what each command reads, where the index lives, how to fetch the attempts refs, how to promote a draft, and the rule that a report from a client repository never goes into the harness's `docs/live/`, and one from a test repository only after `scripts/dev/scrub.py check`. ASD-STE100.
+- [x] 7.3 README: the feature state (manual, report only, n is small today). `openspec/changes/memory-lessons/tasks.md` 3.8 is marked done with a pointer to this change.
 
 ## 8. Review and live validation
 
