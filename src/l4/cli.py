@@ -151,7 +151,28 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "feedback submit": (feedback_help.SUBMIT_HELP, lambda: [click.Argument(["item"]), _unit()]),
     "feedback withdraw": (feedback_help.WITHDRAW_HELP, lambda: [click.Argument(["item"]), _unit()]),
-    "lessons": ("Inspect and curate lessons.", lambda: [click.Argument(["words"], nargs=-1)]),
+    "lessons": ("Inspect and curate lessons; `promote ID` moves an inbox proposal into lessons.md.", lambda: [
+        click.Argument(["words"], nargs=-1),
+        _opt("--from", "from_dir", type=click.Path(path_type=Path),
+             help="promote: the inbox folder to read the proposal from (needed when two folders hold it)."),
+        _flag("--yes", "yes", help="promote: do not ask (required when there is no terminal)."),
+        _flag("--no-commit", "no_commit", help="promote: write lessons.md and keep the proposal; do not commit."),
+    ]),
+    "kg build": ("Build the experience index of this repository (manual; reads committed records only).", lambda: []),
+    "kg report": ("Report what keeps failing, across units, from the experience index.", lambda: [
+        _opt("--out", "out", type=click.Path(path_type=Path),
+             help="Write the report to this file. Inside the repository it must be git-ignored."),
+        _opt("--min-units", "min_units", type=int, default=2, show_default=True,
+             help="A pattern needs at least this many units."),
+    ]),
+    "kg why": ("Explain one unit, finding, lesson, run or question from the experience index.", lambda: [
+        click.Argument(["id"]),
+    ]),
+    "kg propose": ("Write draft lessons for a person into the inbox; it never writes a lesson.", lambda: [
+        _opt("--min-units", "min_units", type=int, default=2, show_default=True,
+             help="A pattern needs at least this many units."),
+        _flag("--dry-run", "dry_run", help="Print the drafts instead of writing them."),
+    ]),
     "s1": ("S1 data set: export, canary, score, report, audit (M1.6).", lambda: [
         click.Argument(["words"], nargs=-1),
         _opt("--out", "out", type=click.Path(path_type=Path)),
@@ -340,6 +361,7 @@ _GROUPS = {
     "ci": click.Group("ci", help="CI helpers."),
     "setup": click.Group("setup", help="Forge setup."),
     "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
+    "kg": click.Group("kg", help="Read the recorded history across units (manual; nothing reaches an agent)."),
 }
 for _group in _GROUPS.values():
     cli.add_command(_group)

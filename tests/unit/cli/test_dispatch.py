@@ -13,6 +13,7 @@ SECTION_2_1 = {
     "simulate", "unlock", "resume", "retry", "restart", "ci render", "ci render-child", "ci map-exit", "upgrade",
     "setup gitlab", "setup github", "ci watch", "eval", "ci cache-key", "ci render-setup",
     "feedback add", "feedback list", "feedback show", "feedback submit", "feedback withdraw",
+    "kg build", "kg report", "kg why", "kg propose",
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
@@ -48,6 +49,10 @@ ARGV = {
     "feedback show": ["feedback", "show", "FB-001"],
     "feedback submit": ["feedback", "submit", "FB-001"],
     "feedback withdraw": ["feedback", "withdraw", "FB-001"],
+    "kg build": ["kg", "build"],
+    "kg report": ["kg", "report"],
+    "kg why": ["kg", "why", "openspec:a"],
+    "kg propose": ["kg", "propose"],
     "s1": ["s1", "export"],
     "eval": ["eval", "--dry-run", "--judge", "j"],
 }
