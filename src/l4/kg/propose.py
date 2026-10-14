@@ -177,8 +177,12 @@ def _finding_patterns(v: View, floor: int, clean) -> list[_Pattern]:
         units = {r.unit for r in found}
         if len(units) < floor:
             continue
-        titles = sorted({str(v.attr(r.edge.to_id, "title") or "") for r in found} - {""})
-        title = clean(titles[0] if titles else display_key(key))
+        rule_keys = tuple(
+            k for k, rule in LESSON_RULES.items() if norm(rule.finding_title) == key.split(KEY_SEPARATOR)[0]
+        )
+        # never a title the agent could shape (a finding title can quote a path the agent chose): the harness's own
+        # rule title, else the normalised recurrence key (review #5)
+        title = clean(LESSON_RULES[rule_keys[0]].finding_title if rule_keys else display_key(key))
         rounds = {r.edge.from_id for r in found}
         files: set[str] = set()
         for round_id in rounds:
@@ -189,9 +193,6 @@ def _finding_patterns(v: View, floor: int, clean) -> list[_Pattern]:
         ]
         sentence = (
             f'The deterministic finding "{title}" was raised in {len(units)} separate units, in {len(rounds)} rounds.'
-        )
-        rule_keys = tuple(
-            k for k, rule in LESSON_RULES.items() if norm(rule.finding_title) == key.split(KEY_SEPARATOR)[0]
         )
         patterns.append(
             _Pattern(

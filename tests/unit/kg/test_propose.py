@@ -166,7 +166,7 @@ def test_a_recurring_deterministic_finding_becomes_a_draft(kg_repo):
     (draft,) = drafts(run_propose(kg_repo))
     key = "tests not collected individually | cart › shows count"
     assert draft.kind == "b" and draft.dedupe_key == f"kg-b-{slug(key)}"
-    assert draft.title == "Recurring finding: Tests not collected individually"
+    assert draft.title == f"Recurring finding: {key}"  # the normalised key, never an agent-chosen path (review #5)
     evidence = (kg_repo.root / draft.evidence_path).read_text(encoding="utf-8")
     assert "verdict.json#/findings/0" in evidence
 

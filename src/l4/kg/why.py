@@ -117,7 +117,7 @@ def _round_label(v: View, round_id: str) -> str:
 def _round_line(v: View, edge: Edge) -> _Line:
     blame: Counter[str] = Counter()
     for raised in v.out(edge.to_id, "RAISED"):
-        for value in v.blame_of(raised.to_id, of="finding") or ["unknown"]:
+        for value in v.blame_of(raised.to_id, of="finding", src=raised.src) or ["unknown"]:
             blame[value] += 1
     findings = f"findings by blame {count_lines(blame)}" if blame else "no findings (n = 0)"
     gates = sorted({g.to_id.removeprefix("gate:") for g in v.out(edge.to_id, "GATE_FAILED")})

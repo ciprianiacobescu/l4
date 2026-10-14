@@ -225,8 +225,9 @@ another repository, or combine repositories.
 `LESSON_RULES` rule covers yet, `.serena/memories/inbox/kg-<YYYY-MM-DD>/<L-id>.md` and `<L-id>.evidence.md`.
 - **The draft** is a lessons v1 file with one section, where the id is `lesson_id(dedupe key)`. Its body ends with a
   `TODO(person):` line.
-- **Allowed text:** a draft MAY quote only failure classes, deterministic finding titles, gate names, guard rule names
-  and globs. It MUST NOT quote a judge finding, a question, an answer or an agent's output.
+- **Allowed text:** a draft MAY quote only failure classes, deterministic finding titles in their normalised form (the
+  recurrence key, where a path is `<path>`, because a deterministic title can quote a path an agent chose), gate
+  names, guard rule names and globs. It MUST NOT quote a judge finding, a question, an answer or an agent's output.
 - **What it must not touch:** the command MUST NOT write `lessons.md`, stage, or commit.
 - **Ignore warning:** it MUST warn when git does not ignore the inbox folder.
 

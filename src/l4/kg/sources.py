@@ -411,13 +411,19 @@ def ref_shas(git: Git, cfg: L4Config) -> dict[str, str]:
     if sha is not None:
         refs[name] = sha
     prefix = f"refs/remotes/{REMOTE}/{cfg.forge.branch_prefix}"
+    # `for-each-ref` matches a pattern up to a slash, and `*` does not cross one: a prefix such as `l4-` (the config
+    # allows it) names no folder, so every `origin` ref is listed and the prefix is applied here (review #9)
+    pattern = prefix if prefix.endswith("/") else f"refs/remotes/{REMOTE}/"
     out = git.run(
-        "for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", prefix, "refs/l4/locks/", "refs/l4/attempts/"
+        "for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", pattern, "refs/l4/locks/", "refs/l4/attempts/"
     ).stdout
     for line in out.splitlines():
         parts = line.split(" ")
-        if len(parts) == 3 and parts[2] == "commit":
-            refs[parts[0]] = parts[1]
+        if len(parts) != 3 or parts[2] != "commit":
+            continue
+        if parts[0].startswith(f"refs/remotes/{REMOTE}/") and not parts[0].startswith(prefix):
+            continue  # not a unit branch (the base ref is in `refs` already)
+        refs[parts[0]] = parts[1]
     return dict(sorted(refs.items()))
 
 

@@ -308,7 +308,9 @@ output.
 
   A second file, `<L-id>.evidence.md`, lists the units, runs, rounds and `src` pointers. `promote` never reads it.
 - **Only harness-owned strings.** A proposal quotes only failure classes (the harness's own reason templates, after
-  `norm`), deterministic finding titles, gate names, guard rule names and globs. A judge finding, a question's text,
+  `norm`), deterministic finding titles in their normalised form (the recurrence key: a title can quote a path an agent
+  chose, and `norm` turns it into `<path>`; a `LESSON_RULES` title is the harness's own), gate names, guard rule names
+  and globs. A judge finding, a question's text,
   an answer and an agent's output are never quoted. The person writes the advice.
 - **It writes nothing else.** It does not stage, commit or touch `lessons.md`. A run on the same day with the same
   index rewrites the same bytes. `--dry-run` prints the files instead of writing them.
