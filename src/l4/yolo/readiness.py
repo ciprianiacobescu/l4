@@ -10,11 +10,17 @@ allows no tool at all (stricter than read-only): everything the judge may see is
 blocks, and the process runs in an empty scratch folder outside the repository, in the agent sandbox. There is no
 implementer to be independent of, so the independence rule of the verifier does not apply.
 
-Two rules decide the verdict whatever the model says: an empty, unparsable or schema-invalid answer is BLOCKED with a
-finding `{criterion: "schema", severity: "blocking", text: "schema_invalid: ..."}`, and a blocking finding makes the
-verdict at least NEEDS_REVISION. Structural validity alone never makes a verdict READY. A usage limit is not a verdict:
-`RoleLimit` is raised (and `RoleUnavailable` when no judge profile can serve), so the caller can wait, never record a
-review that did not happen.
+Rules decide the verdict whatever the model says: an empty, unparsable or schema-invalid answer is BLOCKED with a
+finding `{criterion: "schema", severity: "blocking", text: "schema_invalid: ..."}`, a blocking finding makes the
+verdict at least NEEDS_REVISION, and material the size limits cut makes it at least NEEDS_REVISION with a finding that
+names what was left out (R9), because the digest freezes content the judge never saw. Structural validity alone never
+makes a verdict READY. A usage limit, a timeout and an error of the judge are not verdicts: `RoleLimit` or
+`JudgeFailed` is raised (and `RoleUnavailable` when no judge profile can serve), so the caller can wait and nothing is
+recorded for a review that did not happen (R9).
+
+A unit is read on the revision its digest is taken on (`digest.current_unit_ref`, R3): its branch on `origin` when it
+has one, else the target. File names, unit ids, batch ids and the plan's own words reach the prompt only inside
+`<l4:data>` blocks, defused (R9); the `source` label of a block is escaped too.
 """
 
 import json
@@ -29,10 +35,11 @@ from typing import Any
 from l4.agents.base import AgentAdapter, PermissionPolicy, ProbeCtx, RunRequest
 from l4.agents.factory import Factory, Selected
 from l4.availability.cooldown import AvailabilityStore, SystemClock
+from l4.availability.errors import RoleUnavailable
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.context import AppContext
-from l4.implementer.prompt import data_block
+from l4.implementer.prompt import data_block, defuse
 from l4.implementer.tdd import RoleLimit
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, Msg, StructuredResult
 from l4.proc import run_process
@@ -41,6 +48,7 @@ from l4.sandbox.env import build_agent_env
 from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
+from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
 from l4.yolo.model import Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
@@ -52,11 +60,19 @@ MAX_FOLDER_CHARS = 80_000
 MAX_DEPENDENCY_CHARS = 20_000
 MAX_PROBLEM_CHARS = 800
 MATERIAL_MARK = "<!-- material -->"
-EXCLUDED_NAMES = frozenset({"verification.md", "questions.md", "feedback.md"})  # the harness's or a person's input (D3)
 ROLE = "judges"
 SCRATCH = "yolo"
 
 DigestOf = Callable[[Git, str, str], str]  # (git, rev, unit folder) -> the unit digest (`l4.yolo.digest.unit_digest`)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]")
+
+
+class JudgeFailed(RoleUnavailable):
+    """The judge timed out or failed (R9). Not a verdict: nothing is recorded and the next run tries again. A
+    `RoleUnavailable`, so a caller that waits for a judge to be available waits for this too."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(ROLE, f"judge_error: {detail}")
 
 
 def _load_schema() -> dict[str, Any]:
@@ -84,48 +100,76 @@ def _fill(template: str, values: Mapping[str, str]) -> str:
 
 
 @dataclass(frozen=True)
+class Omission:
+    """A file the prompt does not show at all. `size_limit` tells a file left out for the size limits (R9: the review
+    cannot be READY) from one that cannot be shown to a text judge (a binary file)."""
+
+    path: str
+    reason: str
+    size_limit: bool = False
+
+
+@dataclass(frozen=True)
 class FolderText:
     path: str
-    files: tuple[tuple[str, str], ...]  # (repository path, text), sorted
-    omitted: tuple[str, ...] = ()  # what the prompt does not show, and why
+    files: tuple[tuple[str, str], ...]  # (repository path, text), sorted; a cut file is shown up to its limit
+    omitted: tuple[Omission, ...] = ()  # files the prompt does not show, and why
+    cut: tuple[tuple[str, int], ...] = ()  # (repository path, characters left out) of files shown in part
 
     @property
     def empty(self) -> bool:
         return not self.files and not self.omitted
 
+    @property
+    def left_out(self) -> tuple[str, ...]:
+        """What the size limits kept from the judge, one line each (R9)."""
+        cut = [f"{json.dumps(path)}: {n} characters cut at the size limit" for path, n in self.cut]
+        return tuple(cut + [f"{json.dumps(o.path)}: {o.reason}" for o in self.omitted if o.size_limit])
+
+    @property
+    def binary(self) -> tuple[str, ...]:
+        return tuple(o.path for o in self.omitted if not o.size_limit)
+
 
 def read_folder(git: Git, rev: str, folder: str, *, budget: int) -> FolderText:
     """The files of `folder` at `rev`, without what the harness writes (`.l4/**`, `verification.md`, `questions.md`,
-    `feedback.md`) and without binary files; each file and the folder are cut at a bounded number of characters."""
+    `feedback.md`, at any depth, `digest.is_excluded`) and without binary files; each file and the folder are cut at a
+    bounded number of characters, and what was cut is recorded in `cut` and `omitted`."""
     root = folder.strip("/")
     listing = git.run_bytes("ls-tree", "-r", "-z", "--name-only", rev, "--", root + "/", check=False)
     files: list[tuple[str, str]] = []
-    omitted: list[str] = []
+    omitted: list[Omission] = []
+    cut: list[tuple[str, int]] = []
     left = budget
     for raw in sorted(p for p in listing.split(b"\0") if p):
         path = raw.decode("utf-8", "replace")
-        relative = PurePosixPath(path).relative_to(root).parts
-        if relative[0] == ".l4" or (len(relative) == 1 and relative[0] in EXCLUDED_NAMES):
+        if is_excluded(PurePosixPath(path).relative_to(root).parts):
             continue
         data = git.run_bytes("show", f"{rev}:{path}", check=False)
         if b"\0" in data:
-            omitted.append(f"{path}: binary file")
+            omitted.append(Omission(path, "binary file"))
             continue
         text = data.decode("utf-8", "replace")
         shown = text[: min(MAX_FILE_CHARS, max(left, 0))]
         if len(shown) < len(text):
-            shown += f"\n[cut: {len(text) - len(shown)} characters omitted]"
             if left <= 0:
-                omitted.append(f"{path}: over the size limit of the folder")
+                omitted.append(Omission(path, f"over the size limit of the folder ({len(text)} characters)", True))
                 continue
+            cut.append((path, len(text) - len(shown)))
+            shown += f"\n[cut: {len(text) - len(shown)} characters omitted]"
         left -= len(shown)
         files.append((path, shown))
-    return FolderText(root, tuple(files), tuple(omitted))
+    return FolderText(root, tuple(files), tuple(omitted), tuple(cut))
+
+
+def _label(text: str) -> str:
+    """A `source` label for a data block: control characters escaped and tag openers defused (a path may hold both)."""
+    return defuse(_CONTROL.sub(lambda m: m.group().encode("unicode_escape").decode("ascii"), text))
 
 
 def _folder_blocks(folder: FolderText) -> str:
-    blocks = [data_block(path, text) for path, text in folder.files]
-    blocks += [f"(not shown: {note})" for note in folder.omitted]
+    blocks = [data_block(_label(path), text) for path, text in folder.files]
+    blocks += [data_block("not shown", _label(f"{o.path}: {o.reason}")) for o in folder.omitted]
     return "\n\n".join(blocks) or "(the folder has no files)"
 
 
@@ -135,11 +179,18 @@ def _entry(model: Any) -> str:
 
 @dataclass(frozen=True)
 class Subject:
-    """One thing to review: its id, its prompt, and (for a unit) the folder that its digest is taken of."""
+    """One thing to review: its id, its prompt, and what the prompt does not show (R9): `left_out` is what the size
+    limits cut (the verdict cannot be READY), `not_shown` the binary files (listed in the verdict's `missing`)."""
 
     kind: str  # "unit" | "batch"
     id: str
     user: str
+    left_out: tuple[str, ...] = ()
+    not_shown: tuple[str, ...] = ()
+
+
+def _batch_deps(ids: Sequence[str]) -> str:
+    return data_block("batch prerequisites", "\n".join(f"- batch {b}" for b in ids)) if ids else ""
 
 
 def _unit_subject(
@@ -148,32 +199,41 @@ def _unit_subject(
     prerequisites = []
     for dep, dep_folder in deps:
         shown = _folder_blocks(dep_folder) if dep_folder is not None else "(its folder is not known)"
-        prerequisites.append(f"### {dep}" + (f" ({dep_folder.path})" if dep_folder else "") + f"\n{shown}")
-    batch_deps = [f"- batch {b}" for b in batch.depends_on]
-    entry = (
-        data_block("plan entry", _entry(unit)) + f"\n(in batch {batch.id}; plan {plan.plan_id}, target {plan.target})"
-    )
+        head = data_block("prerequisite", _label(dep + (f" ({dep_folder.path})" if dep_folder else "")))
+        prerequisites.append(f"{head}\n{shown}")
+    context = data_block("context", _label(f"in batch {batch.id}; plan {plan.plan_id}, target {plan.target}"))
     values = {
         "SUBJECT_KIND": "unit",
-        "SUBJECT_ID": unit.id,
-        "ENTRY": entry,
-        "DEPENDENCIES": "\n\n".join([*prerequisites, *batch_deps]) or "(none: the unit depends on nothing)",
-        "FOLDERS": f"### {unit.id} ({folder.path})\n{_folder_blocks(folder)}",
+        "SUBJECT_ID": data_block("subject", _label(unit.id)),
+        "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context,
+        "DEPENDENCIES": "\n\n".join([*prerequisites, _batch_deps(batch.depends_on)]).strip()
+        or "(none: the unit depends on nothing)",
+        "FOLDERS": data_block("folder", _label(f"{unit.id} ({folder.path})")) + "\n" + _folder_blocks(folder),
     }
-    return Subject("unit", unit.id, _fill(MATERIAL_TEMPLATE, values))
+    parts = [(unit.id, folder), *((d, f) for d, f in deps if f is not None)]
+    left_out = tuple(f"{_named(who)} {line}" for who, f in parts for line in f.left_out)
+    return Subject("unit", unit.id, _fill(MATERIAL_TEMPLATE, values), left_out, folder.binary)
+
+
+def _named(unit_id: str) -> str:
+    return json.dumps(unit_id) + ","
 
 
 def _batch_subject(plan: Plan, batch: PlanBatch, folders: Mapping[str, FolderText]) -> Subject:
+    context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
     values = {
         "SUBJECT_KIND": "batch",
-        "SUBJECT_ID": batch.id,
-        "ENTRY": data_block("plan entry", _entry(batch)) + f"\n(plan {plan.plan_id}, target {plan.target})",
-        "DEPENDENCIES": "\n".join(f"- batch {b}" for b in batch.depends_on) or "(none: the batch depends on nothing)",
+        "SUBJECT_ID": data_block("subject", _label(batch.id)),
+        "ENTRY": data_block("plan entry", _entry(batch)) + "\n" + context,
+        "DEPENDENCIES": _batch_deps(batch.depends_on) or "(none: the batch depends on nothing)",
         "FOLDERS": "\n\n".join(
-            f"### {u.id} ({folders[u.id].path})\n{_folder_blocks(folders[u.id])}" for u in batch.units
+            data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
+            for u in batch.units
         ),
     }
-    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values))
+    left_out = tuple(f"{_named(u.id)} {line}" for u in batch.units for line in folders[u.id].left_out)
+    not_shown = tuple(p for u in batch.units for p in folders[u.id].binary)
+    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown)
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------
@@ -205,6 +265,22 @@ def verdict_of(answer: Any, *, digest: str | None = None) -> Verdict:
 
 def _with_digest(verdict: Verdict, digest: str | None) -> Verdict:
     return Verdict(verdict.verdict, verdict.findings, verdict.assumptions, verdict.missing, digest)
+
+
+def _amend(verdict: Verdict, subject: Subject) -> Verdict:
+    """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
+    the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
+    are listed in `missing`."""
+    findings, said, missing = verdict.findings, verdict.verdict, verdict.missing
+    if subject.left_out:
+        text = "material_cut: left out of the review by the size limits, so the review is partial: " + "; ".join(
+            subject.left_out
+        )
+        findings = (*findings, {"criterion": "material", "severity": "blocking", "text": text})
+        said = "NEEDS_REVISION" if said == "READY" else said
+    if subject.not_shown:
+        missing = (*missing, *(f"not shown to the judge (binary file): {path}" for path in subject.not_shown))
+    return Verdict(said, findings, verdict.assumptions, missing, verdict.digest)
 
 
 # --- the judge call ------------------------------------------------------------------------------------------------
@@ -258,7 +334,7 @@ class _Calls:
                 assert result.run is not None
                 raise RoleLimit(result.run)
             if result.status in ("timeout", "error"):
-                return _with_digest(blocked(f"judge_error: {result.detail or result.status}"), digest), cost
+                raise JudgeFailed(result.detail or result.status)  # R9: not a verdict, nothing is recorded
             if result.status == "ok":
                 return verdict_of(result.parsed, digest=digest), cost
             detail = result.detail  # schema_invalid: the paths, never the values
@@ -278,12 +354,15 @@ class _Calls:
 # --- the public functions ------------------------------------------------------------------------------------------
 
 
-def _default_digest() -> DigestOf | None:
-    try:
-        from l4.yolo.digest import unit_digest  # agent A's module; absent until the waves are merged
-    except ImportError:
-        return None
-    return unit_digest  # type: ignore[no-any-return]
+def _unit_revs(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, UnitInfo], target: str) -> dict[str, str]:
+    """The commit each known unit of the plan and each unit it depends on is read on: its branch on `origin` when it
+    has one, else the target (`current_unit_ref`, R3). Raises `RevisionMissing` before any model is asked."""
+    wanted = dict.fromkeys([u.id for u in plan.units()] + [d for u in plan.units() for d in u.depends_on])
+    revs = {}
+    for unit_id in (u for u in wanted if u in units):
+        ref = current_unit_ref(git, cfg, unit_id, target)
+        revs[unit_id] = git.rev_parse(ref) or ref
+    return revs
 
 
 def review_plan_costed(
@@ -300,26 +379,31 @@ def review_plan_costed(
     timeout_s: int = DEFAULT_TIMEOUT_S,
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan)."""
-    digest_fn = digest_of or _default_digest()
+    revs = _unit_revs(git, cfg, plan, units, rev)
+    digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
     folders: dict[str, FolderText] = {}
     for unit in plan.units():
         info = units.get(unit.id)
-        folders[unit.id] = read_folder(git, rev, info.folder, budget=MAX_FOLDER_CHARS) if info else FolderText("", ())
+        folders[unit.id] = (
+            read_folder(git, revs[unit.id], info.folder, budget=MAX_FOLDER_CHARS) if info else FolderText("", ())
+        )
     subjects: list[tuple[Subject, str | None]] = []
     result_units: dict[str, Verdict] = {}
     result_batches: dict[str, Verdict] = {}
     for batch in plan.batches:
         for unit in batch.units:
             info, folder = units.get(unit.id), folders[unit.id]
-            digest = digest_fn(git, rev, info.folder) if digest_fn and info and not folder.empty else None
+            digest = digest_fn(git, revs[unit.id], info.folder) if info and not folder.empty else None
             if folder.empty:
                 note = (
-                    f"the folder of {unit.id} has no files at {rev[:10]}" if info else f"{unit.id} is not a known unit"
+                    f"the folder of {unit.id} has no files at {revs[unit.id][:10]}"
+                    if info
+                    else f"{unit.id} is not a known unit"
                 )
                 result_units[unit.id] = _with_digest(blocked(f"unit_missing: {note}"), digest)
                 continue
             deps = [
-                (d, read_folder(git, rev, units[d].folder, budget=MAX_DEPENDENCY_CHARS) if d in units else None)
+                (d, read_folder(git, revs[d], units[d].folder, budget=MAX_DEPENDENCY_CHARS) if d in units else None)
                 for d in unit.depends_on
             ]
             subjects.append((_unit_subject(plan, unit, batch, folder, deps), digest))
@@ -341,6 +425,7 @@ def review_plan_costed(
         for subject, digest in subjects:
             verdict, spent = calls.ask(subject, timeout_s=timeout_s, digest=digest)
             cost += spent
+            verdict = _amend(verdict, subject)
             (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
     for batch in plan.batches:  # a batch with a unit that cannot be reviewed is not reviewed as a whole either
         if len(batch.units) > 1 and batch.id not in result_batches:
@@ -364,8 +449,10 @@ def review_plan(
     """Review every unit of `plan` and every batch of more than one unit, with the judge role, on the folders at `rev`.
 
     `adapters` replaces the adapters by name (tests and `l4 simulate` inject a `FakeAdapter`). `units` is what
-    admission read of each unit (its folder). A `Verdict.digest` is the unit digest: `digest_of`, else
-    `l4.yolo.digest.unit_digest` when that module exists, else None. `sandbox` replaces the selected sandbox."""
+    admission read of each unit (its folder). `rev` is the target: a unit that has a branch on `origin` is read, and
+    digested, on that branch (D3, R3). A `Verdict.digest` is the unit digest on the revision the unit was read on:
+    `digest_of` when given, else `l4.yolo.digest.unit_digest`. A revision that does not exist raises `RevisionMissing`;
+    a judge that fails raises `JudgeFailed`. `sandbox` replaces the selected sandbox."""
     result, _ = review_plan_costed(
         app, cfg, plan, units, git=git, rev=rev, adapters=adapters, digest_of=digest_of, sandbox=sandbox
     )
@@ -375,6 +462,8 @@ def review_plan(
 __all__ = [
     "READINESS_SCHEMA",
     "FolderText",
+    "JudgeFailed",
+    "Omission",
     "Subject",
     "read_folder",
     "review_plan",
