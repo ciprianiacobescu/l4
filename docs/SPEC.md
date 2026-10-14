@@ -753,7 +753,7 @@ ci:
 
 yolo:
   profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's
-                                   # acceptance_profile can name; `all` (every configured gate) and `none` are reserved (L4-YOLO-009)
+                                   # acceptance_profile can name; `all` (every configured gate except an e2e gate with a server) and `none` are reserved (L4-YOLO-009)
 
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)
@@ -3139,18 +3139,27 @@ unit passing the existing intake checks; no unit already merged. Each failure MU
 order MUST be topological, with ties broken by batch position, then unit position.
 
 **L4-YOLO-003** Input digests ignore the harness's own writes. The digest of a unit SHALL hash the unit folder as design D3 says: `.l4/**`, `verification.md`, `questions.md` and
-`feedback.md` excluded, task checkbox markers normalised. A harness tick, a verification report or a ledger line MUST
-NOT change the digest; a change of a spec, requirement, design or task text MUST.
+`feedback.md` excluded at any depth, task checkbox markers normalised with the patterns of the Kiro and OpenSpec
+providers themselves (R4). A harness tick, a verification report or a ledger line MUST NOT change the digest; a change
+of a spec, requirement, design or task text MUST. The digest of a unit MUST be taken on `refs/remotes/origin/<unit branch>`
+when it exists, else on the target; a revision or a folder that does not exist MUST raise, and MUST NOT give the digest
+of an empty set (R3).
 
 **L4-YOLO-004** Readiness review in CI. A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
 role reviews each unit and each batch with more than one unit, with the prompt and output schema of design D5, and the
 result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid answer MUST be BLOCKED. A blocking finding
-MUST make the verdict at least NEEDS_REVISION. One plan is reviewed per run.
+MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
+NEEDS_REVISION, with a finding that names what was left out. File names, unit ids and batch ids MUST reach the prompt only
+inside `<l4:data>` blocks. A judge that times out or fails MUST record no review: the next run tries again (R9). One plan
+is reviewed per run.
 
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest and the
 limits, and then start a run on the target. It MUST be refused, with exit 2 and the cause, unless: the plan is admitted;
 the latest review is for the current digests; every unit and batch is READY; `merge` and `forge.merge_policy` agree;
 the target exists on `origin`; no other plan is active on the target. Nothing MUST run from a plan before activation.
+Activation freezes the plan digest (`activated_digest`) with the unit digests. From then on, `plan.admitted`,
+`plan.refused` and `plan.reviewed` change only the review fields, never `activated_digest`, the order or the status, and
+a plan file whose digest differs from `activated_digest` MUST stop the plan with `inputs_changed` (R2).
 
 **L4-YOLO-006** The plan ledger is a leased ref. Plan state SHALL be the ledger in `refs/l4/plans/<plan-id>` (design D4). Every write MUST be one commit pushed with
 `--atomic` and a lease on the ref's previous value. A lost lease MUST make the writer read again and decide again; it
@@ -3163,15 +3172,22 @@ unit stays `in_review` and its cause says `merged into <x>, not the base <base>`
 
 **L4-YOLO-008** The guarded merge. With `merge: auto`, the plan step SHALL merge a unit only when all the preconditions of design D8 hold (in review, PASS,
 no open question, no person's commit after the hand-off, the PR open with the target as base, the target tip an
-ancestor of the unit head), by pushing the unit head to the target without force. A refused push for
+ancestor of the unit head, and the head to push equals the tip of the unit branch on `origin` and the head of the PR),
+by pushing the unit head to the target without force. The step MUST record `unit.merge_requested` with the lease before
+the push, after it has read the plan again: a cancelled or stopped plan MUST NOT merge (R5). A refused push for
 `non-fast-forward` MUST send the unit to `verifying` once per attempt (`stale`); a second one, or any other refusal,
 MUST stop the plan with `merge_refused` and the forge's reason. The harness MUST NOT merge any unit that is not the
 current unit of an active `merge: auto` plan.
 
 **L4-YOLO-009** Post-merge acceptance and integration. After a unit's merge into the target (by the harness or, with `merge: human`, by a person), the plan step SHALL run the
-unit's acceptance profile on the merged target revision (design D9) and record `unit.integrated` only when it passes. A
-profile with no gate to run MUST be an error, never a pass. A failure MUST stop the plan with `postcheck_failed`. With
-`merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the harness with the same guard. For every
+unit's acceptance profile on the merged target revision (design D9) and record `unit.integrated` only when it passes.
+Every merged unit of the plan that is not integrated MUST be checked, not only the current one (R10). The profile `all`
+MUST leave out the e2e gates that need an app server (`gates.e2e.serve`) and say so in the detail; a profile that names
+`e2e` while `serve` is set MUST be refused at admission (`unsupported_profile`). A profile MUST pass only when at least
+one required gate other than `setup` ran and passed; with no such gate it is an error, never a pass (R7). A failure MUST
+stop the plan with `postcheck_failed`. With `merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the
+harness with the same guard, and only when every commit on the archive branch after the target tip is a strict harness
+commit, the archive PR is open with the target as its base, and the target is `forge.base_branch` (R6). For every
 unit, the rule "one archive PR at a time" (L4-ARC-007) MUST count only open archive PRs whose base is
 `forge.base_branch`.
 
@@ -3179,8 +3195,13 @@ unit, the rule "one archive PR at a time" (L4-ARC-007) MUST count only open arch
 integrated, and every prerequisite batch is accepted. A unit's branch MUST NOT exist before that. `l4 run --unit U` MUST
 obey the same rule: a plan unit that is not eligible, or a unit outside an active plan, exits 13 before the lease, with
 the reason, and writes nothing. A unit listed in a plan file on the target MUST be dispatched only by that plan's step,
-while the plan is active; in every other plan status it waits with `held by plan <id> (<status>)`. While a plan is
-active, units outside every plan MUST get no new agent work. The sweep MUST still observe every unit.
+while the plan is active; in every other plan status it waits with `held by plan <id> (<status>)`. A unit listed in a
+plan file on the target MUST stay held while the file is there, whatever the status of the plan, a cancelled plan
+included; only the removal of the unit from the file, or of the file, releases it. A plan file that is invalid MUST still
+hold the unit ids that can be read from its JSON (`batches[].units[].id`); a file that is not JSON holds nothing, and
+`l4 plan` and `l4 yolo status` MUST report it. A unit listed in two plan files MUST be a finding (`held_by_other_plan`)
+for the second (R8). While a plan is active, units outside every plan MUST get no new agent work. The sweep MUST still
+observe every unit.
 
 **L4-YOLO-011** Batches. When every unit of a batch is integrated, the plan step SHALL run the batch's acceptance profile on the target tip and
 record `batch.accepted` or `batch.failed`. A failed batch MUST stop the plan. A batch that depends on it MUST NOT start.
@@ -3190,14 +3211,22 @@ or one batch check, or the completion. After a step that wrote a record and left
 on the target (`start_run`).
 
 **L4-YOLO-013** Stops, waits, cancel and resume. The plan SHALL stop, with the reason, when its current unit is `halted`, `escalated`, `abandoned` or `rejected`, when a
-frozen digest changes (`inputs_changed`), when a limit is reached, and as D8, D9 and L4-YOLO-011 say. It SHALL wait,
-with the reason, while its current unit is `awaiting_human`, `clarifying` or `waiting_capacity`. A stopped plan MUST
+frozen digest changes or the plan file is edited after the activation (`inputs_changed`), when a limit is reached, when
+the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), and as D8,
+D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit is `awaiting_human`, `clarifying` or
+`waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A stopped plan MUST
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.
 
-**L4-YOLO-014** Plan limits are never reset. Usage (cost, runs, attempts) SHALL be charged into the plan ledger and checked before every dispatch and merge. A unit
-restart and a plan resume MUST NOT reset it. More allowance MUST be an explicit `l4 yolo resume --extend-…`, recorded.
+**L4-YOLO-014** Plan limits are never reset. Usage (cost, runs, attempts) SHALL be charged into the plan ledger per attempt of a unit (R1): a restart starts a new
+unit ledger, so the usage of the current attempt is charged as `plan.charged{unit, attempt, cost_usd, runs}`, the fold
+keeps the maximum per (unit, attempt) and sums them, and the cost of the earlier attempts is kept. The attempt number
+of a unit is 1 + the number of its attempt refs on `origin`. The cost of the review is charged as the key `plan:review`.
+The limits MUST be evaluated by one implementation, with the extended deadline, for the step and for `l4 yolo resume`
+(R3), and checked before every dispatch and merge. A unit restart and a plan resume MUST NOT reset the usage. More
+allowance MUST be an explicit `l4 yolo resume --extend-…`, recorded. A plan file with `max_unit_attempts` below 1,
+`max_cost_usd` below 0, `max_runs` below 1 or a `deadline` without a time zone MUST be refused (R12).
 
 **L4-YOLO-015** Status, report, receipts, no promotion. `l4 yolo status` SHALL show the plan status, each unit's phase and what it waits for, batch results, usage against
 limits, the stop reason and `Next:`. `l4 status` and `l4 plan` SHALL show the active plan and the wait reasons. On
@@ -6874,6 +6903,27 @@ scenario is a spec defect (§26).
 - **Given** one commit on the target that adds the unit folders of `a` and `b` and a plan that lists them, not yet activated
 - **When** the CI run for that push happens
 - **Then** the plan is admitted and reviewed, no branch of `a` or `b` is created, and `l4 plan` shows both as `held by plan p1 (reviewed)`
+
+
+#### SCN-YOLO-31 (−) A restart does not reset the plan's cost or attempts · L4-YOLO-014
+- **Given** a plan with `max_unit_attempts: 2`, and a unit that used $2 in its first attempt and was restarted
+- **When** the unit used $1 more in its second attempt and the plan step runs
+- **Then** the plan has used $3 and 2 attempts of the unit, the cost of the first attempt is not lost, and a third attempt stops the plan with `limit_attempts`
+
+#### SCN-YOLO-32 (−) An edited plan file stops an active plan · L4-YOLO-005
+- **Given** an active plan, and a person's push that changes its file `.l4/plans/p1.json` on the target (a unit is added)
+- **When** the next CI run happens
+- **Then** `plan.stopped{inputs_changed, subject: plan}` is recorded, `activated_digest` and the order do not change, and nothing is dispatched or merged
+
+#### SCN-YOLO-33 (−) A PR whose head moved after the check is not merged · L4-YOLO-008
+- **Given** an active `merge: auto` plan whose current unit is `in_review` with a PASS, and a commit pushed to the unit branch after the PR head was read
+- **When** the plan step is ready to push the unit head to the target
+- **Then** the head to push is not the tip of the unit branch on `origin` and the head of the PR, nothing is pushed to the target, and the unit is not merged
+
+#### SCN-YOLO-34 (−) A cancelled plan still holds its units · L4-YOLO-010
+- **Given** a plan that was cancelled, with its file still on the target, and a unit `a` that it lists
+- **When** a CI run happens and `l4 plan` runs
+- **Then** no branch of `a` is created, `l4 plan` shows `held by plan p1 (cancelled)`, and the unit is released only when it is removed from the file or the file is removed
 
 ## 24. Definition of done
 
