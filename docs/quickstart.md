@@ -12,7 +12,7 @@ One script, then a commit, a push and the forge and runner steps, on a project w
 ## 1. Clone and adopt
 
 ```bash
-git clone https://github.com/ciprianiacobescu/agent-supervisor.git ~/l4
+git clone https://github.com/ciprianiacobescu/l4.git ~/l4
 cd /path/to/your-project
 ~/l4/scripts/adopt.sh
 ```

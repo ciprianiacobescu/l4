@@ -13,7 +13,7 @@ Status: the harness runs end to end on GitLab with a self-hosted shell runner; G
 ## Getting started
 
 ```bash
-git clone https://github.com/ciprianiacobescu/agent-supervisor.git ~/l4
+git clone https://github.com/ciprianiacobescu/l4.git ~/l4
 cd /path/to/your-project
 ~/l4/scripts/adopt.sh
 ```
@@ -29,10 +29,14 @@ The repository is also a Claude Code plugin marketplace with one skill, `l4`. It
 repository:
 
 ```
-/plugin install l4 --marketplace ciprianiacobescu/agent-supervisor
+/plugin install l4 --marketplace ciprianiacobescu/l4
 ```
 
-On older Claude Code, use `/plugin marketplace add ciprianiacobescu/agent-supervisor`, then `/plugin install l4@agent-supervisor`.
+The repository was renamed from `agent-supervisor` to `l4` on 2026-10-14. Git URLs and links redirect.
+A workflow line `uses: <owner>/agent-supervisor/.github/actions/l4@…` does not: run
+`l4 upgrade --action-repo <owner>/l4` once to rewrite it.
+
+On older Claude Code, use `/plugin marketplace add ciprianiacobescu/l4`, then `/plugin install l4@l4-harness`.
 For Codex, copy `plugins/l4/skills/l4` to `~/.agents/skills/l4`.
 
 * [Quickstart](docs/quickstart.md)

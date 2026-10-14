@@ -20,7 +20,7 @@ before any download. The action MUST never print an input value.
 
 #### Scenario: SCN-ACT-01 (+) A private repository of the same owner needs no key
 - **GIVEN** a private repository of the harness owner and the harness repository's Actions access `user`
-- **WHEN** a job runs `uses: <owner>/agent-supervisor/.github/actions/l4@<sha>` and then `l4 --version`
+- **WHEN** a job runs `uses: <owner>/l4/.github/actions/l4@<sha>` and then `l4 --version`
 - **THEN** the job succeeds with source `action` and no secret configured
 
 #### Scenario: SCN-ACT-02 (−) A public repository cannot use the private action
@@ -168,7 +168,7 @@ skill MUST never ask for, print or move a secret, and never tells an agent to ru
 
 #### Scenario: SCN-SKL-01 (+) Installed from the repository
 - **GIVEN** a Claude Code session with read access to the harness repository
-- **WHEN** the person runs `/plugin marketplace add ciprianiacobescu/agent-supervisor` and `/plugin install l4@agent-supervisor`
+- **WHEN** the person runs `/plugin marketplace add ciprianiacobescu/l4` and `/plugin install l4@l4-harness`
 - **THEN** the skill `l4` is listed and loads
 
 ### Requirement: L4-SKL-002 The skill is written against recorded failures

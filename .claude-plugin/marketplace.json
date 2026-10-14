@@ -1,5 +1,5 @@
 {
-  "name": "agent-supervisor",
+  "name": "l4-harness",
   "description": "The L4 agentic harness's Claude Code plugin: the l4 skill.",
   "owner": {
     "name": "CiprianSpot"

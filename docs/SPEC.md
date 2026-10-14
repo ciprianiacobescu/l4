@@ -241,7 +241,7 @@ test.
 format: frontmatter `name: l4`, a description that starts "Use when…" and names the triggers (adopting L4, a unit's
 status, questions, feedback, an escalated or halted unit), a body under 500 words, and the references `adopt.md`,
 `operate.md` and `feedback.md`. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` MUST make it
-installable with `/plugin marketplace add` and `/plugin install l4@agent-supervisor`; for Codex the folder is copied to
+installable with `/plugin marketplace add` and `/plugin install l4@l4-harness`; for Codex the folder is copied to
 `~/.agents/skills/`. The skill MUST never ask for, print or move a secret, and never tell an agent to run an agent CLI
 by hand on a runner. [Not yet built: delivery change 18, tasks 4.1–4.3.]
 
@@ -6392,7 +6392,7 @@ scenario is a spec defect (§26).
 
 #### SCN-ACT-01 (+) A private repository of the same owner needs no key · L4-ACT-001
 - **Given** a private repository of the harness owner, and the harness repository's Actions access `user`
-- **When** a job runs `uses: <owner>/agent-supervisor/.github/actions/l4@<sha>` and then `l4 --version`
+- **When** a job runs `uses: <owner>/l4/.github/actions/l4@<sha>` and then `l4 --version`
 - **Then** the job succeeds with source `action` and no secret configured.
 
 #### SCN-ACT-02 (−) A public repository cannot use the private action · L4-ACT-001
@@ -6462,8 +6462,8 @@ scenario is a spec defect (§26).
 
 #### SCN-SKL-01 (+) Installed from the repository · L4-SKL-001
 - **Given** a Claude Code session with read access to the harness repository
-- **When** the person runs `/plugin marketplace add ciprianiacobescu/agent-supervisor` and
-  `/plugin install l4@agent-supervisor`
+- **When** the person runs `/plugin marketplace add ciprianiacobescu/l4` and
+  `/plugin install l4@l4-harness`
 - **Then** the skill `l4` is listed and loads.
 
 #### SCN-SKL-02 (+) The feedback kind is chosen right · L4-SKL-002
