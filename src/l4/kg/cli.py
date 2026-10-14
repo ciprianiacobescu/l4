@@ -282,11 +282,44 @@ def run_kg_why(app: AppContext, *, id: str) -> ExitCode:  # noqa: A002 - the opt
     ident = id.strip()
     if not any(pattern.match(ident) for pattern in _ID_PATTERNS):
         raise _unknown_id(ident, "not an id of an accepted form:")
-    app, _cfg, _git_, graph = _load(app)
+    app, _cfg, git, graph = _load(app)
     if ident not in {node.id for node in graph.nodes}:
         raise _unknown_id(ident, "not in the index:")
-    _say(app, why_module.explain(graph.nodes, graph.edges, ident, redactor=app.redactor))
+    edited = _unit_folder_changed_since_last_stop(git, graph, ident)
+    _say(app, why_module.explain(graph.nodes, graph.edges, ident, redactor=app.redactor, spec_edited=edited))
     return ExitCode.OK
+
+
+def _unit_folder_changed_since_last_stop(git: Git, graph: Graph, unit: str) -> bool:
+    """Whether the unit folder changed between the commit of the unit's last stop and the head of its branch (design
+    D9, review #11): `git diff --name-only <stop> <head> -- <folder>`, without the harness's `.l4/` files. False when
+    the unit has no stop or git cannot say (an object that is not local)."""
+    src = why_module.last_stop_src(graph.nodes, graph.edges, unit)
+    if src is None or ":" not in src:
+        return False
+    tip, _, rest = src.partition(":")
+    path = rest.partition("#")[0]
+    folder, dot, _ = path.partition("/.l4/")
+    if not dot:  # a lock ref's `ledger-pending/` file does not name the unit folder
+        return False
+    try:
+        tip_sha = git.rev_parse(tip)
+        if tip_sha is None:
+            return False
+        stop = git.run("log", "-1", "--format=%H", tip_sha, "--", path, check=False).stdout.strip()
+        framework, _, name = unit.partition(":")
+        branch = next((r for r in graph.manifest.refs if r.endswith(f"/{framework}/{name}")
+                       and r.startswith(f"refs/remotes/{REMOTE}/")), None)  # fmt: skip
+        head = graph.manifest.refs[branch] if branch is not None else tip_sha
+        if not stop:
+            return False
+        done = git.run("diff", "--name-only", "--no-renames", "-z", stop, head, "--", folder, check=False)
+    except GitError:
+        return False
+    if done.returncode != 0:
+        return False
+    names = [n for n in done.stdout.split("\0") if n]
+    return any("/.l4/" not in f"/{n}" for n in names)
 
 
 def run_kg_propose(app: AppContext, *, min_units: int = DEFAULT_MIN_UNITS, dry_run: bool = False) -> ExitCode:

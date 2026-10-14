@@ -11,7 +11,8 @@ retries and restarts that its runs recorded. Every line ends with `[src <sha10>:
 block says so.
 
 The last line holds the facts, as facts and not as a command: the stop codes with their counts across all attempts,
-whether a retry with the reason `spec edited` came after the last stop, and the attempt number. The attempt number
+whether the unit folder changed after the last stop (the caller compares the commits with git) or a retry with the
+reason `spec edited` came after it, and the attempt number. The attempt number
 is the number a person counts: the current branch is one more than the highest kept attempt (graph attempt `@0` is the
 current branch, design D4). The line before it names `l4 status --unit ID`, which stays the place for the next command
 (its `Next:` line).
@@ -43,13 +44,26 @@ TIMES = "×"
 _NO_TS = "~"  # sorts after every time stamp
 
 
-def explain(nodes: Iterable[Node], edges: Iterable[Edge], target: str, *, redactor: Redactor | None = None) -> str:
+def last_stop_src(nodes: Iterable[Node], edges: Iterable[Edge], unit: str) -> str | None:
+    """The `src` (`<sha10>:<path>#<seq>`) of the latest stop of `unit`, for the caller that compares the unit folder
+    since that stop with git (design D9); None when the unit has no stop."""
+    v = View(nodes, edges)
+    stops = [e for e in v.of_type("STOPPED") if v.unit_of_run(e.from_id) == unit]
+    return max(stops, key=lambda e: (e.ts, e.src)).src if stops else None
+
+
+def explain(
+    nodes: Iterable[Node], edges: Iterable[Edge], target: str, *, redactor: Redactor | None = None,
+    spec_edited: bool = False,
+) -> str:
+    """`spec_edited`: the caller found a change in the unit folder since the last stop (git, which this module does
+    not read); it adds to the `unit.retried{spec edited}` records."""
     v = View(nodes, edges)
     node = v.nodes.get(target)
     if node is None or (node.type != "unit" and node.type not in NEIGHBOUR_TYPES):
         message = f"{target!r} is not in the index. The ids that kg why accepts: {ACCEPTED_FORMS}."
         raise L4Exit(ExitCode.USAGE_ERROR, message)
-    text = _timeline(v, node) if node.type == "unit" else _neighbourhood(v, node)
+    text = _timeline(v, node, spec_edited) if node.type == "unit" else _neighbourhood(v, node)
     return clean_text(text, redactor)
 
 
@@ -162,21 +176,23 @@ def _spec_edit(edge: Edge) -> bool:
     )
 
 
-def _facts(v: View, unit: str, highest_kept: int) -> str:
+def _facts(v: View, unit: str, highest_kept: int, spec_edited: bool = False) -> str:
     stops = [e for e in v.of_type("STOPPED") if v.unit_of_run(e.from_id) == unit]
     codes = Counter(e.to_id.removeprefix("stop:") for e in stops)
     if codes:
         ordered = sorted(codes.items(), key=lambda item: (-item[1], item[0]))
         shown = ", ".join(f"{code} {TIMES}{n}" for code, n in ordered)
         last = max(e.ts for e in stops)
-        edited = any(_spec_edit(e) and e.ts > last for e in v.of_type("RETRIED") if v.unit_of_attempt(e.to_id) == unit)
+        edited = spec_edited or any(
+            _spec_edit(e) and e.ts > last for e in v.of_type("RETRIED") if v.unit_of_attempt(e.to_id) == unit
+        )
         edit = "yes" if edited else "no"
     else:
         shown, edit = "none (n = 0)", "no stop"
     return f"stops: {shown}; spec edited since the last stop: {edit}; attempt {highest_kept + 1}"
 
 
-def _timeline(v: View, unit: Node) -> str:
+def _timeline(v: View, unit: Node, spec_edited: bool = False) -> str:
     ids = {e.to_id for e in v.out(unit.id, "HAS_ATTEMPT")}
     ids |= {e.to_id for e in v.of_type("RESTARTED") if v.unit_of_attempt(e.to_id) == unit.id}
     attempts = sorted(ids, key=lambda a: (_number(a) == 0, _number(a)))
@@ -196,5 +212,5 @@ def _timeline(v: View, unit: Node) -> str:
         lines = _run_lines(v, attempt) + [_round_line(v, e) for e in v.out(attempt, "HAS_ROUND")]
         out += [line.render() for line in sorted(lines, key=_Line.key)]
     out.append(f"The command to run is the job of `l4 status --unit {unit.id}` (its Next: line).")
-    out.append(_facts(v, unit.id, highest))
+    out.append(_facts(v, unit.id, highest, spec_edited))
     return "\n".join(out) + "\n"

@@ -249,3 +249,37 @@ def test_a_changed_config_value_makes_the_index_stale(kg_repo, tmp_path):
     assert "index rebuilt (config changed)" in err
     assert "New place lesson" in out and "Old place lesson" not in out
     assert "index rebuilt" not in lessons_of("--config", str(config))[1]  # the same config reads the index again
+
+
+# --- #11: "spec edited since the last stop" looks at the unit folder, not only at unit.retried -------------------
+
+STOP = ("phase.changed", {"from": "implementing", "to": "halted", "reason": "baseline_failed", "detail": "red base"})
+
+
+def last_line(repo) -> str:
+    code, out, err = run_kg(repo, "why", "openspec:a")
+    assert code == 0, err
+    return [line for line in out.splitlines() if line][-1]
+
+
+def test_a_spec_edit_pushed_after_the_stop_is_seen_before_any_retry_is_recorded(kg_repo):
+    kg_repo.unit("openspec:a", where="branch", runs=[kg_repo.run(STOP)])
+    assert "spec edited since the last stop: no;" in last_line(kg_repo)
+    rel = kg_repo.unit_path("openspec:a", "branch")
+    kg_repo.commit(kg_repo.branch_of("openspec:a"), {f"{rel}/proposal.md": "## Why\n\nA new reason.\n"}, "edit")
+    assert "spec edited since the last stop: yes;" in last_line(kg_repo)
+
+
+def test_a_harness_file_change_after_the_stop_is_not_a_spec_edit(kg_repo):
+    kg_repo.unit("openspec:a", where="branch", runs=[kg_repo.run(STOP)])
+    rel = kg_repo.unit_path("openspec:a", "branch")
+    kg_repo.commit(kg_repo.branch_of("openspec:a"), {f"{rel}/.l4/evidence/note.txt": "x\n"}, "harness")
+    assert "spec edited since the last stop: no;" in last_line(kg_repo)
+
+
+def test_a_spec_edit_before_the_stop_is_not_a_spec_edit_since_it(kg_repo):
+    rel = kg_repo.unit_path("openspec:a", "branch")
+    kg_repo.unit("openspec:a", where="branch", runs=[])
+    kg_repo.commit(kg_repo.branch_of("openspec:a"), {f"{rel}/proposal.md": "## Why\n\nEdited first.\n"}, "edit")
+    kg_repo.unit("openspec:a", where="branch", runs=[kg_repo.run(STOP)], files={f"{rel}/proposal.md": "## Why\n\nEdited first.\n"})
+    assert "spec edited since the last stop: no;" in last_line(kg_repo)
