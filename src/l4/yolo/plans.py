@@ -9,8 +9,9 @@ The seam between the plan step (`cycle.py`) and the operator commands (`commands
 - `load_context(...)` reads a plan's ledger ref and folds it;
 - `held_by(...)`, `holds_of(...)` and `active_on(...)` answer which plan holds a unit and which plan is active
   (design D10, R8): a unit listed in a plan file is held while the file is on the target, whatever the plan's status
-  (cancelled and completed included); an invalid file holds the unit ids its JSON names; a file that is not a JSON
-  object holds nothing and is returned apart so `l4 plan` and `l4 yolo status` can show it.
+  (cancelled included; a completed plan has integrated its units and holds nothing); an invalid file holds the unit
+  ids its JSON names; a file that is not a JSON object holds nothing and is returned apart so `l4 plan` and
+  `l4 yolo status` can show it.
 """
 
 import json
@@ -29,7 +30,8 @@ from l4.yolo.model import PLANS_DIR, Plan, PlanInvalid, PlanState, UnitInfo, loa
 
 log = logging.getLogger(__name__)
 
-FINAL = frozenset({"cancelled", "completed"})  # statuses no command changes any more (they still hold their units)
+FINAL = frozenset({"cancelled", "completed"})  # statuses no command changes any more
+RELEASES = "completed"  # the one status that holds no unit: the plan integrated them all (a cancelled plan still holds)
 INVALID = "invalid"  # the status shown for a plan file that is not a plan and has no ledger
 
 
@@ -170,7 +172,7 @@ class PlanHolds:
 
 def holds_of(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> PlanHolds:
     """unit id -> (plan id, plan status) for every unit listed in a plan file (design D10, R8), and the files that hold
-    nothing because they are not JSON. The status is the plan's own (`new` without a ledger, `invalid` for a file that
+    nothing because they are not JSON. A completed plan holds nothing (SCN-YOLO-28). The status is the plan's own (`new` without a ledger, `invalid` for a file that
     is not a plan and has no ledger). A unit listed by two plans is held by the first file in path order; admission of
     the second plan refuses it (`held_by_other_plan`)."""
     held: dict[str, tuple[str, str]] = {}
@@ -186,6 +188,8 @@ def holds_of(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> Plan
             unreadable.append(file)
             continue
         status = states[file.plan_id].status if file.plan_id in states else fallback
+        if status == RELEASES:
+            continue
         for unit_id in unit_ids:
             held.setdefault(unit_id, (file.plan_id, status))
     return PlanHolds(held, unreadable)

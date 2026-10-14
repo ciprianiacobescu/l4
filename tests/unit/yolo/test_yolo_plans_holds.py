@@ -29,9 +29,9 @@ def test_a_cancelled_plan_still_holds_its_units():  # review #8, R8
     assert held_by({"p1": state("p1", "cancelled")}, files) == {"openspec:a": ("p1", "cancelled")}
 
 
-def test_a_completed_plan_file_on_the_target_holds_its_units_too():
+def test_a_completed_plan_holds_nothing_any_more():  # design D10: it integrated its units (SCN-YOLO-28)
     files = [file("p1", plan_text("p1", ["openspec:a"]))]
-    assert held_by({"p1": state("p1", "completed")}, files) == {"openspec:a": ("p1", "completed")}
+    assert held_by({"p1": state("p1", "completed")}, files) == {}
 
 
 def test_a_plan_without_a_ledger_is_new():
