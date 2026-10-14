@@ -171,10 +171,10 @@ class PlanHolds:
 
 
 def holds_of(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> PlanHolds:
-    """unit id -> (plan id, plan status) for every unit listed in a plan file (design D10, R8), and the files that hold
-    nothing because they are not JSON. A completed plan holds nothing (SCN-YOLO-28). The status is the plan's own (`new` without a ledger, `invalid` for a file that
-    is not a plan and has no ledger). A unit listed by two plans is held by the first file in path order; admission of
-    the second plan refuses it (`held_by_other_plan`)."""
+    """unit id -> (plan id, plan status) for every unit listed in a plan file (design D10, R8), and the files that
+    hold nothing because they are not JSON. A completed plan holds nothing (SCN-YOLO-28). The status is the plan's
+    own (`new` without a ledger, `invalid` for a file that is not a plan and has no ledger). A unit listed by two
+    plans is held by the first file in path order; admission of the second plan refuses it (`held_by_other_plan`)."""
     held: dict[str, tuple[str, str]] = {}
     unreadable: list[PlanFile] = []
     for file in files:
