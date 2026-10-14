@@ -103,6 +103,7 @@ from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
+from l4.yolo.cycle import PlanStep, yolo_step
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -1350,17 +1351,31 @@ def run_command(
         failure = classify_exception(exc)[0]
     if made:
         found = discover(cfg, git, providers, units)  # the new units are on their own branches now
+    step = yolo_step(
+        app, cfg, git, found, adapters=adapters,
+        all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
+    )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
+    for line in step.actions:
+        log.info("%s", line)
     snapshots = {s.ref.id: s for _, s in found}
     chosen = without_fix_units(
         [(p, s.ref) for p, s in found if s.source != "archive"], named=units
     )  # an archived unit is only ever a parent of a follow-up
+    refused: list[UnitRunResult] = []
+    if step.allow is not None:  # a plan holds its units; while one is active nothing else starts (SCN-YOLO-21, -30)
+        refused = [_refuse_plan_unit(step, ref) for _, ref in chosen if units and ref.id not in step.allow]
+        chosen = [(provider, ref) for provider, ref in chosen if ref.id in step.allow]
     if not units:
         chosen = [
             (provider, ref) for provider, ref in chosen if next_action(facts_of(snapshots[ref.id]))[0] in ACTIONABLE
         ]
+    outcomes = [*(_follow_up_outcome(m) for m in made), *(r.outcome for r in refused)]
+    refusal_codes = [r.exit_code for r in refused]
     if not chosen:
         log.info("nothing to do: no unit has a next step")  # before any lease, worktree or probe
-        return CommandResult(failure, [_follow_up_outcome(m) for m in made])
+        result = CommandResult(most_severe([failure, *refusal_codes]), outcomes)
+        _start_next_run(app, cfg, step)
+        return result
     kiro = cfg.spec.kiro
     if (kiro.write_in_progress_marker or kiro.write_queued_marker) and any(
         ref.framework is Framework.KIRO for _, ref in chosen
@@ -1368,11 +1383,43 @@ def run_command(
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
     result = replace(
-        result, code=most_severe([result.code, failure]), units=[*(_follow_up_outcome(m) for m in made), *result.units]
+        result,
+        code=most_severe([result.code, failure, *refusal_codes]),
+        units=[*outcomes, *result.units],
     )
     result = continue_left_units(app, cfg, result)
+    _start_next_run(app, cfg, step)
     log_artefacts(app.out_dir, app.run_id)
     return result
+
+
+def _refuse_plan_unit(step: PlanStep, ref: UnitRef) -> UnitRunResult:
+    """`l4 run --unit U` for a unit a delivery plan does not let run now (L4-YOLO-010, SCN-YOLO-21): exit 13 with the
+    reason, before the lease, the worktree and the ledger, so nothing is written (the way a halted unit is refused,
+    `_refuse_stopped`)."""
+    tail = step.refusals.get(ref.id) or f"waits for the plan step of this run (plan {step.plan_id})"
+    text = f"run: {ref.id} {tail}"
+    log.error("%s", text)
+    outcome = UnitOutcome(unit=ref.id, phase_before="none", phase_after="none", exit_reason=text[:300])
+    return UnitRunResult(outcome, ExitCode.HALTED)
+
+
+def _start_next_run(app: AppContext, cfg: L4Config, step: PlanStep) -> None:
+    """After a plan step that wrote a record and left work, ask the forge for one more run of the harness's CI on the
+    base branch (L4-YOLO-012). The answer is logged; a forge that cannot, or an error, is a warning and never a failure
+    of the run, like `continue_left_units`."""
+    if not step.start_next_run:
+        return
+    base = cfg.forge.base_branch
+    try:
+        answer = make_forge(cfg, app.environ, repo=app.repo).start_run(base)
+    except ForgeUnavailable:
+        log.warning("plan: the next run was not started: no forge token")
+        return
+    except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run
+        log.warning("plan: the next run was not started (%s)", app.redactor.redact_text(str(exc)))
+        return
+    log.info("plan: next run on %s: %s", base, answer)
 
 
 def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:

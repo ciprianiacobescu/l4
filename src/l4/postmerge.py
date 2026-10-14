@@ -151,6 +151,7 @@ class PostMergeArchiver:
         fetch_config: Sequence[tuple[str, str]] = (),
     ) -> None:
         self._cfg, self._app, self._git, self._forge = cfg, app, git, forge
+        self._other_base_said: set[int] = set()  # archive MRs to another base, said once per sweep (L4-YOLO-009)
         root = cfg.spec.openspec.root
         self._provider_for = provider_for or (lambda path: OpenSpecProvider(path, app.environ, root=root))
         kiro = cfg.spec.kiro
@@ -173,10 +174,19 @@ class PostMergeArchiver:
 
     def open_archive_pr(self, ref: UnitRef, *, iteration: int = 1) -> ArchiveResult:
         names = self.names(ref)
-        waiting = self._forge.list_prs(f"{self._cfg.forge.branch_prefix}archive/", "open")  # L4-ARC-007: one at a time
-        ours = next((pr for pr in waiting if pr.head_branch == names.archive_branch), None)
+        opened = self._forge.list_prs(f"{self._cfg.forge.branch_prefix}archive/", "open")  # L4-ARC-007: one at a time
+        ours = next((pr for pr in opened if pr.head_branch == names.archive_branch), None)
         if ours is not None:
             return ArchiveResult("existing", ours)
+        base = self._cfg.forge.base_branch
+        waiting = [pr for pr in opened if pr.base_branch == base]  # only an archive MR to the base blocks (L4-YOLO-009)
+        for other in opened:
+            if other.base_branch != base and other.number not in self._other_base_said:
+                self._other_base_said.add(other.number)
+                log.warning(
+                    "archive MR !%s (%s) is aimed at %s, not the base %s: it does not block other archives",
+                    other.number, other.head_branch, other.base_branch, base,
+                )  # fmt: skip
         if waiting:
             first = waiting[0]
             return ArchiveResult("pending", first, f"archive MR !{first.number} ({first.head_branch}) is open")
