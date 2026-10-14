@@ -1,0 +1,28 @@
+{
+ "$id": "l4/yolo-readiness@1",
+ "type": "object",
+ "required": ["verdict", "findings"],
+ "properties": {
+  "verdict": {"type": "string", "enum": ["READY", "NEEDS_REVISION", "BLOCKED"]},
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": ["criterion", "severity", "text"],
+    "properties": {
+     "criterion": {
+      "type": "string",
+      "enum": [
+       "outcome", "testability", "interfaces", "failure_cases", "feasibility", "duplicate_scope", "contradiction",
+       "missing_dependency", "batch_acceptance"
+      ]
+     },
+     "severity": {"type": "string", "enum": ["blocking", "major", "minor"]},
+     "text": {"type": "string", "minLength": 1, "maxLength": 2000}
+    }
+   }
+  },
+  "assumptions": {"type": "array", "items": {"type": "string", "maxLength": 1000}},
+  "missing": {"type": "array", "items": {"type": "string", "maxLength": 1000}}
+ }
+}
