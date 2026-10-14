@@ -16,6 +16,7 @@ from l4.vcs.push import (
     build_branch_push_args,
     build_lease_push_args,
     build_push_args,
+    build_restart_args,
     build_retire_args,
     is_lost_lease,
     is_non_fast_forward,
@@ -210,6 +211,21 @@ class Git:
                     self.on_push(branch, expected or None, new)
         return done
 
+    def restart_push(
+        self,
+        remote: str,
+        branch: str,
+        old_head: str,
+        lock: tuple[str, str, str] | None = None,
+        *,
+        config: Sequence[tuple[str, str]] = (),
+    ) -> GitResult:
+        """`l4 restart` (L4-OPS-004): HEAD replaces the unit branch (leased on `old_head`, '' = absent) and the lock ref
+        `lock = (ref, sha, archived)` moves to `archived`, one atomic push. `PushRejected` when any lease is lost, with
+        nothing changed on the remote."""
+        cancel.check()
+        return self._push(build_restart_args(remote, branch, old_head, lock), config, is_lost_lease)
+
     def push_lease(
         self, remote: str, sha: str, ref: str, expected: str, *, config: Sequence[tuple[str, str]] = ()
     ) -> GitResult:
@@ -224,9 +240,7 @@ class Git:
         Raises `PushRejected` when the lock ref moved or the archived name is taken."""
         return self._push(build_retire_args(remote, sha, ref, archived), config, is_lost_lease)
 
-    def _push(
-        self, args: Sequence[str], config: Sequence[tuple[str, str]], moved: Callable[[str], bool]
-    ) -> GitResult:
+    def _push(self, args: Sequence[str], config: Sequence[tuple[str, str]], moved: Callable[[str], bool]) -> GitResult:
         """`moved` says whether a refusal means the ref moved on (`PushRejected`); every other refusal, a protected
         branch or a push rule included, stays a `GitError` for `explain_push_failure` (G12)."""
         cancel.check()  # W-D2: the lock ref, the pending ledger and the retire push too

@@ -61,6 +61,7 @@ from l4.forge.pushfail import PushFailed, explain_push_failure
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
+from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
     open_blocking_questions,
     questions_hold,
@@ -83,14 +84,14 @@ from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
 from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
 from l4.state.breaker import consecutive_verifier_errors
-from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED
+from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
-from l4.state.lifecycle import Edge, Phase, Trigger, transition
+from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
 from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
 from l4.state.reconcile import reconcile
-from l4.state.review import after_handoff, review_note, review_trigger
+from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
 from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
@@ -103,6 +104,7 @@ from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
 
+MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
 
 log = logging.getLogger("l4.run")
@@ -168,12 +170,12 @@ def capacity_section(
     if retry_after is not None and not due_now:
         when = minute_stamp(datetime.fromisoformat(retry_after))
         lines.append(
-            f"Capacity is expected back at {when}. The scheduled `l4 sweep` resumes the unit after that; without a "
+            f"Capacity is expected back at {when}. The scheduled run resumes the unit after that; without a "
             f"schedule, run a pipeline on `{base}` after {when}."
         )
     else:
         lines.append(
-            f"Once that is fixed, run a pipeline on `{base}`, or wait for the scheduled `l4 sweep`: the unit "
+            f"Once that is fixed, run a pipeline on `{base}`, or wait for the scheduled run: the unit "
             "is probed again on every run and resumes at once."
         )
     return "\n".join(lines)
@@ -201,9 +203,12 @@ class RunWaits:
 
 
 class Orchestrator:
-    def __init__(self, cfg: L4Config, services: Services, waits: RunWaits | None = None) -> None:
+    def __init__(
+        self, cfg: L4Config, services: Services, waits: RunWaits | None = None, *, take_spec_edit: bool = True
+    ) -> None:
         self.cfg = cfg
         self.services = services
+        self._takes_spec_edit = take_spec_edit  # `l4 verify` leaves a spec edit for the next `l4 run` (review L3)
         self.state: UnitState = UnitState(unit=services.ref.id)
         self._selected: Selected | None = None
         ctx = HookContext(cfg, services, self.push)
@@ -216,6 +221,7 @@ class Orchestrator:
         self._push_failed = False
         self._commit_what = "ledger"  # the subject of the final ledger commit: `chore(<unit>): <what> [skip ci]`
         self._start = services.git.rev_parse("HEAD")
+        self._branch_start = self._start  # where the run found the branch: the reset target of a secret halt
         self._clarifier = Clarifier(services.ref.path, services.ledger)
         self._reentry: Reentry | None = None
         self._notes: tuple[str, ...] | None = None  # the sticky note's sections for the mirror; None: leave it alone
@@ -289,14 +295,35 @@ class Orchestrator:
         raise SecretInPush(hits)
 
     def _block_secret(self, exc: SecretInPush) -> ExitCode:
-        """The unit halts (exit 13) with the reason in the outcome. `implementing` and `fixing` have the lifecycle's
-        breaker edge; in any other phase (verifying, the hand-off) the phase stays, only the exit code says halted."""
+        """The unit halts (exit 13) with the reason in the outcome (L4-OPS-009, SCN-OPS-15). The commits that hold the
+        secret are discarded first: a hard reset of the worktree to what the forge has, so that the halt (the ledger
+        alone) can be pushed and the unit can be retried. Every phase that has the breaker edge takes the halted edge
+        (`implementing`, `fixing`, `verifying`, `verified`); in any other phase (the hand-off) the phase stays and
+        only the exit code says halted."""
         self.services.ledger.append("breaker.tripped", reason="secret_in_push", paths=[h.path for h in exc.hits][:20])
         self._exit_reason = exc.reason
-        if self.state.phase in (Phase.IMPLEMENTING, Phase.FIXING):
-            return self._halt(exc.reason)
+        self._discard_unpushed()
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if allowed_edge(phase, Trigger.BREAKER_OR_BUDGET) is not None:
+            return self._halt("secret_in_push", exc.reason)
         log.error("%s halted: %s", self.services.ref.id, exc.reason)
         return ExitCode.HALTED
+
+    def _discard_unpushed(self) -> None:
+        """Hard reset to `origin/<branch>`, or, when the forge has no such branch yet, to the commit the run started
+        the branch from. The run's ledger file lies in the worktree: a checkpoint that committed it is reset with the
+        rest, so the writer's copy of its bytes puts it back (`restore_if_tampered`), events and all. The push switch
+        that `_scan_outgoing` set goes off: what is left to push holds no secret."""
+        s = self.services
+        target = s.git.rev_parse(f"refs/remotes/origin/{s.names.branch}") or self._branch_start
+        s.git.run("reset", "--hard", "--quiet", target)
+        if s.ledger.path is not None:
+            s.ledger.path.parent.mkdir(
+                parents=True, exist_ok=True
+            )  # the reset removed a folder only the run's file was in
+        s.ledger.restore_if_tampered()
+        self._push_failed = False
+        log.warning("%s: the unpushed commits hold a secret and were discarded; only the ledger is pushed", s.ref.id)
 
     # --- one unit ---------------------------------------------------------------------------------------------
 
@@ -304,6 +331,7 @@ class Orchestrator:
         before = self._refold().phase or "none"
         try:
             self._reconcile()
+            self._take_spec_edit()
             if (rejected := self._lint_scenarios()) is not None:
                 return UnitRunResult(self._outcome(before), rejected)
             self._reentry = self._clarifier.reenter(
@@ -339,25 +367,140 @@ class Orchestrator:
         by: str | None = None,
         extend_fix_rounds: int | None = None,
         extend_feedback_rounds: int | None = None,
+        event: str = "unit.resumed",
+        trigger: Trigger = Trigger.RESUMED,
+        what: str = "resume",
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
         `l4 run` continues the unit. `signal` (`label:<event id>`) and `by` (`member`) say that a member's `l4:resume`
         label asked for it: one resume per signal. `extend_fix_rounds` records `budget.extended` first, so that the fold
         has the extra rounds when the verifier decides again; `extend_feedback_rounds` is the same for the feedback
-        limit (`feedback_rounds` in the same event, L4-FBK-006)."""
+        limit (`feedback_rounds` in the same event, L4-FBK-006).
+
+        `l4 retry` is the same step with its own words (L4-OPS-001): `event` is `unit.retried` (it folds like
+        `unit.resumed`), `what` is `retry` (the subject of the commit), and `trigger` is the edge of the phase it
+        leaves (`capacity_restored`, `retry_requested`).
+
+        The commit of this step would bury a person's change to the unit folder (review M3), so the tail is checked
+        first: a halted or escalated unit takes `spec_edit_since_stop` instead (L4-OPS-003), an `in_review` unit takes
+        `spec_edit_after_handoff`, and a unit that waits for capacity records `spec.edit_seen` and takes the edit as
+        soon as `capacity_restored` has put it in a phase that can (`fixing` cannot: its fix unit ends first)."""
         before = self._refold().phase or "none"
-        self._commit_what = "resume"
+        self._commit_what = what
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
         if extend_fix_rounds or extend_feedback_rounds:
             rounds = {
                 k: v for k, v in (("fix_rounds", extend_fix_rounds), ("feedback_rounds", extend_feedback_rounds)) if v
             }
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
-        self.services.ledger.append("unit.resumed", reason=reason[:300], **extra)
+        self.services.ledger.append(event, reason=reason[:300], **extra)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
-        self._go(Trigger.RESUMED)
+        edit = self._spec_edit() if self._takes_spec_edit else None
+        stop_edge = {
+            Phase.HALTED.value: Trigger.SPEC_EDIT_SINCE_STOP, Phase.ESCALATED.value: Trigger.SPEC_EDIT_SINCE_STOP,
+            Phase.IN_REVIEW.value: Trigger.SPEC_EDIT_AFTER_HANDOFF,
+        }.get(before)  # fmt: skip
+        context: dict[str, object] = {}
+        if edit is not None and stop_edge is not None:
+            trigger, context = stop_edge, {"commits": list(edit.shas)[-MAX_EDIT_COMMITS:]}
+        elif edit is not None:
+            self._see_spec_edit(edit)  # this step's commit buries it: the run that follows takes it
+        self._go(trigger, **context)
+        if edit is not None and context:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
+            self._reopen(edit.base)
+        else:
+            self._take_pending_spec_edit()  # `capacity_restored` put the unit in a phase that can take it
         return UnitRunResult(self._outcome(before), ExitCode.OK)
+
+    def _spec_edit(self) -> SpecEdit | None:
+        """L4-OPS-003, L4-OPS-014, SCN-OPS-06, SCN-OPS-07: a person's commits after the harness's last commit changed a
+        file of the unit folder that is not the harness's and has no channel of its own. A change elsewhere, `src/` for
+        one, is not a change of the spec."""
+        s = self.services
+        return spec_edit_since_harness(s.git, "HEAD", s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix())
+
+    def _reopen(self, base: str) -> list[str]:
+        """A spec edit was taken: on a Kiro unit the tasks that cite a changed criterion are `[ ]` again (OPS-015)."""
+        return reopen_for_changed_requirements(
+            self.services, base, phase=self.state.phase or "implementing", iteration=self.state.iteration
+        )
+
+    def _take_spec_edit(self) -> None:
+        """L4-OPS-014, design D13, at the start of a run, when the worktree is at the remote head: a person's push to
+        the unit folder takes `spec_edited` to `implementing` from every phase that is not finished. The run records
+        `unit.retried{reason: "spec edited", signal: "spec_edit:<head>", by: "push"}` (it folds like a resume), and a
+        unit escalated at the fix-round or feedback limit gets one round of that kind first, once for each head (a
+        signal already recorded grants nothing). `implementing` needs no edge but reaches the reopening of D14 as well;
+        `fixing` and `waiting_capacity` have no edge: the run records `spec.edit_seen` and takes the edit when the fix
+        unit ends or capacity is restored (`_take_pending_spec_edit`), because the unit's own commits will bury the
+        person's commit."""
+        if not self._takes_spec_edit:  # `l4 verify`: the edit is left for the next `l4 run`, but not buried (review L3)
+            return self._see_spec_edit()
+        self._take_pending_spec_edit()
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if phase in (Phase.FIXING, Phase.WAITING_CAPACITY):  # no edge takes it here: recorded, taken later (review M3)
+            return self._see_spec_edit()
+        if phase is not Phase.IMPLEMENTING and phase not in SPEC_EDIT_PHASES:
+            return
+        edit = self._spec_edit()
+        if edit is None:
+            return
+        if phase is not Phase.IMPLEMENTING:
+            self._record_spec_edit(phase, edit)
+        self._reopen(edit.base)
+
+    def _see_spec_edit(self, edit: SpecEdit | None = None) -> None:
+        """A person's spec edit on a unit that cannot take it now (`fixing`, `waiting_capacity`, a verify):
+        `spec.edit_seen{head, base, commits}`, once for each head. A pending edit of an earlier head keeps its older
+        `base` (the reopening diffs from where the spec was last the harness's) and its commits."""
+        edit, pending = edit or self._spec_edit(), self.state.pending_spec_edit
+        if edit is None or edit.signal in self.state.resumed_signals or (pending and pending.head == edit.head):
+            return
+        base = pending.base if pending else edit.base
+        commits = [
+            *(pending.commits if pending else []),
+            *(c for c in edit.shas if not pending or c not in pending.commits),
+        ]
+        self.services.ledger.append("spec.edit_seen", head=edit.head, base=base, commits=commits[-MAX_EDIT_COMMITS:])
+        self._refold()
+
+    def _take_pending_spec_edit(self) -> bool:
+        """The `spec.edit_seen` of a run that found the unit `fixing` or `waiting_capacity` is taken as soon as the unit
+        is in a phase of `SPEC_EDIT_PHASES` or in `implementing`: right after the fix unit ends (`verifying`, before
+        the verifier runs), right after `capacity_restored`, or at the start of a later run. The edge is the push's
+        own (`_record_spec_edit`), and the Kiro tasks that cite a changed criterion reopen against the recorded
+        base."""
+        pending = self.state.pending_spec_edit
+        phase = Phase(self.state.phase) if self.state.phase else None
+        if pending is None or not self._takes_spec_edit:
+            return False
+        edit = SpecEdit(tuple(pending.commits), pending.base, pending.head)
+        if phase is Phase.IMPLEMENTING:  # no edge to take, but the edit is consumed and the tasks reopen (D14)
+            self.services.ledger.append("unit.retried", reason="spec edited", signal=edit.signal, by="push")
+            self._refold()
+        elif phase in SPEC_EDIT_PHASES:
+            self._record_spec_edit(phase, edit)
+        else:
+            return False
+        self._reopen(edit.base)
+        return True
+
+    def _record_spec_edit(self, phase: Phase | None, edit: SpecEdit) -> None:
+        ledger, extra = self.services.ledger, {"signal": edit.signal, "by": "push"}
+        if phase is Phase.ESCALATED and edit.signal not in self.state.resumed_signals:
+            rounds = (
+                {"feedback_rounds": 1}
+                if feedback_rounds_exhausted(self.state)
+                else {"fix_rounds": 1}
+                if fix_rounds_exhausted(self.cfg, self.state)
+                else {}
+            )
+            if rounds:
+                ledger.append("budget.extended", **rounds, reason="spec edited", **extra)
+        ledger.append("unit.retried", reason="spec edited", **extra)
+        self._notes = ()  # the note of the stop is out of date: the mirror says nothing is waiting
+        self._go(Trigger.SPEC_EDITED, commits=list(edit.shas)[-MAX_EDIT_COMMITS:])
 
     def _reconcile(self) -> None:
         """A step that a killed run left half done is reconciled before anything else (L4-STA-003). A restored
@@ -445,7 +588,7 @@ class Orchestrator:
         self._record_limit(exc)
         context: dict[str, object] = {"reason": str(exc)[:200]}
         retry_after = _retry_after(exc)
-        if retry_after is None and isinstance(exc, RoleUnavailable):  # nothing says when: look again after the default
+        if retry_after is None:  # nothing says when, whatever the cause: look again after the default (L4-OPS-009)
             wait = timedelta(seconds=duration_seconds(self.cfg.availability.default_cooldown))
             retry_after = iso_utc(self.services.factory.now() + wait)
         if retry_after:
@@ -494,6 +637,7 @@ class Orchestrator:
                 code = self._fix()
                 if code is not None:
                     return code
+                self._take_pending_spec_edit()  # the fix unit ended: a spec edit seen while fixing is taken (OPS-014)
             elif phase is Phase.CLARIFYING:
                 code = self._clarify()
                 if code is not None:
@@ -515,6 +659,7 @@ class Orchestrator:
             elif phase is Phase.WAITING_CAPACITY:
                 self._notes = ()  # the capacity note is out of date: a re-park writes it again
                 self._go(Trigger.CAPACITY_RESTORED)
+                self._take_pending_spec_edit()  # a spec push seen while the agents were missing (review M3)
             elif phase is Phase.REJECTED:
                 return ExitCode.REJECTED
             elif phase is Phase.IN_REVIEW:
@@ -536,12 +681,19 @@ class Orchestrator:
         merge."""
         s = self.services
         unit_rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
-        found = review_trigger(after_handoff(s.git, "HEAD", s.ref.name, unit_rel), self.state)
+        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel)
+        found = review_trigger(after, self.state)
         if found is None:
             return False
         self._notes = (review_note(found),)  # the mirror shows why the MR is a draft again, from the first sync on
         self._go(found.trigger, **found.context)
+        if found.trigger is Trigger.SPEC_EDIT_AFTER_HANDOFF and (base := self._before_first_foreign(after)) is not None:
+            self._reopen(base)  # the tasks that cite a changed criterion are open again (L4-OPS-015)
         return True
+
+    def _before_first_foreign(self, after: AfterHandoff) -> str | None:
+        """The last commit before the person's first one after the hand-off: the spec as the harness left it."""
+        return self.services.git.rev_parse(f"{after.foreign[0].sha}^") if after.foreign else None
 
     def _discover(self) -> ExitCode | None:
         """A unit without a phase: intake, or straight to `implemented` when every task is already done."""
@@ -649,7 +801,7 @@ class Orchestrator:
                 if stuck:
                     reason = f"task {stuck[0].key} cannot be selected: its checkbox is not an empty `[ ]`"
                     ledger.append("breaker.tripped", reason="unselectable_task", task=stuck[0].key)
-                    return self._halt(reason)
+                    return self._halt("unselectable_task", reason)
                 if questions_hold(tasks, blocked):
                     return self._await_human(open_ids)
                 self._go(Trigger.ALL_LEAVES_DONE)
@@ -658,7 +810,7 @@ class Orchestrator:
                 outcome = run_task(wb, task)
             except BaselineFailed as exc:
                 ledger.append("breaker.tripped", reason="baseline_failed", detail=str(exc))
-                return self._halt(str(exc))
+                return self._halt("baseline_failed", str(exc))
             except RoleLimit as exc:
                 wb = self._fall_back(exc, wb, task.key)
                 continue
@@ -674,7 +826,7 @@ class Orchestrator:
                     )
                 return self._await_human(outcome.question_ids, task=task.key)
             if outcome.status == "halt":
-                return self._halt(outcome.reason)
+                return self._halt("max_task_attempts", outcome.reason)  # `run_task` halts only on the attempt limit
 
     def switch_profile(self, limit: RunResult | LimitSignal, task: str | None = None) -> Selected:
         """The implementer hit a limit: cool it down and select the next profile. The one place `_selected` changes
@@ -766,11 +918,14 @@ class Orchestrator:
         section = halted_section(phase, reason, s.ref.id, f"{self.cfg.forge.labels_prefix}resume", feedback=feedback)
         return s.app.redactor.redact_text(section)
 
-    def _halt(self, reason: str) -> ExitCode:
-        log.error("%s halted: %s", self.services.ref.id, reason)
-        self._exit_reason = self._exit_reason or f"halted: {reason}"[:300]
-        self._notes = _sections(self._stopped_section("halted", reason))  # the halting run's last sync writes it
-        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=reason[:300])
+    def _halt(self, code: str, detail: str) -> ExitCode:
+        """The halted edge (L4-OPS-005): `code` is one of D5's (`max_task_attempts`, `unselectable_task`,
+        `baseline_failed`, `secret_in_push`, `fix_records`), `detail` the person's text. Both go in the `phase.changed`;
+        the log line, `exit_reason` and the note headline use the detail."""
+        log.error("%s halted: %s", self.services.ref.id, detail)
+        self._exit_reason = self._exit_reason or f"halted: {detail}"[:300]
+        self._notes = _sections(self._stopped_section("halted", detail))  # the halting run's last sync writes it
+        edge = self._go(Trigger.BREAKER_OR_BUDGET, reason=code, detail=detail[:300])
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.HALTED)
 
     def _verify(self, phase: Phase) -> ExitCode | None:
@@ -804,15 +959,17 @@ class Orchestrator:
             raise
         if (notes := self._ctx.shared.pop("notes", None)) is not None:  # the verdict questions' sticky section
             self._notes = notes
-        escalation = self._ctx.shared.pop("escalation", None)  # (reason, note): the feedback limit (L4-FBK-006)
+        # (code, detail) of every escalation the fix loop decides (L4-OPS-005, D5); a verify hook that sets none (an
+        # older or a test hook) gets the generic text and no code
+        escalation = self._ctx.shared.pop("escalation", None)
+        code, why = escalation if escalation else (None, "verification failed (see verification.md)")
         if trigger is Trigger.VERIFY_FAIL_EXHAUSTED:
-            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
-            at_feedback = bool(escalation) and escalation[0] == FEEDBACK_ROUNDS_EXHAUSTED
+            at_feedback = code == FEEDBACK_ROUNDS_EXHAUSTED
             self._notes = (self._stopped_section("escalated", why, feedback=at_feedback), *(self._notes or ()))
-        edge = self._go(trigger, **({"reason": escalation[0]} if escalation else {}))
+        edge = self._go(trigger, **({"reason": code, "detail": why[:300]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
-            why = escalation[1] if escalation else "verification failed and no fix round is left (see verification.md)"
-            self._exit_reason = f"escalated: {why}"
+            log.error("%s escalated: %s", self.services.ref.id, why)
+            self._exit_reason = f"escalated: {why}"[:300]
         if edge.target is Phase.FIXING and self.services.hooks.fix is not None:
             return None  # SPEC 12.0 "10 or 0": the fix loop goes on in this run (D2)
         return None if edge.exit_code is None else ExitCode(edge.exit_code)
@@ -820,10 +977,11 @@ class Orchestrator:
     def _escalate_verifier(self) -> ExitCode:
         """L4-VER-010: the third internal verifier error in a row ends in `escalated` (exit 13); the verifier is not
         called a fourth time."""
-        reason = f"escalated: {VERIFIER_ERROR_LIMIT} consecutive internal verifier errors (see the ledger)"
-        self._notes = _sections(self._stopped_section("escalated", reason.removeprefix("escalated: ")))
-        edge = self._go(Trigger.VERIFY_FAIL_EXHAUSTED, reason=reason)
-        self._exit_reason = reason
+        detail = f"{VERIFIER_ERROR_LIMIT} consecutive internal verifier errors (see the ledger)"
+        self._notes = _sections(self._stopped_section("escalated", detail))
+        edge = self._go(Trigger.VERIFY_FAIL_EXHAUSTED, reason=VERIFIER_ERRORS, detail=detail)
+        log.error("%s escalated: %s", self.services.ref.id, detail)
+        self._exit_reason = f"escalated: {detail}"
         return ExitCode(edge.exit_code if edge.exit_code is not None else ExitCode.HALTED)
 
     def _fix(self) -> ExitCode | None:
@@ -838,7 +996,10 @@ class Orchestrator:
             self._go(Trigger.FIX_UNIT_DONE)
             return None
         if outcome.status == "halt":
-            return self._halt(outcome.reason)
+            # the fix loop gives the text only: its own task limit names itself, every other halt is a record of the
+            # fix unit that cannot be used (no open fix unit, not a fix unit of this one, unselectable task)
+            code = "max_task_attempts" if "max_task_attempts" in outcome.reason else "fix_records"
+            return self._halt(code, outcome.reason)
         self._notes = _sections(outcome.section)
         self._refold()
         self._sync_mirror()
@@ -1028,6 +1189,32 @@ def _busy(snapshot_phase: str | None, ref: UnitRef) -> UnitRunResult:
     return UnitRunResult(outcome, ExitCode.OK)
 
 
+def _refuse_stopped(
+    app: AppContext, state: UnitState, ref: UnitRef, edit: SpecEdit | None = None
+) -> UnitRunResult | None:
+    """`l4 run --unit` on a `halted` or `escalated` unit (L4-OPS-010, SCN-OPS-17, design D10): exit 13 with the recorded
+    cause and the command that moves the unit. Nothing else happens: no lease, worktree, ledger line, commit, push or
+    label sync, because a rerun cannot move the unit and its own side effects (a halt note, a ledger push) hid the
+    cause it was asked about. `l4 resume` and `l4 retry` pass a reason and do not come here. A unit with a person's spec
+    edit after the stop is not refused: the run takes `spec_edited` (L4-OPS-014). An `abandoned` unit (its MR was closed
+    without a merge) is refused the same way and told `l4 restart` (L4-OPS-009, review L4)."""
+    phase = state.phase
+    if phase == Phase.ABANDONED.value:
+        detail = app.redactor.redact_text(state.halt_detail or "the merge request was closed without a merge")
+        next_step = f"l4 restart --unit {ref.id} --reason TEXT"
+    elif phase in (Phase.HALTED.value, Phase.ESCALATED.value) and edit is None:
+        detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
+        next_step = f"l4 retry --unit {ref.id} --reason TEXT"
+    else:
+        return None
+    log.error("%s %s: %s", ref.id, phase, detail)
+    log.error("Next: %s", next_step)
+    reason = f"{phase}: {detail}. Next: {next_step}"[:300]
+    return UnitRunResult(
+        UnitOutcome(unit=ref.id, phase_before=phase, phase_after=phase, exit_reason=reason), ExitCode.HALTED
+    )
+
+
 def run_unit_in_worktree(
     app: AppContext,
     cfg: L4Config,
@@ -1042,17 +1229,25 @@ def run_unit_in_worktree(
     resume_by: str | None = None,
     resume_extend_fix_rounds: int | None = None,
     resume_extend_feedback_rounds: int | None = None,
+    resume_event: str = "unit.resumed",
+    resume_trigger: Trigger = Trigger.RESUMED,
+    resume_what: str = "resume",
+    take_spec_edit: bool = True,
     waits: RunWaits | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
-    lease is held. `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
+    lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
+    `Orchestrator.resume`). `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
+    `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
         ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
     )
     relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve())
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
+    if resume_reason is None and (stopped := _refuse_stopped(app, snapshot.state, ref, snapshot.spec_edit)) is not None:
+        return stopped  # before the lease, the worktree and the ledger: a stopped unit costs a run nothing (L4-OPS-010)
     lease = LocalFileLease(names.flock_path, unit=ref.id, run_id=app.run_id, job=app.environ.get("CI_JOB_ID"))
     opened: dict[str, Path] = {}
 
@@ -1087,13 +1282,19 @@ def run_unit_in_worktree(
             app, cfg, git=unit_git, names=names, worktree=opened["worktree"], ledger=writer,
             adapters=adapters, hooks=hooks, sandbox=resume_reason is None,  # a resume runs no agent and no gate
         )  # fmt: skip
-        orchestrator = Orchestrator(cfg, services, waits)
+        orchestrator = Orchestrator(cfg, services, waits, take_spec_edit=take_spec_edit)
         result = (
             orchestrator.run_unit()
             if resume_reason is None
             else orchestrator.resume(
-                resume_reason, signal=resume_signal, by=resume_by, extend_fix_rounds=resume_extend_fix_rounds,
+                resume_reason,
+                signal=resume_signal,
+                by=resume_by,
+                extend_fix_rounds=resume_extend_fix_rounds,
                 extend_feedback_rounds=resume_extend_feedback_rounds,
+                event=resume_event,
+                trigger=resume_trigger,
+                what=resume_what,
             )
         )
         code, failed = result.exit_code, False
@@ -1191,7 +1392,7 @@ def continue_left_units(app: AppContext, cfg: L4Config, result: CommandResult) -
         return result
     base = cfg.forge.base_branch
     try:
-        answer = make_forge(cfg, app.environ).dispatch_continuation(base)
+        answer = make_forge(cfg, app.environ, repo=app.repo).dispatch_continuation(base)
     except ForgeUnavailable:
         return result  # a local run without credentials: nothing to ask
     except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run

@@ -56,9 +56,7 @@ def excerpt_for(criterion: Criterion, diff: str) -> str:
     return best[:MAX_EXCERPT_CHARS]
 
 
-def evidence_for(
-    criteria: Sequence[Criterion], trace: Sequence[CriterionEvidence], diff: str
-) -> dict[str, Evidence]:
+def evidence_for(criteria: Sequence[Criterion], trace: Sequence[CriterionEvidence], diff: str) -> dict[str, Evidence]:
     tests = {e.criterion: tuple((t.id, t.status) for t in e.tests) for e in trace}
     return {c.id: Evidence(tests.get(c.id, ()), excerpt_for(c, diff)) for c in criteria}
 
@@ -103,6 +101,11 @@ def record_rows(
         return 0
     context = CalibrationContext(wiring.cache_file, run_file, unit, run_id, round_no)
     return record_calibration(
-        step.outcome, context, model=step.model, deterministic=deterministic, judge=judge, engine=step.engine,
+        step.outcome,
+        context,
+        model=step.model,
+        deterministic=deterministic,
+        judge=judge,
+        engine=step.engine,
         server_version=step.server_version,
     )

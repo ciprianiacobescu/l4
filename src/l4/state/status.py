@@ -10,10 +10,10 @@ after the hand-off commit. M1: state-vcs-locks 1.19 `--rebuild`, state.json, `st
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from pathlib import PurePosixPath
-from typing import Literal
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Literal
 
 import click
 
@@ -48,24 +48,30 @@ from l4.state.followups import (
 from l4.state.ledger import (
     MAX_LEDGER_FILE_BYTES,
     LedgerCorrupt,
+    LedgerEvent,
     LedgerRead,
     parse_ledger_files,
     read_ledger_files,
 )
-from l4.state.lifecycle import Phase
+from l4.state.lifecycle import SPEC_EDIT_PHASES, Phase
+from l4.state.next_step import label_for, next_step, reason
 from l4.state.pending import merge_ledgers, read_pending
-from l4.state.review import AfterHandoff, after_handoff
+from l4.state.review import AfterHandoff, SpecEdit, after_handoff, spec_edit_since_harness
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
 from l4.vcs.refresh import refresh_in_ci
 from l4.vcs.tree import regular_blobs
 
+if TYPE_CHECKING:
+    from l4.planner import UnitFacts
+
 REMOTE = "origin"
 TASK_PARSERS: dict[Framework, Callable[[bytes], list[Task]]] = {
     Framework.OPENSPEC: parse_openspec_tasks,
     Framework.KIRO: kiro_tasks,
 }
+STOPPED = (Phase.HALTED.value, Phase.ESCALATED.value)
 CORRUPT_PHASE = "corrupt"  # a status value, not a lifecycle phase: the unit's ledger could not be read
 log = logging.getLogger("l4.status")
 
@@ -98,6 +104,8 @@ class UnitSnapshot:
     feedback: FeedbackFile | None = None  # `feedback.md` from the same source as the tasks and the ledger
     follow_up_of: str | None = None  # the parent's unit id when this unit is a follow-up (`.l4/followup.json`)
     follow_up: FollowUpOffer | None = None  # a `merged` unit: the items a follow-up should take (L4-FBK-010)
+    stopped_in: str | None = None  # a halted or escalated unit: the run whose edge stopped it (L4-OPS-006)
+    spec_edit: SpecEdit | None = None  # a person's spec push after the harness's last commit (L4-OPS-014)
 
     @property
     def feedback_counts(self) -> dict[str, int]:
@@ -181,6 +189,9 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
     review = None
     if on_branch and state.phase == Phase.IN_REVIEW.value:
         review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git))
+    edit = None
+    if on_branch and state.phase in {p.value for p in SPEC_EDIT_PHASES}:
+        edit = spec_edit_since_harness(git, tracking_ref, _relative(provider, ref, git))
     return UnitSnapshot(
         ref,
         state,
@@ -192,7 +203,17 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         review=review,
         feedback=feedback,
         follow_up_of=follow,
+        stopped_in=_stopped_in(read.events, state),
+        spec_edit=edit,
     )
+
+
+def _stopped_in(events: Sequence[LedgerEvent], state: UnitState) -> str | None:
+    """The run id of the last edge into `halted` or `escalated`, while the unit is still stopped."""
+    if state.phase not in STOPPED:
+        return None
+    edges = [e for e in events if e.type == "phase.changed" and e.data.get("to") in STOPPED]
+    return edges[-1].run_id if edges else None
 
 
 def _read_follow_up_marker(git: Git, tracking_ref: str, unit_rel: str) -> str | None:
@@ -331,9 +352,7 @@ def discover(
     return sorted(out, key=lambda pair: pair[1].ref.id)
 
 
-def select_runnable(
-    cfg: L4Config, git: Git, providers: list[SpecProvider], unit: str
-) -> tuple[SpecProvider, UnitRef]:
+def select_runnable(cfg: L4Config, git: Git, providers: list[SpecProvider], unit: str) -> tuple[SpecProvider, UnitRef]:
     """The one unit a command with `--unit` acts on, open follow-ups included. An archived change is only ever the
     parent of a follow-up: it is no unit to run, resume or verify."""
     for provider, snapshot in discover(cfg, git, providers, (unit,)):
@@ -350,11 +369,43 @@ def snapshots(
     return [s for _, s in discover(cfg, git, providers_for(cfg, app.repo, app.environ), wanted)]
 
 
+REASON_WIDTH = 60  # the REASON cell of the table (L4-OPS-006)
+
+
+def _cut(text: str | None) -> str:
+    """One line, at most `REASON_WIDTH` characters, an ellipsis where it was cut; `-` for no reason."""
+    line = " ".join((text or "").split())
+    if not line:
+        return "-"
+    return line if len(line) <= REASON_WIDTH else line[: REASON_WIDTH - 1] + "…"
+
+
+def _facts(snapshot: UnitSnapshot) -> "UnitFacts":
+    from l4.planner import facts_of  # the planner imports this module: the facts are read at call time
+
+    return facts_of(snapshot)
+
+
+def _where(snapshot: UnitSnapshot, repo: Path, branch_prefix: str) -> tuple[str, str]:
+    """(branch, questions path in the repository) of the unit, for the step that names where an answer goes."""
+    try:
+        folder = snapshot.ref.path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        folder = snapshot.ref.path.as_posix()
+    return unit_branch(snapshot.ref.id, branch_prefix), f"{folder}/{QUESTIONS_FILENAME}"
+
+
+def _next(snapshot: UnitSnapshot, repo: Path, branch_prefix: str) -> str:
+    branch, questions_path = _where(snapshot, repo, branch_prefix)
+    return next_step(_facts(snapshot), branch=branch, questions_path=questions_path)
+
+
 def _table(rows: list[UnitSnapshot]) -> str:
-    header = ("UNIT", "PHASE", "ITER", "TASKS", "OPEN-Q", "VERDICT", "SOURCE")
+    header = ("UNIT", "PHASE", "REASON", "ITER", "TASKS", "OPEN-Q", "VERDICT", "SOURCE")
     body = [
         (
-            s.ref.id, s.state.phase or "-", str(s.state.iteration), f"{s.tasks_done}/{s.tasks_total}",
+            s.ref.id, s.state.phase or "-", _cut(reason(_facts(s))), str(s.state.iteration),
+            f"{s.tasks_done}/{s.tasks_total}",
             ",".join(s.state.questions.open) or "-", s.state.last_verdict.verdict if s.state.last_verdict else "-",
             s.source,
         )
@@ -372,6 +423,19 @@ def _table(rows: list[UnitSnapshot]) -> str:
     )
 
 
+def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
+    """The `--unit` detail (L4-OPS-006): the phase, the whole cause of a stop, the run that stopped it, the label that
+    does what the step does, and the step last."""
+    facts = _facts(snapshot)
+    cause = reason(facts) if snapshot.state.phase in (*STOPPED, CORRUPT_PHASE) else None
+    label = label_for(facts, cfg.forge.labels_prefix)
+    lines = [f"Phase: {snapshot.state.phase or '-'}"]
+    lines += [f"Cause: {cause}"] if cause else []
+    lines += [f"Stopped in run: {snapshot.stopped_in}"] if snapshot.stopped_in else []
+    lines += [f"Or: add the label {label}"] if label else []
+    return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}"])
+
+
 def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: bool) -> ExitCode:
     if rebuild:
         raise L4Exit(ExitCode.USAGE_ERROR, "status: --rebuild not yet implemented (M1: state-vcs-locks 1.19)")
@@ -385,6 +449,8 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
                 "pr": urls.expand(s.state.pr) if s.state.pr else None,  # the recorded `<forge>` back to a link
                 "spec_tasks": {"done": s.tasks_done, "total": s.tasks_total},
                 "source": s.source,
+                "reason": reason(_facts(s)),
+                "next": _next(s, app.repo, cfg.forge.branch_prefix),
                 **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
             }
@@ -393,5 +459,7 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
         text = json.dumps({"schema": "l4/status@1", "units": units}, indent=2, ensure_ascii=False)
     else:
         text = _table(rows) if rows else "no units"
+        if unit and rows:
+            text = "\n\n".join([text, *(_block(s, app.repo, cfg) for s in rows)])
     click.echo(app.redactor.redact_text(text))
     return ExitCode.OK

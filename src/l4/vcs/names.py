@@ -13,6 +13,15 @@ def valid_branch_prefix(branch_prefix: str) -> bool:
     return bool(_PREFIX.match(branch_prefix)) and ".." not in branch_prefix and ".lock" not in branch_prefix
 
 
+_BASE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def valid_base_branch(base_branch: str) -> bool:
+    """A base branch name that is safe to write into a CI file: no `..`, no trailing `/` or `.lock`, no quote, space,
+    `$` or newline."""
+    return bool(_BASE.match(base_branch)) and ".." not in base_branch and not base_branch.endswith(("/", ".lock"))
+
+
 def check_branch_prefix(branch_prefix: str) -> None:
     if not valid_branch_prefix(branch_prefix):
         raise ValueError(f"not a usable branch prefix: {branch_prefix!r}")

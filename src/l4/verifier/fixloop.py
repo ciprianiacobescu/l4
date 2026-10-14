@@ -10,8 +10,10 @@ alone, and the cache mounts are the parent's (a cold uv cache per fix unit would
 own `questions.md`, and no clarifier: a human answers. A fix unit is an OpenSpec change or a Kiro bugfix spec.
 """
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+import json
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -52,8 +54,9 @@ from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marke
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, answered_by, blocked_tasks, is_answered
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
 from l4.state.fold import UnitState, fold
-from l4.state.ledger import ledger_path, read_ledger
+from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
+from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
 from l4.verifier.feedback import record_no_status
@@ -61,7 +64,7 @@ from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
 from l4.verifier.notes import escalation_section
 from l4.verifier.provenance import introduction_problem
 from l4.verifier.report import write_round_evidence
-from l4.verifier.types import FixDecision, Verdict, VerifyResult
+from l4.verifier.types import FixDecision, Severity, Verdict, VerifyResult
 
 
 def is_fix_unit(ref: UnitRef) -> bool:
@@ -411,6 +414,106 @@ def _unfinished_fix(ctx: HookContext, provider: FamilyProvider) -> UnitRef | Non
     return fix if fix is not None and any(not t.done for t in provider.own_tasks(fix)) else None
 
 
+# --- a failure that repeats (L4-OPS-007) --------------------------------------------------------------------------
+
+FIX_ROUNDS_EXHAUSTED, NO_CONVERTIBLE_FINDING, NO_FIX_UNITS = (
+    "fix_rounds_exhausted",
+    "no_convertible_finding",
+    "no_fix_units",
+)
+FIX_UNIT_NOT_CREATED, SAME_FAILURE = "fix_unit_not_created", "same_failure"  # `ctx.shared["escalation"]` codes (D5)
+MAX_SAME_DETAIL = 200  # characters of the failure set in the `same_failure` detail
+TEST_GATES = ("test", "e2e")
+_BLOCKING = (Severity.BLOCKER.value, Severity.MAJOR.value)
+_EXIT = re.compile(r"exit code (-?\d+)")
+_RETRY_EVENTS = ("unit.retried", "unit.resumed")  # a person's decision to try again: the next round is judged anew
+
+
+def failure_set(
+    gates: Iterable[Mapping[str, object]], tests: Mapping[str, str], findings: Iterable[Mapping[str, object]] = ()
+) -> frozenset[str]:
+    """What a FAIL round failed on (D7): the name of each failed gate, the failing test ids of a failed test gate, and
+    for a failed gate with no failing test the exit code (`<gate>:exit <code>`, else the head of its reason) and the
+    digest of its last error lines (`<gate>:log <digest>`, review M5: two lint errors are two failures, the same crash
+    twice is one). The id of each blocking finding of source `deterministic` (an integrity or ladder blocker: its id
+    comes from its title and criterion, so it is the same in every round) is in it as `finding <id>`: a round that
+    fails on such a finding alone, every gate passing, still has a set. Judge, human and feedback findings are not
+    part of it: their wording changes between rounds. `gates` and `findings` are the `verdict.json` rows."""
+    failing = sorted(i for i, status in tests.items() if status in ("failed", "error"))
+    found: set[str] = set()
+    for row in gates:
+        if row.get("status") != "fail":
+            continue
+        name = str(row.get("name") or "")
+        found.add(name)
+        if name in TEST_GATES and failing:
+            found.update(failing)
+            continue
+        reason = str(row.get("reason") or "")
+        code = _EXIT.search(reason)
+        found.add(f"{name}:exit {code.group(1)}" if code else f"{name}:{reason.split(';', 1)[0].strip()[:80]}")
+        if digest := row.get("digest"):
+            found.add(f"{name}:log {digest}")
+    for row in findings:
+        if row.get("source") == "deterministic" and row.get("severity") in _BLOCKING and row.get("id"):
+            found.add(f"finding {row['id']}")
+    return frozenset(found)
+
+
+def _previous_round(unit_dir: Path, round_no: int) -> tuple[int, dict[str, object]] | None:
+    """The newest stored round before `round_no` and its `verdict.json`; None when there is none or it is unreadable."""
+    evidence = unit_dir / ".l4" / "evidence"
+    rounds = sorted(
+        (
+            int(p.name.removeprefix("round-"))
+            for p in evidence.glob("round-*")
+            if p.name.removeprefix("round-").isdigit()
+        ),
+        reverse=True,
+    )
+    for n in rounds:
+        if n < round_no:
+            try:
+                data = json.loads((evidence / f"round-{n}" / "verdict.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+            return (n, data) if isinstance(data, dict) else None
+    return None
+
+
+def repeated_failure(unit_dir: Path, git: Git, events: Sequence[LedgerEvent], result: VerifyResult) -> str | None:
+    """The `same_failure` detail when `result` (a FAIL round) failed the way the round before it did, else None. The
+    set must not be empty. Not a repeat when the previous round did not FAIL, when its head is unknown, when a commit
+    of a person lies between that head and now (the person changed something), or when a retry was recorded after the
+    previous round's verdict (the person chose to try once more)."""
+    found = _previous_round(unit_dir, result.round)
+    if found is None:
+        return None
+    before, data = found
+    gates, tests, earlier = data.get("gates"), data.get("tests"), data.get("findings") or []
+    if data.get("verdict") != Verdict.FAIL.value or not isinstance(gates, list) or not isinstance(tests, dict):
+        return None
+    now_findings = ({**asdict(f), "severity": f.severity.value} for f in result.findings)
+    now = failure_set((asdict(g) for g in result.gates), result.tests, now_findings)
+    before_set = failure_set(
+        (g for g in gates if isinstance(g, dict)), tests, (f for f in earlier if isinstance(f, dict))
+    )
+    if not now or now != before_set:
+        return None
+    head = str(data.get("head_sha") or "")
+    if not head or git.run("cat-file", "-e", f"{head}^{{commit}}", check=False).returncode != 0:
+        return None
+    if any(not is_harness_strict(r) for r in commit_records(git, "--first-parent", f"{head}..HEAD")):
+        return None
+    last = max(
+        (i for i, e in enumerate(events) if e.type == "verify.verdict" and e.data.get("round") == before), default=-1
+    )
+    if any(e.type in _RETRY_EVENTS for e in events[last + 1 :]):
+        return None
+    listed = ", ".join(sorted(now))[:MAX_SAME_DETAIL]
+    return f"round {result.round} failed the same way as round {before}: {listed}"
+
+
 def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
     """Sets `result.fix` (L4-VER-006, L4-VER-007), before the evidence is written. FAIL with rounds left: a fix unit.
     FAIL without: `escalated`. PASS with `verifier.fix_minor_findings`: a fix unit for the convertible minors while
@@ -425,7 +528,8 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
         titles = [t.title for t in provider.own_tasks(open_fix) if not t.done]
         result.fix = FixDecision("spawn", marker.round if marker else 0, titles, [])  # no plan: it exists already
         return
-    state = fold(read_ledger(s.ref.path).events, s.ref.id)
+    events = read_ledger(s.ref.path).events
+    state = fold(events, s.ref.id)
     used = _used_rounds(provider, state)
     ordinal = _next_ordinal(provider, state)
     limit = cfg.max_fix_rounds + state.fix_rounds_extra  # a member's extension (`l4 resume`, the label), L4-IMP-013
@@ -436,7 +540,7 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
     listed = list(plan.not_converted)
     if result.verdict is Verdict.FAIL:
         if not provider.can_fix:
-            why = f"{wb.ref.framework.value} has no fix units"
+            why, code = f"{wb.ref.framework.value} has no fix units", NO_FIX_UNITS
         elif plan.feedback_only:  # its own limit, not `max_fix_rounds` (L4-FBK-006)
             if feedback_rounds_left(ctx.cfg, state) > 0:
                 result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
@@ -444,14 +548,16 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
                 note = f"feedback round limit reached ({feedback_round_limit(ctx.cfg, state)})"
                 result.fix = FixDecision("escalate", ordinal - 1, [], listed, note, code=FEEDBACK_ROUNDS_EXHAUSTED)
             return
+        elif (same := repeated_failure(wb.ref.path, wb.git, events, result)) is not None:  # L4-OPS-007
+            why, code = same, SAME_FAILURE
         elif used >= limit:
-            why = f"fix rounds used {used}/{limit}"
+            why, code = f"fix rounds used {used}/{limit}", FIX_ROUNDS_EXHAUSTED
         elif not plan.groups:
-            why = "no finding of this round can be converted into a fix task"
+            why, code = "no finding of this round can be converted into a fix task", NO_CONVERTIBLE_FINDING
         else:
             result.fix = FixDecision("spawn", ordinal, tasks, listed, plan=plan)
             return
-        result.fix = FixDecision("escalate", used, [], listed, why)
+        result.fix = FixDecision("escalate", used, [], listed, why, code=code)
         return
     if not plan.groups:
         result.fix = FixDecision("none", used, [], listed) if listed else None
@@ -526,8 +632,11 @@ def after_verdict(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger
         if isinstance(e, OpenSpecUnavailable | OpenSpecCommandError):
             raise  # transient (exit 1 / 3): the unit stays `verifying` and the run can be repeated
         # a deterministic failure: the same plan fails the same way next round, and each round costs a judge call
-        result.fix = FixDecision("escalate", fix.ordinal - 1, [], list(fix.not_converted), reason)
+        result.fix = FixDecision(
+            "escalate", fix.ordinal - 1, [], list(fix.not_converted), reason, code=FIX_UNIT_NOT_CREATED
+        )
         ctx.shared["notes"] = (escalation_section(result, reason, wb.redactor.redact_text),)
+        ctx.shared["escalation"] = (FIX_UNIT_NOT_CREATED, reason)
         return Trigger.VERIFY_FAIL_EXHAUSTED
     rel = ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
     no_status: list[str] = []

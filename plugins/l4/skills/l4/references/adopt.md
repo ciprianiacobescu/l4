@@ -1,6 +1,6 @@
 # Adopting L4 in a repository (GitHub)
 
-The harness lives in its own repository (`OWNER/agent-supervisor`, private) and is used as a **setup action**. The
+The harness lives in its own repository (`OWNER/l4`, private) and is used as a **setup action**. The
 adopting repository keeps only:
 - `.l4/config.yaml`;
 - one workflow, `.github/workflows/l4.yml`;
@@ -21,7 +21,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/agent-supervisor@v0.3.0   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.3.0   # or @<sha>
 l4 --version
 ```
 
@@ -30,9 +30,9 @@ l4 --version
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --action-repo OWNER/agent-supervisor --harness-ref v0.3.0 [--dependabot]
+l4 init --ci github --action --action-repo OWNER/l4 --harness-ref v0.3.0 [--dependabot]
 # public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/agent-supervisor.git --harness-ref v0.3.0
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.3.0
 ```
 
 - **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.3.0`; that line
@@ -90,7 +90,7 @@ environment `l4` and set `forge.token_env: L4_FORGE_TOKEN`.
 ## 5. Upgrades
 
 ```sh
-uv tool install --force git+https://github.com/OWNER/agent-supervisor@v0.4.0
+uv tool install --force git+https://github.com/OWNER/l4@v0.4.0
 l4 upgrade --harness-ref v0.4.0
 ```
 

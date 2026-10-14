@@ -1,4 +1,4 @@
-# Operating L4: state, questions, resume
+# Operating L4: state, questions, retry and restart
 
 ## Reading state
 
@@ -13,7 +13,7 @@
 
   The ledgers under `.l4/` are the harness's record. Read them; never edit them.
 - **Phases** in order: `implementing` → `implemented` → `verifying` → `fixing` → `verified` → `in_review`, then
-  `merged`. `awaiting_human` means a question waits for you. `escalated` and `halted` need a person (see Resume).
+  `merged`. `awaiting_human` means a question waits for you. `escalated` and `halted` need a person, `abandoned` means the PR was closed unmerged (see Retry or restart).
 
 ## Answering `questions.md`
 
@@ -47,20 +47,29 @@ reads only answers whose Status says they are submitted.
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
 
-## Resume an escalated or halted unit
+## Retry or restart a stuck unit
 
-The note names the reason. Only a member (Developer on GitLab, write access on GitHub) can resume.
+The note names the reason; so do `l4 status` (the `REASON` column) and `l4 status --unit FW:NAME`, which ends with
+`Next:` and, for a unit a label moves, an `Or:` line. Only a member (Developer on GitLab, write access on GitHub) can
+use a label. A command needs the forge token in the environment; the project comes from `origin`.
 
-- **Escalated at the feedback limit** ("feedback round limit reached (N)"):
-  - add the label `l4:resume` to the PR, which gives one more feedback round; or
-  - run `l4 resume --unit FW:NAME --reason "…" --extend-feedback-rounds N` (needs the forge token in the environment).
-- **Escalated at the fix-round limit:** the label gives one more fix round, or use `--extend-fix-rounds N`. Each flag
-  is refused for the other kind of stop.
-- **Halted** (a guard, a stuck task, a budget): fix the cause the note names, then `l4 resume --unit … --reason "…"`
-  or the label.
-- **Then start a run.** Neither the label nor `l4 resume` starts one, so dispatch it or wait for the schedule:
-  - GitHub: `gh workflow run l4.yml --ref <base branch>`;
-  - GitLab: run the pipeline on the base branch.
+- **Continue where it stopped: `l4 retry --unit FW:NAME --reason "…"`**, or the label `l4:retry` on the PR.
+  - Works on `halted`, `escalated`, `waiting_capacity` and `in_review` units (a merged unit: the archive retry).
+    Any other phase is refused with what moves it.
+  - Escalated at a round limit: it adds one fix (or feedback) round; `--rounds N` adds N.
+  - If you changed the spec on the unit branch since the stop, the unit goes back to `implementing`.
+  - It then starts a run on the base branch (`--no-run` skips that). A label starts none: the run that reads it
+    continues the unit.
+  - `l4 resume` and `l4:resume` still work and mean the same for `halted` and `escalated`, but start no run.
+- **Start over: `l4 restart --unit FW:NAME --reason "…"`**, or the label `l4:restart`. It cuts a new branch from the
+  base with the unit folder (spec, questions, feedback; task boxes as the base has them), keeps the old head as
+  `refs/l4/attempts/…`, closes the old PR and starts a run. Use it for a PR closed without a merge (`abandoned`), a
+  deleted branch, or a unit whose history is poisoned.
+- **A spec push re-enters a unit by itself.** A commit on the unit branch that changes the unit folder (not `.l4/`,
+  `verification.md`, `questions.md`, `feedback.md`) sends the unit to `implementing` at the next run, from most phases
+  (during `fixing`, when the fix unit ends). On Kiro, tasks that cite a changed criterion are reopened. Add `[skip ci]`
+  to an unfinished edit.
+- **Do not use `l4 run --unit`** on a stopped unit: it exits 13 and changes nothing.
 - **Do not raise `feedback.max_rounds` or `verifier.max_fix_rounds`** to unblock one unit: that changes every unit.
 
 ## Merging

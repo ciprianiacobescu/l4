@@ -179,8 +179,10 @@ from l4.verifier.verdicts import (
     raise_verdict_questions,
     regressions,
     settle_holds,
+    supersede_stale_verdicts,
     text_sha256,
     unresolved_holds,
+    verdict_targets,
 )
 
 log = logging.getLogger("l4.verify")
@@ -257,10 +259,18 @@ def _events(wb: Workbench) -> list[LedgerEvent]:
 
 
 def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
-    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop)."""
-    return {
-        str(t): str(e.data.get("task", "")) for e in events if e.type == "task.red_ok" for t in e.data.get("tests", [])
-    }
+    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop). A test that a
+    `tests.superseded` event lists (a stale test that a reopened task's red step replaced, L4-OPS-015) is not expected
+    any more, unless a later `task.red_ok` names it again. Every other test a red step added stays expected, so one
+    that vanishes without that record is still a blocker, also in a reopened task."""
+    found: dict[str, str] = {}
+    for e in events:
+        if e.type == "tests.superseded":
+            for t in e.data.get("tests") or ():
+                found.pop(str(t), None)
+        elif e.type == "task.red_ok":
+            found.update(dict.fromkeys((str(t) for t in e.data.get("tests", [])), str(e.data.get("task", ""))))
+    return found
 
 
 def _notes(events: Sequence[LedgerEvent]) -> str:
@@ -1169,6 +1179,22 @@ def _ask_verdicts(
     return [path] if path.exists() else []
 
 
+def _supersede_verdicts(ctx: HookContext, result: VerifyResult, round_no: int) -> list[Path]:
+    """The round ended with any verdict: the verdict questions of an earlier round that nobody answered are replaced
+    by this round (L4-OPS-014). A NEEDS_HUMAN round keeps the ones it asks again. The file joins the evidence commit."""
+    services = ctx.services
+    path = services.ref.path / QUESTIONS_FILENAME
+    events = read_ledger(services.ref.path).events
+    ask = (
+        verdict_targets(result.criteria, result.findings, result.holds) if result.verdict is Verdict.NEEDS_HUMAN else ()
+    )
+    ids = supersede_stale_verdicts(
+        services.ref.path, existing=QuestionsFile.load(path), consumed=fold(events, services.ref.id).verdicts_consumed,
+        events=events, ledger=services.ledger, round_no=round_no, current=ask,
+    )  # fmt: skip
+    return [path] if ids else []
+
+
 def verify_hook(ctx: HookContext) -> Trigger:
     """The orchestrator's `verify` hook (resolved as `l4.verifier.ladder:verify_hook`): one round, evidence committed
     and pushed, then the trigger of the verdict."""
@@ -1293,6 +1319,7 @@ def verify_hook(ctx: HookContext) -> Trigger:
         record_no_status(services.ledger, fold(_events(wb), wb.ref.id), no_status)
     if result.verdict is Verdict.NEEDS_HUMAN:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
+    paths += [p for p in _supersede_verdicts(ctx, result, round_no) if p not in paths]
     commit_verifier_tests(wb, vc.verifier_tests, round_no)
     _commit_evidence(wb, paths, round_no)
     ctx.push()
@@ -1307,7 +1334,8 @@ def verify_hook(ctx: HookContext) -> Trigger:
 
 def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandResult:
     """`l4 verify --unit U`: the verifier alone, on a unit that is `implemented` or `verifying`. It is the normal run
-    with the hand-off hook left out, so a PASS stops at `verified` (exit 0)."""
+    with the hand-off hook left out, so a PASS stops at `verified` (exit 0). It does not take a person's spec edit (that
+    would run the implementer): the edit is recorded as `spec.edit_seen`, and the next `l4 run` takes it."""
     if dry_run:
         raise L4Exit(ExitCode.USAGE_ERROR, "verify: --dry-run not yet implemented (M1: verifier)")
     app, cfg = load_app_config(app)
@@ -1322,5 +1350,5 @@ def run_verify(app: AppContext, *, unit: str, dry_run: bool = False) -> CommandR
             ExitCode.USAGE_ERROR, f"verify: {unit} is {phase or 'new'}; only an implemented unit can be verified"
         )
     hooks = dataclasses.replace(load_hooks(), handoff=None, fix=None)
-    result = run_unit_in_worktree(app, cfg, git, provider, ref, hooks=hooks)
+    result = run_unit_in_worktree(app, cfg, git, provider, ref, hooks=hooks, take_spec_edit=False)  # review L3
     return CommandResult(result.exit_code, [result.outcome])

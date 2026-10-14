@@ -31,6 +31,7 @@ class Step:
     limit: LimitSignal | None = None
     delay_s: float = 0.0
     writes: Mapping[str, str] = field(default_factory=dict)  # worktree-relative path -> content
+    deletes: tuple[str, ...] = ()  # worktree-relative paths the step removes (after the writes)
     cost_usd: float | None = None  # reported as the run's usage, for tests of budget accounting
     credits: float | None = None  # plan credits (Kiro), a different unit from dollars
     credits_source: str | None = None
@@ -77,6 +78,11 @@ class FakeAdapter:
                 raise AdapterError(f"scripted write {name!r} is outside the worktree")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
+        for name in step.deletes:
+            target = (root / name).resolve()
+            if root not in target.parents:
+                raise AdapterError(f"scripted delete {name!r} is outside the worktree")
+            target.unlink(missing_ok=True)
         if step.structured is not None:
             req.result_path.parent.mkdir(parents=True, exist_ok=True)
             req.result_path.write_text(json.dumps(step.structured), encoding="utf-8")

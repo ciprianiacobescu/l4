@@ -30,8 +30,10 @@ from l4.ci.failing_step import (
 )
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
+from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
-from l4.gates.coverage import is_python_gate, project_python
+from l4.fsutil import UnsafeFile, reject_symlinks
+from l4.gates.coverage import cov_env, is_python_gate, project_python
 from l4.gates.e2e import e2e_configured, e2e_test_dir
 from l4.gates.hang import TIMEOUT_MARKER, HungTest, hung_tests
 from l4.gates.junit import TestCase, TestReport
@@ -67,6 +69,7 @@ from l4.implementer.guards import (
     restore_test_paths,
 )
 from l4.implementer.prompt import PromptContext, collect_sources, defuse, render_prompt, result_values_line
+from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
     RESULT_SCHEMA,
     ImplementerResult,
@@ -87,6 +90,8 @@ from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
 from l4.specs.base import Marker, Task
+from l4.specs.criteria import trace_ids
+from l4.specs.fixmark import read_fix_marker
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.verifier.scan import task_tags
@@ -154,6 +159,16 @@ class RedOutcome:
     summary: str = ""
     criteria: dict[str, dict[str, Any]] = field(default_factory=dict)  # criterion -> {tests, proof}
     excerpt: str = ""  # the failure text behind `reason`, for the next prompt
+    superseded: frozenset[str] = frozenset()  # stale tests (L4-OPS-015) this red step removed or broke on purpose
+
+
+@dataclass(frozen=True)
+class StaleTests:
+    """The tests a reopened task's red step may replace (L4-OPS-015): base test id -> the stale criterion ids it traces,
+    and the changes (`reopen.stale_changes`) the red prompt shows."""
+
+    tests: Mapping[str, tuple[str, ...]]
+    changes: tuple[Mapping[str, Any], ...]
 
 
 @dataclass
@@ -202,6 +217,34 @@ def _list(ids: Sequence[str]) -> str:
 
 def new_test_ids(base: TestReport, head: TestReport) -> set[str]:
     return set(head.tests) - set(base.tests)
+
+
+def stale_tests(base: TestReport, stale_ids: Collection[str]) -> dict[str, tuple[str, ...]]:
+    """The tests of the base report whose trace (`trace_ids`: the `l4` marker and the ids in the name, L4-CRT-002)
+    holds a stale criterion id, each with those ids (L4-OPS-015, design D14 "Stale tests"). Nothing for no stale id."""
+    if not stale_ids:
+        return {}
+    found = {i: tuple(sorted(trace_ids(c) & set(stale_ids))) for i, c in base.tests.items()}
+    return {i: ids for i, ids in found.items() if ids}
+
+
+def stale_for(wb: Workbench, task: Task, base: TestReport) -> StaleTests | None:
+    """The stale tests of `task` at the base of its red step: those that trace an id `tasks.reopened` recorded for it
+    (`pending_stale`) and no `task.done` has cleared. None when there are none: every other test stays protected."""
+    changes = pending_stale(_ledger_events(wb), task.key)
+    tests = stale_tests(base, {str(c["old_id"]) for c in changes})
+    return StaleTests(tests, tuple(changes)) if tests else None
+
+
+def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset[str]:
+    """The criteria whose tests already exist and that a spec edit left alone, for the red step of a reopened task
+    (L4-OPS-015): the ids the base tests trace, less the NEW ids of the changed criteria. Empty for a task no
+    `tasks.reopened` holds open: a normal red step needs a new test for every criterion it cites."""
+    events = _ledger_events(wb)
+    if not is_reopened(events, task.key):
+        return frozenset()
+    changed = {str(c["new_id"]) for c in pending_stale(events, task.key) if c.get("new_id")}
+    return frozenset({i for case in base.tests.values() for i in trace_ids(case)} - changed)
 
 
 def _first_line(case: TestCase) -> str:
@@ -255,9 +298,11 @@ def classify_red(
     allowed_passing: Collection[str] = (),
     excerpt: Excerpter | None = None,
     rules: TraceRules | None = None,
+    superseded: Collection[str] = (),
 ) -> RedVerdict:
-    """The failure reasons, in order (design D3.4); the first that holds is returned. `allowed_passing`: the new
-    tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new test must fail by
+    """The failure reasons, in order (design D3.4); the first that holds is returned. `superseded`: the stale tests
+    of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `allowed_passing`:
+    the new tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new test must fail by
     assertion or with the stub's NotImplementedError; any other error is reported by name (SPEC check 3). `excerpt`
     turns the named tests into the failure text of the retry prompt."""
 
@@ -268,7 +313,10 @@ def classify_red(
     broken_modules = set(head.collection_errors) - set(base.collection_errors)
     if not new and not test_files_changed and not tests_added and not broken_modules:
         return RedVerdict(False, "no tests added")
-    regressed = sorted(i for i in base.ids_with("passed") if i not in head.tests or head.tests[i].status != "passed")
+    regressed = sorted(
+        i for i in base.ids_with("passed")
+        if (i not in head.tests or head.tests[i].status != "passed") and i not in superseded
+    )  # fmt: skip
     if not new and not broken_modules and regressed:  # live M1.11 job 5810: an existing test edited in place
         return RedVerdict(
             False,
@@ -309,8 +357,11 @@ def classify_red(
     return RedVerdict(True)
 
 
-def green_failures(base: TestReport, red_ids: Sequence[str], gate: GateResult) -> tuple[str, list[str]]:
-    """Why the green gate run is not acceptable (empty when it is), and the ids of the tests the reason names."""
+def green_failures(
+    base: TestReport, red_ids: Sequence[str], gate: GateResult, superseded: Collection[str] = ()
+) -> tuple[str, list[str]]:
+    """Why the green gate run is not acceptable (empty when it is), and the ids of the tests the reason names.
+    `superseded`: the stale tests the red step replaced (L4-OPS-015) are not regressions."""
     report = gate.report
     if hung := gate_hung(gate):
         return hang_reason(hung), [h.id for h in hung]
@@ -325,7 +376,10 @@ def green_failures(base: TestReport, red_ids: Sequence[str], gate: GateResult) -
     failing = [i for i in red_ids if i not in report.tests or report.tests[i].status != "passed"]
     if failing:
         return f"red tests still failing: {_list(failing)}", failing
-    regressed = [i for i in base.ids_with("passed") if i not in report.tests or report.tests[i].status != "passed"]
+    regressed = [
+        i for i in base.ids_with("passed")
+        if (i not in report.tests or report.tests[i].status != "passed") and i not in superseded
+    ]  # fmt: skip
     if regressed:
         return f"green broke existing tests: {_list(regressed)}", regressed
     known = set(base.tests) | set(red_ids)
@@ -486,6 +540,7 @@ def _prompt(
     previous_failure: str | None,
     unfreeze: Unfreeze | None = None,
     adds_tests: bool = False,
+    stale: StaleTests | None = None,
 ) -> str:
     answers = _answers(wb, task)
     lessons = _lessons(wb, task)
@@ -501,6 +556,7 @@ def _prompt(
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
         unfrozen=tuple((p, g.question) for g in unfreeze.grants for p in g.paths) if unfreeze else (),
         adds_tests=adds_tests,
+        stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
@@ -520,7 +576,7 @@ def _prompt(
 
 def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
-    unfreeze: Unfreeze | None = None, *, adds_tests: bool = False,
+    unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
@@ -535,7 +591,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale)
     wb.publish_prompt(published, prompt)
     env = build_agent_env(wb.host_env, spec, extra=extra)
     request = RunRequest(
@@ -619,7 +675,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     base_report = baseline(wb, base)
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
     run_setup(wb)
-    step = agent_step(wb, "red", task, attempt, previous_failure)
+    stale = stale_for(wb, task, base_report)  # L4-OPS-015: the tests of the old text of a changed criterion
+    step = agent_step(wb, "red", task, attempt, previous_failure, stale=stale)
     if step.kind != "ok":
         wb.discard_changes()
         return _red_exit(step)
@@ -663,6 +720,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             family,
             {i: report.tests[i] for i in new_ids},
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
+            exempt=unchanged_criteria(wb, task, base_report),
         )
         for test in check.untraced:
             wb.emit("test.untraced", task=task.key, test=test)
@@ -690,11 +748,23 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     verdict = classify_red(
         base_report, report, test_files_changed=test_files, tests_added=result.tests_added,
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
-        rules=trace_rules(wb.cfg.gates.test.command),
+        rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
     )  # fmt: skip
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
+    # a stale test that is gone or fails now was replaced on purpose; one that still passes is simply kept
+    replaced = frozenset(
+        t for t in (stale.tests if stale else ()) if t not in report.tests or report.tests[t].status != "passed"
+    )
+
+    def record_superseded() -> None:
+        if replaced and stale:
+            wb.emit(
+                "tests.superseded", task=task.key, tests=sorted(replaced),
+                criteria=sorted({c for t in replaced for c in stale.tests[t]}),
+            )  # fmt: skip
+
     # `tests` trace the criterion; `discriminating` are the ones the zero-value run showed to look at the answer
     # a criterion confirmed by an earlier red names that red's tests (`discriminating`), `via` and the newest red's
     # commit and task; `tests` stay this step's own, which `classify_red` allows to pass
@@ -777,6 +847,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         parents = tick_completed_parents(wb.provider, wb.ref)
         # contract C22, as for red and green: the proof travels inside the commit and names the base; the sha follows
         wb.restore_ledger()
+        record_superseded()
         wb.emit(
             "task.red_ok", task=task.key, base=base, tests=sorted(new_tests), frozen=[], notes=notes,
             criteria=proofs, suppressions=_suppressions(result), tdd="already-satisfied",
@@ -792,7 +863,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         wb.emit("task.red_committed", task=task.key, base=base, sha=sha)
         wb.emit("task.green_committed", task=task.key, base=base, sha=sha)
         wb.push()
-        return RedOutcome("already_satisfied", sha=sha, new_ids=new_tests, base_report=base_report, criteria=proofs)
+        return RedOutcome(
+            "already_satisfied", sha=sha, new_ids=new_tests, base_report=base_report, criteria=proofs,
+            superseded=replaced,
+        )  # fmt: skip
     if (out := tampered("before the red commit")) is not None:
         return out
     # The proof is recorded BEFORE the commit so that it travels inside it: a run killed right after the push has
@@ -802,6 +876,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     wb.git.run("add", "-A", config=wb.exclude_config)
     tree = wb.git.run("write-tree").stdout.strip()
     frozen = build_manifest(wb.git, tree, base, test_globs=tdd.test_globs, support_globs=tdd.test_support_globs)
+    record_superseded()
     wb.emit(
         "task.red_ok", task=task.key, base=base, tests=sorted(new_tests), frozen=sorted(frozen.files), notes=notes,
         criteria=proofs, suppressions=_suppressions(result),
@@ -812,7 +887,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     wb.emit("task.red_committed", task=task.key, base=base, sha=sha)  # contract C22: the sha, which the commit lacked
     manifest = replace(frozen, red_sha=sha)
     wb.push()
-    return RedOutcome("ok", sha=sha, new_ids=new_tests, manifest=manifest, base_report=base_report, criteria=proofs)
+    return RedOutcome(
+        "ok", sha=sha, new_ids=new_tests, manifest=manifest, base_report=base_report, criteria=proofs,
+        superseded=replaced,
+    )  # fmt: skip
 
 
 def _last_checkpoint(wb: Workbench) -> tuple[str, str, str] | None:
@@ -871,6 +949,35 @@ def _red_exit(step: StepOutcome) -> RedOutcome:
     return RedOutcome("failed", step.reason, excerpt=step.excerpt)
 
 
+def fix_gate_env(wb: Workbench) -> dict[str, str] | None:
+    """The environment of the test gate in the green step of a fix unit's task (L4-OPS-012, D12): the verifier's
+    coverage plugin, so that a failure only the measurement causes reaches the fixer as an ordinary failed gate, with
+    its log. Its output goes to a private folder of the step (`.l4-out/fix-cov`, the one place the gate sandbox can
+    write) and is never read: only the gate's pass or fail is used. None for any other unit, for a gate that does not
+    run Python, and when `.l4-out/fix-cov` is a symlink (repository content: nothing is written through it)."""
+    if read_fix_marker(wb.ref.path) is None or not is_python_gate(wb.cfg.gates.test.command):
+        return None
+    try:
+        reject_symlinks(wb.worktree, ".l4-out", "fix-cov")
+    except UnsafeFile as exc:
+        log.warning("%s: the fix gate runs without coverage: %s", wb.ref.id, exc)
+        return None
+    unit = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
+    roots = wb.cfg.verifier.evidence.module_roots
+    packages = set()
+    for path in {*wb.branch_changed_files(), *wb.changed_files()}:
+        parts = path.split("/")
+        if path.endswith(".py") and ".." not in parts and file_kind(path, unit, wb.cfg) == "code":
+            packages.add("/".join(parts[:2]) if parts[0] in roots and len(parts) > 2 else parts[0])
+    out = wb.worktree / ".l4-out" / "fix-cov"
+    shutil.rmtree(out, ignore_errors=True)
+    try:
+        return cov_env(out, sorted(packages))
+    except (ValueError, OSError) as exc:  # an unsafe path name: the gate runs as before
+        log.warning("%s: the fix gate runs without coverage: %s", wb.ref.id, exc)
+        return None
+
+
 def run_green(
     wb: Workbench, task: Task, red: RedOutcome, *, attempt: int, previous_failure: str | None = None
 ) -> GreenOutcome:
@@ -897,8 +1004,8 @@ def run_green(
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
     run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
-    reason, named = green_failures(red.base_report, sorted(red.new_ids), gate)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
+    reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
     hung = gate_hung(gate) if reason else []
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     if hung:
@@ -1229,7 +1336,7 @@ def run_single(
         restore_frozen(wb.git, frozen, events=wb, excludes=wb.excludes, phase="single")
         freeze_test_paths(wb, task, base, phase="single")
     run_setup(wb)
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
     reason, named = green_failures(base_report, [], gate)
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     added = (

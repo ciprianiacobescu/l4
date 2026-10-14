@@ -41,6 +41,7 @@ def build_push_args(remote: str, refspecs: Sequence[str]) -> list[str]:
             raise ForcedPushRefused(f"option-like refspec refused: {spec!r}")
     return ["push", "--", remote, *refspecs]
 
+
 _NON_FAST_FORWARD = re.compile(r"^\s*! \[rejected\].*\((?:non-fast-forward|fetch first)\)", re.MULTILINE)
 # what git (client side) and a server (when the race is lost between the check and the update) say about a lease that
 # no longer holds; any other refusal, a hook or a permission, is not worth another try
@@ -48,9 +49,10 @@ LEASE_LOST = ("stale info", "failed to update ref", "cannot lock ref", "failed t
 _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 LOCK_REF_PREFIX = "refs/l4/locks/"
 ARCHIVED_REF_PREFIX = "refs/l4/archived/"
+ATTEMPT_REF_PREFIX = "refs/l4/attempts/"  # `l4 restart` keeps old heads here (L4-OPS-004)
 
 
-def _plain_ref(ref: str, prefix: str) -> bool:
+def _plain_ref(ref: str, prefix: str | tuple[str, ...]) -> bool:
     bad = ref.endswith("/") or re.search(r"[^A-Za-z0-9._/-]", ref) or ".." in ref
     return ref.startswith(prefix) and not bad
 
@@ -83,16 +85,44 @@ def build_lease_push_args(remote: str, sha: str, ref: str, expected: str) -> lis
     return ["push", f"--force-with-lease={ref}:{expected}", "--", remote, f"{sha}:{ref}"]
 
 
+def build_restart_args(remote: str, branch: str, old_head: str, lock: tuple[str, str, str] | None = None) -> list[str]:
+    """`l4 restart` (L4-OPS-004): push HEAD over the unit branch and, when there is a lock ref, move it to the attempt's
+    `-locks` name, in ONE atomic push. The leases: the branch at `old_head` ('' = it must not exist), and for `lock` =
+    `(lock ref, its sha, archived name)` the lock ref at that sha and the archived name absent. Either every ref moves
+    or none does, so a lost lease leaves the pending ledger where the fold reads it."""
+    if not remote or remote.startswith("-"):
+        raise ForcedPushRefused(f"not a remote name: {remote!r}")
+    if old_head and not _OBJECT_ID.match(old_head):
+        raise ForcedPushRefused(f"not a commit id: {old_head!r}")
+    ref = f"refs/heads/{branch}"
+    if not branch or not _plain_ref(ref, "refs/heads/") or branch.startswith("-"):
+        raise ForcedPushRefused(f"not a branch name: {branch!r}")
+    args = ["push", "--atomic", f"--force-with-lease={ref}:{old_head}"]
+    specs = [f"HEAD:{ref}"]
+    if lock is not None:
+        lock_ref, sha, archived = lock
+        if not _OBJECT_ID.match(sha):
+            raise ForcedPushRefused(f"not a commit id: {sha!r}")
+        if not _plain_ref(lock_ref, LOCK_REF_PREFIX):
+            raise ForcedPushRefused(f"not a lock ref: {lock_ref!r}")
+        if not _plain_ref(archived, ATTEMPT_REF_PREFIX):
+            raise ForcedPushRefused(f"not an attempts ref: {archived!r}")
+        args += [f"--force-with-lease={lock_ref}:{sha}", f"--force-with-lease={archived}:"]
+        specs += [f"{sha}:{archived}", f":{lock_ref}"]
+    return [*args, "--", remote, *specs]
+
+
 def build_retire_args(remote: str, sha: str, ref: str, archived: str) -> list[str]:
-    """Move the lock ref `ref` to `archived` (a ref that must not exist yet) in one atomic push, only if `ref` still
-    holds `sha`: the commit, and the pending ledger in it, is kept under the new name."""
+    """Move the lock ref `ref` to `archived` (a ref that must not exist yet, under `refs/l4/archived/` or, for
+    `l4 restart`, `refs/l4/attempts/`) in one atomic push, only if `ref` still holds `sha`: the commit, and the pending
+    ledger in it, is kept under the new name."""
     if not remote or remote.startswith("-"):
         raise ForcedPushRefused(f"not a remote name: {remote!r}")
     if not _OBJECT_ID.match(sha):
         raise ForcedPushRefused(f"not a commit id: {sha!r}")
     if not _plain_ref(ref, LOCK_REF_PREFIX):
         raise ForcedPushRefused(f"not a lock ref: {ref!r}")
-    if not _plain_ref(archived, ARCHIVED_REF_PREFIX):
+    if not _plain_ref(archived, (ARCHIVED_REF_PREFIX, ATTEMPT_REF_PREFIX)):
         raise ForcedPushRefused(f"not an archived ref: {archived!r}")
     return [
         "push", "--atomic", f"--force-with-lease={ref}:{sha}", f"--force-with-lease={archived}:", "--", remote,

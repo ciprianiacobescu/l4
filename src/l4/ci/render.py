@@ -5,9 +5,12 @@ M1: forge-and-ci 1.14's `uvx --from git+URL@SHA` branch waits for SPEC Q1; 1.16/
 `l4 ci render`; 1.12/1.18 linting of the rendered YAML.
 """
 
+import re
 from importlib.resources import files
 
+from l4.config.schema import L4Config
 from l4.provision.catalog import UV_VERSION
+from l4.vcs.names import check_branch_prefix, valid_base_branch
 
 TEMPLATE_RELPATH = ".l4/ci/l4.gitlab-ci.yml"
 SHIM_RELPATH = ".l4/bin/l4"
@@ -77,8 +80,21 @@ exec uvx --python @@PYTHON@@ --from "git+${repository}@${commit}" l4 "$@"
 """.replace("@@PYTHON@@", HARNESS_PYTHON)
 
 
-def render_gitlab_ci() -> str:
-    return files("l4.ci").joinpath("templates", "l4.gitlab-ci.yml").read_text(encoding="utf-8")
+def _gitlab_regex(text: str) -> str:
+    """`text` as the body of a GitLab `/.../` regex literal: every metacharacter and the `/` delimiter escaped."""
+    return re.sub(r"([/.\\^$*+?()\[\]{}|])", r"\\\1", text)
+
+
+def render_gitlab_ci(cfg: L4Config | None = None) -> str:
+    """The GitLab job (L4-OPS-016): the configured `forge.base_branch` and `forge.branch_prefix` are written into the
+    rules and the `L4_BASE_BRANCH` variable the base checkout reads, so a base that is not the project's default
+    branch works. ValueError for a base or prefix that is not safe to write into YAML (nothing is rendered)."""
+    forge = (cfg or L4Config()).forge
+    if not valid_base_branch(forge.base_branch):
+        raise ValueError(f"not a usable base branch: {forge.base_branch!r}")
+    check_branch_prefix(forge.branch_prefix)
+    text = files("l4.ci").joinpath("templates", "l4.gitlab-ci.yml").read_text(encoding="utf-8")
+    return text.replace("@@BASE@@", forge.base_branch).replace("@@PREFIX_RE@@", _gitlab_regex(forge.branch_prefix))
 
 
 def render_shim() -> str:

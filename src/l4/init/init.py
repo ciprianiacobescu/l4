@@ -156,6 +156,14 @@ def loaded_config(config_text: str) -> L4Config:
         return load_config(Path(tmp))
 
 
+def _gitlab_template(cfg: L4Config) -> str:
+    """The GitLab job for this config; a base branch or prefix that cannot be written safely is a usage error."""
+    try:
+        return render_gitlab_ci(cfg)
+    except ValueError as exc:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"init: {exc}") from None
+
+
 def validated_config(config_text: str) -> str:
     loaded_config(config_text)
     return config_text
@@ -315,7 +323,7 @@ def plan_init(
     edited: PlannedFile | None = None
     merged: PlannedFile | None = None
     if ci in ("gitlab", "both"):
-        files.append(PlannedFile(TEMPLATE_RELPATH, render_gitlab_ci().encode(), 0o644))
+        files.append(PlannedFile(TEMPLATE_RELPATH, _gitlab_template(cfg).encode(), 0o644))
         if ci_edit:
             edited, ci_notes = _ci_edit(repo, cfg, proposal)
             if edited is not None:
@@ -536,8 +544,13 @@ def run_init(
     if harness_ref is not None and harness_commit_pin is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref and --harness-commit exclude each other")
     if not action:
-        extras = (("--action-repo", action_repo), ("--action-copy", action_copy), ("--dependabot", dependabot),
-                  ("--runner-tag", runner_tag), ("--forge-token-env", forge_token_env))
+        extras = (
+            ("--action-repo", action_repo),
+            ("--action-copy", action_copy),
+            ("--dependabot", dependabot),
+            ("--runner-tag", runner_tag),
+            ("--forge-token-env", forge_token_env),
+        )
         for flag, used in extras:
             if used:
                 raise L4Exit(ExitCode.USAGE_ERROR, f"init: {flag} needs --action")
@@ -619,8 +632,7 @@ def run_init(
         click.echo(f"todo: {todo}", err=True)
     click.echo(
         f"next: run `{'l4' if pin is not None else '.l4/bin/l4'} doctor --adoption` (the config rows and a dry run of "
-        "the gates at HEAD), then commit "
-        + _listed(files_to_commit(plan)),
+        "the gates at HEAD), then commit " + _listed(files_to_commit(plan)),
         err=True,
     )
     if plan.vendor is not None:

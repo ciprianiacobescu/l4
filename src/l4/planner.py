@@ -28,21 +28,23 @@ from l4.implementer.tasks import answers_unblock, open_blocking_questions, quest
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.sim.availability import ProbingAvailability, availability_json, roles_needed
 from l4.specs.questions import blocked_tasks
-from l4.state.lifecycle import TERMINAL, Phase
+from l4.state.lifecycle import SPEC_EDIT_PHASES, TERMINAL, Phase
 from l4.state.status import UnitSnapshot, snapshots
 from l4.vcs.git import Git
 from l4.verifier.verdicts import legacy_round, verdict_status
 
 PLAN_SCHEMA = "l4/plan@1"
 _TERMINAL_VALUES = {p.value for p in TERMINAL}
+_SPEC_EDIT_VALUES = {p.value for p in SPEC_EDIT_PHASES}
 _IMPLEMENT = {Phase.INTAKE.value, Phase.READY.value, Phase.IMPLEMENTING.value}
 _VERIFY = {Phase.IMPLEMENTED.value, Phase.VERIFYING.value}
+_FIXING = {Phase.FIXING.value}  # parked in the fix loop: a run takes the unit back into it (L4-OPS-009)
 _NOT_ACTIONABLE = {
     Phase.AWAITING_HUMAN.value: "awaiting_human: no new answers",
     Phase.FIXING.value: "fixing: fix units are not implemented in M0",
-    Phase.WAITING_CAPACITY.value: "waiting_capacity: M0 does not re-enter on its own",
-    Phase.HALTED.value: "halted: a member adds the label l4:resume (or runs l4 resume)",
-    Phase.ESCALATED.value: "escalated: needs l4 resume",
+    Phase.WAITING_CAPACITY.value: "waiting_capacity: run l4 retry to try the agents now",
+    Phase.HALTED.value: "halted: run l4 retry (or the label l4:retry)",
+    Phase.ESCALATED.value: "escalated: run l4 retry (or the label l4:retry)",
     Phase.REJECTED.value: "rejected: inputs unchanged",
     Phase.IN_REVIEW.value: "in_review: waiting for merge",
     Phase.ARCHIVED.value: "archived: waiting for merge",
@@ -63,11 +65,13 @@ class UnitFacts:
     answers_unblock: tuple[str, ...] = ()  # answered questions that free a pending task, when one is eligible
     retry_after: str | None = None  # waiting_capacity: when the earliest cool-down ends
     previous_phase: str | None = None  # waiting_capacity: the phase the unit was parked from
+    halt_detail: str | None = None  # halted or escalated: the person's text of the stop (L4-OPS-005, L4-OPS-006)
     drafts: tuple[str, ...] = ()  # an answer is written but Status is still `open`: never consumed (SCN-QMD-03)
     unreadable: tuple[str, ...] = ()  # questions whose section or Blocking tasks line could not be read
     verdicts_open: tuple[str, ...] = ()  # verdict questions the verifier asked and nobody answered
     verdicts_ready: tuple[str, ...] = ()  # answered with `accept` or `reject`, not yet consumed
     verdicts_invalid: tuple[str, ...] = ()  # answered, but not starting with `accept` or `reject`
+    verdicts_dismissed: tuple[str, ...] = ()  # Status `dismissed`: read as open (L4-OPS-009)
     fix_unit_of: str | None = None  # this unit is a fix unit of that parent: never planned on its own (G5)
     open_fix_unit: str | None = None  # the last fix unit spawned and not done
     fix_progress: tuple[int, int] | None = None  # (done, total) tasks of the open fix unit
@@ -77,6 +81,9 @@ class UnitFacts:
     after_handoff: tuple[str, ...] = ()  # in_review: shas of the commits after H that the harness did not make
     spec_edit_after_handoff: bool = False  # in_review: those commits changed the unit folder (answers, spec edits)
     handoff_lost: bool = False  # in_review: no H on the branch (history rewritten)
+    spec_edited: tuple[
+        str, ...
+    ] = ()  # a person's commits after the harness's last one changed the unit folder (OPS-014)
     ci_failed_jobs: tuple[str, ...] = ()  # in_review: the project's CI is red on H, which is the branch head
     follow_up_items: tuple[str, ...] = ()  # merged: the feedback items (ids) a follow-up should take (L4-FBK-010)
     follow_up_open: str | None = None  # merged: the follow-up that is open, so newer items wait
@@ -96,7 +103,9 @@ class PlanEntry:
 
 def _after_capacity(facts: UnitFacts, now: datetime) -> tuple[str, str] | None:
     """The `waiting_capacity` row (forge-and-ci 2.32, reduced): the previous phase's action once `retry_after` has
-    passed, `none` before that. A park without a readable `retry_after`, or from another phase, stays as it was."""
+    passed, `none` before that. A park from `fixing` is continued by a run too (`implement`: the run drives the fix
+    unit). A park without a readable `retry_after`, or from another phase, stays as it was (the park always records
+    one now, L4-OPS-009)."""
     try:
         due = datetime.fromisoformat(facts.retry_after or "")
     except ValueError:
@@ -106,7 +115,7 @@ def _after_capacity(facts: UnitFacts, now: datetime) -> tuple[str, str] | None:
     if due > now:
         return "none", f"waiting_capacity until {facts.retry_after}"
     previous = facts.previous_phase
-    action = "implement" if previous in _IMPLEMENT else "verify" if previous in _VERIFY else None
+    action = "implement" if previous in _IMPLEMENT | _FIXING else "verify" if previous in _VERIFY else None
     return (action, f"capacity: retry_after {facts.retry_after} passed") if action else None
 
 
@@ -134,6 +143,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         return "none", f"ledger corrupt: {facts.corrupt}"
     if facts.fix_unit_of:
         return "none", f"fix unit of {facts.fix_unit_of}: run the parent"
+    if facts.spec_edited and phase in _SPEC_EDIT_VALUES:  # a person's push re-enters the unit by itself (L4-OPS-014)
+        return "implement", f"spec edited after {phase}: {facts.spec_edited[-1][:10]}"
     pending = facts.tasks_done < facts.tasks_total
     if phase is None:
         if facts.tasks_total == 0:
@@ -159,6 +170,12 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
             return "none", (
                 f"awaiting_human: verdict answer must start with accept or reject: {', '.join(facts.verdicts_invalid)}"
             )
+        if facts.verdicts_dismissed:
+            ids = "; ".join(
+                f"{qid}: a verdict question cannot be dismissed: start the answer with accept or reject"
+                for qid in facts.verdicts_dismissed
+            )
+            return "none", f"awaiting_human: {ids}"
         if facts.verdicts_ready and not facts.verdicts_open:
             return "verify", f"verdicts answered: {', '.join(facts.verdicts_ready)}"
         if facts.answers_unblock:
@@ -184,6 +201,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         if facts.follow_up_open:
             return "none", f"merged: feedback {ids} waits for the open follow-up {facts.follow_up_open}"
         return "follow_up", f"merged: feedback {ids} becomes a follow-up unit"
+    if phase in (Phase.HALTED.value, Phase.ESCALATED.value) and facts.halt_detail:
+        return "none", f"{phase}: {facts.halt_detail}"  # the recorded cause, not the fixed text (L4-OPS-006)
     if phase in _NOT_ACTIONABLE:
         return "none", _NOT_ACTIONABLE[phase]
     return "none", f"unknown phase {phase}"
@@ -233,6 +252,13 @@ def _review_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
     return facts
 
 
+def _spec_edit_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
+    edit, pending = snapshot.spec_edit, snapshot.state.pending_spec_edit
+    if edit is not None:
+        return {"spec_edited": edit.shas}
+    return {"spec_edited": tuple(pending.commits)} if pending is not None else {}  # seen while fixing (L4-OPS-014)
+
+
 def _follow_up_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
     offer = snapshot.follow_up
     if offer is None or not offer.items:
@@ -254,17 +280,20 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         answers_unblock=tuple(answers_unblock(snapshot.questions, snapshot.tasks)),
         retry_after=snapshot.state.retry_after,
         previous_phase=snapshot.state.previous_phase,
+        halt_detail=snapshot.state.halt_detail,
         drafts=_issue_ids(snapshot, "unsubmitted_answer"),
         unreadable=_issue_ids(snapshot, "unreadable_section", "unreadable_blocking"),
         verdicts_open=verdicts.open,
         verdicts_ready=verdicts.ready,
         verdicts_invalid=verdicts.invalid,
+        verdicts_dismissed=verdicts.dismissed,
         fix_unit_of=snapshot.fix_of,
         open_fix_unit=snapshot.state.open_fix_unit,
         fix_progress=progress,
         fix_questions_open=fix_open,
         legacy_round=legacy_round(snapshot.state, snapshot.questions),
         **_review_facts(snapshot),
+        **_spec_edit_facts(snapshot),
         **_follow_up_facts(snapshot),
     )
 

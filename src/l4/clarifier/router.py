@@ -442,9 +442,7 @@ def build_s1_judge(
         from l4.llm.system_one import open_s1_backend
 
         try:
-            backend = open_s1_backend(
-                cfg, "s1_judge", events, environ=environ, log_path=log_path, redactor=redactor
-            )
+            backend = open_s1_backend(cfg, "s1_judge", events, environ=environ, log_path=log_path, redactor=redactor)
         except RoleUnavailable as exc:
             why = f" (System One: {exc})"
         else:
