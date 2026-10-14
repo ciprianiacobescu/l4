@@ -240,6 +240,7 @@ class Question:
     context_text: str = ""  # the `### Context` and `### Options` bodies as written (neutralised, see `unescape_text`)
     options_text: str = ""
     restarted: bool = False  # the Status is `superseded by restart`: no successor, and nothing is held
+    superseded_round: int | None = None  # the Status is `superseded by round <n>`: a later round replaced it
 
 
 @dataclass(frozen=True)
@@ -264,6 +265,7 @@ _TASK_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _SUCCESSOR = re.compile(r"\bsuperseded\s+by\s+`?(Q-\d+)", re.IGNORECASE)
 _RESTART_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+restart\b", re.IGNORECASE)
 SUPERSEDED_BY_RESTART = "superseded by restart"  # `l4 restart` (L4-OPS-004): the question belongs to the old attempt
+_ROUND_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+round\s+(\d+)\b", re.IGNORECASE)
 _QUESTION_HEADING = re.compile(rb"^## Q-(\d+):")
 _ANSWERED = frozenset({QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED, QuestionStatus.ANSWERED_BY_CLARIFIER})
 
@@ -377,6 +379,7 @@ def _parse_section(
         context_text=_visible(data[context.body.start : context.body.end]) if context else "",
         options_text=_visible(data[options.body.start : options.body.end]) if options else "",
         restarted=bool(_RESTART_SUPERSEDED.search(fields.get("status", ""))) and not successor,
+        superseded_round=int(later.group(1)) if (later := _ROUND_SUPERSEDED.search(fields.get("status", ""))) else None,
     )  # fmt: skip
 
 
@@ -464,6 +467,15 @@ class QuestionsFile:
         if question.status_value is None:
             raise SpecError(f"{qid} has no Status line")
         return _edited(self, [(question.status_value, SUPERSEDED_BY_RESTART.encode())], row_of=qid)
+
+    def supersede_by_round(self, qid: str, round_no: int) -> "QuestionsFile":
+        """Status `superseded by round <n>` (L4-OPS-014): a verdict question of an earlier verification round that a
+        later round replaced (a person fixed the spec instead of answering). Like `superseded by restart` it holds no
+        task (see `holds`). The index row follows."""
+        question = _require(self, qid)
+        if question.status_value is None:
+            raise SpecError(f"{qid} has no Status line")
+        return _edited(self, [(question.status_value, f"superseded by round {round_no}".encode())], row_of=qid)
 
     def set_suggestion(self, qid: str, text: str, *, redactor: Redactor) -> "QuestionsFile":
         """Replace the body of the *Clarifier suggestion* block, or add the block before `### Answer`. The text is
@@ -561,14 +573,15 @@ def holds(
     """Per question id, the pending task keys it still holds back (L4-QMD-005); empty sets are left out. Fail closed
     where the file cannot be read: a question whose Blocking tasks line is unreadable, and an id in `unreadable`
     (`QuestionsFile.unreadable_ids`), hold every pending task. A superseded question holds the tasks its named
-    successor does not list: with no successor in the file nothing took over. The exception is `superseded by
-    restart` (`l4 restart`): the old attempt's question, which holds nothing."""
+    successor does not list: with no successor in the file nothing took over. The exceptions are `superseded by
+    restart` (`l4 restart`) and `superseded by round <n>` (L4-OPS-014): the question of an old attempt or round,
+    which holds nothing."""
     every, all_questions = frozenset(pending), list(questions)
     by_id = {q.id: q for q in all_questions}
     held = {qid: every for qid in unreadable}
     for q in all_questions:
-        if is_answered(q) or (q.status is QuestionStatus.SUPERSEDED and q.restarted):
-            continue  # a question that a restart superseded belongs to the old attempt
+        if is_answered(q) or (q.status is QuestionStatus.SUPERSEDED and (q.restarted or q.superseded_round)):
+            continue  # a question that a restart or a later round superseded belongs to the old attempt
         if not q.blocking_readable:
             held[q.id] = every
             continue

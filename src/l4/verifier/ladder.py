@@ -179,8 +179,10 @@ from l4.verifier.verdicts import (
     raise_verdict_questions,
     regressions,
     settle_holds,
+    supersede_stale_verdicts,
     text_sha256,
     unresolved_holds,
+    verdict_targets,
 )
 
 log = logging.getLogger("l4.verify")
@@ -1169,6 +1171,22 @@ def _ask_verdicts(
     return [path] if path.exists() else []
 
 
+def _supersede_verdicts(ctx: HookContext, result: VerifyResult, round_no: int) -> list[Path]:
+    """The round ended with any verdict: the verdict questions of an earlier round that nobody answered are replaced
+    by this round (L4-OPS-014). A NEEDS_HUMAN round keeps the ones it asks again. The file joins the evidence commit."""
+    services = ctx.services
+    path = services.ref.path / QUESTIONS_FILENAME
+    events = read_ledger(services.ref.path).events
+    ask = (
+        verdict_targets(result.criteria, result.findings, result.holds) if result.verdict is Verdict.NEEDS_HUMAN else ()
+    )
+    ids = supersede_stale_verdicts(
+        services.ref.path, existing=QuestionsFile.load(path), consumed=fold(events, services.ref.id).verdicts_consumed,
+        events=events, ledger=services.ledger, round_no=round_no, current=ask,
+    )  # fmt: skip
+    return [path] if ids else []
+
+
 def verify_hook(ctx: HookContext) -> Trigger:
     """The orchestrator's `verify` hook (resolved as `l4.verifier.ladder:verify_hook`): one round, evidence committed
     and pushed, then the trigger of the verdict."""
@@ -1293,6 +1311,7 @@ def verify_hook(ctx: HookContext) -> Trigger:
         record_no_status(services.ledger, fold(_events(wb), wb.ref.id), no_status)
     if result.verdict is Verdict.NEEDS_HUMAN:
         paths += _ask_verdicts(ctx, wb, result, criteria, round_no)
+    paths += [p for p in _supersede_verdicts(ctx, result, round_no) if p not in paths]
     commit_verifier_tests(wb, vc.verifier_tests, round_no)
     _commit_evidence(wb, paths, round_no)
     ctx.push()

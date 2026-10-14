@@ -226,6 +226,16 @@ def _question_answered(state: UnitState, event: LedgerEvent) -> None:
             state.questions.answered.append(qid)
 
 
+def _question_superseded(state: UnitState, event: LedgerEvent) -> None:
+    """`question.superseded{ids, round}` (L4-OPS-014): a later verification round replaced these verdict questions, so
+    they are neither open nor answered."""
+    ids = event.data.get("ids")
+    if isinstance(ids, list):
+        fix = _fix_unit(event)
+        gone = {f"{fix}/{i}" if fix else i for i in ids if isinstance(i, str)}
+        state.questions.open = [q for q in state.questions.open if q not in gone]
+
+
 def _availability_selected(state: UnitState, event: LedgerEvent) -> None:
     role, profile = _text(event, "role"), _text(event, "selected") or _text(event, "profile")  # SPEC 8.4: `selected`
     if role and profile:
@@ -455,6 +465,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "spec.edit_seen": _spec_edit_seen,
     "question.raised": _question_raised,
     "question.answered": _question_answered,
+    "question.superseded": _question_superseded,
     "availability.selected": _availability_selected,
     "agent.session": _agent_session,
     "budget.cost": _budget_cost,
