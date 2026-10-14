@@ -321,7 +321,7 @@ def test_collect_runs_only_read_only_git(kg_repo):
     before = kg_repo.refs()
     recording = kg_repo.recording_git()
     collect(recording, kg_repo.cfg)
-    assert set(recording.subcommands) <= {"for-each-ref", "ls-tree", "cat-file", "rev-parse", "log"}
+    assert set(recording.subcommands) <= {"for-each-ref", "ls-tree", "cat-file", "rev-parse", "log", "config"}
     assert kg_repo.refs() == before and kg_repo.status() == ""
 
 

@@ -241,7 +241,8 @@ def test_blame_of_findings_and_rounds(kg_repo):
 
 def test_changed_files_of_a_round_when_both_commits_are_local(kg_repo):
     base = kg_repo.commit("main", {"src/a.py": "1\n"}, "base")
-    head = kg_repo.commit("work", {"src/b.py": "2\n", "src/web/c.py": "3\n"}, "head")
+    # head is on main: a commit that the read refs reach (review #7)
+    head = kg_repo.commit("main", {"src/b.py": "2\n", "src/web/c.py": "3\n"}, "head")
     raw = json.dumps({
         "schema": "l4/verdict@1", "round": 1, "verdict": "FAIL", "base_sha": base, "head_sha": head,
         "findings": [], "criteria": [], "gates": [], "profiles": {"judge": "j", "implementer": []},

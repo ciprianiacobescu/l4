@@ -191,7 +191,8 @@ def test_a_judge_title_is_not_quoted_even_when_a_failure_is_drafted(kg_repo):
 
 def test_the_scope_is_the_folders_of_the_changed_files_where_known(kg_repo):
     base = kg_repo.commit("main", {"src/a.py": "1\n"}, "base")
-    head = kg_repo.commit("work", {"src/web/b.py": "2\n", "src/api/c.py": "3\n"}, "head")
+    # head is on main: a commit that the read refs reach (review #7)
+    head = kg_repo.commit("main", {"src/web/b.py": "2\n", "src/api/c.py": "3\n"}, "head")
     for name in ("a", "b"):
         crit = kg_repo.criterion(f"cap{name} › Cart › Shows count")
         found = kg_repo.finding("Tests not collected individually", criterion=crit.id)
