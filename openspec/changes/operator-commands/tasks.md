@@ -56,9 +56,9 @@
 
 ## 8. Review and live validation
 
-- [ ] 8.1 An independent review of the whole change on the session model. Fix every confirmed finding.
-- [ ] 8.2 The full suite is green on the 8 CI shards.
-- [ ] 8.3 Live validation on the GitHub dummy, with evidence in `docs/live/operator-commands/`:
+- [x] 8.1 An independent review of the whole change on the session model. Fix every confirmed finding.
+- [x] 8.2 The full suite is green on the 8 CI shards.
+- [x] 8.3 Live validation on the GitHub dummy, with evidence in `docs/live/operator-commands/`:
   - a spec push to an escalated or verified unit that re-enters it by itself;
   - a Kiro criterion reworded on the unit branch, whose citing task is reopened and run red then green;
   - a halted unit, `l4 retry` by command, and the started run;

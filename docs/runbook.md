@@ -1117,6 +1117,10 @@ promotes. The harness then cuts unit branches from that branch and opens their P
 > **CAUTION:** Merge `main` into `l4/main` after each change on `main`. If you do not, the base merge of verification
 > can find conflicts (7.7).
 
+> **CAUTION:** After you move the pin with `l4 upgrade`, a push to an open unit branch still runs the harness that
+> the unit branch pins. The new pin reaches that branch when verification merges the base into it. To use the new
+> harness at once, start a run on the base branch (section 6).
+
 > **NOTE:** The scheduled run on GitHub runs on `main`, and it checks out `l4/main` for the work. It restores the tool
 > caches, but only a push to `l4/main` saves them.
 
