@@ -64,7 +64,7 @@ from this file and design.md; the review in 8.1 is independent. No line edits a 
 
 ## 8. Review and live validation
 
-- [ ] 8.1 An independent review of the whole change on the session model, against L4-KG-001..014 and the D1 boundary. Fix every confirmed finding.
+- [x] 8.1 An independent review of the whole change on the session model, against L4-KG-001..014 and the D1 boundary. Fix every confirmed finding.
 - [ ] 8.2 The full suite is green on the CI shards, with no existing assertion changed (L4-KG-014, SCN-KG-30).
-- [ ] 8.3 Live, by hand, on a local clone of a test repository's history (the GitLab and GitHub dummy repositories), with the attempts refs fetched: `l4 kg build`, `l4 kg report --out .l4-out/kg/report.md`, `l4 kg why` for one restarted unit. Check five numbers of the report against `git show` of their `src`. After `scripts/dev/scrub.py check` is clean, save the evidence in `docs/live/experience-graph/`. (L4-KG-004, L4-KG-005, L4-KG-009)
+- [x] 8.3 Live, by hand, on a local clone of a test repository's history (the GitLab and GitHub dummy repositories), with the attempts refs fetched: `l4 kg build`, `l4 kg report --out .l4-out/kg/report.md`, `l4 kg why` for one restarted unit. Check five numbers of the report against `git show` of their `src`. After `scripts/dev/scrub.py check` is clean, save the evidence in `docs/live/experience-graph/`. (L4-KG-004, L4-KG-005, L4-KG-009)
 - [ ] 8.4 If a failure class recurs in at least 2 units: `l4 kg propose`, a person writes the advice, then `l4 lessons promote` on the base branch. Record the commit, and in later units record the `lessons.injected` events and the lesson's line in `kg report`. If nothing recurs, record `no pattern at n = <units>` and stop. This is the success criterion of design "How the implementer benefits". (L4-KG-008, L4-KG-012, L4-KG-013)
