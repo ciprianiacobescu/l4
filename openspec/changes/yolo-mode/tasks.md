@@ -4,10 +4,10 @@
 
 ## 1. Plan, admission, digests, config (wave 1, agent A: `yolo/admit.py`, `yolo/digest.py`, `config/schema.py` `YoloCfg`)
 
-- [ ] 1.1 `admit()` with every finding code of D2, the unit/batch graph, cycle detection that names the path, and the topological order with the tie rule. Tests SCN-YOLO-03..05, one test per finding code. (L4-YOLO-002)
-- [ ] 1.2 `next_eligible()` (D2): direct and batch-induced prerequisites, accepted batches, the wait reasons. Tests for A→B, A+B→C, batch b2 after b1, and an integrated unit. (L4-YOLO-010)
-- [ ] 1.3 `unit_digest()` and `plan_digest()` (D3) with the exclusions and the marker normalisation. Tests SCN-YOLO-06, SCN-YOLO-07, OpenSpec and Kiro folders. (L4-YOLO-003)
-- [ ] 1.4 `yolo.profiles` in `config/schema.py` (`YoloCfg`, gate kinds validated, `all` and `none` reserved). (L4-YOLO-009)
+- [x] 1.1 `admit()` with every finding code of D2, the unit/batch graph, cycle detection that names the path, and the topological order with the tie rule. Tests SCN-YOLO-03..05, one test per finding code. (L4-YOLO-002)
+- [x] 1.2 `next_eligible()` (D2): direct and batch-induced prerequisites, accepted batches, the wait reasons. Tests for A→B, A+B→C, batch b2 after b1, and an integrated unit. (L4-YOLO-010)
+- [x] 1.3 `unit_digest()` and `plan_digest()` (D3) with the exclusions and the marker normalisation. Tests SCN-YOLO-06, SCN-YOLO-07, OpenSpec and Kiro folders. (L4-YOLO-003)
+- [x] 1.4 `yolo.profiles` in `config/schema.py` (`YoloCfg`, gate kinds validated, `all` and `none` reserved). (L4-YOLO-009)
 
 ## 2. Plan ledger (wave 1, agent B: `yolo/store.py`, `yolo/state.py`)
 

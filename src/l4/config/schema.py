@@ -695,6 +695,34 @@ class MemoryCfg(_Strict):
     serena: SerenaCfg = Field(default_factory=SerenaCfg)
 
 
+YOLO_GATE_KINDS = ("setup", "build", "lint", "typecheck", "test", "e2e")
+YOLO_RESERVED_PROFILES = ("all", "none")  # `all`: every configured gate; `none`: no check (batches only)
+_YOLO_EXTRA = re.compile(r"^extra:[A-Za-z0-9][A-Za-z0-9._-]*$")
+_YOLO_PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
+
+
+class YoloCfg(_Strict):
+    """Delivery plans (yolo-mode L4-YOLO-009): `profiles` maps a name to the gate kinds a post-merge check runs."""
+
+    profiles: dict[str, list[str]] = Field(default_factory=dict)
+
+    @field_validator("profiles")
+    @classmethod
+    def _profiles(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        for name, kinds in value.items():
+            if name in YOLO_RESERVED_PROFILES:
+                raise ValueFree(f"yolo.profiles: {name!r} is reserved (all = every configured gate, none = no check)")
+            if not _YOLO_PROFILE.match(name):
+                raise ValueFree(f"yolo.profiles: {name!r} is not a valid profile name")
+            for kind in kinds:
+                if kind not in YOLO_GATE_KINDS and not _YOLO_EXTRA.match(kind):
+                    raise ValueFree(
+                        f"yolo.profiles.{name}: {kind!r} is not a gate kind "
+                        f"(one of {', '.join(YOLO_GATE_KINDS)}, or extra:<name>)"
+                    )
+        return value
+
+
 class L4Config(_Strict):
     version: Literal[1] = 1
     harness: HarnessCfg = Field(default_factory=HarnessCfg)
@@ -718,3 +746,4 @@ class L4Config(_Strict):
     ci: CiCfg = Field(default_factory=CiCfg)
     budgets: BudgetsCfg = Field(default_factory=BudgetsCfg)
     observability: ObservabilityCfg = Field(default_factory=ObservabilityCfg)
+    yolo: YoloCfg = Field(default_factory=YoloCfg)
