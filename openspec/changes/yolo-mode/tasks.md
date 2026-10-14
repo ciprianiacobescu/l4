@@ -35,9 +35,9 @@
 
 ## 6. Commands (wave 2, agent G: `yolo/commands.py`, `cli.py`, `state/status.py`, `doctor`)
 
-- [ ] 6.1 `l4 yolo check|review|activate|status|cancel|resume|report` (D6) with the refusals of L4-YOLO-005 and D10's resume table. Tests SCN-YOLO-01, -02, -10, -11, -26. (L4-YOLO-005, L4-YOLO-013)
-- [ ] 6.2 `l4 status`: the `plan <id>: …` line while a plan is active. (L4-YOLO-015)
-- [ ] 6.3 `l4 doctor`: the `merge_policy: auto` warning (SCN-YOLO-17). (L4-YOLO-008)
+- [x] 6.1 `l4 yolo check|review|activate|status|cancel|resume|report` (D6) with the refusals of L4-YOLO-005 and D10's resume table. Tests SCN-YOLO-01, -02, -10, -11, -26. (L4-YOLO-005, L4-YOLO-013)
+- [x] 6.2 `l4 status`: the `plan <id>: …` line while a plan is active. (L4-YOLO-015)
+- [x] 6.3 `l4 doctor`: the `merge_policy: auto` warning (SCN-YOLO-17). (L4-YOLO-008)
 
 ## 7. Documentation (wave 1, agent E: `docs/SPEC.md`, `docs/yolo-mode.md`, `docs/runbook.md`, skill `operate.md`, `README.md`, `docs/state-diagram.md`)
 

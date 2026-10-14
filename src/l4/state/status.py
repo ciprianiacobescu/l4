@@ -442,6 +442,9 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     rows = snapshots(app, cfg, (unit,) if unit else (), tolerate_denied=True)
     urls = app_forge_urls(app, cfg)
+    from l4.yolo.commands import plan_lines  # here: the plan commands import this module
+
+    plans = plan_lines(app.repo, Git(app.repo, environ=app.environ), {s.ref.id: s.state.phase for s in rows})
     if as_json:
         units = [
             {
@@ -456,9 +459,13 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
             }
             for s in rows
         ]
-        text = json.dumps({"schema": "l4/status@1", "units": units}, indent=2, ensure_ascii=False)
+        payload: dict[str, object] = {"schema": "l4/status@1", "units": units}
+        if plans:
+            payload["plans"] = plans  # only with a plan: the shape of a repository without one is unchanged
+        text = json.dumps(payload, indent=2, ensure_ascii=False)
     else:
         text = _table(rows) if rows else "no units"
+        text = "\n".join([*plans, text])  # one line per plan above the table (L4-YOLO-015)
         if unit and rows:
             text = "\n\n".join([text, *(_block(s, app.repo, cfg) for s in rows)])
     click.echo(app.redactor.redact_text(text))

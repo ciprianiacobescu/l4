@@ -191,6 +191,36 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--reason", "reason", required=True, help="Why the unit starts over (kept in the ledger)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
+    "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
+        click.Argument(["plan"]),
+    ]),
+    "yolo review": ("Ask CI to review a delivery plan (--local: review it here).", lambda: [
+        click.Argument(["plan"]),
+        _flag("--local", "local", help="Run the readiness review on this machine and record it."),
+        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch."),
+    ]),
+    "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
+        click.Argument(["plan"]),
+        _opt("--reason", "reason", required=True, help="Why the plan is activated (kept in the plan ledger)."),
+        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+    ]),
+    "yolo status": ("Show a delivery plan (or all of them): units, usage, the stop or wait, and Next.", lambda: [
+        click.Argument(["plan"], required=False), _flag("--json", "as_json"),
+    ]),
+    "yolo cancel": ("Cancel a delivery plan: nothing more is dispatched or merged.", lambda: [
+        click.Argument(["plan"]),
+        _opt("--reason", "reason", required=True, help="Why the plan is cancelled (kept in the plan ledger)."),
+    ]),
+    "yolo resume": ("Resume a stopped or waiting delivery plan once the cause is gone.", lambda: [
+        click.Argument(["plan"]),
+        _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
+        _opt("--extend-cost", "extend_cost", type=float, help="Raise the cost limit by this many dollars."),
+        _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
+        _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
+        _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),
+        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+    ]),
+    "yolo report": ("Print the report of a delivery plan.", lambda: [click.Argument(["plan"])]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
         _opt("--api-base", "api_base", help="GitLab API base (default: forge.gitlab.api_url, else from `origin`)."),
@@ -280,7 +310,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
 
 
 # the commands that change a unit's branch or the forge: a signal or the end of their CI job stops them (W-D2)
-_CANCELLABLE = frozenset({"run", "verify", "archive", "resume", "retry", "restart"})
+_CANCELLABLE = frozenset(
+    {"run", "verify", "archive", "resume", "retry", "restart", "yolo review", "yolo activate", "yolo cancel",
+     "yolo resume"}
+)  # fmt: skip
 
 
 def _build_app(options: Mapping[str, Any], environ: Mapping[str, str]) -> AppContext:
@@ -340,6 +373,7 @@ _GROUPS = {
     "ci": click.Group("ci", help="CI helpers."),
     "setup": click.Group("setup", help="Forge setup."),
     "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
+    "yolo": click.Group("yolo", help="Delivery plans: ordered units, a readiness review, one activation."),
 }
 for _group in _GROUPS.values():
     cli.add_command(_group)
