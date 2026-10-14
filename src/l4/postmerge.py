@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
@@ -40,6 +40,9 @@ from l4.vcs.names import UnitNames
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import fix_units_of
+
+if TYPE_CHECKING:
+    from l4.yolo.model import MergeOutcome
 
 log = logging.getLogger("l4.postmerge")
 
@@ -301,3 +304,13 @@ class PostMergeArchiver:
             if name in on_branch and not data.startswith(on_branch[name]):
                 raise ArchiveBlocked(f"the ledger {name} of the base branch is not a prefix of the pending ledger")
             atomic_write_bytes(target / name, data)
+
+
+def merge_archive_guarded(app: AppContext, cfg: L4Config, git: Git, head: str, target: str) -> "MergeOutcome":
+    """Fast-forward `target` to the archive branch `head` under the same guard as a unit merge (design D9, L4-YOLO-009):
+    the target tip must be an ancestor of `head`, the push is never forced, and a refusal is `stale` (the target moved)
+    or `refused` (the forge's redacted message). Only the push and its result: the caller decides when to call it and
+    records `archive.failed`."""
+    from l4.yolo.merge import guarded_push  # the yolo package builds on this module, so it is imported late
+
+    return guarded_push(app, cfg, git, head, target)

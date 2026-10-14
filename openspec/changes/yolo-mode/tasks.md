@@ -22,9 +22,9 @@
 
 ## 4. Guarded merge and the destination check (wave 1, agent D: `yolo/merge.py`, `ci/sweeper.py` `_own_mr`, `postmerge.py` `merge_archive_guarded`)
 
-- [ ] 4.1 `merge_guarded()` and `confirm_merged()` (D8): the four preconditions in order, the push without force, `stale`/`refused`/`merged`. Tests against a bare `origin` (a moved target is refused by git itself) and a fake forge. SCN-YOLO-14..16. (L4-YOLO-008)
-- [ ] 4.2 `_own_mr` counts a merged PR only when `pr.base_branch == forge.base_branch`; the log line and the cause text of D7. SCN-YOLO-13; the existing sweeper tests stay green. (L4-YOLO-007)
-- [ ] 4.3 `merge_archive_guarded()` in `postmerge.py`: fast-forward the target to the archive branch head under the same guard; a callable only (wave 2 wires it for plan units). (L4-YOLO-009)
+- [x] 4.1 `merge_guarded()` and `confirm_merged()` (D8): the four preconditions in order, the push without force, `stale`/`refused`/`merged`. Tests against a bare `origin` (a moved target is refused by git itself) and a fake forge. SCN-YOLO-14..16. (L4-YOLO-008)
+- [x] 4.2 `_own_mr` counts a merged PR only when `pr.base_branch == forge.base_branch`; the log line and the cause text of D7. SCN-YOLO-13; the existing sweeper tests stay green. (L4-YOLO-007)
+- [x] 4.3 `merge_archive_guarded()` in `postmerge.py`: fast-forward the target to the archive branch head under the same guard; a callable only (wave 2 wires it for plan units). (L4-YOLO-009)
 
 ## 5. Plan step and dispatch (wave 2, agent F: `yolo/cycle.py`, `orchestrator.py` `run_command`, `planner.py`, `ci/sweeper.py` wiring)
 
