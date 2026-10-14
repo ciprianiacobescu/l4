@@ -145,10 +145,9 @@ def unit_infos(
     return infos
 
 
-def readable_unit_ids(text: str) -> list[str] | None:
-    """The unit ids a plan file names in `batches[].units[].id`, in file order, whatever else is wrong with it (R8),
-    without the ids its `exclude` names (D15: an excluded unit is not held); None when the text is not a JSON object.
-    Entries of the wrong shape are skipped."""
+def _raw_ids(text: str) -> tuple[list[str], list[str]] | None:
+    """(the unit ids in `batches[].units[].id`, the ids in `exclude[].id`), each in file order and once, whatever else
+    is wrong with the file; None when the text is not a JSON object. Entries of the wrong shape are skipped."""
     try:
         raw = json.loads(text)
     except ValueError:
@@ -163,9 +162,31 @@ def readable_unit_ids(text: str) -> list[str] | None:
             unit_id = unit.get("id") if isinstance(unit, dict) else None
             if isinstance(unit_id, str) and unit_id and unit_id not in ids:
                 ids.append(unit_id)
-    excluded = raw.get("exclude")
-    left_out = {x.get("id") for x in excluded if isinstance(x, dict)} if isinstance(excluded, list) else set()
-    return [i for i in ids if i not in left_out]
+    excluded: list[str] = []
+    entries = raw.get("exclude")
+    for entry in entries if isinstance(entries, list) else []:
+        entry_id = entry.get("id") if isinstance(entry, dict) else None
+        if isinstance(entry_id, str) and entry_id and entry_id not in excluded:
+            excluded.append(entry_id)
+    return ids, excluded
+
+
+def readable_unit_ids(text: str) -> list[str] | None:
+    """The unit ids a plan file names in `batches[].units[].id`, in file order, whatever else is wrong with it (R8),
+    without the ids its `exclude` names (D15: an excluded unit is not held); None when the text is not a JSON object.
+    Entries of the wrong shape are skipped."""
+    found = _raw_ids(text)
+    if found is None:
+        return None
+    ids, excluded = found
+    return [i for i in ids if i not in excluded]
+
+
+def listed_ids(file: "PlanFile") -> set[str]:
+    """Every unit id a plan file lists, planned or excluded (what `l4 yolo draft` and the validator count as covered),
+    whatever else is wrong with the file; empty for a file that is not a JSON object."""
+    found = _raw_ids(file.text)
+    return set() if found is None else {*found[0], *found[1]}
 
 
 @dataclass(frozen=True)

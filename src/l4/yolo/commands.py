@@ -55,6 +55,7 @@ from l4.vcs.git import Git
 from l4.yolo.admit import admit, next_eligible
 from l4.yolo.cycle import REVIEW_KEY, review_batches
 from l4.yolo.digest import RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.draft import Found, new_draft, update_draft
 from l4.yolo.limits import (
     LIMIT_ATTEMPTS,
     LIMIT_COST,
@@ -66,7 +67,9 @@ from l4.yolo.limits import (
 from l4.yolo.model import (
     PLAN_ID,
     PLAN_REF_PREFIX,
+    PLANS_DIR,
     Admission,
+    MergeMode,
     Plan,
     PlanEvent,
     PlanInvalid,
@@ -467,6 +470,73 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
+    return ExitCode.OK
+
+
+# --- l4 yolo draft ---------------------------------------------------------------------------------------------------
+
+
+def run_draft(
+    app: AppContext, *, plan: str, target: str | None = None, merge: str | None = None, update: bool = False
+) -> ExitCode:
+    """Write `.l4/plans/<plan>.json` in the working tree from the specs the providers find there (design D15,
+    L4-YOLO-018): no git write, no network, no model. Exit 0 written (or nothing to add), 2 refused."""
+    plan_id = _plan_id(plan)
+    app, cfg = load_app_config(app)
+    path = app.repo / PLANS_DIR / f"{plan_id}.json"
+    exists = path.exists() or path.is_symlink()
+    if exists and not update:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, f"draft: {PLANS_DIR}/{plan_id}.json exists: use --update to add the new specs"
+        )
+    if update and (target is not None or merge is not None):
+        raise L4Exit(ExitCode.USAGE_ERROR, "draft: --target and --merge set a new file; --update changes nothing else")
+    git = Git(app.repo, environ=app.environ)
+    files = plan_files(app.repo)
+    own = next((f for f in files if f.plan_id == plan_id), None)
+    data: dict[str, Any] = {}
+    if update:
+        if not exists or own is None:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"draft: --update needs {PLANS_DIR}/{plan_id}.json (it does not exist)")
+        if own.plan is None:
+            assert own.invalid is not None
+            raise L4Exit(
+                ExitCode.USAGE_ERROR, "\n".join([*own.invalid.errors, f"draft: {plan_id} is not a valid plan"])
+            )
+        data = json.loads(own.text)
+    found = [
+        Found(snapshot.ref.id, snapshot.state.phase)
+        for _, snapshot in discover(cfg, git, providers_for(cfg, app.repo, app.environ))
+    ]
+    if update:
+        assert own is not None
+        result = update_draft(data, found, files, own)
+    else:
+        mode: MergeMode = "auto" if merge == "auto" else "human"
+        result = new_draft(plan_id, target=target or cfg.forge.base_branch, merge=mode, found=found, files=files)
+    say = click.echo
+    for unit in result.gone:
+        say(f"gone: {unit}")
+    if result.text is None:
+        say(f"{plan_id}: nothing to add: every spec is listed or covered")
+        return ExitCode.OK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(result.text, encoding="utf-8")
+    for unit in result.added:
+        say(f"added: {unit}")
+    for unit, reason in result.excluded:
+        say(f"added: {unit} (excluded: {reason})")
+    say(f"wrote {PLANS_DIR}/{plan_id}.json (not committed)")
+    status = fold_plan(plan_id, local_plans(git).get(plan_id, [])).status
+    if status in ("active", "waiting"):
+        say(f"warning: plan {plan_id} is {status} here: pushing this edit stops it (inputs_changed)")
+    say("Next:")
+    say(
+        f"  1. edit {PLANS_DIR}/{plan_id}.json: the dependencies, batches and exclusions (a dependency only on evidence"
+    )
+    say("     in the specs: the draft added none)")
+    say("  2. python3 scripts/validate_plan.py (the skill ships a copy), then commit and push the plan file only")
+    say(f"  3. l4 yolo check {plan_id}, then l4 yolo review {plan_id}")
     return ExitCode.OK
 
 
@@ -941,6 +1011,7 @@ __all__ = [
     "run_activate",
     "run_cancel",
     "run_check",
+    "run_draft",
     "run_report",
     "run_resume",
     "run_review",

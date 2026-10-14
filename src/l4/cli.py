@@ -191,6 +191,12 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--reason", "reason", required=True, help="Why the unit starts over (kept in the ledger)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
+    "yolo draft": ("Write or update a plan file from the specs here (no dependency, no git, no network).", lambda: [
+        click.Argument(["plan"]),
+        _opt("--target", "target", help="The plan's target branch (default: forge.base_branch)."),
+        _opt("--merge", "merge", type=click.Choice(["human", "auto"]), help="The merge mode (default: human)."),
+        _flag("--update", "update", help="Add the specs no plan lists to the existing file; change nothing else."),
+    ]),
     "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
         click.Argument(["plan"]),
     ]),
