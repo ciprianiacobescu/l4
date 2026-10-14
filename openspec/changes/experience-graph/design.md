@@ -352,7 +352,8 @@ This is L4-MEM-002's human promotion, built for inbox proposals.
    - a `TODO(person)` line is left;
    - the body is empty.
 3. **Check the checkout,** and refuse with exit 2 when any of these is true:
-   - HEAD is detached, or on a branch under `forge.branch_prefix`. A promote commit on a unit branch is a
+   - HEAD is detached, or on a branch under `forge.branch_prefix` other than the base branch (a base branch such
+     as `l4/main` may sit under the prefix). A promote commit on a unit branch is a
      foreign-memory blocker (`integrity.py:156`).
    - Anything is staged.
    - The lessons file in the work tree differs from HEAD (the person's own edit comes first).

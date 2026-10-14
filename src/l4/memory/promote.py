@@ -4,15 +4,14 @@ commits it.
 
 The order is fixed, and every refusal is exit 2 before anything is written: `memory.enabled`, the proposal
 (`l4.memory.inbox`), the checkout (`check_checkout`), the lesson and its scope on screen, a confirmation (`--yes`, or a
-terminal), then `apply_candidates`, then the commit. The checkout must be a branch that is not under
+terminal), then `apply_candidates`, then the commit. The checkout must be the base branch or a branch that is not under
 `forge.branch_prefix` (a person's commit to `.serena/memories/harness/` on a unit branch is a protected-path blocker,
 `verifier/integrity.py`), with nothing staged and a clean, parseable lessons file, so the commit holds the lessons paths
 and nothing else. The commit carries the person's git identity (from the config or from `GIT_AUTHOR_*` and
 `GIT_COMMITTER_*`; git never guesses one, and the command exits 2 when it would have to) and no `L4-*` trailer: the
-trailers mark harness commits, and a person made this one. It is never signed and runs no hook (`Git` turns hooks
-off). Git is used read-only, plus `add` and `commit`; the module never touches the network (L4-KG-001). Imported only
-by
-`l4.memory.cli`.
+trailers mark harness commits, and a person made this one. It is never signed and runs no hook (`Git` turns hooks off).
+Git is used read-only, plus `add` and `commit`; the module never touches the network (L4-KG-001).
+Imported only by `l4.memory.cli`.
 """
 
 import contextlib
@@ -79,7 +78,7 @@ def check_checkout(app: AppContext, cfg: L4Config, git: Git, *, commit: bool = T
     if branch == "HEAD":
         raise _refuse("HEAD is detached: promote on the base branch")
     prefix = cfg.forge.branch_prefix
-    if branch.startswith(prefix):
+    if branch.startswith(prefix) and branch != cfg.forge.base_branch:  # a base branch may sit under it (`l4/main`)
         raise _refuse(
             f"HEAD is on the unit branch {branch}: a person's commit to .serena/memories/harness/ on a unit branch "
             f"is a protected-path blocker. Promote on the base branch ({cfg.forge.base_branch})"

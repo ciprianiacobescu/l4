@@ -104,6 +104,16 @@ def test_a_unit_branch_is_refused_scn_kg_29(repo: Repo):
     nothing_written(repo, before, proposal)
 
 
+def test_a_base_branch_under_the_prefix_is_not_a_unit_branch(repo: Repo):
+    """Live (2026-10-15, the GitHub test repository): with `forge.base_branch: l4/main` the promote was refused as on a
+    unit branch, and the refusal named that same branch as the one to promote on."""
+    repo.put_draft()
+    repo.raw(repo.path, "checkout", "-q", "-b", "l4/main")
+    repo.cfg = L4Config.model_validate({"forge": {"base_branch": "l4/main"}})
+    promote(repo.app, repo.cfg, LID, yes=True)
+    assert "## " + LID in repo.lessons_text()
+
+
 def test_anything_staged_is_refused(repo: Repo):
     proposal = repo.put_draft()
     (repo.path / "other.txt").write_text("x")
