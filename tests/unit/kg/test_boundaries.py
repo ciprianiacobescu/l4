@@ -129,6 +129,28 @@ def test_the_run_path_never_loads_the_graph_code():
     assert done.stdout.strip().splitlines()[-1] == "LOADED:"
 
 
+INDIRECT = ("l4.agents", "l4.availability", "l4.sandbox", "l4.forge", "l4.llm")
+
+
+def test_importing_the_graph_loads_no_agent_model_forge_or_sandbox_package_even_transitively():
+    """Review #10: the static scan only sees direct imports; a fresh interpreter sees the whole import graph."""
+    modules = sorted(module_of(path) for path in (L4 / "kg").rglob("*.py"))
+    assert "l4.kg.cli" in modules
+    code = (
+        "import importlib, sys\n"
+        f"for name in {['l4.kg.cli', *modules]!r}:\n"
+        "    importlib.import_module(name)\n"
+        f"bad = sorted(m for m in sys.modules if any(m == p or m.startswith(p + '.') for p in {INDIRECT!r}))\n"
+        "print('LOADED:' + ','.join(bad))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False,
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip().splitlines()[-1] == "LOADED:"
+
+
 # --- by behaviour --------------------------------------------------------------------------------------------------
 
 
