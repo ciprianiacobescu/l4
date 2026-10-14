@@ -4,8 +4,10 @@ import hashlib
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from l4.vcs.git import Git
-from l4.yolo.digest import plan_digest, unit_digest
+from l4.yolo.digest import RevisionMissing, plan_digest, unit_digest
 
 OPENSPEC = "openspec/changes/add-x"
 KIRO = ".kiro/specs/feat"
@@ -115,12 +117,13 @@ def test_a_digest_is_taken_at_the_revision(tmp_path):
     assert unit_digest(git, first, OPENSPEC) == before
 
 
-def test_missing_folder_and_missing_revision_give_the_empty_set_digest(tmp_path):
+def test_a_missing_folder_gives_the_empty_set_digest_and_a_missing_revision_raises(tmp_path):
     repo, git = make_repo(tmp_path)
     rev = commit(repo)
     empty = hashlib.sha256(b"").hexdigest()[:16]
     assert unit_digest(git, rev, "openspec/changes/absent") == empty
-    assert unit_digest(git, "0" * 40, OPENSPEC) == empty
+    with pytest.raises(RevisionMissing):  # R3: never the empty set for a revision that is not there
+        unit_digest(git, "0" * 40, OPENSPEC)
 
 
 def test_a_folder_of_only_excluded_files_is_the_empty_set(tmp_path):
