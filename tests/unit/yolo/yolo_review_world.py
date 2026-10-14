@@ -13,7 +13,7 @@ from l4.safepath import safe_path
 from l4.vcs.git import Git
 from l4.yolo.model import Plan, load_plan
 
-SPEC_A = "## ADDED Requirements\n### Requirement: A greets\nThe service SHALL greet.\n#### Scenario: hello\n- WHEN x THEN y\n"
+SPEC_A = "## ADDED Requirements\n### Requirement: A greets\nA SHALL greet.\n#### Scenario: hello\n- WHEN x THEN y\n"
 SPEC_B = "## ADDED Requirements\n### Requirement: B uses A\nB SHALL call A.\n#### Scenario: call\n- WHEN x THEN z\n"
 
 
