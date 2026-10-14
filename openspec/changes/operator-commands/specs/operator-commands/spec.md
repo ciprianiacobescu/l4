@@ -248,7 +248,11 @@ and `escalated`, with the trigger `spec_edited`, and the run records `unit.retri
 On a Kiro unit, when a spec edit (L4-OPS-014) changes acceptance criteria in `requirements.md`, the tasks that cite them
 in `_Requirements:_` SHALL be set back to `[ ]` with their parents. This happens in a harness commit
 `chore(<name>): reopen tasks <keys> for changed requirements <ids> [skip ci]`, with `tasks.reopened{tasks,
-requirements}`, and the tasks then run test-first.
+requirements, stale_criteria}`, and the tasks then run test-first. `stale_criteria` are the old ids of the changed
+criteria. A test that traces one is stale: the reopened task's red step MAY replace it (delete it, or rewrite it under a
+new name for the new id), the red and green verdicts and the verifier's "a pre-existing test was deleted" MUST NOT count
+that as a regression, and `tests.superseded{tests, criteria}` records it. The red prompt names the stale tests. Every
+other existing test stays protected.
 - Text is compared after whitespace normalisation.
 - Added and removed criteria count as changed.
 - An OpenSpec unit reopens nothing: its changed scenarios are judged by the verifier.

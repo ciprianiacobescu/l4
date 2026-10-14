@@ -246,6 +246,16 @@ def kiro_requirement_texts(text: str | None) -> dict[str, str]:
     return {label: normalise(body) for _, label, body, _ in _kiro_items(text or "", bugfix=False)}
 
 
+def kiro_requirement_ids(unit_name: str, text: str | None) -> dict[str, str]:
+    """`{"2.3": "C-3c52c0d1"}` for the acceptance criteria of a `requirements.md` text: the id `kiro_criteria` gives
+    that criterion in the unit folder `unit_name` (a missing file has none). It reads the text, not the folder, so
+    the ids of an EARLIER version are known (L4-OPS-015: the stale ids of a changed criterion)."""
+    return {
+        label: criterion_id(Framework.KIRO.value, unit_name, requirement, body)
+        for requirement, label, body, _ in _kiro_items(text or "", bugfix=False)
+    }
+
+
 def _number_key(label: str) -> tuple[int, ...]:
     return tuple(int(part) for part in label.split("."))
 
