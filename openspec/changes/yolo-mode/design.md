@@ -386,3 +386,50 @@ The harness never merges a unit that is not in an active `merge: auto` plan, wha
 ## Open Questions
 
 - None blocking. Later: API merge for protected targets; parallel independent units; receipts as inputs of later plans.
+
+## Revisions after the review of waves 1 and 2 (2026-10-14)
+
+An independent review of wave 1 found 22 defects (15 reproduced); the wave-2 agents reported where their contracts
+disagreed. These decisions replace the text above where they differ.
+
+- **R1. Usage is charged per attempt (D11).** A restart starts a new unit ledger, so a unit fold's `cost_usd` and
+  `restarts` cover the current attempt only. The attempt number of a unit is 1 + the number of its
+  `refs/l4/attempts/<fw>/<name>/*` refs on `origin` (fetched by the step). `plan.charged{unit, attempt, cost_usd,
+  runs}` carries the totals of that attempt; the fold keeps the maximum per (unit, attempt) and sums them. Attempts used
+  by a unit = the highest attempt number charged. The review's cost is charged as `plan.charged{unit: "plan:review",
+  attempt: 0, …}` by the CI step and by `review --local`; status and report skip keys that start with `plan:`.
+- **R2. The activated plan is frozen (D4, D10).** `plan.activated` freezes the plan digest as `activated_digest`.
+  `plan.admitted`, `plan.refused` and `plan.reviewed` recorded while the plan is activated (active, waiting, stopped)
+  change only the review fields, never `activated_digest`, `order` or the status. A plan file whose digest differs from
+  `activated_digest` stops the plan with `inputs_changed` (subject `plan`). `plan.stopped` and `plan.resumed` before any
+  activation are ignored by the fold.
+- **R3. Shared rules, one implementation each.** `yolo/limits.py` evaluates the effective limits (frozen + extended,
+  the extended deadline included: `PlanState.extended_deadline`) and which one is reached; the step and `l4 yolo resume`
+  both use it. `digest.current_unit_digest(git, cfg, unit_id, folder, target_ref)` takes the digest on
+  `refs/remotes/origin/<unit branch>` when it exists, else on the target (D3); the review, activation and the
+  `inputs_changed` check all use it. A revision that does not exist raises; it never gives the empty-set digest.
+- **R4. Task markers are normalised with the providers' own patterns** (`tasks_merge` Kiro and OpenSpec forms: `-*+`
+  and numbered bullets, no space, NBSP, BOM). Exclusions apply at any depth for the judge and for the digest alike.
+- **R5. The guarded merge (D8) adds a fifth precondition:** the head to push equals the `ls-remote` tip of the unit
+  branch and the PR head sha. The step records `unit.merge_requested` with the lease BEFORE the push (re-reading the
+  plan: a cancelled or stopped plan does not merge), then pushes, then records `unit.merged`. `confirm_merged` accepts
+  "the head is an ancestor of the target tip".
+- **R6. `merge_archive_guarded`** also requires: every commit on the archive branch after the target tip is a strict
+  harness commit, the archive PR is open with the target as its base, and the target is `forge.base_branch`.
+- **R7. Post-merge profiles (D9).** `all` leaves out e2e gates that need an app server (`gates.e2e.serve`) and says so
+  in the detail; a profile that names `e2e` while `serve` is set is refused at admission (`unsupported_profile`). A
+  profile passes only when at least one required gate other than `setup` ran and passed; otherwise it is `error`.
+- **R8. Holding (D10).** A unit listed in a plan file is held while the file is on the target, cancelled plans
+  included; removing the unit from the file (or the file) releases it. An invalid plan file still holds the unit ids
+  that can be read from its JSON (`batches[].units[].id`); a file that is not JSON holds nothing and is reported by
+  `l4 plan` and `l4 yolo status`. A unit listed in two plan files is a finding (`held_by_other_plan`) for the second.
+- **R9. Readiness (D5).** A judge timeout or error records no review (the next run tries again). Material cut by the
+  size limits makes the verdict at least NEEDS_REVISION with a finding that names what was left out. File names, unit
+  ids and batch ids reach the prompt only inside `<l4:data>` blocks.
+- **R10. Every merged, non-integrated plan unit is post-checked (D9)**, not only the current one; a person's merge of a
+  non-current unit in a `merge: human` plan is integrated by the next step.
+- **R11. Stop reasons** add `unit_missing` (the unit is no longer among the units of the target; cleared when it is
+  back). `plan.admitted` and `plan.activated` carry `merge`. The CI review records a `batches` entry for every batch
+  with more than one unit.
+- **R12. Limits are validated:** `max_unit_attempts >= 1`, `max_cost_usd >= 0`, `max_runs >= 1`, and a `deadline`
+  with a time zone.
