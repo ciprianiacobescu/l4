@@ -2,10 +2,13 @@
 """YOLO-001 (L4-YOLO-008, SCN-YOLO-17): `forge.merge_policy: auto` without an active `merge: auto` plan is a warning."""
 
 import json
+import os
 
 from l4.config.schema import L4Config
 from l4.doctor import checks_yolo
 from l4.doctor.registry import REGISTRY
+from l4.safepath import safe_path
+from l4.vcs.git import Git
 
 from ..yolo.yolo_cmd_world import A, ev, plan_doc, world  # noqa: F401
 
@@ -14,8 +17,9 @@ def auto_config() -> L4Config:
     return L4Config.model_validate({"forge": {"merge_policy": "auto"}})
 
 
-def test_the_warning_without_a_plan(make_ctx):
-    ctx, _ = make_ctx(cfg=auto_config())
+def test_the_warning_without_a_plan(make_ctx, tmp_path):
+    ctx, _ = make_ctx(cfg=auto_config(), PATH=safe_path(os.environ))  # git must run: the answer is "no plan refs"
+    Git(ctx.repo, environ=ctx.env).run("init", "--quiet")
     result = checks_yolo._yolo_001(ctx)
     assert result.status == "fail"
     assert (
