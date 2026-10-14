@@ -152,3 +152,56 @@ def test_the_profiles_come_from_the_config_when_it_has_them(world):
     config = cfg(lint=[HAS_MARKER])
     object.__setattr__(config, "yolo", type("Y", (), {"profiles": {"fast": ["lint"]}})())
     assert run(world, config, "fast").status == "pass"
+
+
+# --- review #5, #7 (design R7) --------------------------------------------------------------------------------------
+
+SERVE = {"command": "sleep 5", "ready_url": "http://x"}
+
+
+def test_all_leaves_out_a_served_e2e_gate_and_says_so(world):  # review #5, R7
+    config = cfg(lint=[HAS_MARKER], e2e={"command": "sh -c 'true'", "serve": SERVE})
+    result = run(world, config, "all")
+    assert result.status == "pass" and [g.name for g in result.gates] == ["lint"]
+    assert "e2e" in result.detail and "gates.e2e.serve" in result.detail and "left out" in result.detail
+
+
+def test_all_with_only_a_served_e2e_gate_has_no_gate_to_run(world):
+    config = cfg(e2e={"command": "sh -c 'true'", "serve": SERVE})
+    result = run(world, config, "all")
+    assert result.status == "error" and "no gate to run" in result.detail and "gates.e2e.serve" in result.detail
+
+
+def test_a_named_profile_with_a_served_e2e_gate_is_still_an_error(world):
+    config = cfg(lint=[HAS_MARKER], e2e={"command": "sh -c 'true'", "serve": SERVE})
+    result = run(world, config, "p", profiles={"p": ["lint", "e2e"]})
+    assert result.status == "error" and "server" in result.detail and result.gates == ()
+
+
+def test_only_non_required_extras_that_fail_are_an_error_not_a_pass(world):  # review #7, R7
+    config = cfg(extra=[{"name": "audit", "command": "sh -c 'exit 1'", "required": False}])
+    result = run(world, config, "p", profiles={"p": ["extra:audit"]})
+    assert result.status == "error" and "no required gate" in result.detail
+    assert [(g.name, g.status) for g in result.gates] == [("extra:audit", "fail")]
+
+
+def test_only_a_non_required_extra_that_passes_is_an_error_too(world):
+    config = cfg(extra=[{"name": "audit", "command": "sh -c 'true'", "required": False}])
+    result = run(world, config, "p", profiles={"p": ["extra:audit"]})
+    assert result.status == "error" and "no required gate" in result.detail
+
+
+def test_all_with_only_setup_is_an_error_not_a_pass(world):
+    result = run(world, cfg(setup=[HAS_MARKER]), "all")
+    assert result.status == "error" and "no required gate" in result.detail and "setup" in result.detail
+    assert [g.name for g in result.gates] == ["setup"]
+
+
+def test_setup_plus_one_required_gate_that_passes_is_a_pass(world):
+    result = run(world, cfg(setup=[HAS_MARKER], lint=[HAS_MARKER]), "all")
+    assert result.status == "pass" and [g.name for g in result.gates] == ["setup", "lint"]
+
+
+def test_a_failing_required_gate_is_still_a_fail_even_after_setup(world):
+    result = run(world, cfg(setup=[HAS_MARKER], lint=["sh -c 'exit 1'"]), "all")
+    assert result.status == "fail"

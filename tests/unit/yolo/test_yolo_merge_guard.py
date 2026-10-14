@@ -3,7 +3,7 @@ confirm_merged. SCN-YOLO-14 (merged), SCN-YOLO-15 (a moved target is refused by 
 target is refused)."""
 
 import stat
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -231,3 +231,86 @@ def test_confirm_merged_is_false_when_the_target_does_not_hold_the_head(world):
     forge = FakeForge(pull(state="merged"))
     assert confirm_merged(forge, world.git, world.cfg, 7, world.head, wait_s=0, sleep=lambda s: None) is False
     assert forge.gets == []
+
+
+# --- review #6, #18 (design R5) -------------------------------------------------------------------------------------
+
+
+def test_precondition_five_a_branch_that_moved_after_the_snapshot_is_not_merged(world):  # review #6, R5
+    other = world.work.parent / "other"
+    world.raw(world.work.parent, "clone", "-q", "-b", BRANCH, str(world.origin), str(other))
+    person = world.commit(other, "fix.txt", "person's fix")
+    world.raw(other, "push", "-q", "origin", BRANCH)
+    tip = world.target()
+    out = merge(world)
+    assert out.status == "not_ready" and out.head == world.head and out.pr == 7
+    assert "moved" in out.detail and person[:10] in out.detail
+    assert world.target() == tip
+    assert not any(a[:2] == ["push", "--"] for a in world.git.history)
+
+
+def test_precondition_five_a_branch_that_is_gone_is_not_merged(world):
+    world.raw(world.origin, "update-ref", "-d", f"refs/heads/{BRANCH}")
+    tip = world.target()
+    out = merge(world)
+    assert out.status == "not_ready" and "not on origin" in out.detail
+    assert world.target() == tip
+
+
+@dataclass(frozen=True)
+class PullWithHead(PullRequest):
+    head_sha: str | None = None
+
+
+def test_precondition_five_the_head_the_forge_shows_must_be_the_head_to_push(world):
+    pr = PullWithHead(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha="b" * 40)
+    out = merge(world, forge=FakeForge(pr))
+    assert out.status == "not_ready" and "pull request head" in out.detail
+    ok = PullWithHead(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha=world.head)
+    assert merge(world, forge=FakeForge(ok)).status == "merged"
+
+
+def test_before_push_runs_after_every_precondition_with_the_outcome_to_be(world):  # R5
+    seen = []
+
+    def before(outcome):
+        seen.append((outcome.status, outcome.head, outcome.target_before, outcome.pr, world.target()))
+        return True
+
+    before_tip = world.target()
+    out = merge_guarded(world.app, world.cfg, world.git, FakeForge(pull()), world.snapshot(), before_push=before)
+    assert out.status == "merged"
+    assert seen == [("merged", world.head, before_tip, 7, before_tip)]  # the target had not moved yet
+
+
+def test_before_push_false_pushes_nothing_and_says_the_plan_no_longer_allows_it(world):  # R5
+    tip = world.target()
+    out = merge_guarded(
+        world.app, world.cfg, world.git, FakeForge(pull()), world.snapshot(), before_push=lambda outcome: False
+    )
+    assert out.status == "not_ready" and out.detail == "the plan no longer allows the merge"
+    assert out.head == world.head and out.pr == 7
+    assert world.target() == tip
+    assert not any(a[:2] == ["push", "--"] for a in world.git.history)
+
+
+def test_before_push_is_not_called_when_a_precondition_fails(world):
+    calls = []
+    out = merge_guarded(
+        world.app, world.cfg, world.git, FakeForge(pull(state="closed")), world.snapshot(),
+        before_push=lambda outcome: calls.append(outcome) or True,
+    )  # fmt: skip
+    assert out.status == "not_ready" and calls == []
+
+
+def test_confirm_merged_accepts_a_target_that_moved_on_after_the_push(world):  # review #18, R5
+    merge(world)
+    world.move_target()
+    forge = FakeForge(pull(state="merged"))
+    assert confirm_merged(forge, world.git, world.cfg, 7, world.head, wait_s=0, sleep=lambda s: None) is True
+
+
+def test_confirm_merged_is_false_when_the_head_is_not_in_the_target(world):
+    world.move_target()
+    forge = FakeForge(pull(state="open"))
+    assert confirm_merged(forge, world.git, world.cfg, 7, world.head, wait_s=0, sleep=lambda s: None) is False

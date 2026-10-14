@@ -316,11 +316,32 @@ class PostMergeArchiver:
             atomic_write_bytes(target / name, data)
 
 
-def merge_archive_guarded(app: AppContext, cfg: L4Config, git: Git, head: str, target: str) -> "MergeOutcome":
-    """Fast-forward `target` to the archive branch `head` under the same guard as a unit merge (design D9, L4-YOLO-009):
-    the target tip must be an ancestor of `head`, the push is never forced, and a refusal is `stale` (the target moved)
-    or `refused` (the forge's redacted message). Only the push and its result: the caller decides when to call it and
-    records `archive.failed`."""
-    from l4.yolo.merge import guarded_push  # the yolo package builds on this module, so it is imported late
+def merge_archive_guarded(
+    app: AppContext, cfg: L4Config, git: Git, head: str, target: str, *, pr: PullRequest
+) -> "MergeOutcome":
+    """Fast-forward `target` to the archive branch `head` under the guard of a unit merge plus the archive's own
+    (design D9, R6, L4-YOLO-009): `target` is `forge.base_branch`; `pr`, the archive pull request, is open and aimed
+    at `target`; every commit after the target tip is a strict harness commit (author and committer the bot, an
+    `L4-Run` trailer: the review re-entry rule), so a person's edit on the archive branch is never merged unattended;
+    the target tip is an ancestor of `head`; the push is never forced. Anything that fails a check is `not_ready` and
+    pushes nothing; a refusal of the push is `stale` (the target moved) or `refused` (the forge's redacted message).
+    Only the checks and the push: the caller decides when to call it and records `archive.failed`."""
+    from l4.yolo.merge import foreign_commits, guarded_push, remote_tip  # yolo builds on this module: imported late
+    from l4.yolo.model import MergeOutcome
 
-    return guarded_push(app, cfg, git, head, target)
+    def not_ready(detail: str) -> "MergeOutcome":
+        return MergeOutcome("not_ready", head, None, pr.number, detail)
+
+    if target != cfg.forge.base_branch:
+        return not_ready(f"the target {target} is not the base branch {cfg.forge.base_branch}")
+    if pr.state != "open":
+        return not_ready(f"the archive pull request !{pr.number} is {pr.state}, not open")
+    if pr.base_branch != target:
+        return not_ready(f"the archive pull request !{pr.number} is aimed at {pr.base_branch}, not the target {target}")
+    tip = remote_tip(git, cfg, app.environ, target)
+    if tip is None:
+        return not_ready(f"the target branch {target} does not exist on origin")
+    foreign = foreign_commits(git, cfg, app.environ, tip, head)
+    if foreign:
+        return not_ready("the archive branch holds commits that are not a harness commit: " + ", ".join(foreign))
+    return guarded_push(app, cfg, git, head, target, pr=pr.number)
