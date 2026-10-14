@@ -92,3 +92,31 @@ def test_github_provider_key_is_not_called_a_masked_ci_variable():
     on_github = provider_steps(profile, platform="github", environment="l4")[0]
     assert "secret of the GitHub environment `l4`" in on_github and "PROV_KEY" in on_github
     assert "masked" not in on_github
+
+
+def test_opencodes_own_key_is_named_when_unset():
+    """L4-PRV-028: the readiness row and its steps for an opencode-go profile with auth api_key."""
+    from pathlib import Path
+
+    from l4.agents.base import ProbeCtx, ProbeResult
+    from l4.agents.factory import Factory
+    from l4.config.schema import L4Config, Profile
+    from l4.provision.readiness import adapter_readiness
+
+    class Scripted:
+        def probe(self, profile, step, ctx):
+            return ProbeResult(step, step == "binary", reason=None if step == "binary" else "no key")
+
+    profile = Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", auth="api_key")
+    cfg = L4Config.model_validate({"ci": {"platform": "github"}})
+
+    def row(environ):
+        ctx = ProbeCtx(environ, Path("."), lambda *a: None)
+        return adapter_readiness("p", profile, Factory(cfg, ctx, adapters={"opencode": Scripted()}), ctx, cfg=cfg)
+
+    unset = row({})
+    assert unset.detail == "p: OPENCODE_API_KEY is not set"
+    assert unset.steps == (
+        "run `l4 setup github --secret OPENCODE_API_KEY=<ENV>` (the value comes from your environment)",
+    )
+    assert row({"OPENCODE_API_KEY": "x"}).detail is None

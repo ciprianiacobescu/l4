@@ -47,6 +47,7 @@ UI_PATHS = ("web/**", "frontend/**", "app/**/*.tsx", "src/**/*.vue", "templates/
 DEFAULT_REDACT_ENV = (
     "L4_FORGE_TOKEN", "L4_TRIGGER_TOKEN", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
     "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "KIRO_API_KEY", "TYPESAFE_API_KEY", "L4_GITHUB_APP_KEY",
+    "OPENCODE_API_KEY",
 )  # fmt: skip
 RUNNER_SECRET_ENV = ("CI_JOB_TOKEN",)  # the runner's own, always redacted: git may print it from an origin URL
 CREDENTIAL_PATHS = {

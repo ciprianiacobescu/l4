@@ -139,7 +139,11 @@ def test_no_credential_path_is_cached():
     assert {str(p) for p in cached} == {
         f"/home/runner/{p}"
         for p in (
-            ".local/bin", ".local/share/l4", ".local/share/claude", ".local/share/uv", ".cache/l4/installers",
+            ".local/bin",
+            ".local/share/l4",
+            ".local/share/claude",
+            ".local/share/uv",
+            ".cache/l4/installers",
             ".cache/uv",
         )
     }
@@ -435,3 +439,20 @@ def test_permissions_cover_every_api_the_harness_calls_with_github_token():
         "contents": "write", "pull-requests": "write", "issues": "write", "checks": "read", "statuses": "write",
         "actions": "write",
     }  # fmt: skip
+
+
+def test_the_job_names_opencodes_own_key():
+    """SCN-PRV-75: an opencode-go implementer with auth api_key puts OPENCODE_API_KEY in the job env; a free model, a
+    subscription profile and a custom provider add nothing of that name (L4-PRV-028)."""
+    config = cfg(
+        profiles={
+            "go": {"adapter": "opencode", "model": "opencode-go/deepseek-v4.1-flash", "auth": "api_key"},
+            "free": {"adapter": "opencode", "model": "opencode/big-pickle"},
+            "sub": {"adapter": "opencode", "model": "opencode-go/kimi-k2", "auth": "subscription"},
+        },
+        roles={"implementer": ["go"], "judges": ["free"]},
+    )
+    env = parsed(config)["jobs"]["l4"]["env"]
+    assert env["OPENCODE_API_KEY"] == "${{ secrets.OPENCODE_API_KEY }}"
+    others = cfg(profiles=config.model_dump()["profiles"], roles={"implementer": ["free", "sub"], "judges": ["free"]})
+    assert "OPENCODE_API_KEY" not in parsed(others)["jobs"]["l4"]["env"]
