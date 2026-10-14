@@ -35,11 +35,11 @@ from this file and design.md; the review in 8.1 is independent. No line edits a 
 
 ## 5. Report, why, propose (wave 3, agent E: `kg/report.py`, `kg/why.py`, `kg/propose.py`, `tests/unit/kg/test_report.py`, `test_why.py`, `test_propose.py`, `tests/unit/kg/snapshots/`)
 
-- [ ] 5.1 The report sections of D8, in order, with `n = ` on every numbered line, `none (n = 0)` for an empty section, `approximate` in the header of each key-based section, and sorting by count then key. Tests: SCN-KG-18 (snapshot), SCN-KG-12, SCN-KG-13. (L4-KG-006, L4-KG-009)
-- [ ] 5.2 Lesson outcomes (D7): injections by units, tasks and prompts; the attempt failures of the same run and task after the injection's `seq`; the later-round findings with the linked key; the three statuses. Tests: SCN-KG-16 (fixture from the events of job 5528), SCN-KG-17. (L4-KG-008)
-- [ ] 5.3 Profiles by role and stops by code, as D8 items 7 and 8. Snapshot test. (L4-KG-009)
-- [ ] 5.4 `why`: the unit timeline (D9) and the 1-hop view for `F-`, `L-`, `r-` and `<unit>#Q-`. Tests: SCN-KG-20, SCN-KG-21. (L4-KG-010)
-- [ ] 5.5 `propose` (D10): the patterns (a), (b) and (c), at least N units; skipped when a lesson or a `LESSON_RULES` rule covers them; the draft and the evidence file; only harness-owned strings; the `TODO(person):` line; `--dry-run`; and the ignore warning from `git check-ignore`. Tests: SCN-KG-24, SCN-KG-25, SCN-KG-26, SCN-KG-22 (the proposal part). (L4-KG-012)
+- [x] 5.1 The report sections of D8, in order, with `n = ` on every numbered line, `none (n = 0)` for an empty section, `approximate` in the header of each key-based section, and sorting by count then key. Tests: SCN-KG-18 (snapshot), SCN-KG-12, SCN-KG-13. (L4-KG-006, L4-KG-009)
+- [x] 5.2 Lesson outcomes (D7): injections by units, tasks and prompts; the attempt failures of the same run and task after the injection's `seq`; the later-round findings with the linked key; the three statuses. Tests: SCN-KG-16 (fixture from the events of job 5528), SCN-KG-17. (L4-KG-008)
+- [x] 5.3 Profiles by role and stops by code, as D8 items 7 and 8. Snapshot test. (L4-KG-009)
+- [x] 5.4 `why`: the unit timeline (D9) and the 1-hop view for `F-`, `L-`, `r-` and `<unit>#Q-`. Tests: SCN-KG-20, SCN-KG-21. (L4-KG-010)
+- [x] 5.5 `propose` (D10): the patterns (a), (b) and (c), at least N units; skipped when a lesson or a `LESSON_RULES` rule covers them; the draft and the evidence file; only harness-owned strings; the `TODO(person):` line; `--dry-run`; and the ignore warning from `git check-ignore`. Tests: SCN-KG-24, SCN-KG-25, SCN-KG-26, SCN-KG-22 (the proposal part). (L4-KG-012)
 
 ## 6. Commands and boundaries (wave 3, agent F: `kg/cli.py`, `src/l4/commands.py`, `src/l4/cli.py`, `tests/unit/cli/test_dispatch.py` (rows only), `tests/unit/kg/test_cli.py`, `tests/unit/kg/test_boundaries.py`)
 
