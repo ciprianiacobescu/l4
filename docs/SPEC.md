@@ -3171,13 +3171,16 @@ current unit of an active `merge: auto` plan.
 **L4-YOLO-009** Post-merge acceptance and integration. After a unit's merge into the target (by the harness or, with `merge: human`, by a person), the plan step SHALL run the
 unit's acceptance profile on the merged target revision (design D9) and record `unit.integrated` only when it passes. A
 profile with no gate to run MUST be an error, never a pass. A failure MUST stop the plan with `postcheck_failed`. With
-`merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the harness with the same guard.
+`merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the harness with the same guard. For every
+unit, the rule "one archive PR at a time" (L4-ARC-007) MUST count only open archive PRs whose base is
+`forge.base_branch`.
 
 **L4-YOLO-010** Dependency order. A plan unit SHALL be dispatched only when every unit it depends on, directly or through a batch prerequisite, is
 integrated, and every prerequisite batch is accepted. A unit's branch MUST NOT exist before that. `l4 run --unit U` MUST
 obey the same rule: a plan unit that is not eligible, or a unit outside an active plan, exits 13 before the lease, with
-the reason, and writes nothing. While a plan is active, units outside it MUST get no new agent work; the sweep MUST still
-observe them.
+the reason, and writes nothing. A unit listed in a plan file on the target MUST be dispatched only by that plan's step,
+while the plan is active; in every other plan status it waits with `held by plan <id> (<status>)`. While a plan is
+active, units outside every plan MUST get no new agent work. The sweep MUST still observe every unit.
 
 **L4-YOLO-011** Batches. When every unit of a batch is integrated, the plan step SHALL run the batch's acceptance profile on the target tip and
 record `batch.accepted` or `batch.failed`. A failed batch MUST stop the plan. A batch that depends on it MUST NOT start.
@@ -6866,6 +6869,11 @@ scenario is a spec defect (§26).
 - **Given** the stop reasons of design D10
 - **When** the docs check runs
 - **Then** each reason code appears in `docs/runbook.md` with the command that clears it
+
+#### SCN-YOLO-30 (−) Specs pushed with their plan do not start on their own · L4-YOLO-010
+- **Given** one commit on the target that adds the unit folders of `a` and `b` and a plan that lists them, not yet activated
+- **When** the CI run for that push happens
+- **Then** the plan is admitted and reviewed, no branch of `a` or `b` is created, and `l4 plan` shows both as `held by plan p1 (reviewed)`
 
 ## 24. Definition of done
 

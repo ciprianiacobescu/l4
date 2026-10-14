@@ -144,7 +144,9 @@ current unit of an active `merge: auto` plan.
 After a unit's merge into the target (by the harness or, with `merge: human`, by a person), the plan step SHALL run the
 unit's acceptance profile on the merged target revision (design D9) and record `unit.integrated` only when it passes. A
 profile with no gate to run MUST be an error, never a pass. A failure MUST stop the plan with `postcheck_failed`. With
-`merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the harness with the same guard.
+`merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the harness with the same guard. For every
+unit, the rule "one archive PR at a time" (L4-ARC-007) MUST count only open archive PRs whose base is
+`forge.base_branch`.
 
 #### Scenario: SCN-YOLO-18 (−) A failing post-merge check stops the plan
 - **GIVEN** a unit merged into the target whose `all` profile fails on the merged revision
