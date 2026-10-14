@@ -259,10 +259,18 @@ def _events(wb: Workbench) -> list[LedgerEvent]:
 
 
 def _red_green(events: Sequence[LedgerEvent]) -> dict[str, str]:
-    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop)."""
-    return {
-        str(t): str(e.data.get("task", "")) for e in events if e.type == "task.red_ok" for t in e.data.get("tests", [])
-    }
+    """New test id -> task, from the `task.red_ok` events (proven red by the implementer loop). A test that a
+    `tests.superseded` event lists (a stale test that a reopened task's red step replaced, L4-OPS-015) is not expected
+    any more, unless a later `task.red_ok` names it again. Every other test a red step added stays expected, so one
+    that vanishes without that record is still a blocker, also in a reopened task."""
+    found: dict[str, str] = {}
+    for e in events:
+        if e.type == "tests.superseded":
+            for t in e.data.get("tests") or ():
+                found.pop(str(t), None)
+        elif e.type == "task.red_ok":
+            found.update(dict.fromkeys((str(t) for t in e.data.get("tests", [])), str(e.data.get("task", ""))))
+    return found
 
 
 def _notes(events: Sequence[LedgerEvent]) -> str:
