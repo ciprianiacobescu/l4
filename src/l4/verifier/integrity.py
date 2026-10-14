@@ -297,13 +297,22 @@ def _sha(ctx: IntegrityContext, event: LedgerEvent) -> str | None:
 
 
 def _green_sha(ctx: IntegrityContext, red: LedgerEvent) -> str | None:
+    """The commit of THIS red's green: the first `task.done` of the same unit and task after the red and before the
+    next `task.red_ok` of that task. A task reopened by `tasks.reopened` has two red/green cycles; pairing a red with
+    the last green would read the reopened red's rewrite of the test as a change between red and green (L4-VER)."""
     unit, task = _unit_of(ctx, red), red.data.get("task")
-    done = [
+    key = (red.ts, red.run_id, red.seq)
+    later = [
         e for e in ctx.events
-        if e.type == "task.done" and e.data.get("task") == task and _unit_of(ctx, e) == unit
-        and (e.ts, e.run_id, e.seq) >= (red.ts, red.run_id, red.seq)
+        if e.type in ("task.done", "task.red_ok") and e.data.get("task") == task and _unit_of(ctx, e) == unit
+        and (e.ts, e.run_id, e.seq) > key
     ]  # fmt: skip
-    sha = _sha(ctx, done[-1]) if done else None
+    first = next((e for e in later if e.type == "task.done"), None)
+    if first is None or any(
+        e.type == "task.red_ok" and (e.ts, e.run_id, e.seq) < (first.ts, first.run_id, first.seq) for e in later
+    ):
+        return None
+    sha = _sha(ctx, first)
     return sha if isinstance(sha, str) and sha != _sha(ctx, red) else None
 
 
