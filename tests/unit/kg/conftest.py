@@ -71,7 +71,9 @@ from l4.vcs.git import Git
 from l4.verifier.report import verdict_json
 from l4.verifier.types import CriterionOutcome, Finding, GateLine, Severity, Verdict, VerifyResult
 
-READ_ONLY = frozenset({"rev-parse", "for-each-ref", "ls-tree", "cat-file", "log", "check-ignore", "ls-files", "var"})
+READ_ONLY = frozenset(
+    {"rev-parse", "for-each-ref", "ls-tree", "cat-file", "log", "check-ignore", "ls-files", "var", "config"}
+)
 _EPOCH = datetime(2026, 10, 1, 8, 0, 0, tzinfo=UTC)
 _IDENT = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
 
@@ -167,6 +169,15 @@ class KgRepo:
             repo=self.root, config_path=None, log_format="human", verbosity=0, run_id="r-20261001T0800Z-0000",
             environ={**self.environ, "L4_CACHE": str(self.cache), **environ}, redactor=Redactor({}),
         )  # fmt: skip
+
+    def partial_clone(self, name: str = "pclone") -> Path:
+        """A `--filter=blob:none` clone of `origin` with every branch fetched: its blobs are promised, not local."""
+        self._raw(self.origin, "config", "uploadpack.allowFilter", "true")
+        self._raw(self.origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+        clone = self.tmp / name
+        self._raw(self.tmp, "clone", "-q", "--no-checkout", "--filter=blob:none", f"file://{self.origin}", str(clone))
+        self._raw(clone, "fetch", "-q", "--filter=blob:none", "origin", "+refs/heads/*:refs/remotes/origin/*")
+        return clone
 
     def recording_git(self, allowed: frozenset[str] = READ_ONLY) -> RecordingGit:
         return RecordingGit(self.root, environ=self.environ, allowed=allowed)

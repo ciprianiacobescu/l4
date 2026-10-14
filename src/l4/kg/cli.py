@@ -14,7 +14,7 @@ through `run_guarded`. A failed build changes no ref, no tracked file and no led
 index files under the cache root, each atomic, and the manifest last, so the last complete index stays readable or the
 next read finds it `incomplete` and builds again (SCN-KG-03).
 
-`--out` names a file. A relative path is relative to the repository. A path inside the repository must be ignored by
+`--out` names a file. A relative path is relative to the `--repo` folder (the repository root unless a subdirectory was given). A path inside the repository must be ignored by
 git (`git check-ignore`), which also refuses a tracked path (SCN-KG-19); a path outside it is allowed (design D2). The
 check runs before the index is built, so a refused `--out` writes nothing at all.
 
@@ -30,6 +30,7 @@ index is redacted already, and this keeps a later change of `report`, `why` or `
   is printed (it writes the inbox files unless `dry_run`).
 """
 
+import dataclasses
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ from pathlib import Path
 
 import click
 
-from l4.config.redaction import load_app_config
+from l4.config.redaction import attach_forge_urls, load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
@@ -90,22 +91,37 @@ def _say(app: AppContext, text: str, *, err: bool = False) -> None:
 
 
 def _git(app: AppContext) -> Git:
-    return Git(app.repo, environ=app.environ)
+    """The read-only git of every handler. `GIT_NO_LAZY_FETCH=1` keeps a partial clone from fetching a blob that
+    `cat-file` asks for (review #1; L4-KG-001): the object is missing, the unit is skipped, nothing is fetched."""
+    return Git(app.repo, environ={**app.environ, "GIT_NO_LAZY_FETCH": "1"})
 
 
 def _prepare(app: AppContext) -> tuple[AppContext, L4Config, Git, Path]:
-    """Config, the read-only git and the index folder. A cache root inside the repository, a config error and a
-    folder that is no repository all exit 2 here, before anything is read or written."""
+    """Config, the read-only git and the index folder, for the repository root (`git rev-parse --show-toplevel`, so
+    that a command started in a subdirectory reads the whole repository and its guards see the real root, review #3).
+    A cache root inside the repository, a config error and a folder that is no repository all exit 2 here, before
+    anything is read or written."""
+    top = _toplevel(app)
+    if top is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"kg: {app.repo} is not a git repository")
+    app = dataclasses.replace(app, repo=top)
     app, cfg = load_app_config(app)
+    attach_forge_urls(app, cfg)  # L4-KG-011: the forge host is scrubbed from the index and from everything shown
     folder = index_dir(app)
+    return app, cfg, _git(app), folder
+
+
+def _toplevel(app: AppContext) -> Path | None:
+    """The root of the work tree that holds `app.repo`; `app.repo` itself for a bare repository; None for no
+    repository."""
     git = _git(app)
     try:
-        inside = git.run("rev-parse", "--git-dir", check=False).returncode == 0
+        done = git.run("rev-parse", "--show-toplevel", check=False)
+        if done.returncode == 0 and done.stdout.strip():
+            return Path(done.stdout.strip())
+        return app.repo if git.run("rev-parse", "--git-dir", check=False).returncode == 0 else None
     except GitError:
-        inside = False
-    if not inside:
-        raise L4Exit(ExitCode.USAGE_ERROR, f"kg: {app.repo} is not a git repository")
-    return app, cfg, git, folder
+        return None
 
 
 def _build(app: AppContext, cfg: L4Config, git: Git, folder: Path) -> tuple[Graph, list[str], list[str]]:
@@ -166,11 +182,13 @@ def run_kg_build(app: AppContext) -> ExitCode:
     return ExitCode.OK
 
 
-def _check_out(app: AppContext, git: Git, out: Path | str) -> Path:
-    """The file `--out` names, after the rule of design D2: inside the repository only when git ignores it."""
+def _check_out(app: AppContext, git: Git, out: Path | str, start: Path) -> Path:
+    """The file `--out` names, after the rule of design D2: inside the repository only when git ignores it. A
+    relative path is relative to the folder the command was given (`start`, the `--repo` folder), and the rule is
+    applied against the repository root, so a subdirectory cannot reach a not-ignored path (review #3)."""
     given = str(out)
     path = Path(out)
-    path = (path if path.is_absolute() else app.repo / path).resolve()
+    path = (path if path.is_absolute() else start / path).resolve()
     if path.is_dir():
         raise L4Exit(ExitCode.USAGE_ERROR, f"kg: --out {given} is a folder: name a file")
     repo = app.repo.resolve()
@@ -188,10 +206,11 @@ def run_kg_report(app: AppContext, *, out: Path | str | None = None, min_units: 
     """`l4 kg report [--out PATH] [--min-units N]`: the markdown report, on stdout or in the file."""
     _check_min_units(min_units)
     targets: list[Path] = []
+    start = app.repo
 
     def precheck(checked: AppContext, git: Git) -> None:
         if out is not None:
-            targets.append(_check_out(checked, git, out))
+            targets.append(_check_out(checked, git, out, start))
 
     app, cfg, git, graph = _load(app, precheck)
     target = targets[0] if targets else None

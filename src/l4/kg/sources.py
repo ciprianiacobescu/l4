@@ -49,7 +49,8 @@ log = logging.getLogger("l4.kg")
 
 REMOTE = "origin"
 SKIP_REASONS = (
-    "ledger_corrupt", "verdict_unreadable", "oversize", "not_regular", "lessons_problem", "attempt_not_local", "error",
+    "ledger_corrupt", "verdict_unreadable", "oversize", "not_regular", "lessons_problem", "attempt_not_local",
+    "partial_clone", "error",
 )  # fmt: skip
 FETCH_ATTEMPTS = "git fetch origin 'refs/l4/attempts/*:refs/l4/attempts/*'"
 VERDICT_SCHEMA = "l4/verdict@1"  # `l4.verifier.report.VERDICT_SCHEMA_ID`, which a test compares
@@ -172,7 +173,7 @@ class _Slice:
 
 def _ls(git: Git, sha: str, path: str) -> list[_Entry]:
     """The entries of a directory (`path` ends in `/`) or the one entry of a file, at commit `sha`."""
-    raw = git.run_bytes("ls-tree", "-z", "-l", sha, "--", path, check=False)
+    raw = git.run_bytes("ls-tree", "-z", "-l", "--full-tree", sha, "--", path, check=False)
     found = []
     for record in filter(None, raw.split(b"\0")):
         meta, _, name = record.partition(b"\t")
@@ -183,6 +184,12 @@ def _ls(git: Git, sha: str, path: str) -> list[_Entry]:
         text = name.decode("utf-8", "surrogateescape")
         found.append(_Entry(fields[0].decode(), fields[1].decode(), fields[2].decode(), size, text.rsplit("/", 1)[-1]))
     return found
+
+
+def is_partial_clone(git: Git) -> bool:
+    """Whether the repository promises objects it does not hold (`extensions.partialClone` or a promisor remote)."""
+    done = git.run("config", "--get-regexp", r"^(extensions\.partialclone|remote\..*\.promisor)$", check=False)
+    return any(line.partition(" ")[2].strip() not in ("", "false") for line in done.stdout.splitlines())
 
 
 def _is_tree(entry: _Entry | None) -> bool:
@@ -198,11 +205,17 @@ class _Run:
 
     def __init__(self, git: Git, cfg: L4Config) -> None:
         self.git, self.cfg = git, cfg
+        self.partial = is_partial_clone(git)  # a blob that is not local is skipped, never fetched
         self.skips: list[Skip] = []
         self.failed: set[str] = set()
 
     def skip(self, reason: str, where: str, detail: str = "") -> None:
         self.skips.append(Skip(reason, where, detail))
+
+    def failure_reason(self, exc: Exception) -> str:
+        """`partial_clone` when git failed in a partial clone (the object is promised, not local, and the lazy fetch
+        is off), else `error`."""
+        return "partial_clone" if self.partial and isinstance(exc, GitError) else "error"
 
     # --- one folder ---------------------------------------------------------------------------------------------
 
@@ -285,7 +298,7 @@ class _Run:
             log.warning("kg: %s skipped: %s", unit_id, exc)
             del self.skips[mark:]
             self.failed.add(unit_id)
-            self.skip("error", unit_id, f"{type(exc).__name__}: {exc}")
+            self.skip(self.failure_reason(exc), unit_id, f"{type(exc).__name__}: {exc}")
             return []
 
     def _roots(self) -> tuple[str, str]:
@@ -465,6 +478,11 @@ def collect(git: Git, cfg: L4Config) -> Collected:
             )
         date = git.run("log", "-1", "--format=%cI", base_sha, check=False).stdout.strip()
         out.base_date = date or None
+    if run.partial:
+        out.warnings.append(
+            "this repository is a partial clone: a unit whose blobs are not local is skipped (partial_clone), "
+            "and nothing is fetched"
+        )
     refs = ref_shas(git, cfg)
     out.refs = refs
     slices: list[_Slice] = []
@@ -508,7 +526,7 @@ def collect(git: Git, cfg: L4Config) -> Collected:
             out.lessons = sorted(run.lessons(base_name, base_sha), key=lambda r: (r.lesson.id, r.archived))
         except Exception as exc:  # the lessons are one input; the units are read without them
             log.warning("kg: the lessons were not read: %s", exc)
-            run.skip("error", cfg.memory.lessons_file, f"{type(exc).__name__}: {exc}")
+            run.skip(run.failure_reason(exc), cfg.memory.lessons_file, f"{type(exc).__name__}: {exc}")
     for ref in _restart_refs(out.units):
         if ref not in refs:
             out.not_local.append(ref)
