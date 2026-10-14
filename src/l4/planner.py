@@ -13,7 +13,7 @@ written by `with_outcome` from the `actionable` ids. M1: `StaticUnitSource`.
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -87,6 +87,7 @@ class UnitFacts:
     ci_failed_jobs: tuple[str, ...] = ()  # in_review: the project's CI is red on H, which is the branch head
     follow_up_items: tuple[str, ...] = ()  # merged: the feedback items (ids) a follow-up should take (L4-FBK-010)
     follow_up_open: str | None = None  # merged: the follow-up that is open, so newer items wait
+    misdirected: str | None = None  # in_review: `merged into <x>, not the base <base>` (L4-YOLO-007, SCN-YOLO-13)
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         return row
     if phase == Phase.IN_REVIEW.value and (row := _in_review(facts)):
         return row
+    if phase == Phase.IN_REVIEW.value and facts.misdirected:
+        return "none", f"in_review: {facts.misdirected}"
     if phase == Phase.MERGED.value and facts.follow_up_items:
         ids = ", ".join(facts.follow_up_items)
         if facts.follow_up_open:
@@ -219,6 +222,30 @@ def compute_plan(units: Sequence[UnitFacts]) -> list[PlanEntry]:
             )
         )  # fmt: skip
     return entries
+
+
+def with_plan_holds(
+    app: AppContext, cfg: Any, rows: Sequence[UnitSnapshot], entries: list[PlanEntry]
+) -> list[PlanEntry]:
+    """Delivery plans (yolo-mode L4-YOLO-010, SCN-YOLO-30): a unit a plan holds is not actionable and shows why
+    (`held by plan p1 (reviewed)`, `waits for openspec:a (not integrated)`, `not in the active plan p1`). Read-only: the
+    plan state is the local `refs/l4/plans/*` the run's refresh fetched. No plan file, no change."""
+    from l4.yolo.cycle import local_states, plan_holds  # the plan step imports this module for its facts
+    from l4.yolo.plans import plan_files
+
+    files = plan_files(app.repo)
+    if not files:
+        return entries
+    states = local_states(Git(app.repo, environ=app.environ), files)
+    holds = plan_holds(files, states, {s.ref.id: s.state.phase for s in rows}, cfg.forge.base_branch)
+    shown = []
+    for entry in entries:
+        hold = holds.get(entry.unit)
+        if hold is None or entry.phase in (Phase.MERGED.value, Phase.ARCHIVED.value):
+            shown.append(entry)
+        else:
+            shown.append(replace(entry, next_action="none", actionable=False, reason=hold.reason))
+    return shown
 
 
 def _issue_ids(snapshot: UnitSnapshot, *kinds: str) -> tuple[str, ...]:
@@ -295,6 +322,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         **_review_facts(snapshot),
         **_spec_edit_facts(snapshot),
         **_follow_up_facts(snapshot),
+        misdirected=snapshot.state.misdirected.text if snapshot.state.misdirected else None,
     )
 
 
@@ -347,7 +375,7 @@ def run_plan(
             if action.what.startswith("ci_"):  # stderr: stdout is the plan, and `--json` must stay JSON
                 click.echo(app.redactor.redact_text(f"{action.unit}: ci: {action.detail}"), err=True)
         rows = snapshots(app, cfg, units)  # the sweep wrote pending events: fold them
-    entries = compute_plan([facts_of(s) for s in rows])
+    entries = with_plan_holds(app, cfg, rows, compute_plan([facts_of(s) for s in rows]))
     found: dict[str, Any] | None = None
     lines: list[str] = []
     if probe:
