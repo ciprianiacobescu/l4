@@ -1321,7 +1321,7 @@ edit this ref. Use `l4 yolo status <plan-id>` to read the state.
 | `admitted` | The checks passed. The review did not run yet. | Harness | `l4 yolo review <plan-id>` |
 | `reviewed` | The review ran. A person reads it. | **Person** | `l4 yolo activate <plan-id> --reason "<why>"` |
 | `active` | The harness runs the units. | Harness | `l4 yolo status <plan-id>` |
-| `waiting` | The current unit waits for a person or for capacity. | **Person**, or harness | 12.4 |
+| `waiting` | The current unit waits for a person or for capacity. The harness continues by itself when the cause is gone. | **Person**, or harness | 12.4 |
 | `stopped` | A fault stopped the plan. The harness does nothing until a person acts. | **Person** | 12.3 |
 | `cancelled` | A person cancelled the plan. This state is final. | None | `l4 yolo report <plan-id>` |
 | `completed` | Each unit is integrated. The report is ready. | **Person** | `l4 yolo report <plan-id>` |
@@ -1335,7 +1335,8 @@ stateDiagram-v2
   admitted --> reviewed: review in CI
   reviewed --> active: l4 yolo activate
   active --> waiting: question, capacity
-  waiting --> active: l4 yolo resume
+  waiting --> active: the cause is gone (the harness continues), or l4 yolo resume
+  waiting --> stopped: fault
   active --> stopped: fault
   stopped --> active: l4 yolo resume
   active --> cancelled: l4 yolo cancel
@@ -1354,8 +1355,13 @@ stateDiagram-v2
 6. If a verdict is not `READY`, correct the spec of the unit on `<base>`. Do steps 4 and 5 again.
 7. Run `l4 yolo activate <plan-id> --reason "<why>"`.
 
-> **WARNING:** `l4 yolo activate` freezes the spec of each unit. If a person changes a frozen spec afterward, the plan
-> stops with `inputs_changed`.
+> **WARNING:** `l4 yolo activate` freezes the spec of each unit and the plan file. If a person changes a frozen spec
+> afterward, the plan stops with `inputs_changed`. The same is true if a person edits the plan file of an active plan.
+> A later review or admission of the file does not change what the activation froze.
+
+The review does not run if the judge agent fails or does not answer in time. The harness then records no review, and
+the next run tries again. If the size limits cut some material, the verdict is at most `NEEDS_REVISION`. The finding
+names what the harness left out.
 
 The activation is refused with exit 2 and the cause in these cases:
 - The review is for other inputs. Run `l4 yolo review <plan-id>`.
@@ -1364,6 +1370,16 @@ The activation is refused with exit 2 and the cause in these cases:
   `merge: human` in the plan.
 - The target branch is not on `origin`.
 - Another plan is active on the same target.
+
+The checks of `l4 yolo check` give these findings, among others:
+- `held_by_other_plan`: a unit is also in another plan file. Remove the unit from one of the two files.
+- `unsupported_profile`: a profile names `e2e`, but `gates.e2e.serve` is set. The harness does not start an app server
+  for a plan. Remove `e2e` from the profile.
+- A limit that is not valid: `max_unit_attempts` or `max_runs` below 1, `max_cost_usd` below 0, or a `deadline` with no
+  time zone. Correct the limit.
+
+If the plan file is not valid JSON, `l4 plan` and `l4 yolo status` report the file. Such a file holds no unit. If the
+JSON is readable but the plan is not valid, the file still holds the units that it lists (see 12.5).
 
 ### 12.3 Procedure: a plan is `stopped`
 
@@ -1386,20 +1402,23 @@ unit.
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `limit_cost` | The plan used `limits.max_cost_usd`. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |
 | `limit_runs` | The plan used `limits.max_runs`. | None. Decide if the plan can use more runs. | `l4 yolo resume <plan-id> --reason "<why>" --extend-runs <n>` |
-| `limit_attempts` | A unit used `limits.max_unit_attempts`. A restart counts as an attempt. | None. Decide if the unit can have more attempts. | `l4 yolo resume <plan-id> --reason "<why>" --extend-attempts <n>` |
+| `limit_attempts` | A unit used `limits.max_unit_attempts`. A restart counts as an attempt, and the cost of each attempt stays in the plan. | None. Decide if the unit can have more attempts. | `l4 yolo resume <plan-id> --reason "<why>" --extend-attempts <n>` |
 | `limit_deadline` | The time in `limits.deadline` passed. | None. Decide on a new time. | `l4 yolo resume <plan-id> --reason "<why>" --extend-deadline <ISO-time>` |
-| `inputs_changed` | A person changed a frozen spec after the activation. `l4 yolo status` names the unit. | Check the change. A resume cannot clear this reason. | `l4 yolo review <plan-id>`, then `l4 yolo activate <plan-id> --reason "<why>"` |
+| `inputs_changed` | A person changed a frozen spec of a unit, or the plan file, after the activation. `l4 yolo status` names the unit, or `plan` for the plan file. | Check the change. A resume cannot clear this reason. | `l4 yolo review <plan-id>`, then `l4 yolo activate <plan-id> --reason "<why>"` |
 | `target_missing` | The target branch is not on `origin`. | Create the target branch on `origin` again. | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `unit_missing` | The current unit is not in the units of the target any more. A person removed or moved its folder. | Put the unit folder back on the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
 
 > **NOTE:** The usage is never reset. A resume, a restart of a unit and a new activation keep the cost, the runs and the
-> attempts that the plan used. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
+> attempts that the plan used. The harness charges each attempt of a unit on its own. A restart starts a new attempt and
+> does not remove the cost of the attempts before it. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
 
 > **CAUTION:** For `unit_rejected` and `inputs_changed`, the new activation uses the new spec. If you do not want the
 > plan to continue, use `l4 yolo cancel <plan-id> --reason "<why>"`.
 
 ### 12.4 Procedure: a plan is `waiting`
 
-A waiting plan is not an error. The harness continues when the cause is gone. Run `l4 yolo status <plan-id>` to see the
+A waiting plan is not an error. The harness continues by itself when the cause is gone. You do not have to run a
+command. To continue at once, run `l4 yolo resume <plan-id> --reason "<why>"`. Run `l4 yolo status <plan-id>` to see the
 reason.
 
 | Wait reason | Cause | What to do |
@@ -1409,9 +1428,20 @@ reason.
 | The current unit is `waiting_capacity` | No agent is available ([7.4](#74-waiting_capacity-no-agent-is-available)). | Correct the cause, or `l4 retry --unit <unit> --reason "<why>"`. |
 | `waits for <unit> (not integrated)` | A unit that this unit needs is not in the target yet, or its profile did not pass. | With `merge: human`, merge the PR of that unit into the target. Then wait for the next run. |
 | `waits for batch <id> (acceptance)` | The acceptance profile of a batch did not run yet. | Do nothing. The next run does the check. |
+| `held by plan <id> (<status>)` | The unit is in a plan file on the target, and the plan is not active. | Activate the plan, or remove the unit from the plan file (see 12.5). |
 
 With `merge: human`, a PR must be merged into the target. A merge into another branch does not count. The note of the
 unit shows `merged into <x>, not the base <base>`.
+
+With `merge: auto`, the harness also refuses to merge a unit if its head changed after the checks. The head to push must
+be the tip of the unit branch on `origin` and the head of the PR. If it is not, the harness does not push and does not merge the unit.
+
+The post-merge check applies to each merged unit of the plan that is not integrated, not only to the current unit. If a
+person merges a unit that is not the current unit in a plan with `merge: human`, the next step integrates it.
+
+The profile `all` does not run the `e2e` gate if `gates.e2e.serve` is set, and `l4 yolo status` says so. A profile
+passes only if at least one required gate other than `setup` ran and passed. If no gate ran, the result is an error and
+the plan stops with `postcheck_failed`.
 
 ### 12.5 Procedure: cancel a plan
 
@@ -1419,8 +1449,12 @@ unit shows `merged into <x>, not the base <base>`.
 2. Run `l4 yolo report <plan-id>`. Read what the plan did.
 
 The harness starts no new unit and merges nothing. A unit that is already running finishes its run. The harness does
-not merge it. The units are normal units again. Use sections 7.1 to 7.15 for them. A cancelled plan cannot start again.
-Make a new plan with a new `<plan-id>`.
+not merge it. A cancelled plan cannot start again. Make a new plan with a new `<plan-id>`.
+
+A cancelled plan still holds its units. A unit that is in a plan file on the target stays `held by plan <id>
+(cancelled)` while the file is there. To release a unit, remove it from the plan file, or remove the file, on `<base>`.
+Then the unit is a normal unit again. Use sections 7.1 to 7.15 for it. A plan file that is not valid still holds the
+units that the harness can read in its JSON. A file that is not JSON holds nothing.
 
 ### 12.6 What the harness does in one run
 

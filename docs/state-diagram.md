@@ -121,7 +121,7 @@ stateDiagram-v2
   admitted --> reviewed: plan.reviewed (CI)
   reviewed --> active: plan.activated (l4 yolo activate)
   active --> waiting: plan.waiting
-  waiting --> active: cause gone, or plan.resumed
+  waiting --> active: cause gone (the harness continues), or plan.resumed
   active --> stopped: plan.stopped
   waiting --> stopped: plan.stopped
   stopped --> active: plan.resumed
@@ -133,5 +133,9 @@ stateDiagram-v2
   cancelled --> [*]
   completed --> [*]
 ```
+
+A `waiting` plan is not stopped: the harness continues by itself when the cause is gone, and `l4 yolo resume` also wakes
+it. The plan file and the unit specs are frozen at the activation; a change of either stops an active plan with
+`inputs_changed`. A cancelled plan still holds its units while its file is on the target.
 
 The stop reasons and the command that clears each one are in the [runbook, section 12.3](runbook.md#123-procedure-a-plan-is-stopped).

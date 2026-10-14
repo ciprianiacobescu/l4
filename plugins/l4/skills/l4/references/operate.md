@@ -88,11 +88,14 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
 - `l4 yolo review PLAN`: CI reviews the plan (READY / NEEDS_REVISION / BLOCKED per unit). `--local` runs it here.
 - `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
   the review is for the current inputs and everything is READY. `merge: auto` also needs `forge.merge_policy: auto`.
+  The plan file is frozen too: an edit of it, or of a unit spec, stops an active plan with `inputs_changed`.
 - `l4 yolo status [PLAN] [--json]`: state, units, usage against limits, stop reason, `Next:`.
 - `l4 yolo cancel PLAN --reason "…"`: no new dispatch or merge, for good.
 - `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: after the cause of a
-  stop is gone (`l4 retry` the unit first for `unit_halted` / `unit_escalated`). `inputs_changed` and `unit_rejected` need
-  `review` and `activate` again. Usage is never reset.
+  stop is gone (`l4 retry` the unit first for `unit_halted` / `unit_escalated`; `unit_missing` clears when the unit
+  folder is back). `inputs_changed` and `unit_rejected` need `review` and `activate` again. Usage is never reset: a
+  restart is a new attempt and its cost is added. A `waiting` plan continues by itself when the cause is gone.
 - `l4 yolo report PLAN`: the report. Promotion of the base branch to `main` is always manual.
 
-While a plan is active, `l4 run --unit U` exits 13 for a unit that is not the current one.
+While a plan is active, `l4 run --unit U` exits 13 for a unit that is not the current one. A unit in a plan file on the
+base branch stays held (`held by plan <id> (<status>)`), a cancelled plan included, until it is removed from the file.

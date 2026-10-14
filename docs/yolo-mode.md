@@ -69,8 +69,13 @@ yolo:
     full: [build, lint, typecheck, test, e2e]
 ```
 
-The gate kinds are `setup`, `build`, `lint`, `typecheck`, `test`, `e2e` and `extra:<name>`. A profile with no gate to run
-is an error, never a pass. `none` is valid for a batch only.
+The gate kinds are `setup`, `build`, `lint`, `typecheck`, `test`, `e2e` and `extra:<name>`. A profile passes only when at
+least one required gate other than `setup` ran and passed. A profile with no such gate is an error, never a pass. `none`
+is valid for a batch only.
+
+`all` leaves out the `e2e` gates that need an app server (`gates.e2e.serve`), and the result says so. A profile that
+names `e2e` while `serve` is set is refused at admission (`unsupported_profile`). The limits are checked too:
+`max_unit_attempts` and `max_runs` at least 1, `max_cost_usd` at least 0, and a `deadline` with a time zone.
 
 ## The two merge modes
 
@@ -88,6 +93,11 @@ The merge happens only when all of this is true:
 2. No person made a commit after the hand-off.
 3. The PR is open, and its base is the target.
 4. The target tip is contained in the unit head.
+5. The head to push is the tip of the unit branch on `origin` and the head of the PR. A commit that arrives after the
+   check stops the merge.
+
+L4 records the request, with the lease of the plan ref, before it pushes. It reads the plan again first: a plan that is
+cancelled or stopped does not merge.
 
 If the target moved, L4 sends the unit to `verifying`. The verifier merges the new base in and checks again. If this
 happens twice for the same attempt, or if the push is refused for another reason (for example a protected branch), the
@@ -123,8 +133,10 @@ A plan with `merge: auto` while `forge.merge_policy` is `human` is refused at ad
    the target exists on `origin`, and no other plan is active on that target. It freezes a digest of each unit's spec and
    the limits, and starts a run on the target.
 
-Nothing runs from a plan before the activation. If a person changes the spec of a unit afterward (the harness's own
-task ticks and `verification.md` do not count), the plan stops with `inputs_changed`.
+Nothing runs from a plan before the activation. The activation freezes the digest of each unit and the digest of the
+plan file. If a person changes the spec of a unit afterward (the harness's own task ticks and `verification.md` do not
+count), or edits the plan file, the plan stops with `inputs_changed`. A later review changes only the review, not what
+the activation froze. If the judge fails or times out, L4 records no review and the next run tries again.
 
 ## What runs in each CI run
 
@@ -141,22 +153,29 @@ After a step that leaves work, the run starts the next run on the target. A plan
 are not in the plan get no new agent work while the plan is active, but the sweep still records their merges and
 closed PRs. `l4 run --unit <unit>` exits 13 for a unit that is not the current one.
 
+A unit that is in a plan file on the target stays held while the file is there. This is true in every status of the
+plan, a cancelled plan included. To release the unit, remove it from the file, or remove the file. A plan file that is
+not valid still holds the units that L4 can read in its JSON. A file that is not JSON holds nothing, and `l4 plan` and
+`l4 yolo status` report it. A unit that is in two plan files is a finding (`held_by_other_plan`) for the second file.
+L4 post-checks every merged unit of the plan that is not integrated, not only the current one.
 ## Stops and waits
 
-A plan **waits** when the current unit needs a person's answer or has no agent available. The plan continues when the
-cause is gone.
+A plan **waits** when the current unit needs a person's answer or has no agent available. The plan continues by itself
+when the cause is gone. `l4 yolo resume` also wakes it.
 
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
-`postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed` and
-`target_missing`. A stopped plan dispatches and merges nothing, including units that do not depend on the failed one. The
+`postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,
+`target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
+when it is back). A stopped plan dispatches and merges nothing, including units that do not depend on the failed one. The
 cause of each stop and the command that clears it are in [runbook 12.3](runbook.md#123-procedure-a-plan-is-stopped).
 `l4 yolo cancel` stops the plan for good.
 
 ## Limits
 
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
-ledger and checks it before each dispatch and each merge. The usage is never reset: not by a restart of a unit, not by a
-resume. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
+ledger, per attempt of a unit, and checks it before each dispatch and each merge. A restart starts a new attempt and counts
+as one. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
+not by a restart of a unit, not by a resume. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
 
 ## The report and the receipts
 
