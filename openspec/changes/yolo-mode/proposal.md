@@ -76,8 +76,9 @@ A proposal for this ("YOLO mode") was written on 2026-10-14 against 8cdb2617 (0.
 - No CI template change: the plan step runs inside `l4 run`, which every template already calls. Adopters get it with
   `l4 upgrade` (or a new action pin).
 - SPEC: a new section with L4-YOLO-001..016 and SCN-YOLO-*; `merge_policy: auto` is no longer "v1.1".
-- First forge: GitHub, validated live. GitLab marks an MR merged in the same way, but it is not validated live in this
-  change; the runbook says so.
+- Forges: GitHub and GitLab, both validated live (GitHub: the test repository with base `l4/main`; GitLab: a test
+  project on the self-hosted GitLab with integration branch `staging` and default branch `main`). A spike on each showed
+  the PR/MR marked merged within 5 s of the fast-forward push.
 - Not in scope: parallel plan units, several repositories, automatic promotion or deployment, merging through the forge
   API (needed for targets protected with "require a pull request"; such a target refuses the push, and the plan stops
   with `merge_refused`), importing receipts of earlier plans.

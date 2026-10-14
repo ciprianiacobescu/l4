@@ -55,4 +55,5 @@
 - [ ] 9.1 Pin the test repository to the branch commit; `forge.merge_policy: auto`; target `l4/main` (not the default branch), promotion target `amaster`.
 - [ ] 9.2 A plan of three small units: A (OpenSpec) → B (OpenSpec, uses A) in batch 1, C (Kiro, uses B) in batch 2 with a batch profile. Review in CI, activate from a laptop, and let it run to `plan.completed`. Evidence: B's branch did not exist before `unit.integrated{A}`; each PR merged by the fast-forward push; the archive PRs merged; `amaster` unchanged; the report.
 - [ ] 9.3 Stop cases: a spec push to the current unit (`inputs_changed`); `l4 yolo cancel`; a `merge: human` plan where a person merges.
-- [ ] 9.4 `docs/live/yolo-mode/README.md` with run ids and the defects found.
+- [ ] 9.4 GitLab (vps5 `ai-cici/l4-yolo-dummy`, vendored harness, integration branch `staging`, default `main`, runner tag `agentic`): the same three-unit plan to `plan.completed`, MRs merged by the push, `main` unchanged; one stop case.
+- [ ] 9.5 `docs/live/yolo-mode/README.md` with run ids and pipeline ids for both forges, and the defects found.
