@@ -11,7 +11,7 @@ from l4.state.ledger import LedgerEvent
 from l4.verifier import fixloop
 from l4.verifier.fixloop import failure_set, repeated_failure
 from l4.verifier.gates import log_digest
-from l4.verifier.types import GateLine, Verdict, VerifyResult
+from l4.verifier.types import Finding, GateLine, Severity, Verdict, VerifyResult
 
 from ..implementer.conftest import green_step
 from . import test_ladder_fix as ladder_fix
@@ -110,15 +110,28 @@ def unit(tmp_path: Path, git_for):
     return git, repo, path, head
 
 
-def previous(path: Path, head: str, gates: list[dict], tests: dict | None = None, *, verdict: str = "FAIL", n: int = 1):
+def previous(
+    path: Path,
+    head: str,
+    gates: list[dict],
+    tests: dict | None = None,
+    *,
+    verdict: str = "FAIL",
+    n: int = 1,
+    findings: list[Finding] | None = None,
+):
     folder = path / ".l4" / "evidence" / f"round-{n}"
     folder.mkdir(parents=True, exist_ok=True)
     body = {"round": n, "verdict": verdict, "head_sha": head, "gates": gates, "tests": tests or {}}
+    body["findings"] = [{**dataclasses.asdict(f), "severity": f.severity.value} for f in findings or []]
     (folder / "verdict.json").write_text(json.dumps(body))
 
 
-def current(head: str, gates: list[dict], tests: dict | None = None, n: int = 2) -> VerifyResult:
+def current(
+    head: str, gates: list[dict], tests: dict | None = None, n: int = 2, findings: list[Finding] | None = None
+) -> VerifyResult:
     result = VerifyResult("u", n, Verdict.FAIL, "b", head)
+    result.findings = findings or []
     result.gates = [
         GateLine(g["name"], g["command"], g["status"], g["reason"], g["log"], g.get("digest")) for g in gates
     ]
@@ -249,7 +262,8 @@ def test_a_repeated_failure_escalates_with_same_failure_and_writes_no_second_fix
     assert len(run.events("fix.spawned")) == 1  # no fix unit 2
     code, detail = escalation[-1]
     assert code == "same_failure"
-    assert detail.startswith("round 2 failed the same way as round 1: lint, lint:exit 1, lint:log ")  # the digest (M5)
+    assert detail.startswith("round 2 failed the same way as round 1: ")
+    assert "lint, lint:exit 1, lint:log " in detail  # the digest (M5)
 
 
 LINT_BY_CONTENT = (
@@ -308,3 +322,54 @@ def test_a_failure_that_only_the_coverage_plugin_causes_reaches_the_fixer(
     fix_gates = [e for e in run.events("gate.finished") if e.get("fix_unit") == FIX_UNIT and e["name"] == "test"]
     assert fix_gates and fix_gates[0]["status"] == "fail"
     assert "test_runs_without_the_coverage_plugin" in run.adapter.requests[3].prompt  # the retry prompt
+
+
+# --- a deterministic finding with every gate passing (D7) -----------------------------------------------------------
+
+
+def blocker(title: str, source: str = "deterministic", severity: Severity = Severity.BLOCKER) -> Finding:
+    return Finding(severity, title, f"{title}: detail of this round", source)  # type: ignore[arg-type]
+
+
+def row(finding: Finding) -> dict:
+    return {**dataclasses.asdict(finding), "severity": finding.severity.value}
+
+
+def test_the_failure_set_holds_the_ids_of_deterministic_blocking_findings_only():
+    freeze = blocker("a frozen test or support file changed between red and green")
+    found = failure_set(
+        [gate("lint", "pass", "")],
+        {},
+        [row(f) for f in (freeze, blocker("judge says", "judge"), blocker("n", severity=Severity.MINOR))],
+    )
+    assert found == {f"finding {freeze.id}"}
+
+
+def test_the_same_deterministic_blocker_in_two_rounds_is_a_repeat_with_every_gate_passing(unit):
+    git, repo, path, head = unit
+    freeze = blocker("a frozen test or support file changed between red and green")
+    previous(path, head, [gate("lint", "pass", "")], findings=[freeze])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    reworded = dataclasses.replace(freeze, detail="task 1.1: tests/test_other.py")  # the detail may change, the id not
+    detail = repeated_failure(path, git, [], current(now, [gate("lint", "pass", "")], findings=[reworded]))
+    assert detail == f"round 2 failed the same way as round 1: finding {freeze.id}"
+
+
+def test_a_different_deterministic_blocker_is_not_a_repeat(unit):
+    git, repo, path, head = unit
+    previous(path, head, [], findings=[blocker("a pre-existing test was deleted")])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    assert (
+        repeated_failure(path, git, [], current(now, [], findings=[blocker("a skip or xfail marker was added")]))
+        is None
+    )
+
+
+def test_a_judge_finding_alone_is_never_a_repeat(unit):
+    git, repo, path, head = unit
+    previous(path, head, [], findings=[blocker("judge", "judge")])
+    (repo / "b.txt").write_text("fix")
+    now = commit(git, repo, BOT, "fix(u): task")
+    assert repeated_failure(path, git, [], current(now, [], findings=[blocker("judge", "judge")])) is None
