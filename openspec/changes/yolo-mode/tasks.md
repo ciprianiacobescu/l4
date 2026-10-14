@@ -11,9 +11,9 @@
 
 ## 2. Plan ledger (wave 1, agent B: `yolo/store.py`, `yolo/state.py`)
 
-- [ ] 2.1 `PlanStore.read/append/list_plans` (D4): plumbing commits with `ledger.jsonl`, optional `report.md` and `receipts/*.json`; `git push --atomic --force-with-lease`; `PlanMoved` on a lost lease. Tests with a bare `origin` in a temp folder, SCN-YOLO-12 with two clones. (L4-YOLO-006)
-- [ ] 2.2 `fold_plan()` for every event of D4, usage that never resets, `extended`, status transitions. Table tests. (L4-YOLO-006, L4-YOLO-014)
-- [ ] 2.3 Receipts written once per `receipt_id`. (L4-YOLO-015)
+- [x] 2.1 `PlanStore.read/append/list_plans` (D4): plumbing commits with `ledger.jsonl`, optional `report.md` and `receipts/*.json`; `git push --atomic --force-with-lease`; `PlanMoved` on a lost lease. Tests with a bare `origin` in a temp folder, SCN-YOLO-12 with two clones. (L4-YOLO-006)
+- [x] 2.2 `fold_plan()` for every event of D4, usage that never resets, `extended`, status transitions. Table tests. (L4-YOLO-006, L4-YOLO-014)
+- [x] 2.3 Receipts written once per `receipt_id`. (L4-YOLO-015)
 
 ## 3. Review and post-merge checks (wave 1, agent C: `yolo/readiness.py`, `yolo/postcheck.py`, `yolo/prompts/readiness.md`, `yolo/schemas/readiness.schema.json`)
 
