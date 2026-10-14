@@ -37,6 +37,7 @@ from typing import Any
 
 import click
 
+from l4.availability.errors import RoleUnavailable
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
@@ -51,9 +52,17 @@ from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
-from l4.vcs.names import unit_branch
 from l4.yolo.admit import admit, next_eligible
-from l4.yolo.digest import plan_digest, unit_digest
+from l4.yolo.cycle import REVIEW_KEY, review_batches
+from l4.yolo.digest import RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.limits import (
+    LIMIT_ATTEMPTS,
+    LIMIT_COST,
+    LIMIT_RUNS,
+    effective_limits,
+    reached_at,
+    resume_allows,
+)
 from l4.yolo.model import (
     PLAN_ID,
     PLAN_REF_PREFIX,
@@ -65,9 +74,18 @@ from l4.yolo.model import (
     PlanState,
     UnitInfo,
 )
-from l4.yolo.plans import FINAL, PlanFile, active_on, plan_files, plan_files_at, unit_infos
+from l4.yolo.plans import (
+    FINAL,
+    PlanFile,
+    active_on,
+    held_by,
+    plan_files,
+    plan_files_at,
+    readable_unit_ids,
+    unit_infos,
+)
 from l4.yolo.readiness import review_plan_costed
-from l4.yolo.state import fold_plan
+from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
 
 log = logging.getLogger("l4.yolo.commands")
@@ -209,14 +227,15 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
     return _Units(infos, phases)
 
 
-def _now_digest(ctx: _Ctx, rev: str, unit_id: str, folder: str) -> str:
-    """The digest of a unit now (design D3): on its branch when it has one on origin, else on the target head."""
-    ref = f"refs/remotes/origin/{unit_branch(unit_id, ctx.cfg.forge.branch_prefix)}"
-    return unit_digest(ctx.git, ref if ctx.git.rev_parse(ref) else rev, folder)
+def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
+    """The digest of a unit now (design D3, R3): on its branch when it has one on origin, else on the target head.
+    `digest.current_unit_digest` is the one rule the review, the activation and the `inputs_changed` check share; a
+    target that is not fetched raises `RevisionMissing`, which is never the digest of an empty folder."""
+    return current_unit_digest(ctx.git, ctx.cfg, unit_id, folder, ctx.target_ref)
 
 
-def _digests(ctx: _Ctx, rev: str, plan: Plan, units: _Units) -> dict[str, str]:
-    return {u: _now_digest(ctx, rev, u, units.infos[u].folder) for u in plan.unit_ids() if u in units.infos}
+def _digests(ctx: _Ctx, plan: Plan, units: _Units) -> dict[str, str]:
+    return {u: _now_digest(ctx, u, units.infos[u].folder) for u in plan.unit_ids() if u in units.infos}
 
 
 def _append(store: PlanStore, events: Sequence[PlanEvent], head: str | None) -> str:
@@ -288,47 +307,6 @@ def _review_view(
 # --- limits -------------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Limits:
-    """The limits in force: those frozen at activation (or the plan file's before) plus what `resume` extended."""
-
-    cost: float | None
-    runs: int | None
-    attempts: int
-    deadline: datetime | None
-    extra_attempts: Mapping[str, int] = field(default_factory=dict)  # unit or "*" -> added attempts
-
-    def attempts_of(self, unit: str) -> int:
-        return self.attempts + self.extra_attempts.get("*", 0) + self.extra_attempts.get(unit, 0)
-
-
-def _when(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-def limits_of(plan: Plan | None, state: PlanState, events: Sequence[PlanEvent]) -> Limits:
-    frozen = state.limits or (plan.limits.model_dump(mode="json") if plan else {})
-    cost, runs = frozen.get("max_cost_usd"), frozen.get("max_runs")
-    deadline = _when(frozen.get("deadline"))
-    for event in events:  # `Usage` has no deadline: the latest later one in `plan.resumed` wins
-        later = _when((event.data.get("extend") or {}).get("deadline")) if event.type == "plan.resumed" else None
-        if later is not None and (deadline is None or later > deadline):
-            deadline = later
-    return Limits(
-        None if cost is None else float(cost) + state.extended.cost_usd,
-        None if runs is None else int(runs) + state.extended.runs,
-        int(frozen.get("max_unit_attempts", 2)),
-        deadline,
-        dict(state.extended.attempts),
-    )
-
-
 def _money(value: float | None) -> str:
     return "unlimited" if value is None else f"${value:.2f}"
 
@@ -362,14 +340,6 @@ class Blocker:
 
     message: str
     fix: str
-
-
-def _limit_name(reason: str) -> str | None:
-    name = reason.removeprefix("limit_")
-    for key, word in (("cost", "cost"), ("runs", "run"), ("attempts", "attempt"), ("deadline", "deadline")):
-        if word in name:
-            return key
-    return None
 
 
 def resume_blocker(
@@ -414,55 +384,59 @@ def resume_blocker(
             f"{unit} is still abandoned: reopen its pull request, or run l4 restart --unit {unit} --reason TEXT first",
             f"l4 restart --unit {unit} --reason TEXT",
         )
+    if reason == "unit_missing" and unit and unit not in phases:
+        return Blocker(
+            f"{unit} is still not among the units of the target: push it back, or change the plan",
+            f"get {unit} back on the target (or change the plan and run l4 yolo review {plan_id})",
+        )
     if reason == "target_missing" and not target_present:
         return Blocker("the target branch is still missing on origin: push it again first", "push the target branch")
     if reason.startswith("limit_"):
-        return _limit_blocker(plan_id, reason, state, events, plan, extend, now or _now())
+        return _limit_blocker(plan_id, state, plan, extend, now or _now())
     return None
 
 
-def _limit_blocker(
-    plan_id: str, reason: str, state: PlanState, events: Sequence[PlanEvent], plan: Plan | None, extend: Extend,
-    now: datetime,
-) -> Blocker | None:  # fmt: skip
-    limits = limits_of(plan, state, events)
-    used = state.used
+def _limit_blocker(plan_id: str, state: PlanState, plan: Plan | None, extend: Extend, now: datetime) -> Blocker | None:
+    """The limit that `--extend-*` leaves reached, from `limits.resume_allows`, the rule the plan step stops on (R3), so
+    a resume is refused for the very limit the step would stop on again."""
+    fallback = plan.limits.model_dump(mode="json") if plan else None
+    data = extend.as_data()
+    hit = resume_allows(state, data, now=now, fallback=fallback)
+    if hit is None:
+        return None
+    after = state.model_copy(deep=True)  # the same extension, to word the message with the figures it would leave
+    apply_extend(after, data)
+    limits, used = effective_limits(after, fallback), after.used
     again = f"l4 yolo resume {plan_id} --reason TEXT"
-    kind = _limit_name(reason)
-    if kind == "cost" and limits.cost is not None:
-        new = limits.cost + (extend.cost or 0.0)
-        if used.cost_usd >= new:
-            return Blocker(
-                f"{reason}: the cost {_money(used.cost_usd)} has reached the limit {_money(new)}: "
-                f"raise it with --extend-cost USD",
-                f"{again} --extend-cost USD",
-            )
-    elif kind == "runs" and limits.runs is not None:
-        new_runs = limits.runs + (extend.runs or 0)
-        if used.runs >= new_runs:
-            return Blocker(
-                f"{reason}: {used.runs} runs have reached the limit {new_runs}: raise it with --extend-runs N",
-                f"{again} --extend-runs N",
-            )
-    elif kind == "attempts":
-        over = [state.stop_unit] if state.stop_unit else list(used.attempts)
-        for unit in over:
-            allowed = limits.attempts_of(unit) + (extend.attempts or 0)
-            if used.attempts.get(unit, 0) > allowed:
-                return Blocker(
-                    f"{reason}: {unit} used {used.attempts[unit]} attempts, the limit is {allowed}: "
-                    f"raise it with --extend-attempts N",
-                    f"{again} --extend-attempts N",
-                )
-    elif kind == "deadline":
-        new_deadline = extend.deadline or limits.deadline
-        if new_deadline is not None and new_deadline <= now:
-            return Blocker(
-                f"{reason}: the deadline {new_deadline:%Y-%m-%dT%H:%M:%SZ} has passed: "
-                f"set a later one with --extend-deadline ISO",
-                f"{again} --extend-deadline ISO",
-            )
-    return None
+    code = hit[0]
+    if code == LIMIT_COST:
+        message, flag = (
+            f"the cost {_money(used.cost_usd)} has reached the limit {_money(limits.cost_usd)}: raise it",
+            "--extend-cost USD",
+        )
+    elif code == LIMIT_RUNS:
+        message, flag = f"{used.runs} runs have reached the limit {limits.runs}: raise it", "--extend-runs N"
+    elif code == LIMIT_ATTEMPTS:
+        found = reached_at(after, now=now, fallback=fallback)
+        unit = found[2] if found and found[2] else "a unit"
+        message = (
+            f"{unit} used {used.attempts.get(unit, 0)} attempts, the limit is {limits.attempts_of(unit)}: raise it"
+        )
+        flag = "--extend-attempts N"
+    else:
+        stamp = limits.deadline.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if limits.deadline else "the deadline"
+        message, flag = f"the deadline {stamp} has passed: set a later one", "--extend-deadline ISO"
+    return Blocker(f"{code}: {message} with {flag}", f"{again} {flag}")
+
+
+def _held(ctx: _Ctx, own: str, own_state: PlanState | None = None) -> dict[str, str]:
+    """unit id -> the plan file that already lists it (`plans.held_by`, R8), for admission's `held_by_other_plan`. The
+    states are the plan refs as origin has them: a cancelled plan still holds its units."""
+    states = {pid: fold_plan(pid, ctx.store(pid).read().events) for pid in list_plans(ctx.git, ctx.fetch_cfg)}
+    if own_state is not None:
+        states[own] = own_state
+    held = held_by(states, plan_files_at(ctx.git, ctx.target_ref))
+    return {unit: plan_id for unit, (plan_id, _) in held.items()}
 
 
 # --- l4 yolo check -------------------------------------------------------------------------------------------------
@@ -486,7 +460,7 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
         ctx.say(f"{plan_id}: not admitted")
         return ExitCode.USAGE_ERROR
     units = _read_units(ctx, rev, file.plan.unit_ids(), intake=True)
-    admission = admit(file.plan, known_units=units.infos, cfg=ctx.cfg)
+    admission = admit(file.plan, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id))
     if not admission.ok:
         ctx.say(f"{plan_id}: not admitted ({len(admission.findings)} finding(s))")
         _print_findings(ctx, _findings_text(admission, plan_id))
@@ -525,7 +499,7 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
             ExitCode.USAGE_ERROR, f"review: {plan_id} is {state.status}: a plan is reviewed before it is activated"
         )
     units = _read_units(ctx, rev, parsed.unit_ids(), intake=True)
-    admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg)
+    admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
     if not admission.ok:
         lines = _findings_text(admission, plan_id)
         if local:
@@ -534,7 +508,7 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         ctx.say(f"{plan_id}: not admitted, nothing to review (run l4 yolo check {plan_id})")
         _print_findings(ctx, lines)
         return ExitCode.USAGE_ERROR
-    now = _digests(ctx, rev, parsed, units)
+    now = _digests(ctx, parsed, units)
     if not local:
         view = _review_view(parsed, file.text, state, read.events, now)
         if view.kind == "current":
@@ -545,26 +519,34 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         if not no_run:
             ctx.say(start_run_line(ctx.app, ctx.cfg))
         return ExitCode.OK
-    by_folder = {info.folder: uid for uid, info in units.infos.items()}
     try:
-        result, cost = review_plan_costed(
-            ctx.app, ctx.cfg, parsed, units.infos, git=ctx.git, rev=rev,
-            digest_of=lambda _git, _rev, folder: _now_digest(ctx, rev, by_folder[folder], folder),
-        )  # fmt: skip
+        result, cost = review_plan_costed(ctx.app, ctx.cfg, parsed, units.infos, git=ctx.git, rev=rev)
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None
+    except RoleUnavailable as exc:  # a judge that timed out or failed too (R9): no review happened, none is recorded
+        raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: no judge could answer, nothing was recorded: {exc}") from None
+    except RevisionMissing as exc:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"review: {exc}") from None
     digest = plan_digest(file.text)
+    batches = review_batches(parsed, result)
     events = [
         _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
         _event(
             "plan.reviewed", plan_digest=digest, cost_usd=cost, by=ctx.who(),
             units={u: _verdict_json(v) for u, v in result.units.items()},
-            batches={b: _verdict_json(v) for b, v in result.batches.items()},
+            batches={b: _verdict_json(v) for b, v in batches.items()},
         ),
     ]  # fmt: skip
+    if cost > 0:  # the judge's cost is the plan's (R1): the running total of `plan:review`, attempt 0
+        before = max(
+            (float(e.data.get("cost_usd") or 0) for e in read.events
+             if e.type == "plan.charged" and e.data.get("unit") == REVIEW_KEY),
+            default=0.0,
+        )  # fmt: skip
+        events.append(_event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(before + cost, 6), runs=0))
     _append(store, events, read.head)
     ctx.say(f"{plan_id}: reviewed here (${cost:.2f})")
-    for name, verdict in [*result.units.items(), *((f"batch {b}", v) for b, v in result.batches.items())]:
+    for name, verdict in [*result.units.items(), *((f"batch {b}", v) for b, v in batches.items())]:
         line = f"  {name}: {verdict.verdict}"
         ctx.say(line if verdict.verdict == "READY" else f"{line}: {_first_line(verdict.findings)}")
     ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
@@ -606,7 +588,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"then l4 yolo resume {plan_id} --reason TEXT",
         )
     units = _read_units(ctx, rev, parsed.unit_ids(), intake=True)
-    admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg)
+    admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
     if not admission.ok:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
@@ -614,7 +596,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
                 [f"activate: {plan_id} is not admitted:", *(f"  {t}" for t in _findings_text(admission, plan_id))]
             ),
         )
-    now = _digests(ctx, rev, parsed, units)
+    now = _digests(ctx, parsed, units)
     view = _review_view(parsed, file.text, state, read.events, now)
     if view.kind == "none":
         raise L4Exit(ExitCode.USAGE_ERROR, f"activate: {plan_id} has not been reviewed: run l4 yolo review {plan_id}")
@@ -680,7 +662,7 @@ def _extend(cost: float | None, runs: int | None, attempts: int | None, deadline
             raise L4Exit(ExitCode.USAGE_ERROR, f"resume: --extend-{flag} must be more than 0")
     when = None
     if deadline is not None:
-        when = _when(deadline)
+        when = parse_time(deadline)
         if when is None:
             raise L4Exit(ExitCode.USAGE_ERROR, f"resume: --extend-deadline {deadline!r} is not an ISO 8601 time")
     return Extend(cost, runs, attempts, when)
@@ -766,18 +748,24 @@ def _describe(
         "merge": plan.merge if plan else state.merge, "activated_by": state.activated_by,
     }  # fmt: skip
     if file is not None and file.invalid is not None:
-        out["problems"] = list(file.invalid.errors)
+        held = readable_unit_ids(file.text)  # R8: an invalid plan file still holds the units its JSON names
+        out["problems"] = [
+            *file.invalid.errors,
+            "this file is not a JSON object: it holds no unit" if held is None
+            else f"this file is not a plan, but it holds the units it names: {', '.join(held) or 'none'}",
+        ]  # fmt: skip
     if file is None:
         out["problems"] = [f"{pid}: no plan file on origin/{ctx.target}"]
-    limits = limits_of(plan, state, read.events)
+    limits = effective_limits(state, plan.limits.model_dump(mode="json") if plan else None)
     out["usage"] = {
-        "cost_usd": state.used.cost_usd, "cost_limit": limits.cost, "runs": state.used.runs, "runs_limit": limits.runs,
+        "cost_usd": state.used.cost_usd, "cost_limit": limits.cost_usd, "runs": state.used.runs,
+        "runs_limit": limits.runs,
         "attempts": dict(state.used.attempts), "attempts_limit": limits.attempts,
         "deadline": limits.deadline.strftime("%Y-%m-%dT%H:%M:%SZ") if limits.deadline else None,
     }  # fmt: skip
     view = None
     if plan is not None and file is not None and rev is not None:
-        view = _review_view(plan, file.text, state, read.events, _digests(ctx, rev, plan, units))
+        view = _review_view(plan, file.text, state, read.events, _digests(ctx, plan, units))
         out["review"] = {"state": view.kind, "problems": list(view.problems)}
         waiting = next_eligible(plan, state, units.phases).waiting
         rows = []
@@ -916,7 +904,7 @@ def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None]) -> list[s
         plan = files[pid].plan if pid in files else None
         total = len(plan.unit_ids()) if plan else len(state.order)
         unit = f", unit {state.current} ({phases.get(state.current) or '-'})" if state.current else ""
-        cost = limits_of(plan, state, ledgers[pid]).cost
+        cost = effective_limits(state, plan.limits.model_dump(mode="json") if plan else None).cost_usd
         limit = "unlimited" if cost is None else f"${cost:.2f}"
         lines.append(
             f"plan {pid}: {state.status}{unit}, {len(state.integrated)}/{total} integrated, "
@@ -942,11 +930,9 @@ def auto_merge_plan_active(repo: Path, git: Git) -> bool:
 __all__ = [
     "Blocker",
     "Extend",
-    "Limits",
     "PlanInvalid",
     "ReviewView",
     "auto_merge_plan_active",
-    "limits_of",
     "local_plans",
     "plan_lines",
     "resume_blocker",

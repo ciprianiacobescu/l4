@@ -5,7 +5,7 @@ refusal of activation and what activation records."""
 import pytest
 
 from l4.forge.base import ForgeError, ForgeUnavailable
-from l4.yolo.digest import plan_digest
+from l4.yolo.digest import current_unit_digest, plan_digest
 from l4.yolo.model import PlanMoved, ReviewResult, Verdict
 from l4.yolo.store import PlanStore
 
@@ -61,11 +61,12 @@ def test_review_of_an_active_plan_is_refused(world, forge, capsys):
 def fake_judge(monkeypatch, verdicts):
     seen = {}
 
-    def review(app, cfg, plan, units, *, git, rev, digest_of=None, **kw):
+    def review(app, cfg, plan, units, *, git, rev, digest_of=None, **kw):  # the judge's own digest rule (R3)
         seen["rev"] = rev
         result = {}
         for uid, info in units.items():
-            result[uid] = Verdict(verdicts.get(uid, "READY"), digest=digest_of(git, rev, info.folder))
+            digest = current_unit_digest(git, cfg, uid, info.folder, rev)
+            result[uid] = Verdict(verdicts.get(uid, "READY"), digest=digest)
         return ReviewResult(result, {}), 0.25
 
     monkeypatch.setattr("l4.yolo.commands.review_plan_costed", review)
@@ -76,8 +77,9 @@ def test_review_local_records_admitted_and_reviewed_like_ci(world, forge, monkey
     world.push_plan()
     fake_judge(monkeypatch, {B: "NEEDS_REVISION"})
     assert world.l4("review", "p1", "--local") == 0
-    assert world.kinds() == ["plan.admitted", "plan.reviewed"]
-    admitted, reviewed = world.events()
+    assert world.kinds() == ["plan.admitted", "plan.reviewed", "plan.charged"]
+    admitted, reviewed, charged = world.events()
+    assert charged.data == {"unit": "plan:review", "attempt": 0, "cost_usd": 0.25, "runs": 0}  # R1
     assert admitted.data["order"] == [A, B] and admitted.data["plan_digest"] == plan_digest(world.plan_text)
     assert reviewed.data["plan_digest"] == plan_digest(world.plan_text)
     assert reviewed.data["units"][A] == {

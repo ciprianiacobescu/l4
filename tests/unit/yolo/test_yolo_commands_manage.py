@@ -296,7 +296,7 @@ def test_the_runs_limit(world, capsys):
 
 def test_the_attempts_limit_of_the_stopped_unit(world, capsys):
     """SCN-YOLO-27's stop: a unit restarted twice used 3 attempts against a limit of 2."""
-    active_world(world, ev("plan.charged", unit=B, cost_usd=1.0, runs=3, attempts=3),
+    active_world(world, ev("plan.charged", unit=B, attempt=3, cost_usd=1.0, runs=3),
                  ev("plan.stopped", reason="limit_attempts", unit=B))  # fmt: skip
     assert "openspec:add-b used 3 attempts, the limit is 2: raise it with --extend-attempts N" in resume(world, capsys)
     assert world.l4("resume", "p1", "--reason", "one more", "--extend-attempts", "1", "--no-run") == 0
