@@ -1,13 +1,16 @@
 """Admission and eligibility of delivery plans (yolo-mode design D2, requirements L4-YOLO-002 and L4-YOLO-010).
 
 `admit` checks a plan against what the target head knows, without any model: unique ids, known units, resolvable
-dependencies, no cycle, known acceptance profiles, the target, the merge mode, open questions, intake, finished units
-and external dependencies. Every problem is a `Finding` with a code. The graph has one node per unit and one per
-batch: a unit waits for the units it depends on and for the batch nodes its batch depends on; a batch node waits for
-all of its units. The order is topological; among nodes ready together, batch position decides, then unit position.
+dependencies, no cycle, known acceptance profiles, profiles this runner can run (`unsupported_profile`: R7), the
+target, the merge mode, open questions, intake, finished units, units another plan file already lists
+(`held_by_other_plan`: R8) and external dependencies. Every problem is a `Finding` with a code. The graph has one
+node per unit and one per batch: a unit waits for the units it depends on and for the batch nodes its batch depends
+on; a batch node waits for all of its units. The order is topological; among nodes ready together, batch position
+decides, then unit position.
 
 `next_eligible` is pure: from the plan, its folded state and the units' phases it names the one unit that may be
-dispatched (the plan is serial) and the reason every other unit waits.
+dispatched (the plan is serial) and the reason every other unit waits. `merged_not_integrated` names the units the
+step must post-check before it dispatches anything (R10).
 """
 
 import heapq
@@ -26,6 +29,10 @@ from l4.yolo.model import (
 )
 
 FINISHED_PHASES = frozenset({"merged", "archived"})
+_SERVED = (
+    "{who}: acceptance profile {name!r} lists e2e, but gates.e2e.serve is set and a profile run starts no app server "
+    "(use all, which leaves e2e out, or a profile without e2e)"
+)
 _Node = tuple[str, str]  # ("u", unit id) or ("b", batch id)
 
 
@@ -113,8 +120,21 @@ def plan_order(plan: Plan) -> tuple[str, ...]:
     return tuple(done + [u for u in plan.unit_ids() if u not in done])
 
 
-def admit(plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config) -> Admission:
-    """Check `plan` at the target head (design D2). `known_units` holds what the spec providers found there."""
+def _needs_server(cfg: L4Config, profile: str) -> bool:
+    """Whether the named profile lists `e2e` while the e2e gate needs an app server, which a profile run does not start
+    (R7). `all` and `none` are never refused: `all` leaves the gate out."""
+    if profile in (PROFILE_ALL, PROFILE_NONE) or not cfg.gates.e2e.serve.command.strip():
+        return False
+    return "e2e" in cfg.yolo.profiles.get(profile, ())
+
+
+def admit(
+    plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config, held: Mapping[str, str] | None = None
+) -> Admission:
+    """Check `plan` at the target head (design D2). `known_units` holds what the spec providers found there. `held`
+    maps a unit id to the id of the plan file that already lists it (`plans.held_by`, first file in path order): a unit
+    of this plan that another plan holds is a `held_by_other_plan` finding (R8); entries naming this plan are no
+    finding."""
     found: list[Finding] = []
 
     def add(code: str, subject: str, text: str) -> None:
@@ -155,6 +175,8 @@ def admit(plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config) -> 
                 batch.id,
                 f"batch {batch.id}: acceptance profile {bad!r} is not all, none or in yolo.profiles",
             )
+        elif _needs_server(cfg, batch.acceptance_profile):
+            add("unsupported_profile", batch.id, _SERVED.format(who=f"batch {batch.id}", name=batch.acceptance_profile))
         for unit in batch.units:
             for dep in unit.depends_on:
                 if dep == unit.id:
@@ -172,6 +194,10 @@ def admit(plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config) -> 
                     unit.id,
                     f"unit {unit.id}: acceptance profile {bad!r} is not all or in yolo.profiles",
                 )
+            elif _needs_server(cfg, unit.acceptance_profile):
+                add("unsupported_profile", unit.id, _SERVED.format(who=f"unit {unit.id}", name=unit.acceptance_profile))
+            if (other := (held or {}).get(unit.id)) is not None and other != plan.plan_id:
+                add("held_by_other_plan", unit.id, f"unit {unit.id} is already listed in plan {other}")
             info = known_units.get(unit.id)
             if info is None:
                 add("unknown_unit", unit.id, f"unit {unit.id} was not found by a spec provider on the target head")
@@ -202,6 +228,27 @@ def _unit_prereqs(plan: Plan) -> dict[str, tuple[list[str], list[str]]]:
         for unit in batch.units:
             out[unit.id] = (list(unit.depends_on), list(batch.depends_on))
     return out
+
+
+def _order(plan: Plan, state: PlanState) -> list[str]:
+    """The admission order recorded in the state when it covers the plan, else the order computed from the plan."""
+    prereqs = {u.id for u in plan.units()}
+    return [u for u in state.order if u in prereqs] if set(state.order) >= prereqs else list(plan_order(plan))
+
+
+def merged_not_integrated(plan: Plan, state: PlanState, unit_phase: Mapping[str, str | None]) -> list[str]:
+    """The units of the plan that are merged and not yet integrated, in admission order (R10): the ones the step merged
+    (`state.merged`) and the ones a person merged, which show as a finished phase. The step post-checks each of them
+    (D9) before it dispatches another unit, so a person's merge of a unit that was not current never stalls the
+    plan (review #13)."""
+    ids = {u.id for u in plan.units()}
+    return [
+        unit
+        for unit in _order(plan, state)
+        if unit in ids
+        and unit not in state.integrated
+        and (unit in state.merged or unit_phase.get(unit) in FINISHED_PHASES)
+    ]
 
 
 def next_eligible(plan: Plan, state: PlanState, unit_phase: Mapping[str, str | None]) -> Eligibility:
@@ -237,7 +284,7 @@ def next_eligible(plan: Plan, state: PlanState, unit_phase: Mapping[str, str | N
                 return f"waits for batch {bid} (acceptance)"
         return None
 
-    order = [u for u in state.order if u in prereqs] if set(state.order) >= set(prereqs) else list(plan_order(plan))
+    order = _order(plan, state)
     pending = [u for u in order if u not in integrated]
     waiting: dict[str, str] = {}
     chosen: str | None = None

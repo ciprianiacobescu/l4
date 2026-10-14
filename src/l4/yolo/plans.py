@@ -7,9 +7,13 @@ The seam between the plan step (`cycle.py`) and the operator commands (`commands
   anything: the intake checks a unit's first run would make (the provider's strict validation and, for OpenSpec, the
   scenario conflicts of L4-ODD-004) run here as reads only;
 - `load_context(...)` reads a plan's ledger ref and folds it;
-- `held_by(...)` and `active_on(...)` answer which plan holds a unit and which plan is active (design D10).
+- `held_by(...)`, `holds_of(...)` and `active_on(...)` answer which plan holds a unit and which plan is active
+  (design D10, R8): a unit listed in a plan file is held while the file is on the target, whatever the plan's status
+  (cancelled and completed included); an invalid file holds the unit ids its JSON names; a file that is not a JSON
+  object holds nothing and is returned apart so `l4 plan` and `l4 yolo status` can show it.
 """
 
+import json
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -25,7 +29,8 @@ from l4.yolo.model import PLANS_DIR, Plan, PlanInvalid, PlanState, UnitInfo, loa
 
 log = logging.getLogger(__name__)
 
-FINAL = frozenset({"cancelled", "completed"})  # statuses that hold nothing any more
+FINAL = frozenset({"cancelled", "completed"})  # statuses no command changes any more (they still hold their units)
+INVALID = "invalid"  # the status shown for a plan file that is not a plan and has no ledger
 
 
 @dataclass(frozen=True)
@@ -137,20 +142,58 @@ def unit_infos(
     return infos
 
 
-def held_by(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> dict[str, tuple[str, str]]:
-    """unit id -> (plan id, plan status) for every unit listed in a valid plan file whose plan is not final
-    (design D10: a unit listed in a plan file is held by that plan). A unit listed by two plans is held by the first
-    file in path order; admission of the second plan refuses it (`unknown_unit` is not the code: the step logs it)."""
+def readable_unit_ids(text: str) -> list[str] | None:
+    """The unit ids a plan file names in `batches[].units[].id`, in file order, whatever else is wrong with it (R8);
+    None when the text is not a JSON object. Entries of the wrong shape are skipped."""
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    ids: list[str] = []
+    batches = raw.get("batches")
+    for batch in batches if isinstance(batches, list) else []:
+        units = batch.get("units") if isinstance(batch, dict) else None
+        for unit in units if isinstance(units, list) else []:
+            unit_id = unit.get("id") if isinstance(unit, dict) else None
+            if isinstance(unit_id, str) and unit_id and unit_id not in ids:
+                ids.append(unit_id)
+    return ids
+
+
+@dataclass(frozen=True)
+class PlanHolds:
+    held: dict[str, tuple[str, str]]  # unit id -> (plan id, plan status)
+    unreadable: list[PlanFile]  # the files that are not a JSON object: they hold nothing
+
+
+def holds_of(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> PlanHolds:
+    """unit id -> (plan id, plan status) for every unit listed in a plan file (design D10, R8), and the files that hold
+    nothing because they are not JSON. The status is the plan's own (`new` without a ledger, `invalid` for a file that
+    is not a plan and has no ledger). A unit listed by two plans is held by the first file in path order; admission of
+    the second plan refuses it (`held_by_other_plan`)."""
     held: dict[str, tuple[str, str]] = {}
+    unreadable: list[PlanFile] = []
     for file in files:
-        if file.plan is None:
+        if file.plan is not None:
+            unit_ids: list[str] | None = file.plan.unit_ids()
+            fallback = "new"
+        else:
+            unit_ids = readable_unit_ids(file.text)
+            fallback = INVALID
+        if unit_ids is None:
+            unreadable.append(file)
             continue
-        status = states[file.plan_id].status if file.plan_id in states else "new"
-        if status in FINAL:
-            continue
-        for unit_id in file.plan.unit_ids():
+        status = states[file.plan_id].status if file.plan_id in states else fallback
+        for unit_id in unit_ids:
             held.setdefault(unit_id, (file.plan_id, status))
-    return held
+    return PlanHolds(held, unreadable)
+
+
+def held_by(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> dict[str, tuple[str, str]]:
+    """`holds_of(...).held`: unit id -> (plan id, plan status) for every unit a plan file lists (design D10, R8)."""
+    return holds_of(states, files).held
 
 
 def active_on(states: Mapping[str, PlanState], files: Sequence[PlanFile], target: str) -> PlanFile | None:

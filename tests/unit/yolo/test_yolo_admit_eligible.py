@@ -104,3 +104,34 @@ def test_order_without_state_order_is_computed():
     plan = two_batches("none")
     st = PlanState(plan_id="p1", status="active")
     assert next_eligible(plan, st, {}).unit == "a"
+
+
+# --- review #13 (R10) -----------------------------------------------------------------------------------------------
+
+
+def test_merged_not_integrated_lists_every_merged_unit_in_plan_order():
+    from l4.yolo.admit import merged_not_integrated
+
+    plan = make_plan([{"id": "b1", "units": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]}])
+    st = state(plan, integrated=["a"])
+    st.merged["c"] = "sha-c"  # merged by the step
+    got = merged_not_integrated(plan, st, {"a": "merged", "b": "merged", "c": "merged", "d": "in_review"})
+    assert got == ["b", "c"]  # a is integrated; b was merged by a person (phase); d is not merged
+
+
+def test_merged_not_integrated_counts_an_archived_unit_and_ignores_units_outside_the_plan():
+    from l4.yolo.admit import merged_not_integrated
+
+    plan = make_plan([{"id": "b1", "units": [{"id": "a"}]}])
+    assert merged_not_integrated(plan, state(plan), {"a": "archived", "zzz": "merged"}) == ["a"]
+    assert merged_not_integrated(plan, state(plan), {}) == []
+    assert merged_not_integrated(plan, state(plan, integrated=["a"]), {"a": "merged"}) == []
+
+
+def test_a_merged_non_current_unit_is_named_while_another_unit_is_dispatched():  # review #13
+    from l4.yolo.admit import merged_not_integrated
+
+    plan = make_plan([{"id": "b1", "units": [{"id": "a"}, {"id": "b"}]}])
+    phases = {"a": "merged"}
+    assert next_eligible(plan, state(plan), phases).unit == "b"
+    assert merged_not_integrated(plan, state(plan, current="b"), phases) == ["a"]  # the step post-checks it

@@ -167,3 +167,61 @@ def test_external_dependencies():
 def test_a_unit_waits_for_all_units_of_a_prerequisite_batch():
     plan = make_plan([batch("b1", [("a", []), ("b", [])]), batch("b2", [("c", [])], deps=["b1"])])
     assert admit(plan, known_units=infos(plan), cfg=cfg()).order == ("a", "b", "c")
+
+
+# --- review #5, #13, #20 (design R7, R8, R10) -----------------------------------------------------------------------
+
+SERVE = {"command": "sleep 5", "ready_url": "http://x"}
+
+
+def served_cfg(profiles) -> L4Config:
+    return L4Config.model_validate(
+        {
+            "forge": {"base_branch": "staging", "merge_policy": "human"},
+            "yolo": {"profiles": profiles},
+            "gates": {"e2e": {"command": "true", "serve": SERVE}},
+        }
+    )
+
+
+def test_a_named_profile_with_e2e_is_refused_when_the_e2e_gate_needs_a_server():  # R7
+    plan = make_plan(
+        [{**batch("b1", [("a", [])], profile="slow"), "units": [{"id": "a", "acceptance_profile": "fast"}]}]
+    )
+    config = served_cfg({"slow": ["lint", "e2e"], "fast": ["lint"]})
+    result = admit(plan, known_units=infos(plan), cfg=config)
+    assert codes(result) == ["unsupported_profile"] and result.findings[0].subject == "b1"
+    assert "gates.e2e.serve" in result.findings[0].text and "slow" in result.findings[0].text
+
+
+def test_a_unit_profile_with_e2e_is_refused_too():
+    plan = make_plan([{"id": "b1", "units": [{"id": "a", "acceptance_profile": "slow"}]}])
+    result = admit(plan, known_units=infos(plan), cfg=served_cfg({"slow": ["e2e"]}))
+    assert codes(result) == ["unsupported_profile"] and result.findings[0].subject == "a"
+
+
+def test_the_e2e_profile_is_fine_without_a_server_and_all_is_fine_with_one():
+    plan = make_plan([{"id": "b1", "units": [{"id": "a", "acceptance_profile": "slow"}, {"id": "c"}]}])
+    plain = L4Config.model_validate(
+        {
+            "forge": {"base_branch": "staging"},
+            "yolo": {"profiles": {"slow": ["e2e"]}},
+            "gates": {"e2e": {"command": "t"}},
+        }
+    )
+    assert admit(plan, known_units=infos(plan), cfg=plain).ok
+    only_all = make_plan([{"id": "b1", "units": [{"id": "a"}]}])
+    assert admit(only_all, known_units=infos(only_all), cfg=served_cfg({})).ok  # `all` leaves e2e out
+
+
+def test_a_unit_listed_in_an_earlier_plan_is_a_finding_for_this_one():  # review #20, R8
+    plan = make_plan([batch("b1", [("a", []), ("b", [])])])
+    result = admit(plan, known_units=infos(plan), cfg=cfg(), held={"a": "p0", "z": "p0"})
+    assert codes(result) == ["held_by_other_plan"] and result.findings[0].subject == "a"
+    assert "p0" in result.findings[0].text and not result.ok
+
+
+def test_a_unit_held_by_this_very_plan_is_no_finding():
+    plan = make_plan([batch("b1", [("a", [])])])
+    assert admit(plan, known_units=infos(plan), cfg=cfg(), held={"a": "p1"}).ok
+    assert admit(plan, known_units=infos(plan), cfg=cfg()).ok  # no held mapping at all
