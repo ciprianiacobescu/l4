@@ -57,3 +57,12 @@
 - [ ] 9.3 Stop cases: a spec push to the current unit (`inputs_changed`); `l4 yolo cancel`; a `merge: human` plan where a person merges.
 - [ ] 9.4 GitLab (vps5 `ai-cici/l4-yolo-dummy`, vendored harness, integration branch `staging`, default `main`, runner tag `agentic`): the same three-unit plan to `plan.completed`, MRs merged by the push, `main` unchanged; one stop case.
 - [ ] 9.5 `docs/live/yolo-mode/README.md` with run ids and pipeline ids for both forges, and the defects found.
+
+## 10. Plan graph tooling and the OpenCode key (scenario preparation, 2026-10-15)
+
+- [ ] 10.1 OpenCode's own key, design D16: `profile_credential_variable`, the loader in `opencode.py`, the probe's auth and hello, `credential_secrets`, readiness and doctor, `DEFAULT_REDACT_ENV`. Tests SCN-PRV-75..77, plus: a free model unchanged, a custom provider unchanged, a subscription profile unchanged, no login lock for `api_key`. (L4-PRV-028)
+- [ ] 10.2 `Plan.exclude` (design D15): model, admission findings, holding, status lines, digest. Tests SCN-YOLO-35, SCN-YOLO-36, and an excluded unit that no provider knows. (L4-YOLO-017)
+- [ ] 10.3 `l4 yolo draft` and `--update` (`yolo/draft.py`, commands, CLI help row). Tests SCN-YOLO-37, SCN-YOLO-38, derived units covered by the parent, refusal of an existing file without `--update`, `gone:` lines, no git write. (L4-YOLO-018)
+- [ ] 10.4 `scripts/validate_plan.py` and its byte-equal copy in the skill. Tests SCN-YOLO-39..41, the copy check, discovery parity with the providers, schema parity with `load_plan`, order parity with `admit.plan_order`, `--json`, exit codes 0/1/2. (L4-YOLO-019)
+- [ ] 10.5 `plugins/l4/skills/l4/references/plan.md` and the `SKILL.md` link; `docs/SPEC.md` (§12.5 and §23.20: L4-YOLO-017..020, L4-PRV-028 next to L4-PRV-024 and 027, the credential table row), `docs/yolo-mode.md`, runbook §12 (draft, validate, update), `scripts/check_spec.py` clean, `openspec validate yolo-mode --strict` clean. (L4-YOLO-020, L4-PRV-028)
+- [ ] 10.6 Skill check (orchestrator): an agent without `plan.md` and an agent with it plan the scenario's ten specs. The plan written with the skill passes the validator, and every dependency it lists is stated in the specs. (SCN-YOLO-42)

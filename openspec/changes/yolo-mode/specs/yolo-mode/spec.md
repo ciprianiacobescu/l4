@@ -302,3 +302,94 @@ skill's operate reference SHALL list the `l4 yolo` commands.
 - **GIVEN** the stop reasons of design D10
 - **WHEN** the docs check runs
 - **THEN** each reason code appears in `docs/runbook.md` with the command that clears it
+
+### Requirement: L4-YOLO-017 Exclusions in the plan file
+A plan file MAY list `exclude: [{"id": <unit id>, "reason": <text>}]`: units that this plan deliberately does not
+deliver (design D15). The reason MUST be non-empty text of at most 200 characters, and unknown fields MUST be
+refused. Admission MUST refuse a plan that lists the same unit in `exclude` and in a batch (`excluded_and_planned`), the
+same unit twice in `exclude` (`duplicate_id`), or an excluded id that no spec provider knows (`unknown_unit`). An
+excluded unit MUST NOT be held by the plan, so it runs as it would without the plan. The exclusions are part of the plan
+file, so an edit of them after the activation stops the plan (`inputs_changed`) like any other edit.
+
+#### Scenario: SCN-YOLO-35 (+) An excluded unit is not held
+- **GIVEN** an active plan p1 whose file lists `kiro:pick-priority` in `exclude` with the reason `in review before the plan`
+- **WHEN** a CI run looks for work
+- **THEN** `kiro:pick-priority` runs as it would without a plan, and `l4 yolo status p1` lists it under `excluded` with the reason
+
+#### Scenario: SCN-YOLO-36 (−) A unit that is both planned and excluded is refused
+- **GIVEN** a plan file that lists `openspec:a` in a batch and in `exclude`
+- **WHEN** `l4 yolo check p1` runs
+- **THEN** it exits 2 with the finding `excluded_and_planned` for `openspec:a`, and nothing is written
+
+### Requirement: L4-YOLO-018 `l4 yolo draft` scaffolds and updates a plan file
+`l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
+the working tree and nothing else: no commit, no push, no ref, no model call. Without `--update` it MUST refuse an
+existing file (exit 2). It lists every unit the spec providers find in the working tree that no plan file lists
+(planned or excluded) and that is not a derived unit whose parent a plan file lists. It puts each unit that is not
+finished into one batch `unplanned` with no dependencies, and each finished unit (`merged`, `archived`) into `exclude`
+with the reason `already <phase>`. `--target` defaults to `forge.base_branch` and `--merge` to `human`. With `--update`
+the file MUST exist and be a valid plan. Units found as above are added to the batch `unplanned` (created last when
+missing) or to `exclude`. A listed unit that the providers no longer find is reported as `gone: <id>` and kept.
+Nothing else in the file changes. The command MUST NOT invent a dependency. It prints what it added and the next steps
+(edit the dependencies and batches, run the validator, `l4 yolo check`). When the plan's local ref says it is active or
+waiting, `--update` warns that the edit stops the plan.
+
+#### Scenario: SCN-YOLO-37 (+) A draft lists every unplanned unit without dependencies
+- **GIVEN** three OpenSpec changes and two Kiro specs in the working tree, one Kiro spec already merged, and no plan file
+- **WHEN** `l4 yolo draft p1` runs
+- **THEN** `.l4/plans/p1.json` is a valid plan with the four other units in batch `unplanned`, each with `depends_on: []`, the merged spec in `exclude` with the reason `already merged`, `target` equal to `forge.base_branch` and `merge: human`; nothing is committed
+
+#### Scenario: SCN-YOLO-38 (+) An update adds a new spec and keeps the person's edits
+- **GIVEN** a plan file p1 edited by a person (batches and dependencies), and a new OpenSpec change `openspec:z` that no plan lists
+- **WHEN** `l4 yolo draft p1 --update` runs
+- **THEN** `openspec:z` is appended to batch `unplanned` with no dependencies, every other batch, unit, dependency and exclusion is unchanged, and the output says `added: openspec:z`
+
+### Requirement: L4-YOLO-019 A standalone plan validator
+The harness SHALL ship `validate_plan.py`, a script that needs only the Python standard library. It is in two places,
+`scripts/validate_plan.py` and `plugins/l4/skills/l4/scripts/validate_plan.py`, and the two copies MUST be byte-equal.
+It reads every `.l4/plans/*.json` of a working tree and finds the units with the providers' discovery rules (design
+D15). It MUST report, with the codes of admission where they are the same check:
+- a plan file that is not a valid plan (schema, file name, limits);
+- `duplicate_id`, `self_dependency`, `unknown_dependency`, `cycle` (on admission's graph of units and batches),
+  `unknown_unit`, `excluded_and_planned`, `external_dependencies` and `empty_plan`;
+- across all plan files: `uncovered`, a unit that no plan lists (planned or excluded), except a derived unit whose
+  parent is listed;
+- `covered_twice`, a unit listed in two plan files.
+
+It exits 0 when everything is valid, 1 with one line per problem, and 2 on a usage or read error. On success it MUST
+print, for each plan, its dispatch order (the same order as `l4 yolo check`) and its waves (design D15). `--json` MUST
+print the same as one JSON object. The script MUST NOT write anything, use the network or run git.
+
+#### Scenario: SCN-YOLO-39 (−) A cycle through a batch is found
+- **GIVEN** a plan where batch b2 depends on batch b1, and a unit of b1 depends on a unit of b2
+- **WHEN** `python3 scripts/validate_plan.py` runs
+- **THEN** it exits 1 with `<plan>: cycle: …` naming the path, as `l4 yolo check` does
+
+#### Scenario: SCN-YOLO-40 (−) A spec that no plan covers is found
+- **GIVEN** two plan files, and a Kiro spec `kiro:new-report` listed in neither
+- **WHEN** the validator runs
+- **THEN** it exits 1 with `uncovered: kiro:new-report (add it to a plan or to a plan's exclude with a reason)`
+
+#### Scenario: SCN-YOLO-41 (+) A valid plan prints its order and waves
+- **GIVEN** a plan where D and E depend on A, B and C, F depends on D, G on E, H on F, and I and J depend on nothing
+- **WHEN** the validator runs
+- **THEN** it exits 0 and prints wave 1 `A, B, C, I, J`, wave 2 `D, E`, wave 3 `F, G` and wave 4 `H`, and the dispatch order of `l4 yolo check`
+
+### Requirement: L4-YOLO-020 The skill teaches plan creation and update
+The skill SHALL have the reference `plugins/l4/skills/l4/references/plan.md`, linked from `SKILL.md`. It teaches an
+agent to create and update a plan from OpenSpec changes and Kiro specs (design D15):
+- start from `l4 yolo draft`;
+- add a dependency only on evidence in the specs, and give that evidence in the commit message;
+- use batches for acceptance checks;
+- exclude with a reason;
+- run the validator and `l4 yolo check`;
+- commit and push only the plan file.
+
+The reference MUST say that the agent never activates, resumes or cancels a plan for a person, and never writes
+`refs/l4/plans/*`. It MUST say that it never sets `merge: auto` unless the person asks for it and
+`forge.merge_policy` is `auto`, and that an edit of an active plan stops it until a new review and activation.
+
+#### Scenario: SCN-YOLO-42 (+) An agent with the skill writes a valid plan
+- **GIVEN** ten specs with dependencies that their proposals state, and the skill
+- **WHEN** an agent is asked to plan their delivery
+- **THEN** the plan file passes the validator, every dependency it lists is stated in the specs, and the agent did not activate the plan

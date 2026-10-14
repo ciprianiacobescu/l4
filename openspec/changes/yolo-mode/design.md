@@ -433,3 +433,96 @@ disagreed. These decisions replace the text above where they differ.
   with more than one unit.
 - **R12. Limits are validated:** `max_unit_attempts >= 1`, `max_cost_usd >= 0`, `max_runs >= 1`, and a `deadline`
   with a time zone.
+
+## Additions for the scenario (2026-10-15)
+
+### D15. Plan graph tooling: exclusions, `l4 yolo draft`, the validator, the skill reference
+
+The person asked that a plan "support updates via LLM and skills, plus deterministic validation". Every spec of the
+repository should be in a plan, or deliberately outside all plans.
+
+- **Exclusions.** `Plan.exclude: list[PlanExclusion]`, where `PlanExclusion(_Strict)` is `id: str` and
+  `reason: str` (`min_length=1`, `max_length=200`). It is part of the plan file and so of the plan digest. Admission
+  adds `excluded_and_planned`, `duplicate_id` for a repeated exclusion, and `unknown_unit` for an excluded id that no
+  provider knows. `plans.holds_of` and `readable_unit_ids` leave excluded ids out: an excluded unit is not held.
+  `l4 yolo status` lists the exclusions with their reasons.
+- **Derived units.** `<parent>-fix-<n>` and `<parent>-followup-<n>` (the `fixmark` and `followup` name patterns) are
+  covered when their parent is listed, so that feedback on a planned unit does not make the repository uncovered.
+  They may still be listed explicitly.
+- **`l4 yolo draft`** (`yolo/draft.py`, wired in `yolo/commands.py` and `cli.py`). It uses the same providers as
+  admission (`discover`, `plans.unit_infos` for the phase) on the working tree. It reads every plan file of the working
+  tree to know what is listed. It writes JSON with `indent=2` and a final newline, keeping the key order of an existing
+  file (`--update` loads it as a dict, appends, and dumps it). It never orders units and never adds `depends_on`: an
+  ordering is a claim about the specs, which the person or the agent must make with evidence.
+- **`validate_plan.py`** (stdlib only, one file, two byte-equal copies; a unit test compares them).
+  - **Discovery mirrors the providers.**
+    - OpenSpec units are the directories `<openspec root>/changes/<name>` where `<name>` matches
+      `^[a-z0-9]+(?:-[a-z0-9]+)*$` and is not `archive`, with no symlink on the path.
+    - Kiro units are the directories `<kiro root>/<name>` where `<name>` matches `^[A-Za-z0-9][A-Za-z0-9._-]*$`,
+      holding at least one regular file of `requirements.md`, `bugfix.md`, `design.md` or `tasks.md`.
+    - The frameworks and the two roots come from `.l4/config.yaml` (`spec.frameworks`, `spec.openspec.root`,
+      `spec.kiro.root`). A small reader handles the block style that `l4 init` writes, falling back to the defaults
+      (both frameworks, `openspec`, `.kiro/specs`) with a warning on anything else.
+    - `--frameworks`, `--openspec-root` and `--kiro-root` override the config.
+    - A unit test checks the script's discovery against the providers' `list_units` on fixture repositories.
+  - **The schema check** repeats `model.py`'s rules by hand: required and unknown fields, types, the schema id,
+    `plan_id` and the file name, `merge`, `promotion.mode`, the limit ranges, and a deadline with a time zone. A unit
+    test runs every fixture through both `load_plan` and the script and requires the same verdict.
+  - **The graph is admission's graph.** A unit waits for its `depends_on` and for the batch nodes its batch depends
+    on; a batch waits for its units. The cycle text and the dispatch order are those of `admit._find_cycle` and
+    `admit._topological` (heap on `(batch position, unit position)`). A unit test compares the order with
+    `admit.plan_order` for each valid fixture.
+  - **Waves:** the wave of a unit is 1 plus the highest wave of what it waits for, through batch nodes, and 1 when it
+    waits for nothing. Waves show what could run together; the plan still dispatches one unit at a time in the order.
+  - **Output.** Each problem is one line `<plan id>: <code>: <subject>: <text>`, or `<code>: <subject>: <text>` for
+    the coverage problems. `--json` prints `{"ok", "problems": [{plan, code, subject, text}],
+    "plans": {id: {"order", "waves"}}, "units": [...]}`.
+  - **What only `l4 yolo check` can do:** open questions, intake, finished units, profiles, the target against
+    `forge.base_branch`, and the merge policy. The script says so in its `--help`.
+- **The skill reference `references/plan.md`** (about 120 lines, in the style of `operate.md`) covers:
+  - When to make a plan, and when not: one spec, or specs with no order, need none.
+  - **Create:** `l4 yolo draft <id>`, then read each spec's proposal or requirements and tasks. Add a dependency only
+    when a spec uses something another spec introduces or changes: a module, a function, a data field, a file, an
+    endpoint, a config key. Two specs that change the same code in conflicting ways are ordered too. Give one line of
+    evidence per dependency in the commit message. Prefer fewer edges. Batches group units for an acceptance profile.
+    `exclude` takes a reason that a person can check.
+  - **Validate:** the script, then `l4 yolo check`. Fix every problem and never silence one.
+  - **Hand off:** commit and push the plan file only. A person reviews it (`l4 yolo review`) and activates it.
+  - **Update:** a new spec means `l4 yolo draft <id> --update`, then the same steps. An active plan stops when its
+    file changes; it needs a new review and activation, and its usage is kept. A spec with no order to the active
+    plan can go into a new plan instead.
+  - **Never:** activate, resume or cancel for a person; write `refs/l4/plans/*`; set `merge: auto` unless asked and
+    `forge.merge_policy` is `auto`; edit a unit's spec to make a plan valid.
+
+### D16. OpenCode's own key (`OPENCODE_API_KEY`)
+
+Found while preparing the scenario: an `opencode-go/…` implementer with `auth: api_key` cannot log in from CI. Today
+`credential_variable("opencode", "api_key")` is None. The agent environment carries no credential (L4-SEC-001), and
+the adapter writes a key file only for a custom provider. So the key never reaches OpenCode, on either forge.
+
+A local check under an empty HOME, with OpenCode 1.18.33 [V, 2026-10-15]:
+- with `OPENCODE_API_KEY` set, `opencode auth list` shows "OpenCode Go" and "OpenCode Zen" (environment), and
+  `opencode run --pure -m opencode-go/deepseek-v4.1-flash` answers;
+- without it, the run fails with `UnknownError: Unexpected server error`, not a 401.
+
+So the auth step must check that the variable is there before any model call.
+
+- `credentials.profile_credential_variable(profile)` returns `OPENCODE_API_KEY` for an `opencode` profile with
+  `auth: api_key`, a model starting with `opencode/` or `opencode-go/`, and no `options.provider`. For any other
+  profile it returns `credential_variable(profile.adapter, profile.auth)`. Every caller that has a profile uses it:
+  - `credential_loader`;
+  - `probes.credential_env` and `login_failed`;
+  - `provision/readiness.py`;
+  - `ci/github.credential_secrets`;
+  - the doctor rows.
+
+  `credential_variable` stays for the callers that have no profile.
+- `opencode.py` `run` puts `credential_loader(req)` in front of the argv, as `codex.py` does. `isolation_env` sets
+  no variable of that name.
+- `probe_opencode`, auth step: for such a profile, `credential_auth` decides (presence passes with
+  `auth_method: env`; absence fails naming the variable) before `opencode auth list`. The hello adds the one-entry
+  `credential_env` to its environment.
+- `DEFAULT_REDACT_ENV` gains `OPENCODE_API_KEY`. `refreshable_login` is unchanged: an `api_key` profile takes no
+  login lock (a test pins it).
+- `hosted_login_problem` is None for such a profile: the secret is the login on a hosted runner. The setup steps for
+  an unset variable name `l4 setup github --secret OPENCODE_API_KEY=<ENV>`.
