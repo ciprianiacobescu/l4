@@ -154,9 +154,11 @@ def _round_id(rec: UnitRecord, folder: str, number: int) -> str:
 
 
 class _Extractor:
-    def __init__(self, redactor: Redactor, git: Git | None, base_sha: str | None) -> None:
+    def __init__(self, redactor: Redactor, git: Git | None, base_sha: str | None, refs: Mapping[str, str]) -> None:
         self.redactor, self.git = redactor, git
         self.base_sha = base_sha
+        self.read_tips = sorted(set(refs.values()))  # the commits of the refs the manifest records
+        self._reachable: dict[str, bool] = {}
         self.files_unknown = 0
         self._diffs: dict[tuple[str, str], list[str] | None] = {}
 
@@ -172,12 +174,21 @@ class _Extractor:
             self._diffs[key] = self._diff(base, head)
         return self._diffs[key]
 
+    def reachable(self, sha: str) -> bool:
+        """Whether `sha` is a commit that the read refs reach. A commit that is local but only because something else
+        fetched it is not: the same refs must give the same bytes (review #7), and the manifest records the refs."""
+        if sha not in self._reachable:
+            assert self.git is not None
+            lines = [sha, *(f"^{tip}" for tip in self.read_tips)]
+            done = self.git.run("log", "--format=%H", "-1", "--stdin", input="\n".join(lines) + "\n", check=False)
+            self._reachable[sha] = done.returncode == 0 and not done.stdout.strip()
+        return self._reachable[sha]
+
     def _diff(self, base: str, head: str) -> list[str] | None:
         assert self.git is not None
-        for sha in (base, head):
-            if self.git.run("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode != 0:
-                return None
-        done = self.git.run_bytes("diff", "--name-only", "-z", base, head, check=False)
+        if not (self.reachable(base) and self.reachable(head)):
+            return None
+        done = self.git.run_bytes("diff", "--name-only", "--no-renames", "-z", base, head, check=False)
         names = [n.decode("utf-8", "surrogateescape") for n in done.split(b"\0") if n]
         return sorted(names)[:MAX_FILES]
 
@@ -419,7 +430,7 @@ def _link_lessons(g: _Graph, chosen: Mapping[str, LessonRecord], ts: str) -> Non
 def extract(collected: Collected, redactor: Redactor, *, git: Git | None = None) -> Extracted:
     """The graph of `collected`. `git` is read-only and optional: without it, no round has its changed files."""
     graph = _Graph(redactor)
-    worker = _Extractor(redactor, git, collected.base_sha)
+    worker = _Extractor(redactor, git, collected.base_sha, collected.refs)
     skipped = dict(collected.skipped)
     warnings = list(collected.warnings)
     for rec in collected.units:

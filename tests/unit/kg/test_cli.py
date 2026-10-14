@@ -170,7 +170,7 @@ def test_all_three_commands_run_with_no_network_and_read_only_git(seeded, monkey
     refs = seeded.refs()
     for args in (("build",), ("report",), ("why", "openspec:a"), ("propose", "--dry-run")):
         assert kg(seeded, *args) == 0, args
-    assert set(recording.subcommands) <= {"rev-parse", "for-each-ref", "ls-tree", "cat-file", "log", "diff"}
+    assert set(recording.subcommands) <= {"rev-parse", "for-each-ref", "ls-tree", "cat-file", "log", "diff", "config"}
     assert seeded.refs() == refs and seeded.status() == ""
 
 
@@ -272,9 +272,9 @@ def test_two_repositories_never_mix(kg_repo, make_repo, git_environ, tmp_path, m
     read: list[Path] = []
     real = kg_cli.read_index
 
-    def recording(folder, refs):
+    def recording(folder, refs, inputs=None):
         read.append(folder)
-        return real(folder, refs)
+        return real(folder, refs, inputs)
 
     monkeypatch.setattr(kg_cli, "read_index", recording)
     assert kg(kg_repo, "report") == 0

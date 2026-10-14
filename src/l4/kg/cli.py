@@ -31,6 +31,7 @@ index is redacted already, and this keeps a later change of `report`, `why` or `
 """
 
 import dataclasses
+import hashlib
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -124,13 +125,33 @@ def _toplevel(app: AppContext) -> Path | None:
         return None
 
 
+def index_inputs(app: AppContext, cfg: L4Config) -> dict[str, object]:
+    """The config values that change what `collect` reads and what the index holds, and the forge hosts that are
+    scrubbed from it. They go into the manifest, so a change makes the index stale (review #8)."""
+    held = app.redactor.forge_urls
+    # the hosts themselves stay out of the manifest (they are what is scrubbed): a digest tells a change
+    hosts = sorted(held.hosts) if held is not None else []
+    forge = hashlib.sha256("\n".join(hosts).encode("utf-8")).hexdigest()[:16] if hosts else ""
+    return {
+        "forge.base_branch": cfg.forge.base_branch,
+        "forge.branch_prefix": cfg.forge.branch_prefix,
+        "forge_hosts_sha256": forge,
+        "memory.lessons_file": cfg.memory.lessons_file,
+        "spec.kiro.root": str(cfg.spec.kiro.root),
+        "spec.openspec.root": str(cfg.spec.openspec.root),
+    }
+
+
 def _build(app: AppContext, cfg: L4Config, git: Git, folder: Path) -> tuple[Graph, list[str], list[str]]:
     """Collect, extract and write the index. Returns the graph just built, the warnings and the attempt refs that
     are not local. The graph is read back from the folder when the refs did not move meanwhile."""
     collected = collect(git, cfg)
     extracted = extract(collected, app.redactor, git=git)
-    manifest = write_index(folder, extracted.nodes, extracted.edges, refs=collected.refs, skipped=extracted.skipped)
-    state = read_index(folder, collected.refs)
+    inputs = index_inputs(app, cfg)
+    manifest = write_index(
+        folder, extracted.nodes, extracted.edges, refs=collected.refs, skipped=extracted.skipped, inputs=inputs
+    )
+    state = read_index(folder, collected.refs, inputs)
     if state.status == "ok" and state.manifest is not None:
         graph = Graph(state.nodes, state.edges, state.manifest, tuple(extracted.warnings))
     else:  # the index is fine on disk; this run keeps what it built
@@ -151,11 +172,12 @@ def _load(
     app, cfg, git, folder = _prepare(app)
     if precheck is not None:
         precheck(app, git)
-    state: IndexState = read_index(folder, ref_shas(git, cfg))
+    state: IndexState = read_index(folder, ref_shas(git, cfg), index_inputs(app, cfg))
     if state.status == "ok" and state.manifest is not None:
         return app, cfg, git, Graph(state.nodes, state.edges, state.manifest)
     graph, warnings, _ = _build(app, cfg, git, folder)
-    _say(app, f"index rebuilt ({_REASONS[state.status]})", err=True)
+    reason = "config changed" if state.status == "stale" and state.detail else _REASONS[state.status]
+    _say(app, f"index rebuilt ({reason})", err=True)
     _show_warnings(app, warnings)
     return app, cfg, git, graph
 

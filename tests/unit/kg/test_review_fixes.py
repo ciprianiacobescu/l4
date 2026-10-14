@@ -168,3 +168,84 @@ def test_a_branch_prefix_without_a_slash_still_finds_the_unit_branches(kg_repo, 
     code, out, err = run_kg(kg_repo, "why", "openspec:zz", "--config", str(config))
     assert code == 0, err
     assert "Unit openspec:zz" in out
+
+
+# --- #7: the same refs give the same bytes ----------------------------------------------------------------------
+
+
+def test_a_commit_that_is_local_but_not_reachable_from_the_read_refs_changes_nothing(kg_repo):
+    import json
+    import shutil
+
+    from l4.verifier.report import verdict_json
+    from l4.verifier.types import Verdict, VerifyResult
+
+    stage = kg_repo.stage
+    kg_repo._raw(stage, "fetch", "-q", "origin")
+    kg_repo._raw(stage, "checkout", "-q", "-B", "side", "origin/main")
+    base = kg_repo._raw(stage, "rev-parse", "HEAD").strip()
+    (stage / "src").mkdir(exist_ok=True)
+    (stage / "src/feature.py").write_text("x = 1\n")
+    kg_repo._raw(stage, "add", "-A")
+    kg_repo._raw(stage, "commit", "-q", "-m", "work")
+    head = kg_repo._raw(stage, "rev-parse", "HEAD").strip()
+    kg_repo._raw(stage, "push", "-q", "origin", f"{head}:refs/keep/side")  # a ref that kg does not read
+    result = VerifyResult("openspec:a", 1, Verdict.FAIL, base, head)
+    verdict = (json.dumps(verdict_json(result), sort_keys=True) + "\n").encode()
+    rel = kg_repo.unit_path("openspec:a", "archive")
+    kg_repo.unit("openspec:a", where="archive", files={f"{rel}/.l4/evidence/round-1/verdict.json": verdict})
+    assert run_kg(kg_repo, "build")[0] == 0
+    folder = store.index_dir(kg_repo.app())
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    kg_repo._raw(kg_repo.root, "fetch", "-q", "origin", "refs/keep/side:refs/keep/side")
+    assert kg_repo.git.run("cat-file", "-e", f"{head}^{{commit}}", check=False).returncode == 0
+    shutil.rmtree(folder)
+    assert run_kg(kg_repo, "build")[0] == 0
+    after = {p.name: p.read_bytes() for p in folder.iterdir()}
+    assert after == before
+    assert b"files_unknown" in before["edges.jsonl"]
+
+
+def test_a_commit_that_a_read_ref_reaches_gives_the_changed_files(kg_repo):
+    import json
+
+    from l4.verifier.report import verdict_json
+    from l4.verifier.types import Verdict, VerifyResult
+
+    base = kg_repo.sha("origin/main")
+    head = kg_repo.commit("work", {"src/feature.py": "x = 1\n"}, "work")
+    kg_repo._raw(kg_repo.root, "fetch", "-q", "origin")
+    result = VerifyResult("openspec:a", 1, Verdict.FAIL, base, head)
+    verdict = (json.dumps(verdict_json(result), sort_keys=True) + "\n").encode()
+    rel = kg_repo.unit_path("openspec:a", "archive")
+    kg_repo.unit("openspec:a", where="archive", files={f"{rel}/.l4/evidence/round-1/verdict.json": verdict})
+    kg_repo._raw(kg_repo.root, "fetch", "-q", "origin", "refs/heads/work:refs/remotes/origin/l4/openspec/a")
+    assert run_kg(kg_repo, "build")[0] == 0
+    edges = (store.index_dir(kg_repo.app()) / "edges.jsonl").read_text()
+    assert "src/feature.py" in edges and "files_unknown" not in edges
+
+
+# --- #8: a config value that decides what is read makes the index stale -----------------------------------------
+
+
+def test_a_changed_config_value_makes_the_index_stale(kg_repo, tmp_path):
+    from l4.memory.lessons import LessonsFile, render_lessons
+
+    kg_repo.lessons(kg_repo.lesson("Old place lesson", "old-key"))
+    kg_repo.commit("main", {"docs/lessons.md": render_lessons(LessonsFile([kg_repo.lesson("New place lesson", "new-key")]))},
+                   "new place")  # fmt: skip
+    kg_repo._raw(kg_repo.root, "fetch", "-q", "origin")
+
+    def lessons_of(*extra):
+        code, out, err = run_kg(kg_repo, "report", *extra)
+        assert code == 0, err
+        return out, err
+
+    out, _ = lessons_of()
+    assert "Old place lesson" in out and "New place lesson" not in out
+    config = tmp_path / "l4.yaml"
+    config.write_text("memory:\n  lessons_file: docs/lessons.md\n")
+    out, err = lessons_of("--config", str(config))
+    assert "index rebuilt (config changed)" in err
+    assert "New place lesson" in out and "Old place lesson" not in out
+    assert "index rebuilt" not in lessons_of("--config", str(config))[1]  # the same config reads the index again

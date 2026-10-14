@@ -91,7 +91,7 @@ def test_the_manifest_has_the_schema_the_refs_the_counts_and_the_hashes_and_no_t
         "edges.jsonl": hashlib.sha256((folder / "edges.jsonl").read_bytes()).hexdigest(),
         "nodes.jsonl": hashlib.sha256((folder / "nodes.jsonl").read_bytes()).hexdigest(),
     }
-    assert set(raw) == {"schema", "harness_version", "refs", "counts", "skipped", "sha256"}
+    assert set(raw) == {"schema", "harness_version", "refs", "counts", "skipped", "sha256", "inputs"}
 
 
 def test_a_rebuild_after_deleting_the_folder_is_byte_identical(tmp_path):
@@ -201,3 +201,15 @@ def test_the_manifest_is_written_last(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "atomic_write_bytes", lambda p, d: (order.append(Path(p).name), real(p, d)))
     store.write_index(tmp_path / "idx", NODES, EDGES, refs=REFS, skipped={})
     assert order[-1] == "manifest.json" and set(order) == {"nodes.jsonl", "edges.jsonl", "manifest.json"}
+
+
+def test_an_input_that_differs_makes_the_index_stale(tmp_path):
+    """Review #8: the config values that decide what is read are in the manifest."""
+    refs = {"refs/remotes/origin/main": "a" * 40}
+    manifest = store.write_index(
+        tmp_path, [], [], refs=refs, skipped={}, inputs={"memory.lessons_file": ".serena/memories/harness/lessons.md"}
+    )
+    assert manifest.inputs == {"memory.lessons_file": ".serena/memories/harness/lessons.md"}
+    assert store.read_index(tmp_path, refs, dict(manifest.inputs)).status == "ok"
+    assert store.read_index(tmp_path, refs, {"memory.lessons_file": "docs/lessons.md"}).status == "stale"
+    assert store.read_index(tmp_path, refs).status == "ok"  # no inputs asked: refs only

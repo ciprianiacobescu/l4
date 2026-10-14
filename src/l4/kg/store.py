@@ -7,7 +7,8 @@ repository's folder (L4-KG-011).
 
 `write_index` writes `nodes.jsonl`, then `edges.jsonl`, then `manifest.json`, each through `atomic_write_bytes`. The
 manifest (`l4/kg-manifest@1`) holds the harness version, the read refs with their shas (sorted), the counts, the skips
-and the sha256 of the two data files; it holds no time, so the same refs and the same harness version give the same
+and the sha256 of the two data files, and the `inputs` (the config values and the forge hosts that decide what is read
+and how it is scrubbed: a change makes the index stale, review #8); it holds no time, so the same refs and the same harness version give the same
 bytes. A build that dies between the renames leaves a manifest whose hashes do not match the files, so `read_index`
 says `incomplete` and never `ok` (a reader never takes a half-written index as complete).
 
@@ -62,12 +63,13 @@ class Manifest:
     counts: Mapping[str, Mapping[str, int]]
     skipped: Mapping[str, int]
     sha256: Mapping[str, str]
+    inputs: Mapping[str, Any] = field(default_factory=dict)  # the config values that decide what is read and shown
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": MANIFEST_SCHEMA, "harness_version": self.harness_version, "refs": dict(self.refs),
             "counts": {kind: dict(by_type) for kind, by_type in self.counts.items()}, "skipped": dict(self.skipped),
-            "sha256": dict(self.sha256),
+            "sha256": dict(self.sha256), "inputs": dict(self.inputs),
         }  # fmt: skip
 
     @classmethod
@@ -77,7 +79,7 @@ class Manifest:
         manifest = cls(
             harness_version=raw["harness_version"], refs=dict(raw["refs"]),
             counts={kind: dict(by_type) for kind, by_type in raw["counts"].items()}, skipped=dict(raw["skipped"]),
-            sha256=dict(raw["sha256"]),
+            sha256=dict(raw["sha256"]), inputs=dict(raw.get("inputs", {})),
         )  # fmt: skip
         if set(manifest.sha256) != {NODES_FILE, EDGES_FILE}:
             raise ValueError("the manifest does not hash exactly the two data files")
@@ -107,6 +109,7 @@ def write_index(
     *,
     refs: Mapping[str, str],
     skipped: Mapping[str, int],
+    inputs: Mapping[str, Any] | None = None,
     harness_version: str = __version__,
 ) -> Manifest:
     """Write the three files, the manifest last. Raises whatever the filesystem raises: the caller exits 1."""
@@ -120,6 +123,7 @@ def write_index(
             "nodes": _count_by_type(set(node_list)),
         },
         skipped=dict(sorted((reason, n) for reason, n in skipped.items())),
+        inputs=dict(sorted((inputs or {}).items())),
         sha256={
             EDGES_FILE: hashlib.sha256(edges_data).hexdigest(),
             NODES_FILE: hashlib.sha256(nodes_data).hexdigest(),
@@ -137,8 +141,11 @@ def _load_lines(data: bytes, parse: Any) -> list[Any]:
     return [parse(json.loads(line)) for line in data.decode("utf-8").split("\n") if line]
 
 
-def read_index(folder: Path, current_refs: Mapping[str, str]) -> IndexState:
-    """The state of the index in `folder` against the refs a build would read now."""
+def read_index(
+    folder: Path, current_refs: Mapping[str, str], current_inputs: Mapping[str, Any] | None = None
+) -> IndexState:
+    """The state of the index in `folder` against the refs a build would read now and, when given, the config values
+    it would read them with (`stale` when either differs)."""
     manifest_path = folder / MANIFEST_FILE
     data_paths = (folder / NODES_FILE, folder / EDGES_FILE)
     if not manifest_path.is_file():
@@ -156,6 +163,8 @@ def read_index(folder: Path, current_refs: Mapping[str, str]) -> IndexState:
         return IndexState("incomplete", manifest, detail="a data file does not match its sha256")
     if manifest.harness_version != __version__ or dict(manifest.refs) != dict(current_refs):
         return IndexState("stale", manifest)
+    if current_inputs is not None and dict(manifest.inputs) != dict(current_inputs):
+        return IndexState("stale", manifest, detail="the config values that decide what is read changed")
     try:
         nodes = _load_lines(nodes_data, Node.from_dict)
         edges = _load_lines(edges_data, Edge.from_dict)
