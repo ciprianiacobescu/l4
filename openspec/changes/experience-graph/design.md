@@ -95,8 +95,17 @@ is `docs/plan/proposal-experience-graph.md` (main checkout, not committed). Its 
   - `kg/` does not import `l4.agents`, `l4.llm`, `l4.s1`, `l4.forge`, `l4.sandbox`, `l4.availability`,
     `l4.vcs.refresh` or `l4.vcs.push` (static test).
   - The commands run their git calls through a recording `Git`, which a test restricts to read-only subcommands:
-    `rev-parse`, `for-each-ref`, `ls-tree`, `cat-file`, `log`, `diff --name-only`, `check-ignore`, `ls-files`, and
-    `var`. `promote` may also use `add` and `commit`.
+    `rev-parse`, `for-each-ref`, `ls-tree`, `cat-file`, `log`, `diff --name-only`, `check-ignore`, `ls-files`, `var` and
+    `config` (read only, to see whether the repository is a partial clone). `promote` may also use `add` and `commit`.
+  - **Git never fetches.** The kg `Git` runs with `GIT_NO_LAZY_FETCH=1`, so a partial clone (`--filter=blob:none`)
+    cannot fetch a blob that `cat-file` asks for. The unit whose blob is missing is skipped as `partial_clone`, and the
+    build warns once.
+  - **Indirect imports.** `import l4.kg.cli` and every `l4.kg` module load none of `l4.agents`, `l4.availability`,
+    `l4.sandbox`, `l4.forge` or `l4.llm`, even transitively (a subprocess test). The forge-host scrubber is built by
+    `l4.config.redaction.attach_forge_urls`, which imports `l4.forge.urls` only when it is called.
+  - **The repository root.** A command started in a subdirectory acts on the repository root
+    (`git rev-parse --show-toplevel`): the cache-root guard and the `--out` guard (a relative `--out` is relative to the
+    `--repo` folder) see the real root, and `ls-tree` runs with `--full-tree`.
   - A test blocks `socket.socket` and still passes every command.
 - **Exit codes.** These are the existing codes, with no new one:
   - **0:** done. Skipped inputs are counted and shown, and they are not a failure.
@@ -117,14 +126,19 @@ is `docs/plan/proposal-experience-graph.md` (main checkout, not committed). Its 
 - **Files:**
   - `nodes.jsonl` and `edges.jsonl`: one JSON object per line, with sorted keys, sorted lines, LF and UTF-8.
   - `manifest.json` (`l4/kg-manifest@1`): the harness version, the read refs as `{ref: sha}` (sorted), the counts by
-    node type, and `skipped{reason: n}`.
-  - No file holds the build time. The same refs and the same harness version give the same bytes.
+    node type, `skipped{reason: n}` and `inputs`: the config values that decide what is read
+    (`memory.lessons_file`, `forge.base_branch`, `forge.branch_prefix`, `spec.openspec.root`, `spec.kiro.root`) and a
+    digest of the forge hosts that are scrubbed.
+  - No file holds the build time. The same refs, the same inputs and the same harness version give the same bytes.
+    The changed files of a round are decided only from commits that the read refs reach, never from what happens to be
+    local.
 - **Writes are atomic.** Each file is written with `fsutil.atomic_write_bytes`. `manifest.json` is written last, and it
   holds the sha256 of the other two files. A reader that finds a mismatch, for example after a build stopped halfway,
   treats the index as missing and rebuilds it. A build that fails before its first rename exits 1 and leaves the last
   complete build. An index is never read half-written.
 - **Staleness.** `report`, `why` and `propose` read the index. When it is missing, or when a ref in the manifest now
-  points elsewhere, they build it first and say `index rebuilt (refs moved)`.
+  points elsewhere, or when an input of the manifest now differs, they build it first and say `index rebuilt (refs moved)`
+  or `index rebuilt (config changed)`.
 - **Disposable.** Deleting the folder loses nothing. There is no second source of truth.
 - **Report file.** The default is stdout. `--out PATH` writes the file:
   - a path inside the repository must be git-ignored (`git check-ignore`), and `.l4-out/kg/report.md` is;
@@ -153,11 +167,13 @@ is `docs/plan/proposal-experience-graph.md` (main checkout, not committed). Its 
   - `.l4/evidence/round-*/verdict.json` (JSON; a schema other than the verdict schema → skipped);
   - at the base ref, `memory.lessons_file` and its `_archive/*.md` (`parse_lessons`).
 - **Skips are counted, never fatal.** Each skip is counted by reason: `ledger_corrupt`, `verdict_unreadable`,
-  `oversize`, `not_regular` (a symlink or a submodule), `lessons_problem` and `error`.
+  `oversize`, `not_regular` (a symlink or a submodule), `lessons_problem`, `partial_clone` (git could not read an
+  object in a partial clone, and the lazy fetch is off) and `error`.
 - **An attempt that is not local.** When a `unit.restarted{attempt_ref}` names a ref that is not local, it is counted
   as `attempt_not_local`. The report prints `git fetch origin 'refs/l4/attempts/*:refs/l4/attempts/*'`, and the
   command never fetches it.
-- **Changed files of a round** come from `git diff --name-only base_sha head_sha`, only when both commits are local.
+- **Changed files of a round** come from `git diff --name-only base_sha head_sha`, only when both commits are reachable
+  from the read refs (`git log <sha> --not <tips>` is empty).
   After a squash merge they often are not. Then the round is counted as `files_unknown`, and nothing is guessed.
 
 ### D4. The graph
@@ -280,7 +296,9 @@ output.
 
   The last line is what the history shows, as facts and not as a command:
   - the number of stops with the same code;
-  - whether a person changed the unit folder since the last stop;
+  - whether the unit folder changed since the last stop: `git diff --name-only <stop commit> <branch head> -- <folder>`
+    without the `.l4/` files (the stop commit is the last commit that touched the stop's ledger file), or a
+    `unit.retried{spec edited}` after the stop;
   - the attempt number.
 
   The command to run stays the job of `l4 status --unit ID` (`Next:`), which `why` names.
@@ -346,7 +364,9 @@ This is L4-MEM-002's human promotion, built for inbox proposals.
    reinforces it, as L4-MEM-002 says (memory-lessons task 3.7). The caps archive the least recently reinforced
    other lessons, which are printed.
 6. **Commit.** It stages `lessons.md` and the archive files and commits
-   `chore(memory): lesson <id> promoted [skip ci]` with the person's git identity. The body is
+   `chore(memory): lesson <id> promoted [skip ci]` with the person's git identity (from the git config or from
+   `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, which `Git` scrubs and this command puts back; with `user.useConfigOnly`
+   git never guesses one, and promote exits 2 when it would have to). The body is
    `Promoted-from: <inbox path>`. It adds no `L4-*` trailer: a person made this commit, not the harness, and the L4
    trailers mark harness commits. The proposal and its evidence file are then deleted.
 

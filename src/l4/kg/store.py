@@ -8,9 +8,9 @@ repository's folder (L4-KG-011).
 `write_index` writes `nodes.jsonl`, then `edges.jsonl`, then `manifest.json`, each through `atomic_write_bytes`. The
 manifest (`l4/kg-manifest@1`) holds the harness version, the read refs with their shas (sorted), the counts, the skips
 and the sha256 of the two data files, and the `inputs` (the config values and the forge hosts that decide what is read
-and how it is scrubbed: a change makes the index stale, review #8); it holds no time, so the same refs and the same harness version give the same
-bytes. A build that dies between the renames leaves a manifest whose hashes do not match the files, so `read_index`
-says `incomplete` and never `ok` (a reader never takes a half-written index as complete).
+and how it is scrubbed: a change makes the index stale, review #8); it holds no time, so the same refs, inputs and
+harness version give the same bytes. A build that dies between the renames leaves a manifest whose hashes do not match
+the files, so `read_index` says `incomplete` and never `ok` (a reader never takes a half-written index as complete).
 
 `read_index(folder, current_refs)` returns one status: `missing` (nothing there), `incomplete` (a file is missing,
 the manifest is unreadable or of another schema, a hash differs, or a line does not parse), `stale` (the refs the

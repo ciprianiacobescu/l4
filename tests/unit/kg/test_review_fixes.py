@@ -232,8 +232,8 @@ def test_a_changed_config_value_makes_the_index_stale(kg_repo, tmp_path):
     from l4.memory.lessons import LessonsFile, render_lessons
 
     kg_repo.lessons(kg_repo.lesson("Old place lesson", "old-key"))
-    kg_repo.commit("main", {"docs/lessons.md": render_lessons(LessonsFile([kg_repo.lesson("New place lesson", "new-key")]))},
-                   "new place")  # fmt: skip
+    new_text = render_lessons(LessonsFile([kg_repo.lesson("New place lesson", "new-key")]))
+    kg_repo.commit("main", {"docs/lessons.md": new_text}, "new place")
     kg_repo._raw(kg_repo.root, "fetch", "-q", "origin")
 
     def lessons_of(*extra):
@@ -281,5 +281,6 @@ def test_a_spec_edit_before_the_stop_is_not_a_spec_edit_since_it(kg_repo):
     rel = kg_repo.unit_path("openspec:a", "branch")
     kg_repo.unit("openspec:a", where="branch", runs=[])
     kg_repo.commit(kg_repo.branch_of("openspec:a"), {f"{rel}/proposal.md": "## Why\n\nEdited first.\n"}, "edit")
-    kg_repo.unit("openspec:a", where="branch", runs=[kg_repo.run(STOP)], files={f"{rel}/proposal.md": "## Why\n\nEdited first.\n"})
+    edited = {f"{rel}/proposal.md": "## Why\n\nEdited first.\n"}
+    kg_repo.unit("openspec:a", where="branch", runs=[kg_repo.run(STOP)], files=edited)
     assert "spec edited since the last stop: no;" in last_line(kg_repo)

@@ -7,7 +7,6 @@ graph runs git with `GIT_NO_LAZY_FETCH=1`, skips what it cannot read and says wh
 import dataclasses
 import json
 import socket
-import sys
 from pathlib import Path
 
 import pytest

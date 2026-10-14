@@ -2,11 +2,15 @@
 `run_kg_why` and `run_kg_propose`. `commands.py` holds their handler strings; nothing else imports this module
 (L4-KG-001).
 
-Each handler reads one repository only. It loads the config, asks `store.index_dir` for the folder under the cache root
-(a cache root inside the repository exits 2 there, before anything is written, SCN-KG-05), and runs git through the
-read-only `Git` of this module. `report`, `why` and `propose` build the index first when `read_index` says `missing`,
-`incomplete` or `stale`, and say `index rebuilt (<why>)` on stderr, so that stdout holds only the report (SCN-KG-03).
-`build` always builds, and prints what it read and what it skipped, never fatal (L4-KG-002).
+Each handler reads one repository only: the root of the work tree that holds `--repo` (`git rev-parse
+--show-toplevel`), so a command started in a subdirectory reads and guards the whole repository (review #3). Git runs
+with `GIT_NO_LAZY_FETCH=1` (a partial clone never fetches, review #1), and the forge host is scrubbed through
+`l4.config.redaction.attach_forge_urls` (L4-KG-011). The manifest `inputs` are the config values that decide what is
+read; a change makes the index stale (review #8). It loads the config, asks `store.index_dir` for the folder under the
+cache root (a cache root inside the repository exits 2 there, before anything is written, SCN-KG-05), and runs git
+through the read-only `Git` of this module. `report`, `why` and `propose` build the index first when `read_index` says
+`missing`, `incomplete` or `stale`, and say `index rebuilt (<why>)` on stderr, so that stdout holds only the report
+(SCN-KG-03). `build` always builds, and prints what it read and what it skipped, never fatal (L4-KG-002).
 
 The exit codes are the existing ones. A usage error is `L4Exit(USAGE_ERROR)`: no repository, an id of no accepted form
 or not in the index, a `--min-units` below 1, a refused `--out`. Any other exception ends the command with exit 1
@@ -14,9 +18,10 @@ through `run_guarded`. A failed build changes no ref, no tracked file and no led
 index files under the cache root, each atomic, and the manifest last, so the last complete index stays readable or the
 next read finds it `incomplete` and builds again (SCN-KG-03).
 
-`--out` names a file. A relative path is relative to the `--repo` folder (the repository root unless a subdirectory was given). A path inside the repository must be ignored by
-git (`git check-ignore`), which also refuses a tracked path (SCN-KG-19); a path outside it is allowed (design D2). The
-check runs before the index is built, so a refused `--out` writes nothing at all.
+`--out` names a file. A relative path is relative to the `--repo` folder (the repository root unless a subdirectory
+was given). A path inside the repository must be ignored by git (`git check-ignore`), which also refuses a tracked
+path (SCN-KG-19); a path outside it is allowed (design D2). The check runs before the index is built, so a refused
+`--out` writes nothing at all.
 
 Everything printed or written passes `redact_text` and then `scrub_for_commit` once more (L4-KG-011, design D12): the
 index is redacted already, and this keeps a later change of `report`, `why` or `propose` from leaking a value.

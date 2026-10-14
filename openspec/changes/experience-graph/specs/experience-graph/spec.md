@@ -22,7 +22,7 @@ unless a person promotes a lesson.
 #### Scenario: SCN-KG-02 (−) No network, no model, read-only git
 - **GIVEN** a fixture repository with units on the base branch, a unit branch and an attempts ref, `socket.socket` patched to raise, and a recording `Git`
 - **WHEN** `l4 kg build`, `l4 kg report`, `l4 kg why openspec:a` and `l4 kg propose --dry-run` run
-- **THEN** each exits 0, and every recorded git subcommand is one of `rev-parse`, `for-each-ref`, `ls-tree`, `cat-file`, `log`, `diff --name-only`, `check-ignore`, `ls-files`, `var`
+- **THEN** each exits 0, and every recorded git subcommand is one of `rev-parse`, `for-each-ref`, `ls-tree`, `cat-file`, `log`, `diff --name-only`, `check-ignore`, `ls-files`, `var`, `config`
 
 ### Requirement: L4-KG-002 Failures are contained, with the existing exit codes
 An `l4 kg` command SHALL exit 0 when it finished, with every skipped input counted and shown. It SHALL exit 2 for a
@@ -40,10 +40,12 @@ The index SHALL be written to `cache_root(environ, repo) / "kg" / <first 16 hex 
 in a folder with mode 0700, and never inside the repository. It SHALL hold:
 - `nodes.jsonl` and `edges.jsonl`: sorted keys, sorted lines, LF, UTF-8;
 - `manifest.json` (`l4/kg-manifest@1`): the harness version, the read refs with their shas, the counts, the skips,
-  and the sha256 of the two other files.
+  the config values that decide what is read (`inputs`), and the sha256 of the two other files.
 
-No file MAY hold the build time. The same refs and the same harness version MUST give byte-identical files. `report`,
-`why` and `propose` MUST build the index first when it is missing, incomplete, or built from refs that have moved.
+No file MAY hold the build time. The same refs, the same inputs and the same harness version MUST give byte-identical
+files (the changed files of a round come only from commits that the read refs reach). `report`, `why` and `propose`
+MUST build the index first when it is missing, incomplete, built from refs that have moved, or built with other
+inputs. A command started in a subdirectory MUST act on the repository root.
 
 #### Scenario: SCN-KG-04 (+) A rebuild is byte-identical
 - **GIVEN** a fixture repository at fixed ref shas
@@ -69,7 +71,8 @@ The build SHALL read `.l4/ledger/*.jsonl`, `.l4/evidence/round-*/verdict.json`, 
 
 A corrupt, oversized, unreadable or non-regular input MUST be skipped and counted by reason, and MUST NOT fail the
 build. An attempts ref that a `unit.restarted` event names and that is not local MUST be counted as
-`attempt_not_local`, and the report MUST print the fetch command. The build MUST NOT fetch.
+`attempt_not_local`, and the report MUST print the fetch command. The build MUST NOT fetch, also in a partial clone,
+where a unit whose blobs are not local is skipped and counted as `partial_clone`.
 
 #### Scenario: SCN-KG-06 (+) Archived and open units are both read
 - **GIVEN** an archived change `changes/archive/2026-10-05-a/` with a ledger and two verdicts on the base, and an open unit `openspec:b` whose ledger is only on `origin/l4/openspec/b`
@@ -260,8 +263,8 @@ It MUST refuse with exit 2, writing nothing, when any of these is true:
 - there is no terminal and no `--yes`.
 
 It MUST print the lesson and its scope before it writes. Unless `--no-commit` is given, it MUST commit only the
-lessons paths as `chore(memory): lesson <id> promoted [skip ci]`, with the person's git identity and no `L4-*`
-trailer, and then delete the proposal and its evidence file.
+lessons paths as `chore(memory): lesson <id> promoted [skip ci]`, with the person's git identity (never one that git
+guessed) and no `L4-*` trailer, and then delete the proposal and its evidence file.
 
 #### Scenario: SCN-KG-27 (+) A promoted lesson reaches the next matching task through the existing injection
 - **GIVEN** a draft with the TODO line replaced by advice and scope `` `src/web/**` ``, on the base branch checkout
