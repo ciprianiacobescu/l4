@@ -265,6 +265,9 @@ process in the CI job, after the agents of the run have exited.
   merged by the harness with the same fast-forward guard (`merge_archive_guarded`). A refusal is recorded as
   `archive.failed` with the reason; the plan does not wait for the archive (the code is integrated). Kiro: the
   done-gate, as today.
+- **One archive PR at a time counts only PRs to the base** (all adopters, with D7): `open_archive_pr` waits only for
+  an open archive PR whose base is `forge.base_branch`. An archive PR left open against an older base (after a change
+  of `forge.base_branch`) no longer blocks every later archive; it is logged once per sweep.
 
 ### D10. One plan step per CI run; waits and stops
 

@@ -31,7 +31,7 @@
 - [ ] 5.1 `yolo_step()` (D10): reviews, stops, waits, merge + post-check + integration, batch checks, dispatch, completion, report and receipts, one step per run. Tests per branch of D10 with fakes. SCN-YOLO-18, -20, -22..25, -27, -28. (L4-YOLO-009..014)
 - [ ] 5.2 `run_command`: `allow` filters `chosen` (plan-held units, SCN-YOLO-30); `start_run(target)` once at the end when `start_next_run`; `l4 run --unit` refusals before the lease (SCN-YOLO-21). (L4-YOLO-010, L4-YOLO-012)
 - [ ] 5.3 `l4 plan`: the wait reason for plan units and `not in the active plan <id>` for others. (L4-YOLO-015)
-- [ ] 5.4 The sweep merges the archive PR of a `merge: auto` plan unit with `merge_archive_guarded` (SCN-YOLO-19). (L4-YOLO-009)
+- [ ] 5.4 The sweep merges the archive PR of a `merge: auto` plan unit with `merge_archive_guarded` (SCN-YOLO-19); `open_archive_pr` waits only for open archive PRs whose base is `forge.base_branch` (D9). (L4-YOLO-009)
 
 ## 6. Commands (wave 2, agent G: `yolo/commands.py`, `cli.py`, `state/status.py`, `doctor`)
 
