@@ -219,6 +219,11 @@ class _UnitRun:
         shutil.rmtree(self._scratch, ignore_errors=True)
 
 
+def merged_elsewhere(merged_into: str, base: str) -> str:
+    """The cause of an `in_review` unit whose MR was merged into another branch (L4-YOLO-007, SCN-YOLO-13)."""
+    return f"merged into {merged_into}, not the base {base}"
+
+
 class Sweeper:
     def __init__(
         self,
@@ -238,6 +243,7 @@ class Sweeper:
         self._merged: dict[str, list[PullRequest]] | None = None
         self._open: dict[str, PullRequest] | None = None
         self._newest: dict[str, PullRequest] | None = None
+        self.misdirected: dict[str, str] = {}  # unit id -> `merged into <x>, not the base <base>` (L4-YOLO-007)
 
     def run(self, snapshots: Sequence[UnitSnapshot]) -> list[SweepAction]:
         candidates = [s for s in snapshots if s.state.phase in _SWEPT]
@@ -299,15 +305,26 @@ class Sweeper:
 
     def _own_mr(self, snapshot: UnitSnapshot, merged: dict[str, list[PullRequest]]) -> PullRequest | None:
         """The merged MR that is this unit's: the one its ledger names, else (no `pr.updated` was recorded) the latest
-        of the branch. An older MR of a branch name that was used before is not."""
+        of the branch. An older MR of a branch name that was used before is not. A merged MR counts only when it was
+        merged into `forge.base_branch` (L4-YOLO-007): one retargeted and merged elsewhere is logged, remembered in
+        `misdirected` for the unit's cause, and the unit stays as it is."""
         branch = unit_branch(snapshot.ref.id, self.cfg.forge.branch_prefix)
         prs = merged.get(branch, [])
         wanted = snapshot.state.pr
         if wanted is None:
-            return prs[0] if prs else None
-        found = next((pr for pr in prs if self.urls.canonical(pr.url) == self.urls.canonical(wanted)), None)
-        if prs and found is None:
-            log.info("%s: the merged MR of %s is not the unit's MR %s", snapshot.ref.id, branch, wanted)
+            found = prs[0] if prs else None
+        else:
+            found = next((pr for pr in prs if self.urls.canonical(pr.url) == self.urls.canonical(wanted)), None)
+            if prs and found is None:
+                log.info("%s: the merged MR of %s is not the unit's MR %s", snapshot.ref.id, branch, wanted)
+        base = self.cfg.forge.base_branch
+        if found is not None and found.base_branch != base:
+            log.warning(
+                "%s: %s was merged into %s, not the base %s", snapshot.ref.id, found.url, found.base_branch, base
+            )
+            self.misdirected[snapshot.ref.id] = merged_elsewhere(found.base_branch, base)
+            return None
+        self.misdirected.pop(snapshot.ref.id, None)
         return found
 
     def _retire(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
