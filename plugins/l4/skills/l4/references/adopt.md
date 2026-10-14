@@ -43,8 +43,9 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   - **Agents that can log in on a GitHub-hosted runner** (init prints a `todo:` when the default ones cannot):
     - Claude Code takes `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`);
     - kiro-cli takes `KIRO_API_KEY`;
+    - OpenCode with `auth: api_key` and an `opencode/` or `opencode-go/` model takes `OPENCODE_API_KEY`;
     - codex needs `auth: api_key` (`CODEX_API_KEY`), since its subscription login is a local file;
-    - OpenCode's free models need no key.
+    - OpenCode's free models need no key, unless the profile says `auth: api_key`.
 
     Give the implementer and the judges different vendors. Profiles proven on GitHub-hosted runners:
 
@@ -52,6 +53,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     profiles:
       kiro:         {adapter: kiro-cli, auth: api_key, model: glm-5, vendor: zhipu}       # secret KIRO_API_KEY
       oc-free:      {adapter: opencode, model: opencode/mimo-v2.6-flash-free, vendor: xiaomi}  # no secret
+      oc-go:        {adapter: opencode, auth: api_key, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}  # secret OPENCODE_API_KEY
       claude-judge: {adapter: claude-code, auth: subscription, vendor: anthropic}          # secret CLAUDE_CODE_OAUTH_TOKEN
       codex:        {adapter: codex, auth: api_key, vendor: openai}                        # secret CODEX_API_KEY
     roles:
@@ -74,7 +76,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
 
    ```sh
    GH_TOKEN=… l4 setup github --repo OWNER/REPO \
-     --secret CLAUDE_CODE_OAUTH_TOKEN=CLAUDE_CODE_OAUTH_TOKEN [--secret KIRO_API_KEY=KIRO_API_KEY] \
+     --secret CLAUDE_CODE_OAUTH_TOKEN=CLAUDE_CODE_OAUTH_TOKEN [--secret KIRO_API_KEY=KIRO_API_KEY] [--secret OPENCODE_API_KEY=OPENCODE_API_KEY] \
      [--secret L4_HARNESS_SSH_KEY=L4_HARNESS_SSH_KEY] --watch
    ```
 

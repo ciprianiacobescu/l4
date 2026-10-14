@@ -222,9 +222,10 @@ harness:
 - `ANTHROPIC_API_KEY` for a claude-code `auth: api_key` profile;
 - `CODEX_API_KEY` for a codex `auth: api_key` profile;
 - `KIRO_API_KEY` for a kiro-cli profile;
+- `OPENCODE_API_KEY` for an opencode `auth: api_key` profile whose model starts with `opencode/` or `opencode-go/` (OpenCode Go or Zen);
 - an opencode provider's `api_key_env`.
 
-OpenCode's free models need none. `l4 doctor` row PRV-001 names any variable that is missing.
+OpenCode's free models without `auth: api_key` need none. `l4 doctor` row PRV-001 names any variable that is missing.
 
 **The harness through the setup action (recommended).** The harness repository is itself a GitHub action. Your
 repository then holds only `.l4/config.yaml`, `.github/workflows/l4.yml` and the evidence folders: no `.l4/bin/`, no

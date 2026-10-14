@@ -1,6 +1,6 @@
 ---
 name: l4
-description: Use when working in a repository run by the L4 agentic harness (a .l4/config.yaml, unit branches named l4/<framework>/<name>, feedback.md or questions.md in a spec folder) - asking for changes on a unit's pull request, answering the harness's questions, reading a unit's state, resuming an escalated or halted unit, or adopting L4 in a new repository.
+description: Use when working in a repository run by the L4 agentic harness (a .l4/config.yaml, unit branches named l4/<framework>/<name>, feedback.md or questions.md in a spec folder) - asking for changes on a unit's pull request, answering the harness's questions, reading a unit's state, resuming an escalated or halted unit, making or updating a delivery plan (`.l4/plans/`), or adopting L4 in a new repository.
 ---
 
 # Working with the L4 harness
@@ -54,3 +54,5 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
 - `references/operate.md`: answering `questions.md` (verdict questions included), reading state, and resuming an
   escalated or halted unit.
 - `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, and upgrades.
+- `references/plan.md`: making and updating a delivery plan: `l4 yolo draft`, evidence for each dependency, the
+  validator, `l4 yolo check`, and what to hand to a person.

@@ -6,7 +6,7 @@ unit into the integration branch and goes on to the next one. It stops by itself
 right.
 
 This page is for the person who operates a plan. The commands for a stopped plan are in the
-[runbook, section 12](runbook.md#12-delivery-plans). The normative text is in [SPEC 12.5](SPEC.md) (L4-YOLO-001..016).
+[runbook, section 12](runbook.md#12-delivery-plans). The normative text is in [SPEC 12.5](SPEC.md) (L4-YOLO-001..020).
 
 ## What it does, and what it does not do
 
@@ -32,6 +32,9 @@ The id uses lowercase letters, digits and `-`, and starts with a letter or a dig
   "promotion": {"mode": "manual", "target_branch": "main"},
   "limits": {"max_cost_usd": 40, "max_unit_attempts": 2, "max_runs": 60, "deadline": "2026-10-20T18:00:00Z"},
   "external_dependencies": [],
+  "exclude": [
+    {"id": "kiro:legacy-import", "reason": "in review before the plan"}
+  ],
   "batches": [
     {"id": "backend", "depends_on": [], "acceptance_profile": "all", "units": [
       {"id": "openspec:data-contract", "depends_on": [], "acceptance_profile": "all"},
@@ -54,11 +57,23 @@ The id uses lowercase letters, digits and `-`, and starts with a letter or a dig
 | `limits` | Optional. A missing limit is unlimited, except `max_unit_attempts`, which is 2. |
 | `external_dependencies` | Must be empty in this version. |
 | `batches` | A batch is a group of units. A batch can depend on other batches. |
+| `exclude` | Optional. A list of `{"id", "reason"}`: units that this plan deliberately does not deliver. The reason is text of 1 to 200 characters. See below. |
 | `units[].depends_on` | Unit ids in the same plan. |
 | `acceptance_profile` | A profile of `yolo.profiles` in `.l4/config.yaml`, or `all` (every configured gate), or `none`. A unit has `all` by default. A batch has `none` by default (no batch check). |
 
 An unknown field makes the plan invalid. A unit waits for the units in its `depends_on` and for every unit of the
 batches that its batch depends on.
+
+### Exclusions
+
+Every spec of the repository should be in a plan or in a plan's `exclude`. An excluded unit is **not held** by the plan:
+it runs as it would without the plan, and `l4 yolo status` lists it with its reason. The exclusions are part of the plan
+file, so an edit of them after the activation stops the plan (`inputs_changed`). Admission refuses a unit that is both
+planned and excluded (`excluded_and_planned`), a unit excluded twice (`duplicate_id`) and an excluded id that no spec
+provider knows (`unknown_unit`).
+
+A derived unit (`<parent>-fix-<n>`, `<parent>-followup-<n>`) is covered when its parent is listed, so that feedback on a
+planned unit does not make the repository uncovered.
 
 Profiles are defined in `.l4/config.yaml`:
 
@@ -76,6 +91,29 @@ is valid for a batch only.
 `all` leaves out the `e2e` gates that need an app server (`gates.e2e.serve`), and the result says so. A profile that
 names `e2e` while `serve` is set is refused at admission (`unsupported_profile`). The limits are checked too:
 `max_unit_attempts` and `max_runs` at least 1, `max_cost_usd` at least 0, and a `deadline` with a time zone.
+
+## Make or change a plan
+
+Do not write the file from nothing. Let L4 list the specs, then add the order yourself (or ask an agent with the skill).
+
+1. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto]` writes `.l4/plans/<plan-id>.json` in the working
+   tree. It lists every spec that no plan lists in one batch `unplanned` with no dependencies, and puts a finished spec
+   into `exclude` with the reason `already merged`. It commits and pushes nothing, calls no model, and refuses an
+   existing file. It never adds a dependency: an order is a claim about the specs, and you must make it.
+2. Edit the file: move units into batches, add `depends_on` only where a spec uses something that another spec
+   introduces or changes, and give each exclusion a reason that a person can check.
+3. Run the validator, then `l4 yolo check <plan-id>`. The validator is `scripts/validate_plan.py` (the same file is in
+   the skill, `plugins/l4/skills/l4/scripts/`). It needs only Python, reads every plan file of the working tree, checks
+   the schema, the graph and the coverage across all plans (`uncovered`, `covered_twice`), and prints the dispatch
+   order and the waves. A wave is what could run together; the plan still runs one unit at a time. `l4 yolo check`
+   also checks what the script cannot: open questions, intake, finished units, profiles, the target and the merge policy.
+4. Commit and push the plan file only. Then review and activate (below).
+5. To add a spec later, run `l4 yolo draft <plan-id> --update`. It appends the new specs to `unplanned` (or to `exclude`),
+   keeps every other edit, and reports a unit that is gone as `gone: <id>` without removing it. It warns when the plan is
+   active or waiting, because the edit stops it.
+
+The skill reference `references/plan.md` teaches an agent these steps. The agent never activates, resumes or cancels a
+plan, never writes `refs/l4/plans/*`, and sets `merge: auto` only when you ask and `forge.merge_policy` is `auto`.
 
 ## The two merge modes
 
@@ -103,10 +141,14 @@ If the target moved, L4 sends the unit to `verifying`. The verifier merges the n
 happens twice for the same attempt, or if the push is refused for another reason (for example a protected branch), the
 plan stops with `merge_refused`. After the merge, L4 runs the acceptance profile of the unit on the merged revision. A
 fail or an error stops the plan with `postcheck_failed`. The archive PR of an OpenSpec unit is merged by L4 in the same
-way.
+way. After `merge_refused`, `l4 yolo resume` resets the count of stale merges, and the next step tries the merge once more.
 
 L4 does not merge any unit that is not in an active plan with `merge: auto`. This is true whatever `forge.merge_policy`
-says.
+says. A unit that a person removed from the plan file is not merged by the plan, even if it was the current unit before
+the edit.
+
+A unit that is already in review when the plan reaches it is adopted: the plan records it as dispatched, and then
+merges it (`merge: auto`) or waits for its merge (`merge: human`). It does not wait for a run that will never come.
 
 ## The two opt-ins
 
@@ -153,6 +195,9 @@ After a step that leaves work, the run starts the next run on the target. A plan
 are not in the plan get no new agent work while the plan is active, but the sweep still records their merges and
 closed PRs. `l4 run --unit <unit>` exits 13 for a unit that is not the current one.
 
+A plan step that fails for a reason that L4 did not expect (for example a network error while it reads the plan ref) does
+not fail the run of any other unit. The units of the plan stay held, and the next run tries the step again.
+
 A unit that is in a plan file on the target stays held while the file is there. This is true in every status of the
 plan, a cancelled plan included. To release the unit, remove it from the file, or remove the file. A plan file that is
 not valid still holds the units that L4 can read in its JSON. A file that is not JSON holds nothing, and `l4 plan` and
@@ -166,16 +211,24 @@ when the cause is gone. `l4 yolo resume` also wakes it.
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,
 `target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
-when it is back). A stopped plan dispatches and merges nothing, including units that do not depend on the failed one. The
+when it is back). A merged unit whose folder moved to the archive is not missing: it is integrated. A stopped plan dispatches and merges nothing, including units that do not depend on the failed one. The
 cause of each stop and the command that clears it are in [runbook 12.3](runbook.md#123-procedure-a-plan-is-stopped).
 `l4 yolo cancel` stops the plan for good.
+
+**`unit_rejected`.** The harness refused the spec of the current unit. Correct the spec on the unit branch and push. The
+plan then stops with `inputs_changed`, CI reviews it, a person activates it, and the plan dispatches the unit again. No
+`l4 restart` is needed.
+
+**A deleted plan file.** If the file of an active plan is deleted, the plan stops with `inputs_changed` (subject
+`plan`). Restore the file, then review and activate again.
 
 ## Limits
 
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
-ledger, per attempt of a unit, and checks it before each dispatch and each merge. A restart starts a new attempt and counts
-as one. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
-not by a restart of a unit, not by a resume. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
+ledger, per attempt of a unit, and checks it before each dispatch and each merge. The figures include the cost of the
+attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
+activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
+not by a restart of a unit, not by a resume. A resume without `--extend-…` is refused while the limit is still reached. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
 
 ## The report and the receipts
 
@@ -208,6 +261,7 @@ example with a PR. You can squash there. L4 never does it.
 
 | Command | What it does |
 |---|---|
+| `l4 yolo draft <plan> [--target B] [--merge human\|auto] [--update]` | Writes or updates the plan file in the working tree from the specs that no plan lists. Commits nothing. |
 | `l4 yolo check <plan>` | Checks the plan and prints the order. Changes nothing. |
 | `l4 yolo review <plan> [--local]` | Reviews the plan in CI now, or here with `--local`. |
 | `l4 yolo activate <plan> --reason <text>` | Freezes the inputs and starts the plan. |

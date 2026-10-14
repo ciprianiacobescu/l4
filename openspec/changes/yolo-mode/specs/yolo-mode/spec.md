@@ -376,20 +376,14 @@ print the same as one JSON object. The script MUST NOT write anything, use the n
 - **THEN** it exits 0 and prints wave 1 `A, B, C, I, J`, wave 2 `D, E`, wave 3 `F, G` and wave 4 `H`, and the dispatch order of `l4 yolo check`
 
 ### Requirement: L4-YOLO-020 The skill teaches plan creation and update
-The skill SHALL have the reference `plugins/l4/skills/l4/references/plan.md`, linked from `SKILL.md`. It teaches an
-agent to create and update a plan from OpenSpec changes and Kiro specs (design D15):
-- start from `l4 yolo draft`;
-- add a dependency only on evidence in the specs, and give that evidence in the commit message;
-- use batches for acceptance checks;
-- exclude with a reason;
-- run the validator and `l4 yolo check`;
-- commit and push only the plan file.
-
-The reference MUST say that the agent never activates, resumes or cancels a plan for a person, and never writes
-`refs/l4/plans/*`. It MUST say that it never sets `merge: auto` unless the person asks for it and
-`forge.merge_policy` is `auto`, and that an edit of an active plan stops it until a new review and activation.
+The skill SHALL have the reference `plugins/l4/skills/l4/references/plan.md`, linked from `SKILL.md`, that teaches an
+agent to create and update a plan from OpenSpec changes and Kiro specs (design D15). It MUST say that the agent never
+activates, resumes or cancels a plan for a person, never writes `refs/l4/plans/*`, and sets `merge: auto` only when the
+person asks and `forge.merge_policy` is `auto`.
 
 #### Scenario: SCN-YOLO-42 (+) An agent with the skill writes a valid plan
 - **GIVEN** ten specs with dependencies that their proposals state, and the skill
 - **WHEN** an agent is asked to plan their delivery
 - **THEN** the plan file passes the validator, every dependency it lists is stated in the specs, and the agent did not activate the plan
+- **AND** the agent started from `l4 yolo draft`, gave one line of evidence per dependency in the commit message, used batches for acceptance checks, excluded specs only with a reason, ran the validator and `l4 yolo check`, and committed and pushed only the plan file
+- **AND** an edit of an active plan is described as stopping it until a new review and activation

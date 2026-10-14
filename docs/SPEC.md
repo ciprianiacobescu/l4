@@ -199,7 +199,7 @@ moves `uses:` pins, and in copy mode the pin is the `commit:` input, which it ca
 unless `--runner-tag TAG` (repeatable) names a self-hosted one, and `forge.token_env: GITHUB_TOKEN` (the workflow's own
 token) unless `--forge-token-env NAME` is given. When the default role chains name a profile that cannot log in on a hosted
 runner (a `subscription` profile of `codex`, whose login is a stored local file; `claude-code` takes
-`CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets), init MUST print a `todo:` line (and write a
+`CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets, and an `opencode` `auth: api_key` profile with an `opencode/` or `opencode-go/` model `OPENCODE_API_KEY`, L4-PRV-028), init MUST print a `todo:` line (and write a
 `# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents. The
 `schedule:` trigger of both GitHub workflow forms is `ci.schedule` (a cron string, default `"*/30 * * * *"`; `null`
 leaves the trigger out), re-rendered by `l4 upgrade`. The upload of `.l4-out` (the artifact `l4-out`: prompts and agent
@@ -766,7 +766,7 @@ budgets:
 observability:
   log_dir: .l4-out/logs
   redact_env: [L4_FORGE_TOKEN, L4_TRIGGER_TOKEN, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-               CODEX_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, KIRO_API_KEY, TYPESAFE_API_KEY, L4_GITHUB_APP_KEY]
+               CODEX_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, KIRO_API_KEY, OPENCODE_API_KEY, TYPESAFE_API_KEY, L4_GITHUB_APP_KEY]
   redact_forge_urls: true      # the forge host is `<forge>` in everything the harness commits (L4-OBS-002)
 ```
 
@@ -1942,6 +1942,18 @@ A bracketed credential variable reaches only its own profile's agent process (L4
 
 [V for `CLAUDE_CODE_OAUTH_TOKEN` on GitHub-hosted runners, docs/spikes/06 finding 10.]
 
+**L4-PRV-028** OpenCode's own providers take their key from OPENCODE_API_KEY. An `opencode` profile with `auth: api_key`, a model of OpenCode's own providers (`opencode/…` or `opencode-go/…`) and
+no custom provider in its options SHALL have `OPENCODE_API_KEY` as its credential variable (L4-PRV-024), as design D16
+says:
+- the generated GitHub job names it;
+- the probe's auth step passes on its presence and fails with `OPENCODE_API_KEY is not set` when it is unset, before
+  any model call;
+- the probe's hello and the agent run receive it, the run through the credential loader (never in the sandbox
+  environment or in an argv);
+- it is redacted by default.
+
+A free model without `auth: api_key`, a subscription profile and a profile with a custom provider MUST be unchanged.
+
 `claude-code` implementer, auth `subscription` [V as one command, spikes/01, except `--mcp-config F`, and `--safe-mode` replaced by `--setting-sources "" --disable-slash-commands` (HB-X1: V live, `/context` and hooks canaries on the runner; a model call was not possible, the runner's OAuth session had expired)]:
 
 ```
@@ -2097,7 +2109,7 @@ verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the str
 | Step | Meaning | Examples |
 |---|---|---|
 | `binary` | executable on PATH, version ≥ profile `min_version` | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY` or `KIRO_API_KEY`, L4-PRV-024) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
 | `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
 | `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner] |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
@@ -3125,12 +3137,12 @@ A person selects a batch of spec units, the order between them and the limits, h
 once. L4 then runs the units in dependency order. With `merge: human` people merge and L4 only orders. With
 `merge: auto` L4 merges each verified unit into the integration branch under a guard that the git server enforces,
 checks the result, and goes on until the plan is complete or something stops it. Promotion of the integration branch
-is never automatic. The decisions are in `openspec/changes/yolo-mode/design.md` (D1..D14); the guide for operators is
+is never automatic. The decisions are in `openspec/changes/yolo-mode/design.md` (D1..D16); the guide for operators is
 `docs/yolo-mode.md`.
 
 **L4-YOLO-001** The delivery plan file. A plan SHALL be the file `.l4/plans/<plan-id>.json` on the base branch, with schema `l4/delivery-plan@1` as design D1
 says. The file name MUST equal `<plan-id>.json`. Unknown fields MUST be refused. `external_dependencies` that is not
-empty MUST be refused with `external dependencies are not supported in this version`.
+empty MUST be refused with `external dependencies are not supported in this version`. The file MAY have `exclude: [{id, reason}]` (L4-YOLO-017); it is part of the file and of its digest.
 
 **L4-YOLO-002** Admission is deterministic. Admission SHALL check, at the target head: unique unit and batch ids; every unit known to a spec provider; every
 dependency resolvable; no cycle in the graph of units and batches (design D2); known acceptance profiles;
@@ -3237,6 +3249,45 @@ open a PR or merge to the promotion target.
 **L4-YOLO-016** Documentation. The runbook SHALL have a section on delivery plans (states, commands, every stop and how to clear it) in the style of
 the existing runbook. `docs/yolo-mode.md` SHALL describe the plan file, the two merge modes and their safety rules. The
 skill's operate reference SHALL list the `l4 yolo` commands.
+
+**L4-YOLO-017** Exclusions in the plan file. A plan file MAY list `exclude: [{"id": <unit id>, "reason": <text>}]`: units that this plan deliberately does not
+deliver (design D15). The reason MUST be non-empty text of at most 200 characters, and unknown fields MUST be
+refused. Admission MUST refuse a plan that lists the same unit in `exclude` and in a batch (`excluded_and_planned`), the
+same unit twice in `exclude` (`duplicate_id`), or an excluded id that no spec provider knows (`unknown_unit`). An
+excluded unit MUST NOT be held by the plan, so it runs as it would without the plan. The exclusions are part of the plan
+file, so an edit of them after the activation stops the plan (`inputs_changed`) like any other edit.
+
+**L4-YOLO-018** `l4 yolo draft` scaffolds and updates a plan file. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
+the working tree and nothing else: no commit, no push, no ref, no model call. Without `--update` it MUST refuse an
+existing file (exit 2). It lists every unit the spec providers find in the working tree that no plan file lists
+(planned or excluded) and that is not a derived unit whose parent a plan file lists. It puts each unit that is not
+finished into one batch `unplanned` with no dependencies, and each finished unit (`merged`, `archived`) into `exclude`
+with the reason `already <phase>`. `--target` defaults to `forge.base_branch` and `--merge` to `human`. With `--update`
+the file MUST exist and be a valid plan. Units found as above are added to the batch `unplanned` (created last when
+missing) or to `exclude`. A listed unit that the providers no longer find is reported as `gone: <id>` and kept.
+Nothing else in the file changes. The command MUST NOT invent a dependency. It prints what it added and the next steps
+(edit the dependencies and batches, run the validator, `l4 yolo check`). When the plan's local ref says it is active or
+waiting, `--update` warns that the edit stops the plan.
+
+**L4-YOLO-019** A standalone plan validator. The harness SHALL ship `validate_plan.py`, a script that needs only the Python standard library. It is in two places,
+`scripts/validate_plan.py` and `plugins/l4/skills/l4/scripts/validate_plan.py`, and the two copies MUST be byte-equal.
+It reads every `.l4/plans/*.json` of a working tree and finds the units with the providers' discovery rules (design
+D15). It MUST report, with the codes of admission where they are the same check:
+- a plan file that is not a valid plan (schema, file name, limits);
+- `duplicate_id`, `self_dependency`, `unknown_dependency`, `cycle` (on admission's graph of units and batches),
+  `unknown_unit`, `excluded_and_planned`, `external_dependencies` and `empty_plan`;
+- across all plan files: `uncovered`, a unit that no plan lists (planned or excluded), except a derived unit whose
+  parent is listed;
+- `covered_twice`, a unit listed in two plan files.
+
+It exits 0 when everything is valid, 1 with one line per problem, and 2 on a usage or read error. On success it MUST
+print, for each plan, its dispatch order (the same order as `l4 yolo check`) and its waves (design D15). `--json` MUST
+print the same as one JSON object. The script MUST NOT write anything, use the network or run git.
+
+**L4-YOLO-020** The skill teaches plan creation and update. The skill SHALL have the reference `plugins/l4/skills/l4/references/plan.md`, linked from `SKILL.md`, that teaches an
+agent to create and update a plan from OpenSpec changes and Kiro specs (design D15). It MUST say that the agent never
+activates, resumes or cancels a plan for a person, never writes `refs/l4/plans/*`, and sets `merge: auto` only when the
+person asks and `forge.merge_policy` is `auto`.
 
 ---
 
@@ -3952,7 +4003,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 17 | `human-feedback` | a person asks for changes with `l4 feedback add` and a push: `feedback.md` in the unit folder (kinds refactor, duplication, tests, config, behaviour), items taken at step 0 of the next round into a fix unit task of their kind (a refactor chore with frozen tests, a test chore, or red/green against a written or built criterion), the judge's check of every item, a feedback round limit apart from `max_fix_rounds`, lessons from feedback, follow-up units after the merge, Kiro fix units as bugfix specs (L4-KSP-005) (L4-FBK-001..013; approved 2026-10-12, `openspec/changes/human-feedback/`) | the Kiro dummy-repository run of L4-FBK-013 |
 | 18 | `adoption-kit` | the harness as a GitHub setup action (`.github/actions/l4`: source `action` for the owner's private repositories with no key, source `repository` with a deploy key for the rest), separate caches for the harness and the agent CLIs, `l4 init --action` (a short workflow and one `uses:` pin, no `.l4/bin/`), `--harness-ref` version pins and Dependabot, slim release commits, the harness repository's own sharded test CI, and an installable `l4` skill (L4-ACT-001..008, L4-SKL-001..002; approved 2026-10-12 after spike `l4-action`, `openspec/changes/adoption-kit/`) | the dummy-repository runs of L4-ACT-008 |
 | 19 | `operator-commands` | a stuck unit moves with one command or one label: `l4 retry` / `l4:retry` continues it by its phase and starts a run, `l4 restart` / `l4:restart` starts it over on a new branch and keeps the old head as a ref, `l4:resume` and `l4 resume` still work; the cause of every stop recorded and shown (`REASON` column, `Next:` line); a repeated failure escalates as `same_failure`; a secret halt, a capacity park from `fixing`, a closed PR, a deleted branch and a dismissed verdict question are no longer dead ends; the forge target found from `origin`; the fixer's green gate runs under coverage; a spec push to the unit branch re-enters the unit, and a changed Kiro criterion reopens the tasks that cite it (L4-OPS-001..015; approved 2026-10-13, `openspec/changes/operator-commands/`) | the GitHub dummy-repository runs of L4-OPS-013 |
-| 20 | `yolo-mode` | delivery plans: a plan file `.l4/plans/<id>.json` orders units and batches by dependency; admission is deterministic, a readiness review runs in CI, one person activates it; units run one at a time in dependency order, each started only after the units it needs are merged into the target and pass their acceptance profile; with `merge: auto` the harness merges each verified unit by a fast-forward push guarded by the git server, then checks the merged revision, and stops safely at the first failure; limits never reset; the plan state is a leased ref; a report and receipts; no promotion (L4-YOLO-001..016; `openspec/changes/yolo-mode/`) | the live run on the GitHub test repository of tasks 9.1..9.4 |
+| 20 | `yolo-mode` | delivery plans: a plan file `.l4/plans/<id>.json` orders units and batches by dependency; admission is deterministic, a readiness review runs in CI, one person activates it; units run one at a time in dependency order, each started only after the units it needs are merged into the target and pass their acceptance profile; with `merge: auto` the harness merges each verified unit by a fast-forward push guarded by the git server, then checks the merged revision, and stops safely at the first failure; limits never reset; the plan state is a leased ref; a report and receipts; no promotion; exclusions, `l4 yolo draft`, the standalone validator and the plan skill reference (L4-YOLO-001..020; `openspec/changes/yolo-mode/`) | the live run on the GitHub test repository of tasks 9.1..9.4 |
 
 ---
 
@@ -6924,6 +6975,65 @@ scenario is a spec defect (§26).
 - **Given** a plan that was cancelled, with its file still on the target, and a unit `a` that it lists
 - **When** a CI run happens and `l4 plan` runs
 - **Then** no branch of `a` is created, `l4 plan` shows `held by plan p1 (cancelled)`, and the unit is released only when it is removed from the file or the file is removed
+
+#### SCN-YOLO-35 (+) An excluded unit is not held · L4-YOLO-017
+- **Given** an active plan p1 whose file lists `kiro:pick-priority` in `exclude` with the reason `in review before the plan`
+- **When** a CI run looks for work
+- **Then** `kiro:pick-priority` runs as it would without a plan, and `l4 yolo status p1` lists it under `excluded` with the reason
+
+#### SCN-YOLO-36 (−) A unit that is both planned and excluded is refused · L4-YOLO-017
+- **Given** a plan file that lists `openspec:a` in a batch and in `exclude`
+- **When** `l4 yolo check p1` runs
+- **Then** it exits 2 with the finding `excluded_and_planned` for `openspec:a`, and nothing is written
+
+#### SCN-YOLO-37 (+) A draft lists every unplanned unit without dependencies · L4-YOLO-018
+- **Given** three OpenSpec changes and two Kiro specs in the working tree, one Kiro spec already merged, and no plan file
+- **When** `l4 yolo draft p1` runs
+- **Then** `.l4/plans/p1.json` is a valid plan with the four other units in batch `unplanned`, each with `depends_on: []`, the merged spec in `exclude` with the reason `already merged`, `target` equal to `forge.base_branch` and `merge: human`; nothing is committed
+
+#### SCN-YOLO-38 (+) An update adds a new spec and keeps the person's edits · L4-YOLO-018
+- **Given** a plan file p1 edited by a person (batches and dependencies), and a new OpenSpec change `openspec:z` that no plan lists
+- **When** `l4 yolo draft p1 --update` runs
+- **Then** `openspec:z` is appended to batch `unplanned` with no dependencies, every other batch, unit, dependency and exclusion is unchanged, and the output says `added: openspec:z`
+
+#### SCN-YOLO-39 (−) A cycle through a batch is found · L4-YOLO-019
+- **Given** a plan where batch b2 depends on batch b1, and a unit of b1 depends on a unit of b2
+- **When** `python3 scripts/validate_plan.py` runs
+- **Then** it exits 1 with `<plan>: cycle: …` naming the path, as `l4 yolo check` does
+
+#### SCN-YOLO-40 (−) A spec that no plan covers is found · L4-YOLO-019
+- **Given** two plan files, and a Kiro spec `kiro:new-report` listed in neither
+- **When** the validator runs
+- **Then** it exits 1 with `uncovered: kiro:new-report (add it to a plan or to a plan's exclude with a reason)`
+
+#### SCN-YOLO-41 (+) A valid plan prints its order and waves · L4-YOLO-019
+- **Given** a plan where D and E depend on A, B and C, F depends on D, G on E, H on F, and I and J depend on nothing
+- **When** the validator runs
+- **Then** it exits 0 and prints wave 1 `A, B, C, I, J`, wave 2 `D, E`, wave 3 `F, G` and wave 4 `H`, and the dispatch order of `l4 yolo check`
+
+#### SCN-YOLO-42 (+) An agent with the skill writes a valid plan · L4-YOLO-020
+- **Given** ten specs with dependencies that their proposals state, and the skill
+- **When** an agent is asked to plan their delivery
+- **Then** the plan file passes the validator, every dependency it lists is stated in the specs, and the agent did not activate the plan
+- **And** the agent started from `l4 yolo draft`, gave one line of evidence per dependency in the commit message, used batches for acceptance checks, excluded specs only with a reason, ran the validator and `l4 yolo check`, and committed and pushed only the plan file
+- **And** an edit of an active plan is described as stopping it until a new review and activation
+
+### 23.21 OpenCode's own key (PRV)
+
+#### SCN-PRV-75 (+) The GitHub job names the OpenCode key · L4-PRV-028
+- **Given** an implementer profile `adapter: opencode`, `model: opencode-go/deepseek-v4.1-flash`, `auth: api_key`
+- **When** `l4 init --ci github` or `l4 upgrade` renders the workflow
+- **Then** the `l4` job's `env` has `OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}`
+
+#### SCN-PRV-76 (−) An unset key fails the auth step with no model call · L4-PRV-028
+- **Given** that profile and no `OPENCODE_API_KEY` in the harness environment
+- **When** the availability probe runs
+- **Then** the auth step fails with `OPENCODE_API_KEY is not set`, no hello runs, and the role walks on to the next profile
+
+#### SCN-PRV-77 (+) The run gets the key through the loader only · L4-PRV-028
+- **Given** that profile and `OPENCODE_API_KEY` set in the harness environment
+- **When** the implementer runs
+- **Then** the agent process has `OPENCODE_API_KEY` set by the credential loader, and the value is in no argv, in no sandbox `--setenv` and in no log
 
 ## 24. Definition of done
 
