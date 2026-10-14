@@ -9,7 +9,11 @@ is every configured gate kind, and `none` is no check.
 A profile that resolves to no gate is an `error` with the detail `profile <name> has no gate to run`, never a pass: a
 check that ran nothing proves nothing. The first failing required gate ends the run (`fail`); a failing `extra` gate
 that is not `required` is recorded and does not fail it. A gate kind that is not configured is skipped and named in
-the detail. An `e2e` gate that needs a server (`gates.e2e.serve`) is an `error`: this runner does not start servers.
+the detail. A profile passes only when at least one required gate other than `setup` ran and passed; a run of
+`setup` and non-required extras alone is an `error` (R7): setup proves nothing about the merged code, and an extra
+that may fail proves nothing either. This runner does not start servers (`gates.e2e.serve`): `all` leaves the `e2e`
+gate out and says so in the detail (R7), and a named profile that lists `e2e` while a server is configured is an
+`error` (admission refuses it earlier, `unsupported_profile`).
 Anything the runner raises is an `error` too, so the plan step stops with a reason instead of crashing.
 """
 
@@ -56,12 +60,16 @@ def profile_kinds(cfg: L4Config, profile: str, profiles: Mapping[str, Sequence[s
     return kinds
 
 
-def _gates_of(cfg: L4Config, kinds: Sequence[str]) -> tuple[list[tuple[str, str, GateSpec, bool, bool]], list[str]]:
-    """(name, kind, spec, required, network) of every configured gate of `kinds`, and the kinds with none."""
+def _gates_of(
+    cfg: L4Config, kinds: Sequence[str], *, skip_served: bool = False
+) -> tuple[list[tuple[str, str, GateSpec, bool, bool]], list[str], list[str]]:
+    """(name, kind, spec, required, network) of every configured gate of `kinds`, the kinds with none, and the kinds
+    left out because they need an app server (`skip_served`, for `all`; otherwise such a gate raises `_NoGate`)."""
     timeout = duration_seconds(cfg.gates.timeout)
     allowed = cfg.gates.network == "allow"
     found: list[tuple[str, str, GateSpec, bool, bool]] = []
     skipped: list[str] = []
+    left_out: list[str] = []
     for kind in kinds:
         before = len(found)
         if kind in ("setup", "build", "lint", "typecheck"):
@@ -75,6 +83,9 @@ def _gates_of(cfg: L4Config, kinds: Sequence[str]) -> tuple[list[tuple[str, str,
             found.append(("test", kind, spec, True, allowed))
         elif kind == "e2e" and cfg.gates.e2e.command.strip():
             e2e = cfg.gates.e2e
+            if e2e.serve.command.strip() and skip_served:
+                left_out.append(kind)
+                continue
             if e2e.serve.command.strip():
                 raise _NoGate("gate e2e needs an app server (gates.e2e.serve), which a profile run does not start")
             spec = GateSpec("e2e", e2e.command, tuple(e2e.reports), e2e.format, timeout)
@@ -86,7 +97,13 @@ def _gates_of(cfg: L4Config, kinds: Sequence[str]) -> tuple[list[tuple[str, str,
                     found.append((kind, kind, spec, extra.required, allowed))
         if len(found) == before:
             skipped.append(kind)
-    return found, skipped
+    return found, skipped, left_out
+
+
+def _left_out_note(left_out: Sequence[str]) -> str:
+    if not left_out:
+        return ""
+    return f"; left out (gates.e2e.serve is set and this runner starts no server): {', '.join(left_out)}"
 
 
 def run_profile(
@@ -106,11 +123,12 @@ def run_profile(
         return ProfileResult("error", revision, profile, detail=f"revision {revision} is not in the repository")
     try:
         kinds = profile_kinds(cfg, profile, profiles)
-        planned, skipped = _gates_of(cfg, kinds)
+        planned, skipped, left_out = _gates_of(cfg, kinds, skip_served=profile == PROFILE_ALL)
     except (ValueError, _NoGate) as exc:
         return ProfileResult("error", sha, profile, detail=str(exc))
+    served = _left_out_note(left_out)
     if not planned:
-        return ProfileResult("error", sha, profile, detail=f"profile {profile} has no gate to run")
+        return ProfileResult("error", sha, profile, detail=f"profile {profile} has no gate to run{served}")
     cache = cache_root(app.environ, repo=app.repo)
     area = cache.joinpath(*AREA)
     area.mkdir(parents=True, exist_ok=True)
@@ -121,7 +139,7 @@ def run_profile(
             git.run("worktree", "add", "--quiet", "--detach", str(tree), sha)
         except GitError as exc:
             return ProfileResult("error", sha, profile, detail=f"cannot check out {sha[:10]}: {exc}")
-        return _run(app, cfg, git, sha, profile, tree, work, planned, skipped, sandbox)
+        return _run(app, cfg, git, sha, profile, tree, work, planned, skipped, sandbox, served)
     except Exception as exc:  # the runner's own failure is a stop with a reason, not a crash of the plan step
         return ProfileResult("error", sha, profile, detail=f"{type(exc).__name__}: {exc}")
     finally:
@@ -141,6 +159,7 @@ def _run(
     planned: Sequence[tuple[str, str, GateSpec, bool, bool]],
     skipped: Sequence[str],
     sandbox: Sandbox | None,
+    served: str = "",
 ) -> ProfileResult:
     chosen = sandbox or select_sandbox(cfg.sandbox, app.environ, repo=app.repo)
     cache = cache_root(app.environ, repo=app.repo)
@@ -168,6 +187,15 @@ def _run(
             failure = f"{name} failed ({result.reason}); log {result.log_path}"
             break
     note = f"; skipped (not configured): {', '.join(skipped)}" if skipped else ""
+    note += served
     if failure:
         return ProfileResult("fail", sha, profile, tuple(results), failure + note)
+    proved = any(
+        result.status == "pass" and required and kind != "setup"
+        for result, (_name, kind, _spec, required, _network) in zip(results, planned, strict=True)
+    )
+    if not proved:
+        ran = ", ".join(f"{r.name} {r.status}" for r in results)
+        detail = f"no required gate other than setup passed ({ran}){note}"
+        return ProfileResult("error", sha, profile, tuple(results), detail)
     return ProfileResult("pass", sha, profile, tuple(results), f"{len(results)} gate(s) passed{note}")
