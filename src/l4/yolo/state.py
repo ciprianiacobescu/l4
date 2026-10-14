@@ -5,14 +5,26 @@
 - `refused`, `admitted`, `reviewed` before activation; `active` after `plan.activated`.
 - `waiting` on `plan.waiting`, until the next dispatch, merge request, merge or integration, or a resume.
 - `stopped` on `plan.stopped`, until `plan.resumed` (back to `active`) or a new `plan.activated` (the re-activation
-  after `inputs_changed`: the digests and limits are replaced, the usage is kept).
+  after `inputs_changed`: the digests, limits and `activated_digest` are replaced, the usage is kept).
 - `cancelled` and `completed` are final: no later event changes the status.
 
-Usage never goes down. `plan.charged{unit, cost_usd, runs, attempts}` carries the unit's own totals (D11: the cost of
-the unit's fold, which survives a restart; 1 + restarts), so each figure is the maximum seen for that unit, and the
-plan's cost and runs are the sums over the units. A repeated charge therefore counts once, and a restart that resets the
-unit's counters never lowers the plan's. `plan.resumed{extend}` adds to `extended`: `cost_usd` and `runs` numbers, and
-`attempts` either a number (every unit, kept under the key `*`) or a `{unit: n}` mapping.
+The activated plan is frozen (R2, D4, D10). `plan.activated` freezes the plan digest as `activated_digest`. While the
+plan is activated (active, waiting, stopped) `plan.admitted`, `plan.refused` and `plan.reviewed` change only the review
+fields (`findings`, `review`, `review_digests`, `review_plan_digest`): never `activated_digest`, `plan_digest`, `order`,
+`merge` or the status. The latest admission is remembered, and a re-activation of that very plan digest adopts its
+order and merge mode. `plan.stopped` and `plan.resumed` before any activation are ignored, so a plan that was never
+activated cannot become `active` without digests or limits.
+
+Usage never goes down (R1, D11). A restart starts a new unit ledger, so the unit's own totals cover one attempt.
+`plan.charged{unit, attempt, cost_usd, runs}` carries the totals of one attempt of one unit. The fold keeps the maximum
+per (unit, attempt) and sums them: a repeated charge counts once, and a restart that zeroes the unit's counters never
+lowers the plan's. The attempts used by a unit are the highest attempt charged. A charge without `attempt` (an older
+ledger) counts as attempt 1. Keys that start with `plan:` (the judge's cost, `plan:review`, attempt 0) count in the
+plan's cost and runs but are not units: they have no entry in `used.attempts`.
+
+`plan.resumed{extend}` adds to `extended`: `cost_usd` and `runs` numbers, and `attempts` either a number (every unit,
+kept under the key `*`) or a `{unit: n}` mapping. An `extend.deadline` raises `extended_deadline` (the latest wins; a
+time without a zone is read as UTC).
 
 `unit.dispatched` resets the unit's `stale_merges` when its attempts grew since its last `stale` refusal (a new attempt
 gets its one `stale` retry, D8). An event type the fold does not know is ignored (forward compatible) and logged at
@@ -21,6 +33,7 @@ debug.
 
 import logging
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from typing import Any
 
 from l4.yolo.model import PlanEvent, PlanState
@@ -28,9 +41,11 @@ from l4.yolo.model import PlanEvent, PlanState
 log = logging.getLogger("l4.yolo.state")
 
 STALE = "stale"
+PLAN_KEY_PREFIX = "plan:"  # a `plan.charged` key that is not a unit (R1)
 ALL_UNITS = "*"
 _FINAL = ("cancelled", "completed")
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
+MERGE = ("human", "auto")
 
 
 def _text(value: Any) -> str | None:
@@ -41,11 +56,29 @@ def _number(value: Any) -> float:
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
 
 
+def is_unit_key(key: str) -> bool:
+    """False for the keys of `plan.charged` that are not units (`plan:review`, R1)."""
+    return not key.startswith(PLAN_KEY_PREFIX)
+
+
+def parse_time(value: Any) -> datetime | None:
+    """An ISO-8601 time as an aware datetime (a naive one is read as UTC); None when it is not one."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
 def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
     """The state of the plan `plan_id` after `events`."""
     state = PlanState(plan_id=plan_id)
-    cost: dict[str, float] = {}
-    runs: dict[str, int] = {}
+    cost: dict[tuple[str, int], float] = {}
+    runs: dict[tuple[str, int], int] = {}
+    activated = False
+    admitted: tuple[str | None, list[str], str | None] = (None, [], None)  # latest admission: digest, order, merge
     stale_at: dict[str, int] = {}  # unit -> its attempts at its latest `stale` refusal
 
     def wake() -> None:
@@ -57,19 +90,20 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
         data, kind = event.data, event.type
         unit = _text(data.get("unit"))
         if kind == "plan.admitted":
-            if state.status in _BEFORE_ACTIVATION:
-                state.status = "admitted"
-            state.plan_digest = _text(data.get("plan_digest"))
-            state.order = [str(u) for u in data.get("order") or []]
+            order = [str(u) for u in data.get("order") or []]
+            admitted = (_text(data.get("plan_digest")), order, data["merge"] if data.get("merge") in MERGE else None)
             state.findings = []
-            if data.get("merge") in ("human", "auto"):
-                state.merge = data["merge"]
+            if not activated and state.status in _BEFORE_ACTIVATION:
+                state.status = "admitted"
+                state.plan_digest, state.order = admitted[0], order
+                if admitted[2]:
+                    state.merge = admitted[2]  # type: ignore[assignment]
         elif kind == "plan.refused":
-            if state.status in _BEFORE_ACTIVATION:
+            if not activated and state.status in _BEFORE_ACTIVATION:
                 state.status = "refused"
             state.findings = [{str(k): str(v) for k, v in f.items()} for f in data.get("findings") or []]
         elif kind == "plan.reviewed":
-            if state.status in _BEFORE_ACTIVATION:
+            if not activated and state.status in _BEFORE_ACTIVATION:
                 state.status = "reviewed"
             state.review_plan_digest = _text(data.get("plan_digest"))
             state.review, state.review_digests = {}, {}
@@ -79,15 +113,20 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                         state.review[f"{key}{ident}"] = str(entry["verdict"])
                         if entry.get("digest") is not None:
                             state.review_digests[f"{key}{ident}"] = str(entry["digest"])
-        elif kind == "plan.activated":
-            if state.status not in _FINAL:
-                state.status = "active"
+        elif kind == "plan.activated" and state.status not in _FINAL:
+            activated = True
+            state.status = "active"
             state.plan_digest = _text(data.get("plan_digest")) or state.plan_digest
+            state.activated_digest = state.plan_digest
+            if admitted[0] is not None and admitted[0] == state.plan_digest:
+                state.order = list(admitted[1])
+                if admitted[2]:
+                    state.merge = admitted[2]  # type: ignore[assignment]
             state.digests = {str(k): str(v) for k, v in (data.get("digests") or {}).items()}
             state.limits = dict(data.get("limits") or {})
             state.activated_by = _text(data.get("by"))
             state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
-            if data.get("merge") in ("human", "auto"):
+            if data.get("merge") in MERGE:
                 state.merge = data["merge"]
         elif kind == "unit.dispatched" and unit:
             state.current = unit
@@ -122,7 +161,7 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 state.status = "waiting"
                 state.wait_reason = _text(data.get("reason"))
         elif kind == "plan.stopped":
-            if state.status not in _FINAL:
+            if activated and state.status not in _FINAL:
                 state.status = "stopped"
                 state.stop_reason, state.stop_detail, state.stop_unit = (
                     _text(data.get("reason")),
@@ -131,18 +170,21 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 )
                 state.wait_reason = None
         elif kind == "plan.resumed":
-            if state.status in ("stopped", "waiting"):
+            if activated and state.status in ("stopped", "waiting"):
                 state.status = "active"
                 state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
-                _extend(state, data.get("extend"))
+                apply_extend(state, data.get("extend"))
         elif kind == "plan.cancelled":
             if state.status not in _FINAL:
                 state.status = "cancelled"
                 state.wait_reason = None
         elif kind == "plan.charged" and unit:
-            cost[unit] = max(cost.get(unit, 0.0), _number(data.get("cost_usd")))
-            runs[unit] = max(runs.get(unit, 0), int(_number(data.get("runs"))))
-            state.used.attempts[unit] = max(state.used.attempts.get(unit, 0), int(_number(data.get("attempts"))))
+            attempt = int(_number(data["attempt"])) if "attempt" in data else 1
+            key = (unit, attempt)
+            cost[key] = max(cost.get(key, 0.0), _number(data.get("cost_usd")))
+            runs[key] = max(runs.get(key, 0), int(_number(data.get("runs"))))
+            if is_unit_key(unit):
+                state.used.attempts[unit] = max(state.used.attempts.get(unit, 0), attempt)
             state.used.cost_usd, state.used.runs = sum(cost.values()), sum(runs.values())
         elif kind == "plan.completed":
             if state.status not in _FINAL:
@@ -155,11 +197,15 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
     return state
 
 
-def _extend(state: PlanState, extend: Any) -> None:
+def apply_extend(state: PlanState, extend: Any) -> None:
+    """Add what `plan.resumed{extend}` carries to `state.extended` (the fold and `limits.resume_allows` share it)."""
     if not isinstance(extend, dict):
         return
     state.extended.cost_usd += _number(extend.get("cost_usd"))
     state.extended.runs += int(_number(extend.get("runs")))
+    later = parse_time(extend.get("deadline"))
+    if later is not None and (state.extended_deadline is None or later > state.extended_deadline):
+        state.extended_deadline = later.astimezone(UTC)
     attempts = extend.get("attempts")
     if isinstance(attempts, dict):
         for unit, n in attempts.items():
