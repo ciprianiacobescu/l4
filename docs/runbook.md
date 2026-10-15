@@ -482,7 +482,7 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 | `l4 status`, `l4 plan` | No | No | No |
 | `l4 plan --sweep` | No | No | Yes |
 | `l4 feedback …` | No | No | No (git only) |
-| `l4 retry`, `l4 restart` | No | No | Yes. The push, the labels and the start of a run need it. |
+| `l4 retry`, `l4 restart` | No | No | Yes. The labels and the start of a run need it. The push uses your own git credentials when the variable is empty. |
 | `l4 resume` | No | No | Yes, so that the note and the labels change |
 | `l4 archive` | No | No | Yes |
 | `l4 run`, `l4 verify` | **Yes** | **Yes** | Yes |
@@ -1142,12 +1142,11 @@ promotes. The harness then cuts unit branches from that branch and opens their P
    GitHub starts the schedule and a dispatched run only from the file on the default branch. Copy the file again
    after every `l4 upgrade`: a stale copy runs the old pin. A run with a pin other than the base's does no work and
    prints a warning that names both commits (doctor row `CFG-008`).
-5a. Run `l4 setup github`. It adds `main` to the deployment branches of the environment `l4` (a job that runs on the
+6. Run `l4 setup github`. It adds `main` to the deployment branches of the environment `l4` (a job that runs on the
    default branch cannot read the environment's secrets otherwise), and it checks that `main` has the workflow file.
-   Run it after step 5 is merged: until then the dispatch answers 404 and the row is `FAILED`.
-
-6. Merge a spec into `l4/main` to start its unit.
-7. Promote `l4/main` to `main` with a PR, when you are ready.
+   Run it after the file from step 5 is on `main`: until then the dispatch answers 404 and the row is `FAILED`.
+7. Merge a spec into `l4/main` to start its unit.
+8. Promote `l4/main` to `main` with a PR, when you are ready.
 
 > **CAUTION:** Merge `main` into `l4/main` after each change on `main`. If you do not, the base merge of verification
 > can find conflicts (7.7).
