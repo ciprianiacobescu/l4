@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import decimal
+import fnmatch
 import heapq
 import json
 import os
@@ -62,7 +63,8 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
   invalid (schema, file name, limits), duplicate_id, self_dependency, unknown_dependency, cycle, unknown_unit,
   excluded_and_planned, external_dependencies, empty_plan; across the plan files: uncovered (a spec no plan lists,
   planned or excluded, except a <parent>-fix-<n> or <parent>-followup-<n> unit whose parent is listed) and
-  covered_twice (a unit planned in two plan files); for each OpenSpec unit that a plan file plans:
+  covered_twice (a unit planned in two plan files); `yolo.hold` makes a spec it matches count as covered. For each
+  OpenSpec unit that a plan file plans:
   spec_no_baseline (a MODIFIED, RENAMED or REMOVED section in a delta `specs/<capability>/spec.md` whose capability
   has no openspec/specs/<capability>/spec.md in the working tree) and spec_no_purpose (the delta of such a capability
   has no `## Purpose` of at least 50 characters); and material_over_budget: a file the readiness review would cut or
@@ -81,7 +83,9 @@ unknown_unit).
 
 The frameworks and roots come from .l4/config.yaml (spec.frameworks, spec.openspec.root, spec.kiro.root) when it uses
 the block style `l4 init` writes (keys may be quoted, a byte order mark is ignored); anything else falls back to
-both frameworks, `openspec` and `.kiro/specs`, with a warning. The flags override the file.
+both frameworks, `openspec` and `.kiro/specs`, with a warning. The flags override the file. `yolo.hold` (unit ids
+and fnmatch patterns) is read the same way: a spec it matches counts as covered; a yolo block in another style is
+ignored, with a warning.
 Exit 0 valid, 1 problems, 2 usage or read error.
 """
 
@@ -421,23 +425,25 @@ def _parse_map(lines: list[tuple[int, str]], i: int, indent: int) -> tuple[dict[
     return out, i
 
 
-def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
-    """(the `spec` mapping of .l4/config.yaml, warnings). {} when the file has no `spec` key."""
+def _config_rows(repo: Path) -> list[str] | str:
+    """The rows of .l4/config.yaml, or the warning that says why they cannot be read."""
     path = repo / ".l4" / "config.yaml"
     try:
-        text = path.read_text(encoding="utf-8-sig")  # a byte order mark is not part of the first key
+        return path.read_text(encoding="utf-8-sig").splitlines()  # a byte order mark is not part of the first key
     except FileNotFoundError:
-        return {}, [f"{path.relative_to(repo).as_posix()} not found: using the default frameworks and roots"]
+        return f"{path.relative_to(repo).as_posix()} not found: using the default frameworks and roots"
     except (OSError, UnicodeDecodeError) as exc:
-        return {}, [
-            f".l4/config.yaml cannot be read ({exc.__class__.__name__}): using the default frameworks and roots"
-        ]
-    rows = text.splitlines()
-    start = next((n for n, row in enumerate(rows) if re.match(SPEC_KEY + r"\s*(#.*)?$", row)), None)
+        return f".l4/config.yaml cannot be read ({exc.__class__.__name__}): using the default frameworks and roots"
+
+
+def _top_block(rows: list[str], key: str) -> tuple[dict[str, object], str | None]:
+    """(the mapping under the top-level `key`, why it cannot be read or None). {} when the file has no such key."""
+    key_row = r"""^(?:%s|"%s"|'%s')\s*:""" % ((re.escape(key),) * 3)
+    start = next((n for n, row in enumerate(rows) if re.match(key_row + r"\s*(#.*)?$", row)), None)
     if start is None:
-        if any(re.match(SPEC_KEY, row) for row in rows):
-            return {}, ["spec in .l4/config.yaml is not in block style: using the default frameworks and roots"]
-        return {}, []
+        if any(re.match(key_row, row) for row in rows):
+            return {}, "is not in block style"
+        return {}, None
     block = []
     for row in rows[start + 1 :]:
         if row.strip() and not row.startswith((" ", "\t", "#")):
@@ -445,10 +451,37 @@ def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
         block.append(row)
     try:
         lines = _logical_lines(block)
-        parsed = _parse_map(lines, 0, lines[0][0])[0] if lines else {}
+        return (_parse_map(lines, 0, lines[0][0])[0] if lines else {}), None
     except Unsupported as exc:
-        return {}, [f"spec in .l4/config.yaml is not block style ({exc}): using the default frameworks and roots"]
+        return {}, f"is not block style ({exc})"
+
+
+def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
+    """(the `spec` mapping of .l4/config.yaml, warnings). {} when the file has no `spec` key."""
+    rows = _config_rows(repo)
+    if isinstance(rows, str):
+        return {}, [rows]
+    parsed, why = _top_block(rows, "spec")
+    if why is not None:
+        return {}, [f"spec in .l4/config.yaml {why}: using the default frameworks and roots"]
     return parsed, []
+
+
+def read_yolo_hold(repo: Path) -> tuple[list[str], list[str]]:
+    """(`yolo.hold` of .l4/config.yaml, warnings): unit ids and fnmatch patterns (L4-ADO-011). A file that is missing
+    adds no warning here (`read_spec_config` has said so); one that this reader cannot read holds nothing."""
+    rows = _config_rows(repo)
+    if isinstance(rows, str):
+        return [], []
+    parsed, why = _top_block(rows, "yolo")
+    if why is not None:
+        return [], [f"yolo in .l4/config.yaml {why}: yolo.hold is ignored"]
+    hold = parsed.get("hold")
+    if hold is None:
+        return [], []
+    if not isinstance(hold, list) or not all(isinstance(h, str) and h for h in hold):
+        return [], ["yolo.hold in .l4/config.yaml is not a list of non-empty strings: yolo.hold is ignored"]
+    return [str(h) for h in hold], []
 
 
 def resolve_discovery(repo: Path, args: argparse.Namespace) -> tuple[object, str, str, list[str]]:
@@ -969,6 +1002,8 @@ def read_plan_files(repo: Path) -> list[tuple[str, str]]:
 def validate(repo: Path, args: argparse.Namespace) -> dict:
     units, archived, warnings = discover_units(repo, args)
     known = set(units)
+    hold, hold_warnings = read_yolo_hold(repo)
+    warnings += hold_warnings
     reports = [check_plan(name, text, known, archived) for name, text in read_plan_files(repo)]
     listed: set[str] = set()
     planned_in: dict[str, list[str]] = {}
@@ -978,7 +1013,9 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
             planned_in.setdefault(unit, []).append(report.plan_id)
     coverage: list[tuple[str, str, str]] = []
     for unit in sorted(known):
-        if unit not in listed and not any(p in listed for p in derived_parents(unit)):
+        if unit in listed or any(p in listed for p in derived_parents(unit)):
+            continue
+        if not any(fnmatch.fnmatchcase(unit, pattern) for pattern in hold):
             coverage.append(("uncovered", unit, "add it to a plan or to a plan's exclude with a reason"))
     for unit, plans in sorted(planned_in.items()):
         if len(plans) > 1:

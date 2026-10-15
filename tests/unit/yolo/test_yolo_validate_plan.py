@@ -100,6 +100,7 @@ def test_the_script_needs_only_the_standard_library_and_loads_no_other_module():
         "argparse",
         "datetime",
         "decimal",
+        "fnmatch",
         "heapq",
         "json",
         "os",
@@ -1073,6 +1074,76 @@ def test_the_validator_shows_the_same_characters_as_the_review(tmp_path):
     assert mine.shown == [(p, len(t)) for p, t in folder.files]
 
 
+# --- yolo.hold (L4-ADO-011; SCN-ADO-36) ------------------------------------------------------------------------
+
+
+def config(repo: Path, text: str) -> None:
+    touch(repo, ".l4/config.yaml", text)
+
+
+def test_a_held_unit_is_not_uncovered(repo):  # SCN-ADO-36
+    change(repo, "a")
+    change(repo, "b")
+    config(repo, "yolo:\n  hold:\n    - openspec:a\n")
+    put(repo, plan("p1", [units("openspec:b")]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+
+
+def test_a_unit_no_hold_matches_is_still_uncovered(repo):
+    for name in ("a", "b", "c"):
+        change(repo, name)
+    config(repo, "yolo:\n  hold:\n    - openspec:a\n")
+    put(repo, plan("p1", [units("openspec:b")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "uncovered: openspec:c" in out and "openspec:a" not in out
+
+
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        'yolo:\n  hold: [openspec:a, "openspec:b*"]\n',
+        "yolo:\n  hold:\n  - \"openspec:a\"\n  - 'openspec:b*'\n",
+        "\ufeffversion: 1\nyolo:\n  mode: x\n  hold:\n    - openspec:a\n    - openspec:b*\n",
+        '"yolo":\n  "hold":\n    - openspec:a\n    - openspec:b*\n',
+    ],
+)
+def test_the_hold_reads_lists_patterns_and_quoted_keys(repo, cfg):
+    for name in ("a", "b1", "b2", "c"):
+        change(repo, name)
+    config(repo, cfg)
+    put(repo, plan("p1", [units("openspec:c")]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+
+
+def test_a_pattern_holds_every_unit_no_plan_lists(repo):
+    for name in ("a", "b"):
+        change(repo, name)
+    config(repo, 'yolo:\n  hold:\n    - "*"\n')
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+
+
+def test_a_hold_in_flow_style_yolo_is_ignored_with_a_warning(repo):
+    change(repo, "a")
+    change(repo, "b")
+    config(repo, "yolo: {hold: [openspec:a]}\n")
+    put(repo, plan("p1", [units("openspec:b")]))
+    code, out, err = run(repo)
+    assert code == 1 and "uncovered: openspec:a" in out
+    assert "yolo" in err and "yolo.hold" in err
+
+
+def test_a_malformed_hold_is_ignored_with_a_warning(repo):
+    change(repo, "a")
+    config(repo, "yolo:\n  hold: 5\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, _, err = run(repo)
+    assert code == 0 and "yolo.hold" in err
+
+
 def test_the_help_epilog_names_the_new_checks(repo):
-    for word in ("spec_no_baseline", "spec_no_purpose", "material_over_budget"):
+    for word in ("spec_no_baseline", "spec_no_purpose", "material_over_budget", "yolo.hold"):
         assert word in vp.HELP_EPILOG
