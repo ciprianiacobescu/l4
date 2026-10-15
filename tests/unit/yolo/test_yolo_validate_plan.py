@@ -891,16 +891,18 @@ def test_spec_no_purpose_agrees_with_the_purpose_rule_of_the_harness():
         "wrapped": "## Purpose\n" + ("word " * 5 + "\n") * 3 + "## ADDED Requirements\n",
         "spaces": "## Purpose\n" + "a" + " " * 80 + "b\n## ADDED Requirements\n",
         "bullets": "## Purpose\n- " + "y" * 60 + "\n",
+        "crlf": ("## Purpose\n" + "z" * 60 + "\n\n## ADDED Requirements\n").replace("\n", "\r\n"),
+        "bom": "\ufeff## Purpose\n" + "z" * 60 + "\n",
+        "lower": "## purpose\n" + "z" * 60 + "\n",
+        "comment": "## Purpose\n<!-- " + "z" * 80 + " -->\n\n## ADDED Requirements\n",
+        "comment_and_text": "## Purpose\n<!-- c -->\n" + "z" * 60 + "\n",
     }
     for name, text in cases.items():
         assert vp.purpose_ok(text) == harness_purpose_ok(harness, text), name
 
 
 def harness_purpose_ok(harness, text: str) -> bool:
-    import re
-
-    match = re.search(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
-    return len(harness._flat(match.group(1), 1500) if match else "") >= harness.MIN_PURPOSE_CHARS
+    return len(harness._purpose_of(text.encode())) >= harness.MIN_PURPOSE_CHARS
 
 
 def test_purpose_issues_of_the_harness_agrees_when_it_exists(tmp_path):
@@ -1242,3 +1244,14 @@ def test_a_malformed_hold_is_ignored_with_a_warning(repo):
 def test_the_help_epilog_names_the_new_checks(repo):
     for word in ("spec_no_baseline", "spec_no_purpose", "material_over_budget", "yolo.hold"):
         assert word in vp.HELP_EPILOG
+
+
+def test_a_crlf_delta_is_checked_for_baseline_and_purpose(repo):
+    change(repo, "a")
+    delta(
+        repo, "a", "dreaming", (PURPOSE_60 + "## MODIFIED Requirements\n\n### Requirement: X\n").replace("\n", "\r\n")
+    )
+    put(repo, plan("p1", [units("openspec:a")]))
+    _, out, err = run(repo)
+    assert "spec_no_baseline" in out + err
+    assert "spec_no_purpose" not in out + err

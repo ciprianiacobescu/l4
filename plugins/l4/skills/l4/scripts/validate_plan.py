@@ -54,7 +54,8 @@ TASK_MARKER = re.compile(rb"(?m)^((?:\xef\xbb\xbf)?[ \t\xc2\xa0]*(?:[-*+]|[0-9]{
 # The rules of `l4.specs.openspec` (`MIN_PURPOSE_CHARS`, `MAX_PURPOSE_BYTES`, `_purpose`); a test holds them equal.
 MIN_PURPOSE_CHARS = 50
 MAX_PURPOSE_BYTES = 256 * 1024
-PURPOSE_SECTION = re.compile(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
+PURPOSE_SECTION = re.compile(r"(?im)^##[ \t]+Purpose[ \t]*\n(.*?)(?=^##[ \t]|\Z)", re.S)
+HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 DELTA_SECTION = re.compile(r"^##[ \t]+(MODIFIED|RENAMED|REMOVED)[ \t]+Requirements[ \t]*$", re.M)
 MAP_KEY = re.compile(r"""^(?:"([^"\\]+)"|'([^']+)'|([A-Za-z0-9_.-]+)):(?:\s+(.*))?$""")
 
@@ -216,12 +217,17 @@ def _read_text(path: Path, limit: int = MAX_PURPOSE_BYTES) -> str | None:
         return None
 
 
+def normal_text(text: str) -> str:
+    """A leading BOM and CRLF or CR line endings removed, as OpenSpec reads a spec."""
+    return text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def purpose_ok(text: str) -> bool:
     """`openspec._purpose`: the `## Purpose` section, on one line, has at least MIN_PURPOSE_CHARS characters."""
-    match = PURPOSE_SECTION.search(text)
+    match = PURPOSE_SECTION.search(normal_text(text))
     if not match:
         return False
-    flat = " ".join(match.group(1).split()).lstrip("#>*-+ ")
+    flat = " ".join(HTML_COMMENT.sub(" ", match.group(1)).split()).lstrip("#>*-+ ")
     return len(flat[:1500]) >= MIN_PURPOSE_CHARS
 
 
@@ -245,7 +251,7 @@ def purpose_problems(repo: Path, openspec_root: str, change: str) -> list[tuple[
         baseline = (root / "specs" / entry.name / "spec.md").as_posix()
         if (repo / baseline).is_file():
             continue
-        for kind in dict.fromkeys(m.group(1) for m in DELTA_SECTION.finditer(text)):
+        for kind in dict.fromkeys(m.group(1) for m in DELTA_SECTION.finditer(normal_text(text))):
             found.append(
                 (
                     "spec_no_baseline",
