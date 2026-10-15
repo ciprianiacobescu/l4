@@ -3192,7 +3192,7 @@ at all. The judge's material for a batch shows
 every prerequisite of its units that is not a unit of the batch, the way the material of a unit shows its prerequisites,
 and both state that a prerequisite unit of the plan is delivered and merged into the target before any unit that depends
 on it starts. The text of every `tasks.md` in that material MUST show each task marker as `[ ]`, the reading the digest takes, and the material MUST say that the check marks are the harness's progress. File names, unit ids and batch ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that
-times out or fails MUST record no review: the next run tries again (R9). One plan is reviewed per run.
+times out or fails MUST record no review: the next run tries again (R9). One plan is reviewed per run. Every `plan.reviewed` MUST record the `prompt_version` of the readiness prompt (an event without the key counts as 1), and a review made with a version other than the current one MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`, activation), so a change to the review material or prompt gets the plan reviewed again.
 
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest and the
 limits, and then start a run on the target. It MUST be refused, with exit 2 and the cause, unless: the plan is admitted;

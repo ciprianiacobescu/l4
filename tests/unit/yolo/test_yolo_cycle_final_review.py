@@ -15,6 +15,7 @@ from l4.outcome import UnitOutcome
 from l4.yolo.digest import plan_digest
 from l4.yolo.limits import live_attempt, live_state
 from l4.yolo.model import PlanMoved
+from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.state import fold_plan
 
 from .yolo_cycle_world import CycleWorld, ev, unit_id
@@ -286,7 +287,13 @@ def test_a_review_made_stale_by_another_review_is_dropped_without_a_second_judge
         units = {u: {"verdict": "READY", "digest": d, "findings": []} for u, d in world.digests().items()}
         return [
             ev("plan.admitted", plan_digest=digest, order=[A, B], merge="auto"),
-            ev("plan.reviewed", plan_digest=digest, units=units, batches={"b1": {"verdict": "READY", "findings": []}}),
+            ev(
+                "plan.reviewed",
+                plan_digest=digest,
+                prompt_version=PROMPT_VERSION,
+                units=units,
+                batches={"b1": {"verdict": "READY", "findings": []}},
+            ),
         ]
 
     lose_the_lease_once(world, monkeypatch, another_review)

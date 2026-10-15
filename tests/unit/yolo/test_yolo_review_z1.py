@@ -15,6 +15,7 @@ from l4.yolo.digest import plan_digest
 from l4.yolo.limits import reached_at
 from l4.yolo.model import Plan, PlanState, UnitInfo, load_plan
 from l4.yolo.plans import archived_at, archived_changes
+from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.state import fold_plan
 
 from .yolo_cmd_world import A as CA
@@ -289,6 +290,7 @@ def test_check_review_and_activate_accept_a_plan_that_integrated_an_archived_uni
         cev(
             "plan.reviewed",
             plan_digest=plan_digest(w.plan_text),
+            prompt_version=PROMPT_VERSION,
             units={CA: {"verdict": "READY"}, CB: {"verdict": "READY", "digest": w.digest(CB)}},
             batches={"b1": {"verdict": "READY"}},
         ),

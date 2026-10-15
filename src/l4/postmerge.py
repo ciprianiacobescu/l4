@@ -167,7 +167,10 @@ class PostMergeArchiver:
         self._specs = f"{root}/specs"
         self._push_config = push_auth_config(cfg, app.environ)
         self._worktrees = WorktreeManager(
-            git, base_branch=cfg.forge.base_branch, branch_prefix=cfg.forge.branch_prefix, fetch_config=fetch_config,
+            git,
+            base_branch=cfg.forge.base_branch,
+            branch_prefix=cfg.forge.branch_prefix,
+            fetch_config=fetch_config,
             cache=cache_root(app.environ, repo=app.repo),
         )
 

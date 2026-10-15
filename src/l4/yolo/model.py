@@ -215,6 +215,7 @@ class PlanState(BaseModel):
     order: list[str] = Field(default_factory=list)
     findings: list[dict[str, str]] = Field(default_factory=list)  # of the latest `plan.refused`
     review_plan_digest: str | None = None  # the plan digest the latest review was for
+    review_prompt_version: int = 1  # the readiness prompt version of the latest review (no key in the event: 1)
     review_digests: dict[str, str] = Field(default_factory=dict)  # unit -> digest the latest review was for
     review: dict[str, str] = Field(default_factory=dict)  # unit or `batch:<id>` -> verdict
     digests: dict[str, str] = Field(default_factory=dict)  # frozen at activation: unit -> digest

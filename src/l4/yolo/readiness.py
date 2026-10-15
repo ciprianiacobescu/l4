@@ -52,7 +52,10 @@ from l4.yolo.digest import current_unit_ref, is_excluded, normalise_tasks, unit_
 from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
-PROMPT_VERSION = 1
+# 2: the material changed (tasks.md shown with the digest's normalisation and the note on check marks, prerequisite
+# units of a batch, review 7). A review recorded with another version is stale, `plan.reviewed{prompt_version}`; an
+# event without the key counts as 1.
+PROMPT_VERSION = 2
 MAX_CALLS = 2  # the first answer and one repair prompt
 DEFAULT_TIMEOUT_S = 900
 MAX_FILE_CHARS = 20_000

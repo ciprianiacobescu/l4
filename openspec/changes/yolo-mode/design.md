@@ -198,7 +198,9 @@ Prompt template `src/l4/yolo/prompts/readiness.md`; output schema `src/l4/yolo/s
 - A batch with no acceptance profile only groups units: its material says so, a `batch_acceptance` finding on it is moved to the assumptions, and a NEEDS_REVISION with no blocking or major finding left becomes READY.
 - The reviewer never answers a product question: an open question stays a question (admission refuses open questions).
 - One review per plan digest and unit digests: the CI step reviews a plan when its latest `plan.reviewed` is for other
-  digests.
+  digests, or was made with another `PROMPT_VERSION` (recorded as `prompt_version` in every `plan.reviewed`; an event
+  without the key counts as 1; the version is 2 since the material changed). `l4 yolo status` shows
+  `review: stale (the review prompt changed)` and activation refuses such a review.
 - The adapter call reuses the judge's adapter machinery (`agents/factory.py`, the prompt contract of the judge), with
   the judge's tool restrictions (read-only).
 

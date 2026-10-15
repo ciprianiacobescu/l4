@@ -82,7 +82,7 @@ from l4.yolo.model import (
 )
 from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_files_at, unit_infos
 from l4.yolo.postcheck import run_profile
-from l4.yolo.readiness import review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
 from l4.yolo.report import render_report
 from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
@@ -824,7 +824,11 @@ class _Step:
         batches = {
             bid: {"verdict": v.verdict, "findings": list(v.findings)} for bid, v in review_batches(plan, result).items()
         }
-        events.append(self._event("plan.reviewed", plan_digest=digest, units=units, batches=batches))
+        events.append(
+            self._event(
+                "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, units=units, batches=batches
+            )
+        )
         if cost > 0:
             total = cost + max(
                 (float(e.data.get("cost_usd") or 0) for e in ctx.read.events
@@ -860,8 +864,8 @@ class _Step:
 
     @staticmethod
     def _reviewed_current(state: PlanState, digest: str, current: Mapping[str, str]) -> bool:
-        if state.review_plan_digest != digest or not state.review:
-            return False
+        if state.review_plan_digest != digest or not state.review or state.review_prompt_version != PROMPT_VERSION:
+            return False  # a review made with an older review prompt is stale (L4-YOLO-004)
         return all(state.review_digests.get(unit) == value for unit, value in current.items())
 
     # --- 2. the active plan -----------------------------------------------------------------------------------------

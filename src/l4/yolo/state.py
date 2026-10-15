@@ -115,6 +115,8 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             if not activated and state.status in _BEFORE_ACTIVATION:
                 state.status = "reviewed"
             state.review_plan_digest = _text(data.get("plan_digest"))
+            version = data.get("prompt_version")
+            state.review_prompt_version = version if isinstance(version, int) and not isinstance(version, bool) else 1
             state.review, state.review_digests = {}, {}
             for key, entries in (("", data.get("units")), ("batch:", data.get("batches"))):
                 for ident, entry in (entries or {}).items():

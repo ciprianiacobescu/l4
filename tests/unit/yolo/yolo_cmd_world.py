@@ -15,6 +15,7 @@ from l4.sim.scenarios import load_scenario
 from l4.vcs.git import Git
 from l4.yolo.digest import plan_digest, unit_digest
 from l4.yolo.model import PlanEvent
+from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
 A, B = "openspec:add-greeting", "openspec:add-b"
@@ -104,6 +105,7 @@ class CmdWorld:
             "2026-10-14T10:00:00Z",
             {
                 "plan_digest": plan_digest(self.plan_text),
+                "prompt_version": PROMPT_VERSION,
                 "units": {
                     u: {"verdict": v, "digest": self.digest(u), "findings": (findings or {}).get(u, [])}
                     for u, v in units.items()

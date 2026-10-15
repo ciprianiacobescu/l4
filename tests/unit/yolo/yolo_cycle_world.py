@@ -19,6 +19,7 @@ from l4.vcs.git import Git
 from l4.yolo.cycle import PlanStep, yolo_step
 from l4.yolo.digest import plan_digest, unit_digest
 from l4.yolo.model import PlanEvent, ProfileResult
+from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
 from .yolo_ledger_world import _env, make_origin, sh
@@ -194,10 +195,19 @@ class CycleWorld:
     def digests(self, names: Sequence[str] | None = None) -> dict[str, str]:
         return {unit_id(n): unit_digest(self.git, "origin/main", f"openspec/changes/{n}") for n in names or self.units}
 
-    def reviewed(self, text: str | None = None, *, plan_id: str = PLAN, order: Sequence[str] | None = None) -> None:
-        """admitted and reviewed (every unit READY), as the CI step leaves the ledger before an activation."""
+    def reviewed(
+        self,
+        text: str | None = None,
+        *,
+        plan_id: str = PLAN,
+        order: Sequence[str] | None = None,
+        prompt_version: int | None = PROMPT_VERSION,
+    ) -> None:
+        """admitted and reviewed (every unit READY), as the CI step leaves the ledger before an activation. A
+        `prompt_version` of None leaves the key out, the way an older harness recorded it."""
         text = text or (self.repo / ".l4" / "plans" / f"{plan_id}.json").read_text(encoding="utf-8")
         digest = plan_digest(text)
+        version = {} if prompt_version is None else {"prompt_version": prompt_version}
         units = {u: {"verdict": "READY", "digest": d, "findings": []} for u, d in self.digests().items()}
         self.seed(
             ev(
@@ -206,7 +216,7 @@ class CycleWorld:
                 order=list(order or [unit_id(n) for n in self.units]),
                 merge=json.loads(text)["merge"],
             ),
-            ev("plan.reviewed", plan_digest=digest, units=units, batches={}),
+            ev("plan.reviewed", plan_digest=digest, **version, units=units, batches={}),
             plan_id=plan_id,
         )
 

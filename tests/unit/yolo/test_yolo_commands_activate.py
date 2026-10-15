@@ -7,6 +7,7 @@ import pytest
 from l4.forge.base import ForgeError, ForgeUnavailable
 from l4.yolo.digest import current_unit_digest, plan_digest
 from l4.yolo.model import PlanMoved, ReviewResult, Verdict
+from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
 from .yolo_cmd_world import A, B, auto_world, ev, forge, plan_doc, world  # noqa: F401
@@ -82,6 +83,7 @@ def test_review_local_records_admitted_and_reviewed_like_ci(world, forge, monkey
     assert charged.data == {"unit": "plan:review", "attempt": 0, "cost_usd": 0.25, "runs": 0}  # R1
     assert admitted.data["order"] == [A, B] and admitted.data["plan_digest"] == plan_digest(world.plan_text)
     assert reviewed.data["plan_digest"] == plan_digest(world.plan_text)
+    assert reviewed.data["prompt_version"] == PROMPT_VERSION
     assert reviewed.data["units"][A] == {
         "verdict": "READY", "digest": world.digest(A), "findings": [], "assumptions": [], "missing": [],
     }  # fmt: skip

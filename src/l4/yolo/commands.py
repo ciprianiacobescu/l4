@@ -91,7 +91,7 @@ from l4.yolo.plans import (
     readable_unit_ids,
     unit_infos,
 )
-from l4.yolo.readiness import review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
 
@@ -275,6 +275,7 @@ class ReviewView:
 
     kind: str
     problems: tuple[str, ...] = ()
+    prompt_changed: bool = False  # stale because the review prompt changed since the review was made
 
     @property
     def ready(self) -> bool:
@@ -311,6 +312,8 @@ def _review_view(
     if state.review_plan_digest is None:
         return ReviewView("none")
     wanted = [u for u in plan.unit_ids()] + [f"batch:{b.id}" for b in plan.batches if len(b.units) > 1]
+    if state.review_prompt_version != PROMPT_VERSION:
+        return ReviewView("stale", prompt_changed=True)
     stale = state.review_plan_digest != plan_digest(text)
     stale = stale or any(state.review_digests.get(u) != now.get(u) for u in plan.unit_ids())
     stale = stale or any(w not in state.review for w in wanted)
@@ -692,7 +695,7 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
     events = [
         _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
         _event(
-            "plan.reviewed", plan_digest=digest, cost_usd=cost, by=ctx.who(),
+            "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, cost_usd=cost, by=ctx.who(),
             units={u: _verdict_json(v) for u, v in result.units.items()},
             batches={b: _verdict_json(v) for b, v in batches.items()},
         ),
@@ -777,7 +780,8 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     if view.kind == "none":
         raise L4Exit(ExitCode.USAGE_ERROR, f"activate: {plan_id} has not been reviewed: run l4 yolo review {plan_id}")
     if view.kind == "stale":
-        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: review is for other inputs: run l4 yolo review {plan_id}")
+        why = "was made with an older review prompt" if view.prompt_changed else "is for other inputs"
+        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: review {why}: run l4 yolo review {plan_id}")
     if view.problems:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
@@ -976,6 +980,8 @@ def _describe(
     if plan is not None and file is not None and rev is not None:
         view = _review_view(plan, file.text, state, read.events, _digests(ctx, plan, units))
         out["review"] = {"state": view.kind, "problems": list(view.problems)}
+        if view.prompt_changed:
+            out["review"]["prompt_changed"] = True
         waiting = next_eligible(plan, state, units.phases).waiting
         rows = []
         for uid in plan.unit_ids():
@@ -1026,7 +1032,8 @@ def _render(d: dict[str, Any]) -> str:
     if d.get("activated_by"):
         lines.append(f"  activated by {d['activated_by']}")
     if "review" in d and d["status"] in (*_BEFORE_ACTIVATION, "stopped"):
-        lines.append(f"  review: {d['review']['state']}")
+        changed = " (the review prompt changed)" if d["review"].get("prompt_changed") else ""
+        lines.append(f"  review: {d['review']['state']}{changed}")
         lines += [f"    {p}" for p in d["review"]["problems"]]
     if d.get("stop"):
         stop = d["stop"]
