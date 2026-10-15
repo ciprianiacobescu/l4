@@ -21,7 +21,9 @@ plan still runs one unit at a time, in the printed order.
 
    It refuses an existing file. It puts a finished spec into `exclude` with the reason `already <phase>` (for example
    `already merged`, `already archived`).
-2. Check the state of every spec before you order it: `l4 status`, or `l4 plan`. A unit that is started, in review or
+2. Check the state of every spec before you order it: `l4 status`, or `l4 plan`. In a fresh clone, fetch the
+   harness state first (`git fetch origin '+refs/l4/*:refs/l4/*'`): without it both show old phases, for example
+   `verified` for a unit that is in review or merged. A unit that is started, in review or
    has an open PR is not new work. Exclude it with a reason a person can check (`in review before the plan: PR #8`), or
    plan it knowingly and say so in the hand-off. Under `merge: auto` the plan adopts a unit in review with a PASS and
    merges it. Finished specs and specs left out on purpose go in `exclude`, never only in the hand-off message.
@@ -34,8 +36,10 @@ plan still runs one unit at a time, in the printed order.
 5. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters). An
    excluded unit is not held by the plan: it runs as without a plan while no plan is active on the target, and gets no
    new agent work while one is active, like every unit outside the plan.
-6. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.
-7. Leave `promotion` out unless the person names the branch and it exists on the remote (`git ls-remote --heads origin
+6. Set `limits.max_runs` and `limits.max_cost_usd`. They stop a plan whose unit makes no progress; without them only
+   the attempts limit does. Allow about five runs per unit.
+7. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.
+8. Leave `promotion` out unless the person names the branch and it exists on the remote (`git ls-remote --heads origin
    <branch>`). Never invent one. `promotion` is `{"mode": "manual", "target_branch": "<branch>"}`, only a note for the
    hand-off: L4 never promotes.
 
@@ -48,7 +52,7 @@ deliberately outside.
   "plan_id": "pricing",
   "target": "l4/main",
   "merge": "human",
-  "limits": {"max_cost_usd": 20, "max_unit_attempts": 2},
+  "limits": {"max_cost_usd": 20, "max_unit_attempts": 2, "max_runs": 20},
   "external_dependencies": [],
   "batches": [
     {"id": "pricing", "depends_on": [], "units": [
@@ -109,8 +113,8 @@ where it belongs, add its dependencies on evidence, and validate, commit and pus
 
 An **active plan stops (`inputs_changed`) when its file changes**. It needs a new review and a new activation by a
 person; its usage (cost, runs, attempts) is kept. Say so in your hand-off. Keep a unit that the plan has integrated in
-the file: it counts as done. A spec with no order to the active plan can
-go into a new plan instead, which leaves the active file alone. Only one plan is active on a target, so a person activates the new one after the first completes.
+the file: it counts as done. A spec with no order to the active plan can go into a new plan instead, which leaves the
+active file alone. Only one plan is active on a target, so a person activates the new one after the first completes.
 
 ## Never
 
