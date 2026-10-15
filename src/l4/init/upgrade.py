@@ -51,6 +51,7 @@ from l4.init.init import (
 )
 from l4.init.pytest_marker import MarkerEdit, MarkerRefusal, register_l4_marker
 from l4.init.vendor import VendorSource, collect_vendor_source, harness_root
+from l4.vcs.git import Git
 
 log = logging.getLogger("l4.upgrade")
 
@@ -255,6 +256,28 @@ def _rerender_note(old: str, new: str) -> str:
     )
 
 
+def _default_branch(repo: Path, environ: Mapping[str, str]) -> str | None:
+    """The branch the local `origin/HEAD` names (`main` for `refs/remotes/origin/main`), or None when it is not set."""
+    try:
+        done = Git(repo, environ=environ).run("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", check=False)
+    except (L4Exit, OSError):
+        return None
+    ref = done.stdout.strip()
+    return ref.removeprefix("refs/remotes/origin/") if done.returncode == 0 and ref else None
+
+
+def _default_branch_reminder(repo: Path, environ: Mapping[str, str], base: str) -> str | None:
+    """GitHub runs a schedule from the default branch's copy of the workflow: when that branch is not the base, a pin
+    moved on the base is not the pin the cron runs until the file is copied there too (L4-ADO-005)."""
+    default = _default_branch(repo, environ)
+    if default is None or default == base:
+        return None
+    return (
+        f"copy {WORKFLOW_RELPATH} to {default} as well (merge it there): the schedule runs {default}'s copy, "
+        f"and {default} is not the base ({base})"
+    )
+
+
 def _plan_action(
     repo: Path,
     loaded: L4Config,
@@ -309,6 +332,9 @@ def _plan_action(
     if new != text:
         changed = (PlannedFile(WORKFLOW_RELPATH, new.encode("utf-8"), 0o644),)
         notes = (_rerender_note(text, new),)
+        reminder = _default_branch_reminder(repo, environ, loaded.forge.base_branch)
+        if reminder is not None:
+            notes += (reminder,)
     if found.local:  # the consumer's own copy of the setup action is refreshed from the one this `l4` ships
         action_path = f"{ACTION_PATH}/action.yml"
         try:

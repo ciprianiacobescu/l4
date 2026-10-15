@@ -263,3 +263,28 @@ def test_a_token_without_contents_read_is_a_failed_row_not_a_crash(run_setup, gi
     code, out = run_setup()
     assert code == int(ExitCode.DOCTOR_FAILED), out
     assert any(r.startswith("FAILED") and "Contents: read" in r for r in rows(out)), out
+
+
+# --- adoption-lessons 1.5 (L4-ADO-005): the default branch's copy pins the base's commit ------------------------------
+
+
+def test_a_stale_pin_on_the_default_branch_is_a_failed_row_naming_both(run_setup, github, project):  # SCN-ADO-13
+    integration_base(project, github, default_sha="a" * 40, base_sha="b" * 40)
+    code, out = run_setup()
+    assert code == int(ExitCode.DOCTOR_FAILED), out
+    failed = [r for r in rows(out) if r.startswith("FAILED")]
+    assert len(failed) == 1 and "a" * 40 in failed[0] and "b" * 40 in failed[0] and "main" in failed[0], out
+    assert not any(path.endswith("/dispatches") for _, path in github.requests)
+
+
+def test_the_same_pin_on_both_branches_is_kept(run_setup, github, project):
+    integration_base(project, github, default_sha="a" * 40, base_sha="a" * 40)
+    code, out = run_setup()
+    assert code == 0, out
+
+
+def test_a_base_without_the_workflow_leaves_the_pin_comparison_out(run_setup, github, project):
+    integration_base(project, github)
+    del github.files[("staging", WORKFLOW_PATH)]
+    code, out = run_setup()
+    assert code == 0, out

@@ -26,6 +26,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import GITHUB_HOSTS, ForgeError, parse_remote_url
 from l4.forge.github import API_VERSION, DEFAULT_API, TIMEOUT_S, GitHubForge, _checked_api_url
+from l4.init.action import read_pin
 from l4.redact import Redactor
 from l4.state.lifecycle import Phase
 from l4.vcs.git import Git, GitError
@@ -271,6 +272,17 @@ class Setup:
                 "FAILED", f"workflow {WORKFLOW_RELPATH} on {default}",
                 f"{default} has no {WORKFLOW_RELPATH}: GitHub runs schedule and dispatch only from the default "
                 "branch; merge a pull request that adds it",
+            )  # fmt: skip
+            return
+        base_text = self.workflow_text(self.o.base)
+        pin_there, pin_base = read_pin(text), read_pin(base_text or "")
+        have = pin_there.effective if pin_there else None
+        want = pin_base.effective if pin_base else None
+        if want and have != want:
+            self.emit.row(
+                "FAILED", f"workflow {WORKFLOW_RELPATH} on {default}",
+                f"pins {have or 'no commit'} but {self.o.base} pins {want}: a schedule runs {default}'s copy; "
+                f"copy {self.o.base}'s file to {default}",
             )  # fmt: skip
             return
         self.emit.row("KEPT", f"workflow {WORKFLOW_RELPATH} on {default}", "present")
