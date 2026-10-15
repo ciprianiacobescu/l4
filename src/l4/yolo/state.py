@@ -128,6 +128,8 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
             if data.get("merge") in MERGE:
                 state.merge = data["merge"]
+            if state.current is not None and state.order and state.current not in state.order:
+                state.current = None  # a unit the activated order does not hold is no longer the plan's (review #1)
         elif kind == "unit.dispatched" and unit:
             state.current = unit
             if state.used.attempts.get(unit, 0) > stale_at.get(unit, state.used.attempts.get(unit, 0)):

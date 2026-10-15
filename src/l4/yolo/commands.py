@@ -384,7 +384,8 @@ def resume_blocker(
             f"{unit} is still abandoned: reopen its pull request, or run l4 restart --unit {unit} --reason TEXT first",
             f"l4 restart --unit {unit} --reason TEXT",
         )
-    if reason == "unit_missing" and unit and unit not in phases:
+    if reason == "unit_missing" and unit and unit not in phases and unit not in state.merged:
+        # a unit the ledger has merged may have moved to the archive: the step checks its head and integrates it
         return Blocker(
             f"{unit} is still not among the units of the target: push it back, or change the plan",
             f"get {unit} back on the target (or change the plan and run l4 yolo review {plan_id})",

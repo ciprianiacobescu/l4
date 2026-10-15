@@ -103,7 +103,7 @@ from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
-from l4.yolo.cycle import PlanStep, yolo_step
+from l4.yolo.cycle import PlanStep, failed_plan_step, yolo_step
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -1351,10 +1351,13 @@ def run_command(
         failure = classify_exception(exc)[0]
     if made:
         found = discover(cfg, git, providers, units)  # the new units are on their own branches now
-    step = yolo_step(
-        app, cfg, git, found, adapters=adapters,
-        all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
-    )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
+    try:
+        step = yolo_step(
+            app, cfg, git, found, adapters=adapters,
+            all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
+        )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
+        step = failed_plan_step(app, found, exc)
     for line in step.actions:
         log.info("%s", line)
     snapshots = {s.ref.id: s for _, s in found}
