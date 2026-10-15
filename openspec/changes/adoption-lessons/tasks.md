@@ -59,7 +59,7 @@
 
 ## 9. SPEC, suite, live
 
-- [ ] 9.1 docs/SPEC.md, and the evidence file:
+- [x] 9.1 docs/SPEC.md, and the evidence file:
   - copy this change's analysis (`design.md` of the design session) to `docs/plan/adoption-lessons.md`, in the same commit as the change folder, because the change's design names it;
   - L4-ADO-001..019 in Part I, in a section "Adoption lessons" after the adoption kit's requirements;
   - SCN-ADO-01..54 in a new §23.23;

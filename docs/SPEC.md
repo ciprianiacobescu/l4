@@ -256,6 +256,136 @@ once human-feedback is merged), and their answers go to `plugins/l4/tests/baseli
 with the skill (`plugins/l4/tests/with-skill.md`); every scenario that applies MUST pass, and any loophole found is
 closed and re-run. [Not yet built: delivery change 18, tasks 4.1–4.3.]
 
+**Adoption lessons (L4-ADO-001..019).** The first adoption on a real consumer (a public monorepo with an integration branch) worked only through hand work. These requirements make each workaround a feature of the harness. The evidence, the cost of each fix and the lessons rejected are in `docs/plan/adoption-lessons.md`; the decisions are in `openspec/changes/adoption-lessons/design.md`.
+
+**L4-ADO-001** The test gate refuses a module that shadows an evidence plugin. Before it runs a gate command whose environment loads `l4_trace` or `l4_cov` (a `-p` option in `PYTEST_ADDOPTS`), the
+harness SHALL look in the command's working directory for an importable module of that name: a module file with an
+importable suffix, or a package `__init__`. If it finds one, the command MUST NOT start, and the gate fails with a
+reason that names the file. The gate environment SHALL NOT gain `PYTHONSAFEPATH`.
+
+**L4-ADO-002** `l4 setup github` covers the default branch of an integration base. The default branch may differ from `forge.base_branch`. In that case `l4 setup github` SHALL:
+- add the default branch to the deployment branch policies of `ci.github_environment`, or keep it;
+- read `.github/workflows/l4.yml` on the default branch.
+
+If that file is missing, a FAILED row SHALL say that schedule and dispatch need it there, and no dispatch is sent.
+When the default branch is the base, nothing more is added.
+
+**L4-ADO-003** Pushes outside CI keep the person's git credentials. Outside CI, when the variable that `forge.token_env` names is empty, every harness push SHALL run without the
+harness's credential-helper settings, so the person's own git credentials apply. Nothing is written to `.git/config`.
+In CI, or when the variable is set, the push SHALL use the token helper as before.
+
+**L4-ADO-004** A refused push names the forge's own token rules. The explanation of a push refused for its credential SHALL name the rules of the forge that refused it:
+- **GitHub:** `contents: write` and `pull-requests: write`.
+- **GitLab:** a project access token with the `write_repository` scope and the Developer role.
+
+When the variable `forge.token_env` names is empty, the explanation SHALL say it is not set, on any forge. It never
+contains a token.
+
+**L4-ADO-005** A run whose harness pin differs from the base's is stopped before any work. In CI with `harness.delivery: action`, when the running harness commit differs from the pin of
+`.github/workflows/l4.yml` on the checked-out base (the `uses:` sha, or the copy's `commit:` input), the run SHALL do
+no work and end with exit 0 and a warning annotation (`::warning::`) that names both commits and says to update the
+default branch's copy, so a scheduled run neither acts with the old harness nor turns red every schedule. Outside CI, or without a running commit, the check is
+skipped.
+`l4 upgrade` SHALL print the same reminder when the local `origin/HEAD` names a branch other than the base.
+
+**L4-ADO-006** `l4 doctor --adoption` names CI jobs that the gates do not mirror. `l4 doctor --adoption` SHALL warn about each job of the repository's own CI that runs on `push` or `pull_request` and
+has a `run:` command that no gate command, setup command or `yolo.profiles` gate contains. The comparison ignores a
+leading `uv run `, `.venv/bin/` or `python -m `. The warning lists each such job with its `services:` or `container:`.
+With `forge.token_env: GITHUB_TOKEN` and `forge.merge_policy: auto`, it SHALL also say that L4's pushes start no CI.
+The row never fails a run.
+
+**L4-ADO-007** A single OpenSpec unit is validated strictly before any agent runs. An OpenSpec unit SHALL be validated strictly in the phases where the intake lint runs, before any agent or probe, as a
+Kiro unit is. The checks are the provider's strict validation and the Purpose rule of L4-OSP-007: a delta for a
+capability new to `openspec/specs/` needs a `## Purpose` of at least 50 characters.
+
+Any error SHALL reject the unit with exit 14 and a `unit.rejected` entry that carries every reason.
+
+**L4-ADO-008** Intake findings are shown in full, with a way out. An intake failure SHALL carry every error, each cut at no fewer than 600 characters. The plan step's refusal line SHALL
+list one finding per line: at most 10, then how many are left and `l4 yolo check <plan>`.
+
+An archive refusal for a missing capability SHALL be followed by the harness's hint. The hint says:
+- archive the change that creates the capability first, or write the delta as `## ADDED Requirements`;
+- a unit cannot modify what another unit of the same plan only adds.
+
+**L4-ADO-009** The plan validator checks OpenSpec deltas against the baseline. `validate_plan.py` SHALL report, for every OpenSpec unit that a plan file plans:
+- `spec_no_baseline` for a MODIFIED, RENAMED or REMOVED section of a delta whose capability has no
+  `openspec/specs/<cap>/spec.md` in the working tree;
+- `spec_no_purpose` for a delta of a capability new to `openspec/specs/` without a `## Purpose` of at least 50
+  characters.
+
+Each is a problem (exit 1). The script keeps to the Python standard library.
+
+**L4-ADO-010** Review budgets are checked before the push. `validate_plan.py` SHALL report `material_over_budget` for each file the readiness review would cut or leave out. It
+reads a planned unit's folder at the folder budget, and a dependency at the dependency budget. A dependency is a unit
+in a `depends_on`, or a prerequisite outside its batch. The script reads files the way the review reads them, with the
+same limits: it reads `yolo.review.max_file_chars`, `max_folder_chars` and `max_dependency_chars` from `.l4/config.yaml`
+(block style), and an absent or invalid value gives the review's default (20000, 80000, 20000; one warning on standard
+error for an invalid one). A cut of a planned unit's own folder SHALL be a problem (exit 1); a dependency's cut SHALL be a warning
+that leaves the exit code alone, because the review lists it as not shown in full without blocking. `l4 yolo check`
+SHALL print the same lines for an admitted plan, and its exit code does not change.
+
+**L4-ADO-011** `yolo.hold` holds units that no plan lists. `yolo.hold` SHALL be a list of unit ids or `fnmatch` patterns, empty by default. A unit that matches it, and that no
+plan file lists, SHALL get no agent work of any kind. `l4 status`, `l4 plan` and `l4 run --dry-run` show such a unit
+as `held by yolo.hold`. A unit that a plan file lists follows that plan's rules. A merged or archived unit is never
+held. The hold writes no ledger entry and calls no model. `validate_plan.py` counts a held unit as covered.
+
+**L4-ADO-012** `l4 init --hold-existing` writes the hold. `l4 init --hold-existing` SHALL write the ids of every unit found at init into `yolo.hold`, sorted. With no unit it
+writes no key and says so.
+
+**L4-ADO-013** A plan that holds units says so. For a plan file that holds units and is not active, `l4 status` SHALL say how many units it holds, and that none of
+them runs until the plan is fixed, completed or its file is removed.
+
+**L4-ADO-014** The skill teaches specs that pass the readiness review. The skill SHALL hold `references/spec.md` (at most 450 words, linked from `SKILL.md`), a checklist with one line
+per rule:
+- scenarios for every SHALL, failure cases included;
+- no line anchors;
+- named helpers;
+- delivered work in prose;
+- the review budgets;
+- ADDED with a Purpose where there is no baseline;
+- kept scenario names;
+- `depends_on` for a shared function;
+- no hidden dependencies;
+- the runner's tools;
+- short requirements;
+- both validators run before the push.
+
+**L4-ADO-015** Doctor names the System One engine and whether it starts. `l4 doctor` SHALL report the System One profile of `roles.s1_judge` that would serve, with its engine and model. For
+`laya-local`, `l4 doctor --adoption` SHALL start `laya-serve` once, stop it, and report the seconds to ready;
+`l4 doctor --ci` SHALL only check that `laya-serve` and its checkpoint are installed (no start, no added seconds).
+
+When no profile would open, the row SHALL:
+- warn and say why;
+- say that the clarifier then auto-accepts no answer, so every implementer question goes to a person;
+- print the profile lines to add.
+
+On a GitHub-hosted runner, a `remote` or `ollama` profile SHALL be reported as unreachable.
+
+**L4-ADO-016** `l4 init` enables Laya as System One by default. `l4 init` SHALL write a `laya` profile `{backend: system-one, engine: laya-local}` and `roles.s1_judge: [laya]`,
+unless `--s1` says otherwise. `--s1 jev` writes a TypeSafe Jev profile instead (`api_key_env: TYPESAFE_API_KEY`).
+`--s1 none` writes no System One and a `# TODO:` line. The written config SHALL load.
+
+**L4-ADO-017** The workflow names the keys of System One profiles. The rendered GitHub workflow SHALL name, in the job's `env`, the `api_key_env` of every `backend: system-one` profile
+in `roles.s1_judge` or `verifier.s1.shadow`, next to the agents' credential variables.
+
+**L4-ADO-018** The adoption docs and messages say what the code does. The adoption reference, the quickstart, the runbook, the README and the workflow template comments SHALL agree with
+the harness on six points:
+- the default branch on an integration base;
+- the forge token and CI;
+- the action repository;
+- a laptop's push credentials;
+- the review budgets;
+- holding existing specs.
+
+`l4 init --action` without an install origin SHALL name the cause and the command that runs the released harness.
+
+**L4-ADO-019** Runners install Laya when a profile uses it. Runner provisioning SHALL install the pinned Laya (`laya[serve]` with CPU torch) and its checkpoint whenever a
+`laya-local` profile is in `roles.s1_judge` or `verifier.s1.shadow`. This is part of
+the self-provisioning of `l4 doctor --ci --fix`, on both forges, outside the harness's own tool directory.
+
+On GitHub the setup action SHALL keep Laya in a cache of its own, keyed on the Laya pin and the checkpoint. The key of
+the CLI cache does not change. Without such a profile, nothing is installed or cached.
+
 Runtime prerequisites on the runner. `doctor` checks them. In CI they are installed only:
 - by `l4 doctor --fix`, when `ci.self_provision` resolves true (the override `L4_SELF_PROVISION` included): explicitly,
   logged, user-local, at pinned versions, never with root and never with a login (L4-DOC-002);
@@ -281,7 +411,7 @@ of the harness package.
 
 | Command | Purpose | Side effects |
 |---|---|---|
-| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
+| `l4 init [--ci github\|gitlab\|both] [--framework openspec\|kiro] [--vendor] [--dry-run] [--force] [--no-ci-edit] [--harness-repo URL] [--harness-commit SHA] [--harness-ref REF] [--action [--action-repo OWNER/REPO] [--action-copy] [--dependabot] [--runner-tag TAG]... [--forge-token-env NAME]] [--hold-existing] [--s1 laya\|jev\|none]` | Adopt the harness in a repo; `--action` (GitHub only) writes `harness.delivery: action` and a workflow whose `uses: …@<sha> # <REF>` is the only pin, with no `.l4/bin/` file and a config for a GitHub-hosted runner (`ci.runner_tags: []`, `forge.token_env: GITHUB_TOKEN`; L4-ACT-004); `--harness-ref` resolves a tag or branch once with `git ls-remote` (L4-ACT-005) | writes files (§1) |
 | `l4 upgrade [--harness DIR] [--dry-run] [--harness-commit SHA] [--harness-ref REF] [--action-repo OWNER/REPO]` | Bring the vendored harness, the CI template and the shim up to the harness checkout; for a fetched or action adoption move the pin (`harness.commit`, or in action mode only the `uses:` line and, for `--action-copy`, the `commit` input, and the copy of the action itself, refreshed from the one `l4` ships) | writes files (§1) |
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
@@ -305,7 +435,7 @@ of the harness package.
 | `l4 simulate [SCENARIO…\|--all] [--with-repo-config] [--keep] [--json]` | Run the real state machine against fakes (§17) | temp dirs only |
 | `l4 unlock --unit ID [--force]` | Release a lock (expired, or forced by a human) | lock ref |
 | `l4 setup gitlab --project ID\|PATH [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--verify-base URL] [--rotate [--revoke-old]] [--secret NAME=ENVVAR]… [--cron EXPR] [--no-schedule] [--no-pipeline] [--watch] [--dry-run] [--token-command CMD]` | Make a GitLab project ready for the harness (L4-INS-006): read the project, check the runner and the include, make sure the `l4-bot` token and the masked `L4_FORGE_TOKEN` (environment scope `l4`) exist, set secrets, make sure the `l4 sweep` schedule exists, trigger one adoption-check pipeline. Rows `OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`; exit 0, 3 on a `FAIL` row, 2 usage, 1 HTTP error | GitLab (project variables, access tokens, pipeline schedules, one pipeline); `--dry-run` sends only reads |
-| `l4 setup github [--repo OWNER/NAME] [--api-url URL] [--token-env VAR] [--secret NAME=ENVVAR]… [--watch] [--dry-run]` | Make a GitHub repository ready for the harness (L4-GHP-011): check that the token (default `GH_TOKEN`, never printed) has admin on the repository, set the workflow permissions to write with pull-request creation allowed, create or update the environment `ci.github_environment` with deployment branch policies for the base branch and the unit prefix, seal each `--secret` into it with its public key, set the variable `L4_SELF_PROVISION=true` when `ci.runner_tags` is empty, create the labels, dispatch the `l4` workflow (`--watch` follows it). `--repo` defaults to `origin`; `--api-url` to `GITHUB_API_URL`, else api.github.com (a proxy such as Mintkey). Rows `OK`, `CREATED`, `SET`, `KEPT`, `FAILED`; a second run prints `KEPT` for every applied step; exit 0, 3 on a `FAILED` row, 2 usage, 1 HTTP error | GitHub (repository workflow permissions, environment, branch policies, environment secrets, variable, labels, one `workflow_dispatch`); `--dry-run` sends only reads |
+| `l4 setup github [--repo OWNER/NAME] [--api-url URL] [--token-env VAR] [--secret NAME=ENVVAR]… [--watch] [--dry-run]` | Make a GitHub repository ready for the harness (L4-GHP-011): check that the token (default `GH_TOKEN`, never printed) has admin on the repository, set the workflow permissions to write with pull-request creation allowed, create or update the environment `ci.github_environment` with deployment branch policies for the base branch, the unit prefix and the repository's default branch when it is not the base, check that the default branch holds `.github/workflows/l4.yml` with the base's pin (a row `FAILED`, and no dispatch, when it does not; L4-ADO-002, L4-ADO-005), seal each `--secret` into it with its public key, set the variable `L4_SELF_PROVISION=true` when `ci.runner_tags` is empty, create the labels, dispatch the `l4` workflow (`--watch` follows it). `--repo` defaults to `origin`; `--api-url` to `GITHUB_API_URL`, else api.github.com (a proxy such as Mintkey). Rows `OK`, `CREATED`, `SET`, `KEPT`, `FAILED`; a second run prints `KEPT` for every applied step; exit 0, 3 on a `FAILED` row, 2 usage, 1 HTTP error | GitHub (repository workflow permissions, environment, branch policies, environment secrets, variable, labels, one `workflow_dispatch`); `--dry-run` sends only reads |
 | `l4 ci watch (--project ID\|PATH [--pipeline ID \| --ref REF] [--api-base URL] \| --repo OWNER/NAME [--ref REF] [--api-url URL]) [--auth-env VAR] [--auth-scheme private-token\|bearer] [--interval DUR] [--timeout DUR] [--tail N] [--token-command CMD]` | Follow a GitLab pipeline to its end (L4-INS-006): one line per job status change (`job <id> <name> (<stage>) <status> — runner #<id> <description>`), a final table, the last `N` trace lines of each failed job; a job that failed with `allow_failure` counts as success (`failed (allowed)`); exit 0 for a successful pipeline, 1 for failed, canceled, timed out (default 90 m, polling every 15 s) or an HTTP error, 2 for usage. With `--repo` (L4-GHP-012; credential default `GH_TOKEN`): the newest run of `l4.yml` on `--ref`, one line per run status change, each job's conclusion, the last `N` log lines of each failed job; exit 0 when the run's conclusion is `success`, else 1 (also on a timeout) | GitLab or GitHub (reads only) |
 | `l4 ci render --platform github\|gitlab` | Print generated CI files (used by `init`, `doctor`) | none |
 | `l4 ci render-child --plan FILE` | Print the GitLab child pipeline (one job per actionable unit) | none |
@@ -640,7 +770,7 @@ roles:                             # ordered fallback chains; required vs option
   clarifier: [claude-opus, judge-sol]                                 # optional
   verifier_agent: [claude-opus, codex-sol, opencode-gemini]           # required: re-runs, generates missing tests
   judges: [judge-opus, judge-sol, judge-gemini]                       # required: LLM panel
-  s1_judge: [laya]                                                    # optional
+  s1_judge: [laya]                                                    # optional; `l4 init` writes [laya] unless `--s1 jev|none` (L4-ADO-016)
   spec_writer: [template]          # `template` is a reserved built-in profile (deterministic); an LLM profile may follow it
 
 availability:
@@ -935,7 +1065,7 @@ issue whose message starts with `Archive would refuse this delta:` is an ERROR [
 **L4-OSP-007 Purpose of a new capability.** At intake, every delta `specs/<cap>/spec.md` whose `<cap>` is not in
 `openspec/specs/` MUST contain a `## Purpose` section of ≥ 50 characters; otherwise the unit is rejected (exit 14,
 `unit.rejected`). The CLI does not check this, and archive writes a `TBD` Purpose that fails strict validation
-[V, spikes/04].
+[V, spikes/04]. The same check MUST run for a single OpenSpec unit that is outside any plan, strictly and before any agent runs, with every finding shown in full (L4-ADO-007, L4-ADO-008).
 
 **L4-OSP-008 Task→criterion link.** OpenSpec task→criterion link: requirement names quoted in a task's text link the
 task to every scenario of those requirements. A task without one cites all criteria of the change, and doctor reports
@@ -4281,6 +4411,9 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 19 | `operator-commands` | a stuck unit moves with one command or one label: `l4 retry` / `l4:retry` continues it by its phase and starts a run, `l4 restart` / `l4:restart` starts it over on a new branch and keeps the old head as a ref, `l4:resume` and `l4 resume` still work; the cause of every stop recorded and shown (`REASON` column, `Next:` line); a repeated failure escalates as `same_failure`; a secret halt, a capacity park from `fixing`, a closed PR, a deleted branch and a dismissed verdict question are no longer dead ends; the forge target found from `origin`; the fixer's green gate runs under coverage; a spec push to the unit branch re-enters the unit, and a changed Kiro criterion reopens the tasks that cite it (L4-OPS-001..015; approved 2026-10-13, `openspec/changes/operator-commands/`) | the GitHub dummy-repository runs of L4-OPS-013 |
 | 20 | `yolo-mode` | delivery plans: a plan file `.l4/plans/<id>.json` orders units and batches by dependency; admission is deterministic, a readiness review runs in CI, one person activates it; units run one at a time in dependency order, each started only after the units it needs are merged into the target and pass their acceptance profile; with `merge: auto` the harness merges each verified unit by a fast-forward push guarded by the git server, then checks the merged revision, and stops safely at the first failure; limits never reset; the plan state is a leased ref; a report and receipts; no promotion; exclusions, `l4 yolo draft`, the standalone validator and the plan skill reference (L4-YOLO-001..020; `openspec/changes/yolo-mode/`) | the live run on the GitHub test repository of tasks 9.1..9.4 |
 | 21 | `experience-graph` | a person reads the history of a repository's units with no agent in the loop: `l4 kg build` (a derived index under the cache root, read from committed git objects only, never fetched), `l4 kg report` (lesson outcomes, recurring attempt failures and findings by normalised text, gate candidates, spec-gap hotspots, profiles, stops; *n* on every line), `l4 kg why` (the timeline of one unit, the 1-hop view of one record), `l4 kg propose` (drafts in the inbox for a person); `l4 lessons promote ID` builds the human promotion of L4-MEM-002; no module of a run path imports the graph code (L4-KG-001..014; `openspec/changes/experience-graph/`) | the history of a test repository's units, five report numbers checked against `git show` |
+| 22 | `adoption-lessons` | the lessons of the first real consumer adoption as general fixes: a gate refuses a module that shadows an evidence plugin; `l4 setup github` covers the default branch of an integration base and checks its workflow; a laptop push keeps the person's git credentials and a refused push names the forge's own rules; a run with another pin than the base's does no work; `l4 doctor --adoption` names unmirrored CI jobs and the System One state; a single OpenSpec unit is validated strictly with every finding shown; `validate_plan.py` checks deltas and review budgets; `yolo.hold` and `l4 init --hold-existing` replace the backlog plan; Laya is the default System One and runners install it; the workflow names System One keys; a spec-writing reference in the skill (L4-ADO-001..019; `openspec/changes/adoption-lessons/`, `docs/plan/adoption-lessons.md`) | the live runs of tasks 9.3 on the consumer or the public dummy |
+
+The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
 ---
 
@@ -7608,6 +7741,307 @@ scenario is a spec defect (§26).
 - **Given** that profile and `OPENCODE_API_KEY` set in the harness environment
 - **When** the implementer runs
 - **Then** the agent process has `OPENCODE_API_KEY` set by the credential loader, and the value is in no argv, in no sandbox `--setenv` and in no log
+
+### 23.23 Adoption lessons (ADO)
+
+#### SCN-ADO-01 (−) A root l4_trace.py stops the gate · L4-ADO-001
+- **Given** a worktree whose root holds `l4_trace.py`
+- **When** a gate runs with the trace plugin in its environment
+- **Then** no process is started, and the gate fails with a reason that names `l4_trace.py` and the evidence plugin it
+  would replace
+
+#### SCN-ADO-02 (+) A nested module or a root coverage.py is no shadow · L4-ADO-001
+- **Given** a worktree holding `src/pkg/l4_trace.py` and a root `coverage.py`, and no root `l4_trace` or `l4_cov`
+- **When** the test gate runs
+- **Then** the command runs as before
+
+#### SCN-ADO-03 (+) Gates keep their import path · L4-ADO-001
+- **Given** a gate command `python scripts/check.py`, where the script imports a sibling module of `scripts/`
+- **When** the gate environment is built and the command runs
+- **Then** the environment has no `PYTHONSAFEPATH`, and the import succeeds
+
+#### SCN-ADO-04 (+) An integration base gets the default branch · L4-ADO-002
+- **Given** a repository whose default branch is `main` and a config with `forge.base_branch: staging`, and the
+  workflow file on both branches
+- **When** `l4 setup github` runs twice
+- **Then** the first run creates the policies `staging`, `l4/*`, `l4/**/*` and `main`, and the second run keeps all
+  four
+
+#### SCN-ADO-05 (−) The workflow is missing on the default branch · L4-ADO-002
+- **Given** base `staging`, default branch `main`, and no `.github/workflows/l4.yml` on `main`
+- **When** `l4 setup github` runs
+- **Then** a FAILED row names `main` and the file, no dispatch is sent, and the exit code is 3
+
+#### SCN-ADO-06 (+) The base is the default branch · L4-ADO-002
+- **Given** base `main`, which is the default branch
+- **When** `l4 setup github` runs
+- **Then** it creates or keeps only the policies `main`, `l4/*` and `l4/**/*`, and reads no workflow file
+
+#### SCN-ADO-07 (+) A laptop push uses the person's credentials · L4-ADO-003
+- **Given** no CI variables and `GITHUB_TOKEN` unset, with `forge.token_env: GITHUB_TOKEN`
+- **When** the push settings are built
+- **Then** they hold no `credential.helper` entry, the same as the fetch settings
+
+#### SCN-ADO-08 (+) CI keeps the token helper · L4-ADO-003
+- **Given** `GITHUB_ACTIONS=true` and `GITHUB_TOKEN` set
+- **When** the push settings are built
+- **Then** they reset the helpers and add the helper that reads `GITHUB_TOKEN`
+
+#### SCN-ADO-09 (+) A token set on a laptop is used · L4-ADO-003
+- **Given** no CI variables and `GITHUB_TOKEN` set
+- **When** the push settings are built
+- **Then** they reset the helpers and add the helper that reads `GITHUB_TOKEN`
+
+#### SCN-ADO-10 (−) GitHub wording on GitHub · L4-ADO-004
+- **Given** a GitHub origin and a push that fails with `The requested URL returned error: 403`
+- **When** the failure is explained
+- **Then** the text names `contents: write`, and holds neither `Developer role` nor `write_repository`
+
+#### SCN-ADO-11 (−) GitLab wording on GitLab · L4-ADO-004
+- **Given** a GitLab origin and the same failure
+- **When** the failure is explained
+- **Then** the text names `write_repository` and the Developer role
+
+#### SCN-ADO-12 (−) An unset token is named · L4-ADO-004
+- **Given** a GitHub origin outside CI, `GITHUB_TOKEN` unset, and a push that fails with a 403
+- **When** the failure is explained
+- **Then** the text says `GITHUB_TOKEN is not set`
+
+#### SCN-ADO-13 (−) A scheduled run with the old pin · L4-ADO-005
+- **Given** a base whose `l4.yml` pins commit B and a job that installed commit A (`L4_HARNESS_COMMIT=A`)
+- **When** `l4 doctor --ci` runs
+- **Then** the run does no work, a warning annotation names A and B and says to update `.github/workflows/l4.yml` on
+  the default branch, and the job exits 0
+
+#### SCN-ADO-14 (+) The same pin passes · L4-ADO-005
+- **Given** a base whose `l4.yml` pins commit A and `L4_HARNESS_COMMIT=A`
+- **When** `l4 doctor --ci` runs
+- **Then** the check passes
+
+#### SCN-ADO-15 (+) No check outside CI · L4-ADO-005
+- **Given** a laptop with no CI variables
+- **When** `l4 doctor` runs
+- **Then** the check is skipped with the reason that it applies to CI jobs only
+
+#### SCN-ADO-16 (+) The upgrade reminds about the default branch's copy · L4-ADO-005
+- **Given** `origin/HEAD` naming `main` and `forge.base_branch: staging`
+- **When** `l4 upgrade --harness-ref vX` moves the pin
+- **Then** the output says to copy `.github/workflows/l4.yml` to `main` as well
+
+#### SCN-ADO-17 (−) An unmirrored job is listed · L4-ADO-006
+- **Given** a workflow `tests.yml` with a job `test` running `uv run pytest`, and a job `conformance` with a Postgres
+  service running `uv run pytest -m postgres`, and the gate `.venv/bin/pytest --junitxml=.l4-out/junit.xml`
+- **When** `l4 doctor --adoption` runs
+- **Then** the warning lists `tests.yml: conformance (services: postgres)` with its command, and does not list `test`
+
+#### SCN-ADO-18 (−) The workflow token and automatic merges · L4-ADO-006
+- **Given** `forge.token_env: GITHUB_TOKEN` and `forge.merge_policy: auto`
+- **When** `l4 doctor --adoption` runs
+- **Then** the row says that a `merge: auto` plan merges on the gates alone and names `L4_FORGE_TOKEN`,
+  `forge.token_env` and `l4 upgrade`
+
+#### SCN-ADO-19 (+) No CI file · L4-ADO-006
+- **Given** a repository with no workflow besides `l4.yml` and no `.gitlab-ci.yml`
+- **When** `l4 doctor --adoption` runs
+- **Then** the row is skipped with that reason
+
+#### SCN-ADO-20 (−) A MODIFIED delta on a missing capability · L4-ADO-007
+- **Given** a change whose delta modifies `dreaming`, with no `openspec/specs/dreaming/spec.md` on the base, and no
+  plan
+- **When** `l4 run` reaches the unit
+- **Then** the unit is rejected with exit 14 before any agent starts, and the reason holds the archive refusal and the
+  hint of L4-ADO-008
+
+#### SCN-ADO-21 (−) A new capability without a Purpose · L4-ADO-007
+- **Given** a change whose delta adds requirements to a capability that `openspec/specs/` lacks, and that has no
+  `## Purpose`
+- **When** `l4 run` reaches the unit
+- **Then** the unit is rejected with exit 14, and the reason names the missing Purpose
+
+#### SCN-ADO-22 (+) A valid change starts as before · L4-ADO-007
+- **Given** a change that validates strictly
+- **When** `l4 run` reaches the unit
+- **Then** its first task starts, and no `unit.rejected` entry is written
+
+#### SCN-ADO-23 (−) Every finding is printed · L4-ADO-008
+- **Given** a plan with 8 units that each fail intake
+- **When** the plan step refuses it
+- **Then** the log has one line per finding, 8 in all
+
+#### SCN-ADO-24 (−) Two errors in one unit · L4-ADO-008
+- **Given** a change with a MODIFIED delta that drops a scenario and another that targets a missing capability
+- **When** intake runs
+- **Then** the detail holds both messages in full, OpenSpec's sentence "Copy the omitted scenarios into the MODIFIED
+  block" included, and the hint for the missing capability
+
+#### SCN-ADO-25 (−) Twelve findings · L4-ADO-008
+- **Given** a plan refused with 12 findings
+- **When** the plan step prints the refusal
+- **Then** it prints 10 finding lines and then `… and 2 more: l4 yolo check <plan>`
+
+#### SCN-ADO-26 (−) A delta with no baseline · L4-ADO-009
+- **Given** a planned change whose delta `specs/dreaming/spec.md` has `## MODIFIED Requirements`, and no
+  `openspec/specs/dreaming/spec.md`
+- **When** the validator runs
+- **Then** it prints `spec_no_baseline` naming the unit, the delta file and the missing baseline, and exits 1
+
+#### SCN-ADO-27 (+) An ADDED-only new capability with a Purpose · L4-ADO-009
+- **Given** a planned change whose delta for a new capability has a `## Purpose` of 60 characters and only
+  `## ADDED Requirements`
+- **When** the validator runs
+- **Then** it reports no problem for that unit
+
+#### SCN-ADO-28 (−) A new capability without a Purpose · L4-ADO-009
+- **Given** the same change without its `## Purpose`
+- **When** the validator runs
+- **Then** it prints `spec_no_purpose` for the unit and exits 1
+
+#### SCN-ADO-29 (−) A dependency over its budget · L4-ADO-010
+- **Given** unit `b` depends on unit `a`, whose folder holds 27,148 characters with `tasks.md` read last
+- **When** the validator runs
+- **Then** it prints `warning: material_over_budget: openspec:a: …/tasks.md: 7148 characters cut (as a dependency of
+  openspec:b)` and exits 0
+
+#### SCN-ADO-29a (+) A raised budget · L4-ADO-010
+- **Given** the 27,148-character dependency of SCN-ADO-29 and `.l4/config.yaml` with `yolo.review.max_dependency_chars:
+  30000`
+- **When** the validator runs
+- **Then** it prints no `material_over_budget` line and exits 0
+
+#### SCN-ADO-30 (+) Harness files do not count · L4-ADO-010
+- **Given** a planned unit whose spec files hold 79,000 characters, and whose folder also holds a
+  `verification.md` and a `.l4/` folder of 30,000 characters
+- **When** the validator runs
+- **Then** it reports no budget problem
+
+#### SCN-ADO-31 (+) The validator reads like the review · L4-ADO-010
+- **Given** fixture folders with a cut file, an omitted file, a binary file, a ticked `tasks.md` and excluded files
+- **When** the validator and the review's folder reader read them
+- **Then** both list the same cut and omitted files with the same counts
+
+#### SCN-ADO-32 (+) l4 yolo check reports without refusing · L4-ADO-010
+- **Given** an admissible plan with one dependency over its budget
+- **When** `l4 yolo check <plan>` runs
+- **Then** it prints the `material_over_budget` line and exits 0
+
+#### SCN-ADO-33 (+) Existing specs stay put · L4-ADO-011
+- **Given** `yolo.hold: ["openspec:a", "openspec:b"]` and no plan file
+- **When** `l4 run` runs
+- **Then** `a` and `b` are shown `held by yolo.hold`, no agent and no judge is called, and the run says there is
+  nothing to do
+
+#### SCN-ADO-34 (+) A new spec still runs alone · L4-ADO-011
+- **Given** the same hold and a new change `c`
+- **When** `l4 run` runs
+- **Then** `c` starts as a single unit
+
+#### SCN-ADO-35 (+) A pattern holds every new spec until a plan lists it · L4-ADO-011
+- **Given** `yolo.hold: ["*"]` and a new change `c`
+- **When** `l4 run` runs, and later a plan file that lists `c` is reviewed and activated
+- **Then** `c` is held at first, and afterwards follows the plan
+
+#### SCN-ADO-36 (+) The validator counts a held spec as covered · L4-ADO-011
+- **Given** `yolo.hold: ["openspec:a"]` and plan files that do not list `a`
+- **When** the validator runs
+- **Then** it does not report `uncovered: openspec:a`
+
+#### SCN-ADO-37 (+) Three existing changes are held · L4-ADO-012
+- **Given** a repository with three OpenSpec changes
+- **When** `l4 init --ci github --action --hold-existing` runs
+- **Then** `yolo.hold` lists the three ids in order, and a first `l4 run` says there is nothing to do
+
+#### SCN-ADO-38 (+) Nothing to hold · L4-ADO-012
+- **Given** a repository with no unit
+- **When** `l4 init --hold-existing` runs
+- **Then** the config has no `yolo.hold`, and init says there was nothing to hold
+
+#### SCN-ADO-39 (+) A refused plan that holds 26 units · L4-ADO-013
+- **Given** a refused plan that lists 26 units
+- **When** `l4 status` runs
+- **Then** its line reads `plan backlog: refused (holds 26 units; none of them runs until the plan is fixed, completed
+  or its file is removed), 0/26 integrated, $0.00/$0.00`
+
+#### SCN-ADO-40 (+) A delta on a capability without a baseline · L4-ADO-014
+- **Given** an agent with the skill, asked to write a change that adds behaviour to a capability that
+  `openspec/specs/` lacks
+- **When** it writes the delta
+- **Then** it writes `## ADDED Requirements` with a `## Purpose`, and runs `openspec validate <change> --strict` and
+  `validate_plan.py` before the push
+
+#### SCN-ADO-41 (+) The skill stays short · L4-ADO-014
+- **Given** the skill files
+- **When** their words are counted
+- **Then** `references/spec.md` has at most 450 words, and `SKILL.md` gains one line
+
+#### SCN-ADO-42 (−) No System One · L4-ADO-015
+- **Given** a `laya` profile in `roles.s1_judge`, and no `laya-serve` on the runner
+- **When** `l4 doctor --ci` runs
+- **Then** the row warns that System One is off because `laya-serve` is not installed, states the consequence, and
+  names the fix
+
+#### SCN-ADO-43 (−) A LAN engine on a hosted runner · L4-ADO-015
+- **Given** `roles.s1_judge: [ollama-tev1]` and `RUNNER_ENVIRONMENT=github-hosted`
+- **When** `l4 doctor --ci` runs
+- **Then** the row says that the profile is on the local network and unreachable from a GitHub-hosted runner
+
+#### SCN-ADO-44 (+) Laya starts · L4-ADO-015
+- **Given** a `laya` profile with `laya-serve` and its checkpoint installed
+- **When** `l4 doctor --adoption` runs
+- **Then** the row passes, names `laya-local` and the model, gives the seconds to ready, and no `laya-serve` process
+  is left running
+
+#### SCN-ADO-45 (+) Laya by default · L4-ADO-016
+- **Given** a repository without L4
+- **When** `l4 init --ci github --action` runs
+- **Then** the config loads, `roles.s1_judge` is `[laya]`, and the `laya` profile has `engine: laya-local`
+
+#### SCN-ADO-46 (+) Jev on request · L4-ADO-016
+- **Given** a repository without L4
+- **When** `l4 init --ci github --action --s1 jev` runs
+- **Then** `roles.s1_judge` names the Jev profile, and the workflow's job env names `TYPESAFE_API_KEY`
+
+#### SCN-ADO-47 (+) A Jev key reaches the job · L4-ADO-017
+- **Given** `roles.s1_judge: [jev]` whose profile has `api_key_env: TYPESAFE_API_KEY`, and a workflow rendered
+  without it
+- **When** `l4 upgrade` re-renders the workflow
+- **Then** the job env has `TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}`, and upgrade reports the file changed
+
+#### SCN-ADO-48 (+) A shadow engine's key · L4-ADO-017
+- **Given** `verifier.s1.shadow: [jev-shadow]` with `api_key_env: TYPESAFE_API_KEY`
+- **When** the workflow is rendered
+- **Then** the job env names `TYPESAFE_API_KEY` once
+
+#### SCN-ADO-49 (+) A local engine adds nothing · L4-ADO-017
+- **Given** `roles.s1_judge: [laya]` with `engine: laya-local`
+- **When** the workflow is rendered
+- **Then** the job env is the same as without the profile
+
+#### SCN-ADO-50 (+) An integration-base adoption from the reference · L4-ADO-018
+- **Given** a person who follows the adoption reference on a repository with existing specs and a `staging` base
+- **When** they finish
+- **Then** they have set `yolo.hold`, made no backlog plan, and added no deployment branch by hand
+
+#### SCN-ADO-51 (−) init from a checkout · L4-ADO-018
+- **Given** `l4` running from a checkout, and no `--action-repo`
+- **When** `l4 init --ci github --action` runs
+- **Then** it exits 2, says that a checkout has no install origin, and prints the
+  `uv tool run --from git+https://github.com/OWNER/l4@vX.Y.Z` form and `--action-repo`
+
+#### SCN-ADO-52 (+) Laya on a hosted runner, warm the second time · L4-ADO-019
+- **Given** `roles.s1_judge: [laya]` and a GitHub-hosted job with self-provisioning on
+- **When** the job runs twice
+- **Then** the verifier's step 8 reads "judged by laya-local" both times, and the second job restores Laya from its own
+  cache and downloads nothing
+
+#### SCN-ADO-53 (+) No Laya without a profile · L4-ADO-019
+- **Given** no `laya-local` profile in any System One list
+- **When** a job provisions the runner
+- **Then** no Laya is installed and no Laya cache is restored or saved
+
+#### SCN-ADO-54 (+) A persistent GitLab runner installs once · L4-ADO-019
+- **Given** a GitLab shell runner, a `laya` profile, and Laya already installed at the pin
+- **When** `l4 doctor --ci --fix` runs
+- **Then** it reports Laya present and installs nothing
 
 ## 24. Definition of done
 
