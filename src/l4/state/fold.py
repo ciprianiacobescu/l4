@@ -9,7 +9,7 @@ import json
 from collections.abc import Callable, Iterable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer
 
 from l4.state.ledger import TS_FORMAT, LedgerEvent
 
@@ -139,7 +139,17 @@ class UnitState(_Model):
     misdirected: Misdirected | None = None  # `pr.misdirected`, until the next phase change or a new MR (L4-YOLO-007)
     closed_from: ReturnState | None = None  # `pr.closed` (or the `pr_closed` edge) until `pr_reopened` gives it back
     hinted_heads: list[str] = Field(default_factory=list)  # `resume.hint{head}`: branch heads a halt pointer was for
+    # review-resolution 3.4 (L4-YOLO-028): the accepted finding ids that every judge of the latest PASS round answered
+    # `addressed: true` (`review.accepted_judged`); empty without an answer (the guarded merge then treats every
+    # accepted id as open). `accepted_evidence`: id -> the evidence of the first answer that did not address it.
+    accepted_addressed: frozenset[str] = frozenset()
+    accepted_evidence: dict[str, str] = Field(default_factory=dict)
     updated_at: str | None = None
+    _accepted_answers: list[dict[str, Any]] = PrivateAttr(default_factory=list)  # answers since the last verdict
+
+    @field_serializer("accepted_addressed")
+    def _sorted_ids(self, ids: frozenset[str]) -> list[str]:
+        return sorted(ids)
 
 
 def _text(event: LedgerEvent, key: str) -> str | None:
@@ -275,7 +285,33 @@ def _budget_cost(state: UnitState, event: LedgerEvent) -> None:
         state.cost_usd = round(state.cost_usd + usd, 6)
 
 
+def _accepted_judged(state: UnitState, event: LedgerEvent) -> None:
+    """`review.accepted_judged{id, round, addressed, evidence, profile}`: held until the round's verdict is known."""
+    if _text(event, "id") and isinstance(event.data.get("round"), int):
+        state._accepted_answers.append(event.data)
+
+
+def _settle_accepted(state: UnitState, round_: int) -> None:
+    """A PASS round replaces the set: an id is addressed when every judge that answered in the round said so. A judge
+    that gave no row for an id counts as no (a missing answer is `false`)."""
+    rows = [r for r in state._accepted_answers if r["round"] == round_]
+    judges = {str(r.get("profile") or "") for r in rows}
+    addressed: set[str] = set()
+    evidence: dict[str, str] = {}
+    for fid in sorted({str(r["id"]) for r in rows}):
+        mine = {str(r.get("profile") or ""): r for r in rows if r["id"] == fid}
+        no = next((r for r in mine.values() if r.get("addressed") is not True), None)
+        if no is None and set(mine) == judges:
+            addressed.add(fid)
+        else:
+            evidence[fid] = str((no or {}).get("evidence") or "not answered")
+    state.accepted_addressed, state.accepted_evidence = frozenset(addressed), evidence
+
+
 def _verify_verdict(state: UnitState, event: LedgerEvent) -> None:
+    if _text(event, "verdict") == "PASS" and isinstance(event.data.get("round"), int):
+        _settle_accepted(state, event.data["round"])
+    state._accepted_answers.clear()
     verdict, round_, findings = _text(event, "verdict"), event.data.get("round"), event.data.get("findings")
     if verdict and isinstance(round_, int) and isinstance(findings, int):
         state.last_verdict = LastVerdict(round=round_, verdict=verdict, findings=findings)
@@ -497,6 +533,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "agent.session": _agent_session,
     "budget.cost": _budget_cost,
     "verify.verdict": _verify_verdict,
+    "review.accepted_judged": _accepted_judged,
     "fix.spawned": _fix_spawned,
     "fix.done": _fix_done,
     "human.verdict": _human_verdict,
