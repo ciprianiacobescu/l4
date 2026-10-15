@@ -104,6 +104,7 @@ class PlanStep(YoloStep):
     sentence `run: <unit> <refusal>` (L4-YOLO-010, SCN-YOLO-21)."""
 
     refusals: Mapping[str, str] = field(default_factory=dict)
+    pending_starts: frozenset[str] = frozenset()  # current units of a plan with a `unit.not_started` record pending
 
 
 @dataclass(frozen=True)
@@ -600,9 +601,14 @@ class _Step:
                 refusals[unit] = (
                     reason or f"waits for the plan step of this run (plan {live.plan_id if live else plan_id})"
                 )
+        pending = frozenset(
+            ctx.state.current
+            for ctx in self.ctxs.values()
+            if ctx.state.current and not_started_pending(ctx.read.events, ctx.state.current) is not None
+        )  # what the step read: the run clears these without reading the plan ledger again
         return PlanStep(
             allow=allow, actions=(*self.actions, *extra), start_next_run=start_next_run,
-            plan_id=plan_id or (live.plan_id if live else None), refusals=refusals,
+            plan_id=plan_id or (live.plan_id if live else None), refusals=refusals, pending_starts=pending,
         )  # fmt: skip
 
     # --- writing ----------------------------------------------------------------------------------------------------
@@ -1461,7 +1467,10 @@ def record_run_starts(
     that did begin gets `unit.started{unit, run}` when such a record is pending. True when a pending record was
     cleared: the caller chains the next run as the dispatch would have. A failure is a warning: the run limit is the
     brake."""
-    units = [u for u in (*not_started, *began) if step.plan_id and step.allow and u in step.allow]
+    units = [
+        u for u in (*not_started, *(b for b in began if b in step.pending_starts))
+        if step.plan_id and step.allow and u in step.allow
+    ]  # fmt: skip
     if not units:
         return False
     assert step.plan_id is not None

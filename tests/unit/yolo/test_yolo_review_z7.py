@@ -41,3 +41,33 @@ def test_a_run_that_never_started_the_unit_waits_with_its_own_reason(world):  # 
     waiting = [e for e in world.events() if e.type == "plan.waiting"]
     assert [e.data["reason"] for e in waiting] == ["run_not_started"]
     assert fold_plan("p1", world.events()).wait_reason == "run_not_started"
+
+
+def test_a_unit_skipped_because_another_run_holds_its_lease_is_not_recorded_as_not_started(monkeypatch):
+    from types import SimpleNamespace
+
+    from l4 import orchestrator
+    from l4.orchestrator import UnitRunResult, _busy
+
+    monkeypatch.setattr(
+        orchestrator, "load_snapshot", lambda *a, **k: SimpleNamespace(state=SimpleNamespace(phase="implementing"))
+    )
+    monkeypatch.setattr(
+        orchestrator, "run_unit_in_worktree", lambda app, cfg, git, provider, ref, **kw: _busy("implementing", ref)
+    )
+    cfg = SimpleNamespace(
+        forge=SimpleNamespace(branch_prefix="l4/"), ci=SimpleNamespace(time_budget="auto", soft_deadline_margin="20m")
+    )
+    app = SimpleNamespace(redactor=SimpleNamespace(redact_text=lambda t: t), environ={})
+    out = orchestrator.run_units(app, cfg, None, [(object(), SimpleNamespace(id=A))], adapters=None)
+    assert out.not_started == {} and out.began == []
+    assert isinstance(_busy(None, SimpleNamespace(id=A)), UnitRunResult)
+
+
+def test_the_next_line_of_a_run_not_started_wait_agrees_with_the_runbook():
+    from l4.yolo.commands import _next_line
+    from l4.yolo.state import PlanState
+
+    st = PlanState(plan_id="p1", status="waiting", wait_reason="run_not_started")
+    line = _next_line("p1", st, None, None)
+    assert "next trigger" in line and "l4 yolo resume p1" in line

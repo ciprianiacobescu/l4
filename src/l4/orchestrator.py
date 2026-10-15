@@ -196,6 +196,7 @@ def _sections(section: str | None) -> tuple[str, ...] | None:
 class UnitRunResult:
     outcome: UnitOutcome
     exit_code: ExitCode
+    busy: bool = False  # another run holds the unit's lease: skipped, which is not the unit's failure
 
 
 @dataclass
@@ -1195,7 +1196,7 @@ def _busy(snapshot_phase: str | None, ref: UnitRef) -> UnitRunResult:
     log.info("%s is locked by another run: skipped", ref.id)
     reason = "skipped: the unit is locked by another run"
     outcome = UnitOutcome(unit=ref.id, phase_before=phase, phase_after=phase, exit_reason=reason)
-    return UnitRunResult(outcome, ExitCode.OK)
+    return UnitRunResult(outcome, ExitCode.OK, busy=True)
 
 
 def _refuse_stopped(
@@ -1406,8 +1407,13 @@ def run_command(
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
     try:  # a unit whose run ended before it started waits for the next trigger; one that began clears that wait
-        if record_run_starts(app, cfg, git, step, result.not_started, result.began) and not step.start_next_run:
+        cleared = record_run_starts(app, cfg, git, step, result.not_started, result.began)
+        if cleared and not step.start_next_run:
             step = replace(step, start_next_run=True)
+        elif step.plan_id and step.start_next_run and any(
+            u in (step.allow or ()) for u in result.not_started if u not in result.began
+        ):
+            step = replace(step, start_next_run=False)  # the dispatched unit did not start: one trigger runs it once
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
@@ -1545,7 +1551,7 @@ def run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
-        if ref.id not in waits.started:  # a usage error, a lease or worktree failure, a busy unit: it never began
+        if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
         if done.exit_code == ExitCode.REJECTED:
