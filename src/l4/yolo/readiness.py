@@ -48,7 +48,7 @@ from l4.sandbox.env import build_agent_env
 from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
-from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
+from l4.yolo.digest import current_unit_ref, is_excluded, normalise_tasks, unit_digest
 from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
@@ -145,7 +145,7 @@ def read_folder(git: Git, rev: str, folder: str, *, budget: int) -> FolderText:
         path = raw.decode("utf-8", "replace")
         if is_excluded(PurePosixPath(path).relative_to(root).parts):
             continue
-        data = git.run_bytes("show", f"{rev}:{path}", check=False)
+        data = normalise_tasks(path.rsplit("/", 1)[-1], git.run_bytes("show", f"{rev}:{path}", check=False))
         if b"\0" in data:
             omitted.append(Omission(path, "binary file"))
             continue
@@ -196,6 +196,10 @@ GROUPING_NOTE = (
     "and the interfaces the units share."
 )
 NOT_APPLICABLE = "batch_acceptance"
+TASKS_NOTE = (
+    "The check marks of the tasks in a tasks.md are the harness's progress, not part of the specification: they are "
+    "shown unchecked, whatever the file says, so a task is never a sign that something is already implemented."
+)
 ORDER_NOTE = (
     "A prerequisite that is a unit of this plan is delivered and merged into the target before any unit that depends "
     "on it starts: the plan runs one unit at a time, in dependency order."
@@ -226,7 +230,7 @@ def _unit_subject(
     values = {
         "SUBJECT_KIND": "unit",
         "SUBJECT_ID": data_block("subject", _label(unit.id)),
-        "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context,
+        "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context + "\n" + TASKS_NOTE,
         "DEPENDENCIES": "\n\n".join([*prerequisites, _batch_deps(batch.depends_on)]).strip()
         or "(none: the unit depends on nothing)",
         "FOLDERS": data_block("folder", _label(f"{unit.id} ({folder.path})")) + "\n" + _folder_blocks(folder),
@@ -257,6 +261,8 @@ def _batch_subject(
         "ENTRY": data_block("plan entry", _entry(batch))
         + "\n"
         + context
+        + "\n"
+        + TASKS_NOTE
         + ("\n" + GROUPING_NOTE if groups_only else ""),
         "DEPENDENCIES": "\n\n".join([*_prerequisites(plan, deps), _batch_deps(batch.depends_on)]).strip()
         or "(none: the batch depends on nothing)",

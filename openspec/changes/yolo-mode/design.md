@@ -194,6 +194,7 @@ Prompt template `src/l4/yolo/prompts/readiness.md`; output schema `src/l4/yolo/s
 `review_plan(app, cfg, plan, units) -> ReviewResult(units: dict[str, Verdict], batches: dict[str, Verdict])`. Rules:
 - Structural validity alone never gives READY: an empty or unparsable answer is `BLOCKED` with `schema_invalid`.
 - A `blocking` finding makes the verdict at least NEEDS_REVISION whatever the model said.
+- The material shows every `tasks.md` with the digest's normalisation (`digest.normalise_tasks`: each task marker as `[ ]`) and always says that the check marks are the harness's progress, so a ticked task of a started unit is never read as work already done.
 - A batch with no acceptance profile only groups units: its material says so, a `batch_acceptance` finding on it is moved to the assumptions, and a NEEDS_REVISION with no blocking or major finding left becomes READY.
 - The reviewer never answers a product question: an open question stays a question (admission refuses open questions).
 - One review per plan digest and unit digests: the CI step reviews a plan when its latest `plan.reviewed` is for other

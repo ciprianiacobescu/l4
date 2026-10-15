@@ -54,13 +54,13 @@ def test_a_checkbox_in_another_file_is_content(world):
 
 
 @pytest.mark.parametrize("line", [t[1] for t in TICKS] + [t[2] for t in TICKS])
-def test_the_normalised_forms_are_the_ones_tasks_merge_reads(line):
+def test_thenormalise_tasksd_forms_are_the_ones_tasks_merge_reads(line):
     """The digest and the harness's own tick writer agree on what a marker is (`tasks_merge` Kiro and OpenSpec)."""
     raw = line.encode()
     assert tasks_merge._KIRO.match(raw) or tasks_merge._OPENSPEC.match(raw)
-    from l4.yolo.digest import _normalise
+    from l4.yolo.digest import normalise_tasks
 
-    assert re.search(rb"\[[ xX~-]\]", _normalise("tasks.md", raw)).group(0) == b"[ ]"
+    assert re.search(rb"\[[ xX~-]\]", normalise_tasks("tasks.md", raw)).group(0) == b"[ ]"
 
 
 def test_a_missing_revision_raises_never_the_empty_set_digest(world):

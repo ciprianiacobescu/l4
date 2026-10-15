@@ -183,3 +183,52 @@ def test_a_closing_tag_in_a_file_name_cannot_end_a_data_block(world):
     world.rev = world.git.rev_parse("HEAD")
     _, fake = review(world, plan_of({A: []}), Step(structured=answer()))
     assert "<l4:data source=x> " + EVIL not in fake.requests[0].prompt
+
+
+# --- the harness's task check marks are not shown to the judge (R4) -----------------------------------------------
+
+TICKED = "# Tasks\n\n- [x] 1.1 Add the discount\n  - [X] 1.1.1 Step\n- [~] 2 Next\n- [-] 3 Started\n* [ ] 4 Open\n"
+UNTICKED = "# Tasks\n\n- [ ] 1.1 Add the discount\n  - [ ] 1.1.1 Step\n- [ ] 2 Next\n- [ ] 3 Started\n* [ ] 4 Open\n"
+NOTE = "The check marks of the tasks in a tasks.md are the harness's progress"
+
+
+@pytest.mark.parametrize("folder", ["openspec/changes/a", ".kiro/specs/a"])
+def test_ticked_tasks_on_the_unit_branch_are_shown_unticked(world, folder):
+    cfg = make_cfg()
+    world.units = {A: UnitInfo(A, folder), B: UnitInfo(B, FOLDER_B)}
+    world.rev = world.commit({f"{folder}/spec.md": SPEC_A, f"{folder}/tasks.md": TICKED})
+    ticked = world.rev
+    world.git.run("update-ref", f"refs/remotes/origin/{unit_branch(A, cfg.forge.branch_prefix)}", ticked)
+    plain = world.commit({f"{folder}/tasks.md": UNTICKED})
+    _, fake_ticked = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
+    prompt = fake_ticked.requests[0].prompt
+    assert UNTICKED in prompt and "[x]" not in prompt and "[X]" not in prompt and "[~]" not in prompt
+    assert NOTE in outside_blocks(prompt)
+    # the rest of the text is unchanged: the same folder with the markers already open gives the same prompt
+    world.git.run("update-ref", f"refs/remotes/origin/{unit_branch(A, cfg.forge.branch_prefix)}", plain)
+    _, fake_plain = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
+    assert fake_plain.requests[0].prompt == prompt
+
+
+def test_a_batch_shows_the_tasks_unticked_too(world):
+    world.rev = world.commit({f"{FOLDER_A}/tasks.md": TICKED})
+    _, fake = review(world, plan_of({A: [], B: [A]}), *[Step(structured=answer()) for _ in range(3)])
+    assert all("[x]" not in r.prompt and NOTE in outside_blocks(r.prompt) for r in fake.requests)
+
+
+def test_the_shown_tasks_and_the_digest_use_one_normalisation(world):
+    from l4.yolo import digest
+
+    rev = world.commit({f"{FOLDER_A}/tasks.md": TICKED})
+    shown = dict(read_folder(world.git, rev, FOLDER_A, budget=10_000).files)[f"{FOLDER_A}/tasks.md"]
+    assert shown.encode() == digest.normalise_tasks("tasks.md", TICKED.encode())
+    assert readiness.normalise_tasks is digest.normalise_tasks
+    open_rev = world.commit({f"{FOLDER_A}/tasks.md": UNTICKED})
+    assert unit_digest(world.git, rev, FOLDER_A) == unit_digest(world.git, open_rev, FOLDER_A)
+
+
+def test_a_file_that_is_not_tasks_md_keeps_its_check_marks(world):
+    rev = world.commit({f"{FOLDER_A}/notes.md": "- [x] done\n", f"{FOLDER_A}/sub/tasks.md": "- [x] 1 nested\n"})
+    files = dict(read_folder(world.git, rev, FOLDER_A, budget=10_000).files)
+    assert files[f"{FOLDER_A}/notes.md"] == "- [x] done\n"
+    assert files[f"{FOLDER_A}/sub/tasks.md"] == "- [ ] 1 nested\n"  # the digest reads any tasks.md by name

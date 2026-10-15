@@ -59,7 +59,9 @@ def is_excluded(parts: Sequence[str]) -> bool:
     return any(p in EXCLUDED_DIRS for p in parts[:-1]) or parts[-1] in EXCLUDED_FILES
 
 
-def _normalise(name: str, content: bytes) -> bytes:
+def normalise_tasks(name: str, content: bytes) -> bytes:
+    """The content as the digest covers it, and as the readiness review shows it: in a file named `tasks.md` every task
+    marker reads `[ ]`; any other file is unchanged (R4)."""
     return _MARKER.sub(rb"\1 \2", content) if name == "tasks.md" else content
 
 
@@ -92,7 +94,7 @@ def unit_digest(git: Git, rev: str, folder: str) -> str:
         raise FolderMissing(f"the folder {folder!r} does not exist at {rev!r}")
     h = hashlib.sha256()
     for rel, sha in sorted(entries, key=lambda e: e[0].encode("utf-8", "surrogateescape")):
-        content = _normalise(rel.rsplit("/", 1)[-1], git.run_bytes("cat-file", "blob", sha))
+        content = normalise_tasks(rel.rsplit("/", 1)[-1], git.run_bytes("cat-file", "blob", sha))
         h.update(rel.encode("utf-8", "surrogateescape") + b"\0" + content + b"\0")
     return h.hexdigest()[:DIGEST_CHARS]
 
