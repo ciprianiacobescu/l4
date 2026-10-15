@@ -17,7 +17,7 @@ def refs(run) -> str:
 def ledger_files(run) -> list[str]:
     from l4.vcs.names import UnitNames
 
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache, repo_key=run.tdd.key)
     return sorted(p.name for p in (names.worktree / UNIT_DIR / ".l4" / "ledger").glob("*.jsonl"))
 
 

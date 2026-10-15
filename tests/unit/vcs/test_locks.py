@@ -17,7 +17,7 @@ RUN_A, RUN_B = "r-20261003T1312Z-aaaa", "r-20261003T1313Z-bbbb"
 
 @pytest.fixture
 def names(tmp_path: Path) -> UnitNames:
-    return UnitNames.for_unit("openspec:x", branch_prefix="l4/", cache=tmp_path / "cache")
+    return UnitNames.for_unit("openspec:x", branch_prefix="l4/", cache=tmp_path / "cache", repo_key="proj-0123456789")
 
 
 def lease(names: UnitNames, run_id: str = RUN_A) -> LocalFileLease:

@@ -16,7 +16,7 @@ layer exists, so it is delivered as the second slice after the CLI/config skelet
 - Add the idempotency key and the crash reconciliation of unfinished steps (resume after crash).
 - Add a hardened git runner (`core.hooksPath=/dev/null`, `core.fsmonitor=false`, `protocol.ext.allow=never`,
   `--no-verify`, never a `+` refspec), commit trailers, and WIP snapshots built from a temporary index.
-- Add one worktree per unit under `$L4_CACHE/worktrees/<fw>/<name>`: created from the remote unit branch (or from
+- Add one worktree per unit under `$L4_CACHE/worktrees/<key>/<fw>/<name>`: created from the remote unit branch (or from
   base), reused only after verification, base brought in by merge, harness-owned-file conflict resolution, pruning.
 - Add unit locks. Walking skeleton (M1): an in-process push mutex plus a local `flock` lease. Full scope (M2): the
   remote git lease on `refs/l4/locks/<fw>/<name>`, atomic fenced pushes, rejection classification, heartbeat,

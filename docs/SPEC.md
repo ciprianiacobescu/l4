@@ -435,7 +435,9 @@ looks like a secret in config MUST fail validation.
 **L4-CFG-005 Runner paths.** The runner cache `$L4_CACHE` (worktrees, lock files, the probe cache and cool-down
 registry, harness-owned tool prefixes, per-unit sandbox caches, S1 calibration data) MUST default, when the variable is
 unset, to `$XDG_CACHE_HOME/l4`, else `~/.cache/l4`, and MUST resolve **outside** the repository: worktrees live outside
-the repo (L4-WTR-001) and the cross-job `flock` of L4-LCK-001 must be shared by jobs whose build directories differ
+the repo (L4-WTR-001) and the cross-job `flock` of L4-LCK-001 must be shared by jobs of the same project whose build
+directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which is why both paths are keyed by the project's repository key
+(from its `origin` URL, never from a local path) and not by the checkout's location
 [I, decision of the cross-change review 2026-10-03; a repo-local `.l4-cache/` was rejected for these two reasons]. A
 `$L4_CACHE` inside the repository is a usage error (exit 2). `$L4_HOME` (default `~/.local/share/l4`) holds the
 user-local tools that `doctor --fix` installs (L4-DOC-002). Both are environment variables, never config keys and
@@ -2962,7 +2964,8 @@ worktree and resume the step; else re-run the step.
   `--force-with-lease=<ref>:<old-sha>`; release by deleting with a lease.
 - a run that cannot acquire the lease because a live holder has it logs `lock.busy{holder}` and skips the unit (exit 0
   for that unit).
-- on shared shell runners, additionally `flock` `$L4_CACHE/locks/<unit>.lock`.
+- on shared shell runners, additionally `flock` `$L4_CACHE/locks/<key>/<fw>/<name>.lock` (`<key>`: the repository key of
+  L4-WTR-001), taken before the unit's worktree is prepared or removed.
 - every fenced WIP push records the WIP commit SHA in the lock commit it advances (`wip_sha`); a new holder
   (L4-STA-003) restores a WIP snapshot only if its SHA equals the `wip_sha` of the last lock commit of a lease that was
   valid when pushed; any other WIP commit is ignored.
@@ -2974,7 +2977,12 @@ in every run's log, and `ci.max_parallel_units` is forced to 1.
 
 ### 12.3 Worktrees
 
-**L4-WTR-001** Worktrees live in `$L4_CACHE/worktrees/<fw>/<name>` (outside the repo, L4-CFG-005), are created with
+**L4-WTR-001** Worktrees live in `$L4_CACHE/worktrees/<key>/<fw>/<name>` (outside the repo, L4-CFG-005; the post-merge
+archive worktree in `$L4_CACHE/worktrees/<key>/archive/<fw>/<name>`), where `<key>` is the repository key, which is the same for every clone and
+build directory of one project and differs between projects, so two projects that share a change name on one runner never meet at a path. A
+checkout found at a path is replaced only if its repository has the same key or its owning clone no longer exists
+(an orphan, whose gitdir points nowhere); a checkout of a repository with another key is never deleted (exit 2). Directories of the
+earlier layout (`$L4_CACHE/worktrees/<fw>/<name>`, `$L4_CACHE/locks/<fw>/<name>.lock`) are not used and are not touched. Worktrees are created with
 `git worktree add` from the remote unit branch (created from base when absent), are reused across runs on the same
 runner only after `git fetch` + verification that HEAD matches the remote branch or the WIP snapshot, and are pruned by
 `doctor --fix`. The base branch is brought in by **merge** (pushed history is never rebased). Conflicts in
@@ -3165,13 +3173,18 @@ of a spec, requirement, design or task text MUST. The digest of a unit MUST be t
 when it exists, else on the target; a revision or a folder that does not exist MUST raise, and MUST NOT give the digest
 of an empty set (R3).
 
-**L4-YOLO-004** Readiness review in CI. A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
+**L4-YOLO-004** Readiness review in CI.
+A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
 role reviews each unit and each batch with more than one unit, with the prompt and output schema of design D5, and the
 result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid answer MUST be BLOCKED. A blocking finding
 MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
-NEEDS_REVISION, with a finding that names what was left out. File names, unit ids and batch ids MUST reach the prompt only
-inside `<l4:data>` blocks. A judge that times out or fails MUST record no review: the next run tries again (R9). One plan
-is reviewed per run.
+NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and
+states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and
+its NEEDS_REVISION MUST become READY when no blocking or major finding remains. The judge's material for a batch shows
+every prerequisite of its units that is not a unit of the batch, the way the material of a unit shows its prerequisites,
+and both state that a prerequisite unit of the plan is delivered and merged into the target before any unit that depends
+on it starts. File names, unit ids and batch ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that
+times out or fails MUST record no review: the next run tries again (R9). One plan is reviewed per run.
 
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest and the
 limits, and then start a run on the target. It MUST be refused, with exit 2 and the cause, unless: the plan is admitted;

@@ -183,7 +183,7 @@ class PlanState(BaseModel):
 
 `src/l4/yolo/readiness.py`. The judge role (the first available profile of `roles.judges`) reviews:
 - each unit: the unit folder at the target head, the plan entry, the units it depends on (names and their folders);
-- each batch with more than one unit: all its units' folders together.
+- each batch with more than one unit: all its units' folders together, and the folders of the prerequisites of its units that are not units of the batch (as a unit shows them); a prerequisite unit of the plan is delivered and merged before a unit that depends on it starts, and the material says so.
 
 Prompt template `src/l4/yolo/prompts/readiness.md`; output schema `src/l4/yolo/schemas/readiness.schema.json`:
 
@@ -194,6 +194,7 @@ Prompt template `src/l4/yolo/prompts/readiness.md`; output schema `src/l4/yolo/s
 `review_plan(app, cfg, plan, units) -> ReviewResult(units: dict[str, Verdict], batches: dict[str, Verdict])`. Rules:
 - Structural validity alone never gives READY: an empty or unparsable answer is `BLOCKED` with `schema_invalid`.
 - A `blocking` finding makes the verdict at least NEEDS_REVISION whatever the model said.
+- A batch with no acceptance profile only groups units: its material says so, a `batch_acceptance` finding on it is moved to the assumptions, and a NEEDS_REVISION with no blocking or major finding left becomes READY.
 - The reviewer never answers a product question: an open question stays a question (admission refuses open questions).
 - One review per plan digest and unit digests: the CI step reviews a plan when its latest `plan.reviewed` is for other
   digests.
@@ -390,7 +391,7 @@ The harness never merges a unit that is not in an active `merge: auto` plan, wha
 - **A unit branch runs its own pinned harness** (0.3.0 gotcha). The plan step runs in the base checkout (the target's
   harness), so the plan logic is always the target's version; a unit run may use an older pin until the base merge.
 - **Both forges, one mechanism.** The design uses only git and calls that exist on both forges. GitLab was checked the
-  same way on 2026-10-14 (vps5, project `ai-cici/l4-yolo-dummy`, MR !1): the MR was `merged` within 5 s of the push,
+  same way on 2026-10-14 (a self-hosted GitLab, a disposable project, MR !1): the MR was `merged` within 5 s of the push,
   `merge_commit_sha` = the head. Both forges are validated live in task group 9.
 
 ## Migration Plan

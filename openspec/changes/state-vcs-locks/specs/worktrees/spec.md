@@ -8,12 +8,12 @@ The hardened git runner, the trailer model and the WIP snapshot primitive are co
 ## ADDED Requirements
 
 ### Requirement: L4-WTR-001 (part a) Worktree location
-Worktrees SHALL live in `$L4_CACHE/worktrees/<fw>/<name>`, outside the repository working tree.
+Worktrees SHALL live in `$L4_CACHE/worktrees/<key>/<fw>/<name>`, outside the repository working tree. `<key>` is the repository key (a slug of the last path segment of the `origin` URL and a short hash of its normalised `host/path`, or a hash of the git common dir without an origin): the same for every clone and build directory of one project, different between projects. A checkout found at the path is replaced when its repository has the same key or its clone no longer exists (an orphan); one of another key is refused and never deleted.
 
 #### Scenario: SCN-WTR-N1 (+) Worktree path is outside the repository
 - **GIVEN** unit `openspec:add-login` and `L4_CACHE=/var/l4`
 - **WHEN** the worktree is ensured
-- **THEN** it exists at `/var/l4/worktrees/openspec/add-login`, `git worktree list` shows it, and `git status` of the main checkout is clean.
+- **THEN** it exists at `/var/l4/worktrees/<key>/openspec/add-login`, `git worktree list` shows it, and `git status` of the main checkout is clean.
 
 ### Requirement: L4-WTR-001 (part b) Create from the remote branch or base
 A missing worktree SHALL be created with `git worktree add` from the remote unit branch, or, when that branch does not exist, as a new unit branch from the remote base branch.

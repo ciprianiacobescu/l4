@@ -49,7 +49,7 @@ from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
 from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
-from l4.yolo.model import Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
+from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
 PROMPT_VERSION = 1
@@ -187,20 +187,41 @@ class Subject:
     user: str
     left_out: tuple[str, ...] = ()
     not_shown: tuple[str, ...] = ()
+    groups_only: bool = False  # a batch with no acceptance profile: batch_acceptance does not apply to it
+
+
+GROUPING_NOTE = (
+    "This batch only groups units, has no acceptance profile and states no outcome of its own, so batch_acceptance "
+    "does not apply to it. Review what lies between its units: contradiction, duplicate_scope, missing_dependency, "
+    "and the interfaces the units share."
+)
+NOT_APPLICABLE = "batch_acceptance"
+ORDER_NOTE = (
+    "A prerequisite that is a unit of this plan is delivered and merged into the target before any unit that depends "
+    "on it starts: the plan runs one unit at a time, in dependency order."
+)
 
 
 def _batch_deps(ids: Sequence[str]) -> str:
     return data_block("batch prerequisites", "\n".join(f"- batch {b}" for b in ids)) if ids else ""
 
 
+def _prerequisites(plan: Plan, deps: Sequence[tuple[str, FolderText | None]]) -> list[str]:
+    """The prerequisite units, each as a data block with its folder text (or that its folder is not known), and the
+    ordering of the plan in plain words when one of them is a unit of this plan."""
+    shown = []
+    for dep, dep_folder in deps:
+        text = _folder_blocks(dep_folder) if dep_folder is not None else "(its folder is not known)"
+        head = data_block("prerequisite", _label(dep + (f" ({dep_folder.path})" if dep_folder else "")))
+        shown.append(f"{head}\n{text}")
+    in_plan = {u.id for u in plan.units()}
+    return [*shown, ORDER_NOTE] if any(dep in in_plan for dep, _ in deps) else shown
+
+
 def _unit_subject(
     plan: Plan, unit: PlanUnit, batch: PlanBatch, folder: FolderText, deps: Sequence[tuple[str, FolderText | None]]
 ) -> Subject:
-    prerequisites = []
-    for dep, dep_folder in deps:
-        shown = _folder_blocks(dep_folder) if dep_folder is not None else "(its folder is not known)"
-        head = data_block("prerequisite", _label(dep + (f" ({dep_folder.path})" if dep_folder else "")))
-        prerequisites.append(f"{head}\n{shown}")
+    prerequisites = _prerequisites(plan, deps)
     context = data_block("context", _label(f"in batch {batch.id}; plan {plan.plan_id}, target {plan.target}"))
     values = {
         "SUBJECT_KIND": "unit",
@@ -220,23 +241,34 @@ def _named(unit_id: str) -> str:
 
 
 def _batch_subject(
-    plan: Plan, batch: PlanBatch, folders: Mapping[str, FolderText], skip: Collection[str] = ()
+    plan: Plan,
+    batch: PlanBatch,
+    folders: Mapping[str, FolderText],
+    skip: Collection[str] = (),
+    deps: Sequence[tuple[str, FolderText | None]] = (),
 ) -> Subject:
+    """`deps`: the prerequisites of the units of the batch that are not units of the batch, in plan order."""
     units = [u for u in batch.units if u.id not in skip]
     context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
+    groups_only = batch.acceptance_profile == PROFILE_NONE
     values = {
         "SUBJECT_KIND": "batch",
         "SUBJECT_ID": data_block("subject", _label(batch.id)),
-        "ENTRY": data_block("plan entry", _entry(batch)) + "\n" + context,
-        "DEPENDENCIES": _batch_deps(batch.depends_on) or "(none: the batch depends on nothing)",
+        "ENTRY": data_block("plan entry", _entry(batch))
+        + "\n"
+        + context
+        + ("\n" + GROUPING_NOTE if groups_only else ""),
+        "DEPENDENCIES": "\n\n".join([*_prerequisites(plan, deps), _batch_deps(batch.depends_on)]).strip()
+        or "(none: the batch depends on nothing)",
         "FOLDERS": "\n\n".join(
             data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
             for u in units
         ),
     }
-    left_out = tuple(f"{_named(u.id)} {line}" for u in units for line in folders[u.id].left_out)
+    parts = [*((u.id, folders[u.id]) for u in units), *((d, f) for d, f in deps if f is not None)]
+    left_out = tuple(f"{_named(who)} {line}" for who, f in parts for line in f.left_out)
     not_shown = tuple(p for u in units for p in folders[u.id].binary)
-    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown)
+    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown, groups_only)
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------
@@ -274,7 +306,20 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
     """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
     the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
     are listed in `missing`."""
-    findings, said, missing = verdict.findings, verdict.verdict, verdict.missing
+    findings, said, missing, assumptions = verdict.findings, verdict.verdict, verdict.missing, verdict.assumptions
+    if subject.groups_only and any(f["criterion"] == NOT_APPLICABLE for f in findings):
+        # the plan file has nowhere to state a batch outcome: the finding cannot be fixed, so it is kept as a note
+        assumptions = (
+            *assumptions,
+            *(
+                f"batch_acceptance does not apply (the batch has no acceptance profile), {f['severity']}: {f['text']}"
+                for f in findings
+                if f["criterion"] == NOT_APPLICABLE
+            ),
+        )
+        findings = tuple(f for f in findings if f["criterion"] != NOT_APPLICABLE)
+        if said == "NEEDS_REVISION" and not any(f["severity"] in ("blocking", "major") for f in findings):
+            said = "READY"
     if subject.left_out:
         text = "material_cut: left out of the review by the size limits, so the review is partial: " + "; ".join(
             subject.left_out
@@ -283,7 +328,7 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         said = "NEEDS_REVISION" if said == "READY" else said
     if subject.not_shown:
         missing = (*missing, *(f"not shown to the judge (binary file): {path}" for path in subject.not_shown))
-    return Verdict(said, findings, verdict.assumptions, missing, verdict.digest)
+    return Verdict(said, findings, assumptions, missing, verdict.digest)
 
 
 # --- the judge call ------------------------------------------------------------------------------------------------
@@ -394,6 +439,15 @@ def review_plan_costed(
         folders[unit.id] = (
             read_folder(git, revs[unit.id], info.folder, budget=MAX_FOLDER_CHARS) if info else FolderText("", ())
         )
+    read_deps: dict[str, FolderText | None] = {}
+
+    def dependency(dep: str) -> FolderText | None:  # a prerequisite is read once, whoever shows it
+        if dep not in read_deps:
+            read_deps[dep] = (
+                read_folder(git, revs[dep], units[dep].folder, budget=MAX_DEPENDENCY_CHARS) if dep in units else None
+            )
+        return read_deps[dep]
+
     subjects: list[tuple[Subject, str | None]] = []
     result_units: dict[str, Verdict] = {}
     result_batches: dict[str, Verdict] = {}
@@ -412,17 +466,18 @@ def review_plan_costed(
                 )
                 result_units[unit.id] = _with_digest(blocked(f"unit_missing: {note}"), digest)
                 continue
-            deps = [
-                (d, read_folder(git, revs[d], units[d].folder, budget=MAX_DEPENDENCY_CHARS) if d in units else None)
-                for d in unit.depends_on
-            ]
+            deps = [(d, dependency(d)) for d in unit.depends_on]
             subjects.append((_unit_subject(plan, unit, batch, folder, deps), digest))
     for batch in plan.batches:
         left = [u for u in batch.units if u.id not in done]
         if len(batch.units) > 1 and not left:
             result_batches[batch.id] = Verdict("READY")
         elif len(batch.units) > 1 and all(not folders[u.id].empty for u in left):
-            subjects.append((_batch_subject(plan, batch, folders, skip=done), None))
+            inside = {u.id for u in batch.units}
+            # the prerequisites of the units reviewed that lie outside the batch, once each, in plan order
+            outside = dict.fromkeys(d for u in left for d in u.depends_on if d not in inside)
+            batch_deps = [(d, dependency(d)) for d in outside]
+            subjects.append((_batch_subject(plan, batch, folders, skip=done, deps=batch_deps), None))
     cost = 0.0
     if subjects:
         factory = Factory(

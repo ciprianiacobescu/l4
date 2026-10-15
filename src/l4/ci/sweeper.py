@@ -108,6 +108,7 @@ from l4.vcs.git import Git
 from l4.vcs.locks import Busy, LocalFileLease
 from l4.vcs.names import UnitNames, unit_branch
 from l4.vcs.push import LOCK_REF_PREFIX, PushRejected
+from l4.vcs.repokey import repository_key
 
 if TYPE_CHECKING:
     from l4.orchestrator import UnitRunResult
@@ -242,6 +243,7 @@ class Sweeper:
         self._auto_units = frozenset(auto_units)  # the units of an active `merge: auto` plan (L4-YOLO-009)
         self._archiver, self._detector, self._retry, self._ci = archiver, detector, retry, ci
         self.urls = app_forge_urls(app, cfg)  # what a ledger commits for the forge host, and how its URLs compare
+        self._key: str | None = None
         self._merged: dict[str, list[PullRequest]] | None = None
         self._open: dict[str, PullRequest] | None = None
         self._newest: dict[str, PullRequest] | None = None
@@ -362,10 +364,17 @@ class Sweeper:
         folder = f"{base}:{where}/{name}"
         return bool(self.git.run("rev-parse", "--verify", "--quiet", folder, check=False).stdout.strip())
 
+    def _repo_key(self) -> str:
+        """The repository key of this clone, read once per sweep (the paths of every unit carry it)."""
+        if self._key is None:
+            self._key = repository_key(self.app.repo, self.app.environ)
+        return self._key
+
     def _retire_one(self, unit_id: str, lock: str, sha: str) -> SweepAction | None:
         names = UnitNames.for_unit(
-            unit_id, branch_prefix=self.cfg.forge.branch_prefix, cache=cache_root(self.app.environ, repo=self.app.repo)
-        )
+            unit_id, branch_prefix=self.cfg.forge.branch_prefix, cache=cache_root(self.app.environ, repo=self.app.repo),
+            repo_key=self._repo_key(),
+        )  # fmt: skip
         merged = self._merged_mrs()
         if not merged or not merged.get(names.archive_branch):
             return None  # the archive MR is open, closed or never was: the lock ref is still the unit's
