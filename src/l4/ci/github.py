@@ -83,7 +83,8 @@ def doctor_command(cfg: L4Config, platform: Literal["github", "gitlab"]) -> str:
 
 def credential_secrets(cfg: L4Config) -> list[str]:
     """The secrets the job must name besides the forge token (L4-PRV-027, SCN-PRV-74): the credential variable of every
-    profile a role chain uses (L4-PRV-024) and an opencode provider's `api_key_env`. A GitHub secret reaches a job
+    profile a role chain uses (L4-PRV-024), an opencode provider's `api_key_env`, and the `api_key_env` of each
+    System One profile in `roles.s1_judge` or `verifier.s1.shadow` (L4-ADO-017). A GitHub secret reaches a job
     only through its `env`; an unset one maps to an empty value, which the harness treats as unset."""
     names: set[str] = set()
     for adapter, profiles in adapters_in_use(cfg).items():
@@ -95,6 +96,11 @@ def credential_secrets(cfg: L4Config) -> list[str]:
             options = profile.opencode_options() if adapter == "opencode" else None
             if options is not None and options.provider is not None:  # a free model has no options at all
                 names.add(options.provider.api_key_env)
+    # System One (L4-ADO-017): the key of every `system-one` profile that a judge list or the shadow list names
+    for s1_name in (*cfg.roles.s1_judge, *cfg.verifier.s1.shadow):
+        s1_profile = cfg.profiles.get(s1_name)
+        if s1_profile is not None and s1_profile.backend == "system-one" and s1_profile.api_key_env:
+            names.add(s1_profile.api_key_env)
     names.discard(cfg.forge.token_env)
     return sorted(names)
 

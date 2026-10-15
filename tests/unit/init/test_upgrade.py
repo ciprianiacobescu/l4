@@ -255,3 +255,26 @@ def test_upgrade_refuses_an_unsafe_base_branch_and_writes_nothing(target, harnes
     assert run(target, harness_repo, git_environ) == 2
     assert "base branch" in capsys.readouterr().err
     assert snapshot(target) == before
+
+
+def test_upgrade_adds_a_system_one_key_to_the_workflow_and_says_so(target, git_environ, capsys):
+    """SCN-ADO-47: a Jev profile added after adoption reaches the job env on the next upgrade, which reports it."""
+    import yaml
+
+    sha = "d" * 40
+    flags = ("--action", "--action-repo", "o/harness", "--harness-commit", sha)
+    assert main(["init", "--repo", str(target), "--ci", "github", *flags], environ=git_environ) == 0
+    workflow = target / ".github/workflows/l4.yml"
+    assert "TYPESAFE_API_KEY" not in workflow.read_text()
+    config = target / ".l4/config.yaml"
+    document = yaml.safe_load(config.read_text())
+    document.setdefault("profiles", {})["jev"] = {
+        "backend": "system-one", "engine": "jev", "base_url": "https://api.typesafe.ai",
+        "model": "jev-1.13.0", "api_key_env": "TYPESAFE_API_KEY", "vendor": "typesafe",
+    }  # fmt: skip
+    document.setdefault("roles", {})["s1_judge"] = ["jev"]
+    config.write_text(yaml.safe_dump(document, sort_keys=False))
+    capsys.readouterr()
+    assert main(["upgrade", "--repo", str(target), "--harness-commit", sha], environ=git_environ) == 0
+    assert "TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}" in workflow.read_text()
+    assert "re-rendered .github/workflows/l4.yml" in capsys.readouterr().out

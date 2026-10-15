@@ -191,3 +191,11 @@ def test_base_checkout_is_the_same_step_without_a_fetch():
     assert "git fetch" not in run and "fetch-depth: 0" in run
     plain = yaml.safe_load(render_github_ci(cfg(ci={"runner_tags": []})))["jobs"]["l4"]["steps"][1]["run"]
     assert run == plain
+
+
+def test_the_action_workflow_names_a_system_one_key():
+    """SCN-ADO-47 for the action form of the workflow."""
+    jev = {"backend": "system-one", "engine": "jev", "base_url": "https://api.typesafe.ai", "model": "jev-1.13.0",
+           "api_key_env": "TYPESAFE_API_KEY", "vendor": "typesafe"}  # fmt: skip
+    text = render_github_action_ci(cfg(profiles={"jev": jev}, roles={"s1_judge": ["jev"]}), PIN)
+    assert "TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}" in text
