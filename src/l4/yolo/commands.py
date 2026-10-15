@@ -928,6 +928,12 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
             f"trigger, a cron run or a push, runs the unit once more (l4 yolo resume {plan_id} --reason TEXT wakes the "
             "plan at once)"
         )
+    if status == "waiting" and state.wait_reason == "unit_not_started":
+        return (
+            "fix the unit on its branch (add the task, repair the ledger); the plan continues by itself at the next "
+            f"run when the unit has something to run (l4 yolo resume {plan_id} --reason TEXT wakes it at once, but "
+            "it waits again if the unit still has nothing to run)"
+        )
     if status in ("waiting", "stopped"):
         resume = f"l4 yolo resume {plan_id} --reason TEXT"
         return f"{blocker.fix}, then {resume}" if blocker else resume

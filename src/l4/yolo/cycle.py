@@ -1075,7 +1075,7 @@ class _Step:
             # (`unit_not_started`, the wait of a unit with nothing to run, is not this one: it is read below, as ever)
             if unit is None or not_started_pending(ctx.read.events, unit) is None:
                 return "the cause is gone: a run started the unit, or the plan was activated or resumed since"
-            return "the cause is gone: the next trigger runs the unit again"  # the wait ends so that the step runs it
+            return "the cause is gone: this trigger runs the unit"  # the wait ends so that the step runs it
         if unit is None and ctx.file.plan is not None:  # waiting on the unit the plan would dispatch (review #2)
             unit = next_eligible(ctx.file.plan, state, self._phases()).unit
             nxt = self.snaps.get(unit) if unit else None

@@ -37,3 +37,25 @@ def test_run_units_carries_the_busy_units(world, monkeypatch):  # noqa: F811
     monkeypatch.setattr(orch, "_phase_of", lambda *a: "none")
     result = orch.run_units(world.app, world.cfg, world.git, [(StubProvider(), snap.ref)], adapters=None)
     assert result.busy == [A] and result.not_started == {} and result.began == []
+
+
+def test_the_next_line_of_a_unit_not_started_wait_says_to_fix_the_unit_first():
+    from l4.yolo.commands import _next_line
+    from l4.yolo.state import PlanState
+
+    st = PlanState(plan_id="p1", status="waiting", wait_reason="unit_not_started")
+    line = _next_line("p1", st, None, None)
+    assert line.startswith("fix the unit on its branch") and "by itself" in line and "l4 yolo resume p1" in line
+
+
+def test_the_harness_resume_after_a_run_that_never_started_the_unit_says_this_trigger_runs_it(world):  # noqa: F811
+    from .test_yolo_review_z6 import never_started, step
+
+    world.plan(deps={})
+    world.activate()
+    never_started(world, step(world))
+    step(world)  # waits: run_not_started
+    step(world)  # the cause is gone: this trigger runs the unit
+    resumed = [e for e in world.events() if e.type == "plan.resumed" and e.data.get("by") == "harness"]
+    assert resumed and "this trigger runs the unit" in resumed[-1].data["reason"]
+    assert "next trigger" not in resumed[-1].data["reason"]

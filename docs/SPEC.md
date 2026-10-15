@@ -2985,8 +2985,10 @@ checkout found at a path is replaced only if its repository has the same key or 
 earlier layout (`$L4_CACHE/locks/<fw>/<name>.lock`) are not used and are not touched. A worktree of this clone that is
 registered under `$L4_CACHE/worktrees` (the earlier layout, or another key after a rename) and has the unit branch (or the
 WIP or archive branch being added) checked out MUST be removed before the new one is added: `git worktree remove
---force`, the directory deleted when it lies under `$L4_CACHE/worktrees`, `git worktree prune`. Only this clone's
-registrations are read and removed. A registration elsewhere is a person's worktree: the run exits 2 naming its path.
+-f -f` (a locked registration too), the directory deleted when it lies under `$L4_CACHE/worktrees` (the cache path the
+run was given, resolved, not a directory found by name) and holds no checkout of another repository key, `git worktree
+prune`. Only this clone's registrations are read and removed, and its own main worktree is never removed (exit 2). A
+registration elsewhere is a person's worktree: the run exits 2 naming its path.
 The callers hold the keyed unit flock, so a runner's projects are upgraded between pipelines (a job of an older harness
 holds the old lock path). Worktrees are created with
 `git worktree add` from the remote unit branch (created from base when absent), are reused across runs on the same
