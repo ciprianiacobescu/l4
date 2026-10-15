@@ -188,3 +188,32 @@ def test_ci_003_names_a_file_that_does_not_parse(make_ctx):
     put(ctx.repo, ".github/workflows/bad.yml", "on: [push\njobs: {")
     result = ci.CI_003.run(ctx)
     assert result.status == "fail" and "bad.yml" in result.message
+
+
+import pytest  # noqa: E402
+
+
+def test_ci_003_says_the_workflow_token_starts_no_ci(make_ctx):
+    config = gated(forge={"token_env": "GITHUB_TOKEN", "merge_policy": "auto"})
+    ctx, _ = make_ctx(cfg=config)
+    put(ctx.repo, ".github/workflows/ci.yml", WORKFLOW)
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail" and "start no CI" in result.message and "merges on the gates alone" in result.message
+    for name in ("L4_FORGE_TOKEN", "forge.token_env", "l4 upgrade", "l4 setup github --secret"):
+        assert name in (result.fix_hint or ""), name
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [{"token_env": "GITHUB_TOKEN", "merge_policy": "human"}, {"token_env": "L4_FORGE_TOKEN", "merge_policy": "auto"}],
+)
+def test_ci_003_has_no_token_sentence_otherwise(make_ctx, forge):
+    ctx, _ = make_ctx(cfg=gated(forge=forge))
+    put(ctx.repo, ".github/workflows/ci.yml", WORKFLOW)
+    assert "start no CI" not in ci.CI_003.run(ctx).message
+
+
+def test_ci_003_token_sentence_stands_without_a_ci_file(make_ctx):
+    ctx, _ = make_ctx(cfg=gated(forge={"token_env": "GITHUB_TOKEN", "merge_policy": "auto"}))
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail" and "start no CI" in result.message

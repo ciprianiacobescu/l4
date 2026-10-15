@@ -124,15 +124,29 @@ def _job_line(job: RepoJob, wanted: list[str]) -> str:
     return f"{where}{tail} runs {shown}{more}"
 
 
+TOKEN_SENTENCE = (
+    "forge.token_env is GITHUB_TOKEN and forge.merge_policy is auto: a push made with the workflow's GITHUB_TOKEN "
+    "starts no workflow run, so L4's pushes start no CI and a `merge: auto` plan merges on the gates alone"
+)
+TOKEN_HINT = (
+    "set a personal or app token as the repository secret L4_FORGE_TOKEN (`l4 setup github --secret`), set "
+    "forge.token_env to L4_FORGE_TOKEN, then run `l4 upgrade` so that the workflow passes it"
+)
+
+
+def _workflow_token_starts_no_ci(ctx: DoctorContext) -> bool:
+    forge = ctx.cfg.forge
+    return forge.token_env == "GITHUB_TOKEN" and forge.merge_policy == "auto"  # noqa: S105  (a name, not a secret)
+
+
 def _ci_003(ctx: DoctorContext) -> CheckResult:
     """The warning of `l4 doctor --adoption`: a job of the repository's own CI that no gate mirrors is not run by L4,
     so a unit can hand off green on the gates and red on that job. Heuristic (design D6): it never fails a run."""
     found = repo_ci_jobs(ctx.repo)
-    if not found.present:
+    token = _workflow_token_starts_no_ci(ctx)
+    if not found.present and not token:
         return CheckResult("skip", "no CI file besides l4.yml and no .gitlab-ci.yml")
     open_jobs = unmirrored(found.jobs, ctx.cfg)
-    if not open_jobs and not found.problems:
-        return CheckResult("pass", f"{len(found.jobs)} CI job(s), each mirrored by a gate")
     parts = []
     if open_jobs:
         lines = "; ".join(_job_line(j, open_commands(j, ctx.cfg)) for j in open_jobs)
@@ -142,8 +156,18 @@ def _ci_003(ctx: DoctorContext) -> CheckResult:
         )
     if found.problems:
         parts.append("not compared: " + "; ".join(found.problems))
-    hint = "add the command to a gate (gates.setup, lint, test, e2e), or accept that L4's units are not checked by it"
-    return CheckResult("fail", "; ".join(parts), hint, severity="warn")
+    if token:
+        parts.append(TOKEN_SENTENCE)
+    if not parts:
+        return CheckResult("pass", f"{len(found.jobs)} CI job(s), each mirrored by a gate")
+    hints = []
+    if open_jobs or found.problems:
+        hints.append(
+            "add the command to a gate (gates.setup, lint, test, e2e), or accept that no unit is checked by it"
+        )
+    if token:
+        hints.append(TOKEN_HINT)
+    return CheckResult("fail", "; ".join(parts), "; ".join(hints), severity="warn")
 
 
 CI_003 = register(Check("CI-003", "The repository's CI jobs are mirrored by the gates", "warn", _ci_003, CONFIG_SCOPES))
