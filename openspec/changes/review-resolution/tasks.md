@@ -72,6 +72,16 @@ orchestrator. "World" fixtures: `tests/unit/yolo/yolo_review_world.py` (readines
 
 ## 5. Integration, review, live check (orchestrator)
 
+- [ ] 4.2a The toolset works for an agent (acceptance test of this change, with the skill). A fixture repository with a
+  plan of three OpenSpec units and three seeded defects: a unit that calls a helper another unit defines but has no
+  `depends_on` on it; a dependency folder over `yolo.review.max_dependency_chars` because of a background file; a
+  requirement whose failure behaviour has no scenario. A subagent that has only the skill (`plugins/l4/skills/l4`) and
+  a fake judge configured to return those three findings until they are fixed, runs `validate_plan.py`,
+  `l4 yolo review <plan> --worktree` and `l4 yolo findings <plan> --json`, fixes the plan and the specs, and reaches
+  READY on every subject without pushing and without `l4 yolo accept`. Record the transcript summary (commands run,
+  rounds, cost) in `plugins/l4/tests/with-skill.md` as a new scenario. A failure here is a defect of the toolset or the
+  skill: fix it, do not weaken the fixture. (L4-YOLO-021, L4-YOLO-026)
+
 - [ ] 5.1 Merge the wave branches in order; the full unit suite; ruff; mypy; `check_spec`; `openspec validate review-resolution --strict` (only the MODIFIED L4-YOLO-004 and -005 may exceed 500 characters, as they do today).
 - [ ] 5.2 One independent adversarial review of the whole change (session model): the binding of acceptances, the sandbox choice, the cache keys (a stale reuse is the worst defect here), and the `merge: auto` wait. Fix confirmed findings with tests.
 - [ ] 5.3 Live check on a disposable repository (GitHub, `merge: auto`, a plan of three units where one unit has a prerequisite folder over 20,000 characters): on macOS without bwrap, `--worktree` with a claude-code judge (SCN-YOLO-60); edit, dry run again (only the changed unit judged); `--record`, push, the CI log shows no judge call; a unit judged not READY twice is accepted by a person (SCN-YOLO-62); activate; the red prompt of that unit holds the block; the verifier's reply holds `accepted`; record the evidence under `docs/live/review-resolution/`. The dummy repository is left for the user to delete.
