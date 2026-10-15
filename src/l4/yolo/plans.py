@@ -16,10 +16,12 @@ The seam between the plan step (`cycle.py`) and the operator commands (`commands
 
 import json
 import logging
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from l4.config.schema import L4Config
 from l4.gates.odd import scenario_conflicts
 from l4.specs.base import Framework, SpecProvider, UnitRef
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -85,6 +87,39 @@ def plan_files_at(git: Git, rev: str) -> list[PlanFile]:
             continue
         found.append(_plan_file(rel, shown.stdout))
     return found
+
+
+_ARCHIVED = re.compile(r"^\d{4}-\d\d-\d\d-(?P<name>.+)$")  # the rule of `archived_units` in scripts/validate_plan.py
+
+
+def archived_changes(git: Git, rev: str, root: str) -> frozenset[str]:
+    """`openspec:<name>` for each `<root>/changes/archive/<date>-<name>` folder of a revision (`git ls-tree`): the
+    changes that were archived at the target. They are not units: they only let an `exclude` name a finished change
+    (`l4 yolo draft` excludes a merged unit, and its archive pull request then moves the folder). A root that is
+    absolute, holds `..` or is empty names nothing; a symbolic link or a file is not a change."""
+    relative = PurePosixPath(root)
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        return frozenset()
+    folder = PurePosixPath(*relative.parts, "changes", "archive")
+    listing = git.run("ls-tree", "-z", f"{rev}:{folder}", check=False)
+    if listing.returncode != 0:
+        return frozenset()
+    found = set()
+    for record in listing.stdout.split("\0"):
+        meta, _, name = record.partition("\t")
+        mode, kind = (meta.split(" ") + ["", ""])[:2]
+        match = _ARCHIVED.match(name)
+        if match and mode == "040000" and kind == "tree":
+            found.add(f"openspec:{match.group('name')}")
+    return frozenset(found)
+
+
+def archived_at(git: Git, rev: str, cfg: L4Config) -> frozenset[str]:
+    """`archived_changes` for the configured OpenSpec root, unless `spec.frameworks` leaves OpenSpec out."""
+    frameworks = cfg.spec.frameworks
+    if frameworks != "auto" and "openspec" not in frameworks:
+        return frozenset()
+    return archived_changes(git, rev, cfg.spec.openspec.root)
 
 
 def _open_questions(snapshot: UnitSnapshot | None) -> tuple[str, ...]:

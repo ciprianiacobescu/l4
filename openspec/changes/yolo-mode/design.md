@@ -93,7 +93,7 @@ def plans_on(git: Git, rev: str, plans_dir: str) -> dict[str, tuple[str, str]]  
 ```python
 @dataclass(frozen=True) class Finding: code: str; subject: str; text: str
 @dataclass(frozen=True) class Admission: ok: bool; findings: tuple[Finding, ...]; order: tuple[str, ...]
-def admit(plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config) -> Admission
+def admit(plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config, held=None, state=None, archived=frozenset()) -> Admission
 @dataclass(frozen=True) class UnitInfo: id: str; folder: str; open_questions: tuple[str, ...]; phase: str | None; intake_ok: bool
 ```
 
@@ -106,6 +106,12 @@ Checks, each a `Finding` code:
 - The graph has one node per unit and one per batch. A unit waits for its `depends_on` units and for every unit of the
   batches its batch `depends_on`. A batch node waits for all of its units. A cycle anywhere is `cycle`.
 - `order`: a topological order; among nodes ready at the same time, batch position, then unit position.
+- `state` is the plan's own folded ledger. A planned unit in `state.merged` or `state.integrated` is done by the plan:
+  no `finished`, `unknown_unit`, `open_questions` or `intake` finding for it (its change may be archived), and it stays a
+  node of the graph. Every call that has the ledger passes it (the step's re-admission, `check`, `review`, `activate`);
+  a plan without a state, or with nothing merged, is checked as before. `archived` holds the changes archived at the target
+  (`plans.archived_changes`: `<root>/changes/archive/<date>-<name>` as `openspec:<name>`); an excluded id in it is known.
+  The review does not ask the judge about a done unit.
 
 `next_eligible(plan, plan_state, unit_phase) -> Eligibility` (also in `admit.py`, pure):
 
@@ -116,6 +122,11 @@ Checks, each a `Finding` code:
 A unit is eligible when it is not integrated, every unit it depends on (directly and through batch prerequisites) is
 integrated (D9), and every prerequisite batch is accepted. Reasons: `waits for <unit> (not integrated)`, `waits for
 batch <id> (acceptance)`. With `merge: human`, "integrated" is "merged into the target" (D9).
+
+`unit_blocker(plan, state, unit)` is that rule for one unit. `next_eligible` never chooses a current unit that has a
+blocker (it waits with the reason), the activation clears `current` when the unit has one under the new plan
+(`plan.activated{current}`; the fold keeps the key's value, and an older event keeps the old rule), and the step does not
+merge a unit that has one.
 
 ### D3. Input digests
 
