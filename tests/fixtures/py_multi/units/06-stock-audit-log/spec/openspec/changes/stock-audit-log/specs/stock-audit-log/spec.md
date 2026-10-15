@@ -1,3 +1,7 @@
+## Purpose
+
+The stock-audit-log capability of the multi-unit pytdd fixture: the behavior its scenarios below pin down.
+
 ## ADDED Requirements
 
 ### Requirement: stock-audit-log

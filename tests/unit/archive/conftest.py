@@ -6,7 +6,7 @@ from l4.vcs.git import Git
 
 from ..forge.conftest import API, PROJECT, TOKEN, FakeGitLab, gitlab  # noqa: F401
 from ..implementer.conftest import blocked_step, green_step, red_step  # noqa: F401
-from ..orchestrator.conftest import BRANCH, UNIT, UNIT_DIR, Run, install_hooks, run_l4  # noqa: F401
+from ..orchestrator.conftest import BRANCH, UNIT, UNIT_DIR, Run, install_hooks, openspec_stand_in, run_l4  # noqa: F401
 
 
 @pytest.fixture

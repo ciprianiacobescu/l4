@@ -15,6 +15,8 @@ from l4.eval.replay import materialize_reference, reference_profile
 from l4.eval.seeds import load_seed_set
 from l4.eval.workspace import Identity, make_workspace
 
+from ..specs.fixcli import patch_openspec
+
 
 @pytest.fixture(autouse=True)
 def no_verifier_or_clarifier(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -29,8 +31,12 @@ def _git(cwd: Path, *args: str) -> str:
 
 @pytest.mark.parametrize("unit_id", ["add-shelf-code", "add-late-fee"])
 def test_the_replay_profile_takes_a_unit_through_red_and_green(
-    seeds_root: Path, tmp_path: Path, setup_command: str, unit_id: str
+    seeds_root: Path, tmp_path: Path, setup_command: str, unit_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    patch_openspec(monkeypatch)  # the pinned OpenSpec is not installed here; the intake validates the unit (L4-ADO-007)
+    # the Purpose of `add-late-fee` has 40 characters (L4-OSP-007 wants 50): the seeds are frozen by `seed_set_sha256`
+    # (L4-EVAL-022), so the rule is switched off here and the seed is left to the eval owner
+    monkeypatch.setattr("l4.orchestrator.purpose_issues", lambda unit_dir, specs_root: [])
     seeds = load_seed_set(seeds_root)
     unit = seeds.unit(unit_id)
     ws = make_workspace(seeds, unit, tmp_path / "ws", identity=Identity("t", "t@example.invalid"))

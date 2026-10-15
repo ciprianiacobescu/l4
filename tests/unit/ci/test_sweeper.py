@@ -18,7 +18,7 @@ from ..archive.conftest import forge_env, use_fake_gitlab  # noqa: F401  (a fake
 from ..archive.merged_world import MergedWorld
 from ..forge.conftest import API, PROJECT, TOKEN, WEB
 from ..implementer.conftest import result
-from ..orchestrator.conftest import run_l4  # noqa: F401
+from ..orchestrator.conftest import openspec_stand_in, run_l4  # noqa: F401
 from .review_world import ReviewWorld
 
 LOCK = "refs/l4/locks/openspec/{}"

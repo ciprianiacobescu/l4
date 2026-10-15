@@ -6,6 +6,7 @@ from .conftest import BRANCH, UNIT_DIR, new_origin_main
 
 SPEC = f"{UNIT_DIR}/specs/pricing/spec.md"
 CONFLICT = (
+    "## Purpose\n\nDiscount codes for the pytdd pricing module: a known code reduces an amount by a percentage.\n\n"
     "## ADDED Requirements\n\n### Requirement: Discount codes\nSAVE10 is a known code.\n\n"
     '#### Scenario: Known code\n- **WHEN** `apply_discount(50.0, "SAVE10")` is called\n- **THEN** it returns `45.0`\n\n'
     '#### Scenario: Known code, other rule\n- **WHEN** `apply_discount(50.0, "SAVE10")` is called\n'

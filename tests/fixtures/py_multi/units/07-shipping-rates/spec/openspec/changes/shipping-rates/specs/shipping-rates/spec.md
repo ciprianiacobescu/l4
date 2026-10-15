@@ -1,3 +1,7 @@
+## Purpose
+
+The shipping-rates capability of the multi-unit pytdd fixture: the behavior its scenarios below pin down.
+
 ## ADDED Requirements
 
 ### Requirement: shipping-rates

@@ -77,9 +77,10 @@ from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
-from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit
+from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
 from l4.specs.detect import require_framework
+from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
 from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
@@ -533,6 +534,22 @@ class Orchestrator:
         reasons = [
             f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"
         ]
+        return self._reject(reasons)
+
+    def _validate_openspec(self) -> ExitCode | None:
+        """L4-ADO-007, before any agent or probe and before the scenario lint: the provider's strict validation and
+        the Purpose of a capability new to `openspec/specs/` (L4-OSP-007), as a Kiro unit is validated. Every error
+        is a reason (each cut at 600 characters, an archive refusal with its hint: L4-ADO-008) and rejects the unit."""
+        s = self.services
+        target = self.cfg.forge.base_branch
+        reasons = intake_errors(s.provider.validate(s.ref, strict=True), target)
+        reasons += intake_errors(
+            ValidationReport(False, tuple(purpose_issues(s.ref.path, s.worktree / "openspec" / "specs"))), target
+        )
+        return self._reject(reasons) if reasons else None
+
+    def _reject(self, reasons: list[str]) -> ExitCode:
+        s = self.services
         s.ledger.append("unit.rejected", reasons=reasons)
         log.error("%s rejected: %s", s.ref.id, "; ".join(reasons))
         self._exit_reason = f"rejected: {'; '.join(reasons)}"[:300]  # a delivery plan records it (L4-YOLO-013)
@@ -548,6 +565,8 @@ class Orchestrator:
             return None
         if s.ref.framework is not Framework.OPENSPEC:
             return self._validate_kiro()
+        if (rejected := self._validate_openspec()) is not None:
+            return rejected
         base = base_criteria(s.worktree / "openspec" / "specs") if s.ref.framework is Framework.OPENSPEC else []
         removed = replaced_requirements(s.ref.path) if s.ref.framework is Framework.OPENSPEC else frozenset()
         conflicts = scenario_conflicts(s.provider.criteria(s.ref), base, removed)

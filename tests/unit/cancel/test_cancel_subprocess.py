@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from l4.config.defaults import openspec_entrypoint
 from l4.vcs.locks import LocalFileLease
 from l4.vcs.names import UnitNames
 
@@ -76,7 +77,15 @@ class Job:
         data = yaml.safe_load(config.read_text())
         data["forge"] = {"type": "local"}  # no forge API: the CI variables below only switch the watchdog on
         config.write_text(yaml.safe_dump(data))
-        env = {**tdd.environ, "GITLAB_CI": "true", "CI_JOB_TOKEN": "job-token", "CI_JOB_ID": "6051",
+        node = tmp_path / "fake-bin" / "node"  # the intake validates the unit (L4-ADO-007): a node that says "valid"
+        node.parent.mkdir()
+        node.write_text('#!/bin/sh\necho \'{"items":[{"id":"add-discount-codes","valid":true,"issues":[]}]}\'\n')
+        node.chmod(0o755)
+        entry = openspec_entrypoint(tdd.environ)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text("// fake\n")
+        path = f"{node.parent}{os.pathsep}{tdd.environ['PATH']}"
+        env = {**tdd.environ, "PATH": path, "GITLAB_CI": "true", "CI_JOB_TOKEN": "job-token", "CI_JOB_ID": "6051",
                "L4_CANCEL_POLL_S": "0.2", **extra_env}  # fmt: skip
         l4 = [sys.executable, "-m", "l4", "run", "--unit", UNIT, "--repo", str(tdd.repo)]
         self.log = tmp_path / "job.log"

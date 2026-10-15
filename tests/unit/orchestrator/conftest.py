@@ -15,6 +15,7 @@ from l4.specs.questions import QuestionsFile, QuestionStatus
 from l4.vcs.names import UnitNames
 
 from ..conftest import UNIT, TddRepo  # noqa: F401
+from ..specs.fixcli import patch_openspec
 
 BRANCH = "l4/openspec/add-discount-codes"
 LOCK_REF = "refs/l4/locks/openspec/add-discount-codes"
@@ -81,6 +82,13 @@ def no_verifier(monkeypatch: pytest.MonkeyPatch) -> None:
     """These tests are about the run up to `implemented`: the verifier (tests/unit/verifier) is switched off by
     pointing its hook at a module that does not exist, which is how an absent hook looks."""
     monkeypatch.setitem(services.HOOKS, "verify", "l4_test_no_verifier:verify_hook")
+
+
+@pytest.fixture(autouse=True)
+def openspec_stand_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pinned OpenSpec is not installed under the tests' L4_HOME and the intake of an OpenSpec unit validates it
+    (L4-ADO-007): `validate` says valid. A test that wants an error calls `patch_openspec(monkeypatch, valid=False)`."""
+    patch_openspec(monkeypatch)
 
 
 @pytest.fixture(autouse=True)
