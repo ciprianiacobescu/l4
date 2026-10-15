@@ -87,39 +87,41 @@ def test_a_judge_that_fails_on_the_repair_prompt_raises_too(world):
 # --- #16 (R9) cut material is never READY ------------------------------------------------------------------------
 
 
-def test_a_file_cut_at_the_size_limit_makes_ready_needs_revision(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_FILE_CHARS", 200)
-    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
-    result, _ = review(world, plan_of({A: []}), Step(structured=answer()))
+def test_a_file_cut_at_the_size_limit_makes_ready_needs_revision(world):
+    cfg = make_cfg(yolo={"review": {"max_file_chars": 1000}})
+    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 1500 + "\n"})
+    result, _ = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
     verdict = result.units[A]
     assert verdict.verdict == "NEEDS_REVISION"
     (finding,) = verdict.findings
-    assert finding["severity"] == "blocking" and "big.md" in finding["text"] and "left out" in finding["text"]
+    assert finding["severity"] == "blocking" and "big.md has 1501 characters" in finding["text"]
+    assert finding["text"].startswith("material_cut: ") and "Shorten the file" in finding["text"]
 
 
-def test_a_file_over_the_folder_budget_is_named(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_FOLDER_CHARS", 30)
-    world.rev = world.commit({f"{FOLDER_A}/a-first.md": "y" * 40 + "\n", f"{FOLDER_A}/b-second.md": "z" * 40 + "\n"})
-    result, _ = review(world, plan_of({A: []}), Step(structured=answer()))
+def test_a_file_over_the_folder_budget_is_named(world):
+    cfg = make_cfg(yolo={"review": {"max_folder_chars": 1000}})
+    world.rev = world.commit({f"{FOLDER_A}/a-first.md": "y" * 600 + "\n", f"{FOLDER_A}/b-second.md": "z" * 600 + "\n"})
+    result, _ = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
     verdict = result.units[A]
     assert verdict.verdict == "NEEDS_REVISION"
     assert any("b-second.md" in f["text"] for f in verdict.findings)
 
 
-def test_a_blocked_verdict_stays_blocked_when_material_was_cut(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_FILE_CHARS", 200)
-    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
-    result, _ = review(world, plan_of({A: []}), Step(structured=answer("BLOCKED")))
+def test_a_blocked_verdict_stays_blocked_when_material_was_cut(world):
+    cfg = make_cfg(yolo={"review": {"max_file_chars": 1000}})
+    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 1500 + "\n"})
+    result, _ = review(world, plan_of({A: []}), Step(structured=answer("BLOCKED")), cfg=cfg)
     assert result.units[A].verdict == "BLOCKED"
 
 
-def test_a_cut_dependency_also_forces_the_unit_and_the_batch(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_DEPENDENCY_CHARS", 200)
+def test_a_cut_dependency_is_listed_in_missing_and_forces_nothing(world):
+    cfg = make_cfg(yolo={"review": {"max_dependency_chars": 300}})
     world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
     plan = plan_of({A: [], B: [A]}, batches=[("b1", [A, B])])
-    result, _ = review(world, plan, *[Step(structured=answer()) for _ in range(3)])
+    result, _ = review(world, plan, *[Step(structured=answer()) for _ in range(3)], cfg=cfg)
     assert result.units[A].verdict == "READY"  # A itself is shown whole
-    assert result.units[B].verdict == "NEEDS_REVISION" and FOLDER_A in result.units[B].findings[0]["text"]
+    assert result.units[B].verdict == "READY" and result.units[B].findings == ()
+    assert any(f"{FOLDER_A}/big.md" in m and "dependency budget 300" in m for m in result.units[B].missing)
     assert result.batches["b1"].verdict == "READY"  # the batch shows whole folders
 
 
@@ -185,50 +187,51 @@ def test_a_closing_tag_in_a_file_name_cannot_end_a_data_block(world):
     assert "<l4:data source=x> " + EVIL not in fake.requests[0].prompt
 
 
-# --- the harness's task check marks are not shown to the judge (R4) -----------------------------------------------
+# --- the check marks reach the judge as they are (L4-YOLO-025, D6) -----------------------------------------
 
 TICKED = "# Tasks\n\n- [x] 1.1 Add the discount\n  - [X] 1.1.1 Step\n- [~] 2 Next\n- [-] 3 Started\n* [ ] 4 Open\n"
 UNTICKED = "# Tasks\n\n- [ ] 1.1 Add the discount\n  - [ ] 1.1.1 Step\n- [ ] 2 Next\n- [ ] 3 Started\n* [ ] 4 Open\n"
-NOTE = "The check marks of the tasks in a tasks.md are the harness's progress"
+NOTE = (
+    "A ticked task (`[x]`) is already delivered on the revision shown: the harness will not implement it again. "
+    "Judge the specification of the open tasks; do not raise a `feasibility` or `duplicate_scope` finding only "
+    "because work is already done."
+)
 
 
 @pytest.mark.parametrize("folder", ["openspec/changes/a", ".kiro/specs/a"])
-def test_ticked_tasks_on_the_unit_branch_are_shown_unticked(world, folder):
+def test_ticked_tasks_reach_the_judge_ticked_and_the_digest_ignores_them(world, folder):  # SCN-YOLO-56
     cfg = make_cfg()
     world.units = {A: UnitInfo(A, folder), B: UnitInfo(B, FOLDER_B)}
     world.rev = world.commit({f"{folder}/spec.md": SPEC_A, f"{folder}/tasks.md": TICKED})
     ticked = world.rev
     world.git.run("update-ref", f"refs/remotes/origin/{unit_branch(A, cfg.forge.branch_prefix)}", ticked)
     plain = world.commit({f"{folder}/tasks.md": UNTICKED})
-    _, fake_ticked = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
+    result, fake_ticked = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
     prompt = fake_ticked.requests[0].prompt
-    assert UNTICKED in prompt and "[x]" not in prompt and "[X]" not in prompt and "[~]" not in prompt
-    assert NOTE in outside_blocks(prompt)
-    # the rest of the text is unchanged: the same folder with the markers already open gives the same prompt
+    assert TICKED in prompt and UNTICKED not in prompt
+    assert NOTE in outside_blocks(prompt) and "shown unchecked" not in prompt
+    assert readiness.PROMPT_VERSION == 4
+    assert result.units[A].digest == unit_digest(world.git, plain, folder)  # the digest is of the unticked text
     world.git.run("update-ref", f"refs/remotes/origin/{unit_branch(A, cfg.forge.branch_prefix)}", plain)
     _, fake_plain = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
-    assert fake_plain.requests[0].prompt == prompt
+    assert UNTICKED in fake_plain.requests[0].prompt and fake_plain.requests[0].prompt != prompt
 
 
-def test_a_batch_shows_the_tasks_unticked_too(world):
+def test_a_batch_shows_the_tasks_ticked_too(world):
     world.rev = world.commit({f"{FOLDER_A}/tasks.md": TICKED})
     _, fake = review(world, plan_of({A: [], B: [A]}), *[Step(structured=answer()) for _ in range(3)])
-    assert all("[x]" not in r.prompt and NOTE in outside_blocks(r.prompt) for r in fake.requests)
+    assert all(TICKED in r.prompt and NOTE in outside_blocks(r.prompt) for r in fake.requests)
 
 
-def test_the_shown_tasks_and_the_digest_use_one_normalisation(world):
-    from l4.yolo import digest
-
+def test_the_shown_tasks_are_raw_and_the_digest_is_normalised(world):
     rev = world.commit({f"{FOLDER_A}/tasks.md": TICKED})
     shown = dict(read_folder(world.git, rev, FOLDER_A, budget=10_000).files)[f"{FOLDER_A}/tasks.md"]
-    assert shown.encode() == digest.normalise_tasks("tasks.md", TICKED.encode())
-    assert readiness.normalise_tasks is digest.normalise_tasks
+    assert shown == TICKED
     open_rev = world.commit({f"{FOLDER_A}/tasks.md": UNTICKED})
     assert unit_digest(world.git, rev, FOLDER_A) == unit_digest(world.git, open_rev, FOLDER_A)
 
 
-def test_a_file_that_is_not_tasks_md_keeps_its_check_marks(world):
+def test_every_file_keeps_its_check_marks(world):
     rev = world.commit({f"{FOLDER_A}/notes.md": "- [x] done\n", f"{FOLDER_A}/sub/tasks.md": "- [x] 1 nested\n"})
     files = dict(read_folder(world.git, rev, FOLDER_A, budget=10_000).files)
-    assert files[f"{FOLDER_A}/notes.md"] == "- [x] done\n"
-    assert files[f"{FOLDER_A}/sub/tasks.md"] == "- [ ] 1 nested\n"  # the digest reads any tasks.md by name
+    assert files[f"{FOLDER_A}/notes.md"] == "- [x] done\n" and files[f"{FOLDER_A}/sub/tasks.md"] == "- [x] 1 nested\n"
