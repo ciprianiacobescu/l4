@@ -75,13 +75,16 @@ after the other.
 
 ## Validate
 
-Run both, from the repository root, and fix every problem they print. Never silence one: not by deleting a
-dependency you cannot justify, nor by excluding a spec only to make the check pass.
+Before the push, run the script from the repository root and fix every problem it prints. Never silence one: not by
+deleting a dependency you cannot justify, nor by excluding a spec only to make the check pass.
 
 ```sh
 python3 <skill dir>/scripts/validate_plan.py
-l4 yolo check <id>
 ```
+
+`l4 yolo check <id>` reads the plan file and the units from the target, so it cannot run before the push (it exits 2 for
+a plan file that is not on the target). Run it after the push, as the last step of the hand-off; CI runs the same
+admission and the review. Fix its findings the same way.
 
 - The script needs only Python. It reads every `.l4/plans/*.json`, finds the units like the harness does, and checks
   the schema, the graph (cycles, unknown units, duplicates) and the coverage across all plan files (`uncovered`,
@@ -93,16 +96,19 @@ l4 yolo check <id>
 
 ## Hand off
 
-Commit and push the plan file only, never a spec edit with it. One evidence line per dependency goes in the commit
-message, naming the spec file that shows it:
+Commit and push the plan file. When the specs it lists are new (not on the target yet), commit them in the SAME commit,
+or push the plan file first: a spec that lands without a plan that holds it runs at once. Only an edit of an existing
+unit's spec stays out of the plan commit. One evidence line per dependency goes in the commit message, naming the spec
+file that shows it:
 
 ```sh
-git add .l4/plans/<id>.json
+git add .l4/plans/<id>.json <the new spec folders, if any>
 git commit -m "plan pricing: add-pricing, use-pricing, report-export
 
 openspec:use-pricing depends on openspec:add-pricing: use-pricing's tasks call add-pricing's parse_price() (add-pricing/specs/pricing/spec.md)
 exclude kiro:legacy-import: its PR is open and owned by another team"
 git push
+l4 yolo check <id>
 ```
 
 Then stop. A person reads the review (`l4 yolo review <id>`) and activates (`l4 yolo activate <id> --reason "…"`).

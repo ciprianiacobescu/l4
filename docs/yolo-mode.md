@@ -105,12 +105,17 @@ Do not write the file from nothing. Let L4 list the specs, then add the order yo
    calls no model, and refuses an existing file. It never adds a dependency: an order is a claim about the specs, and you must make it.
 2. Edit the file: move units into batches, add `depends_on` only where a spec uses something that another spec
    introduces or changes, and give each exclusion a reason that a person can check.
-3. Run the validator, then `l4 yolo check <plan-id>`. The validator is `scripts/validate_plan.py` (the same file is in
+3. Run the validator. `l4 yolo check <plan-id>` reads the plan file and the units from the target, so it runs after the
+   push (step 4); before the push it exits 2 for a plan file that is not there yet. The validator is `scripts/validate_plan.py` (the same file is in
    the skill, `plugins/l4/skills/l4/scripts/`). It needs only Python, reads every plan file of the working tree, checks
    the schema, the graph and the coverage across all plans (`uncovered`, `covered_twice`), and prints the dispatch
    order and the waves. A wave is what could run together; the plan still runs one unit at a time. `l4 yolo check`
-   also checks what the script cannot: open questions, intake, finished units, profiles, the target and the merge policy.
-4. Commit and push the plan file only. Then review and activate (below).
+   also checks what the script cannot: open questions, intake, finished units, profiles, the target and the merge policy
+   (CI runs the same admission and the review).
+4. Commit and push the plan file. When the specs it lists are new (not on the target yet), commit them in the same
+   commit as the plan file, or push the plan file first: a spec that lands without a plan that holds it runs at once.
+   Only an edit of an existing unit's spec stays out of the plan commit. Then run `l4 yolo check <plan-id>`, and review
+   and activate (below).
 5. To add a spec later, run `l4 yolo draft <plan-id> --update`. It appends the new specs to `unplanned` (or to `exclude`),
    keeps every other edit, and reports a unit that is gone as `gone: <id>` without removing it. It warns when the plan is
    active or waiting, because the edit stops it. A unit that the plan has integrated stays in the file and counts as
@@ -218,6 +223,11 @@ once and `l4 yolo status` shows it. The plan continues by itself when the merge 
 after a push, the step reads the PR again, three times, five seconds apart, before it calls the merge not ready. It does
 so in the run that records the wait, not in a preview and not in later runs while the wait for that head stands.
 
+A plan also waits, with the reason `unit_not_started`, when the last run of its current unit ended before the unit
+started: a usage error, a worktree or lease failure, a missing CLI. The harness records the exit and the reason of that
+run (`l4 yolo status` shows them) and starts no next run, so a unit that cannot start does not loop. The next trigger,
+a cron run or a push, runs the unit once more; a run that starts the unit clears the wait.
+
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,
 `target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
@@ -225,11 +235,12 @@ when it is back). A merged unit whose folder moved to the archive is not missing
 cause of each stop and the command that clears it are in [runbook 12.3](runbook.md#123-procedure-a-plan-is-stopped).
 `l4 yolo cancel` stops the plan for good.
 
-**`unit_rejected`.** The harness refused the spec of the current unit. `l4 retry` never moves a rejected unit, so the
-plan does not ask for one. Correct the spec (on the unit branch, or on the target when the unit has no branch) and push.
-The next run stops the plan with `inputs_changed`, CI reviews it, and a person runs `l4 yolo activate`. The activation
-freezes the corrected spec. The plan then dispatches the unit, and the next run of the unit reads the corrected spec. No
-`l4 restart` is needed. A resume cannot clear this stop: it would only stop the plan again with `inputs_changed`. If the
+**`unit_rejected`.** The harness refused the current unit (its spec, or the configuration: an empty `gates.test.command`
+is one cause). `l4 retry` never moves a rejected unit, so the plan does not ask for one. Fix the cause. For a spec:
+correct it (on the unit branch, or on the target when the unit has no branch) and push. The next run stops the plan with
+`inputs_changed`, CI reviews it, and a person runs `l4 yolo activate`. The activation freezes the corrected spec. For the
+configuration: set it, then a person runs `l4 yolo activate` (there is nothing to review). The plan then dispatches the
+unit, and the next run of the unit reads the corrected spec or configuration. No `l4 restart` is needed. A resume cannot clear this stop: it would only stop the plan again with `inputs_changed`. If the
 unit is rejected again after that run, the plan stops again with `unit_rejected`.
 
 **A deleted plan file.** If the file of an active plan is deleted, the plan stops with `inputs_changed` (subject

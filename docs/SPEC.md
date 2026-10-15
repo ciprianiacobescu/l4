@@ -3243,14 +3243,19 @@ D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit i
 `waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
 plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
 while the merge of its current unit is not ready (no open PR, a PR aimed at another branch, a PR head that is not the
-branch tip); it goes on by itself when the merge is ready. A plan stopped with `unit_rejected` MUST need a corrected spec,
-a new review and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation the
-next run of the unit reads the corrected spec. A unit that its own run rejects (exit 14, for example an empty
+branch tip); it goes on by itself when the merge is ready. A plan stopped with `unit_rejected` MUST need the cause fixed (the unit's spec, which then needs a new review, or the
+configuration) and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation
+the next run of the unit reads the corrected spec or configuration, and a unit that its run rejects again stops the plan
+again. A unit that its own run rejects (exit 14, for example an empty
 `gates.test.command`) has no phase to show it, so the run MUST record `unit.rejected{unit, run, detail}` on the plan
 ledger when the plan dispatched the unit, and the next plan step MUST stop the plan with `unit_rejected` for that unit,
-recording its spec digest, and not dispatch it again. Outside CI the plan step MUST fetch the target branch before it
-reads the plan files; when the fetch fails it MUST log one line, write nothing to the plan ledger and let no unit of a
-plan run in that run. A stopped plan MUST
+recording its spec digest, and not dispatch it again. A run of the plan's current unit that ends before the unit
+started (no `run.started`: a usage error, a lease or worktree failure, a missing CLI) MUST be recorded the same way as
+`unit.not_started{unit, run, exit, detail}`; the next plan step then MUST wait with the reason `unit_not_started`, the
+unit and the detail, and MUST NOT start a next run, so that one trigger runs the unit once; a run that starts the unit
+clears it. Outside CI the plan step MUST fetch the target branch before it
+reads the plan files; when the fetch fails it MUST log one line, write nothing to the plan ledger and let no unit run while the last fetched ledger of
+a plan says it is open, else hold the units the plan files list and let the units that no plan lists run. A stopped plan MUST
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.
