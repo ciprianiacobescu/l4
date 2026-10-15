@@ -199,3 +199,41 @@ def test_the_action_workflow_names_a_system_one_key():
            "api_key_env": "TYPESAFE_API_KEY", "vendor": "typesafe"}  # fmt: skip
     text = render_github_action_ci(cfg(profiles={"jev": jev}, roles={"s1_judge": ["jev"]}), PIN)
     assert "TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}" in text
+
+
+LAYA_PROFILE = {"laya": {"backend": "system-one", "engine": "laya-local"}}
+
+
+def laya_job(runner_tags: list[str] | None = None) -> dict:
+    ci = {"runner_tags": runner_tags or []}
+    return job(cfg(profiles=LAYA_PROFILE, roles={"s1_judge": ["laya"]}, ci=ci))
+
+
+def test_laya_is_saved_after_doctor_on_the_base_branch_when_its_key_had_no_hit():
+    """SCN-ADO-52: the action restores, the workflow saves after `doctor --ci --fix` installed it."""
+    steps = laya_job()["steps"]
+    names = [s.get("name") or s["uses"].split("@")[0] for s in steps]
+    assert names.index("doctor") < names.index("save Laya cache") < names.index("plan")
+    save = next(s for s in steps if s.get("name") == "save Laya cache")
+    assert save["uses"].startswith("actions/cache/save@")
+    assert save["if"] == (
+        "${{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.laya-cache-hit != 'true'"
+        " && steps.l4.outputs.laya-cache-key != '' }}"
+    )
+    assert save["with"]["key"] == "${{ steps.l4.outputs.laya-cache-key }}"
+    assert save["with"]["path"] == "${{ steps.l4.outputs.laya-cache-paths }}"
+
+
+def test_no_laya_save_without_a_laya_profile_or_on_a_self_hosted_runner():
+    """SCN-ADO-53: the default workflow is the one it was; a self-hosted runner keeps its own Laya."""
+    assert all(s.get("name") != "save Laya cache" for s in job()["steps"])
+    assert all(s.get("name") != "save Laya cache" for s in laya_job(runner_tags=["vps"])["steps"])
+    assert "Laya" not in render_github_action_ci(L4Config(), PIN)
+
+
+def test_the_rendered_workflow_holds_no_literal_laya_cache_path():
+    from l4.ci.github import LAYA_CACHE_PATHS
+
+    text = render_github_action_ci(cfg(profiles=LAYA_PROFILE, roles={"s1_judge": ["laya"]}), PIN)
+    for path in LAYA_CACHE_PATHS:
+        assert path not in text, path
