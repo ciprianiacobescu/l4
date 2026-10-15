@@ -210,7 +210,7 @@ The runbook has the procedure (section 12.2a). These are the rules.
   limit what the judge reads. A prerequisite folder is shown in this order: proposal, requirements, `specs/**/spec.md`,
   bugfix, design, other files, then `tasks.md`. A cut of a prerequisite does not block: it is listed in the unit's
   `missing`. A cut of the unit's own folder is a blocking `material` finding with the file, its size, the budget, the key
-  and the fix. `validate_plan.py` and `l4 yolo check` print the same overruns before the push.
+  and the fix. `validate_plan.py` prints the same overruns before the push; `l4 yolo check` prints them after it, from the target.
 - **Check marks.** The judge sees `tasks.md` as the file has it. A ticked task is delivered, and is not a reason for a
   `feasibility` or `duplicate_scope` finding. The unit digest still ignores the marks.
 - **Verdict rules.** A NEEDS_REVISION with minor findings only is READY, with the findings kept. A NEEDS_REVISION with no
