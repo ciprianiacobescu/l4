@@ -54,6 +54,7 @@ from l4.context import AppContext
 from l4.exitcodes import L4Exit
 from l4.forge.base import Forge, ForgeError, ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.gitlab import push_auth_config
+from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.sandbox.base import Sandbox
@@ -313,6 +314,7 @@ def _store(app: AppContext, cfg: L4Config, git: Git, plan_id: str) -> PlanStore:
     return PlanStore(
         git, plan_id, fetch_auth_config(cfg, app.environ), push_config=push_auth_config(cfg, app.environ),
         token_env=cfg.forge.token_env, environ=app.environ, redact=app.redactor.redact_text,
+        platform=push_platform(cfg, app.environ, app.repo),
     )  # fmt: skip
 
 
