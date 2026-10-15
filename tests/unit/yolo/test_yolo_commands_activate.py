@@ -182,11 +182,19 @@ def test_a_target_missing_on_origin_is_refused(world, monkeypatch, capsys):
 
 def test_another_plan_active_on_the_target_is_refused(world, capsys):
     reviewed_world(world)
-    other = plan_doc({A: []}, plan_id="p2")
+    other = plan_doc({"openspec:elsewhere": []}, plan_id="p2")  # review #15: a unit p2 shares would be held by p2
     world.push({".l4/plans/p2.json": __import__("json").dumps(other)})
     world.seed("p2", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"))
     err = refused(world, capsys)
     assert "plan p2 is already active, waiting or stopped on main" in err and "l4 yolo cancel p2" in err
+
+
+def test_a_unit_the_active_plan_lists_is_held_by_it_so_the_other_plan_is_not_admitted(world, capsys):  # review #15
+    reviewed_world(world)
+    other = plan_doc({A: []}, plan_id="p2")
+    world.push({".l4/plans/p2.json": __import__("json").dumps(other)})
+    world.seed("p2", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"))
+    assert "held_by_other_plan: unit " + A + " is already listed in plan p2" in refused(world, capsys)
 
 
 def test_an_active_plan_is_not_activated_twice(world, capsys):
