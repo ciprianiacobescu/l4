@@ -23,6 +23,7 @@ from l4.vcs.repokey import repository_key
 from .ops_world import (  # noqa: F401
     BRANCH,
     NAME,
+    REWORDED_SPEC,
     UNIT,
     UNIT_REL,
     escalate,
@@ -72,7 +73,7 @@ def poisoned(world, forge):
     """An escalated unit, with a merge request, whose branch has a person's correction to the requirements."""
     assert world.run(happy()).code == ExitCode.OK
     escalate(world, spawned=3)
-    person_pushes(world, {SPEC: "## ADDED Requirements\n### Requirement: corrected\n"})
+    person_pushes(world, {SPEC: REWORDED_SPEC.replace("reworded", "corrected")})
     return open_pr(forge)
 
 

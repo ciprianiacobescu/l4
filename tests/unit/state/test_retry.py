@@ -17,6 +17,7 @@ from l4.vcs.git import Git
 from .ops_world import (  # noqa: F401
     BRANCH,
     NAME,
+    REWORDED_SPEC,
     UNIT,
     UNIT_REL,
     escalate,
@@ -183,7 +184,7 @@ def test_a_reworded_requirement_sends_an_escalated_unit_to_implementing(world):
     """SCN-OPS-06."""
     world.run(failing_reds())
     escalate(world, spawned=3)
-    person_pushes(world, {f"{UNIT_REL}/specs/greeting/spec.md": "## ADDED Requirements\nreworded\n"})
+    person_pushes(world, {f"{UNIT_REL}/specs/greeting/spec.md": REWORDED_SPEC})
     result = retry(world)
     assert result.outcome.phase_after == "implementing"
     assert phase_changes(world)[-1] == ("escalated", "implementing", "spec_edit_since_stop")

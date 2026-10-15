@@ -10,6 +10,7 @@ from l4.exitcodes import ExitCode
 from .ops_world import (  # noqa: F401
     BRANCH,
     NAME,
+    REWORDED_SPEC,
     UNIT,
     UNIT_REL,
     escalate,
@@ -99,7 +100,7 @@ def test_a_verified_unit_is_verified_again_after_a_reworded_requirement(world):
     """SCN-OPS-21: it is not handed off on the old verdict."""
     world.run(failing_reds())
     stamp(world, ("phase.changed", {"from": "verifying", "to": "verified", "trigger": "verify_pass"}))
-    person_pushes(world, {f"{UNIT_REL}/specs/greeting/spec.md": "## ADDED Requirements\nreworded\n"})
+    person_pushes(world, {f"{UNIT_REL}/specs/greeting/spec.md": REWORDED_SPEC})
     world.run(happy())
     changes = phase_changes(world)
     at = changes.index(("verified", "implementing", "spec_edited"))

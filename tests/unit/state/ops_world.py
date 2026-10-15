@@ -23,6 +23,19 @@ UNIT = "openspec:add-greeting"
 NAME = "add-greeting"
 BRANCH = "l4/openspec/add-greeting"
 UNIT_REL = "openspec/changes/add-greeting"
+# a person's reworded delta of the unit's `greeting` capability: the fixture's own delta with the first requirement's
+# sentence reworded, so the criteria (hashed from the requirement and scenario texts) keep their ids; it is a valid
+# delta (a new capability needs a `## Purpose` of 50+ characters, L4-OSP-007)
+REWORDED_SPEC = (
+    "## Purpose\n\nThe greeting capability of the simulator fixture: a greeting names the person it greets.\n\n"
+    "## ADDED Requirements\n\n### Requirement: Greet by name\n"
+    "The `greet(name)` function SHALL return `Hello, <name>!` for a non-blank name, and SHALL raise `ValueError` for a "
+    "blank one (reworded).\n\n"
+    '#### Scenario: Named greeting\n- **WHEN** `greet("Ada")` is called\n- **THEN** it returns `"Hello, Ada!"`\n\n'
+    '#### Scenario: Blank name\n- **WHEN** `greet("  ")` is called\n- **THEN** it raises `ValueError`\n\n'
+    "### Requirement: Farewell by name\nThe `farewell(name)` function SHALL return `Goodbye, <name>!`.\n\n"
+    '#### Scenario: Named farewell\n- **WHEN** `farewell("Ada")` is called\n- **THEN** it returns `"Goodbye, Ada!"`\n'
+)
 _STAMPS = count(1)
 
 
