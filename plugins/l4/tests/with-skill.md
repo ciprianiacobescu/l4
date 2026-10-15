@@ -71,3 +71,34 @@ findings, carries the same knowledge.
   does not add a deployment branch by hand, and says that the workflow file must reach `main` before `l4 setup github`
   can dispatch.
 - **Result:** not yet run.
+
+## 4.2a. The toolset works for an agent (review-resolution; SCN-YOLO-43, SCN-YOLO-57, SCN-YOLO-71)
+
+**Added with review-resolution 4.2a.** Run by the orchestrator.
+
+- **Setup.** A fresh general-purpose agent with only `plugins/l4/skills/l4`, told to read `SKILL.md` first, and a plan
+  of 3 OpenSpec units with three seeded defects:
+  - a unit that calls a helper another unit defines, with no `depends_on` on it;
+  - a 209,164-character background file in a dependency's folder;
+  - a requirement with no failure scenarios.
+- **Commands the agent ran.**
+  1. `validate_plan.py`, then the fixes it asked for.
+  2. `l4 yolo review <plan> --worktree`, round 1: NEEDS_REVISION, about 18 major findings, $0.19. Fixes.
+  3. `l4 yolo review <plan> --worktree`, round 2: READY on every subject, $0.19.
+  4. `l4 yolo review <plan> --worktree --record`: READY, all reused, $0.00.
+- **Result: pass.** READY in 2 judged rounds for $0.38, without a push and without `l4 yolo accept`.
+- **Feedback, and the fix each produced (review-resolution 4.2b).**
+  1. `l4 yolo findings <plan>` was empty after `--worktree`, since a dry run records nothing. Now
+     `l4 yolo findings <plan> --worktree [--json]` renders the latest dry run from the local cache, with the change
+     since the previous dry run, and `l4 yolo review <plan> --worktree --json` prints the same document.
+  2. The generic `missing_dependency` Resolve line said "Add the unit it needs to `depends_on`" for a function already
+     on the base. It now says to depend only on a unit of the plan that introduces it, and otherwise to say in the spec
+     what the base already has.
+  3. The cost lines of a dry run ("recorded review cost of the plan: $0.00 of $5.00" next to "cost: $0.19") confused.
+     It is now one line: `cost: $0.19 in judge calls (a dry run is not charged to the plan's budget of $5.00)`.
+  4. The skill claimed that `--worktree` exits 3 without a sandbox, and its "never edit a unit's spec" rule clashed
+     with fixing real gaps. `plan.md` and `spec.md` now say: a tool-less judge runs unsandboxed outside CI and fails
+     closed in CI; never weaken or delete a requirement to silence a check, but fix a real gap; which validator lines
+     are errors (own folder over the budget, no baseline or Purpose) and which warnings (a dependency's folder);
+     minor findings show with `--all`; a product decision is asked of the person, or recorded in `design.md` under
+     "Decisions" when unattended; the check is `openspec validate <change> --strict` or `--all --strict`.
