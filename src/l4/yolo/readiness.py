@@ -26,7 +26,7 @@ has one, else the target. File names, unit ids, batch ids and the plan's own wor
 import json
 import re
 import shutil
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
@@ -219,7 +219,10 @@ def _named(unit_id: str) -> str:
     return json.dumps(unit_id) + ","
 
 
-def _batch_subject(plan: Plan, batch: PlanBatch, folders: Mapping[str, FolderText]) -> Subject:
+def _batch_subject(
+    plan: Plan, batch: PlanBatch, folders: Mapping[str, FolderText], skip: Collection[str] = ()
+) -> Subject:
+    units = [u for u in batch.units if u.id not in skip]
     context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
     values = {
         "SUBJECT_KIND": "batch",
@@ -228,11 +231,11 @@ def _batch_subject(plan: Plan, batch: PlanBatch, folders: Mapping[str, FolderTex
         "DEPENDENCIES": _batch_deps(batch.depends_on) or "(none: the batch depends on nothing)",
         "FOLDERS": "\n\n".join(
             data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
-            for u in batch.units
+            for u in units
         ),
     }
-    left_out = tuple(f"{_named(u.id)} {line}" for u in batch.units for line in folders[u.id].left_out)
-    not_shown = tuple(p for u in batch.units for p in folders[u.id].binary)
+    left_out = tuple(f"{_named(u.id)} {line}" for u in units for line in folders[u.id].left_out)
+    not_shown = tuple(p for u in units for p in folders[u.id].binary)
     return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown)
 
 
@@ -377,8 +380,12 @@ def review_plan_costed(
     digest_of: DigestOf | None = None,
     sandbox: Sandbox | None = None,
     timeout_s: int = DEFAULT_TIMEOUT_S,
+    done: Collection[str] = (),
 ) -> tuple[ReviewResult, float]:
-    """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan)."""
+    """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan). `done` names
+    the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
+    not asked about them (they are READY, with their digest when their folder is there) and a batch is reviewed on its
+    other units. A batch of done units only is READY."""
     revs = _unit_revs(git, cfg, plan, units, rev)
     digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
     folders: dict[str, FolderText] = {}
@@ -394,6 +401,9 @@ def review_plan_costed(
         for unit in batch.units:
             info, folder = units.get(unit.id), folders[unit.id]
             digest = digest_fn(git, revs[unit.id], info.folder) if info and not folder.empty else None
+            if unit.id in done:
+                result_units[unit.id] = _with_digest(Verdict("READY"), digest)
+                continue
             if folder.empty:
                 note = (
                     f"the folder of {unit.id} has no files at {revs[unit.id][:10]}"
@@ -408,8 +418,11 @@ def review_plan_costed(
             ]
             subjects.append((_unit_subject(plan, unit, batch, folder, deps), digest))
     for batch in plan.batches:
-        if len(batch.units) > 1 and all(not folders[u.id].empty for u in batch.units):
-            subjects.append((_batch_subject(plan, batch, folders), None))
+        left = [u for u in batch.units if u.id not in done]
+        if len(batch.units) > 1 and not left:
+            result_batches[batch.id] = Verdict("READY")
+        elif len(batch.units) > 1 and all(not folders[u.id].empty for u in left):
+            subjects.append((_batch_subject(plan, batch, folders, skip=done), None))
     cost = 0.0
     if subjects:
         factory = Factory(

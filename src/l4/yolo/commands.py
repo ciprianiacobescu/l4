@@ -52,7 +52,7 @@ from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
-from l4.yolo.admit import admit, next_eligible
+from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.cycle import REVIEW_KEY, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import Found, new_draft, update_draft
@@ -84,6 +84,7 @@ from l4.yolo.plans import (
     FINAL,
     PlanFile,
     active_on,
+    archived_at,
     held_by,
     plan_files,
     plan_files_at,
@@ -443,7 +444,8 @@ def _limit_blocker(plan_id: str, state: PlanState, plan: Plan | None, extend: Ex
     a resume is refused for the very limit the step would stop on again."""
     fallback = plan.limits.model_dump(mode="json") if plan else None
     data = extend.as_data()
-    hit = resume_allows(state, data, now=now, fallback=fallback)
+    in_plan = plan.unit_ids() if plan else None
+    hit = resume_allows(state, data, now=now, fallback=fallback, units=in_plan)
     if hit is None:
         return None
     after = state.model_copy(deep=True)  # the same extension, to word the message with the figures it would leave
@@ -459,7 +461,7 @@ def _limit_blocker(plan_id: str, state: PlanState, plan: Plan | None, extend: Ex
     elif code == LIMIT_RUNS:
         message, flag = f"{used.runs} runs have reached the limit {limits.runs}: raise it", "--extend-runs N"
     elif code == LIMIT_ATTEMPTS:
-        found = reached_at(after, now=now, fallback=fallback)
+        found = reached_at(after, now=now, fallback=fallback, units=in_plan)
         unit = found[2] if found and found[2] else "a unit"
         message = (
             f"{unit} used {used.attempts.get(unit, 0)} attempts, the limit is {limits.attempts_of(unit)}: raise it"
@@ -502,7 +504,15 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
         ctx.say(f"{plan_id}: not admitted")
         return ExitCode.USAGE_ERROR
     units = _read_units(ctx, rev, file.plan.known_ids(), intake=True)
-    admission = admit(file.plan, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id))
+    state = fold_plan(plan_id, ctx.store(plan_id).read().events)  # read-only: the plan's own merged units are done
+    admission = admit(
+        file.plan,
+        known_units=units.infos,
+        cfg=ctx.cfg,
+        held=_held(ctx, plan_id),
+        state=state,
+        archived=archived_at(ctx.git, rev, ctx.cfg),
+    )
     if not admission.ok:
         ctx.say(f"{plan_id}: not admitted ({len(admission.findings)} finding(s))")
         _print_findings(ctx, _findings_text(admission, plan_id))
@@ -608,7 +618,14 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
             ExitCode.USAGE_ERROR, f"review: {plan_id} is {state.status}: a plan is reviewed before it is activated"
         )
     units = _read_units(ctx, rev, parsed.known_ids(), intake=True)
-    admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
+    admission = admit(
+        parsed,
+        known_units=units.infos,
+        cfg=ctx.cfg,
+        held=_held(ctx, plan_id, state),
+        state=state,
+        archived=archived_at(ctx.git, rev, ctx.cfg),
+    )
     if not admission.ok:
         lines = _findings_text(admission, plan_id)
         if local:
@@ -644,7 +661,9 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
             ctx.say(start_run_line(ctx.app, ctx.cfg))
         return ExitCode.OK
     try:
-        result, cost = review_plan_costed(ctx.app, ctx.cfg, parsed, units.infos, git=ctx.git, rev=rev)
+        result, cost = review_plan_costed(
+            ctx.app, ctx.cfg, parsed, units.infos, git=ctx.git, rev=rev, done=done_units(parsed, state)
+        )
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None
     except RoleUnavailable as exc:  # a judge that timed out or failed too (R9): no review happened, none is recorded
@@ -721,7 +740,14 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"push it, then l4 yolo review {plan_id} and l4 yolo activate {plan_id} --reason TEXT; or restart the "
             f"unit (l4 restart --unit {rejected} --reason TEXT)",
         )
-    admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
+    admission = admit(
+        parsed,
+        known_units=units.infos,
+        cfg=ctx.cfg,
+        held=_held(ctx, plan_id, state),
+        state=state,
+        archived=archived_at(ctx.git, rev, ctx.cfg),
+    )
     if not admission.ok:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
@@ -755,9 +781,13 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"let it finish, or run l4 yolo cancel {other.plan_id} --reason TEXT first",
         )
     base = {u: n for u in parsed.unit_ids() if (n := attempt_refs(ctx.git, u, ctx.fetch_cfg)) is not None}
+    # the current unit goes on only when the new order holds it and nothing it now waits for is open (review z1, H2)
+    current = state.current
+    if current is not None and (current not in admission.order or unit_blocker(parsed, state, current) is not None):
+        current = None
     event = _event(
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
-        merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base,
+        merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base, current=current,
     )  # fmt: skip
     _append(store, [event], read.head)
     ctx.say(f"{plan_id}: activated on {parsed.target} ({len(parsed.unit_ids())} unit(s), merge: {parsed.merge})")

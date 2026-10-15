@@ -60,7 +60,7 @@ from l4.state.fold import UnitState
 from l4.state.status import UnitSnapshot
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
-from l4.yolo.admit import FINISHED_PHASES, admit, merged_not_integrated, next_eligible
+from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
@@ -78,7 +78,7 @@ from l4.yolo.model import (
     Verdict,
     YoloStep,
 )
-from l4.yolo.plans import PlanFile, holds_of, plan_files, unit_infos
+from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, unit_infos
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import review_plan_costed
 from l4.yolo.report import render_report
@@ -612,7 +612,14 @@ class _Step:
             return None
         infos = unit_infos(self.app.repo, self.found, plan.known_ids())
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
-        admission = admit(plan, known_units=infos, cfg=self.cfg, held=held)
+        admission = admit(
+            plan,
+            known_units=infos,
+            cfg=self.cfg,
+            held=held,
+            state=state,
+            archived=archived_at(self.git, rev, self.cfg),
+        )
         if not admission.ok:
             findings = [{"code": f.code, "subject": f.subject, "text": f.text} for f in admission.findings]
             last = _last(ctx.read.events, "plan.refused")
@@ -623,7 +630,15 @@ class _Step:
             return self._after_review(ctx)
         try:
             result, cost = review_plan_costed(
-                self.app, self.cfg, plan, infos, git=self.git, rev=rev, adapters=self.adapters, sandbox=self.sandbox
+                self.app,
+                self.cfg,
+                plan,
+                infos,
+                git=self.git,
+                rev=rev,
+                adapters=self.adapters,
+                sandbox=self.sandbox,
+                done=done_units(plan, state),
             )
         except (RoleLimit, RoleUnavailable) as exc:  # `JudgeFailed` is a `RoleUnavailable`: nothing is recorded (R9)
             reason = self.app.redactor.redact_text(str(exc) or type(exc).__name__).splitlines()[0][:200]
@@ -712,7 +727,10 @@ class _Step:
         """(stop reason, detail, unit) of the first limit reached (D11, R3): `limits.reached_at` on the state."""
         assert ctx.file.plan is not None
         return reached_at(
-            self._limit_state(ctx, unit), now=self._now(), fallback=ctx.file.plan.limits.model_dump(mode="json")
+            self._limit_state(ctx, unit),
+            now=self._now(),
+            fallback=ctx.file.plan.limits.model_dump(mode="json"),
+            units=ctx.file.plan.unit_ids(),
         )
 
     def _inputs_changed(self, ctx: _Ctx) -> str | None:
@@ -918,6 +936,10 @@ class _Step:
         unit = snap.ref.id
         verdict = snap.state.last_verdict
         if verdict is None or verdict.verdict != "PASS":
+            return None
+        assert ctx.file.plan is not None
+        if (why := unit_blocker(ctx.file.plan, ctx.state, unit)) is not None:  # never out of order (review z1, H2)
+            self._line(ctx.plan_id, f"{unit} is not merged: it {why}")
             return None
         if self.cfg.forge.merge_policy != "auto":
             return self._stop(ctx, "merge_refused", "forge.merge_policy is not auto", unit)

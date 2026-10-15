@@ -26,6 +26,10 @@ plan's cost and runs but are not units: they have no entry in `used.attempts`.
 kept under the key `*`) or a `{unit: n}` mapping. An `extend.deadline` raises `extended_deadline` (the latest wins; a
 time without a zone is read as UTC).
 
+`plan.activated{current: <unit or null>}` says which unit the plan goes on with: the activation keeps the current unit
+only when the new order holds it and every prerequisite of it is integrated, else it is null. An event without the key
+(an older ledger) keeps the current unit unless the new order drops it.
+
 `plan.activated{attempt_base: {unit: n}}` records how many attempt refs each unit had on origin at the activation (R13):
 the unit's attempts in the plan are counted from there, and a re-activation keeps the first base of a unit. A
 `plan.resumed` that a person recorded resets `stale_merges` (the harness's own wake-up does not): the next step tries
@@ -135,7 +139,11 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
             if data.get("merge") in MERGE:
                 state.merge = data["merge"]
-            if state.current is not None and state.order and state.current not in state.order:
+            if (
+                "current" in data
+            ):  # the activation says which unit goes on: none when it has a new blocker (review z1, H2)
+                state.current = _text(data["current"])
+            elif state.current is not None and state.order and state.current not in state.order:
                 state.current = None  # a unit the activated order does not hold is no longer the plan's (review #1)
         elif kind == "unit.dispatched" and unit:
             state.current = unit

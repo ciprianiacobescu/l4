@@ -3,7 +3,8 @@
 `admit` checks a plan against what the target head knows, without any model: unique ids, known units, resolvable
 dependencies, no cycle, known acceptance profiles, profiles this runner can run (`unsupported_profile`: R7), the
 target, the merge mode, open questions, intake, finished units, units another plan file already lists
-(`held_by_other_plan`: R8) and external dependencies. Every problem is a `Finding` with a code. The graph has one
+(`held_by_other_plan`: R8) and external dependencies. A unit that the plan itself merged or integrated (its ledger
+`state`) is done and has no unit-level finding. Every problem is a `Finding` with a code. The graph has one
 node per unit and one per batch: a unit waits for the units it depends on and for the batch nodes its batch depends
 on; a batch node waits for all of its units. The order is topological; among nodes ready together, batch position
 decides, then unit position.
@@ -14,7 +15,7 @@ step must post-check before it dispatches anything (R10).
 """
 
 import heapq
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from l4.config.schema import L4Config
 from l4.yolo.model import (
@@ -128,14 +129,35 @@ def _needs_server(cfg: L4Config, profile: str) -> bool:
     return "e2e" in cfg.yolo.profiles.get(profile, ())
 
 
+def done_units(plan: Plan, state: PlanState | None) -> frozenset[str]:
+    """The units of `plan` that the plan itself already merged or integrated (its ledger state), in the plan now. The
+    target holds their work: their spec may be finished, archived or gone, and that is no fault of the plan."""
+    if state is None:
+        return frozenset()
+    return frozenset(u for u in plan.unit_ids() if u in state.integrated or u in state.merged)
+
+
 def admit(
-    plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config, held: Mapping[str, str] | None = None
+    plan: Plan,
+    *,
+    known_units: Mapping[str, UnitInfo],
+    cfg: L4Config,
+    held: Mapping[str, str] | None = None,
+    state: PlanState | None = None,
+    archived: Collection[str] = frozenset(),
 ) -> Admission:
     """Check `plan` at the target head (design D2). `known_units` holds what the spec providers found there. `held`
     maps a unit id to the id of the plan that holds it (`plans.held_by`: the activated plan, else the first file in
     path order): a unit of this plan that another plan holds is a `held_by_other_plan` finding (R8); entries naming
-    this plan are no finding."""
+    this plan are no finding.
+
+    `state` is the plan's own ledger state, when it has one. A planned unit that the plan merged or integrated is done
+    (L4-YOLO-002): it is no `finished` unit, no `unknown_unit` (its change may be archived), and it has no open
+    question or intake finding. It stays a unit of the graph. A plan with no state, or with nothing merged, gets no
+    such leave. `archived` holds the ids of the changes archived at the target (`plans.archived_changes`): an excluded
+    id that names one is known."""
     found: list[Finding] = []
+    done = done_units(plan, state)
 
     def add(code: str, subject: str, text: str) -> None:
         found.append(Finding(code, subject, text))
@@ -162,7 +184,7 @@ def admit(
     for excluded in dict.fromkeys(x.id for x in plan.exclude):
         if excluded in unit_ids:
             add("excluded_and_planned", excluded, f"unit {excluded} is both planned and excluded")
-        if known_units.get(excluded) is None:
+        if known_units.get(excluded) is None and excluded not in archived:
             add(
                 "unknown_unit",
                 excluded,
@@ -209,6 +231,8 @@ def admit(
                 add("unsupported_profile", unit.id, _SERVED.format(who=f"unit {unit.id}", name=unit.acceptance_profile))
             if (other := (held or {}).get(unit.id)) is not None and other != plan.plan_id:
                 add("held_by_other_plan", unit.id, f"unit {unit.id} is already listed in plan {other}")
+            if unit.id in done:
+                continue
             info = known_units.get(unit.id)
             if info is None:
                 add("unknown_unit", unit.id, f"unit {unit.id} was not found by a spec provider on the target head")
@@ -262,6 +286,31 @@ def merged_not_integrated(plan: Plan, state: PlanState, unit_phase: Mapping[str,
     ]
 
 
+def unit_blocker(plan: Plan, state: PlanState, unit_id: str) -> str | None:
+    """Why `unit_id` may not run or merge yet, or None: a unit it depends on, or a unit of a prerequisite batch, is not
+    integrated, or a prerequisite batch is not accepted (a batch whose profile is `none` counts as accepted once its
+    units are integrated). One rule for the dispatch, the activation and the merge guard."""
+    integrated = state.integrated
+    batches = {b.id: b for b in plan.batches}
+    direct, prereq_batches = _unit_prereqs(plan).get(unit_id, ([], []))
+    for dep in direct:
+        if dep not in integrated:
+            return f"waits for {dep} (not integrated)"
+    for bid in prereq_batches:
+        batch = batches.get(bid)
+        if batch is None:
+            continue
+        for u in batch.units:
+            if u.id not in integrated:
+                return f"waits for {u.id} (not integrated)"
+        accepted = bid in state.accepted_batches or (
+            batch.acceptance_profile == PROFILE_NONE and all(u.id in integrated for u in batch.units)
+        )
+        if not accepted:
+            return f"waits for batch {bid} (acceptance)"
+    return None
+
+
 def next_eligible(plan: Plan, state: PlanState, unit_phase: Mapping[str, str | None]) -> Eligibility:
     """The one unit to dispatch next and why each other unit waits (design D2, requirement L4-YOLO-010).
 
@@ -272,34 +321,20 @@ def next_eligible(plan: Plan, state: PlanState, unit_phase: Mapping[str, str | N
     integrated) is never dispatched again; the plan step integrates it.
     """
     integrated = state.integrated
-    batches = {b.id: b for b in plan.batches}
-
-    def batch_accepted(batch_id: str) -> bool:
-        batch = batches[batch_id]
-        if batch_id in state.accepted_batches:
-            return True
-        return batch.acceptance_profile == PROFILE_NONE and all(u.id in integrated for u in batch.units)
-
-    prereqs = _unit_prereqs(plan)
 
     def blocker(unit_id: str) -> str | None:
-        direct, prereq_batches = prereqs[unit_id]
-        for dep in direct:
-            if dep not in integrated:
-                return f"waits for {dep} (not integrated)"
-        for bid in prereq_batches:
-            for u in batches[bid].units:
-                if u.id not in integrated:
-                    return f"waits for {u.id} (not integrated)"
-            if not batch_accepted(bid):
-                return f"waits for batch {bid} (acceptance)"
-        return None
+        return unit_blocker(plan, state, unit_id)
+
+    prereqs = _unit_prereqs(plan)
 
     order = _order(plan, state)
     pending = [u for u in order if u not in integrated]
     waiting: dict[str, str] = {}
     chosen: str | None = None
     current = state.current if state.current in prereqs and state.current not in integrated else None
+    if current is not None and (why := blocker(current)) is not None:
+        waiting[current] = why  # a stale current unit never runs before its prerequisites (review z1, H2)
+        current = None
     if current is not None:
         chosen = current
     for unit_id in pending:

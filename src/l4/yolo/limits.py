@@ -13,7 +13,7 @@ own). The deadline is reached when `now >=` it. A unit that is integrated is not
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -81,9 +81,16 @@ def effective_limits(state: PlanState, fallback: Mapping[str, Any] | None = None
 
 
 def reached_at(
-    state: PlanState, *, now: datetime, fallback: Mapping[str, Any] | None = None
+    state: PlanState,
+    *,
+    now: datetime,
+    fallback: Mapping[str, Any] | None = None,
+    units: Collection[str] | None = None,
 ) -> tuple[str, str, str | None] | None:
-    """`(code, detail, unit)` of the first limit reached, or None. `unit` is set for `limit_attempts` only."""
+    """`(code, detail, unit)` of the first limit reached, or None. `unit` is set for `limit_attempts` only. The attempts
+    of a unit count only while the unit is in the plan: `units` (the plan's units) when given, else the order recorded
+    at the activation. A unit a person removed from the plan keeps its charged attempts and stops nothing."""
+    in_plan = set(units) if units is not None else set(state.order)
     limits = effective_limits(state, fallback)
     used = state.used
     if limits.cost_usd is not None and used.cost_usd >= limits.cost_usd:
@@ -91,7 +98,7 @@ def reached_at(
     if limits.runs is not None and used.runs >= limits.runs:
         return LIMIT_RUNS, f"{used.runs} run(s) used of {limits.runs}", None
     for unit, attempts in used.attempts.items():
-        if not is_unit_key(unit) or unit in state.integrated:
+        if not is_unit_key(unit) or unit in state.integrated or (in_plan and unit not in in_plan):
             continue
         allowed = limits.attempts_of(unit)
         if attempts > allowed:
@@ -103,21 +110,32 @@ def reached_at(
     return None
 
 
-def reached(state: PlanState, *, now: datetime, fallback: Mapping[str, Any] | None = None) -> tuple[str, str] | None:
+def reached(
+    state: PlanState,
+    *,
+    now: datetime,
+    fallback: Mapping[str, Any] | None = None,
+    units: Collection[str] | None = None,
+) -> tuple[str, str] | None:
     """`(code, detail)` of the first limit the plan has reached (cost, runs, attempts, deadline), or None (R3)."""
-    hit = reached_at(state, now=now, fallback=fallback)
+    hit = reached_at(state, now=now, fallback=fallback, units=units)
     return None if hit is None else (hit[0], hit[1])
 
 
 def resume_allows(
-    state: PlanState, extend: Mapping[str, Any] | None, *, now: datetime, fallback: Mapping[str, Any] | None = None
+    state: PlanState,
+    extend: Mapping[str, Any] | None,
+    *,
+    now: datetime,
+    fallback: Mapping[str, Any] | None = None,
+    units: Collection[str] | None = None,
 ) -> tuple[str, str] | None:
     """What still blocks `l4 yolo resume` once `extend` (the `extend` of `plan.resumed`: `cost_usd`, `runs`, `attempts`
     as a number or a `{unit: n}` mapping, `deadline`) is applied: `(code, detail)` of the first limit that would be
     reached again, or None when the resume may go on. `state` is not changed."""
     after = state.model_copy(deep=True)
     apply_extend(after, dict(extend) if extend else None)
-    return reached(after, now=now, fallback=fallback)
+    return reached(after, now=now, fallback=fallback, units=units)
 
 
 # --- the live figures of a unit (R1, R3, R13): one place for the plan step and `l4 yolo resume` -----------------

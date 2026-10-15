@@ -28,6 +28,13 @@ dependency resolvable; no cycle in the graph of units and batches (design D2); k
 `target == forge.base_branch`; `merge: auto` only with `forge.merge_policy: auto`; no unit with open questions; every
 unit passing the existing intake checks; no unit already merged. Each failure MUST be a finding with its code. The
 order MUST be topological, with ties broken by batch position, then unit position.
+A unit that the plan itself merged or integrated (its own ledger) is done: when the plan is admitted again (the step's
+review, `l4 yolo check`, `review` and `activate` all pass the ledger state), it MUST NOT get `finished`, `unknown_unit`,
+open question or intake findings, even when its change was archived or its folder is gone. It stays a unit of the graph,
+so the units that depend on it resolve and treat it as integrated. A plan with no ledger state, or with nothing merged,
+MUST still be refused for a merged or unknown unit. The judge MUST NOT be asked about a done unit. An excluded id that
+names a change archived at the target (`<root>/changes/archive/<date>-<name>`, the rule of `scripts/validate_plan.py`)
+is known.
 
 #### Scenario: SCN-YOLO-03 (−) A cycle through a batch prerequisite is found
 - **GIVEN** batch `b2` depends on batch `b1`, and unit `a` of `b1` depends on unit `c` of `b2`
@@ -250,6 +257,12 @@ D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit i
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.
+At the re-activation the plan MUST keep its current unit only when the new order holds it and every prerequisite of it
+under the new plan is integrated (its dependencies, the units of its prerequisite batches, those batches accepted);
+else the current unit is cleared, and `plan.activated` records `current`. That unit stays a held plan unit: it goes on
+when its prerequisites are integrated, by the usual rules (adopted when it is in review with a PASS, and the guarded
+merge refuses a head that lacks the new target tip). The step MUST NOT choose, adopt or merge a unit whose
+prerequisites are not integrated. The attempts of a unit that is no longer in the plan MUST NOT reach a limit.
 
 #### Scenario: SCN-YOLO-25 (−) A spec push to a plan unit stops the plan
 - **GIVEN** an active plan, and a person's push that changes `spec.md` of the current unit on its branch
@@ -309,11 +322,11 @@ skill's operate reference SHALL list the `l4 yolo` commands.
 A plan file MAY list `exclude: [{"id": <unit id>, "reason": <text>}]`: units that this plan deliberately does not
 deliver (design D15). The reason MUST be non-empty text of at most 200 characters, and unknown fields MUST be
 refused. Admission MUST refuse a plan that lists the same unit in `exclude` and in a batch (`excluded_and_planned`), the
-same unit twice in `exclude` (`duplicate_id`), or an excluded id that no spec provider knows (`unknown_unit`). An
-excluded unit MUST NOT be held by the plan: while no plan is active on the target (for example while the plan waits
-for its review or its activation, or after it completes) it runs as it would without a plan. While a plan is active it gets
-no new agent work, like every unit outside the active plan (L4-YOLO-010), and `l4 yolo status` lists it under `excluded`
-with the reason. The exclusions are part of the plan
+same unit twice in `exclude` (`duplicate_id`), or an excluded id that no spec provider knows and that is not a change
+archived at the target (`unknown_unit`). An excluded unit MUST NOT be held by the plan: while no plan is active on the
+target (for example while the plan waits for its review or its activation, or after it completes) it runs as it would
+without a plan. While a plan is active it gets no new agent work, like every unit outside the active plan (L4-YOLO-010),
+and `l4 yolo status` lists it under `excluded` with the reason. The exclusions are part of the plan
 file, so an edit of them after the activation stops the plan (`inputs_changed`) like any other edit.
 
 #### Scenario: SCN-YOLO-35 (+) An excluded unit is not held by the plan
