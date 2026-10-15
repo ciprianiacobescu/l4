@@ -69,7 +69,8 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
   has no openspec/specs/<capability>/spec.md in the working tree) and spec_no_purpose (the delta of such a capability
   has no `## Purpose` of at least 50 characters); and material_over_budget: a file the readiness review would cut or
   leave out, read the way the review reads it (a planned unit's folder at 80,000 characters, a unit named in a
-  depends_on at 20,000, each file at 20,000; harness files and binary files are not read). A cut of a planned unit's
+  depends_on at 20,000, each file at 20,000, or what `yolo.review.max_folder_chars`, `max_dependency_chars` and
+  `max_file_chars` of .l4/config.yaml say; harness files and binary files are not read). A cut of a planned unit's
   own folder is a problem (exit 1). A dependency's cut is a line `warning: material_over_budget: ...` on standard
   output that leaves the exit code alone: the review lists it as not shown in full without blocking.
 
@@ -289,9 +290,9 @@ def _folder_files(repo: Path, folder: str) -> list[str]:
     return sorted(found, key=lambda path: path.encode("utf-8", "surrogateescape"))
 
 
-def read_folder(repo: Path, folder: str, *, budget: int) -> FolderRead:
+def read_folder(repo: Path, folder: str, *, budget: int, max_file: int = MAX_FILE_CHARS) -> FolderRead:
     """`readiness.read_folder` on the working tree: skip the harness's files (`digest.is_excluded`), show a `tasks.md`
-    with every task marker as `[ ]`, leave out a binary file, show each file up to MAX_FILE_CHARS and the folder up to
+    with every task marker as `[ ]`, leave out a binary file, show each file up to `max_file` and the folder up to
     `budget`; a file the budget runs out in is cut (the `[cut: ...]` line counts), one after it is omitted."""
     root = folder.strip("/")
     out = FolderRead()
@@ -311,7 +312,7 @@ def read_folder(repo: Path, folder: str, *, budget: int) -> FolderRead:
             out.binary.append(path)
             continue
         text = data.decode("utf-8", "replace")
-        shown = text[: min(MAX_FILE_CHARS, max(left, 0))]
+        shown = text[: min(max_file, max(left, 0))]
         if len(shown) < len(text):
             if left <= 0:
                 out.omitted.append((path, len(text)))
@@ -465,6 +466,41 @@ def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
     if why is not None:
         return {}, [f"spec in .l4/config.yaml {why}: using the default frameworks and roots"]
     return parsed, []
+
+
+def read_review_limits(repo: Path) -> tuple[tuple[int, int, int], list[str]]:
+    """((max_file_chars, max_folder_chars, max_dependency_chars), warnings) from `yolo.review` of .l4/config.yaml:
+    the module constants where a key is absent or invalid (not an integer, below 1000 for the file and folder
+    budgets, below 0 for the dependency budget), with one warning per invalid key."""
+    limits = {
+        "max_file_chars": MAX_FILE_CHARS,
+        "max_folder_chars": MAX_FOLDER_CHARS,
+        "max_dependency_chars": MAX_DEPENDENCY_CHARS,
+    }
+    defaults = (MAX_FILE_CHARS, MAX_FOLDER_CHARS, MAX_DEPENDENCY_CHARS)
+    rows = _config_rows(repo)
+    if isinstance(rows, str):
+        return defaults, []
+    parsed, why = _top_block(rows, "yolo")
+    if why is not None:
+        return defaults, []  # read_yolo_hold has said so
+    section = parsed.get("review")
+    warnings: list[str] = []
+    if section is not None and not isinstance(section, dict):
+        warnings.append("yolo.review in .l4/config.yaml is not a mapping: the default review budgets are used")
+        section = {}
+    for key, floor in (("max_file_chars", 1000), ("max_folder_chars", 1000), ("max_dependency_chars", 0)):
+        raw = (section or {}).get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, str) and re.fullmatch(r"-?[0-9]+", raw) and int(raw) >= floor:
+            limits[key] = int(raw)
+        else:
+            warnings.append(
+                f"yolo.review.{key} in .l4/config.yaml is not an integer of at least {floor}: "
+                f"the default {limits[key]} is used"
+            )
+    return (limits["max_file_chars"], limits["max_folder_chars"], limits["max_dependency_chars"]), warnings
 
 
 def read_yolo_hold(repo: Path) -> tuple[list[str], list[str]]:
@@ -1004,6 +1040,8 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
     known = set(units)
     hold, hold_warnings = read_yolo_hold(repo)
     warnings += hold_warnings
+    limits, limit_warnings = read_review_limits(repo)
+    warnings += limit_warnings
     reports = [check_plan(name, text, known, archived) for name, text in read_plan_files(repo)]
     listed: set[str] = set()
     planned_in: dict[str, list[str]] = {}
@@ -1026,7 +1064,7 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
             if unit in known and unit.startswith("openspec:"):
                 for code, delta_file, text in purpose_problems(repo, openspec_root, unit.partition(":")[2]):
                     report.add(code, unit, f"{delta_file}: {text}")
-    warnings_budget = budget_problems(repo, args, reports, known)
+    warnings_budget = budget_problems(repo, args, reports, known, limits)
     problems = [
         {"plan": r.plan_id, "code": c, "subject": s, "text": t} for r in reports for (c, s, t) in r.problems
     ] + [{"plan": None, "code": c, "subject": s, "text": t} for (c, s, t) in coverage]
@@ -1042,7 +1080,9 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
     }
 
 
-def budget_problems(repo: Path, args: argparse.Namespace, reports: list[PlanReport], known: set[str]) -> list[str]:
+def budget_problems(
+    repo: Path, args: argparse.Namespace, reports: list[PlanReport], known: set[str], limits: tuple[int, int, int]
+) -> list[str]:
     """Add `material_over_budget` to the plan reports for a planned unit's own folder (a problem) and return the
     warning lines for dependencies (the review lists them as not shown in full without blocking)."""
     _, openspec_root, kiro_root, _ = resolve_discovery(repo, args)
@@ -1053,7 +1093,7 @@ def budget_problems(repo: Path, args: argparse.Namespace, reports: list[PlanRepo
         for unit, deps in report.deps.items():
             if unit in known:
                 for path, what in budget_lines(
-                    read_folder(repo, unit_folder(unit, openspec_root, kiro_root), budget=MAX_FOLDER_CHARS)
+                    read_folder(repo, unit_folder(unit, openspec_root, kiro_root), budget=limits[1], max_file=limits[0])
                 ):
                     report.add("material_over_budget", unit, f"{path}: {what}")
             for dep in deps:
@@ -1063,7 +1103,7 @@ def budget_problems(repo: Path, args: argparse.Namespace, reports: list[PlanRepo
     for dep, by in dependents.items():
         if dep in known:
             folder = unit_folder(dep, openspec_root, kiro_root)
-            for path, what in budget_lines(read_folder(repo, folder, budget=MAX_DEPENDENCY_CHARS)):
+            for path, what in budget_lines(read_folder(repo, folder, budget=limits[2], max_file=limits[0])):
                 lines.append(
                     f"warning: material_over_budget: {dep}: {path}: {what} (as a dependency of {', '.join(by)})"
                 )

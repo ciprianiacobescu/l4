@@ -1026,6 +1026,71 @@ def test_the_json_output_carries_the_budget_lines(repo):
     assert len(data["budget_warnings"]) == 1 and "7148 characters cut" in data["budget_warnings"][0]
 
 
+def dependency_plan(repo: Path) -> None:
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 19_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 8_148)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+
+
+def test_a_raised_dependency_budget_removes_the_warning(repo):  # SCN-ADO-29a
+    dependency_plan(repo)
+    config(repo, "yolo:\n  review:\n    max_dependency_chars: 30000\n")
+    code, out, err = run(repo)
+    assert code == 0 and "material_over_budget" not in out and err == ""
+
+
+def test_a_lowered_file_budget_reports_a_cut(repo):
+    change(repo, "a")
+    touch(repo, "openspec/changes/a/spec.md", "x" * 5_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+    config(repo, "yolo:\n  review:\n    max_file_chars: 2000\n")
+    code, out, _ = run(repo)
+    assert code == 1 and "openspec:a: openspec/changes/a/spec.md: 3000 characters cut" in out
+
+
+def test_a_lowered_folder_budget_applies_to_planned_units(repo):
+    change(repo, "a")
+    for n in range(3):
+        touch(repo, f"openspec/changes/a/f{n}.md", "x" * 2_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    config(repo, "yolo:\n  review:\n    max_folder_chars: 3000\n")
+    code, out, _ = run(repo)
+    assert code == 1 and "openspec/changes/a/f1.md: 1000 characters cut" in out
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("max_file_chars", "many"),
+        ("max_file_chars", "999"),
+        ("max_folder_chars", "999"),
+        ("max_folder_chars", "5.5"),
+        ("max_dependency_chars", "-1"),
+        ("max_dependency_chars", "true"),
+    ],
+)
+def test_an_invalid_review_limit_falls_back_with_one_warning(repo, key, value):
+    dependency_plan(repo)
+    config(repo, f"yolo:\n  review:\n    {key}: {value}\n")
+    code, out, err = run(repo)
+    assert code == 0 and "7148 characters cut" in out  # the defaults are in force
+    assert err.count(f"yolo.review.{key}") == 1 and err.count("warning:") == 1
+
+
+def test_a_dependency_budget_of_zero_is_valid(repo):
+    dependency_plan(repo)
+    config(repo, "yolo:\n  review:\n    max_dependency_chars: 0\n")
+    code, out, err = run(repo)
+    assert code == 0 and "omitted" in out and err == ""
+
+
+def test_the_review_limits_default_to_the_constants(repo):
+    limits, warnings = vp.read_review_limits(repo)
+    assert limits == (vp.MAX_FILE_CHARS, vp.MAX_FOLDER_CHARS, vp.MAX_DEPENDENCY_CHARS) and warnings == []
+
+
 def budget_world(tmp_path):
     from .yolo_review_world import World
 
