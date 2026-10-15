@@ -104,7 +104,7 @@ from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
-from l4.yolo.cycle import PlanStep, failed_plan_step, record_rejections, record_run_starts, yolo_step
+from l4.yolo.cycle import PlanStep, failed_plan_step, fetch_cause, record_rejections, record_run_starts, yolo_step
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -1575,6 +1575,8 @@ def _failed_unit(
     code, message = classify_exception(exc)
     redacted = app.redactor.redact_text(message)
     first = (redacted.splitlines() or [type(exc).__name__])[0]
+    if isinstance(exc, GitError):  # git's own cause, not its command line (the same extraction as a fetch failure)
+        first = fetch_cause(app, exc, limit=300)
     log.error("%s: %s", ref.id, first)
     log.debug("traceback", exc_info=exc)
     if isinstance(exc, PushFailed) and exc.refused:

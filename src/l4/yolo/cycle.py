@@ -67,6 +67,7 @@ from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, r
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
     PLAN_ID,
+    PLAN_REF_PREFIX,
     PLANS_DIR,
     Eligibility,
     MergeOutcome,
@@ -248,15 +249,16 @@ def auto_plan_units(app: AppContext, cfg: L4Config, git: Git) -> frozenset[str]:
     return frozenset(units)
 
 
-def fetch_cause(app: AppContext, exc: GitError) -> str:
-    """Why a git fetch failed, for one line: what git said (the first line of its stderr), then the exit status; the
+def fetch_cause(app: AppContext, exc: GitError, limit: int = 160) -> str:
+    """Why a git fetch failed, for one line: what git said (its `fatal:` or `error:` line, else the first line of its stderr), then the exit status; the
     command line, which is long and says nothing, is left out so that a cut keeps the cause."""
     said = [x.strip() for x in str(getattr(exc, "stderr", "") or "").splitlines() if x.strip()]
-    text = said[0] if said else (str(exc).splitlines() or [type(exc).__name__])[0]
+    cause = next((x for x in said if x.startswith(("fatal:", "error:"))), said[0] if said else None)
+    text = cause if cause else (str(exc).splitlines() or [type(exc).__name__])[0]
     code = getattr(exc, "returncode", None)
     text = app.redactor.redact_text(text)
-    if len(text) > 160:  # a long path in the middle goes, not the end of the sentence
-        text = f"{text[:50]}...{text[-105:]}"
+    if len(text) > limit:  # a long path in the middle goes, not the end of the sentence
+        text = f"{text[:50]}...{text[-(limit - 55) :]}"
     return text + (f" (git exit {code})" if code is not None else "")
 
 
@@ -531,7 +533,12 @@ class _Step:
         list stay held and the units that no plan lists run, as they do when the step fails (`failed_plan_step`)."""
         log.warning("no plan step in this run: %s", why)
         extra = (f"plan step skipped: {why}",)
-        if not self.files:  # the repository had plan files once and this clone sees none: nothing is known
+        if not self.files:  # this clone sees no plan file: the ledgers it holds say whether a plan is still open
+            try:
+                if not self._open_plan_in_clone():
+                    return PlanStep(allow=None, actions=extra)  # no plan lists a unit: the units run as ever
+            except Exception as exc:  # noqa: BLE001 - the ledgers cannot be read: no unit runs
+                log.warning("plan step skipped: the plan ledgers cannot be read (%s)", type(exc).__name__)
             return self._result(frozenset(), start_next_run=False, extra=extra, reason=why)
         try:
             held = holds_of({}, self.files).held
@@ -549,6 +556,19 @@ class _Step:
         return self._result(
             frozenset(u for u in self.snaps if u not in held), start_next_run=False, extra=extra, reason=why
         )
+
+    def _open_plan_in_clone(self) -> bool:
+        """Whether a plan ref this clone holds (`refs/l4/plans/*`, no network) has a ledger that is active, waiting or
+        stopped, or cannot be read."""
+        refs = self.git.run("for-each-ref", "--format=%(refname)", PLAN_REF_PREFIX).stdout.split()
+        for ref in refs:
+            plan_id = ref.removeprefix(PLAN_REF_PREFIX)
+            if not PLAN_ID.match(plan_id):
+                continue
+            read = _store(self.app, self.cfg, self.git, plan_id).read_local()
+            if read is None or fold_plan(plan_id, read.events).status in ("active", "waiting", "stopped"):
+                return True
+        return False
 
     def run(self) -> PlanStep:
         if self.unconfirmed is not None:
