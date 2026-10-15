@@ -763,6 +763,8 @@ ci:
 yolo:
   profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's
                                    # acceptance_profile can name; `all` (every configured gate except an e2e gate with a server) and `none` are reserved (L4-YOLO-009)
+  hold: []                         # unit ids or fnmatch patterns (`openspec:a`, `kiro:*`): a matching unit that no plan file lists gets no
+                                   # agent work and shows `held by yolo.hold`; an empty string is a load error (L4-ADO-011)
 
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)
