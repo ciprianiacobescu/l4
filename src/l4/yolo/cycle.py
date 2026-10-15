@@ -97,6 +97,8 @@ STOPPED_PHASES = ("halted", "escalated", "abandoned", "rejected")
 WAIT_PHASES = ("awaiting_human", "clarifying", "waiting_capacity")
 RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current unit whose last run never started it
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
+ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
+MAX_WAIT_DETAIL = 1_000
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
 _REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
@@ -424,6 +426,7 @@ class _Step:
         self.named: frozenset[str] | None = None  # the units a `l4 run --unit` names (a read-only step)
         self.unconfirmed: str | None = None  # why the target could not be fetched: the plan files may be stale
         self._merge_not_ready: dict[str, str] = {}  # unit id -> why its merge was not ready in this step
+        self._merge_wait_reason: dict[str, str] = {}  # unit id -> the wait reason when it is not `merge_not_ready`
         self._merge_heads: dict[str, str | None] = {}  # unit id -> the head that merge was not ready for
         self._head_asked: set[str] = set()  # units whose PR head the forge was asked about in this run (LOW-1)
 
@@ -599,6 +602,7 @@ class _Step:
                 self._load()
                 self.actions = []
                 self._merge_not_ready, self._merge_heads, self._head_asked = {}, {}, set()
+                self._merge_wait_reason = {}
                 self._file_deleted()
                 if not self.files:  # every plan file is gone: the units are ordinary units again
                     return PlanStep(allow=None, actions=tuple(self.actions))
@@ -1161,6 +1165,8 @@ class _Step:
         unit = state.current
         if state.wait_reason == MERGE_NOT_READY:
             return self._merge_wait_gone(ctx, unit)
+        if state.wait_reason == ACCEPTED_FINDING_OPEN:
+            return self._accepted_wait_gone(ctx, unit)
         if state.wait_reason == RUN_NOT_STARTED:
             # (`unit_not_started`, the wait of a unit with nothing to run, is not this one: it is read below, as ever)
             if unit is None or not_started_pending(ctx.read.events, unit) is None:
@@ -1229,9 +1235,10 @@ class _Step:
         branch, a PR head that differs from the branch tip, ...): nothing but a person changes that, so the plan waits
         with `merge_not_ready` and the detail on record, once. `_cause_gone` wakes it when the merge changes."""
         detail = self._merge_not_ready[unit]
-        head = self._merge_heads.get(unit)  # recorded: the next runs ask the forge about this head once, not again
-        self._write(ctx, [self._event("plan.waiting", reason=MERGE_NOT_READY, unit=unit, detail=detail, head=head)])
-        self._line(ctx.plan_id, f"waiting ({MERGE_NOT_READY}, {unit}): {detail}")
+        reason = self._merge_wait_reason.get(unit, MERGE_NOT_READY)
+        head = self._merge_heads.get(unit) if reason == MERGE_NOT_READY else None  # the next runs ask the forge once
+        self._write(ctx, [self._event("plan.waiting", reason=reason, unit=unit, detail=detail, head=head)])
+        self._line(ctx.plan_id, f"waiting ({reason}, {unit}): {detail}")
         return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
 
     def _merge_wait_gone(self, ctx: _Ctx, unit: str | None) -> str | None:
@@ -1259,6 +1266,38 @@ class _Step:
         if probe.status == "not_ready" and probe.detail != NO_LONGER_ALLOWED:
             return f"the cause is gone: the merge of {unit} is not ready for another reason ({probe.detail})"
         return f"the cause is gone: the merge of {unit} can go on"
+
+    def _accepted_open(self, ctx: _Ctx, snap: UnitSnapshot) -> str | None:
+        """Fail closed (D8.4): the accepted findings of the unit and its batch that no judge of the latest PASS round
+        answered `addressed: true`, as the wait detail (`<unit>: F-… not addressed: <evidence>; …`); None when none is
+        open. An id without an answer is open (`no answer recorded`)."""
+        unit = snap.ref.id
+        ids = [
+            f["id"] for item in self._accepted(ctx.plan_id, frozenset({unit})).get(unit, ()) for f in item["findings"]
+        ]
+        held = [fid for fid in dict.fromkeys(ids) if fid not in snap.state.accepted_addressed]
+        if not held:
+            return None
+        why = (f"{fid} not addressed: {snap.state.accepted_evidence.get(fid) or 'no answer recorded'}" for fid in held)
+        return f"{unit}: {'; '.join(why)}"[:MAX_WAIT_DETAIL]
+
+    def _accepted_wait_gone(self, ctx: _Ctx, unit: str | None) -> str | None:
+        """Why a plan waiting with `accepted_finding_open` may go on, None while the same findings are open (the detail
+        on record). The unit leaves review or has work to do again, a later PASS round addressed the findings, or the
+        evidence changed (the wait is then recorded again with it): gone."""
+        snap = self.snaps.get(unit) if unit else None
+        if snap is None:
+            return f"the cause is gone: {unit or 'the current unit'} is not among the units of the target"
+        phase = snap.state.phase or ""
+        if phase != "in_review" or self._unit_action(snap) in _ACTIONABLE:
+            return f"the cause is gone: {unit} is {phase or 'not started'}"
+        now = self._accepted_open(ctx, snap)
+        if now is None:
+            return f"the cause is gone: the accepted findings of {unit} are addressed"
+        waiting = _last(ctx.read.events, "plan.waiting", unit)
+        if now != (str(waiting.data.get("detail") or "") if waiting is not None else ""):
+            return f"the cause is gone: the accepted findings of {unit} are open for another reason ({now})"
+        return None
 
     # --- the guarded merge, post-merge profile, batches, completion ------------------------------------------------
 
@@ -1293,6 +1332,10 @@ class _Step:
             forge = self._forge_for_merge()
         except ForgeUnavailable as exc:
             return self._stop(ctx, "merge_refused", f"no forge to ask: {exc}", unit)
+        if (held := self._accepted_open(ctx, snap)) is not None:  # D8.4: before anything is asked of the forge
+            self._line(ctx.plan_id, f"{unit} is not merged: an accepted finding is not addressed")
+            self._merge_not_ready[unit], self._merge_wait_reason[unit] = held, ACCEPTED_FINDING_OPEN
+            return None
         out = merge_guarded(
             self.app, self.cfg, self.git, forge, snap, sleep=self.sleep, **self._reread(ctx, unit),
             before_push=lambda to_be: self._merge_requested(ctx, unit, to_be),
