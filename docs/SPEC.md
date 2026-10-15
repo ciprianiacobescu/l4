@@ -3199,7 +3199,8 @@ the push, after it has read the plan again: a cancelled or stopped plan MUST NOT
 MUST stop the plan with `merge_refused` and the forge's reason. The harness MUST NOT merge any unit that is not the
 current unit of an active `merge: auto` plan. When the head of the PR differs from the tip of the unit branch, the step
 MUST read the PR again, up to three times, five seconds apart (a forge may show a push late), before it calls the merge
-not ready. A merge that stays not ready MUST be a wait (L4-YOLO-013).
+not ready, in the run that records that wait for the first time and not in a preview (`l4 run --unit`) or in a later run
+while the wait for that head stands. A merge that stays not ready MUST be a wait (L4-YOLO-013).
 
 **L4-YOLO-009** Post-merge acceptance and integration. After a unit's merge into the target (by the harness or, with `merge: human`, by a person), the plan step SHALL run the
 unit's acceptance profile on the merged target revision (design D9) and record `unit.integrated` only when it passes.
@@ -3244,7 +3245,12 @@ plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail
 while the merge of its current unit is not ready (no open PR, a PR aimed at another branch, a PR head that is not the
 branch tip); it goes on by itself when the merge is ready. A plan stopped with `unit_rejected` MUST need a corrected spec,
 a new review and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation the
-next run of the unit reads the corrected spec. A stopped plan MUST
+next run of the unit reads the corrected spec. A unit that its own run rejects (exit 14, for example an empty
+`gates.test.command`) has no phase to show it, so the run MUST record `unit.rejected{unit, run, detail}` on the plan
+ledger when the plan dispatched the unit, and the next plan step MUST stop the plan with `unit_rejected` for that unit,
+recording its spec digest, and not dispatch it again. Outside CI the plan step MUST fetch the target branch before it
+reads the plan files; when the fetch fails it MUST log one line, write nothing to the plan ledger and let no unit of a
+plan run in that run. A stopped plan MUST
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.

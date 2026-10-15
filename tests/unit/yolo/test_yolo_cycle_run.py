@@ -11,6 +11,7 @@ from l4.exitcodes import ExitCode
 from l4.forge.base import ForgeError
 from l4.forge.local import LocalForge
 from l4.outcome import CommandResult
+from l4.yolo.store import PlanStore
 
 from .yolo_cycle_world import CycleWorld, ev, unit_id
 
@@ -128,6 +129,43 @@ def test_the_current_unit_may_be_named_and_its_run_is_only_charged(world, run):
     result = run(units=(A,))
     assert result.code == ExitCode.OK and run.runner.chosen == [[A]]
     assert world.kinds() == [*before, "plan.charged"]  # a named run does not step the plan, it is charged (L4-YOLO-012)
+
+
+def test_a_dispatched_unit_that_its_run_rejects_is_on_the_plan_ledger_and_the_next_run_stops_the_plan(
+    world, run, monkeypatch
+):
+    world.plan()
+    world.activate()
+    why = "rejected: gates.test.command is not configured: there is no test oracle"
+    monkeypatch.setattr(
+        orch, "run_units", lambda *a, **k: CommandResult(ExitCode.REJECTED, [], rejected={A: why})
+    )  # the run of the dispatched unit exits 14
+    result = run()
+    assert result.code == ExitCode.REJECTED and run.forge.started == ["main"]
+    assert world.kinds()[-3:] == ["plan.charged", "unit.dispatched", "unit.rejected"]
+    run()  # the next run: the step stops the plan, the unit is not dispatched again
+    assert world.kinds()[-1] == "plan.stopped" and world.kinds().count("unit.dispatched") == 1
+    assert run.forge.started == ["main"]
+    assert [e for e in world.events() if e.type == "plan.stopped"][0].data["detail"] == why
+
+
+def test_a_rejection_the_plan_ledger_cannot_record_does_not_change_the_run_result(world, run, monkeypatch, caplog):
+    world.plan()
+    world.activate()
+    monkeypatch.setattr(orch, "run_units", lambda *a, **k: CommandResult(ExitCode.REJECTED, [], rejected={A: "x"}))
+    append = PlanStore.append
+
+    def failing(self, events, **kw):
+        events = list(events)
+        if any(e.type == "unit.rejected" for e in events):
+            raise ValueError("boom")
+        return append(self, events, **kw)
+
+    monkeypatch.setattr(PlanStore, "append", failing)
+    caplog.set_level(logging.WARNING)
+    result = run()
+    assert result.code == ExitCode.REJECTED
+    assert any("the rejection of" in r.getMessage() for r in caplog.records)
 
 
 def test_an_active_plan_runs_only_its_dispatched_unit_and_starts_the_next_run_once(world, run):

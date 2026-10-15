@@ -160,10 +160,11 @@ task, a new `verification.md`, a new `.l4/ledger.jsonl` line → same digest; on
 - Events (`PlanEvent(type, at, data)`; `by` and `run` in `data` where known):
   `plan.admitted{plan_digest, order}`, `plan.refused{findings}`, `plan.reviewed{plan_digest, units: {id: {verdict,
   digest, findings}}, batches: {...}}`, `plan.activated{plan_digest, digests: {unit: digest}, limits, by, reason}`,
-  `unit.dispatched{unit, run}`, `unit.merge_requested{unit, head, target_before}`, `unit.merged{unit, head, pr,
+  `unit.dispatched{unit, run}`, `unit.rejected{unit, run, detail}` (written after a run of the dispatched unit exited 14),
+  `unit.merge_requested{unit, head, target_before}`, `unit.merged{unit, head, pr,
   merge_commit}`, `unit.merge_refused{unit, reason}`, `unit.postcheck{unit, revision, profile, status, detail}`,
   `unit.integrated{unit, revision}`, `batch.accepted{batch, revision}` / `batch.failed{batch, revision, detail}`,
-  `plan.waiting{reason, unit}`, `plan.stopped{reason, detail, unit}`, `plan.resumed{by, reason, extend}`,
+  `plan.waiting{reason, unit, detail, head}`, `plan.stopped{reason, detail, unit}`, `plan.resumed{by, reason, extend}`,
   `plan.cancelled{by, reason}`, `plan.charged{unit, cost_usd, runs, attempts}`, `plan.completed{revision}`.
 - `fold_plan(events) -> PlanState`:
 

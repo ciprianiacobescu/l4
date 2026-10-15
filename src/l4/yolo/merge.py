@@ -156,10 +156,14 @@ def merge_guarded(
     *,
     before_push: Callable[[MergeOutcome], bool] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    reread: bool = True,
+    waited_head: str | None = None,
 ) -> MergeOutcome:
     """The preconditions in order, then `guarded_push` (see the module docstring). `before_push` is called last, with
     the outcome-to-be, and False stops the merge without a push (R5). `sleep` waits between the reads of a PR whose
-    head the forge shows late (tests pass a no-op)."""
+    head the forge shows late (tests pass a no-op). The plan step asks again for that head only when it would record
+    the wait for the first time: `reread` False (a preview) or `waited_head`, the unit head a `merge_not_ready` wait
+    is already recorded for, equal to the head to merge, reads the forge once."""
     target = cfg.forge.base_branch
     if (why := _readiness(snapshot)) is not None:
         return _not_ready(why)
@@ -190,7 +194,8 @@ def merge_guarded(
             head=head, pr=pr.number,
         )  # fmt: skip
     forge_head = pr.head_sha  # None when the forge does not report it (the local forge): the ls-remote check stands
-    for _ in range(HEAD_LAG_READS if forge_head and forge_head != head else 0):  # the forge may lag a push
+    lagging = bool(forge_head) and forge_head != head and reread and waited_head != head
+    for _ in range(HEAD_LAG_READS if lagging else 0):  # the forge may lag a push
         sleep(HEAD_LAG_WAIT_S)
         try:
             forge_head = forge.get_pr(pr.number).head_sha

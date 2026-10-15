@@ -246,6 +246,31 @@ def auto_plan_units(app: AppContext, cfg: L4Config, git: Git) -> frozenset[str]:
     return frozenset(units)
 
 
+def _fetch_failure(app: AppContext, cfg: L4Config, git: Git) -> str | None:
+    """Outside CI, fetch the target into its tracking ref before the plan files are read from it: a laptop clone does
+    not fetch on its own, and plan files read from an old tip would make the step stop a plan that was edited and
+    activated again since (the `l4 yolo` commands fetch the same way). None when it was fetched, in CI (the job checks
+    out the target head: no network call), when the clone has no origin and when origin answers that the branch is not
+    there (the step stops the plan as `target_missing`, a fact); else one line saying why not."""
+    if app.environ.get("GITHUB_ACTIONS") == "true" or app.environ.get("GITLAB_CI") == "true":
+        return None
+    if git.run("remote", "get-url", "origin", check=False).returncode != 0:
+        return None
+    target = cfg.forge.base_branch
+    spec = f"+refs/heads/{target}:refs/remotes/origin/{target}"
+    try:
+        git.fetch("origin", refspecs=(spec,), config=fetch_auth_config(cfg, app.environ))
+    except GitError as exc:
+        try:
+            if remote_tip(git, cfg, app.environ, target) is None:
+                return None
+        except GitError:
+            pass
+        first = (str(exc).splitlines() or [type(exc).__name__])[0]
+        return f"the target {target} could not be fetched ({app.redactor.redact_text(first)[:200]})"
+    return None
+
+
 def _store(app: AppContext, cfg: L4Config, git: Git, plan_id: str) -> PlanStore:
     return PlanStore(
         git, plan_id, fetch_auth_config(cfg, app.environ), push_config=push_auth_config(cfg, app.environ),
@@ -294,19 +319,31 @@ def yolo_step(
     (`l4 run --unit`): the plan needs them all, and is read only when a plan file exists. `read_only` (a run that names
     units): which units may run is answered from the plan's state, and nothing is reviewed, recorded or started
     (but the charge of a run of the current unit, L4-YOLO-012). `sleep` waits between the reads of a PR head that
-    the forge shows late (tests pass a no-op). The plan files are those of the target (`plan_source`)."""
+    the forge shows late (tests pass a no-op). The plan files are those of the target (`plan_source`). Outside CI the
+    target is fetched first; when that fails the step reads nothing from a tracking ref that may be stale, writes
+    nothing and lets no unit of a plan run (L4-YOLO-013)."""
     source = plan_source(cfg, git)
     files = plan_files(app.repo) if source is None else plan_files_at(git, source)
+    unconfirmed = None
+    # a repository that never had a plan file is left alone: no network call for it
+    if files or (not read_only and _had_plan_files(git, source or "HEAD")):
+        unconfirmed = _fetch_failure(app, cfg, git)
+        source = plan_source(cfg, git)
+        files = plan_files(app.repo) if source is None else plan_files_at(git, source)
     ledgers: list[str] | None = None
     if not files:  # no plan file: only a repository that once had plan files can hold a plan whose file was deleted
-        ledgers = _ledger_plans(app, cfg, git) if not read_only and _had_plan_files(git, source or "HEAD") else []
-        if not ledgers:
+        had = not read_only and _had_plan_files(git, source or "HEAD")
+        if unconfirmed is None:
+            ledgers = _ledger_plans(app, cfg, git) if had else []
+            if not ledgers:
+                return PlanStep(allow=None)
+        elif not had:
             return PlanStep(allow=None)
     named = frozenset(s.ref.id for _, s in found) if read_only else None  # the units `l4 run --unit` names
     if all_units is not None:
         found = all_units()
     step = _Step(app, cfg, git, found, files, forge, adapters, profiles, sandbox, now, confirm_wait_s)
-    step.ledgers, step.sleep, step.named = ledgers, sleep, named
+    step.ledgers, step.sleep, step.named, step.unconfirmed = ledgers, sleep, named, unconfirmed
     return step.preview() if read_only else step.run()
 
 
@@ -349,7 +386,10 @@ class _Step:
         self._attempts: dict[str, int | None] = {}  # unit id -> its attempt refs on origin (None: not readable)
         self.sleep: Callable[[float], None] = time.sleep  # between the reads of a PR head the forge shows late
         self.named: frozenset[str] | None = None  # the units a `l4 run --unit` names (a read-only step)
+        self.unconfirmed: str | None = None  # why the target could not be fetched: the plan files may be stale
         self._merge_not_ready: dict[str, str] = {}  # unit id -> why its merge was not ready in this step
+        self._merge_heads: dict[str, str | None] = {}  # unit id -> the head that merge was not ready for
+        self._head_asked: set[str] = set()  # units whose PR head the forge was asked about in this run (LOW-1)
 
     # --- loading ----------------------------------------------------------------------------------------------------
 
@@ -408,6 +448,8 @@ class _Step:
         """What `l4 run --unit` may run: the current or eligible unit of the active plan, else every unit no plan holds
         (L4-YOLO-010). Nothing is reviewed or started and no stop is recorded; only the run of the current unit is
         charged (`_charge_named_run`)."""
+        if self.unconfirmed is not None:
+            return self._skipped(self.unconfirmed)
         self._load()
         live = live_plan(self.files, self._states(), self.target)
         if live is None or live.plan is None:
@@ -458,18 +500,30 @@ class _Step:
         if (unit := self._inputs_changed(ctx)) is not None:
             return f"waits for the plan step: the spec of {unit} changed after the activation (plan {pid})"
         current = state.current if state.current in plan.unit_ids() else None
+        blocker = unit_blocker(plan, state, current) if current else None  # an older ledger can hold a blocked one
+        if blocker is not None:
+            return f"waits for the plan step: {current} {blocker} (plan {pid})"
+        if current and rejection_pending(ctx.read.events, current) is not None:
+            return f"waits for the plan step: {current} was rejected by its last run (plan {pid})"
         if (limit := self._limit_reached(ctx, current)) is not None:
             return f"waits for the plan step: plan {pid} reached a limit ({limit[0]}: {limit[1]})"
         if pending := merged_not_integrated(plan, state, self._phases()):
             return f"waits for the post-merge check of {pending[0]} (plan {pid})"
         return None
 
+    def _skipped(self, why: str) -> PlanStep:
+        """No plan step in this run, and nothing written to a plan ledger: no unit of a plan runs."""
+        log.warning("no plan step in this run: %s", why)
+        return self._result(frozenset(), start_next_run=False, extra=(f"plan step skipped: {why}",), reason=why)
+
     def run(self) -> PlanStep:
+        if self.unconfirmed is not None:
+            return self._skipped(self.unconfirmed)
         for attempt in (1, 2):
             try:
                 self._load()
                 self.actions = []
-                self._merge_not_ready = {}
+                self._merge_not_ready, self._merge_heads, self._head_asked = {}, {}, set()
                 self._file_deleted()
                 if not self.files:  # every plan file is gone: the units are ordinary units again
                     return PlanStep(allow=None, actions=tuple(self.actions))
@@ -841,7 +895,7 @@ class _Step:
             return self._stop(ctx, "unit_missing", f"{current} is not among the units of the target", current)
         if current and snap is not None:
             phase = snap.state.phase or ""
-            if phase == "rejected":
+            if phase == "rejected" or rejection_pending(ctx.read.events, current) is not None:
                 return self._rejected(ctx, snap)
             if phase in STOPPED_PHASES:
                 return self._stop(ctx, f"unit_{phase}", snap.state.halt_detail or snap.state.halt_reason, current)
@@ -906,7 +960,9 @@ class _Step:
             self._write(ctx, self._dispatch_events(ctx, unit, snap))
             self._line(ctx.plan_id, f"{unit}: its spec was fixed after it was rejected, its next run reads it")
             return self._result(frozenset({unit}), start_next_run=True, plan_id=ctx.plan_id)
-        detail = snap.state.halt_detail or snap.state.halt_reason
+        refused = rejection_pending(ctx.read.events, unit)  # the reasons its own run gave (no phase records them)
+        detail = (str(refused.data.get("detail") or "") if refused else "") or snap.state.halt_detail
+        detail = detail or snap.state.halt_reason
         if seen is not None and seen != now:
             detail = (
                 f"{unit} is still rejected after its spec was fixed: correct the spec, or run l4 restart --unit "
@@ -990,7 +1046,8 @@ class _Step:
         branch, a PR head that differs from the branch tip, ...): nothing but a person changes that, so the plan waits
         with `merge_not_ready` and the detail on record, once. `_cause_gone` wakes it when the merge changes."""
         detail = self._merge_not_ready[unit]
-        self._write(ctx, [self._event("plan.waiting", reason=MERGE_NOT_READY, unit=unit, detail=detail)])
+        head = self._merge_heads.get(unit)  # recorded: the next runs ask the forge about this head once, not again
+        self._write(ctx, [self._event("plan.waiting", reason=MERGE_NOT_READY, unit=unit, detail=detail, head=head)])
         self._line(ctx.plan_id, f"waiting ({MERGE_NOT_READY}, {unit}): {detail}")
         return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
 
@@ -1009,7 +1066,7 @@ class _Step:
         try:
             probe = merge_guarded(
                 self.app, self.cfg, self.git, self._forge_for_merge(), snap, before_push=lambda _: False,
-                sleep=self.sleep,
+                sleep=self.sleep, **self._reread(ctx, unit),
             )  # fmt: skip
         except (ForgeError, ForgeUnavailable, GitError) as exc:
             log.info("%s: the merge could not be asked about: %s", unit, exc)
@@ -1021,6 +1078,18 @@ class _Step:
         return f"the cause is gone: the merge of {unit} can go on"
 
     # --- the guarded merge, post-merge profile, batches, completion ------------------------------------------------
+
+    def _reread(self, ctx: _Ctx, unit: str | None) -> dict[str, object]:
+        """How `merge_guarded` may ask the forge again for a PR head that differs from the branch tip (LOW-1): only
+        in the run that would record the wait for the first time, so not in a preview, not in a run where the wait of
+        this unit and head is on record (the latest wait with its `head`; an older ledger has none, so it is asked
+        once more and recorded with it), and once per unit in a run."""
+        waiting = _last(ctx.read.events, "plan.waiting", unit)
+        recorded = waiting.data.get("head") if waiting and waiting.data.get("reason") == MERGE_NOT_READY else None
+        first = unit is not None and unit not in self._head_asked and self.named is None
+        if unit is not None:
+            self._head_asked.add(unit)
+        return {"reread": first, "waited_head": str(recorded) if recorded else None}
 
     def _forge_for_merge(self) -> Forge:
         return self._forge or make_forge(self.cfg, self.app.environ, repo=self.app.repo)
@@ -1042,7 +1111,7 @@ class _Step:
         except ForgeUnavailable as exc:
             return self._stop(ctx, "merge_refused", f"no forge to ask: {exc}", unit)
         out = merge_guarded(
-            self.app, self.cfg, self.git, forge, snap, sleep=self.sleep,
+            self.app, self.cfg, self.git, forge, snap, sleep=self.sleep, **self._reread(ctx, unit),
             before_push=lambda to_be: self._merge_requested(ctx, unit, to_be),
         )  # fmt: skip
         if out.status == "not_ready":
@@ -1054,6 +1123,7 @@ class _Step:
                 return self._stop(ctx, "target_missing", out.detail)
             self._line(ctx.plan_id, f"{unit} is not ready to merge: {out.detail}")
             self._merge_not_ready[unit] = out.detail
+            self._merge_heads[unit] = out.head
             return None
         if out.status == "refused":
             return self._stop(ctx, "merge_refused", out.detail, unit)
@@ -1282,6 +1352,54 @@ class _Step:
         return [self._charged(ctx, unit, snap, extra_run=1), self._event("unit.dispatched", **data)]
 
 
+def rejection_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
+    """The `unit.rejected` record of `unit` when its latest run, the one the plan dispatched, rejected it: no
+    `unit.dispatched` came after it. A rejection leaves the unit with no phase and its ledger stays in the job's
+    worktree, so this record is how the next run's plan step knows (M2, L4-YOLO-013)."""
+    for event in reversed(events):
+        if event.data.get("unit") != unit:
+            continue
+        if event.type == "unit.rejected":
+            return event
+        if event.type in ("unit.dispatched", "unit.integrated"):
+            return None
+    return None
+
+
+def record_rejections(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, rejected: Mapping[str, str]) -> None:
+    """After the run: a unit of the plan that the run rejected (exit 14, no phase to show it) gets `unit.rejected{unit,
+    run, detail}` on the plan ledger, so the next plan step stops the plan with `unit_rejected` instead of dispatching
+    the unit again (M2). Only the current unit of an active plan that the step let run is recorded. A failure is a
+    warning: the run's own result stands, and the run limit is the brake."""
+    units = [u for u in rejected if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            open_plan = state.status in ("active", "waiting")
+            events = [
+                PlanEvent("unit.rejected", at, {"unit": u, "run": app.run_id, "detail": rejected[u][:300]})
+                for u in units
+                if open_plan and state.current == u and rejection_pending(read.events, u) is None
+            ]
+            if not events:
+                return
+            try:
+                store.append(events, expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s was rejected by its run", step.plan_id, ", ".join(units))
+            return
+        log.warning("plan %s: the rejection of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the rejection of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+
+
 def failed_plan_step(
     app: AppContext,
     found: Sequence[tuple[SpecProvider, UnitSnapshot]],
@@ -1326,6 +1444,8 @@ __all__ = [
     "live_plan",
     "local_states",
     "plan_holds",
+    "record_rejections",
+    "rejection_pending",
     "review_batches",
     "unreadable_plan_files",
     "yolo_step",
