@@ -62,11 +62,12 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.push import ATTEMPT_REF_PREFIX
 from l4.yolo.admit import FINISHED_PHASES, admit, merged_not_integrated, next_eligible
-from l4.yolo.digest import RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.limits import reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
     PLAN_ID,
+    PLANS_DIR,
     Eligibility,
     MergeOutcome,
     Plan,
@@ -83,7 +84,7 @@ from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import review_plan_costed
 from l4.yolo.report import render_report
 from l4.yolo.state import fold_plan
-from l4.yolo.store import PlanRead, PlanStore, parse_ledger, plan_ref
+from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
 
 log = logging.getLogger("l4.yolo.cycle")
 
@@ -270,15 +271,37 @@ def yolo_step(
     (`l4 run --unit`): the plan needs them all, and is read only when a plan file exists. `read_only` (a run that names
     units): which units may run is answered from the plan's state, and nothing is reviewed, recorded or started."""
     files = plan_files(app.repo)
-    if not files:
-        return PlanStep(allow=None)
+    ledgers: list[str] | None = None
+    if not files:  # no plan file: only a repository that once had plan files can hold a plan whose file was deleted
+        ledgers = _ledger_plans(app, cfg, git) if not read_only and _had_plan_files(git) else []
+        if not ledgers:
+            return PlanStep(allow=None)
     if all_units is not None:
         found = all_units()
     step = _Step(app, cfg, git, found, files, forge, adapters, profiles, sandbox, now, confirm_wait_s)
+    step.ledgers = ledgers
     return step.preview() if read_only else step.run()
 
 
+def _had_plan_files(git: Git) -> bool:
+    """True when the history of the checkout ever held a file under `.l4/plans`. A local read, no network: a
+    repository that never had a plan file takes no plan step at all (design: no change without a plan file)."""
+    shown = git.run("log", "-1", "--format=%H", "--", PLANS_DIR, check=False)
+    return shown.returncode == 0 and bool(shown.stdout.strip())
+
+
+def _ledger_plans(app: AppContext, cfg: L4Config, git: Git) -> list[str]:
+    """The plan ids that have a ledger ref on origin; [] when origin cannot be asked (no plan step then)."""
+    try:
+        return list_plans(git, fetch_auth_config(cfg, app.environ))
+    except GitError as exc:
+        log.warning("the plan refs could not be listed: %s", str(exc).splitlines()[0][:200] if str(exc) else exc)
+        return []
+
+
 class _Step:
+    ledgers: list[str] | None = None  # the plan ids with a ledger ref on origin, when `yolo_step` has listed them
+
     def __init__(
         self, app: AppContext, cfg: L4Config, git: Git, found: Sequence[tuple[SpecProvider, UnitSnapshot]],
         files: Sequence[PlanFile], forge: Forge | None, adapters: Mapping[str, AgentAdapter] | None,
@@ -307,6 +330,29 @@ class _Step:
             store = _store(self.app, self.cfg, self.git, file.plan_id)
             read = store.read()
             self.ctxs[file.plan_id] = _Ctx(file, store, read, fold_plan(file.plan_id, read.events))
+
+    def _file_deleted(self) -> None:
+        """An activated plan (active, waiting or stopped) whose plan file is no longer on the target is stopped as
+        `inputs_changed`, subject `plan`, once (R2, review #10): `l4 status` and the doctor stop counting it as
+        active, and a restored file needs a new review and a new activation, the old one never revives. A plan that
+        was never activated has nothing to stop."""
+        ids = self.ledgers if self.ledgers is not None else _ledger_plans(self.app, self.cfg, self.git)
+        for plan_id in ids:
+            if plan_id in self.ctxs or not PLAN_ID.match(plan_id):
+                continue
+            store = _store(self.app, self.cfg, self.git, plan_id)
+            try:
+                read = store.read()
+                state = fold_plan(plan_id, read.events)
+            except ValueError as exc:  # a ledger that is no ledger: left to `l4 yolo` to report
+                log.warning("plan %s: its ledger cannot be read: %s", plan_id, exc)
+                continue
+            gone = state.status in ("active", "waiting") or (
+                state.status == "stopped" and not (state.stop_reason == "inputs_changed" and state.stop_unit == "plan")
+            )
+            if gone:
+                ctx = _Ctx(PlanFile(plan_id, f"{PLANS_DIR}/{plan_id}.json", "", None, None), store, read, state)
+                self._stop(ctx, "inputs_changed", "the plan file was deleted", "plan")
 
     def _states(self) -> dict[str, PlanState]:
         return {pid: c.state for pid, c in self.ctxs.items()}
@@ -347,6 +393,9 @@ class _Step:
             try:
                 self._load()
                 self.actions = []
+                self._file_deleted()
+                if not self.files:  # every plan file is gone: the units are ordinary units again
+                    return PlanStep(allow=None, actions=tuple(self.actions))
                 done = self._reviews()
                 if done is not None:
                     return done
@@ -439,7 +488,10 @@ class _Step:
 
     def _digest(self, unit: str, folder: str) -> str:
         """The digest of a unit now: on its branch when it has one on origin, else on the target (D3, R3)."""
-        return current_unit_digest(self.git, self.cfg, unit, folder, self._target_ref())
+        try:
+            return current_unit_digest(self.git, self.cfg, unit, folder, self._target_ref())
+        except FolderMissing:  # the folder is gone: it equals no digest, so it reads as a change (review #4)
+            return MISSING
 
     def _report(self, ctx: _Ctx, events: Sequence[PlanEvent]) -> str:
         assert ctx.file.plan is not None

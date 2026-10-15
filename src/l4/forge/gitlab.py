@@ -229,6 +229,7 @@ class GitLabForge:
             draft=bool(data.get("draft", _DRAFT.match(title) is not None)),
             state=_STATES.get(str(data.get("state")), "open"), labels=tuple(str(x) for x in data.get("labels", ())),
             merge_commit_sha=str(data["merge_commit_sha"]) if data.get("merge_commit_sha") else None,
+            head_sha=str(data["sha"]) if data.get("sha") else None,  # the MR's `sha` is its source branch head
         )  # fmt: skip
 
     @staticmethod

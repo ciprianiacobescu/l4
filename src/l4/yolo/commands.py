@@ -54,7 +54,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import admit, next_eligible
 from l4.yolo.cycle import REVIEW_KEY, review_batches
-from l4.yolo.digest import RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.limits import (
     LIMIT_ATTEMPTS,
     LIMIT_COST,
@@ -231,7 +231,10 @@ def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
     """The digest of a unit now (design D3, R3): on its branch when it has one on origin, else on the target head.
     `digest.current_unit_digest` is the one rule the review, the activation and the `inputs_changed` check share; a
     target that is not fetched raises `RevisionMissing`, which is never the digest of an empty folder."""
-    return current_unit_digest(ctx.git, ctx.cfg, unit_id, folder, ctx.target_ref)
+    try:
+        return current_unit_digest(ctx.git, ctx.cfg, unit_id, folder, ctx.target_ref)
+    except FolderMissing:  # the folder is gone: it equals no digest, so the review is stale (review #4)
+        return MISSING
 
 
 def _digests(ctx: _Ctx, plan: Plan, units: _Units) -> dict[str, str]:

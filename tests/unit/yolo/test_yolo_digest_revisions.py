@@ -1,13 +1,14 @@
 """Digest rules after the review (R3, R4; review #3, #4, #15, #17): the providers' task markers, a missing revision
 that raises, the unit branch when it exists, and exclusions at any depth."""
 
+import hashlib
 import re
 
 import pytest
 
 from l4.specs import tasks_merge
 from l4.vcs.names import unit_branch
-from l4.yolo.digest import RevisionMissing, current_unit_digest, unit_digest
+from l4.yolo.digest import FolderMissing, RevisionMissing, current_unit_digest, unit_digest
 
 from .yolo_review_world import World, make_cfg
 
@@ -69,9 +70,16 @@ def test_a_missing_revision_raises_never_the_empty_set_digest(world):
             unit_digest(world.git, rev, FOLDER)
 
 
-def test_a_folder_that_is_not_in_an_existing_revision_is_still_the_empty_set(world):
+def test_a_folder_that_is_not_in_an_existing_revision_raises(world):  # review #4, L4-YOLO-003
     rev = world.commit({"other/x.md": "x\n"})
-    assert unit_digest(world.git, rev, FOLDER) == unit_digest(world.git, rev, "also/not/there")
+    with pytest.raises(FolderMissing, match="does not exist"):
+        unit_digest(world.git, rev, FOLDER)
+    assert issubclass(FolderMissing, RevisionMissing)
+
+
+def test_a_folder_of_only_excluded_files_still_has_a_digest(world):
+    rev = world.commit({f"{FOLDER}/verification.md": "v\n"})
+    assert unit_digest(world.git, rev, FOLDER) == hashlib.sha256(b"").hexdigest()[:16]
 
 
 def test_the_current_digest_is_taken_on_the_unit_branch_when_it_exists(world):

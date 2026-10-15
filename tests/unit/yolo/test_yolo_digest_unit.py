@@ -117,11 +117,11 @@ def test_a_digest_is_taken_at_the_revision(tmp_path):
     assert unit_digest(git, first, OPENSPEC) == before
 
 
-def test_a_missing_folder_gives_the_empty_set_digest_and_a_missing_revision_raises(tmp_path):
+def test_a_missing_folder_and_a_missing_revision_both_raise(tmp_path):
     repo, git = make_repo(tmp_path)
     rev = commit(repo)
-    empty = hashlib.sha256(b"").hexdigest()[:16]
-    assert unit_digest(git, rev, "openspec/changes/absent") == empty
+    with pytest.raises(RevisionMissing):  # review #4, L4-YOLO-003: a folder that is not there is not the empty set
+        unit_digest(git, rev, "openspec/changes/absent")
     with pytest.raises(RevisionMissing):  # R3: never the empty set for a revision that is not there
         unit_digest(git, "0" * 40, OPENSPEC)
 
