@@ -1357,7 +1357,7 @@ def run_command(
             all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
         )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
-        step = failed_plan_step(app, found, exc)
+        step = failed_plan_step(app, found, exc, cfg=cfg, git=git)
     for line in step.actions:
         log.info("%s", line)
     snapshots = {s.ref.id: s for _, s in found}

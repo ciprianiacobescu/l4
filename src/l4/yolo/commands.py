@@ -624,8 +624,7 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
             ctx.say(
                 f"{plan_id}: {unit} was rejected and its spec has not changed: fix the spec and push it. The next "
                 f"run on {ctx.target} then stops the plan with inputs_changed and CI reviews it; then l4 yolo "
-                f"activate {plan_id} --reason TEXT. A unit on a branch stays rejected until l4 restart --unit {unit} "
-                f"--reason TEXT"
+                f"activate {plan_id} --reason TEXT, and the unit's next run reads the corrected spec"
             )
             return ExitCode.OK
         view = _review_view(parsed, file.text, state, read.events, now)
@@ -945,6 +944,9 @@ def _describe(
         out["stop"] = {"reason": state.stop_reason, "detail": state.stop_detail, "unit": state.stop_unit}
     if state.status == "waiting":
         out["wait"] = state.wait_reason
+        waiting = next((e for e in reversed(read.events) if e.type == "plan.waiting"), None)
+        if waiting is not None and waiting.data.get("detail"):
+            out["wait_detail"] = str(waiting.data["detail"])
     blocker = None
     if state.status in ("stopped", "waiting"):
         live = None
@@ -970,7 +972,7 @@ def _render(d: dict[str, Any]) -> str:
         unit = f" [{stop['unit']}]" if stop.get("unit") else ""
         lines.append(f"  stopped: {stop['reason']}{unit}" + (f": {stop['detail']}" if stop.get("detail") else ""))
     if d.get("wait"):
-        lines.append(f"  waiting: {d['wait']}")
+        lines.append(f"  waiting: {d['wait']}" + (f": {d['wait_detail']}" if d.get("wait_detail") else ""))
     if d.get("units"):
         lines.append("  units:")
         for u in d["units"]:

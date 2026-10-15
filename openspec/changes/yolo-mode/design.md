@@ -296,7 +296,10 @@ process in the CI job, after the agents of the run have exited.
      - a limit is reached (D11) → `plan.stopped{limit_<name>}`;
      - the current unit is `halted`, `escalated`, `abandoned` or `rejected` → `plan.stopped{unit_<phase>, unit}`;
      - the current unit is `awaiting_human`, `clarifying` or `waiting_capacity` → `plan.waiting` (once per cause);
-     - the current unit is `in_review` with a PASS and `merge: auto` → D8, then D9 in the same step;
+     - the current unit is `in_review` with a PASS and `merge: auto` → D8, then D9 in the same step; a merge that is
+       `not_ready` with nothing else to run → `plan.waiting{merge_not_ready, unit, detail}` (once per detail; the
+       step reads the PR again three times, five seconds apart, when its head differs from the branch tip; the plan
+       goes on by itself when the merge is ready);
      - the current unit is `merged` (by D8 or by a person) and not integrated → D9;
      - all units of a batch integrated and the batch not accepted → the batch profile;
      - otherwise the eligible unit (D2) → `allow = {unit}` and `unit.dispatched`; a new unit branch starts from the
@@ -305,6 +308,9 @@ process in the CI job, after the agents of the run have exited.
 - After a plan step that wrote a record and left work, `start_run_next` is true; `run_command` then calls
   `start_run(target)` once at the end (the existing continuation path, also outside a soft deadline). The job's
   `concurrency: l4` queues it.
+- The step reads the plan files from `refs/remotes/origin/<base>` when that ref exists and the checkout is not that
+  commit (or has a changed plan file), else from the working tree (CI checks out the target head).
+- `l4 run --unit <current>` is charged to the plan like the run of the step (`plan.charged` and `unit.dispatched`).
 - `l4 run --unit U` while a plan is active: a plan unit that is not the eligible one, or a unit outside the plan, exits
   13 before the lease with `run: U waits for <reason> (plan <id>)` or `run: U is not in the active plan <id>`, and
   writes nothing.
@@ -317,7 +323,7 @@ What clears each stop for `l4 yolo resume`:
 | --- | --- |
 | `unit_halted`, `unit_escalated` | The unit is no longer halted or escalated (`l4 retry` moved it). |
 | `unit_abandoned` | The PR was reopened, or the unit was restarted. |
-| `unit_rejected` | Never: the spec must change, so a new review and activation. |
+| `unit_rejected` | Never: the spec must change, so a new review and activation. The step does not call `l4 retry` (it refuses a rejected unit); after the activation the unit's next run reads the corrected spec. |
 | `merge_refused` | The operator says so (`--reason`); the next step tries the merge again once. |
 | `postcheck_failed`, `batch_failed` | A new commit on the target (a person's fix) or `--reason`; the check runs again. |
 | `limit_*` | The matching `--extend-*` raises the limit above the usage. |

@@ -125,7 +125,7 @@ stateDiagram-v2
   active --> stopped: plan.stopped
   waiting --> stopped: plan.stopped
   stopped --> active: plan.resumed
-  stopped --> reviewed: inputs_changed, unit_rejected: review again
+  stopped --> reviewed: inputs_changed, unit_rejected: review again (the spec changed)
   active --> cancelled: plan.cancelled
   waiting --> cancelled: plan.cancelled
   stopped --> cancelled: plan.cancelled
@@ -135,7 +135,11 @@ stateDiagram-v2
 ```
 
 A `waiting` plan is not stopped: the harness continues by itself when the cause is gone, and `l4 yolo resume` also wakes
-it. The plan file and the unit specs are frozen at the activation; a change of either stops an active plan with
+it. A plan with `merge: auto` waits with `merge_not_ready` when the merge of the current unit is not ready (no open PR, a
+PR aimed at another branch, a PR head that is not the branch tip), and goes on when the merge is ready.
+A plan stopped with `unit_rejected` goes the same way as `inputs_changed`: the person corrects the spec, the next run
+records `inputs_changed`, CI reviews, `l4 yolo activate` freezes the new spec, and the unit's next run reads it. The
+phase `rejected` has no edge in the unit diagrams: a rejected unit keeps its phase and the next run reads its spec again. The plan file and the unit specs are frozen at the activation; a change of either stops an active plan with
 `inputs_changed`. A cancelled plan still holds its units while its file is on the target.
 
 The stop reasons and the command that clears each one are in the [runbook, section 12.3](runbook.md#123-procedure-a-plan-is-stopped).
