@@ -5,17 +5,17 @@ import pytest
 from l4.vcs.repokey import key_of_remote, normalize_remote, repository_key
 
 SAME_GITLAB = [
-    "https://gitlab-ci-token:X@host/ai-cici/l4-yolo-dummy.git",
-    "git@host:ai-cici/l4-yolo-dummy.git",
-    "https://host/ai-cici/l4-yolo-dummy",
-    "https://HOST/ai-cici/l4-yolo-dummy/",
-    "ssh://git@host:2222/ai-cici/l4-yolo-dummy.git",
+    "https://gitlab-ci-token:X@host/team/l4-yolo-dummy.git",
+    "git@host:team/l4-yolo-dummy.git",
+    "https://host/team/l4-yolo-dummy",
+    "https://HOST/team/l4-yolo-dummy/",
+    "ssh://git@host:2222/team/l4-yolo-dummy.git",
 ]
 
 
 def test_all_spellings_of_one_gitlab_project_are_one_key():
-    assert {key_of_remote(u) for u in SAME_GITLAB} == {key_of_remote("https://host/ai-cici/l4-yolo-dummy")}
-    assert {normalize_remote(u) for u in SAME_GITLAB} == {"host/ai-cici/l4-yolo-dummy"}
+    assert {key_of_remote(u) for u in SAME_GITLAB} == {key_of_remote("https://host/team/l4-yolo-dummy")}
+    assert {normalize_remote(u) for u in SAME_GITLAB} == {"host/team/l4-yolo-dummy"}
 
 
 def test_a_github_token_in_the_url_does_not_change_the_key():
@@ -24,16 +24,16 @@ def test_a_github_token_in_the_url_does_not_change_the_key():
 
 def test_different_projects_have_different_keys():
     keys = {
-        key_of_remote("https://host/ai-cici/l4-yolo-dummy"),
-        key_of_remote("https://host/ai-cici/dummy-agentic"),
+        key_of_remote("https://host/team/l4-yolo-dummy"),
+        key_of_remote("https://host/team/dummy-agentic"),
         key_of_remote("https://host/other/l4-yolo-dummy"),  # same last segment, another group
-        key_of_remote("https://other-host/ai-cici/l4-yolo-dummy"),
+        key_of_remote("https://other-host/team/l4-yolo-dummy"),
     }
     assert len(keys) == 4
 
 
 def test_the_key_is_a_short_readable_slug_and_a_hash():
-    key = key_of_remote("https://host/ai-cici/l4-yolo-dummy.git")
+    key = key_of_remote("https://host/team/l4-yolo-dummy.git")
     assert key.startswith("l4-yolo-dummy-") and len(key) == len("l4-yolo-dummy-") + 10
     assert "/" not in key and len(key_of_remote("https://h/g/" + "x" * 200)) <= 40
 
