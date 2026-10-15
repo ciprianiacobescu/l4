@@ -263,9 +263,8 @@ def run_review_worktree(app: AppContext, *, plan: str, fresh: Sequence[str], rec
     shown = parsed.limits.max_cost_usd
     recorded = _review_total(read.events)
     limit = f"${shown:.2f}" if shown is not None else "no limit"
-    n_judged, n_reused = len(judged_now), len(reused)
-    ctx.say(f"cost: ${cost:.2f} ({n_judged} judged, {n_reused} reused)")
     if record:
+        ctx.say(f"cost: ${cost:.2f} ({len(judged_now)} judged, {len(reused)} reused)")
         labels = [sandboxes.label] if sandboxes.label else []
         labels += [str(cached[v.material]["sandbox"]) for v in from_cache.values() if cached[v.material].get("sandbox")]
         judges = [sandboxes.profile] if sandboxes.profile else []
@@ -295,7 +294,8 @@ def run_review_worktree(app: AppContext, *, plan: str, fresh: Sequence[str], rec
         _append(store, events, read.head)
         ctx.say(f"recorded review cost of the plan: {_money(recorded + cost)} of {limit}")
     else:
-        ctx.say(f"recorded review cost of the plan: {_money(recorded)} of {limit} (this run records nothing)")
+        budget = f" of {limit}" if shown is not None else ""
+        ctx.say(f"cost: ${cost:.2f} in judge calls (a dry run is not charged to the plan's budget{budget})")
     ok = _all_clear(state, result, batches)
     if record:
         ctx.say("Next: git push; CI finds this review current and does not review again")

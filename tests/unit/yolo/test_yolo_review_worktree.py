@@ -76,7 +76,7 @@ def test_scn_yolo_57_a_dry_run_reads_the_uncommitted_edit_and_writes_nothing(wor
     assert any("Edited at the desk" in r.prompt for r in fake.requests)
     assert f"plan p1 at the working tree: plan digest {plan_digest(world.plan_text)}" in out
     assert f"  {A}: digest " in out and ", material " in out and ": READY" in out
-    assert "cost: $0.75 (3 judged, 0 reused)" in out
+    assert "cost: $0.75 in judge calls (a dry run is not charged to the plan's budget of" in out
     assert "Next:" in out
     assert world.store().read().head is None  # nothing on origin
     assert state_of(world) == before  # HEAD, status, index and refs are as they were
@@ -111,7 +111,7 @@ def test_a_second_run_with_no_edit_makes_no_judge_call(world, monkeypatch, capsy
     again = judge(monkeypatch)  # an empty script: any call fails the test
     assert world.l4("review", "p1", "--worktree") == 0
     out = capsys.readouterr().out
-    assert again.requests == [] and "cost: $0.00 (0 judged, 3 reused)" in out and "(reused)" in out
+    assert again.requests == [] and "cost: $0.00 in judge calls" in out and "(reused)" in out
 
 
 def test_an_edit_asks_the_judge_about_that_unit_and_its_batch_only(world, monkeypatch, capsys):
@@ -141,7 +141,7 @@ def test_a_subject_ci_already_judged_on_the_same_material_costs_nothing(world, m
     capsys.readouterr()
     again = judge(monkeypatch)
     assert world.l4("review", "p1", "--worktree") == 0
-    assert again.requests == [] and "cost: $0.00 (0 judged, 3 reused)" in capsys.readouterr().out
+    assert again.requests == [] and "cost: $0.00 in judge calls" in capsys.readouterr().out
 
 
 def test_fresh_asks_the_judge_again_about_the_named_subject_only(world, monkeypatch, capsys):
@@ -151,7 +151,7 @@ def test_fresh_asks_the_judge_again_about_the_named_subject_only(world, monkeypa
     capsys.readouterr()
     again = judge(monkeypatch, answer())
     assert world.l4("review", "p1", "--worktree", "--fresh", A) == 0
-    assert len(again.requests) == 1 and "cost: $0.25 (1 judged, 2 reused)" in capsys.readouterr().out
+    assert len(again.requests) == 1 and "cost: $0.25 in judge calls" in capsys.readouterr().out
 
 
 def test_fresh_names_a_subject_of_the_plan(world, monkeypatch, capsys):
@@ -210,12 +210,12 @@ def test_a_judge_at_its_limit_exits_12_and_leaves_no_cache(world, monkeypatch, c
     assert world.store().read().head is None
 
 
-def test_the_plan_review_total_is_shown_against_its_limit(world, monkeypatch, capsys):
+def test_a_dry_run_names_the_budget_it_is_not_charged_to(world, monkeypatch, capsys):
     ready_world(world)
     world.seed("p1", ev("plan.charged", unit="plan:review", attempt=0, cost_usd=1.5, runs=0))
     judge(monkeypatch, answer(), answer(), answer())
     world.l4("review", "p1", "--worktree")
-    assert "recorded review cost of the plan: $1.50 of $40.00" in capsys.readouterr().out
+    assert "(a dry run is not charged to the plan's budget of $40.00)" in capsys.readouterr().out
 
 
 # --- the sandbox ------------------------------------------------------------------------------------------------------
@@ -397,3 +397,12 @@ def test_a_second_local_review_of_unchanged_material_judges_nothing_and_costs_no
     assert again.requests == [] and len(reviewed) == 2 and reviewed[-1].data["cost_usd"] == 0
     assert all("reused_from" in v for v in reviewed[-1].data["units"].values())
     assert [e.type for e in world.events()].count("plan.charged") == 1
+
+
+def test_the_dry_run_cost_is_one_line_and_not_charged_to_the_plan(world, monkeypatch, capsys):
+    ready_world(world)
+    judge(monkeypatch, answer(), answer(), answer())
+    world.l4("review", "p1", "--worktree")
+    out = capsys.readouterr().out
+    assert "cost: $0.75 in judge calls (a dry run is not charged to the plan's budget of $40.00)" in out
+    assert "recorded review cost of the plan" not in out and "(3 judged" not in out
