@@ -1,8 +1,10 @@
 """CI-001: the runner's `insteadOf` rule (see l4.forge.pushurl). CI-002: the runner tags of the pipeline's jobs (M1.8).
+CI-003: the repository's own CI jobs that the gates do not mirror (adoption-lessons L4-ADO-006).
 Registered at import (via l4.doctor.run)."""
 
 from l4.ci.gitlab_jobs import gitlab_jobs
 from l4.ci.render import TEMPLATE_RELPATH
+from l4.ci.repo_jobs import RepoJob, open_commands, repo_ci_jobs, unmirrored
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, register
 from l4.forge.base import forge_wanted
@@ -104,3 +106,44 @@ def _ci_002(ctx: DoctorContext) -> CheckResult:
 
 
 CI_002 = register(Check("CI-002", "Jobs carry the runner tags", "error", _ci_002, CONFIG_SCOPES))
+
+
+MAX_JOB_COMMANDS = 3
+
+
+def _job_line(job: RepoJob, wanted: list[str]) -> str:
+    where = f"{job.file}: {job.name}"
+    extras = []
+    if job.services:
+        extras.append(f"services: {', '.join(job.services)}")
+    if job.container:
+        extras.append("container")
+    shown = ", ".join(f"`{c}`" for c in wanted[:MAX_JOB_COMMANDS])
+    more = f" (+{len(wanted) - MAX_JOB_COMMANDS} more)" if len(wanted) > MAX_JOB_COMMANDS else ""
+    tail = f" ({'; '.join(extras)})" if extras else ""
+    return f"{where}{tail} runs {shown}{more}"
+
+
+def _ci_003(ctx: DoctorContext) -> CheckResult:
+    """The warning of `l4 doctor --adoption`: a job of the repository's own CI that no gate mirrors is not run by L4,
+    so a unit can hand off green on the gates and red on that job. Heuristic (design D6): it never fails a run."""
+    found = repo_ci_jobs(ctx.repo)
+    if not found.present:
+        return CheckResult("skip", "no CI file besides l4.yml and no .gitlab-ci.yml")
+    open_jobs = unmirrored(found.jobs, ctx.cfg)
+    if not open_jobs and not found.problems:
+        return CheckResult("pass", f"{len(found.jobs)} CI job(s), each mirrored by a gate")
+    parts = []
+    if open_jobs:
+        lines = "; ".join(_job_line(j, open_commands(j, ctx.cfg)) for j in open_jobs)
+        parts.append(
+            f"{len(open_jobs)} job(s) of the repository's own CI have a command that no gate runs, so L4 does not "
+            f"run it: {lines}"
+        )
+    if found.problems:
+        parts.append("not compared: " + "; ".join(found.problems))
+    hint = "add the command to a gate (gates.setup, lint, test, e2e), or accept that L4's units are not checked by it"
+    return CheckResult("fail", "; ".join(parts), hint, severity="warn")
+
+
+CI_003 = register(Check("CI-003", "The repository's CI jobs are mirrored by the gates", "warn", _ci_003, CONFIG_SCOPES))
