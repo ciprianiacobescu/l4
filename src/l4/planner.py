@@ -13,7 +13,7 @@ written by `with_outcome` from the `actionable` ids. M1: `StaticUnitSource`.
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +21,7 @@ import click
 
 from l4.ci.sweeper import sweep as run_sweep
 from l4.config.redaction import load_app_config
+from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import plan_exit_code
 from l4.forge.urls import ForgeUrls, app_forge_urls
@@ -87,6 +88,7 @@ class UnitFacts:
     ci_failed_jobs: tuple[str, ...] = ()  # in_review: the project's CI is red on H, which is the branch head
     follow_up_items: tuple[str, ...] = ()  # merged: the feedback items (ids) a follow-up should take (L4-FBK-010)
     follow_up_open: str | None = None  # merged: the follow-up that is open, so newer items wait
+    misdirected: str | None = None  # in_review: `merged into <x>, not the base <base>` (L4-YOLO-007, SCN-YOLO-13)
 
 
 @dataclass(frozen=True)
@@ -196,6 +198,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         return row
     if phase == Phase.IN_REVIEW.value and (row := _in_review(facts)):
         return row
+    if phase == Phase.IN_REVIEW.value and facts.misdirected:
+        return "none", f"in_review: {facts.misdirected}"
     if phase == Phase.MERGED.value and facts.follow_up_items:
         ids = ", ".join(facts.follow_up_items)
         if facts.follow_up_open:
@@ -219,6 +223,38 @@ def compute_plan(units: Sequence[UnitFacts]) -> list[PlanEntry]:
             )
         )  # fmt: skip
     return entries
+
+
+def with_plan_holds(
+    app: AppContext, cfg: L4Config, rows: Sequence[UnitSnapshot], entries: list[PlanEntry]
+) -> list[PlanEntry]:
+    """Delivery plans (yolo-mode L4-YOLO-010, SCN-YOLO-30): a unit a plan holds is not actionable and shows why
+    (`held by plan p1 (reviewed)`, `waits for openspec:a (not integrated)`, `not in the active plan p1`). Read-only: the
+    plan state is the local `refs/l4/plans/*` the run's refresh fetched. No plan file, no change."""
+    from l4.yolo.cycle import local_states, plan_holds, target_plan_files  # the plan step imports this module
+
+    git = Git(app.repo, environ=app.environ)
+    files = target_plan_files(app, cfg, git)  # the files the plan step reads, so a laptop and CI agree
+    if not files:
+        return entries
+    states = local_states(git, files)
+    holds = plan_holds(files, states, {s.ref.id: s.state.phase for s in rows}, cfg.forge.base_branch)
+    shown = []
+    for entry in entries:
+        hold = holds.get(entry.unit)
+        if hold is None or entry.phase in (Phase.MERGED.value, Phase.ARCHIVED.value):
+            shown.append(entry)
+        else:
+            shown.append(replace(entry, next_action="none", actionable=False, reason=hold.reason))
+    return shown
+
+
+def plan_file_notes(app: AppContext, cfg: L4Config) -> list[str]:
+    """One line for each plan file that is not a JSON object: it holds no unit (R8), so a person who expects it to hold
+    its units is told. No plan file, no line."""
+    from l4.yolo.cycle import target_plan_files, unreadable_plan_files
+
+    return unreadable_plan_files(target_plan_files(app, cfg, Git(app.repo, environ=app.environ)))
 
 
 def _issue_ids(snapshot: UnitSnapshot, *kinds: str) -> tuple[str, ...]:
@@ -295,6 +331,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         **_review_facts(snapshot),
         **_spec_edit_facts(snapshot),
         **_follow_up_facts(snapshot),
+        misdirected=snapshot.state.misdirected.text if snapshot.state.misdirected else None,
     )
 
 
@@ -347,7 +384,9 @@ def run_plan(
             if action.what.startswith("ci_"):  # stderr: stdout is the plan, and `--json` must stay JSON
                 click.echo(app.redactor.redact_text(f"{action.unit}: ci: {action.detail}"), err=True)
         rows = snapshots(app, cfg, units)  # the sweep wrote pending events: fold them
-    entries = compute_plan([facts_of(s) for s in rows])
+    entries = with_plan_holds(app, cfg, rows, compute_plan([facts_of(s) for s in rows]))
+    for note in plan_file_notes(app, cfg):  # stderr: stdout is the plan, and `--json` must stay JSON
+        click.echo(app.redactor.redact_text(note), err=True)
     found: dict[str, Any] | None = None
     lines: list[str] = []
     if probe:

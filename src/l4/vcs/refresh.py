@@ -13,6 +13,7 @@ from l4.vcs.git import Git
 
 REMOTE = "origin"
 LOCK_REFSPEC = "+refs/l4/locks/*:refs/l4/locks/*"
+PLAN_REFSPEC = "+refs/l4/plans/*:refs/l4/plans/*"  # delivery plans (yolo-mode D4): `l4 plan` reads them read-only
 log = logging.getLogger("l4.refresh")
 _refreshed: set[tuple[str, str]] = set()
 
@@ -42,6 +43,6 @@ def refresh_in_ci(
     if git.run("remote", "get-url", remote, check=False).returncode != 0:
         log.info("no remote %s: the refs are not refreshed", remote)
         return False
-    git.fetch(remote, refspecs=unit_refspecs(branch_prefix, remote), prune=True, config=config)
+    git.fetch(remote, refspecs=(*unit_refspecs(branch_prefix, remote), PLAN_REFSPEC), prune=True, config=config)
     _refreshed.add(key)
     return True

@@ -8,7 +8,7 @@ import re
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -74,6 +74,15 @@ class CommandResult:
     units: Sequence[UnitOutcome] = ()
     actionable: Sequence[str] = ()  # unit ids with a next action (`plan`, `run --dry-run`); `L4_UNITS_ACTIONABLE`
     continuation: Literal["dispatched", "already_queued", "unsupported"] | None = None  # `run` only (L4-GHP-004)
+    # `run` only: unit id -> why its run exited 14, for the plan that dispatched it (L4-YOLO-013)
+    rejected: Mapping[str, str] = field(default_factory=dict)
+    # `run` only: unit id -> (exit code, why) for a unit whose run ended before it started (no `run.started`), and the
+    # units whose run did start: a plan records the first and clears it with the second (L4-YOLO-013)
+    not_started: Mapping[str, tuple[int, str]] = field(default_factory=dict)
+    began: Sequence[str] = ()
+    # `run` only: the units skipped because another run holds their lease; a plan does not chain a run for them (the
+    # other run's end, or the cron, is the next trigger)
+    busy: Sequence[str] = ()
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:

@@ -36,7 +36,7 @@ import contextlib
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -52,7 +52,7 @@ from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarifi
 from l4.config.defaults import cache_root
 from l4.config.preflight import preflight_run_config
 from l4.config.redaction import load_app_config
-from l4.config.schema import L4Config, duration_seconds
+from l4.config.schema import L4Config, Profile, duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
 from l4.follow_up import FollowUpMade, perform_follow_ups
@@ -75,7 +75,7 @@ from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
-from l4.provision.readiness import platform_of, steps_for
+from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -97,12 +97,14 @@ from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
 from l4.vcs.names import UnitNames
+from l4.vcs.repokey import repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
+from l4.yolo.cycle import PlanStep, failed_plan_step, fetch_cause, record_rejections, record_run_starts, yolo_step
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -149,6 +151,7 @@ def capacity_section(
     retry_after: str | None,
     platform: str = "gitlab",
     environment: str | None = None,
+    profiles: Mapping[str, Profile] | None = None,
 ) -> str:
     """The sticky note of a unit that parked for capacity (L4-ARC-002; live job 5561: the MR stayed silent): what
     is missing, the human steps for a login, and when the unit comes back. `bring_in_base`'s sibling: the next
@@ -162,7 +165,10 @@ def capacity_section(
         for u in unready:
             lines.append(f"- `{u.profile}` ({u.adapter or 'backend'}): {u.step}: {u.reason}")
             if u.step == "auth" and u.adapter:
-                steps = steps_for(u.adapter, u.auth, platform=platform, environment=environment)
+                profile = (profiles or {}).get(u.profile)  # the profile names its own key (L4-PRV-028)
+                steps = (
+                    provider_steps(profile, platform=platform, environment=environment) if profile is not None else ()
+                ) or steps_for(u.adapter, u.auth, platform=platform, environment=environment)
                 lines += [f"  - {step}" for step in steps]
         lines.append("")
     else:
@@ -190,6 +196,7 @@ def _sections(section: str | None) -> tuple[str, ...] | None:
 class UnitRunResult:
     outcome: UnitOutcome
     exit_code: ExitCode
+    busy: bool = False  # another run holds the unit's lease: skipped, which is not the unit's failure
 
 
 @dataclass
@@ -200,6 +207,7 @@ class RunWaits:
 
     waited_s: int = 0
     began: datetime | None = None
+    started: set[str] = field(default_factory=set)  # the units whose run ledger was opened (`run.started` written)
 
 
 class Orchestrator:
@@ -527,6 +535,7 @@ class Orchestrator:
         ]
         s.ledger.append("unit.rejected", reasons=reasons)
         log.error("%s rejected: %s", s.ref.id, "; ".join(reasons))
+        self._exit_reason = f"rejected: {'; '.join(reasons)}"[:300]  # a delivery plan records it (L4-YOLO-013)
         return ExitCode.REJECTED
 
     def _lint_scenarios(self) -> ExitCode | None:
@@ -602,7 +611,7 @@ class Orchestrator:
         platform, environment = platform_of(self.cfg, app.environ, origin_url(app.repo, app.environ))
         section = capacity_section(
             exc, base=self.cfg.forge.base_branch, now=self.services.factory.now(), retry_after=retry_after,
-            platform=platform, environment=environment,
+            platform=platform, environment=environment, profiles=self.cfg.profiles,
         )  # fmt: skip
         self._notes = _sections(redact(section))  # before the phase change, which syncs the mirror
         edge = self._go(Trigger.REQUIRED_ROLE_UNAVAILABLE, **context)
@@ -706,6 +715,7 @@ class Orchestrator:
         if reasons:
             self.services.ledger.append("unit.rejected", reasons=reasons)
             log.error("%s rejected: %s", self.services.ref.id, "; ".join(reasons))
+            self._exit_reason = f"rejected: {'; '.join(reasons)}"[:300]  # a delivery plan records it (L4-YOLO-013)
             return ExitCode.REJECTED
         pending = any(not t.done for t in required(tasks))
         self._go(Trigger.UNIT_DISCOVERED_PENDING if pending else Trigger.UNIT_DISCOVERED_DONE)
@@ -1186,7 +1196,7 @@ def _busy(snapshot_phase: str | None, ref: UnitRef) -> UnitRunResult:
     log.info("%s is locked by another run: skipped", ref.id)
     reason = "skipped: the unit is locked by another run"
     outcome = UnitOutcome(unit=ref.id, phase_before=phase, phase_after=phase, exit_reason=reason)
-    return UnitRunResult(outcome, ExitCode.OK)
+    return UnitRunResult(outcome, ExitCode.OK, busy=True)
 
 
 def _refuse_stopped(
@@ -1242,8 +1252,9 @@ def run_unit_in_worktree(
     `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
-        ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
-    )
+        ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo),
+        repo_key=repository_key(app.repo, app.environ),
+    )  # fmt: skip
     relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve())
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
     if resume_reason is None and (stopped := _refuse_stopped(app, snapshot.state, ref, snapshot.spec_edit)) is not None:
@@ -1258,7 +1269,7 @@ def run_unit_in_worktree(
     def open_writer() -> LedgerWriter:
         manager = WorktreeManager(
             git, base_branch=cfg.forge.base_branch, branch_prefix=cfg.forge.branch_prefix,
-            fetch_config=fetch_auth_config(cfg, app.environ),
+            fetch_config=fetch_auth_config(cfg, app.environ), cache=cache_root(app.environ, repo=app.repo),
         )  # fmt: skip
         tree = manager.ensure(names)
         unit_dir = tree.path / relative
@@ -1274,6 +1285,8 @@ def run_unit_in_worktree(
     writer = acquire_for_run(lease, open_writer)
     if writer is None:
         return _busy(snapshot.state.phase, ref)
+    if waits is not None:
+        waits.started.add(ref.id)  # `run.started` is written: a plan tells this run from one that never began
     code: int = ExitCode.INTERNAL_ERROR
     failed = True
     orchestrator: Orchestrator | None = None
@@ -1350,17 +1363,34 @@ def run_command(
         failure = classify_exception(exc)[0]
     if made:
         found = discover(cfg, git, providers, units)  # the new units are on their own branches now
+    try:
+        step = yolo_step(
+            app, cfg, git, found, adapters=adapters,
+            all_units=(lambda: discover(cfg, git, providers, ())) if units else None, read_only=bool(units),
+        )  # delivery plans (L4-YOLO-010, L4-YOLO-012)  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 - a failing plan step must not fail the units that are in no plan (review #12)
+        step = failed_plan_step(app, found, exc, cfg=cfg, git=git)
+    for line in step.actions:
+        log.info("%s", line)
     snapshots = {s.ref.id: s for _, s in found}
     chosen = without_fix_units(
         [(p, s.ref) for p, s in found if s.source != "archive"], named=units
     )  # an archived unit is only ever a parent of a follow-up
+    refused: list[UnitRunResult] = []
+    if step.allow is not None:  # a plan holds its units; while one is active nothing else starts (SCN-YOLO-21, -30)
+        refused = [_refuse_plan_unit(step, ref) for _, ref in chosen if units and ref.id not in step.allow]
+        chosen = [(provider, ref) for provider, ref in chosen if ref.id in step.allow]
     if not units:
         chosen = [
             (provider, ref) for provider, ref in chosen if next_action(facts_of(snapshots[ref.id]))[0] in ACTIONABLE
         ]
+    outcomes = [*(_follow_up_outcome(m) for m in made), *(r.outcome for r in refused)]
+    refusal_codes = [r.exit_code for r in refused]
     if not chosen:
         log.info("nothing to do: no unit has a next step")  # before any lease, worktree or probe
-        return CommandResult(failure, [_follow_up_outcome(m) for m in made])
+        result = CommandResult(most_severe([failure, *refusal_codes]), outcomes)
+        _start_next_run(app, cfg, step)
+        return result
     kiro = cfg.spec.kiro
     if (kiro.write_in_progress_marker or kiro.write_queued_marker) and any(
         ref.framework is Framework.KIRO for _, ref in chosen
@@ -1368,11 +1398,61 @@ def run_command(
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
     result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
     result = replace(
-        result, code=most_severe([result.code, failure]), units=[*(_follow_up_outcome(m) for m in made), *result.units]
+        result,
+        code=most_severe([result.code, failure, *refusal_codes]),
+        units=[*outcomes, *result.units],
     )
+    try:  # a unit the plan dispatched and its run rejected is on the plan ledger before the next run (L4-YOLO-013)
+        record_rejections(app, cfg, git, step, result.rejected)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
+    try:  # a unit whose run ended before it started waits for the next trigger; one that began clears that wait
+        cleared = record_run_starts(app, cfg, git, step, result.not_started, result.began)
+        if cleared and not step.start_next_run:
+            step = replace(step, start_next_run=True)
+        elif (
+            step.plan_id
+            and step.start_next_run
+            and any(u in (step.allow or ()) for u in (*result.not_started, *result.busy) if u not in result.began)
+        ):
+            # the dispatched unit did not start, or another run holds it: one trigger runs it once; the other run's
+            # end or the cron is the next trigger
+            step = replace(step, start_next_run=False)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
+    _start_next_run(app, cfg, step)
     log_artefacts(app.out_dir, app.run_id)
     return result
+
+
+def _refuse_plan_unit(step: PlanStep, ref: UnitRef) -> UnitRunResult:
+    """`l4 run --unit U` for a unit a delivery plan does not let run now (L4-YOLO-010, SCN-YOLO-21): exit 13 with the
+    reason, before the lease, the worktree and the ledger, so nothing is written (the way a halted unit is refused,
+    `_refuse_stopped`)."""
+    tail = step.refusals.get(ref.id) or f"waits for the plan step of this run (plan {step.plan_id})"
+    text = f"run: {ref.id} {tail}"
+    log.error("%s", text)
+    outcome = UnitOutcome(unit=ref.id, phase_before="none", phase_after="none", exit_reason=text[:300])
+    return UnitRunResult(outcome, ExitCode.HALTED)
+
+
+def _start_next_run(app: AppContext, cfg: L4Config, step: PlanStep) -> None:
+    """After a plan step that wrote a record and left work, ask the forge for one more run of the harness's CI on the
+    base branch (L4-YOLO-012). The answer is logged; a forge that cannot, or an error, is a warning and never a failure
+    of the run, like `continue_left_units`."""
+    if not step.start_next_run:
+        return
+    base = cfg.forge.base_branch
+    try:
+        answer = make_forge(cfg, app.environ, repo=app.repo).start_run(base)
+    except ForgeUnavailable:
+        log.warning("plan: the next run was not started: no forge token")
+        return
+    except Exception as exc:  # noqa: BLE001 - a warning, never a failure of the run
+        log.warning("plan: the next run was not started (%s)", app.redactor.redact_text(str(exc)))
+        return
+    log.info("plan: next run on %s: %s", base, answer)
 
 
 def _follow_up_outcome(made: FollowUpMade) -> UnitOutcome:
@@ -1441,6 +1521,9 @@ def run_units(
     exit 10, untouched, for the next run. The first unit always starts."""
     codes: list[int] = []
     units: list[UnitOutcome] = []
+    rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
+    not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
+    busy: list[str] = []  # unit ids skipped because another run holds their lease
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
@@ -1473,7 +1556,15 @@ def run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
-    return CommandResult(most_severe(codes), units)
+        if done.busy:
+            busy.append(ref.id)
+        if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
+            why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
+            not_started[ref.id] = (int(done.exit_code), why)
+        if done.exit_code == ExitCode.REJECTED:
+            rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
+    began = [ref.id for _, ref in chosen if ref.id in waits.started]
+    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy)
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:
@@ -1491,6 +1582,8 @@ def _failed_unit(
     code, message = classify_exception(exc)
     redacted = app.redactor.redact_text(message)
     first = (redacted.splitlines() or [type(exc).__name__])[0]
+    if isinstance(exc, GitError):  # git's own cause, not its command line (the same extraction as a fetch failure)
+        first = fetch_cause(app, exc, limit=300)
     log.error("%s: %s", ref.id, first)
     log.debug("traceback", exc_info=exc)
     if isinstance(exc, PushFailed) and exc.refused:

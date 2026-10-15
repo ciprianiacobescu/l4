@@ -24,7 +24,7 @@ from l4.agents.base import (
     ProbeResult,
     ProbeStep,
 )
-from l4.agents.credentials import credential_in, credential_variable
+from l4.agents.credentials import credential_in, profile_credential_variable
 from l4.availability.limits import normalise_limit
 from l4.availability.quota import Window, claude_quota, codex_quota, now_of, rate_limit_event_windows
 from l4.availability.rpc import run_rpc_session
@@ -76,7 +76,7 @@ def credential_env(profile: Profile, ctx: ProbeCtx) -> tuple[str | None, dict[st
     """The profile's credential variable (L4-PRV-024) and, when the host has it set, the one-entry environment to add
     to this profile's auth, quota and hello calls (and no other profile's): `(NAME, {NAME: value})`, else `(NAME, {})`.
     """
-    variable = credential_variable(profile.adapter, profile.auth)
+    variable = profile_credential_variable(profile)
     value = credential_in(ctx.environ, variable)
     return variable, ({variable: value} if variable and value else {})
 
@@ -94,7 +94,7 @@ def credential_auth(profile: Profile, ctx: ProbeCtx) -> ProbeResult | None:
 
 def login_failed(profile: Profile, reason: str) -> ProbeResult:
     """A failed file-login check; a profile with a credential variable is told it may set it instead."""
-    variable = credential_variable(profile.adapter, profile.auth)
+    variable = profile_credential_variable(profile)
     return ProbeResult("auth", False, reason=f"{reason} (or set {variable})" if variable else reason)
 
 

@@ -172,9 +172,11 @@ def _setup_tail(repo: Path, events: Sequence[dict[str, Any]], limit: int = 2000)
 def read_local_ledger(cache: Path, unit: str, *, framework: str = "openspec") -> list[dict[str, Any]]:
     """The ledger files in the unit's worktree under the cell's cache: a run parked before its first push (a 429 on
     the first step) leaves its events there and nowhere else."""
-    folder = cache / "worktrees" / framework / unit / "openspec" / "changes" / unit / ".l4" / "ledger"
+    # `worktrees/<repository key>/<framework>/<unit>` (L4-WTR-001): the cell's cache holds one repository's key, so
+    # the key is matched, not recomputed
+    pattern = f"worktrees/*/{framework}/{unit}/openspec/changes/{unit}/.l4/ledger/*.jsonl"
     events: list[dict[str, Any]] = []
-    for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
+    for path in sorted(cache.glob(pattern)):
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             with contextlib.suppress(ValueError):
                 events.append(json.loads(line))

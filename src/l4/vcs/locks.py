@@ -1,4 +1,5 @@
-"""The local lease (SPEC 12.2): a non-blocking flock on `$L4_CACHE/locks/<fw>/<name>.lock`.
+"""The local lease (SPEC 12.2): a non-blocking flock on `$L4_CACHE/locks/<key>/<fw>/<name>.lock`
+(`<key>`: the repository key, `l4.vcs.repokey`).
 
 Correct on one runner, which is the M0 setup (GitLab `resource_group` serialises jobs; the flock covers a manual run
 racing a pipeline job). The kernel drops the lock when the process dies, so a SIGKILL needs no cleanup.

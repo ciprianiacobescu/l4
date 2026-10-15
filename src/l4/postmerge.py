@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
@@ -37,9 +37,13 @@ from l4.state.pending import merge_ledgers, read_pending_files
 from l4.vcs.errors import GitError
 from l4.vcs.git import BOT_IDENTITY, Git
 from l4.vcs.names import UnitNames
+from l4.vcs.repokey import repository_key
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import fix_units_of
+
+if TYPE_CHECKING:
+    from l4.yolo.model import MergeOutcome
 
 log = logging.getLogger("l4.postmerge")
 
@@ -148,6 +152,8 @@ class PostMergeArchiver:
         fetch_config: Sequence[tuple[str, str]] = (),
     ) -> None:
         self._cfg, self._app, self._git, self._forge = cfg, app, git, forge
+        self._key: str | None = None
+        self._other_base_said: set[int] = set()  # archive MRs to another base, said once per sweep (L4-YOLO-009)
         root = cfg.spec.openspec.root
         self._provider_for = provider_for or (lambda path: OpenSpecProvider(path, app.environ, root=root))
         kiro = cfg.spec.kiro
@@ -161,19 +167,34 @@ class PostMergeArchiver:
         self._specs = f"{root}/specs"
         self._push_config = push_auth_config(cfg, app.environ)
         self._worktrees = WorktreeManager(
-            git, base_branch=cfg.forge.base_branch, branch_prefix=cfg.forge.branch_prefix, fetch_config=fetch_config
+            git,
+            base_branch=cfg.forge.base_branch,
+            branch_prefix=cfg.forge.branch_prefix,
+            fetch_config=fetch_config,
+            cache=cache_root(app.environ, repo=app.repo),
         )
 
     def names(self, ref: UnitRef) -> UnitNames:
         cache = cache_root(self._app.environ, repo=self._app.repo)
-        return UnitNames.for_unit(ref.id, branch_prefix=self._cfg.forge.branch_prefix, cache=cache)
+        if self._key is None:
+            self._key = repository_key(self._app.repo, self._app.environ)  # once per command
+        return UnitNames.for_unit(ref.id, branch_prefix=self._cfg.forge.branch_prefix, cache=cache, repo_key=self._key)
 
     def open_archive_pr(self, ref: UnitRef, *, iteration: int = 1) -> ArchiveResult:
         names = self.names(ref)
-        waiting = self._forge.list_prs(f"{self._cfg.forge.branch_prefix}archive/", "open")  # L4-ARC-007: one at a time
-        ours = next((pr for pr in waiting if pr.head_branch == names.archive_branch), None)
+        opened = self._forge.list_prs(f"{self._cfg.forge.branch_prefix}archive/", "open")  # L4-ARC-007: one at a time
+        ours = next((pr for pr in opened if pr.head_branch == names.archive_branch), None)
         if ours is not None:
             return ArchiveResult("existing", ours)
+        base = self._cfg.forge.base_branch
+        waiting = [pr for pr in opened if pr.base_branch == base]  # only an archive MR to the base blocks (L4-YOLO-009)
+        for other in opened:
+            if other.base_branch != base and other.number not in self._other_base_said:
+                self._other_base_said.add(other.number)
+                log.warning(
+                    "archive MR !%s (%s) is aimed at %s, not the base %s: it does not block other archives",
+                    other.number, other.head_branch, other.base_branch, base,
+                )  # fmt: skip
         if waiting:
             first = waiting[0]
             return ArchiveResult("pending", first, f"archive MR !{first.number} ({first.head_branch}) is open")
@@ -301,3 +322,34 @@ class PostMergeArchiver:
             if name in on_branch and not data.startswith(on_branch[name]):
                 raise ArchiveBlocked(f"the ledger {name} of the base branch is not a prefix of the pending ledger")
             atomic_write_bytes(target / name, data)
+
+
+def merge_archive_guarded(
+    app: AppContext, cfg: L4Config, git: Git, head: str, target: str, *, pr: PullRequest
+) -> "MergeOutcome":
+    """Fast-forward `target` to the archive branch `head` under the guard of a unit merge plus the archive's own
+    (design D9, R6, L4-YOLO-009): `target` is `forge.base_branch`; `pr`, the archive pull request, is open and aimed
+    at `target`; every commit after the target tip is a strict harness commit (author and committer the bot, an
+    `L4-Run` trailer: the review re-entry rule), so a person's edit on the archive branch is never merged unattended;
+    the target tip is an ancestor of `head`; the push is never forced. Anything that fails a check is `not_ready` and
+    pushes nothing; a refusal of the push is `stale` (the target moved) or `refused` (the forge's redacted message).
+    Only the checks and the push: the caller decides when to call it and records `archive.failed`."""
+    from l4.yolo.merge import foreign_commits, guarded_push, remote_tip  # yolo builds on this module: imported late
+    from l4.yolo.model import MergeOutcome
+
+    def not_ready(detail: str) -> "MergeOutcome":
+        return MergeOutcome("not_ready", head, None, pr.number, detail)
+
+    if target != cfg.forge.base_branch:
+        return not_ready(f"the target {target} is not the base branch {cfg.forge.base_branch}")
+    if pr.state != "open":
+        return not_ready(f"the archive pull request !{pr.number} is {pr.state}, not open")
+    if pr.base_branch != target:
+        return not_ready(f"the archive pull request !{pr.number} is aimed at {pr.base_branch}, not the target {target}")
+    tip = remote_tip(git, cfg, app.environ, target)
+    if tip is None:
+        return not_ready(f"the target branch {target} does not exist on origin")
+    foreign = foreign_commits(git, cfg, app.environ, tip, head)
+    if foreign:
+        return not_ready("the archive branch holds commits that are not a harness commit: " + ", ".join(foreign))
+    return guarded_push(app, cfg, git, head, target, pr=pr.number)
