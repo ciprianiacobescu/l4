@@ -89,6 +89,33 @@ The forge token is the workflow's own `GITHUB_TOKEN`. The harness's pushes made 
 repository's own CI shows `not_run` on L4's PRs. To keep that CI, use a fine-grained token as `L4_FORGE_TOKEN` in the
 environment `l4` and set `forge.token_env: L4_FORGE_TOKEN`.
 
+## 4a. An integration branch, and specs that already exist
+
+When L4 must work on a branch that is not the default one (for example `staging`, promoted to `main` by a person) and
+the repository already has specs that L4 must not start:
+
+1. Create the branch from the default branch and push it. Run every `l4` command below with the release you adopt:
+   `uv tool run --from git+https://github.com/OWNER/l4@vX.Y.Z l4 …`.
+2. On that branch: `l4 init …` as in section 3, then set `forge.base_branch: <branch>` (and `forge.merge_policy: auto`
+   if delivery plans may merge), mirror the repository's CI commands in `gates`, run `l4 upgrade --harness-ref vX.Y.Z`
+   and `l4 doctor --adoption`. Commit what init listed with `[skip ci]`.
+3. **Hold the existing specs** in the next commit: `l4 yolo draft backlog --target <branch> --merge human`, set its
+   `limits` to `{"max_unit_attempts": 1, "max_runs": 1, "max_cost_usd": 0}`, validate, and say in the commit message
+   that the plan only holds units and is never activated. A unit listed in any plan that is not completed does not
+   run; `exclude` does not hold. Admission may refuse the plan (old specs often fail intake); the hold still applies.
+4. Copy form only: create the deploy key (`ssh-keygen -t ed25519 -N "" -f key`), add `key.pub` to the harness
+   repository as a read-only deploy key named after the adopting repository, and pass `--secret
+   L4_HARNESS_SSH_KEY=…` to `l4 setup github` (section 4). Delete the local private key afterwards.
+5. Add the **default branch** to the environment `l4`'s deployment branches (Settings → Environments → l4): the cron
+   runs on the default branch, and `l4 setup github` adds only `<branch>` and `l4/*`.
+6. Push the branch. The first run must show every existing unit `held by plan backlog` and `nothing to do`.
+7. Open a pull request to the default branch with `.github/workflows/l4.yml` **only**: GitHub runs `schedule` and
+   `workflow_dispatch` only for workflows on the default branch. The job checks out `<branch>` before the action, so
+   nothing else is needed there.
+
+New specs outside every plan then run as single units (a pull request into `<branch>`, merged by a person); a plan
+with `merge: auto`, activated by a person, is merged into `<branch>` by L4.
+
 ## 5. Upgrades
 
 ```sh
