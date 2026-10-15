@@ -4,6 +4,8 @@ specs of the working tree, with no dependency, no git write, no network."""
 
 import dataclasses
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -90,6 +92,17 @@ def test_a_draft_lists_every_unplanned_unit_without_dependencies(world, monkeypa
     out = capsys.readouterr().out
     assert f"added: {A}" in out and f"added: {K2} (excluded: already merged)" in out
     assert "validate_plan.py" in out and "l4 yolo check p1" in out
+
+
+def test_a_fresh_draft_passes_the_standalone_validator(world, monkeypatch):
+    draft_with(monkeypatch, world, merged=(K2,))
+    assert world.l4("draft", "p1") == 0
+    script = Path(__file__).resolve().parents[3] / "scripts" / "validate_plan.py"
+    done = subprocess.run(
+        [sys.executable, "-I", str(script), "--repo", str(world.app.repo)], capture_output=True, text=True
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "order: " in done.stdout and "wave 1: " in done.stdout
 
 
 def test_target_and_merge_are_written(world, monkeypatch):
