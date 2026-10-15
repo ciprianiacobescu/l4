@@ -62,3 +62,24 @@ def test_schema_breaks_are_invalid_and_never_echo_the_value(mutate):
 def test_text_that_is_not_json_is_invalid():
     assert isinstance(parse_judge_output("here is my verdict: pass"), SchemaInvalid)
     assert isinstance(parse_judge_output("[1, 2]"), SchemaInvalid)
+
+
+def test_a_reply_without_accepted_is_valid_and_one_with_it_is_kept():
+    """review-resolution 3.3 (L4-YOLO-028): `accepted` is optional, like `feedback`."""
+    assert isinstance(parse_judge_output(judge_reply([ID])), JudgeVerdict)
+    reply = judge_reply([ID], accepted=[{"id": "F-0a1b2c", "addressed": False, "evidence": "not in the diff"}])
+    verdict = parse_judge_output(reply)
+    assert isinstance(verdict, JudgeVerdict) and verdict.accepted[0].id == "F-0a1b2c"
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"id": "FB-001", "addressed": True, "evidence": "e"},  # a feedback id is not a finding id
+        {"id": "F-xyz", "addressed": True, "evidence": "e"},
+        {"id": "F-0a1b2c", "addressed": "yes", "evidence": "e"},
+        {"id": "F-0a1b2c", "addressed": True},
+    ],
+)
+def test_a_bad_accepted_entry_is_invalid(entry):
+    assert isinstance(parse_judge_output(judge_reply([ID], accepted=[entry])), SchemaInvalid)

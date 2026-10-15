@@ -101,8 +101,8 @@ def events_of(wb, kind: str) -> list[dict]:
 # --- the prompt --------------------------------------------------------------------------------------------------
 
 
-def test_the_prompt_version_is_7():
-    assert judge.PROMPT_VERSION == 7
+def test_the_prompt_version_is_8():
+    assert judge.PROMPT_VERSION == 8
 
 
 def test_the_block_lists_each_item_with_its_code_text_and_variable_and_the_task_is_in_the_system_text(make_bench):
@@ -159,7 +159,7 @@ def test_build_judge_prompt_takes_feedback_refs():
         unit_id="u", sources=[], criteria=[], diff="", diff_truncated=False, gate_report="", notes_for_verifier="",
         redact=str, feedback=[ref],
     )  # fmt: skip
-    assert prompt.version == "judge@7" and '<l4:data kind="feedback">' in prompt.user
+    assert prompt.version == "judge@8" and '<l4:data kind="feedback">' in prompt.user
 
 
 def feedback_ref_for_test():
@@ -378,7 +378,6 @@ def test_a_missing_status_line_is_recorded_as_invalid_once(make_bench):
         state = fold(read_ledger(wb.ref.path).events, wb.ref.id)
         record_no_status(wb.ledger, state, ["FB-001"])
     assert events_of(wb, "feedback.invalid") == [{"id": "FB-001", "problem": "no Status line"}]
-
 
 
 # --- review #14: a yes closes an item in a PASS round only -----------------------------------------------------------
