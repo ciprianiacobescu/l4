@@ -82,12 +82,12 @@ def test_scn_yolo_46_a_missing_dependency_names_the_plan_entry_to_add():
 def test_an_id_already_in_depends_on_gets_no_suggestion():
     line = resolve("missing_dependency", "it uses openspec:b", subject="openspec:a", depends_on=("openspec:b",))
     assert "add " not in line.split("depends_on")[0] and 'add "openspec:b"' not in line
-    assert line.startswith("Add the unit it needs to `depends_on` of `openspec:a` in `.l4/plans/p1.json` (batch `b1`)")
+    assert line.startswith("Add a `depends_on` to `openspec:a` in `.l4/plans/p1.json` (batch `b1`)")
 
 
 def test_an_unknown_id_gets_no_suggestion():
     line = resolve("missing_dependency", "it uses openspec:zzz", subject="openspec:a")
-    assert 'add "' not in line and line.startswith("Add the unit it needs")
+    assert 'add "' not in line and line.startswith("Add a `depends_on` to")
 
 
 def test_an_id_must_appear_verbatim_not_as_part_of_another():
@@ -154,3 +154,11 @@ def test_an_unknown_criterion_gets_a_general_line():
 def test_a_missing_folder_is_not_printed_as_none():
     for criterion in ("outcome", "testability"):
         assert "None" not in resolve(criterion, folder=None)
+
+
+def test_the_general_line_adds_a_dependency_only_on_a_unit_of_the_plan():
+    """review-resolution 4.2b: code that is already on the base branch is no unit to depend on."""
+    line = resolve("missing_dependency", "it uses a helper", subject="openspec:a")
+    assert "only on a unit of the plan that introduces it" in line
+    assert "if the code already exists on the base branch, say so in the spec instead" in line
+    assert "Add the unit it needs" not in line

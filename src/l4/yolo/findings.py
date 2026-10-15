@@ -250,7 +250,10 @@ def resolve(
             ids = ", ".join(f'"{unit}"' for unit in named)
             return f"add {ids} to depends_on of {subject} in {plan_file}{batch_note}"
         batch_code = f" (batch `{batch}`)" if batch else ""
-        return f"Add the unit it needs to `depends_on` of `{subject}` in `{plan_file}`{batch_code}."
+        return (
+            f"Add a `depends_on` to `{subject}` in `{plan_file}`{batch_code} only on a unit of the plan that "
+            "introduces it; if the code already exists on the base branch, say so in the spec instead."
+        )
     if criterion == "batch_acceptance":
         name = batch or (subject[len(BATCH_PREFIX) :] if subject.startswith(BATCH_PREFIX) else "the batch")
         return (
