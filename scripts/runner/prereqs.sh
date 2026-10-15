@@ -30,6 +30,8 @@ OPENCODE_VERSION=${OPENCODE_VERSION:-1.18.34}
 SERENA_VERSION=${SERENA_VERSION:-1.7.0}
 PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION:-1.63.0}
 KIRO_VERSION=${KIRO_VERSION:-2.28.0}       # floor, not an exact pin: the installer has no version argument (it installs `latest`)
+# The Laya pin and checkpoint are those of l4.provision.catalog (a drift test compares them); `l4 doctor --ci --fix`
+# installs the same Laya for a `laya-local` profile, so a runner provisioned here downloads nothing again.
 LAYA_VERSION=${LAYA_VERSION:-0.3.24}
 LAYA_CHECKPOINT=${LAYA_CHECKPOINT:-typed-decisions}   # subfolder of convaiinnovations/laya that PRQ-18 prefetches
 GIT_MIN=${GIT_MIN:-2.34.0}
