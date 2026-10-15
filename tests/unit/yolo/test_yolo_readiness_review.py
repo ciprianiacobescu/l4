@@ -98,6 +98,65 @@ def test_a_minor_finding_leaves_ready_alone(world):
     assert verdict.verdict == "READY" and verdict.findings == (minor,)
 
 
+def test_minor_findings_alone_do_not_block(world):  # SCN-YOLO-50
+    minors = [
+        {"criterion": "outcome", "severity": "minor", "text": "wording one"},
+        {"criterion": "interfaces", "severity": "minor", "text": "wording two"},
+    ]
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("NEEDS_REVISION", minors)))).units[A]
+    assert verdict.verdict == "READY" and verdict.findings == tuple(minors)
+
+
+def test_a_needs_revision_without_a_finding_gets_one(world):  # SCN-YOLO-51
+    said = answer("NEEDS_REVISION")
+    said["missing"] = ["the API of x"]
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=said))).units[A]
+    assert verdict.verdict == "NEEDS_REVISION"
+    (finding,) = verdict.findings
+    assert finding["criterion"] == "verdict" and finding["severity"] == "major"
+    assert finding["text"] == "the judge said NEEDS_REVISION and named no finding; missing: the API of x"
+
+
+def test_a_needs_revision_without_a_finding_or_a_missing_list_says_nothing(world):
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("NEEDS_REVISION")))).units[A]
+    (finding,) = verdict.findings
+    assert finding["text"].endswith("named no finding; missing: nothing")
+    said = answer("NEEDS_REVISION")
+    said["missing"] = ["a", "b"]
+    again = review(world, plan_of({A: []}), judge(Step(structured=said))).units[A]
+    assert again.findings[0]["text"].endswith("missing: a; b")
+
+
+def test_batch_acceptance_is_not_a_units_finding(world):  # SCN-YOLO-52
+    gap = {"criterion": "batch_acceptance", "severity": "major", "text": "no end-to-end check"}
+    minor = {"criterion": "outcome", "severity": "minor", "text": "wording"}
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("NEEDS_REVISION", [gap, minor])))).units[A]
+    assert verdict.verdict == "READY" and verdict.findings == (minor,)
+    assert verdict.assumptions == ("batch_acceptance does not apply to a unit, major: no end-to-end check",)
+
+
+def test_nothing_left_after_the_move_is_ready_not_a_finding_of_the_harness(world):
+    gap = {"criterion": "batch_acceptance", "severity": "blocking", "text": "no end-to-end check"}
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("NEEDS_REVISION", [gap])))).units[A]
+    assert verdict.verdict == "READY" and verdict.findings == ()
+    assert verdict.assumptions == ("batch_acceptance does not apply to a unit, blocking: no end-to-end check",)
+
+
+def test_a_blocked_verdict_with_only_minor_findings_stays_blocked(world):
+    minor = {"criterion": "outcome", "severity": "minor", "text": "wording"}
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("BLOCKED", [minor])))).units[A]
+    assert verdict.verdict == "BLOCKED" and verdict.findings == (minor,)
+
+
+def test_a_major_finding_keeps_needs_revision(world):
+    findings = [
+        {"criterion": "outcome", "severity": "minor", "text": "wording"},
+        {"criterion": "testability", "severity": "major", "text": "no inputs"},
+    ]
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("NEEDS_REVISION", findings)))).units[A]
+    assert verdict.verdict == "NEEDS_REVISION" and verdict.findings == tuple(findings)
+
+
 def test_a_batch_with_two_units_is_reviewed_as_a_whole(world):
     plan = plan_of({A: [], B: [A]})
     plan.batches[0].acceptance_profile = "fast"  # a batch with a profile is reviewed on batch_acceptance too

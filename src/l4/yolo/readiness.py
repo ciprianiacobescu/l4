@@ -423,17 +423,24 @@ def _with_digest(verdict: Verdict, digest: str | None) -> Verdict:
 def _amend(verdict: Verdict, subject: Subject) -> Verdict:
     """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
     the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
-    are listed in `missing`."""
+    are listed in `missing` and so is what a prerequisite's budget cut. Then the rules of L4-YOLO-023: a
+    `batch_acceptance` finding on a unit becomes an assumption; a NEEDS_REVISION with no finding gets the harness
+    finding `verdict`; a NEEDS_REVISION whose findings are all minor is READY (the findings stay). The judge's own
+    `blocking` and a BLOCKED are not touched."""
     findings, said, missing, assumptions = verdict.findings, verdict.verdict, verdict.missing, verdict.assumptions
-    if subject.groups_only and any(f["criterion"] == NOT_APPLICABLE for f in findings):
+    named_none = not findings
+    why = (
+        "batch_acceptance does not apply (the batch has no acceptance profile)"
+        if subject.groups_only
+        else "batch_acceptance does not apply to a unit"
+        if subject.kind == "unit"
+        else ""
+    )
+    if why and any(f["criterion"] == NOT_APPLICABLE for f in findings):
         # the plan file has nowhere to state a batch outcome: the finding cannot be fixed, so it is kept as a note
         assumptions = (
             *assumptions,
-            *(
-                f"batch_acceptance does not apply (the batch has no acceptance profile), {f['severity']}: {f['text']}"
-                for f in findings
-                if f["criterion"] == NOT_APPLICABLE
-            ),
+            *(f"{why}, {f['severity']}: {f['text']}" for f in findings if f["criterion"] == NOT_APPLICABLE),
         )
         findings = tuple(f for f in findings if f["criterion"] != NOT_APPLICABLE)
         if said == "NEEDS_REVISION" and not any(f["severity"] in ("blocking", "major") for f in findings):
@@ -444,6 +451,12 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         text = " ".join(subject.left_out)
         findings = (*findings, {"criterion": "material", "severity": "blocking", "text": text})
         said = "NEEDS_REVISION" if said == "READY" else said
+    if said == "NEEDS_REVISION" and named_none and not findings:
+        shown = "; ".join(verdict.missing) or "nothing"
+        text = f"the judge said NEEDS_REVISION and named no finding; missing: {shown}"
+        findings = ({"criterion": "verdict", "severity": "major", "text": text},)
+    elif said == "NEEDS_REVISION" and findings and all(f["severity"] == "minor" for f in findings):
+        said = "READY"  # the prompt defines minor as a nit
     if subject.not_shown:
         missing = (*missing, *(f"not shown to the judge (binary file): {path}" for path in subject.not_shown))
     missing = (*missing, *subject.not_in_full)
