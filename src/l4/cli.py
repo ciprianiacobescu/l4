@@ -90,6 +90,8 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--forge-token-env", "forge_token_env",
              help="With --action: forge.token_env, the secret the job reads the forge token from "
                   "(default: GITHUB_TOKEN, the workflow's own)."),
+        _flag("--hold-existing", "hold_existing",
+              help="Write the ids of the units found now as yolo.hold: none of them runs until you remove it."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),

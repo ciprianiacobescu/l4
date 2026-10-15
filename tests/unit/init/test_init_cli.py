@@ -196,3 +196,11 @@ def test_the_closing_line_names_every_file_to_commit(target: Path, harness_repo:
     assert init(third, harness_repo, git_environ, "--ci", "github", "--vendor") == 0
     line = _next_line(capsys.readouterr().err)
     assert ".github/workflows/l4.yml" in line and ".gitlab-ci.yml" not in line
+
+
+def test_hold_existing_is_a_flag_of_init(target: Path, harness_repo: Path, git_environ):
+    folder = target / "openspec/changes/alpha"
+    folder.mkdir(parents=True)
+    (folder / "proposal.md").write_text("## Why\nx\n")
+    assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor", "--hold-existing") == 0
+    assert yaml.safe_load((target / ".l4/config.yaml").read_text())["yolo"] == {"hold": ["openspec:alpha"]}

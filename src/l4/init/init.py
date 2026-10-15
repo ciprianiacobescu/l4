@@ -50,6 +50,8 @@ from l4.init.pytest_marker import MarkerEdit, MarkerRefusal, register_l4_marker
 from l4.init.vendor import VendorSource, collect_vendor_source, harness_root
 from l4.memory.ignore import carve_out_text, ignored_harness_paths
 from l4.memory.serena import SEED_PROJECT_RELPATH, render_seed_project_yml
+from l4.specs.detect import collect_units
+from l4.specs.providers import providers_for
 
 log = logging.getLogger("l4.init")
 
@@ -95,6 +97,7 @@ def render_config(
     runner_tags: tuple[str, ...] | None = None,
     token_env: str | None = None,
     todos: tuple[str, ...] = (),
+    hold: tuple[str, ...] = (),
 ) -> str:
     """The M0 pair of SPEC 3.2: Codex implements, Claude Code judges, a different vendor each. Models are left to the
     CLIs' defaults; set `model` and `options.reasoning_effort` on a profile to pin them. `ci`: the platform, or `both`
@@ -104,7 +107,8 @@ def render_config(
     harness is fetched at run time from that URL at `commit` (L4-GHP-010), not vendored. `delivery: action`: the
     harness comes from the setup action, whose pin is the workflow's `uses:` line: no version and no commit here.
     `runner_tags` (written as `ci.runner_tags`, `()` meaning GitHub-hosted) and `token_env` (`forge.token_env`) are
-    written only when given; `todos` are extra `# TODO:` lines at the top."""
+    written only when given; `todos` are extra `# TODO:` lines at the top; `hold` is written as `yolo.hold`, and no key
+    when it is empty (L4-ADO-012)."""
     platform = "auto" if ci == "both" else ci
     pins = (
         {"delivery": "action"}
@@ -121,6 +125,7 @@ def render_config(
         "forge": {"type": platform, **({"token_env": token_env} if token_env else {})},
         "ci": {"platform": platform, **({"runner_tags": list(runner_tags)} if runner_tags is not None else {})},
         **({} if memory else {"memory": {"enabled": False}}),
+        **({"yolo": {"hold": list(hold)}} if hold else {}),
     }
     todos = "".join(f"# TODO: {todo}\n" for todo in (*todos, *(proposal.todos if proposal else ())))
     return (
@@ -275,6 +280,12 @@ def _dependabot(repo: Path) -> tuple[PlannedFile | None, tuple[str, ...]]:
     return PlannedFile(DEPENDABOT_RELPATH, edit.text.encode("utf-8"), mode), (f"{DEPENDABOT_RELPATH} {verb}",)
 
 
+def existing_unit_ids(repo: Path, environ: Mapping[str, str]) -> tuple[str, ...]:
+    """The sorted ids of the units the providers find in the working tree (`spec.frameworks: auto`)."""
+    units = collect_units(providers_for(L4Config(), repo, environ))
+    return tuple(sorted(unit.id for unit in units))
+
+
 def plan_init(
     repo: Path,
     environ: Mapping[str, str],
@@ -288,13 +299,16 @@ def plan_init(
     dependabot: bool = False,
     runner_tags: tuple[str, ...] = (),
     token_env: str = HOSTED_FORGE_TOKEN,
+    hold_existing: bool = False,
 ) -> InitPlan:
     """Everything init will write, or an exit-2 refusal naming what is in the way. `fetched`: (repository, commit) of a
     harness fetched at run time (L4-GHP-010): the fetched shim, and no vendored copy. `action`: the harness comes from
     the setup action (L4-ACT-004): the config, the action-form workflow, the action itself with `action.copy`, and no
     `.l4/bin/` file at all; `dependabot` adds or merges `.github/dependabot.yml`. An action adoption runs on a
     GitHub-hosted runner unless `runner_tags` are given, and uses the workflow's own `GITHUB_TOKEN` unless `token_env`
-    says otherwise; a profile that cannot log in there is named in a todo."""
+    says otherwise; a profile that cannot log in there is named in a todo. `hold_existing`: the ids of the units the
+    spec providers find now (all frameworks, as `spec.frameworks: auto` would) are written, sorted, as `yolo.hold`
+    (L4-ADO-012)."""
     vendor: VendorSource | None = None
     repository: str | None = None
     if action is not None:
@@ -306,11 +320,12 @@ def plan_init(
         repository, commit = _fetched_pins(*fetched)
     ignored = ignored_harness_paths(repo, environ)  # `.serena/` in .gitignore: neither the seed nor lessons commit
     proposal = propose_gates(detect_python(repo))
+    held = existing_unit_ids(repo, environ) if hold_existing else ()
     login_todos = hosted_login_todos() if action is not None and not runner_tags else ()
     config_text = render_config(
         None if action else commit, ci, memory=not ignored, proposal=proposal, repository=repository,
         delivery="action" if action else None, runner_tags=runner_tags if action else None,
-        token_env=token_env if action else None, todos=login_todos,
+        token_env=token_env if action else None, todos=login_todos, hold=held,
     )  # fmt: skip
     cfg = loaded_config(config_text)
     files = [PlannedFile(str(CONFIG_RELPATH), config_text.encode(), 0o644)]
@@ -354,6 +369,12 @@ def plan_init(
         f"memory is off (memory.enabled: false): {carve_out_text(ignored)}\nthen set memory.enabled: true",
     ) if ignored else ()  # fmt: skip
     notes += (*ci_notes, *proposal.notes)
+    if hold_existing:
+        notes += (
+            (f"yolo.hold lists {len(held)} existing unit(s); none of them runs until you remove it from the list",)
+            if held
+            else ("nothing to hold: the repository has no spec unit yet, so no yolo.hold was written",)
+        )
     marker = register_l4_marker(repo) if "pytest" in cfg.gates.test.command else None
     return InitPlan(
         (*files, *seed),
@@ -540,6 +561,7 @@ def run_init(
     harness_ref: str | None = None,
     runner_tag: tuple[str, ...] = (),
     forge_token_env: str | None = None,
+    hold_existing: bool = False,
 ) -> ExitCode:
     if harness_ref is not None and harness_commit_pin is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref and --harness-commit exclude each other")
@@ -593,7 +615,7 @@ def run_init(
     plan = plan_init(
         app.repo, app.environ, force=force, harness=harness, ci=ci or "gitlab", ci_edit=not no_ci_edit, fetched=fetched,
         action=pin, dependabot=dependabot, runner_tags=tuple(runner_tag),
-        token_env=forge_token_env or HOSTED_FORGE_TOKEN,
+        token_env=forge_token_env or HOSTED_FORGE_TOKEN, hold_existing=hold_existing,
     )  # None was refused  # fmt: skip
     apply_plan(app.repo, plan)
     for planned in plan.files:

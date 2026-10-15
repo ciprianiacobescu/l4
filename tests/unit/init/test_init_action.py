@@ -323,3 +323,33 @@ def test_dependabot_with_the_copy_is_exit_2_in_one_line(target: Path, git_enviro
     err = capsys.readouterr().err.strip()
     assert len(err.splitlines()) == 1 and "--dependabot" in err and "--action-copy" in err and "commit:" in err
     assert not (target / ".l4").exists() and not (target / ".github").exists()
+
+
+def make_changes(repo: Path, *names: str) -> None:
+    for name in names:
+        folder = repo / "openspec/changes" / name
+        folder.mkdir(parents=True)
+        (folder / "proposal.md").write_text("## Why\nx\n")
+
+
+def test_hold_existing_writes_the_sorted_ids_of_the_units_found(target: Path, git_environ):
+    """SCN-ADO-37"""
+    make_changes(target, "zeta", "alpha", "mid")
+    assert init(target, git_environ, *BASE, "--hold-existing") == 0
+    assert yaml.safe_load((target / ".l4/config.yaml").read_text())["yolo"] == {
+        "hold": ["openspec:alpha", "openspec:mid", "openspec:zeta"]
+    }
+    assert load_config(target).yolo.hold == ["openspec:alpha", "openspec:mid", "openspec:zeta"]
+
+
+def test_hold_existing_with_no_unit_writes_no_key_and_says_so(target: Path, git_environ, capsys):
+    """SCN-ADO-38"""
+    assert init(target, git_environ, *BASE, "--hold-existing") == 0
+    assert "yolo" not in yaml.safe_load((target / ".l4/config.yaml").read_text())
+    assert "nothing to hold" in capsys.readouterr().err
+
+
+def test_without_the_flag_the_units_are_not_held(target: Path, git_environ):
+    make_changes(target, "alpha")
+    assert init(target, git_environ, *BASE) == 0
+    assert "yolo" not in yaml.safe_load((target / ".l4/config.yaml").read_text())
