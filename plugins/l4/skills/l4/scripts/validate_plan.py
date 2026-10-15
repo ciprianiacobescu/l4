@@ -9,12 +9,18 @@ would report without git, a network or a model (yolo-mode design D15, requiremen
 
 Exit 0: everything is valid. Exit 1: one line per problem, `<plan id>: <code>: <subject>: <text>`, or for the coverage
 problems `uncovered: <unit> (...)` and `covered_twice: <unit> (...)`. Exit 2: a usage or read error.
+
+A planned unit whose OpenSpec change is archived is not an error here: the script has no plan state, so it cannot tell
+a unit that this plan already integrated (which `l4 yolo check` accepts) from a fresh plan that lists a finished one
+(which `l4 yolo check` refuses as `finished`). It prints `finished: <id> (archived: l4 yolo check accepts it only when
+this plan already integrated it)` and the exit code stays 0 if nothing else is wrong.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import decimal
 import heapq
 import json
 import os
@@ -35,6 +41,8 @@ ARCHIVED = re.compile(r"^\d{4}-\d\d-\d\d-(?P<name>.+)$")
 DEFAULT_OPENSPEC_ROOT = "openspec"
 DEFAULT_KIRO_ROOT = ".kiro/specs"
 FRAMEWORKS = ("openspec", "kiro")
+SPEC_KEY = r"""^(?:spec|"spec"|'spec')\s*:"""  # the top-level key, plain or quoted like YAML allows
+MAP_KEY = re.compile(r"""^(?:"([^"\\]+)"|'([^']+)'|([A-Za-z0-9_.-]+)):(?:\s+(.*))?$""")
 
 HELP_EPILOG = """\
 What this script checks, with the codes of `l4 yolo check` where the check is the same:
@@ -45,12 +53,15 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
 
 What only `l4 yolo check` can check (it needs git, the target head and the configuration): open questions, the intake
 checks of each spec, finished units, acceptance profiles, the target against forge.base_branch, and the merge policy.
-Specs are read from this working tree only: a spec that exists only on a branch is unknown here, and an archived
-change is known only to an `exclude` (the harness reads archived changes from the base branch).
+Specs are read from this working tree only: a spec that exists only on a branch is unknown here. An archived change
+is known to an `exclude`, and a planned unit whose change is archived is accepted too, with a line
+`finished: <id> (archived: ...)`: the script has no plan state, so it cannot tell a unit that this plan already
+integrated (`l4 yolo check` accepts it) from a finished unit in a fresh plan (`l4 yolo check` refuses it).
 
 The frameworks and roots come from .l4/config.yaml (spec.frameworks, spec.openspec.root, spec.kiro.root) when it uses
-the block style `l4 init` writes; anything else falls back to both frameworks, `openspec` and `.kiro/specs`, with a
-warning. The flags override the file. Exit 0 valid, 1 problems, 2 usage or read error.
+the block style `l4 init` writes (keys may be quoted, a byte order mark is ignored); anything else falls back to
+both frameworks, `openspec` and `.kiro/specs`, with a warning. The flags override the file.
+Exit 0 valid, 1 problems, 2 usage or read error.
 """
 
 
@@ -231,10 +242,10 @@ def _parse_map(lines: list[tuple[int, str]], i: int, indent: int) -> tuple[dict[
         ind, text = lines[i]
         if ind > indent:
             raise Unsupported("unexpected indentation")
-        match = re.match(r"^([A-Za-z0-9_.-]+):(?:\s+(.*))?$", text)
+        match = MAP_KEY.match(text)
         if not match:
             raise Unsupported(f"cannot read {text[:20]!r}")
-        key, rest = match.group(1), match.group(2)
+        key, rest = next(g for g in match.groups()[:3] if g is not None), match.group(4)
         i += 1
         if rest is not None and _strip_comment(rest):
             out[key] = _scalar(rest)
@@ -254,7 +265,7 @@ def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
     """(the `spec` mapping of .l4/config.yaml, warnings). {} when the file has no `spec` key."""
     path = repo / ".l4" / "config.yaml"
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")  # a byte order mark is not part of the first key
     except FileNotFoundError:
         return {}, [f"{path.relative_to(repo).as_posix()} not found: using the default frameworks and roots"]
     except (OSError, UnicodeDecodeError) as exc:
@@ -262,9 +273,9 @@ def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
             f".l4/config.yaml cannot be read ({exc.__class__.__name__}): using the default frameworks and roots"
         ]
     rows = text.splitlines()
-    start = next((n for n, row in enumerate(rows) if re.match(r"^spec\s*:\s*(#.*)?$", row)), None)
+    start = next((n for n, row in enumerate(rows) if re.match(SPEC_KEY + r"\s*(#.*)?$", row)), None)
     if start is None:
-        if any(re.match(r"^spec\s*:", row) for row in rows):
+        if any(re.match(SPEC_KEY, row) for row in rows):
             return {}, ["spec in .l4/config.yaml is not in block style: using the default frameworks and roots"]
         return {}, []
     block = []
@@ -351,13 +362,28 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+_UNIX_TIME = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)$")
+# The Unix times pydantic accepts as a string (measured against `model.load_plan`, which is the reference): a whole
+# number counts as seconds up to 20e9 and as milliseconds above, so it must lie in these milliseconds; a number with a
+# point is read as a float, whose limits are these (to within the float's own rounding at the very edge).
+_UNIX_MS_MIN, _UNIX_MS_MAX = -62135596800000, 253402300799999
+_UNIX_FRACTION_MIN, _UNIX_FRACTION_MAX = decimal.Decimal("-62135596800134860"), decimal.Decimal("253402300799181840")
+
+
+def _unix_time_ok(value: str) -> bool:
+    number = decimal.Decimal(value)
+    if "." in value:
+        return _UNIX_FRACTION_MIN < number <= _UNIX_FRACTION_MAX
+    return _UNIX_MS_MIN <= number <= _UNIX_MS_MAX
+
+
 def _datetime_problem(value: object) -> str | None:
-    """None when `value` is a datetime string with a time zone (pydantic's rules for an ISO 8601 string; a string of
-    digits is a Unix time, which carries its zone)."""
+    """None when `value` is a datetime string with a time zone (pydantic's rules for an ISO 8601 string; a string
+    that is a number is a Unix time, which carries its zone)."""
     if not isinstance(value, str):
         return "Input should be a valid datetime"
-    if value.isdigit() and value.isascii():
-        return None
+    if _UNIX_TIME.match(value):
+        return None if _unix_time_ok(value) else "Input should be a valid datetime, the Unix time is out of range"
     match = _DATETIME.match(value)
     if not match:
         return "Input should be a valid datetime"
@@ -647,6 +673,7 @@ class PlanReport:
         self.waves: list[list[str]] | None = None
         self.planned: list[str] = []  # the unit ids the file names in its batches, whatever else is wrong
         self.excluded: list[str] = []
+        self.finished: list[str] = []  # planned units whose OpenSpec change is archived
 
     def add(self, code: str, subject: str, text: str) -> None:
         self.problems.append((code, subject, text))
@@ -671,7 +698,9 @@ def _raw_ids(raw: dict) -> tuple[list[str], list[str]]:
 
 
 def check_plan(file_name: str, text: str, known: set[str], finished: set[str]) -> PlanReport:
-    """Everything `l4 yolo check` finds in one plan file without git, the configuration or the target head."""
+    """Everything `l4 yolo check` finds in one plan file without git, the configuration or the target head.
+    `finished` holds the archived changes: an `exclude` may name one, and so may a batch (listed in `report.finished`,
+    not an error: only `l4 yolo check` knows whether this plan already integrated it)."""
     stem = file_name[: -len(".json")]
     report = PlanReport(stem)
     try:
@@ -727,7 +756,9 @@ def check_plan(file_name: str, text: str, known: set[str], finished: set[str]) -
                         "unknown_dependency", unit["id"],
                         f"unit {unit['id']} depends on {dep}, which is not a unit of the plan",
                     )  # fmt: skip
-            if unit["id"] not in known:
+            if unit["id"] not in known and unit["id"] in finished:
+                report.finished.append(unit["id"])
+            elif unit["id"] not in known:
                 report.add("unknown_unit", unit["id"], f"unit {unit['id']} was not found by a spec provider")
     waits, key = build_graph(batches)
     cycle = find_cycle(waits, key)
@@ -793,9 +824,11 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
     problems = [
         {"plan": r.plan_id, "code": c, "subject": s, "text": t} for r in reports for (c, s, t) in r.problems
     ] + [{"plan": None, "code": c, "subject": s, "text": t} for (c, s, t) in coverage]
+    finished = sorted({unit for r in reports for unit in r.finished})
     return {
         "ok": not problems,
         "problems": problems,
+        "finished": finished,
         "plans": {r.plan_id: {"order": r.order, "waves": r.waves} for r in reports if r.order is not None},
         "units": sorted(known),
         "warnings": warnings,
@@ -808,15 +841,20 @@ def problem_line(problem: dict) -> str:
     return f"{problem['plan']}: {problem['code']}: {problem['subject']}: {problem['text']}"
 
 
+def finished_line(unit: str) -> str:
+    return f"finished: {unit} (archived: l4 yolo check accepts it only when this plan already integrated it)"
+
+
 def render(result: dict) -> str:
+    finished = [finished_line(unit) for unit in result["finished"]]
     if result["problems"]:
-        return "\n".join(problem_line(p) for p in result["problems"])
+        return "\n".join([*(problem_line(p) for p in result["problems"]), *finished])
     lines = []
     for plan_id, shown in result["plans"].items():
         lines.append(f"{plan_id}: valid ({len(shown['order'])} unit(s))")
         lines.append(f"order: {', '.join(shown['order'])}")
         lines += [f"wave {n}: {', '.join(wave)}" for n, wave in enumerate(shown["waves"], start=1)]
-    return "\n".join(lines)
+    return "\n".join([*lines, *finished])
 
 
 def parser() -> argparse.ArgumentParser:

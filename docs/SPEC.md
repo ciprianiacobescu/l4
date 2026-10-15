@@ -3255,7 +3255,10 @@ skill's operate reference SHALL list the `l4 yolo` commands.
 deliver (design D15). The reason MUST be non-empty text of at most 200 characters, and unknown fields MUST be
 refused. Admission MUST refuse a plan that lists the same unit in `exclude` and in a batch (`excluded_and_planned`), the
 same unit twice in `exclude` (`duplicate_id`), or an excluded id that no spec provider knows (`unknown_unit`). An
-excluded unit MUST NOT be held by the plan, so it runs as it would without the plan. The exclusions are part of the plan
+excluded unit MUST NOT be held by the plan: while no plan is active on the target (for example while the plan waits
+for its review or its activation, or after it completes) it runs as it would without a plan. While a plan is active it gets
+no new agent work, like every unit outside the active plan (L4-YOLO-010), and `l4 yolo status` lists it under `excluded`
+with the reason. The exclusions are part of the plan
 file, so an edit of them after the activation stops the plan (`inputs_changed`) like any other edit.
 
 **L4-YOLO-018** `l4 yolo draft` scaffolds and updates a plan file. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
@@ -3281,6 +3284,13 @@ D15). It MUST report, with the codes of admission where they are the same check:
   parent is listed;
 - `covered_twice`, a unit listed in two plan files.
 
+A planned unit whose OpenSpec change is archived MUST NOT fail the script, because it has no plan state and cannot tell a
+unit that this plan already integrated (which `l4 yolo check` accepts) from a finished unit in a fresh plan (which
+`l4 yolo check` refuses as `finished`). It MUST print `finished: <id> (archived: l4 yolo check accepts it only when this
+plan already integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
+quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
+including a deadline written as a Unix time.
+
 It exits 0 when everything is valid, 1 with one line per problem, and 2 on a usage or read error. On success it MUST
 print, for each plan, its dispatch order (the same order as `l4 yolo check`) and its waves (design D15). `--json` MUST
 print the same as one JSON object. The script MUST NOT write anything, use the network or run git.
@@ -3288,7 +3298,11 @@ print the same as one JSON object. The script MUST NOT write anything, use the n
 **L4-YOLO-020** The skill teaches plan creation and update. The skill SHALL have the reference `plugins/l4/skills/l4/references/plan.md`, linked from `SKILL.md`, that teaches an
 agent to create and update a plan from OpenSpec changes and Kiro specs (design D15). It MUST say that the agent never
 activates, resumes or cancels a plan for a person, never writes `refs/l4/plans/*`, and sets `merge: auto` only when the
-person asks and `forge.merge_policy` is `auto`.
+person asks and `forge.merge_policy` is `auto`. It MUST tell the agent to check the
+state of every spec first and to exclude, with a reason a person can check, a unit that is started or in review (or to
+plan it knowingly and say so), to leave `promotion` out unless the person names a branch that exists on the remote, to
+put finished and deliberately left-out specs in `exclude` and not only in the hand-off message, and to keep an
+integrated unit in the file after an update.
 
 ---
 
@@ -6977,10 +6991,13 @@ scenario is a spec defect (§26).
 - **When** a CI run happens and `l4 plan` runs
 - **Then** no branch of `a` is created, `l4 plan` shows `held by plan p1 (cancelled)`, and the unit is released only when it is removed from the file or the file is removed
 
-#### SCN-YOLO-35 (+) An excluded unit is not held · L4-YOLO-017
-- **Given** an active plan p1 whose file lists `kiro:pick-priority` in `exclude` with the reason `in review before the plan`
-- **When** a CI run looks for work
-- **Then** `kiro:pick-priority` runs as it would without a plan, and `l4 yolo status p1` lists it under `excluded` with the reason
+#### SCN-YOLO-35 (+) An excluded unit is not held by the plan · L4-YOLO-017
+- **Given** a plan p1 whose file lists `kiro:pick-priority` in `exclude` with the reason `in review before the plan`
+- **When** a CI run looks for work while p1 is reviewed and not yet active, or after p1 completes
+- **Then** `kiro:pick-priority` runs as it would without a plan
+- **When** a CI run looks for work while p1 is active
+- **Then** `kiro:pick-priority` gets no new agent work (`is not in the active plan p1`), like every unit outside the active plan
+- **And** `l4 yolo status p1` lists it under `excluded` with the reason
 
 #### SCN-YOLO-36 (−) A unit that is both planned and excluded is refused · L4-YOLO-017
 - **Given** a plan file that lists `openspec:a` in a batch and in `exclude`

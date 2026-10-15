@@ -15,7 +15,10 @@ from l4.orchestrator import Orchestrator
 def _stub(tmp_path: Path, seen: dict[str, object], recorded: list | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         cfg=SimpleNamespace(
-            availability=AvailabilityCfg(default_cooldown="30m"), forge=ForgeCfg(base_branch="main"), ci=CiCfg()
+            availability=AvailabilityCfg(default_cooldown="30m"),
+            forge=ForgeCfg(base_branch="main"),
+            ci=CiCfg(),
+            profiles={},
         ),
         services=SimpleNamespace(
             ref=SimpleNamespace(id="u"),
@@ -31,7 +34,10 @@ def test_a_plain_role_unavailable_is_parked_after_the_default_cooldown(tmp_path:
     seen: dict[str, object] = {}
     stub = SimpleNamespace(
         cfg=SimpleNamespace(
-            availability=AvailabilityCfg(default_cooldown="30m"), forge=ForgeCfg(base_branch="main"), ci=CiCfg()
+            availability=AvailabilityCfg(default_cooldown="30m"),
+            forge=ForgeCfg(base_branch="main"),
+            ci=CiCfg(),
+            profiles={},
         ),
         services=SimpleNamespace(
             ref=SimpleNamespace(id="u"),

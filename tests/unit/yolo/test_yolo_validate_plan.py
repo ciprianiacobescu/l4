@@ -95,7 +95,19 @@ def test_the_script_needs_only_the_standard_library_and_loads_no_other_module():
         if isinstance(n, (ast.Import, ast.ImportFrom))
         for a in (n.names if isinstance(n, ast.Import) else [None])
     }
-    assert imported <= {"__future__", "argparse", "datetime", "heapq", "json", "os", "re", "stat", "sys", "pathlib"}
+    assert imported <= {
+        "__future__",
+        "argparse",
+        "datetime",
+        "decimal",
+        "heapq",
+        "json",
+        "os",
+        "re",
+        "stat",
+        "sys",
+        "pathlib",
+    }
     code = (
         "import importlib.util, sys\n"
         "before = set(sys.modules)\n"
@@ -258,6 +270,26 @@ def test_anything_else_falls_back_to_both_frameworks_with_a_warning(repo, text):
     assert (frameworks, openspec_root, kiro_root) == (["openspec", "kiro"], "openspec", ".kiro/specs")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        '"spec":\n  frameworks: [openspec]\n',
+        "'spec':\n  frameworks: [openspec]\n",
+        "\ufeffspec:\n  frameworks: [openspec]\n",
+        'spec:\n  "frameworks": [openspec]\n',
+        "spec:\n  'frameworks':\n    - openspec\n",
+        'spec:\n  "frameworks": [openspec]\n',
+    ],
+)
+def test_a_quoted_spec_key_and_a_byte_order_mark_are_read_like_yaml_reads_them(repo, text):  # L3
+    assert yaml.safe_load(text.lstrip("\ufeff"))["spec"] == {"frameworks": ["openspec"]}
+    write_config(repo, text)
+    spec_cfg, warnings = read_spec(repo)
+    assert warnings == [] and spec_cfg == {"frameworks": ["openspec"]}
+    args = vp.parser().parse_args(["--repo", str(repo)])
+    assert vp.resolve_discovery(repo, args)[0] == ["openspec"]
+
+
 def test_no_config_file_is_a_warning_and_the_defaults(repo):
     change(repo, "a")
     put(repo, plan("p1", [units("openspec:a")]))
@@ -367,6 +399,33 @@ FIXTURES = {
     "deadline padded": variant(limits={"deadline": " 2026-12-31T18:00:00Z"}),
     "deadline null": variant(limits={"deadline": None}),
     "deadline junk": variant(limits={"deadline": "soon"}),
+    "deadline unix '1760000000.5'": variant(limits={"deadline": "1760000000.5"}),
+    "deadline unix '-1'": variant(limits={"deadline": "-1"}),
+    "deadline unix '99999999999999999999'": variant(limits={"deadline": "99999999999999999999"}),
+    "deadline unix '1760000000.'": variant(limits={"deadline": "1760000000."}),
+    "deadline unix '+1'": variant(limits={"deadline": "+1"}),
+    "deadline unix '.5'": variant(limits={"deadline": ".5"}),
+    "deadline unix '1e3'": variant(limits={"deadline": "1e3"}),
+    "deadline unix '1_000'": variant(limits={"deadline": "1_000"}),
+    "deadline unix '-0.5'": variant(limits={"deadline": "-0.5"}),
+    "deadline unix '0'": variant(limits={"deadline": "0"}),
+    "deadline unix '00012'": variant(limits={"deadline": "00012"}),
+    "deadline unix '253402300799999'": variant(limits={"deadline": "253402300799999"}),
+    "deadline unix '253402300800000'": variant(limits={"deadline": "253402300800000"}),
+    "deadline unix '-62135596800000'": variant(limits={"deadline": "-62135596800000"}),
+    "deadline unix '-62135596800001'": variant(limits={"deadline": "-62135596800001"}),
+    "deadline unix '1000000000000000'": variant(limits={"deadline": "1000000000000000"}),
+    "deadline unix '1111111111111111111.5'": variant(limits={"deadline": "1111111111111111111.5"}),
+    "deadline unix '111111111111111111.5'": variant(limits={"deadline": "111111111111111111.5"}),
+    "deadline unix '-1111111111111111111.5'": variant(limits={"deadline": "-1111111111111111111.5"}),
+    "deadline unix '-111111111111111.5'": variant(limits={"deadline": "-111111111111111.5"}),
+    "deadline unix '9223372036854775807'": variant(limits={"deadline": "9223372036854775807"}),
+    "deadline unix '9223372036854775808'": variant(limits={"deadline": "9223372036854775808"}),
+    "deadline unix '20000000000.5'": variant(limits={"deadline": "20000000000.5"}),
+    "deadline unix '٣'": variant(limits={"deadline": "٣"}),
+    "deadline unix '1 '": variant(limits={"deadline": "1 "}),
+    "deadline unix ' 1'": variant(limits={"deadline": " 1"}),
+    "deadline unix '.'": variant(limits={"deadline": "."}),
     "promotion null": variant(promotion=None),
     "promotion ok": variant(promotion={"mode": "manual", "target_branch": "x"}),
     "promotion mode": variant(promotion={"mode": "auto", "target_branch": "x"}),
@@ -632,6 +691,33 @@ def test_an_invalid_plan_file_still_covers_the_units_it_names(repo):
     put(repo, plan("p1", [units("openspec:a")], parallel=1))
     code, out, _ = run(repo)
     assert code == 1 and "uncovered" not in out and "p1: invalid: parallel: unknown field" in out
+
+
+def test_a_planned_unit_whose_change_is_archived_is_accepted_with_a_finished_line(repo):  # L4-YOLO-019, Z1
+    change(repo, "a")
+    touch(repo, "openspec/changes/archive/2026-02-03-done/proposal.md")
+    put(repo, plan("p1", [units("openspec:a", "openspec:done", deps={"openspec:a": ["openspec:done"]})]))
+    code, out, _ = run(repo)
+    assert code == 0 and "p1: valid (2 unit(s))" in out
+    assert (
+        "finished: openspec:done (archived: l4 yolo check accepts it only when this plan already integrated it)" in out
+    )
+    assert "unknown_unit" not in out
+    doc = json.loads(run(repo, "--json")[1])
+    assert doc["ok"] is True and doc["finished"] == ["openspec:done"]
+
+
+def test_a_planned_unit_with_no_change_at_all_is_still_unknown(repo):
+    change(repo, "a")
+    put(repo, plan("p1", [units("openspec:a", "openspec:ghost")]))
+    code, out, _ = run(repo)
+    assert code == 1 and "p1: unknown_unit: openspec:ghost" in out and "finished:" not in out
+
+
+def test_the_help_and_the_docstring_say_an_archived_planned_unit_is_accepted(repo):
+    out = run(repo, "--help")[1]
+    assert "already integrated" in " ".join(out.split())
+    assert "already integrated" in " ".join((vp.__doc__ or "").split())
 
 
 def test_an_excluded_archived_change_is_known(repo):

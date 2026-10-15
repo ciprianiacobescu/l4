@@ -52,7 +52,7 @@ from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarifi
 from l4.config.defaults import cache_root
 from l4.config.preflight import preflight_run_config
 from l4.config.redaction import load_app_config
-from l4.config.schema import L4Config, duration_seconds
+from l4.config.schema import L4Config, Profile, duration_seconds
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
 from l4.follow_up import FollowUpMade, perform_follow_ups
@@ -75,7 +75,7 @@ from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
-from l4.provision.readiness import platform_of, steps_for
+from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit
 from l4.specs.criteria import base_criteria, replaced_requirements
@@ -150,6 +150,7 @@ def capacity_section(
     retry_after: str | None,
     platform: str = "gitlab",
     environment: str | None = None,
+    profiles: Mapping[str, Profile] | None = None,
 ) -> str:
     """The sticky note of a unit that parked for capacity (L4-ARC-002; live job 5561: the MR stayed silent): what
     is missing, the human steps for a login, and when the unit comes back. `bring_in_base`'s sibling: the next
@@ -163,7 +164,10 @@ def capacity_section(
         for u in unready:
             lines.append(f"- `{u.profile}` ({u.adapter or 'backend'}): {u.step}: {u.reason}")
             if u.step == "auth" and u.adapter:
-                steps = steps_for(u.adapter, u.auth, platform=platform, environment=environment)
+                profile = (profiles or {}).get(u.profile)  # the profile names its own key (L4-PRV-028)
+                steps = (
+                    provider_steps(profile, platform=platform, environment=environment) if profile is not None else ()
+                ) or steps_for(u.adapter, u.auth, platform=platform, environment=environment)
                 lines += [f"  - {step}" for step in steps]
         lines.append("")
     else:
@@ -603,7 +607,7 @@ class Orchestrator:
         platform, environment = platform_of(self.cfg, app.environ, origin_url(app.repo, app.environ))
         section = capacity_section(
             exc, base=self.cfg.forge.base_branch, now=self.services.factory.now(), retry_after=retry_after,
-            platform=platform, environment=environment,
+            platform=platform, environment=environment, profiles=self.cfg.profiles,
         )  # fmt: skip
         self._notes = _sections(redact(section))  # before the phase change, which syncs the mirror
         edge = self._go(Trigger.REQUIRED_ROLE_UNAVAILABLE, **context)

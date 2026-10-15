@@ -37,7 +37,7 @@ PROFILE_KEYED = ("fake", "command")
 IDENTITY_ENV = {
     "claude-code": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR"),
     "codex": ("CODEX_API_KEY", "CODEX_HOME"),
-    "opencode": ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"),
+    "opencode": ("OPENROUTER_API_KEY", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"),
     "kiro-cli": ("KIRO_API_KEY",),
 }
 
