@@ -8,8 +8,9 @@ key that older entries get from the unit digest (a unit) or the event time (a ba
 
 import hashlib
 import json
+import re
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -182,3 +183,92 @@ def rounds_not_ready(events: Sequence[PlanEvent], subject: str) -> int:
             elif entry.get("digest") is not None:
                 versions.add(str(entry["digest"]))
     return len(versions)
+
+
+# --- how to resolve a finding (design D1) -------------------------------------------------------------------------
+
+
+def _id_pattern(unit_id: str) -> re.Pattern[str]:
+    """The id as a whole token: not part of a longer id (`openspec:ab`), a trailing full stop is not part of it."""
+    return re.compile(rf"(?<![\w:.\-]){re.escape(unit_id)}(?![\w:\-])(?!\.\w)")
+
+
+def _named_units(text: str, subject: str, depends_on: Collection[str], known_units: Collection[str]) -> list[str]:
+    return [
+        unit
+        for unit in sorted(known_units)
+        if unit != subject and unit not in depends_on and _id_pattern(unit).search(text)
+    ]
+
+
+def resolve(
+    plan_id: str,
+    base: str,
+    subject: str,
+    finding: Mapping[str, str],
+    *,
+    folder: str | None,
+    batch: str | None,
+    depends_on: Collection[str] = (),
+    known_units: Collection[str] = (),
+) -> str:
+    """The `Resolve:` text of a finding (without the label): harness text per criterion with the subject's folder, the
+    plan file and the batch filled in. Nothing is parsed from the finding but the ids of the plan's own units."""
+    criterion = finding.get("criterion", "")
+    where = folder if folder else "the unit's folder"
+    kiro = subject.startswith("kiro:")
+    plan_file = f".l4/plans/{plan_id}.json"
+    if criterion == "outcome":
+        target = f"{where}/requirements.md" if kiro else f"{where}/proposal.md or the spec"
+        return f"State the observable result in {target}, not only the work."
+    if criterion == "testability":
+        target = f"{where}/requirements.md" if kiro else f"{where}/specs/*/spec.md"
+        return (
+            f"Give the scenario concrete inputs and outputs in {target}; "
+            "a time bound needs a tolerance or an injected clock."
+        )
+    if criterion == "interfaces":
+        return (
+            "Fix names, signatures, data shapes and error values in the spec "
+            "(the implementer and the dependent units read the spec, not only tasks.md)."
+        )
+    if criterion == "failure_cases":
+        return "State what happens on bad input, absence, concurrency and a failing dependency."
+    if criterion == "feasibility":
+        return (
+            "Split the unit (a new change folder and a plan entry) "
+            "or remove the part that needs a person, a secret or a service."
+        )
+    if criterion == "duplicate_scope":
+        return "Remove the overlap from one of the units the finding names."
+    if criterion == "contradiction":
+        return "Make the two statements agree, in this folder or in a prerequisite's."
+    if criterion == "missing_dependency":
+        batch_note = f" (batch {batch})" if batch else ""
+        named = _named_units(finding.get("text", ""), subject, depends_on, known_units)
+        if named:
+            ids = ", ".join(f'"{unit}"' for unit in named)
+            return f"add {ids} to depends_on of {subject} in {plan_file}{batch_note}"
+        batch_code = f" (batch `{batch}`)" if batch else ""
+        return f"Add the unit it needs to `depends_on` of `{subject}` in `{plan_file}`{batch_code}."
+    if criterion == "batch_acceptance":
+        name = batch or (subject[len(BATCH_PREFIX) :] if subject.startswith(BATCH_PREFIX) else "the batch")
+        return (
+            f"State the batch outcome in a unit's proposal, or give batch {name} "
+            "an acceptance profile that can show it."
+        )
+    if criterion == "material":
+        return finding.get("text", "")
+    if criterion == "schema":
+        return f"No review happened for this item: run the review again (l4 yolo review {plan_id})."
+    if criterion in ("unit_missing", "completeness"):
+        return (
+            "No review happened for this item: push the folder to "
+            f"{base} or remove the unit from {plan_file}, then run the review again (l4 yolo review {plan_id})."
+        )
+    if criterion == "verdict":
+        return (
+            "The judge said NEEDS_REVISION and named no finding: read the missing list, "
+            f"or ask again with l4 yolo review {plan_id} --worktree --fresh {subject}."
+        )
+    return "Read the finding and change the specification it points to, then run the review again."
