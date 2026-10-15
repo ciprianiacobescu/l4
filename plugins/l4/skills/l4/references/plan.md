@@ -34,9 +34,10 @@ plan still runs one unit at a time, in the printed order.
    not evidence: when you cannot point to a line, add no dependency.
 4. Use a batch to group units that share an acceptance check (`acceptance_profile`, a profile of `yolo.profiles`).
    Do not invent profiles.
-5. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters). An
-   excluded unit is not held by the plan: it runs as without a plan while no plan is active on the target, and gets no
-   new agent work while one is active, like every unit outside the plan.
+5. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters). A
+   spec meant to run alone goes there too, with that reason. An excluded unit is not held by the plan: it runs as
+   without a plan while no plan is active on the target, and gets no new agent work while one is active, like every unit
+   outside the plan. A spec that `yolo.hold` matches is held and counts as covered, so it needs no entry.
 6. Set `limits.max_runs` and `limits.max_cost_usd`. They stop a plan whose unit makes no progress; without them only
    the attempts limit does. Allow about five runs per unit.
 7. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.

@@ -59,3 +59,15 @@ findings, carries the same knowledge.
   and `validate_plan.py` before any push.
 - **Limits check.** `wc -w plugins/l4/skills/l4/references/spec.md` is at most 450, and `SKILL.md` gained one line.
 - **Result:** not yet run.
+
+## S9. Adopting on an integration base with existing specs (SCN-ADO-50)
+
+**Added with adoption-lessons 8.2.** to run: the orchestrator
+
+- **Setup.** A fresh general-purpose agent with only `plugins/l4/skills/l4`, told to read `SKILL.md` first. A fixture
+  repository with three existing OpenSpec changes, a default branch `main` and a base `staging`. A dry run, no forge.
+- **Task.** "Adopt L4 on `staging` so that none of the existing specs starts."
+- **Pass when** the agent uses `l4 init … --hold-existing` (so `yolo.hold` lists the three ids), writes no backlog plan,
+  does not add a deployment branch by hand, and says that the workflow file must reach `main` before `l4 setup github`
+  can dispatch.
+- **Result:** not yet run.

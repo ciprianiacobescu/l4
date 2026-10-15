@@ -30,11 +30,17 @@ l4 --version
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --action-repo OWNER/l4 --harness-ref v0.4.0 [--dependabot]
+l4 init --ci github --action --harness-ref v0.4.0 [--dependabot] [--s1 laya|jev|none]
 # public or other-owner repository:
 l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.0
 ```
 
+- **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
+  (section 2). Pass it from a checkout, which has no install origin: `init` then exits 2.
+- **System One.** `l4 init` writes a Laya profile (local, no key) as `roles.s1_judge` by default. `--s1 jev` writes a
+  Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
+  `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
+  is in use.
 - **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.0`; that line
   is the only pin.
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
@@ -64,7 +70,10 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     month even when idle; set a slower cron, or `null`.
   - **`ci.upload_artifacts: false`** on a **public** repository. The `l4-out` artifact holds the prompts and agent
     transcripts (secrets masked), and any signed-in user can download it.
-  - The test gate and the role chains; `l4 doctor --adoption` checks them.
+  - The test gate and the role chains; `l4 doctor --adoption` checks them. The test gate must write
+    `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
+  - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
+    Add their commands to `gates`, or accept that L4 will not run them.
 - **Re-render after editing:** `l4 upgrade --harness-ref v0.4.0`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
@@ -80,14 +89,23 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
      [--secret L4_HARNESS_SSH_KEY=L4_HARNESS_SSH_KEY] --watch
    ```
 
-   It creates the environment `l4` with its branch rules, seals the secrets, sets the workflow permissions (write, and
+   It creates the environment `l4` with its branch rules (the default branch too, when it is not the base), seals the secrets, sets the workflow permissions (write, and
    Actions may create pull requests), the variable `L4_SELF_PROVISION` and the labels, and dispatches a first run.
    `--dry-run` reads only.
+
+   GitHub runs `schedule` and `workflow_dispatch` only from the default branch. When the default branch is not the
+   base, `setup` checks that it holds `.github/workflows/l4.yml` with the same pin as the base. Without the file the
+   row is FAILED and the dispatch is not sent, so run `setup` after the default-branch pull request is merged (4a).
 4. Unset the variables afterwards. Never paste a secret into a file or a chat.
 
-The forge token is the workflow's own `GITHUB_TOKEN`. The harness's pushes made with it start no other workflows, so the
-repository's own CI shows `not_run` on L4's PRs. To keep that CI, use a fine-grained token as `L4_FORGE_TOKEN` in the
-environment `l4` and set `forge.token_env: L4_FORGE_TOKEN`.
+The forge token is the workflow's own `GITHUB_TOKEN`. Pushes made with it start no workflow anywhere, so the
+repository's own CI does not run on L4's PRs and shows `not_run`. To have it run:
+1. Make a fine-grained token with contents and pull-request write on the repository.
+2. Store it as `L4_FORGE_TOKEN` in the environment `l4` (`--secret L4_FORGE_TOKEN=L4_FORGE_TOKEN`).
+3. Set `forge.token_env: L4_FORGE_TOKEN` (or init with `--forge-token-env L4_FORGE_TOKEN`) and run `l4 upgrade`.
+
+A push from a laptop uses your own git credentials (https with your credential helper, or ssh). A refused push names
+the forge's own token rules.
 
 ## 4a. An integration branch, and specs that already exist
 
@@ -96,25 +114,31 @@ the repository already has specs that L4 must not start:
 
 1. Create the branch from the default branch and push it. Run every `l4` command below with the release you adopt:
    `uv tool run --from git+https://github.com/OWNER/l4@vX.Y.Z l4 …`.
-2. On that branch: `l4 init …` as in section 3, then set `forge.base_branch: <branch>` (and `forge.merge_policy: auto`
-   if delivery plans may merge), mirror the repository's CI commands in `gates`, run `l4 upgrade --harness-ref vX.Y.Z`
-   and `l4 doctor --adoption`. Commit what init listed with `[skip ci]`.
-3. **Hold the existing specs** in the next commit: `l4 yolo draft backlog --target <branch> --merge human`, set its
-   `limits` to `{"max_unit_attempts": 1, "max_runs": 1, "max_cost_usd": 0}`, validate, and say in the commit message
-   that the plan only holds units and is never activated. A unit listed in any plan that is not completed does not
-   run; `exclude` does not hold. Admission may refuse the plan (old specs often fail intake); the hold still applies.
+2. On that branch: `l4 init … --hold-existing` as in section 3. It writes the ids of the specs found now as
+   `yolo.hold`: none of them runs, no plan and no review are needed. Then set `forge.base_branch: <branch>` (and
+   `forge.merge_policy: auto` if delivery plans may merge), mirror the repository's CI commands in `gates`, run
+   `l4 upgrade --harness-ref vX.Y.Z` and `l4 doctor --adoption`. Commit what init listed with `[skip ci]`.
+3. To release a held spec, remove its id from `yolo.hold` or list it in a plan. `yolo.hold: ["*"]` makes every spec
+   opt-in by plan. A spec that no plan lists and `yolo.hold` does not match runs alone, as a pull request into
+   `<branch>` that a person merges.
 4. Copy form only: create the deploy key (`ssh-keygen -t ed25519 -N "" -f key`), add `key.pub` to the harness
    repository as a read-only deploy key named after the adopting repository, and pass `--secret
    L4_HARNESS_SSH_KEY=…` to `l4 setup github` (section 4). Delete the local private key afterwards.
-5. Add the **default branch** to the environment `l4`'s deployment branches (Settings → Environments → l4): the cron
-   runs on the default branch, and `l4 setup github` adds only `<branch>` and `l4/*`.
-6. Push the branch. The first run must show every existing unit `held by plan backlog` and `nothing to do`.
-7. Open a pull request to the default branch with `.github/workflows/l4.yml` **only**: GitHub runs `schedule` and
-   `workflow_dispatch` only for workflows on the default branch. The job checks out `<branch>` before the action, so
-   nothing else is needed there.
+5. Push the branch. Open a pull request to the default branch with `.github/workflows/l4.yml` **only**, and merge it:
+   the cron and `workflow_dispatch` run from the default branch's copy. The job checks out `<branch>` before the action,
+   so nothing else is needed there. After every `l4 upgrade`, copy the new workflow there too: a stale copy runs the old
+   pin; the run then does no work and prints a warning that names both commits (doctor `CFG-008`).
+6. Run `l4 setup github` (section 4). It adds the default branch to the environment's deployment branches and checks
+   the workflow there. The first run must show every existing unit `held by yolo.hold` and `nothing to do`.
 
-New specs outside every plan then run as single units (a pull request into `<branch>`, merged by a person); a plan
-with `merge: auto`, activated by a person, is merged into `<branch>` by L4.
+With `merge: auto` in an activated plan, L4 merges into `<branch>`; otherwise a person merges.
+
+**On 0.4.0, which has no `yolo.hold`:** hold the existing specs with a plan instead. Run `l4 yolo draft backlog --target
+<branch> --merge human`, set its `limits` to `{"max_unit_attempts": 1, "max_runs": 1, "max_cost_usd": 0}`, validate, and
+say in the commit message that the plan only holds units and is never activated. A unit listed in a plan that is not
+completed does not run; `exclude` does not hold. Admission may refuse the plan, and the hold still applies. The plan
+fails open for every new spec, and a judge review is charged if admission ever accepts it. Move to `yolo.hold` once the
+pin is on a release that has it: the schema is strict, so release, pin move, then the config edit.
 
 ## 5. Upgrades
 
