@@ -1,0 +1,14 @@
+plan valuation: 10 units, 10 integrated
+unit                               prerequisites                                dispatched      first run       integrated      C1   C2   C3   C4
+openspec:add-money-format          -                                            10-15 05:32:44  10-15 05:32:46  10-15 05:35:52  ok   ok   ok   ok
+kiro:stock-ledger                  -                                            10-15 05:36:29  10-15 05:36:31  10-15 05:39:58  ok   ok   ok   ok
+openspec:add-vat                   -                                            10-15 05:40:27  10-15 05:40:28  10-15 05:42:25  ok   ok   ok   ok
+openspec:add-stock-valuation       stock-ledger,add-money-format,add-vat        10-15 05:43:45  10-15 05:43:47  10-15 05:46:26  ok   ok   ok   ok
+kiro:invoice-line                  stock-ledger,add-money-format,add-vat        10-15 05:47:01  10-15 05:47:02  10-15 05:50:45  ok   ok   ok   ok
+openspec:add-valuation-summary     add-stock-valuation                          10-15 05:51:34  10-15 05:51:35  10-15 05:53:49  ok   ok   ok   ok
+kiro:invoice-lines                 invoice-line                                 10-15 05:54:21  10-15 05:54:23  10-15 05:58:56  ok   ok   ok   ok
+openspec:add-summary-currency      add-valuation-summary                        10-15 05:59:47  10-15 05:59:48  10-15 06:02:26  ok   ok   ok   ok
+openspec:add-shelf-label           -                                            10-15 06:03:23  10-15 06:03:24  10-15 06:05:35  ok   ok   ok   ok
+kiro:units-surplus                 -                                            10-15 06:06:11  10-15 06:06:13  10-15 06:08:50  ok   ok   ok   ok
+plan events: plan.admitted; plan.reviewed; plan.activated(complex scenario on a public repository: five waves of unit dependencies, DeepSeek Flash on OpenCode Go as the implementer, auto-merge into l4/main (live test requested by the maintainer)); plan.completed
+RESULT: dependencies enforced (C1-C3 hold for every unit)

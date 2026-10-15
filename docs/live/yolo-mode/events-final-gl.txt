@@ -1,0 +1,15 @@
+# plan ledger refs/l4/plans/final-gl (gitlab): time, event, fields (no URLs, no identities)
+2026-10-15T09:50:42Z  plan.admitted        
+2026-10-15T09:50:42Z  plan.reviewed        prompt_version=2 units=add-discounted-total:READY,add-percent-off:READY
+2026-10-15T09:50:42Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T09:51:09Z  plan.activated       reason=the final harness on GitLab; a cancel while the second unit is current (task 9.4 stop case)
+2026-10-15T09:51:33Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=1
+2026-10-15T09:51:33Z  unit.dispatched      unit=openspec:add-percent-off
+2026-10-15T09:53:57Z  unit.merge_requested unit=openspec:add-percent-off
+2026-10-15T09:54:00Z  unit.merged          unit=openspec:add-percent-off
+2026-10-15T09:54:02Z  unit.postcheck       unit=openspec:add-percent-off
+2026-10-15T09:54:02Z  unit.integrated      unit=openspec:add-percent-off
+2026-10-15T09:54:02Z  plan.charged         unit=openspec:add-percent-off attempt=1 runs=1
+2026-10-15T09:54:39Z  plan.charged         unit=openspec:add-discounted-total attempt=1 runs=1
+2026-10-15T09:54:39Z  unit.dispatched      unit=openspec:add-discounted-total
+2026-10-15T09:54:52Z  plan.cancelled       reason=task 9.4 stop case: cancel while the second unit is current
