@@ -8,6 +8,8 @@ from l4.vcs.git import BOT_IDENTITY, GitError
 from l4.vcs.names import UnitNames
 from l4.vcs.worktree import WorktreeManager
 
+NO_CACHE = Path("/l4-test-cache-that-holds-nothing")  # resolved, never created: no registration is under it
+
 
 @pytest.fixture
 def names(tmp_path: Path) -> UnitNames:
@@ -27,7 +29,7 @@ def test_created_from_base_when_branch_absent(make_repo, git_for, raw, names, tm
     newer = raw(other, "rev-parse", "HEAD").strip()
     assert newer != base_head
 
-    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert worktree.path == names.worktree and worktree.source == "base"
     assert repo.resolve() not in worktree.path.resolve().parents  # outside the repository
     assert worktree.head == newer and (worktree.path / "n.txt").exists()
@@ -46,14 +48,14 @@ def test_created_from_existing_remote_branch(make_repo, git_for, raw, names, tmp
     git.run("checkout", "-q", "main")
     git.run("branch", "-q", "-D", "l4/openspec/x")  # a different runner has no local branch
 
-    worktree = WorktreeManager(git, base_branch="main", branch_prefix="l4/").ensure(names)
+    worktree = WorktreeManager(git, base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert worktree.source == "remote_branch" and worktree.head == pushed
     assert (worktree.path / "work.txt").read_text() == "checkpoint\n"
 
 
 def test_an_existing_worktree_is_removed_and_recreated_never_reused(make_repo, git_for, raw, names):
     repo = make_repo(remote=True)
-    manager = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/")
+    manager = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE)
     first = manager.ensure(names)
     (first.path / "dirty.txt").write_text("leftover of a crashed run\n")
     raw(first.path, "checkout", "-q", "--detach")  # and a state the next run must not inherit
@@ -72,7 +74,7 @@ def test_leftover_directory_that_is_not_a_registered_worktree_is_replaced(make_r
     repo = make_repo(remote=True)
     names.worktree.mkdir(parents=True)
     (names.worktree / "junk").write_text("x")
-    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert not (worktree.path / "junk").exists() and (worktree.path / "README.md").exists()
 
 
@@ -80,14 +82,14 @@ def test_a_worktree_path_inside_the_repository_is_refused(make_repo, git_for):
     repo = make_repo(remote=True)
     inside = UnitNames.for_unit("openspec:x", branch_prefix="l4/", cache=repo / ".l4-cache", repo_key="proj-0123456789")
     with pytest.raises(L4Exit) as err:
-        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(inside)
+        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(inside)
     assert err.value.code is ExitCode.USAGE_ERROR and not (repo / ".l4-cache").exists()
 
 
 def test_missing_base_branch_is_a_git_error(make_repo, git_for, names):
     repo = make_repo(remote=True)
     with pytest.raises(GitError, match="base branch"):
-        WorktreeManager(git_for(repo), base_branch="nope", branch_prefix="l4/").ensure(names)
+        WorktreeManager(git_for(repo), base_branch="nope", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
 
 
 def test_a_clone_of_this_project_in_another_directory_has_its_worktree_replaced(
@@ -97,9 +99,9 @@ def test_a_clone_of_this_project_in_another_directory_has_its_worktree_replaced(
     repo = make_repo(remote=True)
     clone = tmp_path / "builds" / "7" / "clone"
     raw(tmp_path, "clone", "-q", str(tmp_path / "repo-origin.git"), str(clone))
-    theirs = WorktreeManager(git_for(clone), base_branch="main", branch_prefix="l4/").ensure(names)
+    theirs = WorktreeManager(git_for(clone), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     (theirs.path / "stale.txt").write_text("an earlier job's leftover\n")
-    ours = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    ours = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert ours.path == theirs.path and not (ours.path / "stale.txt").exists()
     assert (ours.path / ".git").read_text().split()[1].startswith(str(repo.resolve()))  # now a worktree of this clone
 
@@ -107,12 +109,12 @@ def test_a_clone_of_this_project_in_another_directory_has_its_worktree_replaced(
 def test_another_repositorys_worktree_at_the_same_path_is_not_deleted(make_repo, git_for, names):
     repo = make_repo(remote=True)
     other_manager = WorktreeManager(
-        git_for(make_repo("elsewhere", remote=True)), base_branch="main", branch_prefix="l4/"
+        git_for(make_repo("elsewhere", remote=True)), base_branch="main", branch_prefix="l4/", cache=NO_CACHE
     )
     theirs = other_manager.ensure(names)  # the other project's live worktree, same path (the old unkeyed layout)
     (theirs.path / "wip.txt").write_text("their uncommitted work\n")
     with pytest.raises(L4Exit, match="another repository"):
-        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert (theirs.path / "wip.txt").read_text() == "their uncommitted work\n"
     other_manager.ensure(names)  # its own path is still replaced as before
     assert not (theirs.path / "wip.txt").exists()
@@ -124,7 +126,7 @@ def test_another_repositorys_clone_at_the_path_is_not_deleted(make_repo, git_for
     names.worktree.parent.mkdir(parents=True)
     other.rename(names.worktree)  # a whole clone of another project parked at the path
     with pytest.raises(L4Exit, match="another repository"):
-        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert (names.worktree / "README.md").exists()
 
 
@@ -132,10 +134,10 @@ def test_an_orphan_worktree_whose_clone_is_gone_is_replaced(make_repo, git_for, 
     repo = make_repo(remote=True)
     clone = tmp_path / "builds" / "3" / "clone"
     raw(tmp_path, "clone", "-q", str(tmp_path / "repo-origin.git"), str(clone))
-    theirs = WorktreeManager(git_for(clone), base_branch="main", branch_prefix="l4/").ensure(names)
+    theirs = WorktreeManager(git_for(clone), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     shutil.rmtree(clone)  # the runner cleaned the build directory; the worktree is left with a dangling gitdir
     assert (theirs.path / ".git").is_file() and not Path((theirs.path / ".git").read_text().split()[1]).exists()
-    ours = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    ours = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert ours.path == theirs.path and (ours.path / "README.md").exists()
 
 
@@ -146,7 +148,7 @@ def test_fetch_uses_the_credential_helper_it_was_given(make_repo, git_for, names
     real = git.fetch
     git.fetch = lambda remote, **kw: (seen.append(tuple(kw["config"])), real(remote, **kw))[1]  # type: ignore[method-assign]
     helper = (("credential.helper", ""), ("credential.helper", "!f() { :; }; f"))
-    WorktreeManager(git, base_branch="main", branch_prefix="l4/", fetch_config=helper).ensure(names)
+    WorktreeManager(git, base_branch="main", branch_prefix="l4/", fetch_config=helper, cache=NO_CACHE).ensure(names)
     assert seen == [helper]
 
 
@@ -165,7 +167,7 @@ def test_pruned_branch_is_not_resurrected(make_repo, git_for, raw, names, tmp_pa
     """The project deletes merged source branches; a stale `origin/l4/...` must not bring the unit back."""
     repo = make_repo(remote=True)
     git = git_for(repo)
-    manager = WorktreeManager(git, base_branch="main", branch_prefix="l4/")
+    manager = WorktreeManager(git, base_branch="main", branch_prefix="l4/", cache=NO_CACHE)
     pushed = push_unit_branch(repo, git, trailers)
     first = manager.ensure(names)
     assert first.source == "remote_branch" and first.head == pushed
@@ -185,7 +187,7 @@ def test_ensure_fetches_and_prunes_the_lock_refs_but_leaves_other_refs_alone(
     bare = tmp_path / "repo-origin.git"
     head = raw(repo, "rev-parse", "HEAD").strip()
     raw(bare, "update-ref", names.lock_ref, head)
-    manager = WorktreeManager(git, base_branch="main", branch_prefix="l4/")
+    manager = WorktreeManager(git, base_branch="main", branch_prefix="l4/", cache=NO_CACHE)
     manager.ensure(names)
     assert git.rev_parse(names.lock_ref) == head  # the lock refs are outside the default refspec
     raw(repo, "update-ref", "refs/l4/elsewhere", head)
@@ -200,7 +202,7 @@ def test_a_branch_of_another_prefix_is_not_pruned(make_repo, git_for, raw, names
     git.run("branch", "feature")
     git.push("origin", ["feature:refs/heads/feature"])
     git.fetch("origin")
-    WorktreeManager(git, base_branch="main", branch_prefix="l4/").ensure(names)
+    WorktreeManager(git, base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert git.rev_parse("refs/remotes/origin/feature") is not None
 
 
@@ -239,7 +241,7 @@ def test_a_person_s_worktree_outside_the_cache_holding_the_branch_is_refused(mak
     mine = tmp_path / "my-own-checkout"
     _holder(repo, raw, mine, "l4/openspec/x")
     with pytest.raises(L4Exit) as caught:
-        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=NO_CACHE).ensure(names)
     assert caught.value.code == ExitCode.USAGE_ERROR
     assert str(mine.resolve()) in str(caught.value) and "l4/openspec/x" in str(caught.value)
     assert (mine / "MARK").exists()  # untouched

@@ -131,3 +131,46 @@ def test_a_unit_named_worktrees_has_its_old_leftover_removed(make_repo, git_for,
     names = _names(cache, repository_key(a, git_environ), unit="openspec:worktrees")
     assert _manager(git_for, a, cache).ensure(names).path == names.worktree
     assert not old.exists()
+
+
+def test_the_linked_worktree_the_run_works_in_is_never_deleted(make_repo, git_for, raw, tmp_path: Path, git_environ):
+    """A3c: l4 run from inside an old-layout worktree under the cache that holds the unit branch: exit 2, nothing
+    touched (the run's own checkout is treated like the main worktree)."""
+    a = make_repo("a", remote=True)
+    cache = tmp_path / "cache"
+    old = cache / "worktrees" / "openspec" / "x"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    raw(a, "worktree", "add", "-q", "-B", "l4/openspec/x", str(old), "origin/main")
+    (old / "UNCOMMITTED.txt").write_text("edit\n")
+    with pytest.raises(L4Exit) as caught:
+        _manager(git_for, old, cache).ensure(_names(cache, repository_key(old, git_environ)))
+    assert caught.value.code == ExitCode.USAGE_ERROR and "this run works in" in str(caught.value)
+    assert (old / "UNCOMMITTED.txt").exists() and (old / ".git").exists()
+
+
+def test_the_refusal_for_another_repositorys_checkout_names_a_remedy_that_works(
+    make_repo, git_for, raw, tmp_path: Path, git_environ
+):
+    """A2: `git worktree prune` does nothing while the path exists; the message names the registration directory."""
+    a = make_repo("a", remote=True)
+    b = make_repo("b", remote=True)
+    cache = tmp_path / "cache"
+    old = cache / "worktrees" / "openspec" / "x"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    raw(a, "worktree", "add", "-q", "-B", "l4/openspec/x", str(old), "origin/main")
+    shutil.rmtree(old)
+    raw(b, "worktree", "add", "-q", "-B", "l4/openspec/x", str(old), "origin/main")
+    names = _names(cache, repository_key(a, git_environ))
+    with pytest.raises(L4Exit) as caught:
+        _manager(git_for, a, cache).ensure(names)
+    registration = next((a / ".git" / "worktrees").iterdir())
+    text = str(caught.value)
+    assert str(registration.resolve()) in text or str(registration) in text
+    assert "git worktree prune" not in text and "move" in text
+    shutil.rmtree(registration)  # the advised remedy clears the refusal
+    assert _manager(git_for, a, cache).ensure(names).path == names.worktree
+
+
+def test_a_manager_without_a_cache_is_a_type_error(git_for, make_repo):
+    with pytest.raises(TypeError):
+        WorktreeManager(git_for(make_repo("a", remote=True)), base_branch="main", branch_prefix="l4/")  # type: ignore[call-arg]
