@@ -2562,6 +2562,10 @@ pytest tests only; changed code is not python`: no writer call, no finding, no f
     "feedback": {"type": "array", "items": {"type": "object",
       "required": ["id", "addressed", "evidence"],
       "properties": {"id": {"type": "string", "pattern": "^FB-[0-9]{3,}$"},
+                     "addressed": {"type": "boolean"}, "evidence": {"type": "string"}}}},
+    "accepted": {"type": "array", "items": {"type": "object",
+      "required": ["id", "addressed", "evidence"],
+      "properties": {"id": {"type": "string", "pattern": "^F-[0-9a-f]{6}$"},
                      "addressed": {"type": "boolean"}, "evidence": {"type": "string"}}}}
   }
 }

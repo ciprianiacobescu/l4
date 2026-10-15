@@ -193,6 +193,29 @@
      }
     }
    }
+  },
+  "accepted": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "addressed",
+     "evidence"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "pattern": "^F-[0-9a-f]{6}$"
+     },
+     "addressed": {
+      "type": "boolean"
+     },
+     "evidence": {
+      "type": "string"
+     }
+    }
+   }
   }
  }
 }
