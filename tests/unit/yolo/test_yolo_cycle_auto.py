@@ -161,11 +161,39 @@ def test_an_item_of_another_unit_does_not_block(world):
     assert world.tip() == head and "unit.merged" in world.kinds()
 
 
-def test_the_batch_items_block_its_units(world):
-    _, snaps = in_review(world, accepted={"batch:b1": accepted_item(F1)})
+def _batch_item_plan(world, name, *, integrated=(), **state):
+    """An active two-unit batch with one batch-level accepted finding; `name` is in review with a PASS."""
+    world.plan(merge="auto", deps={})
+    world.activate()
+    text = (world.repo / ".l4" / "plans" / "p1.json").read_text(encoding="utf-8")
+    world.seed(ev("plan.activated", plan_digest=plan_digest(text), digests=world.digests(), limits={}, by="alice",
+                  reason="go", accepted={"batch:b1": accepted_item(F1)}))  # fmt: skip
+    for done in integrated:
+        world.seed(ev("unit.integrated", unit=unit_id(done), revision="r"))
+    world.seed(ev("unit.dispatched", unit=unit_id(name), run="r0"))
+    head = world.unit_branch(name)
+    world.forge.create_pr(f"l4/openspec/{name}", "main", f"[l4] {name}", "b", draft=False)
+    return head, {name: world.in_review(name, head, **state)}
+
+
+def test_a_batch_item_does_not_hold_a_unit_that_does_not_complete_the_batch(world):
+    head, snaps = _batch_item_plan(world, "a")
+    world.step(snaps)
+    assert world.tip() == head and "unit.merged" in world.kinds() and not waits(world)
+
+
+def test_the_unit_that_completes_the_batch_waits_for_the_batch_item(world):
+    _, snaps = _batch_item_plan(world, "b", integrated=["a"])
     world.step(snaps)
     (waiting,) = waits(world)
-    assert finding_id("batch:b1", F1) in waiting.data["detail"]
+    assert waiting.data["reason"] == "accepted_finding_open" and finding_id("batch:b1", F1) in waiting.data["detail"]
+
+
+def test_the_unit_that_completes_the_batch_merges_once_the_batch_item_is_addressed(world):
+    bid = finding_id("batch:b1", F1)
+    head, snaps = _batch_item_plan(world, "b", integrated=["a"], accepted_addressed=frozenset({bid}))
+    world.step(snaps)
+    assert world.tip() == head and "unit.merged" in world.kinds() and not waits(world)
 
 
 def test_a_human_merge_plan_is_unchanged(world):
