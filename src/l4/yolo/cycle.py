@@ -98,6 +98,7 @@ WAIT_PHASES = ("awaiting_human", "clarifying", "waiting_capacity")
 RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current unit whose last run never started it
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+_REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
 _USERINFO = re.compile(r"(?<=//)[^/@\s]+@")
 
@@ -831,7 +832,7 @@ class _Step:
         current = {u: self._digest(u, i.folder) for u, i in folders.items()}
         if self._reviewed_current(state, digest, current):
             return None
-        infos = unit_infos(self.app.repo, self.found, plan.known_ids())
+        infos = unit_infos(self.app.repo, self.found, plan.known_ids(), target=plan.target)
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
         admission = admit(
             plan,
@@ -847,7 +848,7 @@ class _Step:
             if state.status == "refused" and last is not None and last.data.get("findings") == findings:
                 return None
             self._write(ctx, [self._event("plan.refused", plan_digest=digest, findings=findings)])
-            self._line(ctx.plan_id, f"refused: {len(findings)} finding(s): {findings[0]['text']}")
+            self._refusal_lines(ctx.plan_id, findings)
             return self._after_review(ctx)
         judge: dict[str, str] = {}
 
@@ -917,6 +918,14 @@ class _Step:
             f"(l4 yolo findings {ctx.plan_id})",
         )
         return self._after_review(ctx)
+
+    def _refusal_lines(self, plan_id: str, findings: Sequence[Mapping[str, str]]) -> None:
+        """One line of the log per finding of a refused plan, in full, at most `_REFUSAL_LINES`; the rest by the command
+        that prints them all (L4-ADO-008). The ledger keeps every finding."""
+        for finding in findings[:_REFUSAL_LINES]:
+            self._line(plan_id, f"refused: {' '.join(str(finding['text']).split())}")
+        if len(findings) > _REFUSAL_LINES:
+            self._line(plan_id, f"… and {len(findings) - _REFUSAL_LINES} more: l4 yolo check {plan_id}")
 
     def _write_review(self, ctx: _Ctx, events: Sequence[PlanEvent], digest: str) -> None:
         """The review is paid for: when the lease is lost, the ref is read again and the same facts are appended once

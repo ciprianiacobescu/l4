@@ -231,3 +231,56 @@ def test_a_lost_lease_after_the_review_still_appends_the_same_facts(tmp_path, mo
     assert world.kinds() == ["plan.admitted", "plan.reviewed"] and len(world.judge.requests) == 3
     data = reviewed_events(world)[0]
     assert data["source"] == "ci" and data["units"][A]["material"] and data["batches"]["b1"]["digests"]
+
+
+# --- the refusal of a plan prints every finding (L4-ADO-008) -----------------------------------------------
+
+
+def refused_world(tmp_path, count):
+    names = tuple(f"u{n:02d}" for n in range(count))
+    world = baselined(CycleWorld(tmp_path, units=names))
+    for name in names:  # a capability new to openspec/specs with no Purpose: the intake of the unit fails
+        world.commit({f"openspec/changes/{name}/specs/new-{name}/spec.md": SPEC_NEW})
+    world.plan(deps={})
+    return world, names
+
+
+def finding_lines(step):
+    return [a for a in step.actions if "fails the intake checks" in a]
+
+
+def test_scn_ado_23_every_finding_of_a_refused_plan_is_a_line_of_the_log(tmp_path):
+    world, names = refused_world(tmp_path, 8)
+    step = world.step()
+    assert world.kinds() == ["plan.refused"] and len(world.events()[0].data["findings"]) == 8
+    lines = finding_lines(step)
+    assert len(lines) == 8 and all(line.startswith("plan p1: refused: ") for line in lines)
+    assert all("`## Purpose`" in line for line in lines)  # in full, not the first one only
+    assert not any("more:" in a for a in step.actions)
+
+
+def test_scn_ado_25_twelve_findings_print_ten_lines_and_then_the_rest_by_command(tmp_path):
+    world, names = refused_world(tmp_path, 12)
+    step = world.step()
+    assert len(world.events()[0].data["findings"]) == 12  # the ledger keeps all of them
+    assert len(finding_lines(step)) == 10
+    assert step.actions[-1] == "plan p1: … and 2 more: l4 yolo check p1"
+    again = world.step()
+    assert world.kinds() == ["plan.refused"] and not finding_lines(again)  # said once per changed set
+
+
+def test_the_intake_of_a_plans_unit_is_asked_with_the_plans_target(tmp_path, monkeypatch):
+    import l4.yolo.cycle as cycle
+
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    seen = []
+    real = cycle.unit_infos
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("target"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cycle, "unit_infos", spy)
+    world.step()
+    assert "main" in seen
