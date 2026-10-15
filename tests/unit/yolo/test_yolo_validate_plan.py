@@ -807,3 +807,125 @@ def test_the_script_runs_with_the_system_python_too():
         pytest.skip("no /usr/bin/python3")
     done = subprocess.run([python3, "-I", str(SCRIPT), "--help"], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0
+
+
+# --- OpenSpec deltas against the baseline (L4-ADO-009; SCN-ADO-26, -27, -28) ----------------------------------
+
+PURPOSE_60 = "## Purpose\n\n" + "The dreaming capability keeps what a session learned for later. " + "\n"
+DELTA_ADDED = "## ADDED Requirements\n\n### Requirement: A thing\nIt SHALL do it.\n"
+
+
+def delta(repo: Path, unit: str, cap: str, body: str) -> None:
+    touch(repo, f"openspec/changes/{unit}/specs/{cap}/spec.md", body)
+
+
+def baseline(repo: Path, cap: str) -> None:
+    touch(repo, f"openspec/specs/{cap}/spec.md", "## Purpose\n\nx\n")
+
+
+def lines_of(out: str, code: str) -> list[str]:
+    return [line for line in out.splitlines() if f": {code}: " in line or line.startswith(f"{code}:")]
+
+
+@pytest.mark.parametrize("header", ["MODIFIED", "RENAMED", "REMOVED"])
+def test_a_delta_with_no_baseline_is_reported(repo, header):  # SCN-ADO-26
+    change(repo, "a")
+    delta(repo, "a", "dreaming", PURPOSE_60 + f"\n## {header} Requirements\n\n### Requirement: A thing\nx\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    found = lines_of(out, "spec_no_baseline")
+    assert len(found) == 1
+    assert (
+        "openspec:a" in found[0]
+        and "specs/dreaming/spec.md" in found[0]
+        and "openspec/specs/dreaming/spec.md" in found[0]
+    )
+
+
+def test_a_modified_delta_with_a_baseline_is_fine(repo):
+    change(repo, "a")
+    baseline(repo, "dreaming")
+    delta(repo, "a", "dreaming", "## MODIFIED Requirements\n\n### Requirement: A thing\nx\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+
+
+def test_an_added_only_new_capability_with_a_purpose_is_fine(repo):  # SCN-ADO-27
+    change(repo, "a")
+    delta(repo, "a", "dreaming", PURPOSE_60 + "\n" + DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+
+
+def test_a_new_capability_without_a_purpose_is_reported(repo):  # SCN-ADO-28
+    change(repo, "a")
+    delta(repo, "a", "dreaming", DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert len(lines_of(out, "spec_no_purpose")) == 1 and "openspec:a" in out
+
+
+def test_a_delta_of_a_capability_with_a_baseline_needs_no_purpose(repo):
+    change(repo, "a")
+    baseline(repo, "dreaming")
+    delta(repo, "a", "dreaming", DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+
+
+def test_spec_no_purpose_agrees_with_the_purpose_rule_of_the_harness():
+    from l4.specs import openspec as harness
+
+    assert vp.MIN_PURPOSE_CHARS == harness.MIN_PURPOSE_CHARS
+    assert vp.MAX_PURPOSE_BYTES == harness.MAX_PURPOSE_BYTES
+    cases = {
+        "none": "## ADDED Requirements\n",
+        "empty": "## Purpose\n\n## ADDED Requirements\n",
+        "short": "## Purpose\nshort one\n\n## ADDED Requirements\n",
+        "49": "## Purpose\n" + "x" * 49 + "\n\n## ADDED Requirements\n",
+        "50": "## Purpose\n" + "x" * 50 + "\n## ADDED Requirements\n",
+        "wrapped": "## Purpose\n" + ("word " * 5 + "\n") * 3 + "## ADDED Requirements\n",
+        "spaces": "## Purpose\n" + "a" + " " * 80 + "b\n## ADDED Requirements\n",
+        "bullets": "## Purpose\n- " + "y" * 60 + "\n",
+    }
+    for name, text in cases.items():
+        assert vp.purpose_ok(text) == harness_purpose_ok(harness, text), name
+
+
+def harness_purpose_ok(harness, text: str) -> bool:
+    import re
+
+    match = re.search(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return len(harness._flat(match.group(1), 1500) if match else "") >= harness.MIN_PURPOSE_CHARS
+
+
+def test_purpose_issues_of_the_harness_agrees_when_it_exists(tmp_path):
+    from l4.specs import openspec as harness
+
+    issues = getattr(harness, "purpose_issues", None)
+    if issues is None:
+        pytest.skip("purpose_issues (task 3.3) is not in this worktree yet")
+    root = tmp_path / "r"
+    change(root, "a")
+    (root / "openspec" / "specs").mkdir(parents=True)
+    delta(root, "a", "short", "## Purpose\nshort\n\n" + DELTA_ADDED)
+    delta(root, "a", "long", PURPOSE_60 + DELTA_ADDED)
+    harness_caps = {i for i in issues(root / "openspec/changes/a", root / "openspec/specs")}
+    ours = vp.purpose_problems(root, "openspec", "a")
+    assert len(harness_caps) == len(ours) == 1
+
+
+def test_only_planned_units_are_read_for_deltas(repo):
+    change(repo, "a")
+    change(repo, "b")
+    delta(repo, "b", "dreaming", DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")], exclude=[{"id": "openspec:b", "reason": "r"}]))
+    assert run(repo)[0] == 0
+
+
+def test_the_help_epilog_names_the_new_checks(repo):
+    for word in ("spec_no_baseline", "spec_no_purpose"):
+        assert word in vp.HELP_EPILOG

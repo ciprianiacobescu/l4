@@ -43,6 +43,11 @@ DEFAULT_OPENSPEC_ROOT = "openspec"
 DEFAULT_KIRO_ROOT = ".kiro/specs"
 FRAMEWORKS = ("openspec", "kiro")
 SPEC_KEY = r"""^(?:spec|"spec"|'spec')\s*:"""  # the top-level key, plain or quoted like YAML allows
+# The rules of `l4.specs.openspec` (`MIN_PURPOSE_CHARS`, `MAX_PURPOSE_BYTES`, `_purpose`); a test holds them equal.
+MIN_PURPOSE_CHARS = 50
+MAX_PURPOSE_BYTES = 256 * 1024
+PURPOSE_SECTION = re.compile(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
+DELTA_SECTION = re.compile(r"^##[ \t]+(MODIFIED|RENAMED|REMOVED)[ \t]+Requirements[ \t]*$", re.M)
 MAP_KEY = re.compile(r"""^(?:"([^"\\]+)"|'([^']+)'|([A-Za-z0-9_.-]+)):(?:\s+(.*))?$""")
 
 HELP_EPILOG = """\
@@ -50,7 +55,10 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
   invalid (schema, file name, limits), duplicate_id, self_dependency, unknown_dependency, cycle, unknown_unit,
   excluded_and_planned, external_dependencies, empty_plan; across the plan files: uncovered (a spec no plan lists,
   planned or excluded, except a <parent>-fix-<n> or <parent>-followup-<n> unit whose parent is listed) and
-  covered_twice (a unit planned in two plan files).
+  covered_twice (a unit planned in two plan files); for each OpenSpec unit that a plan file plans:
+  spec_no_baseline (a MODIFIED, RENAMED or REMOVED section in a delta `specs/<capability>/spec.md` whose capability
+  has no openspec/specs/<capability>/spec.md in the working tree) and spec_no_purpose (the delta of such a capability
+  has no `## Purpose` of at least 50 characters).
 
 What only `l4 yolo check` can check (it needs git, the target head and the configuration): open questions, the intake
 checks of each spec, finished units, acceptance profiles, the target against forge.base_branch, and the merge policy.
@@ -177,6 +185,69 @@ def archived_units(repo: Path, root: str) -> set[str]:
         if match and entry.is_dir() and not entry.is_symlink():
             out.add(f"openspec:{match.group('name')}")
     return out
+
+
+# --- the OpenSpec deltas of a planned unit ------------------------------------------------------------------------
+
+
+def _read_text(path: Path, limit: int = MAX_PURPOSE_BYTES) -> str | None:
+    """A regular file's text (UTF-8, `replace`), or None when it is missing, a symlink, too big or unreadable."""
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+            return None
+        return path.read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return None
+
+
+def purpose_ok(text: str) -> bool:
+    """`openspec._purpose`: the `## Purpose` section, on one line, has at least MIN_PURPOSE_CHARS characters."""
+    match = PURPOSE_SECTION.search(text)
+    if not match:
+        return False
+    flat = " ".join(match.group(1).split()).lstrip("#>*-+ ")
+    return len(flat[:1500]) >= MIN_PURPOSE_CHARS
+
+
+def purpose_problems(repo: Path, openspec_root: str, change: str) -> list[tuple[str, str, str]]:
+    """(code, delta file, text) for each delta of the change `<root>/changes/<change>` (L4-ADO-009)."""
+    root = Path(openspec_root)
+    parts = (*root.parts, "changes", change, "specs")
+    if _symlink_on_path(repo, parts):
+        return []
+    specs = repo.joinpath(*parts)
+    if not specs.is_dir():
+        return []
+    found: list[tuple[str, str, str]] = []
+    for entry in sorted(specs.iterdir(), key=lambda p: p.name):
+        if entry.is_symlink() or not entry.is_dir():
+            continue
+        text = _read_text(entry / "spec.md")
+        if text is None:
+            continue
+        delta_file = (entry / "spec.md").relative_to(repo).as_posix()
+        baseline = (root / "specs" / entry.name / "spec.md").as_posix()
+        if (repo / baseline).is_file():
+            continue
+        for kind in dict.fromkeys(m.group(1) for m in DELTA_SECTION.finditer(text)):
+            found.append(
+                (
+                    "spec_no_baseline",
+                    delta_file,
+                    f"{kind} Requirements, and the working tree has no {baseline}: archive the change that creates "
+                    f"{entry.name} first, or write this delta as ## ADDED Requirements with a ## Purpose",
+                )
+            )
+        if not purpose_ok(text):
+            found.append(
+                (
+                    "spec_no_purpose",
+                    delta_file,
+                    f"{entry.name} is new to {(root / 'specs').as_posix()}/ and the delta has no ## Purpose of at "
+                    f"least {MIN_PURPOSE_CHARS} characters (archive would write TBD and fail strict validation)",
+                )
+            )
+    return found
 
 
 # --- the configuration: a small block-style reader -----------------------------------------------------------------
@@ -823,6 +894,12 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
     for unit, plans in sorted(planned_in.items()):
         if len(plans) > 1:
             coverage.append(("covered_twice", unit, f"listed in plans {', '.join(plans)}"))
+    openspec_root = resolve_discovery(repo, args)[1]
+    for report in reports:
+        for unit in report.planned:
+            if unit in known and unit.startswith("openspec:"):
+                for code, delta_file, text in purpose_problems(repo, openspec_root, unit.partition(":")[2]):
+                    report.add(code, unit, f"{delta_file}: {text}")
     problems = [
         {"plan": r.plan_id, "code": c, "subject": s, "text": t} for r in reports for (c, s, t) in r.problems
     ] + [{"plan": None, "code": c, "subject": s, "text": t} for (c, s, t) in coverage]
