@@ -351,3 +351,54 @@ def test_stopped_and_resumed_before_activation_are_ignored(before):
 def test_an_activation_after_cancel_or_completion_is_ignored():
     s = fold(ACTIVATED, ev("plan.cancelled", by="me"), ev("plan.activated", plan_digest="zz", digests={"u": "d"}))
     assert s.status == "cancelled" and s.activated_digest == "pd" and s.digests == {"openspec:a": "da"}
+
+
+# review-resolution 1.8 (L4-YOLO-027): the acceptance override
+def _accepted(subject="openspec:a", **extra):
+    return ev(
+        "plan.accepted",
+        **{"subject": subject, "material": "m1", "findings_sha": "h1", "reason": "r", "by": "me", **extra},
+    )
+
+
+def test_plan_accepted_sets_the_acceptance_of_the_subject():
+    s = fold(_accepted(actor="person", marker=None, rounds=2))
+    assert s.accepted["openspec:a"]["material"] == "m1" and s.accepted["openspec:a"]["actor"] == "person"
+    assert s.status == "new" and s.activated_accepted == {}  # nothing else changes
+
+
+def test_the_latest_acceptance_of_a_subject_stands_and_subjects_are_independent():
+    s = fold(_accepted(), ev("plan.accepted", subject="batch:b1", material="m2"), _accepted(reason="newer"))
+    assert s.accepted["openspec:a"]["reason"] == "newer" and set(s.accepted) == {"openspec:a", "batch:b1"}
+
+
+def test_an_acceptance_is_recorded_in_every_status_but_final():
+    for status_events in ([], [ACTIVATED], [ACTIVATED, ev("plan.stopped", reason="inputs_changed")]):
+        s = fold(*status_events, _accepted())
+        assert "openspec:a" in s.accepted
+    for final in (ev("plan.cancelled"), ev("plan.completed", revision="r")):
+        s = fold(ACTIVATED, final, _accepted())
+        assert s.accepted == {} and s.status in ("cancelled", "completed")
+
+
+def test_a_withdrawal_removes_the_acceptance_and_ignores_an_unknown_subject():
+    s = fold(_accepted(), _accepted("batch:b1"), ev("plan.acceptance_withdrawn", subject="openspec:a", reason="x"))
+    assert set(s.accepted) == {"batch:b1"}
+    assert fold(ev("plan.acceptance_withdrawn", subject="nope", reason="x")).accepted == {}
+
+
+def test_activation_freezes_the_accepted_findings_and_a_reactivation_replaces_them():
+    frozen = {"openspec:a": {"findings": [{"id": "F-1"}], "reason": "r", "by": "me", "actor": "person"}}
+    s = fold(_accepted(), ev("plan.activated", plan_digest="pd", accepted=frozen))
+    assert s.activated_accepted == frozen and "openspec:a" in s.accepted and s.status == "active"
+    s = fold(
+        ev("plan.activated", plan_digest="pd", accepted=frozen),
+        ev("plan.stopped", reason="inputs_changed"),
+        ev("plan.activated", plan_digest="pd2", accepted={"batch:b1": {"reason": "q"}}),
+    )
+    assert s.activated_accepted == {"batch:b1": {"reason": "q"}}
+
+
+def test_an_old_ledger_without_acceptances_folds_to_empty():
+    s = fold(ev("plan.admitted", plan_digest="d1"), ACTIVATED, ev("plan.stopped", reason="deadline"))
+    assert s.accepted == {} and s.activated_accepted == {}
