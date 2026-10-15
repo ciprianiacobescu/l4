@@ -53,7 +53,7 @@ from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
-from l4.yolo.cycle import REVIEW_KEY, plan_source, review_batches
+from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import Found, new_draft, update_draft
 from l4.yolo.limits import (
@@ -408,9 +408,10 @@ def resume_blocker(
     reason, unit = state.stop_reason or "", state.stop_unit
     if reason == "unit_rejected" and unit:
         return Blocker(
-            f"{unit} was rejected: fix its spec and push it; the next run stops the plan with inputs_changed and CI "
-            f"reviews it, then l4 yolo activate {plan_id}",
-            f"fix the spec of {unit} and push it; after the review, l4 yolo activate {plan_id} --reason TEXT",
+            f"{unit} was rejected: fix the cause, its spec (push it; the next run stops the plan with inputs_changed "
+            f"and CI reviews it) or the configuration, then l4 yolo activate {plan_id}",
+            f"fix the cause of the rejection of {unit}: its spec (push it, wait for the review) or the configuration; "
+            f"then l4 yolo activate {plan_id} --reason TEXT",
         )
     if reason in ("inputs_changed", "unit_rejected"):
         what = f"{unit} was rejected" if reason == "unit_rejected" and unit else f"{plan_id} stopped with {reason}"
@@ -535,8 +536,7 @@ def _sync_phases(app: AppContext, cfg: L4Config, git: Git) -> None:
     try:
         fetch_unit_refs(app, cfg, git)
     except GitError as exc:
-        reason = app.redactor.redact_text(str(exc)).strip().splitlines()[-1][:160] if str(exc).strip() else "failed"
-        click.echo(f"draft: could not fetch from origin ({reason}): the phases may be old")
+        click.echo(f"draft: could not fetch from origin ({fetch_cause(app, exc)}): the phases may be old")
 
 
 def run_draft(
@@ -655,9 +655,10 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         seen, unit = _rejected_at(read.events, state), state.stop_unit or "a unit"
         if seen is not None and now.get(unit) == seen:  # R8: CI reviews the plan once the spec has changed
             ctx.say(
-                f"{plan_id}: {unit} was rejected and its spec has not changed: fix the spec and push it. The next "
-                f"run on {ctx.target} then stops the plan with inputs_changed and CI reviews it; then l4 yolo "
-                f"activate {plan_id} --reason TEXT, and the unit's next run reads the corrected spec"
+                f"{plan_id}: {unit} was rejected and its spec has not changed: fix the cause. A spec: push it, "
+                f"the next run on {ctx.target} then stops the plan with inputs_changed and CI reviews it. "
+                f"The configuration: nothing to review. Then l4 yolo activate {plan_id} --reason TEXT, and the "
+                f"unit's next run reads the corrected spec or configuration"
             )
             return ExitCode.OK
         view = _review_view(parsed, file.text, state, read.events, now)
@@ -752,8 +753,8 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
         raise L4Exit(
             ExitCode.USAGE_ERROR,
             f"activate: {rejected} was rejected, is still rejected and its spec has not changed: fix the spec and "
-            f"push it, then l4 yolo review {plan_id} and l4 yolo activate {plan_id} --reason TEXT; or restart the "
-            f"unit (l4 restart --unit {rejected} --reason TEXT)",
+            f"push it, then l4 yolo review {plan_id} and l4 yolo activate {plan_id} --reason TEXT; or, when the cause "
+            f"is the configuration, restart the unit (l4 restart --unit {rejected} --reason TEXT)",
         )
     admission = admit(
         parsed,
@@ -904,10 +905,11 @@ def run_report(app: AppContext, *, plan: str) -> ExitCode:
 
 def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker: Blocker | None) -> str:
     status = state.status
-    if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the spec first
+    if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the cause first
         return (
-            f"fix the spec of {state.stop_unit or 'the unit'} and push it (the next run records inputs_changed and CI "
-            f"reviews the plan), then l4 yolo activate {plan_id} --reason TEXT"
+            f"fix the cause of the rejection of {state.stop_unit or 'the unit'}: its spec (push it; the next run "
+            f"records inputs_changed and CI reviews the plan) or the configuration, then l4 yolo activate {plan_id} "
+            f"--reason TEXT"
         )
     if status in _BEFORE_ACTIVATION or (
         status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")

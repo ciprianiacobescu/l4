@@ -288,7 +288,11 @@ def test_the_documented_path_walks_from_the_unit_rejected_stop_to_the_unit_runni
     stopped = state(world)
     assert (stopped.status, stopped.stop_reason, stopped.stop_unit) == ("stopped", "unit_rejected", A)
     blocker = resume_blocker("p1", stopped, world.events(), None, {A: "rejected"}, Extend())
-    assert blocker is not None and "fix its spec and push it" in blocker.message
+    assert (
+        blocker is not None
+        and "fix the cause, its spec (push it" in blocker.message
+        and "the configuration" in blocker.message
+    )
     assert "then l4 yolo activate p1" in blocker.message
     world.commit({"openspec/changes/a/specs/x/spec.md": NEW_SPEC}, "fix the spec of a")
     world.push_main()

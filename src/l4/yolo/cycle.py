@@ -42,7 +42,7 @@ post-checked before anything is dispatched, a person's merges included (R10).
 import logging
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -91,6 +91,7 @@ log = logging.getLogger("l4.yolo.cycle")
 REVIEW_KEY = "plan:review"  # the `plan.charged` key of the judge's cost
 STOPPED_PHASES = ("halted", "escalated", "abandoned", "rejected")
 WAIT_PHASES = ("awaiting_human", "clarifying", "waiting_capacity")
+UNIT_NOT_STARTED = "unit_not_started"  # the `plan.waiting` reason of a current unit whose last run never started it
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
@@ -246,6 +247,18 @@ def auto_plan_units(app: AppContext, cfg: L4Config, git: Git) -> frozenset[str]:
     return frozenset(units)
 
 
+def fetch_cause(app: AppContext, exc: GitError) -> str:
+    """Why a git fetch failed, for one line: what git said (the first line of its stderr), then the exit status; the
+    command line, which is long and says nothing, is left out so that a cut keeps the cause."""
+    said = [x.strip() for x in str(getattr(exc, "stderr", "") or "").splitlines() if x.strip()]
+    text = said[0] if said else (str(exc).splitlines() or [type(exc).__name__])[0]
+    code = getattr(exc, "returncode", None)
+    text = app.redactor.redact_text(text)
+    if len(text) > 160:  # a long path in the middle goes, not the end of the sentence
+        text = f"{text[:50]}...{text[-105:]}"
+    return text + (f" (git exit {code})" if code is not None else "")
+
+
 def _fetch_failure(app: AppContext, cfg: L4Config, git: Git) -> str | None:
     """Outside CI, fetch the target into its tracking ref before the plan files are read from it: a laptop clone does
     not fetch on its own, and plan files read from an old tip would make the step stop a plan that was edited and
@@ -266,8 +279,7 @@ def _fetch_failure(app: AppContext, cfg: L4Config, git: Git) -> str | None:
                 return None
         except GitError:
             pass
-        first = (str(exc).splitlines() or [type(exc).__name__])[0]
-        return f"the target {target} could not be fetched ({app.redactor.redact_text(first)[:200]})"
+        return f"the target {target} could not be fetched ({fetch_cause(app, exc)})"
     return None
 
 
@@ -512,9 +524,30 @@ class _Step:
         return None
 
     def _skipped(self, why: str) -> PlanStep:
-        """No plan step in this run, and nothing written to a plan ledger: no unit of a plan runs."""
+        """No plan step in this run, and nothing written to a plan ledger. The target could not be fetched, so the plan
+        files may be old and no ledger can be read from origin: what the clone last fetched decides. While a plan
+        file's ledger says the plan is open (active, waiting or stopped) no unit runs; else the units the plan files
+        list stay held and the units that no plan lists run, as they do when the step fails (`failed_plan_step`)."""
         log.warning("no plan step in this run: %s", why)
-        return self._result(frozenset(), start_next_run=False, extra=(f"plan step skipped: {why}",), reason=why)
+        extra = (f"plan step skipped: {why}",)
+        if not self.files:  # the repository had plan files once and this clone sees none: nothing is known
+            return self._result(frozenset(), start_next_run=False, extra=extra, reason=why)
+        try:
+            held = holds_of({}, self.files).held
+            open_plan = any(
+                (read := _store(self.app, self.cfg, self.git, f.plan_id).read_local()) is not None
+                and fold_plan(f.plan_id, read.events).status in ("active", "waiting", "stopped")
+                for f in self.files
+                if f.plan is not None and f.plan.target == self.target and PLAN_ID.match(f.plan_id)
+            )
+        except Exception as exc:  # noqa: BLE001 - the holds cannot be known: no unit runs
+            log.warning("plan step skipped: the plan files or ledgers cannot be read (%s)", type(exc).__name__)
+            return self._result(frozenset(), start_next_run=False, extra=extra, reason=why)
+        if open_plan:
+            return self._result(frozenset(), start_next_run=False, extra=extra, reason=why)
+        return self._result(
+            frozenset(u for u in self.snaps if u not in held), start_next_run=False, extra=extra, reason=why
+        )
 
     def run(self) -> PlanStep:
         if self.unconfirmed is not None:
@@ -608,7 +641,7 @@ class _Step:
         try:
             self.git.fetch("origin", refspecs=(spec,), config=fetch_auth_config(self.cfg, self.app.environ))
         except GitError as exc:
-            log.warning("the target %s could not be fetched: %s", self.target, str(exc).splitlines()[0][:200])
+            log.warning("the target %s could not be fetched: %s", self.target, fetch_cause(self.app, exc))
             return None
         return self.git.rev_parse(f"refs/remotes/origin/{self.target}")
 
@@ -899,6 +932,9 @@ class _Step:
                 return self._rejected(ctx, snap)
             if phase in STOPPED_PHASES:
                 return self._stop(ctx, f"unit_{phase}", snap.state.halt_detail or snap.state.halt_reason, current)
+            ended = not_started_pending(ctx.read.events, current)
+            if ended is not None and self._unit_action(snap) in _ACTIONABLE:
+                return self._not_started(ctx, snap, ended)
             if phase not in FINISHED_PHASES and phase in WAIT_PHASES and self._unit_action(snap) not in _ACTIONABLE:
                 return self._wait(ctx, phase, current, snap)
         pending = merged_not_integrated(plan, state, self._phases())  # R10: every merged unit is post-checked first
@@ -945,9 +981,10 @@ class _Step:
 
     def _rejected(self, ctx: _Ctx, snap: UnitSnapshot) -> PlanStep:
         """The current unit is `rejected` (R8). The stop records the spec digest the unit was rejected at. `retry`
-        never moves a rejected unit (`retry.refuse`), so the step does not ask it: the person corrects the spec, the
-        next run records `inputs_changed`, CI reviews, `l4 yolo activate` freezes the new digest, and then the unit's
-        own next run reads the corrected spec (L4-YOLO-012). That run is dispatched here, with its charge, once per
+        never moves a rejected unit (`retry.refuse`), so the step does not ask it: the person fixes the cause.
+        A corrected spec: the next run records `inputs_changed`, CI reviews, `l4 yolo activate` freezes the new digest.
+        A corrected configuration: `l4 yolo activate` alone (`rejection_pending` ends at an activation). Then the
+        unit's own next run reads it (L4-YOLO-012). That run is dispatched here, with its charge, once per
         activation; a unit that is still rejected after it stops the plan again."""
         unit, state = snap.ref.id, ctx.state
         rejections = [
@@ -965,8 +1002,8 @@ class _Step:
         detail = detail or snap.state.halt_reason
         if seen is not None and seen != now:
             detail = (
-                f"{unit} is still rejected after its spec was fixed: correct the spec, or run l4 restart --unit "
-                f"{unit} --reason TEXT, then l4 yolo resume {ctx.plan_id} --reason TEXT"
+                f"{unit} is still rejected after its spec was fixed: fix the cause (its spec or the configuration), "
+                f"or run l4 restart --unit {unit} --reason TEXT, then l4 yolo resume {ctx.plan_id} --reason TEXT"
             )
         return self._stop(ctx, "unit_rejected", detail, unit, digest=now)
 
@@ -1007,6 +1044,8 @@ class _Step:
         unit = state.current
         if state.wait_reason == MERGE_NOT_READY:
             return self._merge_wait_gone(ctx, unit)
+        if state.wait_reason == UNIT_NOT_STARTED:  # the wait is for the next trigger, which runs the unit once more
+            return "the cause is gone: the next trigger runs the unit again"
         if unit is None and ctx.file.plan is not None:  # waiting on the unit the plan would dispatch (review #2)
             unit = next_eligible(ctx.file.plan, state, self._phases()).unit
             nxt = self.snaps.get(unit) if unit else None
@@ -1039,6 +1078,30 @@ class _Step:
         reason = f"unit_{phase}"
         self._write(ctx, [self._event("plan.waiting", reason=reason, unit=unit, detail=detail)])
         self._line(ctx.plan_id, f"waiting ({reason}, {unit}): {detail}")
+        return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
+
+    def _not_started(self, ctx: _Ctx, snap: UnitSnapshot, ended: PlanEvent) -> PlanStep:
+        """The last run of the current unit ended before it started the unit (L4-YOLO-013). The plan waits with
+        `unit_not_started` and the run's exit and reason on record, once per failed run, and chains no run: the next
+        trigger (cron or push) runs the unit again, once. This run still runs it, and is charged like a dispatch, so
+        `max_runs` bounds a unit that never starts. A run that starts the unit clears the wait (`record_run_starts`)."""
+        unit = snap.ref.id
+        recorded = next(
+            (
+                e for e in reversed(ctx.read.events)
+                if e is ended or (e.type == "plan.waiting" and e.data.get("reason") == UNIT_NOT_STARTED)
+            ),
+            None,
+        )  # fmt: skip
+        events = [self._charged(ctx, unit, snap, extra_run=1)]
+        if recorded is ended:
+            detail = (
+                f"its run {ended.data.get('run')} ended before it started the unit "
+                f"(exit {ended.data.get('exit')}): {ended.data.get('detail')}"
+            )
+            events.insert(0, self._event("plan.waiting", reason=UNIT_NOT_STARTED, unit=unit, detail=detail[:400]))
+            self._line(ctx.plan_id, f"waiting ({UNIT_NOT_STARTED}, {unit}): {detail}")
+        self._write(ctx, events)
         return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
 
     def _wait_merge(self, ctx: _Ctx, unit: str) -> PlanStep:
@@ -1355,8 +1418,11 @@ class _Step:
 def rejection_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
     """The `unit.rejected` record of `unit` when its latest run, the one the plan dispatched, rejected it: no
     `unit.dispatched` came after it. A rejection leaves the unit with no phase and its ledger stays in the job's
-    worktree, so this record is how the next run's plan step knows (M2, L4-YOLO-013)."""
+    worktree, so this record is how the next run's plan step knows (M2, L4-YOLO-013). A later `plan.activated` ends
+    it: the person fixed the cause (the spec or the configuration) and the unit's next run reads it."""
     for event in reversed(events):
+        if event.type == "plan.activated":
+            return None
         if event.data.get("unit") != unit:
             continue
         if event.type == "unit.rejected":
@@ -1364,6 +1430,68 @@ def rejection_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | Non
         if event.type in ("unit.dispatched", "unit.integrated"):
             return None
     return None
+
+
+def not_started_pending(events: Sequence[PlanEvent], unit: str) -> PlanEvent | None:
+    """The `unit.not_started` record of `unit` when the latest run of it that the plan dispatched ended before the unit
+    started and no run has started it since (L4-YOLO-013). `unit.dispatched` does not end it (the step dispatches
+    before the run); `unit.started`, an integration, a new activation and a person's resume do."""
+    for event in reversed(events):
+        if event.type == "plan.activated" or (event.type == "plan.resumed" and event.data.get("by") != "harness"):
+            return None
+        if event.data.get("unit") != unit:
+            continue
+        if event.type == "unit.not_started":
+            return event
+        if event.type in ("unit.started", "unit.integrated"):
+            return None
+    return None
+
+
+def record_run_starts(
+    app: AppContext, cfg: L4Config, git: Git, step: PlanStep, not_started: Mapping[str, tuple[int, str]],
+    began: Collection[str],
+) -> bool:  # fmt: skip
+    """After the run: the current unit of the active plan that the step let run and whose run ended before the unit
+    started (no `run.started`: a usage error, a lease or worktree failure, a missing CLI) gets `unit.not_started{unit,
+    run, exit, detail}`, so the next plan step waits instead of chaining one more run (L4-YOLO-013); the unit's run
+    that did begin gets `unit.started{unit, run}` when such a record is pending. True when a pending record was
+    cleared: the caller chains the next run as the dispatch would have. A failure is a warning: the run limit is the
+    brake."""
+    units = [u for u in (*not_started, *began) if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return False
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            if state.status not in ("active", "waiting") or state.current not in units:
+                return False
+            unit = state.current
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            pending = not_started_pending(read.events, unit)
+            if unit in not_started:
+                if pending is not None and pending.data.get("run") == app.run_id:
+                    return False  # recorded already
+                code, detail = not_started[unit]
+                data = {"unit": unit, "run": app.run_id, "exit": code, "detail": detail[:300]}
+                events, cleared = [PlanEvent("unit.not_started", at, data)], False
+            elif pending is not None:
+                events, cleared = [PlanEvent("unit.started", at, {"unit": unit, "run": app.run_id})], True
+            else:
+                return False
+            try:
+                store.append(events, expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s %s", step.plan_id, unit, "started" if cleared else "did not start in its run")
+            return cleared
+        log.warning("plan %s: the start of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the start of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+    return False
 
 
 def record_rejections(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, rejected: Mapping[str, str]) -> None:
@@ -1441,10 +1569,13 @@ __all__ = [
     "REVIEW_KEY",
     "auto_plan_units",
     "failed_plan_step",
+    "fetch_cause",
     "live_plan",
     "local_states",
+    "not_started_pending",
     "plan_holds",
     "record_rejections",
+    "record_run_starts",
     "rejection_pending",
     "review_batches",
     "unreadable_plan_files",

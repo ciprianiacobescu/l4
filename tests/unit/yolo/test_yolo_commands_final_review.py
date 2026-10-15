@@ -81,11 +81,14 @@ def rejected_world(world):
     )
 
 
-def test_review_of_a_rejected_plan_with_the_same_spec_says_to_fix_the_spec(world, forge, capsys):
+def test_review_of_a_rejected_plan_with_the_same_spec_says_to_fix_the_cause(world, forge, capsys):
     rejected_world(world)
     assert world.l4("review", "p1") == 0
     out = capsys.readouterr().out
-    assert f"{B} was rejected and its spec has not changed: fix the spec and push it" in out
+    assert (
+        f"{B} was rejected and its spec has not changed: fix the cause" in out
+        and "The configuration: nothing to review" in out
+    )
     assert "stops the plan with inputs_changed and CI reviews it" in out and "review requested" not in out
     assert forge.called("start_run") == []
 
@@ -112,7 +115,8 @@ def test_status_of_a_rejected_plan_names_the_fix(world, capsys):
     rejected_world(world)
     assert world.l4("status", "p1") == 0
     out = capsys.readouterr().out
-    assert f"Next: fix the spec of {B} and push it (the next run records inputs_changed and CI reviews the plan)" in out
+    assert f"Next: fix the cause of the rejection of {B}: its spec (push it; the next run records inputs_changed" in out
+    assert "or the configuration, then l4 yolo activate p1" in out
 
 
 # --- #13: where the attempts of each unit start ---------------------------------------------------------------------

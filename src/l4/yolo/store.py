@@ -119,6 +119,15 @@ class PlanStore:
         ledger = files.pop(LEDGER_FILE, b"").decode("utf-8")
         return PlanRead(head, parse_ledger(ledger), {p: b.decode("utf-8", "replace") for p, b in files.items()})
 
+    def read_local(self) -> PlanRead | None:
+        """The ledger as the clone last fetched it, with no network call: None when the ref was never fetched. For a
+        step that cannot reach the origin and only needs to know which plans were open."""
+        head = self.git.rev_parse(self.ref)
+        if head is None:
+            return None
+        ledger = self._files_at(head).get(LEDGER_FILE, b"").decode("utf-8")
+        return PlanRead(head, parse_ledger(ledger), {})
+
     def _fetch(self) -> str | None:
         try:
             self.git.fetch("origin", refspecs=(f"+{self.ref}:{self.ref}",), config=self.config)

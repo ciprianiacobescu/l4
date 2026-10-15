@@ -36,7 +36,7 @@ import contextlib
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -103,7 +103,7 @@ from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
-from l4.yolo.cycle import PlanStep, failed_plan_step, record_rejections, yolo_step
+from l4.yolo.cycle import PlanStep, failed_plan_step, record_rejections, record_run_starts, yolo_step
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -205,6 +205,7 @@ class RunWaits:
 
     waited_s: int = 0
     began: datetime | None = None
+    started: set[str] = field(default_factory=set)  # the units whose run ledger was opened (`run.started` written)
 
 
 class Orchestrator:
@@ -1281,6 +1282,8 @@ def run_unit_in_worktree(
     writer = acquire_for_run(lease, open_writer)
     if writer is None:
         return _busy(snapshot.state.phase, ref)
+    if waits is not None:
+        waits.started.add(ref.id)  # `run.started` is written: a plan tells this run from one that never began
     code: int = ExitCode.INTERNAL_ERROR
     failed = True
     orchestrator: Orchestrator | None = None
@@ -1400,6 +1403,11 @@ def run_command(
         record_rejections(app, cfg, git, step, result.rejected)
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
+    try:  # a unit whose run ended before it started waits for the next trigger; one that began clears that wait
+        if record_run_starts(app, cfg, git, step, result.not_started, result.began) and not step.start_next_run:
+            step = replace(step, start_next_run=True)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
     _start_next_run(app, cfg, step)
     log_artefacts(app.out_dir, app.run_id)
@@ -1502,6 +1510,7 @@ def run_units(
     codes: list[int] = []
     units: list[UnitOutcome] = []
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
+    not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
@@ -1534,9 +1543,13 @@ def run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
+        if ref.id not in waits.started:  # a usage error, a lease or worktree failure, a busy unit: it never began
+            why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
+            not_started[ref.id] = (int(done.exit_code), why)
         if done.exit_code == ExitCode.REJECTED:
             rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
-    return CommandResult(most_severe(codes), units, rejected=rejected)
+    began = [ref.id for _, ref in chosen if ref.id in waits.started]
+    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began)
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:

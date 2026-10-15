@@ -237,11 +237,12 @@ def test_resume_never_clears_a_changed_spec(world, capsys):
     assert "run l4 yolo review p1, then l4 yolo activate p1" in resume(world, capsys)
 
 
-def test_resume_of_a_rejected_unit_says_to_fix_the_spec_first(world, capsys):  # review #8
+def test_resume_of_a_rejected_unit_says_to_fix_the_cause_first(world, capsys):  # review #8
     active_world(world, ev("plan.stopped", reason="unit_rejected", unit=B))
     err = resume(world, capsys)
-    assert "openspec:add-b was rejected: fix its spec and push it" in err
-    assert "the next run stops the plan with inputs_changed and CI reviews it, then l4 yolo activate p1" in err
+    assert "openspec:add-b was rejected: fix the cause, its spec (push it" in err
+    assert "the next run stops the plan with inputs_changed and CI reviews it) or the configuration" in err
+    assert "then l4 yolo activate p1" in err
 
 
 def test_resume_waits_for_the_questions(world, monkeypatch, capsys):
