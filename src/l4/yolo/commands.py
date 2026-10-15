@@ -307,12 +307,19 @@ def _first_line(findings: Any) -> str:
 
 
 def _review_view(
-    plan: Plan, text: str, state: PlanState, events: Sequence[PlanEvent], now: Mapping[str, str]
+    plan: Plan,
+    text: str,
+    state: PlanState,
+    events: Sequence[PlanEvent],
+    now: Mapping[str, str],
+    *,
+    prompt_matters: bool = True,
 ) -> ReviewView:
+    """`prompt_matters` False: show the review as it was made (a plan that needs no new review)."""
     if state.review_plan_digest is None:
         return ReviewView("none")
     wanted = [u for u in plan.unit_ids()] + [f"batch:{b.id}" for b in plan.batches if len(b.units) > 1]
-    if state.review_prompt_version != PROMPT_VERSION:
+    if prompt_matters and state.review_prompt_version != PROMPT_VERSION:
         return ReviewView("stale", prompt_changed=True)
     stale = state.review_plan_digest != plan_digest(text)
     stale = stale or any(state.review_digests.get(u) != now.get(u) for u in plan.unit_ids())
@@ -940,6 +947,8 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
         )
     if status in ("waiting", "stopped"):
         resume = f"l4 yolo resume {plan_id} --reason TEXT"
+        if blocker and blocker.fix.startswith(resume.split(" --")[0]):
+            return blocker.fix  # a limit: the fix is the resume itself, with the flag
         return f"{blocker.fix}, then {resume}" if blocker else resume
     if status == "active":
         return f"nothing: CI advances the plan at each run (l4 yolo cancel {plan_id} --reason TEXT stops it)"
@@ -978,7 +987,12 @@ def _describe(
     }  # fmt: skip
     view = None
     if plan is not None and file is not None and rev is not None:
-        view = _review_view(plan, file.text, state, read.events, _digests(ctx, plan, units))
+        needs_review = state.status in _BEFORE_ACTIVATION or (
+            state.status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")
+        )  # only there a review under an older prompt means a new review
+        view = _review_view(
+            plan, file.text, state, read.events, _digests(ctx, plan, units), prompt_matters=needs_review
+        )
         out["review"] = {"state": view.kind, "problems": list(view.problems)}
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True

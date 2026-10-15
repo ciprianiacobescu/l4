@@ -330,3 +330,43 @@ def test_a_bad_extension_is_a_usage_error(world, capsys):
 def test_resume_blocker_is_pure_and_total():
     state = PlanState(plan_id="p1", status="stopped", stop_reason="something_new")
     assert commands.resume_blocker("p1", state, [], None, {}, commands.Extend()) is None  # an unknown cause: --reason
+
+
+def _legacy_review_world(world, *events):
+    """A plan reviewed under the first review prompt (no prompt_version in the ledger), activated, then `events`."""
+    world.push_plan()
+    old = world.reviewed()
+    old.data.pop("prompt_version")
+    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]), old,
+               ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={A: world.digest(A),
+                  B: world.digest(B)}, limits={"max_runs": 1}, by="a", reason="r"), *events)  # fmt: skip
+    return world
+
+
+def test_a_limit_stop_after_an_activation_under_an_older_prompt_shows_no_stale_review(world, capsys):
+    """LOW-4: the plan needs a resume, not a new review; the note about the prompt is for a plan that needs one."""
+    _legacy_review_world(world, ev("plan.charged", unit=A, attempt=1, cost_usd=0.0, runs=1),
+                         ev("plan.stopped", reason="limit_runs", detail="1 of 1 runs", unit=A))  # fmt: skip
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert "stale" not in out and "the review prompt changed" not in out and "review: current" in out
+
+
+def test_inputs_changed_after_an_older_prompt_review_still_asks_for_a_new_review(world, capsys):
+    _legacy_review_world(world, ev("plan.stopped", reason="inputs_changed", detail="plan", unit=None))
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    assert "review: stale (the review prompt changed)" in capsys.readouterr().out
+
+
+def test_the_next_line_of_a_limit_stop_is_one_resume_command(world, capsys):
+    """LOW-5: `l4 yolo resume p1 --reason TEXT --extend-runs N`, not that command followed by a second resume."""
+    active_world(
+        world, ev("plan.charged", unit=A, cost_usd=1.0, runs=5, attempts=1), ev("plan.stopped", reason="limit_runs")
+    )
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    nxt = next(line for line in out.splitlines() if line.startswith("Next:"))
+    assert nxt == "Next: l4 yolo resume p1 --reason TEXT --extend-runs N"
