@@ -45,6 +45,13 @@ tests/eval/seeds/units/<id>/          proposal.md, tasks.md (one task), specs/<c
 each reference). **Any byte of the seed set changes `seed_set_sha256`**, so a new unit starts a new baseline: the gate
 refuses to compare across it (`--allow-seed-change` prints deltas only).
 
+Seed-set changes so far: (1) the `## Purpose` of `add-late-fee` was lengthened from 40 to 57 characters, because intake
+rule L4-OSP-007 (a delta of a capability with no baseline in `openspec/specs/` needs a Purpose of 50+ characters) now
+applies to the seeds; the new `seed_set_sha256` is `0169574d...`. **This breaks comparability with every earlier
+baseline**, including `docs/eval/2026-10-08/` (`ed59f51d...`), whose cells would be rejected at intake today: the next
+live run is a new baseline, and `--compare` against the old one needs `--allow-seed-change` (deltas only). The hash is
+computed, not stored; the copy in `tests/integration/golden/eval_scorecard.json` is updated with the seed.
+
 ## Command lines
 
 Put `--out` outside `/tmp` (the gate sandbox mounts a tmpfs there; finding H1 of the free run). Warm the uv cache once

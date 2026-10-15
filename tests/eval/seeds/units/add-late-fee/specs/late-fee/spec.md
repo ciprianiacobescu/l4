@@ -1,7 +1,7 @@
 # Spec Delta
 
 ## Purpose
-The fee that an overdue balance carries.
+The fee that an overdue balance carries until it is paid.
 
 ## ADDED Requirements
 

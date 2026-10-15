@@ -40,9 +40,6 @@ def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(OpenSpecProvider, "validate", lambda self, unit, strict=True: ValidationReport(True, ()))
     monkeypatch.setattr(OpenSpecCli, "run_json", lambda self, *a: CliResult(a, 0, {"items": [{"valid": True}]}))
     monkeypatch.setitem(services.HOOKS, "clarify", "l4_test_no_clarifier:clarify_hook")
-    # the Purpose of the seed `add-late-fee` has 40 characters (L4-OSP-007 wants 50). The seeds are frozen by
-    # `seed_set_sha256` (L4-EVAL-022): the rule is switched off here and the seed is left to the eval owner
-    monkeypatch.setattr("l4.orchestrator.purpose_issues", lambda unit_dir, specs_root: [])
 
 
 def result(phase: str, **over: Any) -> dict[str, Any]:
