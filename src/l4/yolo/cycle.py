@@ -45,6 +45,7 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from fnmatch import fnmatchcase
 from typing import Any
 
 from l4.agents.base import AgentAdapter
@@ -83,7 +84,7 @@ from l4.yolo.model import (
     Verdict,
     YoloStep,
 )
-from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_files_at, unit_infos
+from l4.yolo.plans import PlanFile, archived_at, holds_of, listed_ids, plan_files, plan_files_at, unit_infos
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
@@ -99,6 +100,7 @@ RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current un
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
 _REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
+_NEVER_HELD = frozenset({"merged", "archived"})  # phases `yolo.hold` leaves alone
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
 _USERINFO = re.compile(r"(?<=//)[^/@\s]+@")
 
@@ -151,17 +153,31 @@ def live_plan(files: Sequence[PlanFile], states: Mapping[str, PlanState], target
     return None
 
 
+def config_holds(cfg: L4Config, unit_ids: Collection[str], listed: Collection[str]) -> dict[str, Hold]:
+    """The units `yolo.hold` holds (L4-ADO-011): an id or an `fnmatch` pattern of the setting matches the unit and no
+    plan file lists it (`listed`: the ids of every readable plan file, planned or excluded). No ledger, no model."""
+    patterns = cfg.yolo.hold
+    return {
+        unit: Hold("held by yolo.hold", "is held by yolo.hold")
+        for unit in unit_ids
+        if unit not in listed and any(fnmatchcase(unit, pattern) for pattern in patterns)
+    }
+
+
 def plan_holds(
     files: Sequence[PlanFile],
     states: Mapping[str, PlanState],
     phases: Mapping[str, str | None],
     target: str,
+    cfg: L4Config | None = None,
 ) -> dict[str, Hold]:
     """The units that get no new agent work from the plans, with the reason (design D10): a unit listed in a plan that
     is not final is held (`held by plan p1 (reviewed)`); in the active plan only the current or eligible unit is
     free and the others wait for what `next_eligible` says; while a plan is active a unit outside every plan is
     `not in the active plan p1`. A unit the plan has integrated is no hold. A cancelled plan still holds its units, and
-    a plan file that is not a plan holds the ids its JSON names, shown as `invalid` (R8)."""
+    a plan file that is not a plan holds the ids its JSON names, shown as `invalid` (R8). With `cfg`, a unit that
+    `yolo.hold` matches and no plan file lists is `held by yolo.hold`, whether or not a plan is active; a merged or
+    archived unit is never held by it (L4-ADO-011)."""
     invalid = {f.plan_id for f in files if f.plan is None}
     held = {
         unit: (pid, "invalid" if pid in invalid else status)
@@ -172,8 +188,15 @@ def plan_holds(
     if live is not None and live.plan is not None:
         eligibility = next_eligible(live.plan, states[live.plan_id], phases)
     holds: dict[str, Hold] = {}
+    from_config = (
+        config_holds(cfg, [u for u, p in phases.items() if p not in _NEVER_HELD], set().union(*map(listed_ids, files)))
+        if cfg is not None and cfg.yolo.hold
+        else {}
+    )
     for unit in phases:
-        if unit in held:
+        if unit in from_config:
+            holds[unit] = from_config[unit]
+        elif unit in held:
             plan_id, status = held[unit]
             if live is not None and plan_id == live.plan_id and eligibility is not None:
                 state = states[plan_id]
@@ -372,15 +395,24 @@ def yolo_step(
         if unconfirmed is None:
             ledgers = _ledger_plans(app, cfg, git) if had else []
             if not ledgers:
-                return PlanStep(allow=None)
+                return _config_step(cfg, found)
         elif not had:
-            return PlanStep(allow=None)
+            return _config_step(cfg, found)
     named = frozenset(s.ref.id for _, s in found) if read_only else None  # the units `l4 run --unit` names
     if all_units is not None:
         found = all_units()
     step = _Step(app, cfg, git, found, files, forge, adapters, profiles, sandbox, now, confirm_wait_s)
     step.ledgers, step.sleep, step.named, step.unconfirmed = ledgers, sleep, named, unconfirmed
     return step.preview() if read_only else step.run()
+
+
+def _config_step(cfg: L4Config, found: Sequence[tuple[SpecProvider, UnitSnapshot]]) -> PlanStep:
+    """The step of a repository with no plan: every unit, but those `yolo.hold` holds (L4-ADO-011)."""
+    if not cfg.yolo.hold:
+        return PlanStep(allow=None)
+    holds = plan_holds([], {}, {s.ref.id: s.state.phase for _, s in found}, cfg.forge.base_branch, cfg)
+    allow = frozenset(s.ref.id for _, s in found if s.ref.id not in holds)
+    return PlanStep(allow=allow, refusals={u: h.refusal for u, h in holds.items()})
 
 
 def _had_plan_files(git: Git, rev: str = "HEAD") -> bool:
@@ -601,6 +633,8 @@ class _Step:
                 self._merge_not_ready, self._merge_heads, self._head_asked = {}, {}, set()
                 self._file_deleted()
                 if not self.files:  # every plan file is gone: the units are ordinary units again
+                    if self.cfg.yolo.hold:
+                        return self._result(None, start_next_run=False)
                     return PlanStep(allow=None, actions=tuple(self.actions))
                 self._rejected_fixed()
                 done = self._reviews()
@@ -628,7 +662,7 @@ class _Step:
     ) -> PlanStep:  # fmt: skip
         """`allow` None: every unit that no plan holds (and, while a plan is active, none unless the step names it)."""
         states = self._states()
-        holds = plan_holds(self.files, states, self._phases(), self.target)
+        holds = plan_holds(self.files, states, self._phases(), self.target, self.cfg)
         live = live_plan(self.files, states, self.target)
         if allow is None:
             allow = frozenset(u for u in self.snaps if u not in holds)
@@ -1691,6 +1725,7 @@ __all__ = [
     "PlanStep",
     "REVIEW_KEY",
     "auto_plan_units",
+    "config_holds",
     "failed_plan_step",
     "fetch_cause",
     "live_plan",

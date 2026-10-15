@@ -805,6 +805,7 @@ def run_review(
             rev=rev,
             done=done_units(parsed, state),
             delivered=delivered_on_target(archived_at(ctx.git, rev, ctx.cfg), units.phases),
+            prior=fnd.prior_entries(read.events, PROMPT_VERSION),
             sandbox_for=sandbox_for,
         )
     except RoleLimit as exc:
