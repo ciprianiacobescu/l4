@@ -100,6 +100,7 @@ def test_the_script_needs_only_the_standard_library_and_loads_no_other_module():
         "argparse",
         "datetime",
         "decimal",
+        "fnmatch",
         "heapq",
         "json",
         "os",
@@ -807,3 +808,407 @@ def test_the_script_runs_with_the_system_python_too():
         pytest.skip("no /usr/bin/python3")
     done = subprocess.run([python3, "-I", str(SCRIPT), "--help"], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0
+
+
+# --- OpenSpec deltas against the baseline (L4-ADO-009; SCN-ADO-26, -27, -28) ----------------------------------
+
+PURPOSE_60 = "## Purpose\n\n" + "The dreaming capability keeps what a session learned for later. " + "\n"
+DELTA_ADDED = "## ADDED Requirements\n\n### Requirement: A thing\nIt SHALL do it.\n"
+
+
+def delta(repo: Path, unit: str, cap: str, body: str) -> None:
+    touch(repo, f"openspec/changes/{unit}/specs/{cap}/spec.md", body)
+
+
+def baseline(repo: Path, cap: str) -> None:
+    touch(repo, f"openspec/specs/{cap}/spec.md", "## Purpose\n\nx\n")
+
+
+def lines_of(out: str, code: str) -> list[str]:
+    return [line for line in out.splitlines() if f": {code}: " in line or line.startswith(f"{code}:")]
+
+
+@pytest.mark.parametrize("header", ["MODIFIED", "RENAMED", "REMOVED"])
+def test_a_delta_with_no_baseline_is_reported(repo, header):  # SCN-ADO-26
+    change(repo, "a")
+    delta(repo, "a", "dreaming", PURPOSE_60 + f"\n## {header} Requirements\n\n### Requirement: A thing\nx\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    found = lines_of(out, "spec_no_baseline")
+    assert len(found) == 1
+    assert (
+        "openspec:a" in found[0]
+        and "specs/dreaming/spec.md" in found[0]
+        and "openspec/specs/dreaming/spec.md" in found[0]
+    )
+
+
+def test_a_modified_delta_with_a_baseline_is_fine(repo):
+    change(repo, "a")
+    baseline(repo, "dreaming")
+    delta(repo, "a", "dreaming", "## MODIFIED Requirements\n\n### Requirement: A thing\nx\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+
+
+def test_an_added_only_new_capability_with_a_purpose_is_fine(repo):  # SCN-ADO-27
+    change(repo, "a")
+    delta(repo, "a", "dreaming", PURPOSE_60 + "\n" + DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+
+
+def test_a_new_capability_without_a_purpose_is_reported(repo):  # SCN-ADO-28
+    change(repo, "a")
+    delta(repo, "a", "dreaming", DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert len(lines_of(out, "spec_no_purpose")) == 1 and "openspec:a" in out
+
+
+def test_a_delta_of_a_capability_with_a_baseline_needs_no_purpose(repo):
+    change(repo, "a")
+    baseline(repo, "dreaming")
+    delta(repo, "a", "dreaming", DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+
+
+def test_spec_no_purpose_agrees_with_the_purpose_rule_of_the_harness():
+    from l4.specs import openspec as harness
+
+    assert vp.MIN_PURPOSE_CHARS == harness.MIN_PURPOSE_CHARS
+    assert vp.MAX_PURPOSE_BYTES == harness.MAX_PURPOSE_BYTES
+    cases = {
+        "none": "## ADDED Requirements\n",
+        "empty": "## Purpose\n\n## ADDED Requirements\n",
+        "short": "## Purpose\nshort one\n\n## ADDED Requirements\n",
+        "49": "## Purpose\n" + "x" * 49 + "\n\n## ADDED Requirements\n",
+        "50": "## Purpose\n" + "x" * 50 + "\n## ADDED Requirements\n",
+        "wrapped": "## Purpose\n" + ("word " * 5 + "\n") * 3 + "## ADDED Requirements\n",
+        "spaces": "## Purpose\n" + "a" + " " * 80 + "b\n## ADDED Requirements\n",
+        "bullets": "## Purpose\n- " + "y" * 60 + "\n",
+    }
+    for name, text in cases.items():
+        assert vp.purpose_ok(text) == harness_purpose_ok(harness, text), name
+
+
+def harness_purpose_ok(harness, text: str) -> bool:
+    import re
+
+    match = re.search(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return len(harness._flat(match.group(1), 1500) if match else "") >= harness.MIN_PURPOSE_CHARS
+
+
+def test_purpose_issues_of_the_harness_agrees_when_it_exists(tmp_path):
+    from l4.specs import openspec as harness
+
+    issues = getattr(harness, "purpose_issues", None)
+    if issues is None:
+        pytest.skip("purpose_issues (task 3.3) is not in this worktree yet")
+    root = tmp_path / "r"
+    change(root, "a")
+    (root / "openspec" / "specs").mkdir(parents=True)
+    delta(root, "a", "short", "## Purpose\nshort\n\n" + DELTA_ADDED)
+    delta(root, "a", "long", PURPOSE_60 + DELTA_ADDED)
+    harness_caps = {i for i in issues(root / "openspec/changes/a", root / "openspec/specs")}
+    ours = vp.purpose_problems(root, "openspec", "a")
+    assert len(harness_caps) == len(ours) == 1
+
+
+def test_only_planned_units_are_read_for_deltas(repo):
+    change(repo, "a")
+    change(repo, "b")
+    delta(repo, "b", "dreaming", DELTA_ADDED)
+    put(repo, plan("p1", [units("openspec:a")], exclude=[{"id": "openspec:b", "reason": "r"}]))
+    assert run(repo)[0] == 0
+
+
+# --- review budgets (L4-ADO-010; SCN-ADO-29, -30, -31) -------------------------------------------------------
+
+
+def test_the_review_constants_equal_the_harness():
+    from l4.yolo import digest, readiness
+
+    assert vp.MAX_FILE_CHARS == readiness.MAX_FILE_CHARS
+    assert vp.MAX_FOLDER_CHARS == readiness.MAX_FOLDER_CHARS
+    assert vp.MAX_DEPENDENCY_CHARS == readiness.MAX_DEPENDENCY_CHARS
+    assert vp.EXCLUDED_DIRS == digest.EXCLUDED_DIRS
+    assert vp.EXCLUDED_FILES == digest.EXCLUDED_FILES
+    assert vp.TASK_MARKER.pattern == digest._MARKER.pattern
+
+
+def big_unit(repo: Path, name: str, tasks_chars: int = 7000, lead: int = 20_148 - 1) -> None:
+    # spec files first (alphabetical), tasks.md last: the dependency budget of 20,000 runs out inside tasks.md
+    change(repo, name)
+    touch(repo, f"openspec/changes/{name}/design.md", "d" * 100)
+    touch(repo, f"openspec/changes/{name}/spec-a.md", "a" * 19_000)
+    touch(repo, f"openspec/changes/{name}/spec-b.md", "b" * (lead - 19_000 - 100 - 1))
+    touch(repo, f"openspec/changes/{name}/tasks.md", "t" * (27_148 - lead))
+
+
+def test_a_dependency_over_its_budget_is_a_warning_and_exit_0(repo):  # SCN-ADO-29
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 19_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 8_148)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+    found = [line for line in out.splitlines() if "material_over_budget" in line]
+    assert found == [
+        "warning: material_over_budget: openspec:a: openspec/changes/a/tasks.md: 7148 characters cut "
+        "(as a dependency of openspec:b)"
+    ]
+
+
+def test_a_cut_of_a_planned_units_own_folder_is_a_problem(repo):
+    change(repo, "a")
+    touch(repo, "openspec/changes/a/huge.md", "x" * 25_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "p1: material_over_budget: openspec:a: openspec/changes/a/huge.md: 5000 characters cut" in out
+
+
+def test_an_omitted_file_is_reported_with_its_size(repo):
+    change(repo, "a")
+    for n in range(5):
+        touch(repo, f"openspec/changes/a/f{n}.md", "x" * 20_000)
+    touch(repo, "openspec/changes/a/z.md", "x" * 30)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "openspec:a: openspec/changes/a/z.md: omitted" in out and "(30 characters)" in out
+
+
+def test_harness_files_do_not_count(repo):  # SCN-ADO-30
+    change(repo, "a")
+    for n in range(3):
+        touch(repo, f"openspec/changes/a/spec{n}.md", "x" * 19_000)
+    touch(repo, "openspec/changes/a/verification.md", "v" * 30_000)
+    touch(repo, "openspec/changes/a/.l4/log/notes.md", "n" * 30_000)
+    touch(repo, "openspec/changes/a/sub/feedback.md", "f" * 30_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 0 and "material_over_budget" not in out, out
+
+
+def test_a_prerequisite_in_an_outer_batch_dependency_is_read_at_the_dependency_budget(repo):
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 20_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 10)
+    put(
+        repo,
+        plan(
+            "p1",
+            [
+                {"id": "b1", "units": [{"id": "openspec:a"}]},
+                {"id": "b2", "units": [{"id": "openspec:b", "depends_on": ["openspec:a"]}], "depends_on": ["b1"]},
+            ],
+        ),
+    )
+    code, out, _ = run(repo)
+    assert code == 0
+    assert "warning: material_over_budget: openspec:a: openspec/changes/a/tasks.md: omitted" in out
+
+
+def test_the_json_output_carries_the_budget_lines(repo):
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 19_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 8_148)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+    code, out, _ = run(repo, "--json")
+    data = json.loads(out)
+    assert code == 0 and data["ok"] is True
+    assert len(data["budget_warnings"]) == 1 and "7148 characters cut" in data["budget_warnings"][0]
+
+
+def dependency_plan(repo: Path) -> None:
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 19_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 8_148)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+
+
+def test_a_raised_dependency_budget_removes_the_warning(repo):  # SCN-ADO-29a
+    dependency_plan(repo)
+    config(repo, "yolo:\n  review:\n    max_dependency_chars: 30000\n")
+    code, out, err = run(repo)
+    assert code == 0 and "material_over_budget" not in out and err == ""
+
+
+def test_a_lowered_file_budget_reports_a_cut(repo):
+    change(repo, "a")
+    touch(repo, "openspec/changes/a/spec.md", "x" * 5_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+    config(repo, "yolo:\n  review:\n    max_file_chars: 2000\n")
+    code, out, _ = run(repo)
+    assert code == 1 and "openspec:a: openspec/changes/a/spec.md: 3000 characters cut" in out
+
+
+def test_a_lowered_folder_budget_applies_to_planned_units(repo):
+    change(repo, "a")
+    for n in range(3):
+        touch(repo, f"openspec/changes/a/f{n}.md", "x" * 2_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    config(repo, "yolo:\n  review:\n    max_folder_chars: 3000\n")
+    code, out, _ = run(repo)
+    assert code == 1 and "openspec/changes/a/f1.md: 1000 characters cut" in out
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("max_file_chars", "many"),
+        ("max_file_chars", "999"),
+        ("max_folder_chars", "999"),
+        ("max_folder_chars", "5.5"),
+        ("max_dependency_chars", "-1"),
+        ("max_dependency_chars", "true"),
+    ],
+)
+def test_an_invalid_review_limit_falls_back_with_one_warning(repo, key, value):
+    dependency_plan(repo)
+    config(repo, f"yolo:\n  review:\n    {key}: {value}\n")
+    code, out, err = run(repo)
+    assert code == 0 and "7148 characters cut" in out  # the defaults are in force
+    assert err.count(f"yolo.review.{key}") == 1 and err.count("warning:") == 1
+
+
+def test_a_dependency_budget_of_zero_is_valid(repo):
+    dependency_plan(repo)
+    config(repo, "yolo:\n  review:\n    max_dependency_chars: 0\n")
+    code, out, err = run(repo)
+    assert code == 0 and "omitted" in out and err == ""
+
+
+def test_the_review_limits_default_to_the_constants(repo):
+    limits, warnings = vp.read_review_limits(repo)
+    assert limits == (vp.MAX_FILE_CHARS, vp.MAX_FOLDER_CHARS, vp.MAX_DEPENDENCY_CHARS) and warnings == []
+
+
+def budget_world(tmp_path):
+    from .yolo_review_world import World
+
+    world = World(tmp_path)
+    files = {
+        "openspec/changes/u/a.md": "A" * 15_000,
+        "openspec/changes/u/b.md": "B" * 25_000,
+        "openspec/changes/u/c.md": "C" * 19_000,
+        "openspec/changes/u/d.md": "D" * 30,
+        "openspec/changes/u/tasks.md": "- [x] one\n  * [~] two\n1. [-] three\n- [ ] four\n" + "t" * 2_000,
+        "openspec/changes/u/verification.md": "v" * 50_000,
+        "openspec/changes/u/.l4/x.md": "x" * 50_000,
+        "openspec/changes/u/deep/.l4/y.md": "y" * 50_000,
+        "openspec/changes/u/deep/questions.md": "q" * 50_000,
+        "openspec/changes/u/\u00e9t\u00e9.md": "caf\u00e9 " * 3_000,
+        "openspec/changes/u/Z-last.md": "z" * 10,
+    }
+    world.commit(files)
+    (world.repo / "openspec/changes/u/bin.dat").write_bytes(b"ab\0cd")
+    world.git.run("add", "-A")
+    world.git.run("commit", "--quiet", "-m", "bin")
+    return world
+
+
+@pytest.mark.parametrize("budget_name", ["MAX_FOLDER_CHARS", "MAX_DEPENDENCY_CHARS", "tiny"])
+def test_the_validator_reads_a_folder_like_the_review(tmp_path, budget_name):  # SCN-ADO-31
+    from l4.yolo import readiness
+
+    world = budget_world(tmp_path)
+    budget = 3_000 if budget_name == "tiny" else getattr(readiness, budget_name)
+    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=budget)
+    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=budget)
+    assert list(mine.cut) == [(p, n) for p, n in folder.cut]
+    assert [(p, size) for p, size in mine.omitted] == [
+        (o.path, int(o.reason.split("(")[1].split()[0])) for o in folder.omitted if o.size_limit
+    ]
+    assert list(mine.binary) == list(folder.binary)
+
+
+def test_the_validator_shows_the_same_characters_as_the_review(tmp_path):
+    from l4.yolo import readiness
+
+    world = budget_world(tmp_path)
+    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS)
+    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS)
+    assert mine.shown == [(p, len(t)) for p, t in folder.files]
+
+
+# --- yolo.hold (L4-ADO-011; SCN-ADO-36) ------------------------------------------------------------------------
+
+
+def config(repo: Path, text: str) -> None:
+    touch(repo, ".l4/config.yaml", text)
+
+
+def test_a_held_unit_is_not_uncovered(repo):  # SCN-ADO-36
+    change(repo, "a")
+    change(repo, "b")
+    config(repo, "yolo:\n  hold:\n    - openspec:a\n")
+    put(repo, plan("p1", [units("openspec:b")]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+
+
+def test_a_unit_no_hold_matches_is_still_uncovered(repo):
+    for name in ("a", "b", "c"):
+        change(repo, name)
+    config(repo, "yolo:\n  hold:\n    - openspec:a\n")
+    put(repo, plan("p1", [units("openspec:b")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "uncovered: openspec:c" in out and "openspec:a" not in out
+
+
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        'yolo:\n  hold: [openspec:a, "openspec:b*"]\n',
+        "yolo:\n  hold:\n  - \"openspec:a\"\n  - 'openspec:b*'\n",
+        "\ufeffversion: 1\nyolo:\n  mode: x\n  hold:\n    - openspec:a\n    - openspec:b*\n",
+        '"yolo":\n  "hold":\n    - openspec:a\n    - openspec:b*\n',
+    ],
+)
+def test_the_hold_reads_lists_patterns_and_quoted_keys(repo, cfg):
+    for name in ("a", "b1", "b2", "c"):
+        change(repo, name)
+    config(repo, cfg)
+    put(repo, plan("p1", [units("openspec:c")]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+
+
+def test_a_pattern_holds_every_unit_no_plan_lists(repo):
+    for name in ("a", "b"):
+        change(repo, name)
+    config(repo, 'yolo:\n  hold:\n    - "*"\n')
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0
+
+
+def test_a_hold_in_flow_style_yolo_is_ignored_with_a_warning(repo):
+    change(repo, "a")
+    change(repo, "b")
+    config(repo, "yolo: {hold: [openspec:a]}\n")
+    put(repo, plan("p1", [units("openspec:b")]))
+    code, out, err = run(repo)
+    assert code == 1 and "uncovered: openspec:a" in out
+    assert "yolo" in err and "yolo.hold" in err
+
+
+def test_a_malformed_hold_is_ignored_with_a_warning(repo):
+    change(repo, "a")
+    config(repo, "yolo:\n  hold: 5\n")
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, _, err = run(repo)
+    assert code == 0 and "yolo.hold" in err
+
+
+def test_the_help_epilog_names_the_new_checks(repo):
+    for word in ("spec_no_baseline", "spec_no_purpose", "material_over_budget", "yolo.hold"):
+        assert word in vp.HELP_EPILOG

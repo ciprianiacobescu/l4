@@ -34,7 +34,9 @@ Each is a problem (exit 1). The script keeps to the Python standard library.
 `validate_plan.py` SHALL report `material_over_budget` for each file the readiness review would cut or leave out. It
 reads a planned unit's folder at the folder budget, and a dependency at the dependency budget. A dependency is a unit
 in a `depends_on`, or a prerequisite outside its batch. The script reads files the way the review reads them, with the
-same limits. A cut of a planned unit's own folder SHALL be a problem (exit 1); a dependency's cut SHALL be a warning
+same limits: it reads `yolo.review.max_file_chars`, `max_folder_chars` and `max_dependency_chars` from `.l4/config.yaml`
+(block style), and an absent or invalid value gives the review's default (20000, 80000, 20000; one warning on standard
+error for an invalid one). A cut of a planned unit's own folder SHALL be a problem (exit 1); a dependency's cut SHALL be a warning
 that leaves the exit code alone, because the review lists it as not shown in full without blocking. `l4 yolo check`
 SHALL print the same lines for an admitted plan, and its exit code does not change.
 
@@ -43,6 +45,12 @@ SHALL print the same lines for an admitted plan, and its exit code does not chan
 - **WHEN** the validator runs
 - **THEN** it prints `warning: material_over_budget: openspec:a: …/tasks.md: 7148 characters cut (as a dependency of
   openspec:b)` and exits 0
+
+#### Scenario: SCN-ADO-29a (+) A raised budget
+- **GIVEN** the 27,148-character dependency of SCN-ADO-29 and `.l4/config.yaml` with `yolo.review.max_dependency_chars:
+  30000`
+- **WHEN** the validator runs
+- **THEN** it prints no `material_over_budget` line and exits 0
 
 #### Scenario: SCN-ADO-30 (+) Harness files do not count
 - **GIVEN** a planned unit whose spec files hold 79,000 characters, and whose folder also holds a
