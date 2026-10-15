@@ -82,7 +82,7 @@ from l4.yolo.model import (
 )
 from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_files_at, unit_infos
 from l4.yolo.postcheck import run_profile
-from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
 from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
@@ -807,6 +807,9 @@ class _Step:
                 adapters=self.adapters,
                 sandbox=self.sandbox,
                 done=done_units(plan, state),
+                delivered=delivered_on_target(
+                    archived_at(self.git, rev, self.cfg), {u: s.state.phase for u, s in self.snaps.items()}
+                ),
             )
         except (RoleLimit, RoleUnavailable) as exc:  # `JudgeFailed` is a `RoleUnavailable`: nothing is recorded (R9)
             reason = self.app.redactor.redact_text(str(exc) or type(exc).__name__).splitlines()[0][:200]
