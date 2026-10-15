@@ -1370,7 +1370,7 @@ stateDiagram-v2
 3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.
 4. Run `l4 yolo review <plan-id>`. This starts a run on `<base>`. The run reviews the plan.
 5. Run `l4 yolo status <plan-id>`. Read the verdict of each unit and each batch.
-6. If a verdict is not `READY`, correct the spec of the unit on `<base>`. Do steps 4 and 5 again.
+6. If a verdict is not `READY`, follow [12.2a](#122a-procedure-the-review-is-not-ready). Then do steps 4 and 5 again.
 7. Run `l4 yolo activate <plan-id> --reason "<why>"`.
 
 > **WARNING:** `l4 yolo activate` freezes the spec of each unit and the plan file. If a person changes a frozen spec
@@ -1387,7 +1387,9 @@ The activation is refused with exit 2 and the cause in these cases:
   Run `l4 yolo review <plan-id>`. After a harness upgrade, CI reviews again (and the judge agent charges for it) every
   plan that is not yet activated and every plan that is stopped with `inputs_changed`. A plan that is active is not
   reviewed again, and a resume of a plan stopped for a limit needs no new review.
-- A unit or a batch is not `READY`.
+- A unit or a batch is not `READY` and has no acceptance that holds ([12.2a](#122a-procedure-the-review-is-not-ready)).
+  The refusal names the most severe finding of each item and `l4 yolo findings <plan-id>`. An acceptance that no longer
+  holds is named: `the acceptance by <by> was for other material`.
 - `merge: auto` is in the plan, but `forge.merge_policy` is `human`. Set `forge.merge_policy: auto`, or set
   `merge: human` in the plan.
 - The target branch is not on `origin`.
@@ -1402,6 +1404,81 @@ The checks of `l4 yolo check` give these findings, among others:
 
 If the plan file is not valid JSON, `l4 plan` and `l4 yolo status` report the file. Such a file holds no unit. If the
 JSON is readable but the plan is not valid, the file still holds the units that it lists (see 12.5).
+
+### 12.2a Procedure: the review is not `READY`
+
+A unit or a batch is `NEEDS_REVISION` or `BLOCKED`. The review is incremental: a subject whose material was judged
+before keeps its verdict at no cost, so only changed units are judged again. Material is the unit folder, its
+prerequisites as shown, its plan entry and the review prompt version.
+
+1. Run `l4 yolo findings <plan-id>`. It reads the latest review, calls no model and writes nothing. For each subject
+   that is not `READY` it prints every blocking and major finding in full, with an id `F-xxxxxx`, the criterion and a
+   `Resolve:` line, the count of minor findings, and what changed since the previous judgement (`new`, `repeated`,
+   `gone`, `persistent` criteria). `--all` adds `READY` subjects and minor findings; `--json` is for scripts.
+   A `BLOCKED` item with a `schema`, `unit_missing` or `completeness` finding was not reviewed: run the review again,
+   or push the missing folder or remove the unit from the plan.
+2. Do what each `Resolve:` line says: edit the specs of the unit, or the plan file (for example a `depends_on`).
+   A `material_cut` finding names the file, its size, the budget and the key to raise (`yolo.review.max_file_chars`,
+   `max_folder_chars`, `max_dependency_chars` in `.l4/config.yaml`). A prerequisite folder that is cut does not block;
+   it is listed in the `missing` of the dependent unit.
+3. Run `l4 yolo review <plan-id> --worktree`. It reviews the working tree, uncommitted edits included, with the same
+   prompt and rules as CI. It is a dry run: it writes nothing to the plan ledger and charges nothing to the plan. It
+   prints the digests, the verdicts, the findings and the cost, and exits 0 when every subject is `READY` or accepted,
+   else 2. Repeat steps 1 to 3. `--fresh <subject>` (repeatable) judges a subject again even when its material is
+   known.
+4. When every subject is `READY`: commit the plan file and the unit folders, then run
+   `l4 yolo review <plan-id> --worktree --record`. Every subject is a cache hit, so it costs nothing. It records the
+   review as `plan.reviewed` and refuses (exit 2) while a path of the plan has an uncommitted change.
+5. Push. CI finds the review current and does not judge again. Run `l4 yolo activate <plan-id> --reason "<why>"`.
+
+If a unit has a branch on `origin`, CI reads its folder on that branch. The review of the working tree is current for
+CI only when the branch holds the same folder. Otherwise CI reviews it again.
+
+**When the judge keeps finding more.** After real attempts to fix a unit, a person may accept its remaining findings:
+
+```sh
+l4 yolo accept <plan-id> <subject> --reason "<what the implementer should do>"
+```
+
+The command prints every finding, then asks for the plan id to be typed. It records the subject's latest verdict, with
+its findings, the reason, who accepted and whether a person or an agent. The reason goes to the implementer and to the
+verifier ([12.2b](#122b-where-an-accepted-finding-goes)); write what to do where the spec is silent, for example
+`keep the thresholds; run the timing tests with a 3x tolerance`. Then run `l4 yolo activate <plan-id> --reason "<why>"`.
+The activation lists every accepted subject with who accepted it and the reason. `l4 yolo accept <plan-id> <subject>
+--withdraw --reason "<why>"` removes an acceptance.
+
+The command is refused (exit 2, with the cause and the fix) when:
+- the subject is `BLOCKED`, whatever the cause;
+- the subject has a blocking finding: fix the spec;
+- the subject has a `material_cut` of its own folder: shorten the file or raise `yolo.review.max_file_chars`;
+- the subject was judged not `READY` on fewer than `yolo.review.accept_after_rounds` versions of its text (default 2).
+  A version is a different text of the subject; a verdict reused, or judged again after a change of a prerequisite or of
+  the prompt, is the same version;
+- the plan is active;
+- the command is run by an agent (no terminal, or `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `AI_AGENT`, `CODEX_SANDBOX`
+  or `L4_RESULT_PATH` is set), unless `yolo.review.accept_by_agents: true` is in `.l4/config.yaml` at `origin/<base>`.
+  An agent that is allowed to accept is marked `(accepted by an agent)` in the activation output.
+
+An acceptance holds while the latest review keeps the same material and findings. Any change of the unit folder, a
+prerequisite, the plan entry or the review prompt voids it: the subject must be reviewed, and accepted again if
+needed.
+
+**macOS and other hosts without `bwrap`.** Outside CI, `--worktree` and `--local` run the judge unsandboxed when its
+adapter has no tools (`claude-code`, `opencode`), and print `judge unsandboxed (bwrap was not found on PATH): it has no
+tools and runs in an empty folder`. A `codex` judge is refused (exit 3): use a `claude-code` or `opencode` judge profile
+for the local review, or let CI review. In CI the sandbox is required.
+
+**Cost.** A review of the working tree judges only the subjects that changed, and a judged subject costs what a CI
+review of it costs. The output ends with `cost: $x.xx (n judged, m reused)` and the plan's recorded review total against
+`limits.max_cost_usd`. A dry run is not charged to the plan.
+
+### 12.2b Where an accepted finding goes
+
+An accepted subject carries its findings through the run. Do nothing unless the plan waits.
+- The unit run writes `.l4/review-accepted.json` in the unit folder. The implementer's prompt holds the accepted
+  findings and the reason. The verifier's judge answers for each finding whether the work addressed it.
+- With `merge: auto`, a unit with a `PASS` is not merged while an accepted finding has no `addressed: true` answer. The
+  plan waits with `accepted_finding_open` ([12.4](#124-procedure-a-plan-is-waiting)). `merge: human` is unchanged.
 
 ### 12.3 Procedure: a plan is `stopped`
 
@@ -1454,6 +1531,7 @@ reason.
 | `run_not_started` | The last run of the current unit ended before the unit started: a usage error, a worktree or lease failure, a missing CLI. `l4 yolo status` shows the exit and the reason of that run (for example the worktree message) and its `Next:` line repeats the advice below. The harness starts no next run after a run that did not start the unit, so the plan does not loop. | Read the detail. Fix the cause (the configuration, the runner, the unit branch). Do nothing else: the next trigger, a cron run or a push, runs the unit once more (`l4 yolo resume` does the same at once). A run that starts the unit clears the wait; a run that fails to start it again keeps the plan waiting. Each of these runs counts against `max_runs`. |
 | `unit_not_started` | The unit is eligible but has nothing the harness can run: no task in its `tasks.md`, or a ledger that cannot be read. `l4 yolo status` shows what the unit waits for. | Fix the unit on its branch (add the task, repair the ledger). The plan continues by itself at the next run when the unit has something to run. `l4 yolo resume` wakes it at once, but the plan waits again if the unit still has nothing to run. |
 | `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>` or `the pull request !1 is closed, not open`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
+| `accepted_finding_open` | A plan with `merge: auto`: the current unit is in review with a PASS, but a finding that a person accepted ([12.2a](#122a-procedure-the-review-is-not-ready)) has no `addressed: true` answer of the verifier. `l4 yolo status` shows `<unit>: F-… not addressed: <evidence>`, or `no answer recorded` (a unit adopted in review, or verified before the accepted findings reached it). Nothing is pushed. | Run `l4 retry --unit <unit> --reason "<why>"` so the verifier judges the unit again with the accepted findings in its prompt, or merge the pull request yourself: the next step integrates a person's merge. A later `PASS` round that addresses every accepted finding clears the wait by itself. The detail is recorded once. |
 
 With `merge: human`, a PR must be merged into the target. A merge into another branch does not count. The note of the
 unit shows `merged into <x>, not the base <base>`.
