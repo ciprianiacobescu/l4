@@ -3,6 +3,7 @@
 refusal of activation and what activation records."""
 
 import pytest
+import yaml
 
 from l4.forge.base import ForgeError, ForgeUnavailable
 from l4.yolo.digest import current_unit_digest, plan_digest
@@ -324,3 +325,132 @@ def test_a_lost_lease_says_the_plan_moved(world, monkeypatch, capsys):
     assert "the plan moved: run the command again" in capsys.readouterr().err
     assert "plan.activated" not in world.kinds()
     assert PlanMoved  # the exception the message comes from
+
+
+# --- acceptances (L4-YOLO-027; SCN-YOLO-62, -66), `accepted: {}` (SCN-YOLO-11), --local ----------------------
+
+
+def accepted_event(subject, material, findings, *, by="alex@example.com", actor="person", marker=None, reason="go on"):
+    from l4.yolo.findings import findings_sha
+
+    return ev(
+        "plan.accepted", subject=subject, material=material, findings=findings, findings_sha=findings_sha(findings),
+        reason=reason, by=by, actor=actor, marker=marker, verdict="NEEDS_REVISION", prompt_version=PROMPT_VERSION,
+    )  # fmt: skip
+
+
+def accepting_world(world, *events):
+    from .yolo_review_events import FAILURES, TESTABILITY, two_rounds
+
+    world.push_plan()
+    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]))
+    two_rounds(world, [TESTABILITY, FAILURES])
+    if events:
+        world.seed("p1", *events)
+    return world
+
+
+def test_activation_without_acceptances_records_an_empty_accepted(world, forge):
+    """SCN-YOLO-11."""
+    reviewed_world(world)
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    assert world.events()[-1].data["accepted"] == {}
+
+
+def test_an_acceptance_that_holds_clears_the_item_and_is_listed(world, forge, capsys):
+    """SCN-YOLO-62, the activation part."""
+    from .yolo_review_events import FAILURES, TESTABILITY
+
+    both = [TESTABILITY, FAILURES]
+    accepting_world(world, accepted_event(A, "m2", both, reason="keep the thresholds"))
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    assert (
+        "accepted: openspec:add-greeting by alex@example.com (person): keep the thresholds" in capsys.readouterr().out
+    )
+    assert world.events()[-1].data["accepted"] == {
+        A: {"findings": both, "reason": "keep the thresholds", "by": "alex@example.com", "actor": "person"}
+    }
+
+
+def test_agent_acceptances_come_before_a_persons(world, forge, capsys):
+    from .yolo_review_events import FAILURES, TESTABILITY, entry, review
+
+    accepting_world(world)
+    world.seed(
+        "p1",
+        review(
+            world,
+            "2026-10-14T12:00:00Z",
+            {
+                A: entry(world, A, "NEEDS_REVISION", [FAILURES], "ma3"),
+                B: entry(world, B, "NEEDS_REVISION", [TESTABILITY], "mb"),
+            },
+        ),
+        accepted_event(A, "ma3", [FAILURES], reason="ra"),
+        accepted_event(B, "mb", [TESTABILITY], by="bot", actor="agent", marker="CLAUDECODE", reason="rb"),
+    )
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    out = capsys.readouterr().out
+    assert out.index(f"accepted: {B}") < out.index(f"accepted: {A}")
+    assert (
+        "(accepted by an agent)" in out.split(f"accepted: {A}")[0]
+        and "(accepted by an agent)" not in out.split(f"accepted: {A}")[1].splitlines()[0]
+    )
+
+
+def test_a_change_of_the_material_voids_the_acceptance(world, capsys):
+    """SCN-YOLO-66."""
+    from .yolo_review_events import FAILURES, TESTABILITY, entry, review
+
+    accepting_world(world, accepted_event(A, "m2", [TESTABILITY, FAILURES]))
+    world.seed("p1", review(world, "2026-10-14T12:00:00Z", {A: entry(world, A, "NEEDS_REVISION", [TESTABILITY], "m3")}))
+    err = refused(world, capsys)
+    assert f"{A}: NEEDS_REVISION: testability:" in err
+    assert "(the acceptance by alex@example.com was for other material)" in err
+    assert err.rstrip().endswith("Next: l4 yolo findings p1")
+
+
+def test_status_shows_the_acceptance_under_the_item_and_in_json(world, capsys):
+    import json
+
+    from .yolo_review_events import FAILURES, TESTABILITY
+
+    accepting_world(world, accepted_event(A, "m2", [TESTABILITY, FAILURES], reason="keep the thresholds"))
+    capsys.readouterr()
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert f"{A}: accepted by alex@example.com (person): keep the thresholds" in out
+    assert "review: current" in out and f"{A}: NEEDS_REVISION" not in out
+    assert "l4 yolo activate p1" in out  # the acceptance cleared the item
+    assert world.l4("status", "p1", "--json") == 0
+    review = json.loads(capsys.readouterr().out)["plans"][0]["review"]
+    assert review["problems"] == []
+    assert review["accepted"] == [
+        {"subject": A, "by": "alex@example.com", "actor": "person", "reason": "keep the thresholds", "holds": True}
+    ]
+
+
+def test_review_local_passes_a_sandbox_chooser_and_records_the_label(world, forge, monkeypatch, capsys):
+    world.push_plan()
+    monkeypatch.setattr("l4.yolo.judge_sandbox.resolve_tool", lambda *a, **k: None)  # no bwrap on PATH
+    config = yaml.safe_load(world.app.config_path.read_text(encoding="utf-8"))
+    config["sandbox"] = {"mode": "bwrap"}
+    world.app.config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    seen = {}
+
+    def review(app, cfg, plan, units, *, git, rev, sandbox_for=None, **kw):
+        seen["sandbox"] = sandbox_for("claude-code", "main")
+        digests = {uid: current_unit_digest(git, cfg, uid, info.folder, rev) for uid, info in units.items()}
+        return ReviewResult({u: Verdict("READY", digest=d, material=f"k-{u}") for u, d in digests.items()}, {}), 0.1
+
+    monkeypatch.setattr("l4.yolo.commands.review_plan_costed", review)
+    assert world.l4("review", "p1", "--local") == 0
+    out = capsys.readouterr().out
+    assert "judge unsandboxed (bwrap was not found on PATH): it has no tools and runs in an empty folder" in out
+    reviewed = next(e for e in world.events() if e.type == "plan.reviewed")
+    assert (
+        reviewed.data["source"] == "local" and reviewed.data["sandbox"] == "none" and reviewed.data["judge"] == "main"
+    )
+    assert reviewed.data["units"][A]["material"] == f"k-{A}"

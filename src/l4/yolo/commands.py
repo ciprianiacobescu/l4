@@ -39,6 +39,7 @@ from typing import Any
 import click
 
 from l4.availability.errors import RoleUnavailable
+from l4.ci.detect import in_ci
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
@@ -55,6 +56,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo import accept as accepting
 from l4.yolo import findings as fnd
+from l4.yolo import judge_sandbox
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
@@ -279,6 +281,12 @@ class ReviewView:
     kind: str
     problems: tuple[str, ...] = ()
     prompt_changed: bool = False  # stale because the review prompt changed since the review was made
+    accepted: tuple[dict[str, Any], ...] = ()  # the acceptances of items that are not READY: subject, by, actor, ...
+
+    @property
+    def cleared(self) -> list[dict[str, Any]]:
+        """The acceptances that hold (`accept.holds`): their items no longer stop the activation."""
+        return [a for a in self.accepted if a["holds"]]
 
     @property
     def ready(self) -> bool:
@@ -333,15 +341,31 @@ def _review_view(
         return ReviewView("stale")
     latest: dict[str, Any] = next((e.data for e in reversed(events) if e.type == "plan.reviewed"), {})
     problems = []
+    accepted: list[dict[str, Any]] = []
+    held = accepting.holds(state, latest)
     for name in wanted:
         verdict = state.review[name]
         if verdict == "READY":
             continue
+        given = state.accepted.get(name)
+        if given is not None:
+            holds = bool(held.get(name)) and verdict == "NEEDS_REVISION"
+            accepted.append(
+                {
+                    "subject": name, "by": given.get("by"), "actor": given.get("actor"),
+                    "reason": given.get("reason"), "findings": list(given.get("findings") or []), "holds": holds,
+                }
+            )  # fmt: skip
+            if holds:
+                continue
         group, _, ident = name.partition(":") if name.startswith("batch:") else ("units", "", name)
         entry = (latest.get("batches" if group == "batch" else "units") or {}).get(ident) or {}
         label = f"batch {ident}" if group == "batch" else name
-        problems.append(f"{label}: {verdict}: {_first_line(entry.get('findings'))}")
-    return ReviewView("current", tuple(problems))
+        line = f"{label}: {verdict}: {_first_line(entry.get('findings'))}"
+        if given is not None:
+            line += f" (the acceptance by {given.get('by')} was for other material)"
+        problems.append(line)
+    return ReviewView("current", tuple(problems), accepted=tuple(accepted))
 
 
 # --- limits -------------------------------------------------------------------------------------------------------
@@ -625,13 +649,18 @@ def run_draft(
 
 
 def _verdict_json(verdict: Any) -> dict[str, Any]:
-    return {
+    out = {
         "verdict": verdict.verdict,
         "digest": verdict.digest,
         "findings": [dict(f) for f in verdict.findings],
         "assumptions": list(verdict.assumptions),
         "missing": list(verdict.missing),
     }
+    if getattr(verdict, "material", None) is not None:  # the key an acceptance is bound to (L4-YOLO-027)
+        out["material"] = verdict.material
+    if getattr(verdict, "reused_from", None) is not None:
+        out["reused_from"] = verdict.reused_from
+    return out
 
 
 def run_review(
@@ -710,6 +739,19 @@ def run_review(
         if not no_run:
             ctx.say(start_run_line(ctx.app, ctx.cfg))
         return ExitCode.OK
+    chosen: dict[str, str] = {}
+
+    def sandbox_for(adapter: str, profile: str) -> Any:
+        """The judge's sandbox (design D5): bwrap, or none for a tool-less judge outside CI, said out loud."""
+        sandbox, label = judge_sandbox.choose(
+            ctx.cfg, ctx.app.environ, ctx.app.repo, adapter=adapter, in_ci=in_ci(ctx.app.environ)
+        )
+        chosen.update(sandbox=label, judge=profile)
+        if label == "none" and ctx.cfg.sandbox.mode != "none":
+            why = judge_sandbox.unsandboxed_reason(ctx.app.environ, ctx.app.repo)
+            ctx.say(f"judge unsandboxed ({why}): it has no tools and runs in an empty folder")
+        return sandbox
+
     try:
         result, cost = review_plan_costed(
             ctx.app,
@@ -720,6 +762,7 @@ def run_review(
             rev=rev,
             done=done_units(parsed, state),
             delivered=delivered_on_target(archived_at(ctx.git, rev, ctx.cfg), units.phases),
+            sandbox_for=sandbox_for,
         )
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None
@@ -733,6 +776,7 @@ def run_review(
         _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
         _event(
             "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, cost_usd=cost, by=ctx.who(),
+            source="local", **chosen,
             units={u: _verdict_json(v) for u, v in result.units.items()},
             batches={b: _verdict_json(v) for b, v in batches.items()},
         ),
@@ -847,11 +891,21 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     current = state.current
     if current is not None and (current not in admission.order or unit_blocker(parsed, state, current) is not None):
         current = None
+    # an acceptance that holds is frozen with the activation; an agent's come first (the person sees them first)
+    cleared = sorted(view.cleared, key=lambda a: a["actor"] != "agent")
+    accepted = {
+        a["subject"]: {"findings": a["findings"], "reason": a["reason"], "by": a["by"], "actor": a["actor"]}
+        for a in cleared
+    }
     event = _event(
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
         merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base, current=current,
+        accepted=accepted,
     )  # fmt: skip
     _append(store, [event], read.head)
+    for a in cleared:
+        mark = " (accepted by an agent)" if a["actor"] == "agent" else ""
+        ctx.say(f"accepted: {a['subject']} by {a['by']} ({a['actor']}): {a['reason']}{mark}")
     ctx.say(f"{plan_id}: activated on {parsed.target} ({len(parsed.unit_ids())} unit(s), merge: {parsed.merge})")
     if not no_run:
         ctx.say(start_run_line(ctx.app, ctx.cfg))
@@ -1030,7 +1084,11 @@ def _describe(
         view = _review_view(
             plan, file.text, state, read.events, _digests(ctx, plan, units), prompt_matters=needs_review
         )
-        out["review"] = {"state": view.kind, "problems": list(view.problems)}
+        out["review"] = {
+            "state": view.kind,
+            "problems": list(view.problems),
+            "accepted": [{k: a[k] for k in ("subject", "by", "actor", "reason", "holds")} for a in view.accepted],
+        }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
         waiting = next_eligible(plan, state, units.phases).waiting
@@ -1086,6 +1144,11 @@ def _render(d: dict[str, Any]) -> str:
         changed = " (the review prompt changed)" if d["review"].get("prompt_changed") else ""
         lines.append(f"  review: {d['review']['state']}{changed}")
         lines += [f"    {p}" for p in d["review"]["problems"]]
+        lines += [
+            f"    {a['subject']}: accepted by {a['by']} ({a['actor']}): {a['reason']}"
+            for a in d["review"].get("accepted", [])
+            if a["holds"]
+        ]
     if d.get("stop"):
         stop = d["stop"]
         unit = f" [{stop['unit']}]" if stop.get("unit") else ""
