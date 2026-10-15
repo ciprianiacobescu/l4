@@ -60,8 +60,11 @@ def test_the_forge_host_is_in_no_text_the_graph_writes_or_shows(kg_repo):
 
 
 def test_redact_forge_urls_off_scrubs_nothing(kg_repo, tmp_path):
-    kg_repo.unit("openspec:a", where="archive", verdicts=[kg_repo.verdict(
-        1, "FAIL", findings=[kg_repo.finding(f"gate at https://{HOST}/p failed")])])
+    kg_repo.unit(
+        "openspec:a",
+        where="archive",
+        verdicts=[kg_repo.verdict(1, "FAIL", findings=[kg_repo.finding(f"gate at https://{HOST}/p failed")])],
+    )
     config = tmp_path / "l4.yaml"
     config.write_text("observability:\n  redact_forge_urls: false\n")
     code, _, err = run_kg(kg_repo, "build", "--config", str(config), CI_SERVER_URL=f"https://{HOST}")
@@ -163,8 +166,7 @@ def test_a_branch_prefix_without_a_slash_still_finds_the_unit_branches(kg_repo, 
     config.write_text("forge:\n  branch_prefix: l4-\n")
     code, out, err = run_kg(kg_repo, "build", "--config", str(config))
     assert code == 0, err
-    assert "refs/remotes/origin/l4-openspec/zz" in store.read_index(
-        store.index_dir(kg_repo.app()), {}).manifest.refs
+    assert "refs/remotes/origin/l4-openspec/zz" in store.read_index(store.index_dir(kg_repo.app()), {}).manifest.refs
     code, out, err = run_kg(kg_repo, "why", "openspec:zz", "--config", str(config))
     assert code == 0, err
     assert "Unit openspec:zz" in out

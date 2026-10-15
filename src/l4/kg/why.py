@@ -53,7 +53,11 @@ def last_stop_src(nodes: Iterable[Node], edges: Iterable[Edge], unit: str) -> st
 
 
 def explain(
-    nodes: Iterable[Node], edges: Iterable[Edge], target: str, *, redactor: Redactor | None = None,
+    nodes: Iterable[Node],
+    edges: Iterable[Edge],
+    target: str,
+    *,
+    redactor: Redactor | None = None,
     spec_edited: bool = False,
 ) -> str:
     """`spec_edited`: the caller found a change in the unit folder since the last stop (git, which this module does
