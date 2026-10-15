@@ -1,6 +1,7 @@
 import contextlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,11 @@ def test_canary_then_export_end_to_end(tmp_path: Path, env: dict[str, str], caps
     root = tmp_path / "ok"
     root.mkdir()
     build_repo(root / "py_multi")
+    # the fixture's own gate command is a bare `python`, whichever one the PATH finds: on a machine whose `python` is
+    # older than the fixture's requires-python (3.11) the units that use `X | None` fail to collect (baseline_failed)
+    command = f"{sys.executable} -m pytest -q --junitxml=.l4-out/junit.xml"
     argv = ["s1", "canary", "--repo", str(root / "py_multi"), "--seed", "3", "--target", "60", "--min-test", "0"]
+    argv += ["--test-command", command]
     assert main([*argv, "--max-variants", "1"], environ=env) == 0
     canary_file = Path(env["L4_CACHE"]) / "s1" / "canary.jsonl"
     items = r.read_records(canary_file, ("item",))
