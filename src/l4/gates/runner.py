@@ -17,6 +17,7 @@ from l4.gates.junit import ReportError, TestReport, parse_junit
 from l4.redact import Redactor
 from l4.sandbox.base import Sandbox, SandboxSpec
 from l4.sandbox.env import build_gate_env
+from l4.verifier.scan import plugin_module
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,50 @@ def _report_files(worktree: Path, reports: tuple[str, ...]) -> list[tuple[str, P
     return files
 
 
+_PLUGINS = frozenset({"l4_trace", "l4_cov"})
+
+
+def _plugin_options(addopts: str) -> set[str]:
+    """The module names of the `-p <module>` / `-p<module>` options of a `PYTEST_ADDOPTS` text."""
+    try:
+        tokens = shlex.split(addopts)
+    except ValueError:
+        tokens = addopts.split()
+    found: set[str] = set()
+    for index, token in enumerate(tokens):
+        if token == "-p" and index + 1 < len(tokens):
+            found.add(tokens[index + 1])
+        elif token.startswith("-p") and not token.startswith("--"):
+            found.add(token[2:])
+    return found
+
+
+def shadowing_plugin(worktree: Path, addopts: str) -> tuple[str, str] | None:
+    """(L4-ADO-001) The `(relative path, plugin name)` of a root file or package of the worktree that would be imported
+    in place of a harness plugin (`l4_trace`, `l4_cov`) that `addopts` loads with `-p`, or None. Only the root counts
+    (the gate runs `python -m pytest` from it); `coverage` is not checked here."""
+    kept = _plugin_options(addopts) & _PLUGINS
+    if not kept:
+        return None
+    try:
+        entries = sorted(worktree.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        candidates = [entry.name] if entry.is_file() else []
+        if entry.is_dir():
+            try:
+                candidates = [f"{entry.name}/{child.name}" for child in sorted(entry.iterdir()) if child.is_file()]
+            except OSError:
+                continue
+            candidates = [c for c in candidates if c.rsplit("/", 1)[1].startswith("__init__.")]
+        for candidate in candidates:
+            name = plugin_module(candidate)
+            if name in kept:
+                return candidate if entry.is_file() else entry.name + "/", name
+    return None
+
+
 def run_gate(
     spec: GateSpec,
     *,
@@ -97,6 +142,11 @@ def run_gate(
         argv = shlex.split(spec.command)
     except ValueError:
         return result("fail", "the command cannot be parsed")
+    shadow = shadowing_plugin(worktree, (extra_env or {}).get("PYTEST_ADDOPTS", ""))
+    if shadow is not None:
+        reason = f"{shadow[0]} would replace the harness's {shadow[1]} plugin: remove or rename it"
+        log_path.write_text(reason + "\n", encoding="utf-8")
+        return result("fail", reason)
     for _, path in files:  # a report from an earlier run must not pass for this run's
         path.unlink(missing_ok=True)
     wrapped = sandbox.wrap(argv, sandbox_spec, build_gate_env(host_env, sandbox_spec, extra=extra_env))
