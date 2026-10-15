@@ -3,7 +3,9 @@ environment's (exit 3), anything else, a non-fast-forward included, exit 1. A re
 (`! [remote rejected]`: a protected branch, a push rule) is the forge's, never a non-fast-forward (G12)."""
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
+from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.pushurl import runner_rewrites_urls
 from l4.vcs.git import GitError
@@ -47,9 +49,27 @@ def _unit_of(branch: str) -> str:
     return f"{parts[-2]}:{parts[-1]}" if len(parts) >= 3 else "<unit>"
 
 
+def push_platform(cfg: L4Config, environ: Mapping[str, str], repo: Path) -> str:
+    """The forge a push of `repo` goes to: `forge.type`, `ci.platform`, the CI variables, then the host of `origin`."""
+    from l4.forge.base import forge_platform
+    from l4.forge.urls import origin_url
+
+    return forge_platform(cfg, environ, origin_url(repo, environ))
+
+
 def explain_push_failure(
-    exc: GitError, *, branch: str, token_env: str, environ: Mapping[str, str], redact: Callable[[str], str]
+    exc: GitError,
+    *,
+    branch: str,
+    token_env: str,
+    environ: Mapping[str, str],
+    redact: Callable[[str], str],
+    platform: str | None = None,
 ) -> PushFailed:
+    """`platform` names the forge that refused (`forge_platform`); a caller that does not know it gets GitHub inside
+    GitHub Actions and GitLab elsewhere (L4-ADO-004)."""
+    if platform is None:
+        platform = "github" if environ.get("GITHUB_ACTIONS") == "true" else "gitlab"
     lines = [line.strip() for line in exc.stderr.strip().splitlines()[:_LINES]]
     reason = " | ".join(lines) or f"git exit {exc.returncode}"
     head = f"push of {branch} to origin failed: {reason}"
@@ -77,13 +97,20 @@ def explain_push_failure(
         return PushFailed(ExitCode.DOCTOR_FAILED, redact(f"{head}. {hint}"), refused=True)
     if not is_permission_failure(exc.stderr):
         return PushFailed(ExitCode.INTERNAL_ERROR, redact(head))
-    hint = (
-        f"the forge refused the credential: {token_env} must be a project access token with the "
-        "write_repository (and api) scopes and the Developer role or higher, and the branch must not be protected "
-        "against it"
-    )
-    if environ.get("GITLAB_CI") == "true" and not environ.get(token_env):
+    if platform == "github":
+        hint = (
+            f"the forge refused the credential: {token_env} must be a token that can push to the repository: "
+            "`contents: write` and `pull-requests: write` (the workflow's `permissions`, or a fine-grained token "
+            "with those), and the branch must not be protected against it"
+        )
+    else:
+        hint = (
+            f"the forge refused the credential: {token_env} must be a project access token with the "
+            "write_repository (and api) scopes and the Developer role or higher, and the branch must not be "
+            "protected against it"
+        )
+    if not environ.get(token_env):
         hint += f". {token_env} is not set"
-        if runner_rewrites_urls(environ):
+        if environ.get("GITLAB_CI") == "true" and runner_rewrites_urls(environ):
             hint += ": the runner rewrites the origin URL to carry the job token, which cannot push"
     return PushFailed(ExitCode.DOCTOR_FAILED, redact(f"{head}. {hint}"))

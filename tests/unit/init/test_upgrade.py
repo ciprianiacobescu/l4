@@ -255,3 +255,47 @@ def test_upgrade_refuses_an_unsafe_base_branch_and_writes_nothing(target, harnes
     assert run(target, harness_repo, git_environ) == 2
     assert "base branch" in capsys.readouterr().err
     assert snapshot(target) == before
+
+
+# --- adoption-lessons 1.5 (L4-ADO-005): the default branch's copy of the workflow ---
+
+OLD, NEW = "d" * 40, "e" * 40
+REMINDER = "copy .github/workflows/l4.yml to main"
+
+
+def action_adoption(target: Path, environ, base: str = "staging") -> None:
+    argv = ["init", "--repo", str(target), "--ci", "github", "--action", "--action-repo", "o/harness"]
+    assert main([*argv, "--harness-commit", OLD], environ=environ) == 0
+    config = target / ".l4/config.yaml"
+    config.write_text(config.read_text() + f"forge:\n  base_branch: {base}\n")
+
+
+def upgrade_to_new(target: Path, environ) -> int:
+    return main(["upgrade", "--repo", str(target), "--harness-commit", NEW], environ=environ)
+
+
+def test_upgrade_reminds_about_the_default_branch_copy(target, git_environ, raw, capsys):  # SCN-ADO-16
+    action_adoption(target, git_environ)
+    raw(target, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    capsys.readouterr()
+    assert upgrade_to_new(target, git_environ) == 0
+    out = capsys.readouterr().out
+    assert REMINDER in out and "staging" in out
+
+
+def test_no_reminder_when_the_default_branch_is_the_base(target, git_environ, raw, capsys):
+    action_adoption(target, git_environ, base="main")
+    raw(target, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    capsys.readouterr()
+    assert upgrade_to_new(target, git_environ) == 0
+    assert "copy .github/workflows/l4.yml" not in capsys.readouterr().out
+
+
+def test_no_reminder_without_origin_head_or_without_a_change(target, git_environ, raw, capsys):
+    action_adoption(target, git_environ)
+    capsys.readouterr()
+    assert upgrade_to_new(target, git_environ) == 0  # no origin/HEAD in this clone
+    assert "copy .github/workflows/l4.yml" not in capsys.readouterr().out
+    raw(target, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    assert upgrade_to_new(target, git_environ) == 0  # nothing moves: the workflow is already at NEW
+    assert "copy .github/workflows/l4.yml" not in capsys.readouterr().out

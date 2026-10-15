@@ -132,3 +132,70 @@ def test_registration_ids_severities_and_scopes():
     assert by_id["CFG-006"].severity == "error" and by_id["CFG-007"].severity == "info"
     assert {"ci", "local", "config"} <= by_id["CFG-006"].scopes
     assert {"ci", "local", "config"} <= by_id["CFG-007"].scopes
+
+
+# --- adoption-lessons 1.4 (L4-ADO-005): the running harness is the pin of the base's workflow ---
+
+
+@pytest.fixture
+def running(monkeypatch):
+    def set_commit(commit: str | None) -> None:
+        monkeypatch.setattr(cc, "harness_commit", lambda: commit)
+
+    return set_commit
+
+
+CI_ENV = {"GITHUB_ACTIONS": "true"}
+
+
+def test_an_old_pin_is_a_warning_naming_both_commits_and_the_fix(make_ctx, running):  # SCN-ADO-13
+    ctx, _ = make_ctx(cfg=action_cfg(), **CI_ENV)
+    write(ctx.repo, rendered(ActionPin("o/harness", OTHER)))  # the base pins B
+    running(SHA)  # the job installed A
+    result = cc._cfg_008(ctx)
+    assert result.status == "fail"
+    assert SHA in result.message and OTHER in result.message
+    assert ".github/workflows/l4.yml" in (result.fix_hint or "") and "default branch" in (result.fix_hint or "")
+    check = {c.id: c for c in REGISTRY.checks()}["CFG-008"]
+    assert check.severity == "warn" and check.scopes == frozenset({"ci"})  # a warning never fails the job
+
+
+def test_the_copy_form_compares_the_commit_input(make_ctx, running):
+    ctx, _ = make_ctx(cfg=action_cfg(), **CI_ENV)
+    write(ctx.repo, rendered(ActionPin("o/harness", OTHER, copy=True)))
+    running(SHA)
+    result = cc._cfg_008(ctx)
+    assert result.status == "fail" and OTHER in result.message
+
+
+def test_the_same_pin_passes(make_ctx, running):  # SCN-ADO-14
+    ctx, _ = make_ctx(cfg=action_cfg(), **CI_ENV)
+    write(ctx.repo, rendered(ActionPin("o/harness", SHA)))
+    running(SHA)
+    assert cc._cfg_008(ctx).status == "pass"
+
+
+def test_no_check_outside_ci(make_ctx, running):  # SCN-ADO-15
+    ctx, _ = make_ctx(cfg=action_cfg())
+    write(ctx.repo, rendered(ActionPin("o/harness", OTHER)))
+    running(SHA)
+    result = cc._cfg_008(ctx)
+    assert result.status == "skip" and "CI jobs only" in result.message
+
+
+def test_other_deliveries_and_an_unknown_running_commit_skip(make_ctx, running):
+    ctx, _ = make_ctx(cfg=L4Config(), **CI_ENV)
+    running(SHA)
+    assert cc._cfg_008(ctx).status == "skip"
+    ctx, _ = make_ctx(cfg=action_cfg(), **CI_ENV)
+    write(ctx.repo, rendered(ActionPin("o/harness", OTHER)))
+    running(None)
+    assert cc._cfg_008(ctx).status == "skip"
+
+
+def test_a_workflow_that_cannot_be_read_or_has_no_step_is_left_to_cfg_006(make_ctx, running):
+    ctx, _ = make_ctx(cfg=action_cfg(), **CI_ENV)
+    running(SHA)
+    assert cc._cfg_008(ctx).status == "skip"  # no file
+    write(ctx.repo, "name: l4\njobs:\n  l4:\n    steps:\n      - run: echo\n")
+    assert cc._cfg_008(ctx).status == "skip"

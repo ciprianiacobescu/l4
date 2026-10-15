@@ -500,9 +500,15 @@ def push_auth_config(
     cfg: L4Config, environ: Mapping[str, str], origin_url: str | None = None
 ) -> tuple[tuple[str, str], ...]:
     """The `git -c` pairs of every push: the credential helper, plus a credential-free push URL because a runner may
-    rewrite the origin URL to carry its job token (`l4.forge.pushurl`). `origin_url` names the platform outside CI."""
+    rewrite the origin URL to carry its job token (`l4.forge.pushurl`). `origin_url` names the platform outside CI.
+    Outside CI, with the `forge.token_env` variable empty, no helper: the person's own git credentials apply, as
+    for the fetch (L4-ADO-003)."""
     platform = forge_platform(cfg, environ, origin_url)
-    config = git_auth_config(cfg.forge.token_env, username=GIT_USERNAMES.get(platform, "oauth2"))
+    in_ci = environ.get("GITLAB_CI") == "true" or environ.get("GITHUB_ACTIONS") == "true"
+    if in_ci or environ.get(cfg.forge.token_env):
+        config = git_auth_config(cfg.forge.token_env, username=GIT_USERNAMES.get(platform, "oauth2"))
+    else:
+        config = ()
     url = push_url(cfg, environ) if platform == "gitlab" else None  # the runner workaround is GitLab's
     return (*config, ("remote.origin.pushurl", url)) if url else config
 

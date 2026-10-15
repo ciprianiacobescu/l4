@@ -27,7 +27,7 @@ from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.forge.base import Forge, PullRequest
 from l4.forge.gitlab import push_auth_config
-from l4.forge.pushfail import explain_push_failure
+from l4.forge.pushfail import explain_push_failure, push_platform
 from l4.fsutil import UnsafeFile, atomic_write_bytes, reject_symlinks
 from l4.specs.base import ArchiveFailed, ArchiveRefused, Framework, UnitRef
 from l4.specs.kiro import KiroProvider
@@ -288,6 +288,7 @@ class PostMergeArchiver:
             raise explain_push_failure(
                 exc, branch=names.archive_branch, token_env=self._cfg.forge.token_env, environ=self._app.environ,
                 redact=self._app.redactor.redact_text,
+                platform=push_platform(self._cfg, self._app.environ, self._git.repo),
             ) from None  # fmt: skip
         return ArchiveResult("opened", self._open_mr(names), archived_as=report.archived_as)
 

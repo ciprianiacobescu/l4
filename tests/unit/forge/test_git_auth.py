@@ -70,3 +70,49 @@ def test_ssh_and_local_origins_are_left_alone(url: str, tmp_path: Path, git_envi
 def test_no_origin_is_not_an_error(tmp_path: Path, git_environ, raw):
     raw(tmp_path, "init", "-q")
     assert strip_remote_credentials(Git(tmp_path, environ=git_environ)) is False
+
+
+# --- adoption-lessons 1.1 (L4-ADO-003): a push outside CI without a token keeps the person's credentials ------------
+
+
+def _cfg(forge_type: str = "github", token_env: str = "GITHUB_TOKEN"):
+    from l4.config.schema import L4Config
+
+    return L4Config.model_validate({"forge": {"type": forge_type, "token_env": token_env}})
+
+
+def test_a_laptop_push_without_a_token_has_no_helper_pairs():  # SCN-ADO-07
+    from l4.forge.base import fetch_auth_config
+    from l4.forge.gitlab import push_auth_config
+
+    config = _cfg()
+    assert push_auth_config(config, {}) == fetch_auth_config(config, {}) == ()
+    assert push_auth_config(config, {"GITHUB_TOKEN": ""}) == ()
+
+
+def test_ci_keeps_the_token_helper():  # SCN-ADO-08
+    from l4.forge.gitlab import push_auth_config
+
+    pairs = push_auth_config(_cfg(), {"GITHUB_ACTIONS": "true", "GITHUB_TOKEN": "t"})
+    assert pairs[0] == ("credential.helper", "") and "GITHUB_TOKEN" in pairs[1][1]
+
+
+def test_ci_keeps_the_helper_even_when_the_variable_is_empty():
+    from l4.forge.gitlab import push_auth_config
+
+    assert len(push_auth_config(_cfg(), {"GITHUB_ACTIONS": "true"})) == 2
+
+
+def test_a_token_set_on_a_laptop_is_used():  # SCN-ADO-09
+    from l4.forge.gitlab import push_auth_config
+
+    pairs = push_auth_config(_cfg(), {"GITHUB_TOKEN": "t"})
+    assert pairs[0] == ("credential.helper", "") and "GITHUB_TOKEN" in pairs[1][1]
+
+
+def test_the_gitlab_push_url_workaround_is_unchanged_in_ci():
+    from l4.forge.gitlab import push_auth_config
+
+    env = {"GITLAB_CI": "true", "CI_SERVER_URL": "https://gl.example.test", "CI_PROJECT_PATH": "g/p"}
+    pairs = push_auth_config(_cfg("gitlab", "L4_FORGE_TOKEN"), env)
+    assert ("remote.origin.pushurl", "https://oauth2@gl.example.test/g/p.git") in pairs
