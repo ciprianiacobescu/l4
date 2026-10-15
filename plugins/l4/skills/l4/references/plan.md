@@ -104,7 +104,7 @@ Before the person reviews the plan, run the same review yourself and fix what it
 3. `l4 yolo findings <id> --json`. For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
    and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
    wording.
-4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Specs follow `references/spec.md`.
+4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
 5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record`, then push. CI then does not
    judge again. Hand off as below.
 
