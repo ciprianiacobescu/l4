@@ -211,6 +211,11 @@ L4 post-checks every merged unit of the plan that is not integrated, not only th
 A plan **waits** when the current unit needs a person's answer or has no agent available. The plan continues by itself
 when the cause is gone. `l4 yolo resume` also wakes it.
 
+A plan with `merge: auto` also waits when the merge of the current unit is not ready, for example when the unit has no
+open PR, or the PR is aimed at another branch than the target. The reason is `merge_not_ready`. The detail is recorded
+once and `l4 yolo status` shows it. The plan continues by itself when the merge is ready. If the PR shows an old head
+after a push, the step reads the PR again, three times, five seconds apart, before it calls the merge not ready.
+
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,
 `target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
@@ -218,9 +223,12 @@ when it is back). A merged unit whose folder moved to the archive is not missing
 cause of each stop and the command that clears it are in [runbook 12.3](runbook.md#123-procedure-a-plan-is-stopped).
 `l4 yolo cancel` stops the plan for good.
 
-**`unit_rejected`.** The harness refused the spec of the current unit. Correct the spec on the unit branch and push. The
-plan then stops with `inputs_changed`, CI reviews it, a person activates it, and the plan dispatches the unit again. No
-`l4 restart` is needed.
+**`unit_rejected`.** The harness refused the spec of the current unit. `l4 retry` never moves a rejected unit, so the
+plan does not ask for one. Correct the spec (on the unit branch, or on the target when the unit has no branch) and push.
+The next run stops the plan with `inputs_changed`, CI reviews it, and a person runs `l4 yolo activate`. The activation
+freezes the corrected spec. The plan then dispatches the unit, and the next run of the unit reads the corrected spec. No
+`l4 restart` is needed. A resume cannot clear this stop: it would only stop the plan again with `inputs_changed`. If the
+unit is rejected again after that run, the plan stops again with `unit_rejected`.
 
 **A deleted plan file.** If the file of an active plan is deleted, the plan stops with `inputs_changed` (subject
 `plan`). Restore the file, then review and activate again.

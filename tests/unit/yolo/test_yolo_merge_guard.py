@@ -99,7 +99,10 @@ def world(tmp_path, raw, git_environ) -> World:
 
 
 def merge(world: World, snapshot=None, forge=None):
-    return merge_guarded(world.app, world.cfg, world.git, forge or FakeForge(pull()), snapshot or world.snapshot())
+    return merge_guarded(
+        world.app, world.cfg, world.git, forge or FakeForge(pull()), snapshot or world.snapshot(),
+        sleep=lambda _seconds: None,
+    )  # fmt: skip
 
 
 def test_a_verified_unit_is_merged_by_a_fast_forward_push(world):  # SCN-YOLO-14

@@ -141,7 +141,9 @@ by pushing the unit head to the target without force. The step MUST record `unit
 the push, after it has read the plan again: a cancelled or stopped plan MUST NOT merge (R5). A refused push for
 `non-fast-forward` MUST send the unit to `verifying` once per attempt (`stale`); a second one, or any other refusal,
 MUST stop the plan with `merge_refused` and the forge's reason. The harness MUST NOT merge any unit that is not the
-current unit of an active `merge: auto` plan.
+current unit of an active `merge: auto` plan. When the head of the PR differs from the tip of the unit branch, the step
+MUST read the PR again, up to three times, five seconds apart (a forge may show a push late), before it calls the merge
+not ready. A merge that stays not ready MUST be a wait (L4-YOLO-013).
 
 #### Scenario: SCN-YOLO-14 (+) A verified unit is merged by a fast-forward push
 - **GIVEN** an active `merge: auto` plan whose current unit is `in_review` with a PASS, and the target tip in its head
@@ -241,7 +243,10 @@ record `batch.accepted` or `batch.failed`. A failed batch MUST stop the plan. A 
 ### Requirement: L4-YOLO-012 One plan step per run, and the next run is started
 A CI run SHALL make at most one plan step (design D10): one review, or one unit dispatch, or one merge with its checks,
 or one batch check, or the completion. After a step that wrote a record and left work, the run MUST start the next run
-on the target (`start_run`).
+on the target (`start_run`). The step, the holds and the merge-policy listing MUST read the plan files from
+`origin/<forge.base_branch>` when that ref exists and the checkout is not that commit (or has a changed plan file), so
+a local checkout never stops or releases a plan of the target. A named run of the current unit (`l4 run --unit`) MUST be
+charged to the plan like the run of the step.
 
 #### Scenario: SCN-YOLO-24 (+) The run after a merge is started by the harness
 - **GIVEN** a CI run that merged and integrated unit `a`, with `b` waiting for it
@@ -253,7 +258,12 @@ The plan SHALL stop, with the reason, when its current unit is `halted`, `escala
 frozen digest changes or the plan file is edited after the activation (`inputs_changed`), when a limit is reached, when
 the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), and as D8,
 D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit is `awaiting_human`, `clarifying` or
-`waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A stopped plan MUST
+`waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
+plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
+while the merge of its current unit is not ready (no open PR, a PR aimed at another branch, a PR head that is not the
+branch tip); it goes on by itself when the merge is ready. A plan stopped with `unit_rejected` MUST need a corrected spec,
+a new review and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation the
+next run of the unit reads the corrected spec. A stopped plan MUST
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.

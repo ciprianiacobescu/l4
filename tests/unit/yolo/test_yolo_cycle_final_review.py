@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from l4.availability.errors import RoleUnavailable
-from l4.exitcodes import ExitCode, L4Exit
+from l4.exitcodes import ExitCode
 from l4.implementer.tdd import RoleLimit
 from l4.orchestrator import UnitRunResult
 from l4.outcome import UnitOutcome
@@ -191,62 +191,8 @@ def test_a_fixed_spec_stops_the_plan_with_inputs_changed_and_ci_reviews_it(world
     assert got.review[A] == "READY"
 
 
-def test_plumbing_a_reactivated_fixed_unit_asks_for_the_l4_retry_path_and_goes_on_when_it_moves(world, monkeypatch):
-    # Plumbing only: today `retry.refuse` refuses a `rejected` phase (the lifecycle has no re-entry edge from it), so in
-    # production the next test is what happens. This checks the step's side for the day a retry can move the unit.
-    text = rejected_world(world)
-    world.commit(world.unit_files("a", spec=FIXED_SPEC), "fix the spec of a")
-    world.push_main()
-    world.step({"a": world.snapshot("a", "rejected")})  # inputs_changed, reviewed
-    world.seed(
-        ev(
-            "plan.activated",
-            plan_digest=plan_digest(text),
-            digests=world.digests(),
-            limits={},
-            by="alice",
-            reason="again",
-        )
-    )
-    calls = []
-
-    def retry(app, cfg, git, provider, ref, **kw):
-        calls.append((ref.id, kw["by"]))
-        return UnitRunResult(UnitOutcome(unit=ref.id, phase_before="rejected", phase_after="intake"), ExitCode.OK)
-
-    monkeypatch.setattr("l4.state.retry.retry_unit", retry)
-    step = world.step({"a": world.snapshot("a", "rejected")})
-    assert calls == [(A, "plan")] and state(world).status == "active"
-    assert step.start_next_run is True
-
-
-def test_a_retry_that_cannot_move_a_rejected_unit_stops_the_plan_again_and_says_why(world, monkeypatch):
-    def refuse(app, cfg, git, provider, ref, **kw):  # what `retry.refuse` says of a rejected unit
-        raise L4Exit(ExitCode.USAGE_ERROR, f"retry: {ref.id} is rejected: correct the spec on its branch")
-
-    monkeypatch.setattr("l4.state.retry.retry_unit", refuse)
-    text = rejected_world(world)
-    world.commit(world.unit_files("a", spec=FIXED_SPEC), "fix the spec of a")
-    world.push_main()
-    world.step({"a": world.snapshot("a", "rejected")})
-    world.seed(
-        ev(
-            "plan.activated",
-            plan_digest=plan_digest(text),
-            digests=world.digests(),
-            limits={},
-            by="alice",
-            reason="again",
-        )
-    )
-    world.step({"a": world.snapshot("a", "rejected")})
-    got = state(world)
-    assert got.status == "stopped" and got.stop_reason == "unit_rejected"
-    assert "a retry cannot move it" in got.stop_detail and "l4 restart --unit openspec:a" in got.stop_detail
-    assert "next run reads it again" not in got.stop_detail
-    count = len(world.events())
-    world.step({"a": world.snapshot("a", "rejected")})
-    assert world.events()[count:] == []  # no loop: the stop waits for another fix
+# The step no longer asks `l4 retry` to move a rejected unit (it refuses one): see test_yolo_review_z2.py for the way
+# out of `unit_rejected` (a corrected spec, a review, an activation, then the unit's own next run).
 
 
 # --- #9: a review keeps the chain of runs of the active plan --------------------------------------------------------

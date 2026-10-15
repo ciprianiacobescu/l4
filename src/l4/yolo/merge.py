@@ -39,6 +39,8 @@ log = logging.getLogger("l4.yolo.merge")
 _UNRESOLVED_FEEDBACK = ("submitted", "taken", "waiting", "not_addressed")
 _REFUSAL_LINES = 3
 NO_LONGER_ALLOWED = "the plan no longer allows the merge"
+HEAD_LAG_READS = 3  # a PR head that differs from the branch tip is read again this many times ...
+HEAD_LAG_WAIT_S = 5.0  # ... this many seconds apart: the forge may lag a push by a few seconds (L4-YOLO-008)
 
 
 def _not_ready(detail: str, **known: object) -> MergeOutcome:
@@ -153,9 +155,11 @@ def merge_guarded(
     snapshot: UnitSnapshot,
     *,
     before_push: Callable[[MergeOutcome], bool] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> MergeOutcome:
     """The preconditions in order, then `guarded_push` (see the module docstring). `before_push` is called last, with
-    the outcome-to-be, and False stops the merge without a push (R5)."""
+    the outcome-to-be, and False stops the merge without a push (R5). `sleep` waits between the reads of a PR whose
+    head the forge shows late (tests pass a no-op)."""
     target = cfg.forge.base_branch
     if (why := _readiness(snapshot)) is not None:
         return _not_ready(why)
@@ -186,6 +190,15 @@ def merge_guarded(
             head=head, pr=pr.number,
         )  # fmt: skip
     forge_head = pr.head_sha  # None when the forge does not report it (the local forge): the ls-remote check stands
+    for _ in range(HEAD_LAG_READS if forge_head and forge_head != head else 0):  # the forge may lag a push
+        sleep(HEAD_LAG_WAIT_S)
+        try:
+            forge_head = forge.get_pr(pr.number).head_sha
+        except (ForgeError, ForgeUnavailable) as exc:
+            log.info("!%s: the forge could not be asked again: %s", pr.number, exc)
+            break
+        if not forge_head or forge_head == head:
+            break
     if forge_head and forge_head != head:
         return _not_ready(
             f"the pull request head {forge_head[:10]} is not the head to merge {head[:10]}", head=head, pr=pr.number
