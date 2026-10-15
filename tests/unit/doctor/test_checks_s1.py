@@ -124,8 +124,12 @@ def test_env_013_is_a_registered_warning():
 
 
 def test_env_013_skips_without_an_ollama_profile(make_ctx):
-    ctx, _ = make_ctx(cfg=config(profiles={"r": {"backend": "system-one", "engine": "remote", "base_url": "http://x"}},
-                                 roles={"s1_judge": ["r"]}))
+    ctx, _ = make_ctx(
+        cfg=config(
+            profiles={"r": {"backend": "system-one", "engine": "remote", "base_url": "http://x"}},
+            roles={"s1_judge": ["r"]},
+        )
+    )
     assert c._env_013(ctx).status == "skip"
 
 
@@ -179,3 +183,115 @@ def test_cov_001_checks_a_project_interpreter_whatever_runs_the_tests(make_ctx):
     fake.tools["python"] = ""
     result = c._cov_001(ctx)
     assert result.status == "pass" and fake.calls[-1] == (str(py), "-c", "import coverage")
+
+
+# --- S1-003: the engine that would serve step 8, and whether it starts (adoption-lessons 6.3, L4-ADO-015) -------------
+
+import dataclasses  # noqa: E402
+import stat  # noqa: E402
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from ..llm.test_system_one import FAKE_SERVE  # noqa: E402
+
+LAYA = {"laya": {"backend": "system-one", "engine": "laya-local"}}
+JEV = {"jev": {"backend": "system-one", "engine": "jev", "api_key_env": "TYPESAFE_API_KEY"}}
+
+
+def laya_world(tmp_path: Path, mode: str = "serve") -> tuple[dict[str, str], Path]:
+    """A fake `laya-serve` on PATH (a Python script that answers /health) and the checkpoint in the HF cache."""
+    bin_dir, home, state = tmp_path / "laya-bin", tmp_path / "laya-home", tmp_path / "laya-state"
+    for folder in (bin_dir, state):
+        folder.mkdir(exist_ok=True)
+    exe = bin_dir / "laya-serve"
+    exe.write_text(FAKE_SERVE.format(python=sys.executable, state=str(state), mode=mode))
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    snap = home / ".cache/huggingface/hub/models--convaiinnovations--laya/snapshots/abc123/typed-decisions"
+    snap.mkdir(parents=True, exist_ok=True)
+    (snap / "model.safetensors").write_bytes(b"x")
+    return {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(home)}, state
+
+
+def test_s1_003_is_a_registered_warning_in_the_repository_scopes():
+    load_check_modules()
+    found = next(x for x in REGISTRY.checks() if x.id == "S1-003")
+    assert found.severity == "warn" and {"ci", "local", "config"} <= found.scopes
+
+
+def test_s1_003_skips_without_a_judge_profile_or_with_s1_off(make_ctx):
+    ctx, _ = make_ctx(cfg=config(profiles=LAYA))
+    assert c._s1_003(ctx).status == "skip"
+    ctx, _ = make_ctx(cfg=config(profiles=LAYA, roles={"s1_judge": ["laya"]}, verifier={"s1": {"enabled": False}}))
+    assert c._s1_003(ctx).status == "skip"
+
+
+def test_s1_003_laya_not_installed_names_the_consequence_and_the_fix(make_ctx, tmp_path):
+    ctx, _ = make_ctx(cfg=config(profiles=LAYA, roles={"s1_judge": ["laya"]}), PATH=str(tmp_path / "empty"))
+    result = c._s1_003(ctx)
+    assert result.status == "fail" and "laya: laya-serve is not on PATH" in result.message
+    assert (
+        "auto-accepts no answer" in result.message and "every implementer question goes to a person" in result.message
+    )
+    assert "engine: laya-local" in (result.fix_hint or "") and "TYPESAFE_API_KEY" in (result.fix_hint or "")
+    assert "l4 doctor --ci --fix" in (result.fix_hint or "")
+
+
+def test_s1_003_a_lan_engine_is_unreachable_from_a_hosted_runner(make_ctx):
+    mac = {"backend": "system-one", "engine": "ollama", "model": "tev1", "base_url": "http://mac.test:11434"}
+    ctx, _ = make_ctx(cfg=config(profiles={"ollama-tev1": mac}, roles={"s1_judge": ["ollama-tev1"]}),
+                      RUNNER_ENVIRONMENT="github-hosted")  # fmt: skip
+    result = c._s1_003(ctx)
+    assert result.status == "fail" and "on the local network" in result.message
+    assert "unreachable from a GitHub-hosted runner" in result.message
+
+
+def test_s1_003_adoption_starts_laya_once_stops_it_and_reports_the_seconds(make_ctx, tmp_path):
+    env, state = laya_world(tmp_path)
+    ctx, _ = make_ctx(cfg=config(profiles=LAYA, roles={"s1_judge": ["laya"]}), **env)
+    result = c._s1_003(dataclasses.replace(ctx, adoption=True))
+    assert result.status == "pass", result.message
+    assert "laya-local" in result.message and "typed-decisions" in result.message and "ready in " in result.message
+    pid = int((state / "pid").read_text())
+    with pytest.raises(ProcessLookupError):
+        for _ in range(100):  # the stop is synchronous; allow the OS a moment to reap
+            import os
+            import time
+
+            os.kill(pid, 0)
+            time.sleep(0.05)
+
+
+def test_s1_003_ci_checks_the_install_and_starts_nothing(make_ctx, tmp_path):
+    env, state = laya_world(tmp_path)
+    ctx, _ = make_ctx(cfg=config(profiles=LAYA, roles={"s1_judge": ["laya"]}), **env)
+    result = c._s1_003(ctx)  # adoption is off: `l4 doctor --ci`
+    assert result.status == "pass" and "laya-local" in result.message and "installed" in result.message
+    assert "ready in" not in result.message and not (state / "pid").exists()
+
+
+def test_s1_003_a_server_that_cannot_start_is_a_warning_with_its_reason(make_ctx, tmp_path):
+    env, _ = laya_world(tmp_path, mode="crash")
+    ctx, _ = make_ctx(cfg=config(profiles=LAYA, roles={"s1_judge": ["laya"]}), **env)
+    result = c._s1_003(dataclasses.replace(ctx, adoption=True))
+    assert result.status == "fail" and "exited with code 3" in result.message
+
+
+def test_s1_003_the_first_profile_that_would_open_serves(make_ctx, tmp_path):
+    env, _ = laya_world(tmp_path)
+    ctx, _ = make_ctx(cfg=config(profiles={**JEV, **LAYA}, roles={"s1_judge": ["jev", "laya"]}), **env)
+    result = c._s1_003(ctx)
+    assert (
+        result.status == "pass"
+        and "laya-local" in result.message
+        and "jev: the variable TYPESAFE_API_KEY is not set" in result.message
+    )
+    ctx, _ = make_ctx(cfg=config(profiles={**JEV, **LAYA}, roles={"s1_judge": ["jev", "laya"]}),
+                      TYPESAFE_API_KEY="k", **env)  # fmt: skip
+    assert "jev" in c._s1_003(ctx).message
+
+
+def test_adoption_flag_reaches_the_context_of_doctor_adoption(make_ctx):
+    from l4.doctor.context import system_context
+
+    ctx = system_context(Path("."), L4Config(), {"PATH": "/usr/bin"})
+    assert ctx.adoption is False

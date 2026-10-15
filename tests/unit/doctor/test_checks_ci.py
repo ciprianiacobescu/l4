@@ -125,3 +125,95 @@ def test_ci002_is_in_the_config_scope():
     from l4.doctor.registry import REGISTRY
 
     assert {"ci", "local", "config"} <= ci.CI_002.scopes and ci.CI_002 in REGISTRY.checks()
+
+
+# --- CI-003: repository CI jobs the gates do not mirror (adoption-lessons 6.1, 6.2; SCN-ADO-17..19) -------------------
+
+
+from l4.doctor.registry import REGISTRY, load_check_modules  # noqa: E402
+
+WORKFLOW = """\
+on:
+  push:
+jobs:
+  test:
+    steps:
+      - run: uv run pytest
+  conformance:
+    services:
+      postgres:
+        image: postgres:16
+    steps:
+      - run: uv run pytest -m postgres
+"""
+
+
+def gated(**extra) -> L4Config:
+    return L4Config.model_validate(
+        {"gates": {"test": {"command": ".venv/bin/pytest --junitxml=.l4-out/j.xml"}}, **extra}
+    )
+
+
+def test_ci_003_is_a_config_scope_warning():
+    load_check_modules()
+    check = next(c for c in REGISTRY.checks() if c.id == "CI-003")
+    assert check.severity == "warn" and "config" in check.scopes
+
+
+def test_ci_003_lists_the_unmirrored_job_with_its_services(make_ctx):
+    ctx, _ = make_ctx(cfg=gated())
+    put(ctx.repo, ".github/workflows/ci.yml", WORKFLOW)
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail"
+    assert "ci.yml: conformance (services: postgres)" in result.message and "pytest -m postgres" in result.message
+    assert "ci.yml: test" not in result.message
+    assert "L4_FORGE_TOKEN" not in result.message  # no token sentence without GITHUB_TOKEN and auto
+
+
+def test_ci_003_passes_when_every_job_is_mirrored(make_ctx):
+    ctx, _ = make_ctx(cfg=gated())
+    put(ctx.repo, ".github/workflows/ci.yml", WORKFLOW.split("  conformance:")[0])
+    assert ci.CI_003.run(ctx).status == "pass"
+
+
+def test_ci_003_is_skipped_without_a_ci_file(make_ctx):
+    ctx, _ = make_ctx(cfg=gated())
+    put(ctx.repo, ".github/workflows/l4.yml", "on: push\njobs: {}\n")
+    result = ci.CI_003.run(ctx)
+    assert result.status == "skip" and "no CI file" in result.message
+
+
+def test_ci_003_names_a_file_that_does_not_parse(make_ctx):
+    ctx, _ = make_ctx(cfg=gated())
+    put(ctx.repo, ".github/workflows/bad.yml", "on: [push\njobs: {")
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail" and "bad.yml" in result.message
+
+
+import pytest  # noqa: E402
+
+
+def test_ci_003_says_the_workflow_token_starts_no_ci(make_ctx):
+    config = gated(forge={"token_env": "GITHUB_TOKEN", "merge_policy": "auto"})
+    ctx, _ = make_ctx(cfg=config)
+    put(ctx.repo, ".github/workflows/ci.yml", WORKFLOW)
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail" and "start no CI" in result.message and "merges on the gates alone" in result.message
+    for name in ("L4_FORGE_TOKEN", "forge.token_env", "l4 upgrade", "l4 setup github --secret"):
+        assert name in (result.fix_hint or ""), name
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [{"token_env": "GITHUB_TOKEN", "merge_policy": "human"}, {"token_env": "L4_FORGE_TOKEN", "merge_policy": "auto"}],
+)
+def test_ci_003_has_no_token_sentence_otherwise(make_ctx, forge):
+    ctx, _ = make_ctx(cfg=gated(forge=forge))
+    put(ctx.repo, ".github/workflows/ci.yml", WORKFLOW)
+    assert "start no CI" not in ci.CI_003.run(ctx).message
+
+
+def test_ci_003_token_sentence_stands_without_a_ci_file(make_ctx):
+    ctx, _ = make_ctx(cfg=gated(forge={"token_env": "GITHUB_TOKEN", "merge_policy": "auto"}))
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail" and "start no CI" in result.message
