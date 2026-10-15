@@ -13,6 +13,7 @@ SECTION_2_1 = {
     "simulate", "unlock", "resume", "retry", "restart", "ci render", "ci render-child", "ci map-exit", "upgrade",
     "setup gitlab", "setup github", "ci watch", "eval", "ci cache-key", "ci render-setup",
     "feedback add", "feedback list", "feedback show", "feedback submit", "feedback withdraw",
+    "kg build", "kg report", "kg why", "kg propose",
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
@@ -60,6 +61,10 @@ ARGV = {
     "yolo cancel": ["yolo", "cancel", "p1", "--reason", "why"],
     "yolo resume": ["yolo", "resume", "p1", "--reason", "why"],
     "yolo report": ["yolo", "report", "p1"],
+    "kg build": ["kg", "build"],
+    "kg report": ["kg", "report"],
+    "kg why": ["kg", "why", "openspec:a"],
+    "kg propose": ["kg", "propose"],
     "s1": ["s1", "export"],
     "eval": ["eval", "--dry-run", "--judge", "j"],
 }

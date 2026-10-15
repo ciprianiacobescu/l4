@@ -39,6 +39,14 @@ A workflow line `uses: <owner>/agent-supervisor/.github/actions/l4@…` does not
 On older Claude Code, use `/plugin marketplace add ciprianiacobescu/l4`, then `/plugin install l4@l4-harness`.
 For Codex, copy `plugins/l4/skills/l4` to `~/.agents/skills/l4`.
 
+## Reading the history (`l4 kg`)
+
+`l4 kg build|report|why|propose` reads the history of all units of one repository from committed git objects. It
+shows what keeps failing across units, what followed each lesson, and how one unit got where it is. `l4 lessons
+promote ID` turns a reviewed draft from the inbox into a lesson. State: manual only, report only. No run reads the
+graph, and nothing reaches an agent unless a person promotes a lesson. Today *n* is small (few units, one lesson), so
+every line of the report shows its *n*. See the [runbook](docs/runbook.md#13-reading-the-history-l4-kg).
+
 * [Quickstart](docs/quickstart.md)
 * [Operations runbook](docs/runbook.md): the states of a unit, why a unit stops, and how to resume or retry
 * [Delivery plans](docs/yolo-mode.md): order units by dependency and, with two opt-ins, merge them automatically into the integration branch

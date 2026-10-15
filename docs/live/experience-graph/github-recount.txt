@@ -1,0 +1,8 @@
+runs (distinct run_id): 26
+round verdict blobs (distinct): 18
+vacuous attempt failures: 5 units: ['kiro:add-low-stock-message', 'kiro:pick-priority']
+stop-like event types: {}
+lessons.injected events: 9 sample keys: ['bytes', 'channel', 'ids', 'run_id', 'seq', 'ts', 'type', 'unit']
+   {'run_id': 'r-20261014T0806Z-1ec0', 'unit': 'kiro:pick-priority', 'seq': '18', 'type': 'lessons.injected', 'ids': "['L-e7230fe4']", 'channel': 'prompt_section', 'bytes': '250'}
+   {'run_id': 'r-20261014T0806Z-1ec0', 'unit': 'kiro:pick-priority', 'seq': '31', 'type': 'lessons.injected', 'ids': "['L-e7230fe4']", 'channel': 'prompt_section', 'bytes': '250'}
+   {'run_id': 'r-20261014T0806Z-1ec0', 'unit': 'kiro:pick-priority', 'seq': '43', 'type': 'lessons.injected', 'ids': "['L-e7230fe4']", 'channel': 'prompt_section', 'bytes': '250'}
