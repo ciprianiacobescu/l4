@@ -4,7 +4,9 @@
 The dry run reads the plan file and the unit folders through a snapshot commit of the working tree (`worktree.snapshot`:
 `HEAD`, the index and every ref stay), asks the judge only about the subjects whose material was not judged before (the
 plan's recorded reviews and a local cache), prints what it found and records nothing on origin. `--record`, on a clean
-tree only, records the events `--local` would, so that the pushed commit finds its review current in CI."""
+tree only, records the events `--local` would, so that the pushed commit finds its review current in CI. It reuses only
+what the ledger holds (the local cache is for dry runs: a review is accepted or skipped from the ledger only, D5) and
+judges everything else again, saying in each entry who judged it."""
 
 import json
 import logging
@@ -44,7 +46,7 @@ from l4.yolo.cycle import REVIEW_KEY, review_batches
 from l4.yolo.digest import RevisionMissing, plan_digest
 from l4.yolo.model import Plan, PlanEvent, ReviewResult, Verdict
 from l4.yolo.plans import archived_at, plan_files, unit_infos
-from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, FreshRefused, delivered_on_target, review_plan_costed
 from l4.yolo.state import fold_plan
 
 log = logging.getLogger("l4.yolo.review_worktree")
@@ -315,7 +317,7 @@ def run_review_worktree(
             ctx.say(f"CI reads {unit} on its branch {branch}; this review read the working tree")
     ledger = findings.prior_entries(read.events, PROMPT_VERSION)
     cache_file = cache_path(ctx.app, plan_id)
-    cached = read_cache(cache_file)
+    cached = {} if record else read_cache(cache_file)  # a recorded review is accepted or skipped from the ledger only
     prior: dict[str, dict[str, Any]] = {
         **{k: {**line["entry"], "at": line.get("at")} for k, line in cached.items()},
         **ledger,
@@ -336,7 +338,16 @@ def run_review_worktree(
             fresh=tuple(fresh),
             revs=dict.fromkeys(infos, snap),
             sandbox_for=sandboxes,
+            refuse_fresh_of_prior=record,
         )
+    except FreshRefused as exc:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"review: --record --fresh {', '.join(exc.names)}: the ledger already holds the review of this material, "
+            "and a recorded review is not re-rolled. If you agree with it, l4 yolo accept; "
+            f"otherwise change the material (edit the specification) and run l4 yolo review {plan_id} --worktree. "
+            f"(--fresh without --record asks again in a dry run.)",
+        ) from None
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None
     except RoleUnavailable as exc:
@@ -350,7 +361,6 @@ def run_review_worktree(
     }
     judged_now = {s: v for s, (_, v) in subjects.items() if v.material and not v.reused_from}
     reused = {s: v for s, (_, v) in subjects.items() if v.reused_from}
-    from_cache = {s: v for s, v in reused.items() if v.material not in ledger and v.material in cached}
     stamp = _stamp()
     append_cache(
         cache_file,
@@ -385,18 +395,17 @@ def run_review_worktree(
     if record:
         ctx.say(f"cost: ${cost:.2f} ({len(judged_now)} judged, {len(reused)} reused)")
         labels = [sandboxes.label] if sandboxes.label else []
-        labels += [str(cached[v.material]["sandbox"]) for v in from_cache.values() if cached[v.material].get("sandbox")]
         judges = [sandboxes.profile] if sandboxes.profile else []
-        judges += [str(cached[v.material]["judge"]) for v in from_cache.values() if cached[v.material].get("judge")]
         digest = plan_digest(file.text)
+        provenance = {"source": "worktree", "judge": sandboxes.profile, "sandbox": sandboxes.label}
         reviewed: dict[str, Any] = {
             "plan_digest": digest,
             "prompt_version": PROMPT_VERSION,
             "source": "worktree",
             "cost_usd": cost,
             "by": ctx.who(),
-            "units": {u: _recorded(v, ledger) for u, v in result.units.items()},
-            "batches": {b: _recorded(v, ledger) for b, v in batches.items()},
+            "units": {u: _recorded(v, ledger, provenance) for u, v in result.units.items()},
+            "batches": {b: _recorded(v, ledger, provenance) for b, v in batches.items()},
         }
         if labels:
             reviewed["sandbox"] = "none" if "none" in labels else labels[0]
@@ -420,8 +429,8 @@ def run_review_worktree(
         ctx.say("Next: git push; CI finds this review current and does not review again")
     elif ok:
         ctx.say(
-            f"Next: commit the plan file and the unit folders, then l4 yolo review {plan_id} --worktree --record, "
-            "then git push"
+            f"Next: commit the plan file and the unit folders, then l4 yolo review {plan_id} --worktree --record "
+            "(it judges again whatever the ledger does not hold), then git push"
         )
     else:
         ctx.say(f"Next: change the specification as the Resolve lines say, then l4 yolo review {plan_id} --worktree")
@@ -439,12 +448,14 @@ def _entry(verdict: Verdict) -> dict[str, Any]:
     return entry
 
 
-def _recorded(verdict: Verdict, ledger: Mapping[str, Any]) -> dict[str, Any]:
-    """The ledger entry of a verdict: a reuse of a recorded entry keeps `reused_from`; one taken from the local cache
-    has no earlier judgement in the ledger to point at, so it is recorded as the judgement it is."""
+def _recorded(verdict: Verdict, ledger: Mapping[str, Any], provenance: Mapping[str, Any]) -> dict[str, Any]:
+    """The ledger entry of a verdict. A reuse of a recorded entry keeps `reused_from`. Anything else was judged by this
+    run (`--record` reads no local cache), so the entry says where: `source`, the judge profile and the sandbox."""
     entry = _entry(verdict)
-    if not (verdict.reused_from and verdict.material in ledger):
-        entry.pop("reused_from", None)  # `_verdict_json` carries it; `findings.judged()` would drop this round
+    if verdict.reused_from and verdict.material in ledger:
+        return entry
+    entry.pop("reused_from", None)
+    entry.update({k: v for k, v in provenance.items() if v})
     return entry
 
 
