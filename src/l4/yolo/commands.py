@@ -91,6 +91,7 @@ from l4.yolo.plans import (
     active_on,
     archived_at,
     held_by,
+    holds_of,
     plan_files,
     plan_files_at,
     readable_unit_ids,
@@ -1097,6 +1098,8 @@ def _describe(
         "plan_id": pid, "status": state.status, "target": plan.target if plan else None,
         "merge": plan.merge if plan else state.merge, "activated_by": state.activated_by,
     }  # fmt: skip
+    if file is not None and file.plan is not None and state.status not in (*FINAL, "active"):
+        out["holds"] = len(holds_of({pid: state}, [file]).held)  # units no run touches until the plan is fixed
     if file is not None and file.invalid is not None:
         held = readable_unit_ids(file.text)  # R8: an invalid plan file still holds the units its JSON names
         out["problems"] = [
@@ -1178,6 +1181,11 @@ def _render(d: dict[str, Any]) -> str:
     if d.get("target"):
         head += f" (target {d['target']}, merge: {d['merge']})"
     lines = [head, *(f"  {p}" for p in d.get("problems", []))]
+    if d.get("holds"):
+        lines.append(
+            f"  holds {d['holds']} unit{'s' if d['holds'] != 1 else ''}; none of them runs until the plan is fixed, "
+            "completed or its file is removed"
+        )
     if d.get("activated_by"):
         lines.append(f"  activated by {d['activated_by']}")
     if "review" in d and d["status"] in (*_BEFORE_ACTIVATION, "stopped"):
@@ -1276,8 +1284,10 @@ def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None], cfg: L4Co
     except GitError:
         return []
     lines = []
+    states = {pid: fold_plan(pid, events) for pid, events in ledgers.items()}
+    held = holds_of(states, list(files.values())).held
     for pid in sorted(ledgers):
-        state = fold_plan(pid, ledgers[pid])
+        state = states[pid]
         if state.status in FINAL:
             continue
         plan = files[pid].plan if pid in files else None
@@ -1285,8 +1295,15 @@ def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None], cfg: L4Co
         unit = f", unit {state.current} ({phases.get(state.current) or '-'})" if state.current else ""
         cost = effective_limits(state, plan.limits.model_dump(mode="json") if plan else None).cost_usd
         limit = "unlimited" if cost is None else f"${cost:.2f}"
+        holding = sum(1 for owner, _ in held.values() if owner == pid)
+        holds = (
+            f" (holds {holding} unit{'s' if holding != 1 else ''}; none of them runs until the plan is fixed, "
+            "completed or its file is removed)"
+            if state.status != "active" and holding
+            else ""
+        )
         lines.append(
-            f"plan {pid}: {state.status}{unit}, {len(state.integrated)}/{total} integrated, "
+            f"plan {pid}: {state.status}{holds}{unit}, {len(state.integrated)}/{total} integrated, "
             f"${state.used.cost_usd:.2f}/{limit}"
         )
     return lines

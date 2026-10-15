@@ -69,6 +69,16 @@ def test_status_of_a_plan_not_ready_says_to_fix_the_specs(world, capsys):
     )
 
 
+def test_status_of_a_plan_that_is_not_active_says_how_many_units_it_holds(world, capsys):
+    world.push_plan()
+    assert world.l4("status", "p1") == 0
+    assert "holds 2 units; none of them runs until the plan is fixed, completed or its file is removed" in (
+        capsys.readouterr().out
+    )
+    assert world.l4("status", "p1", "--json") == 0
+    assert json.loads(capsys.readouterr().out)["plans"][0]["holds"] == 2
+
+
 def test_status_of_an_active_plan_shows_units_batches_usage_and_waits(world, capsys):
     active_world(
         world,
