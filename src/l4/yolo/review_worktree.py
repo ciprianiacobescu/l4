@@ -324,8 +324,8 @@ def _recorded(verdict: Verdict, ledger: Mapping[str, Any]) -> dict[str, Any]:
     """The ledger entry of a verdict: a reuse of a recorded entry keeps `reused_from`; one taken from the local cache
     has no earlier judgement in the ledger to point at, so it is recorded as the judgement it is."""
     entry = _entry(verdict)
-    if verdict.reused_from and verdict.material in ledger:
-        entry["reused_from"] = verdict.reused_from
+    if not (verdict.reused_from and verdict.material in ledger):
+        entry.pop("reused_from", None)  # `_verdict_json` carries it; `findings.judged()` would drop this round
     return entry
 
 

@@ -301,6 +301,28 @@ def test_record_after_a_dry_run_is_all_cache_hits_at_no_cost(world, monkeypatch,
     assert "plan.charged" not in world.kinds()  # nothing was spent
 
 
+def test_record_of_a_verdict_reused_from_the_ledger_keeps_reused_from(world, monkeypatch, capsys):
+    """review-resolution D2/D5: a ledger reuse keeps its pointer; a local-cache hit has none."""
+    ready_world(world)
+    commit_edit(world)
+    judge(monkeypatch, answer(), answer(), answer())
+    world.l4("review", "p1", "--worktree")
+    by_subject = {line["subject"]: line for line in cache_lines(world)}
+    for file in world.root.glob("**/yolo/p1/review/verdicts.jsonl"):
+        file.unlink()  # the local cache is gone: only the ledger remembers
+    at = "2026-10-14T11:00:00Z"
+    world.seed("p1", PlanEvent("plan.reviewed", at, {
+        "prompt_version": PROMPT_VERSION, "plan_digest": "x",
+        "units": {s: dict(by_subject[s]["entry"]) for s in (A, B)},
+        "batches": {"b1": dict(by_subject["batch:b1"]["entry"])},
+    }))  # fmt: skip
+    again = judge(monkeypatch)
+    assert world.l4("review", "p1", "--worktree", "--record") == 0
+    assert again.requests == []
+    data = [e for e in world.events() if e.type == "plan.reviewed"][-1].data
+    assert data["units"][A]["reused_from"] == at and data["batches"]["b1"]["reused_from"] == at
+
+
 def test_record_of_a_not_ready_review_records_it_and_exits_2(world, monkeypatch, capsys):
     ready_world(world)
     judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP]), answer())

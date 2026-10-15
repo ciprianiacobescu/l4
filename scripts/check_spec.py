@@ -7,7 +7,7 @@ problems = 0
 
 # 1. requirement ↔ scenario coverage
 defined = set(re.findall(r"\*\*(L4-[A-Z]+-\d{3}[a-z]?)", part1)) | set(re.findall(r"^\| (L4-[A-Z]+-\d{3}) \|", part1, re.M))
-scen = re.findall(r"^#### (SCN-[A-Z]+-\d+) \(([^)]*)\) (.*)$", part2, re.M)
+scen = re.findall(r"^#### (SCN-[A-Z]+-\d+[a-z]?) \(([^)]*)\) (.*)$", part2, re.M)
 refs = set()
 for m in re.finditer(r"(L4-[A-Z]+-)(\d{3}[a-z]?)(?:…(\d{3}))?", part2):
     p, a, b = m.group(1), m.group(2), m.group(3)
