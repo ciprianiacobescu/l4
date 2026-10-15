@@ -600,7 +600,8 @@ def run_draft(
         f"  1. edit {PLANS_DIR}/{plan_id}.json: the dependencies, batches and exclusions (a dependency only on evidence"
     )
     say("     in the specs: the draft added none)")
-    say("  2. python3 scripts/validate_plan.py (the skill ships a copy), then commit and push the plan file only")
+    say("  2. python3 scripts/validate_plan.py (the skill ships a copy), then commit and push the plan file")
+    say("     (new specs in the same commit, or after the plan file: one that lands without a plan runs at once)")
     say(f"  3. l4 yolo check {plan_id}, then l4 yolo review {plan_id}")
     return ExitCode.OK
 
@@ -921,6 +922,12 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
         if view.problems:
             return f"fix the specs named above, push them, then l4 yolo review {plan_id}"
         return f"l4 yolo activate {plan_id} --reason TEXT"
+    if status == "waiting" and state.wait_reason == "run_not_started":
+        return (
+            "fix the cause of the failed run named above (the configuration, the runner, the unit branch); the next "
+            f"trigger, a cron run or a push, runs the unit once more (l4 yolo resume {plan_id} --reason TEXT wakes the "
+            "plan at once)"
+        )
     if status in ("waiting", "stopped"):
         resume = f"l4 yolo resume {plan_id} --reason TEXT"
         return f"{blocker.fix}, then {resume}" if blocker else resume

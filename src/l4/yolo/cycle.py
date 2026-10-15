@@ -91,7 +91,7 @@ log = logging.getLogger("l4.yolo.cycle")
 REVIEW_KEY = "plan:review"  # the `plan.charged` key of the judge's cost
 STOPPED_PHASES = ("halted", "escalated", "abandoned", "rejected")
 WAIT_PHASES = ("awaiting_human", "clarifying", "waiting_capacity")
-UNIT_NOT_STARTED = "unit_not_started"  # the `plan.waiting` reason of a current unit whose last run never started it
+RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current unit whose last run never started it
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
@@ -1044,8 +1044,11 @@ class _Step:
         unit = state.current
         if state.wait_reason == MERGE_NOT_READY:
             return self._merge_wait_gone(ctx, unit)
-        if state.wait_reason == UNIT_NOT_STARTED:  # the wait is for the next trigger, which runs the unit once more
-            return "the cause is gone: the next trigger runs the unit again"
+        if state.wait_reason == RUN_NOT_STARTED:
+            # (`unit_not_started`, the wait of a unit with nothing to run, is not this one: it is read below, as ever)
+            if unit is None or not_started_pending(ctx.read.events, unit) is None:
+                return "the cause is gone: a run started the unit, or the plan was activated or resumed since"
+            return "the cause is gone: the next trigger runs the unit again"  # the wait ends so that the step runs it
         if unit is None and ctx.file.plan is not None:  # waiting on the unit the plan would dispatch (review #2)
             unit = next_eligible(ctx.file.plan, state, self._phases()).unit
             nxt = self.snaps.get(unit) if unit else None
@@ -1082,14 +1085,14 @@ class _Step:
 
     def _not_started(self, ctx: _Ctx, snap: UnitSnapshot, ended: PlanEvent) -> PlanStep:
         """The last run of the current unit ended before it started the unit (L4-YOLO-013). The plan waits with
-        `unit_not_started` and the run's exit and reason on record, once per failed run, and chains no run: the next
+        `run_not_started` and the run's exit and reason on record, once per failed run, and chains no run: the next
         trigger (cron or push) runs the unit again, once. This run still runs it, and is charged like a dispatch, so
         `max_runs` bounds a unit that never starts. A run that starts the unit clears the wait (`record_run_starts`)."""
         unit = snap.ref.id
         recorded = next(
             (
                 e for e in reversed(ctx.read.events)
-                if e is ended or (e.type == "plan.waiting" and e.data.get("reason") == UNIT_NOT_STARTED)
+                if e is ended or (e.type == "plan.waiting" and e.data.get("reason") == RUN_NOT_STARTED)
             ),
             None,
         )  # fmt: skip
@@ -1099,8 +1102,8 @@ class _Step:
                 f"its run {ended.data.get('run')} ended before it started the unit "
                 f"(exit {ended.data.get('exit')}): {ended.data.get('detail')}"
             )
-            events.insert(0, self._event("plan.waiting", reason=UNIT_NOT_STARTED, unit=unit, detail=detail[:400]))
-            self._line(ctx.plan_id, f"waiting ({UNIT_NOT_STARTED}, {unit}): {detail}")
+            events.insert(0, self._event("plan.waiting", reason=RUN_NOT_STARTED, unit=unit, detail=detail[:400]))
+            self._line(ctx.plan_id, f"waiting ({RUN_NOT_STARTED}, {unit}): {detail}")
         self._write(ctx, events)
         return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
 

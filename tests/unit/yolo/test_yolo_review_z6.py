@@ -66,7 +66,7 @@ def test_a_unit_whose_run_never_started_is_not_chained_into_a_loop(world):
         never_started(world, s, "again")
     assert chains == [False] * 4
     waiting = [e for e in world.events() if e.type == "plan.waiting"]
-    assert waiting and waiting[0].data["reason"] == "unit_not_started" and waiting[0].data["unit"] == A
+    assert waiting and waiting[0].data["reason"] == "run_not_started" and waiting[0].data["unit"] == A
     assert WORKTREE in waiting[0].data["detail"] and state(world).status == "waiting"
     assert state(world).used.runs == 5  # the waiting runs are charged: max_runs still bounds the plan
 
@@ -77,7 +77,7 @@ def test_the_wait_is_recorded_once_per_failed_run_and_the_record_carries_the_exi
     never_started(world, step(world))
     step(world)
     step(world)  # no run in between: the wait is on record already
-    assert [e.data["reason"] for e in world.events() if e.type == "plan.waiting"] == ["unit_not_started"]
+    assert [e.data["reason"] for e in world.events() if e.type == "plan.waiting"] == ["run_not_started"]
     (record,) = [e for e in world.events() if e.type == "unit.not_started"]
     assert record.data["unit"] == A and record.data["exit"] == 2 and WORKTREE in record.data["detail"]
 
