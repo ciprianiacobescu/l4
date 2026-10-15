@@ -1,3 +1,7 @@
+## Purpose
+
+Discount codes for the pytdd pricing module: a known code reduces an amount by a percentage.
+
 ## ADDED Requirements
 
 ### Requirement: Discount codes

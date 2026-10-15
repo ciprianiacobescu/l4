@@ -7,7 +7,7 @@ from l4.llm.agent_judge import Msg, StructuredResult
 # the fixtures of `test_hook.py`, which runs the real orchestrator against the fake forge
 from ..archive.conftest import forge_env, use_fake_gitlab  # noqa: F401
 from ..forge.conftest import gitlab  # noqa: F401
-from ..orchestrator.conftest import fake_clock, install_hooks, run_l4  # noqa: F401
+from ..orchestrator.conftest import fake_clock, install_hooks, openspec_stand_in, run_l4  # noqa: F401
 
 
 class ScriptedBackend:

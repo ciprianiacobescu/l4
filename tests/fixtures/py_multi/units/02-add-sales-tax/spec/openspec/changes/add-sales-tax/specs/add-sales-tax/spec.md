@@ -1,3 +1,7 @@
+## Purpose
+
+The add-sales-tax capability of the multi-unit pytdd fixture: the behavior its scenarios below pin down.
+
 ## ADDED Requirements
 
 ### Requirement: add-sales-tax

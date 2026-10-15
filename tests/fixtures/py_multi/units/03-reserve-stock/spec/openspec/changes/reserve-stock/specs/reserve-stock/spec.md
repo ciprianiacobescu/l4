@@ -1,3 +1,7 @@
+## Purpose
+
+The reserve-stock capability of the multi-unit pytdd fixture: the behavior its scenarios below pin down.
+
 ## ADDED Requirements
 
 ### Requirement: reserve-stock

@@ -1,3 +1,7 @@
+## Purpose
+
+The greeting capability of the simulator fixture: a greeting names the person it greets.
+
 ## ADDED Requirements
 
 ### Requirement: Greet by name

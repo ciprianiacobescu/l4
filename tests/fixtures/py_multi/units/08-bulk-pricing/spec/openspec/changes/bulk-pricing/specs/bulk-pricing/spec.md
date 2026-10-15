@@ -1,3 +1,7 @@
+## Purpose
+
+The bulk-pricing capability of the multi-unit pytdd fixture: the behavior its scenarios below pin down.
+
 ## ADDED Requirements
 
 ### Requirement: bulk-pricing
