@@ -225,3 +225,27 @@ def test_a_unit_held_by_this_very_plan_is_no_finding():
     plan = make_plan([batch("b1", [("a", [])])])
     assert admit(plan, known_units=infos(plan), cfg=cfg(), held={"a": "p1"}).ok
     assert admit(plan, known_units=infos(plan), cfg=cfg()).ok  # no held mapping at all
+
+
+class _Provider:
+    def __init__(self, *messages: str) -> None:
+        from l4.specs.base import ValidationIssue, ValidationReport
+
+        self.report = ValidationReport(False, tuple(ValidationIssue("ERROR", "specs", m, None) for m in messages))
+
+    def validate(self, ref, strict=True):
+        return self.report
+
+
+def test_plan_intake_keeps_every_error_cut_at_600_each_and_adds_the_hint(tmp_path):  # SCN-ADO-24
+    from l4.specs.base import Framework, UnitRef
+    from l4.specs.openspec import ARCHIVE_REFUSAL, intake_hint
+    from l4.yolo.plans import intake
+
+    refusal = f"{ARCHIVE_REFUSAL} dreaming: target spec does not exist; only ADDED requirements are allowed."
+    provider = _Provider("a" * 900, "b" * 500, refusal)
+    ok, detail = intake(provider, UnitRef(Framework.OPENSPEC, "c", tmp_path), tmp_path, target="staging")  # type: ignore[arg-type]
+    assert not ok
+    assert "a" * 600 in detail and "a" * 601 not in detail and "b" * 500 in detail
+    assert refusal in detail and intake_hint(refusal, "staging") in detail
+    assert len(detail) > 1400  # the 300-character cut of the whole is gone

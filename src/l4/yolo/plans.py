@@ -25,6 +25,7 @@ from l4.config.schema import L4Config
 from l4.gates.odd import scenario_conflicts
 from l4.specs.base import Framework, SpecProvider, UnitRef
 from l4.specs.criteria import base_criteria, replaced_requirements
+from l4.specs.openspec import intake_errors
 from l4.specs.questions import QuestionStatus
 from l4.state.status import UnitSnapshot
 from l4.vcs.git import Git
@@ -128,16 +129,16 @@ def _open_questions(snapshot: UnitSnapshot | None) -> tuple[str, ...]:
     return tuple(q.id for q in snapshot.questions.questions if q.status is QuestionStatus.OPEN)
 
 
-def intake(provider: SpecProvider, ref: UnitRef, repo: Path) -> tuple[bool, str]:
+def intake(provider: SpecProvider, ref: UnitRef, repo: Path, *, target: str = "the base branch") -> tuple[bool, str]:
     """The intake checks of a unit's first run, as reads only: the provider's strict validation (ERROR issues) and, for
     OpenSpec, scenario pairs with the same WHEN and a different THEN (which the first run would turn into questions)."""
     try:
         report = provider.validate(ref, strict=True)
     except Exception as exc:  # noqa: BLE001 - a validation that cannot run is an intake failure, never a crash
         return False, f"validation could not run: {type(exc).__name__}: {exc}"[:300]
-    errors = [f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"]
+    errors = intake_errors(report, target)  # every ERROR, 600 characters each, never cut as a whole (L4-ADO-008)
     if errors:
-        return False, "; ".join(errors)[:300]
+        return False, "; ".join(errors)
     if ref.framework is Framework.OPENSPEC:
         try:
             base = base_criteria(repo / "openspec" / "specs")
@@ -155,6 +156,7 @@ def unit_infos(
     wanted: Iterable[str],
     *,
     check_intake: bool = True,
+    target: str = "the base branch",
 ) -> dict[str, UnitInfo]:
     """`UnitInfo` for each wanted unit id that a provider knows (from `discover`'s result); a unit id no provider
     knows is left out, so admission reports it as `unknown_unit`."""
@@ -164,7 +166,7 @@ def unit_infos(
         if unit_id not in by_id:
             continue
         provider, snapshot = by_id[unit_id]
-        ok, detail = intake(provider, snapshot.ref, repo) if check_intake else (True, "")
+        ok, detail = intake(provider, snapshot.ref, repo, target=target) if check_intake else (True, "")
         try:
             folder = str(snapshot.ref.path.resolve().relative_to(repo.resolve()))
         except ValueError:
