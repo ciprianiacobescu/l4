@@ -65,8 +65,6 @@ def test_an_old_ledger_folds_as_before():
 def test_the_new_modules_are_stubs():
     """The wave-2 entry points are still stubs; wave 1's modules are implemented and tested on their own."""
     with pytest.raises(NotImplementedError):
-        review_worktree.run_review_worktree(None, plan="p1", fresh=(), record=False, no_run=False)
-    with pytest.raises(NotImplementedError):
         commands.run_findings(None, plan="p1", subject=None, show_all=False, as_json=False)
     with pytest.raises(NotImplementedError):
         commands.run_accept(None, plan="p1", subject="s", reason="r", withdraw=False, yes=False)
