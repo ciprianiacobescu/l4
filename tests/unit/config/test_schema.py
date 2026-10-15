@@ -212,3 +212,14 @@ def test_redact_forge_urls_defaults_on():
     assert L4Config.model_validate({}).observability.redact_forge_urls is True
     off = L4Config.model_validate({"observability": {"redact_forge_urls": False}})
     assert off.observability.redact_forge_urls is False
+
+
+def test_yolo_hold_defaults_to_nothing_and_takes_ids_and_patterns():
+    assert L4Config().yolo.hold == []
+    cfg = L4Config.model_validate({"yolo": {"hold": ["openspec:a", "kiro:*"]}})
+    assert cfg.yolo.hold == ["openspec:a", "kiro:*"]
+
+
+def test_yolo_hold_rejects_an_empty_entry():
+    with pytest.raises(ValidationError):
+        L4Config.model_validate({"yolo": {"hold": ["openspec:a", ""]}})

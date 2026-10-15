@@ -90,6 +90,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--forge-token-env", "forge_token_env",
              help="With --action: forge.token_env, the secret the job reads the forge token from "
                   "(default: GITHUB_TOKEN, the workflow's own)."),
+        _flag("--hold-existing", "hold_existing",
+              help="Write the ids of the units found now as yolo.hold: none of them runs until you remove it."),
+        _opt("--s1", "s1", type=click.Choice(["laya", "jev", "none"]), default="laya", show_default=True,
+             help="The System One profile to write: laya (local, no key), jev (TypeSafe, TYPESAFE_API_KEY) or none."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
@@ -311,7 +315,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "ci render-child": ("Print the GitLab child pipeline.", lambda: [
         _opt("--plan", "plan", required=True, type=click.Path(dir_okay=False, path_type=Path)),
     ]),
-    "ci cache-key": ("Print the key suffix of a CI cache (clis: catalog pins and config CLIs).", lambda: [
+    "ci cache-key": ("Print the key of a CI cache (clis: a suffix; laya: the whole key, or nothing).", lambda: [
         click.Argument(["cache"], type=str),
     ]),
     "ci render-setup": ("Print the runner setup script (l4-setup.sh) for bash.", lambda: []),

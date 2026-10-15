@@ -717,6 +717,14 @@ class YoloCfg(_Strict):
 
     profiles: dict[str, list[str]] = Field(default_factory=dict)
     review: YoloReviewCfg = Field(default_factory=YoloReviewCfg)
+    hold: list[str] = Field(default_factory=list)
+
+    @field_validator("hold")
+    @classmethod
+    def _hold(cls, value: list[str]) -> list[str]:
+        if any(not entry.strip() for entry in value):
+            raise ValueFree("yolo.hold: an entry is empty (name a unit id or an fnmatch pattern)")
+        return value
 
     @field_validator("profiles")
     @classmethod

@@ -226,3 +226,24 @@ def test_auth_config_is_passed_to_fetch_and_push(world):
     fetches = [h for h in a.history if "fetch" in h]
     assert fetches == [] or "credential.helper=" in " ".join(fetches[0])
     assert any("remote.origin.pushurl=file:///nowhere" in " ".join(h) for h in a.history if "push" in h)
+
+
+def test_a_refused_ledger_push_is_worded_for_the_platform(world):
+    """adoption-lessons 1.2b (L4-ADO-004): the store passes its platform to `explain_push_failure`."""
+    from l4.exitcodes import L4Exit
+    from l4.vcs.git import Git, GitError
+
+    _, a, _ = world
+    real = Git.run
+
+    def refuse(self, *args, **kwargs):
+        if args and args[0] == "push":
+            raise GitError(["git", "push"], 128, "error: The requested URL returned error: 403")
+        return real(self, *args, **kwargs)
+
+    store = PlanStore(a, "p1", token_env="GITHUB_TOKEN", environ={"GITHUB_TOKEN": "x"}, platform="github")
+    import unittest.mock as mock
+
+    with mock.patch.object(Git, "run", refuse), pytest.raises(L4Exit) as caught:
+        store.append([ev("plan.admitted")], expect=None)
+    assert "contents: write" in str(caught.value)

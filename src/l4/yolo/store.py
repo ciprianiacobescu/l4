@@ -84,7 +84,8 @@ def parse_ledger(text: str) -> list[PlanEvent]:
 
 class PlanStore:
     """The ledger ref of one plan. `config` is the `git -c` pairs of the fetch (`fetch_auth_config`); `push_config`
-    those of the push (`push_auth_config`), `config` when not given."""
+    those of the push (`push_auth_config`), `config` when not given. `platform` is the forge that a refused push
+    is explained for (`push_platform`); without it the explanation guesses from the CI variables (L4-ADO-004)."""
 
     def __init__(
         self,
@@ -96,6 +97,7 @@ class PlanStore:
         token_env: str = "L4_FORGE_TOKEN",
         environ: Mapping[str, str] | None = None,
         redact: Callable[[str], str] = str,
+        platform: str | None = None,
     ) -> None:
         self.git = git
         self.plan_id = plan_id
@@ -103,6 +105,7 @@ class PlanStore:
         self.config = tuple(config)
         self.push_config = self.config if push_config is None else tuple(push_config)
         self._token_env, self._environ, self._redact = token_env, environ or {}, redact
+        self._platform = platform
 
     @staticmethod
     def list_plans(git: Git, config: Sequence[tuple[str, str]] = ()) -> list[str]:
@@ -235,7 +238,12 @@ class PlanStore:
             if is_lost_lease(exc.stderr):
                 raise PlanMoved(f"{self.ref} moved since it was read: read again and decide again") from None
             raise explain_push_failure(
-                exc, branch=self.ref, token_env=self._token_env, environ=self._environ, redact=self._redact
+                exc,
+                branch=self.ref,
+                token_env=self._token_env,
+                environ=self._environ,
+                redact=self._redact,
+                platform=self._platform,
             ) from None
 
 
