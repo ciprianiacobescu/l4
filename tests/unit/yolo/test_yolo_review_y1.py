@@ -288,7 +288,7 @@ def test_a_failing_plan_step_keeps_the_plan_units_held_and_lets_the_others_run(r
 # --- finding 11: l4 run --dry-run -------------------------------------------------------------------------------------
 
 
-def test_a_dry_run_shows_a_unit_a_plan_holds_as_held_not_as_runnable(tdd_repo, capsys):
+def test_a_dry_run_shows_a_unit_a_plan_holds_as_held_not_as_runnable(tdd_repo, capsys, raw):
     import json
 
     from l4.cli import main
@@ -300,6 +300,12 @@ def test_a_dry_run_shows_a_unit_a_plan_holds_as_held_not_as_runnable(tdd_repo, c
     }  # fmt: skip
     (tdd_repo.repo / ".l4" / "plans").mkdir(parents=True, exist_ok=True)
     (tdd_repo.repo / ".l4" / "plans" / "p1.json").write_text(json.dumps(plan), encoding="utf-8")
+    # the plan file is on the target, as the plan step reads it (`plan_source`, LOW-5): a file only in the working
+    # tree holds nothing in a real run, so the dry run must not show it held either
+    raw(tdd_repo.repo, "add", ".l4/plans/p1.json")
+    raw(tdd_repo.repo, "commit", "-q", "-m", "plan p1")
+    raw(tdd_repo.repo, "push", "-q", "origin", "main")
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
     tdd_repo.write_config()
 
     def dry(*flags):

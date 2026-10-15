@@ -27,4 +27,4 @@ def test_a_test_command_passes(make_ctx):
 
 def test_it_is_an_error_that_runs_on_a_laptop_and_in_ci():
     check = {c.id: c for c in REGISTRY.checks()}["CFG-004"]
-    assert check.severity == "error" and CONFIG_SCOPES <= check.scopes
+    assert check.severity == "error" and check.scopes >= CONFIG_SCOPES
