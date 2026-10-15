@@ -139,3 +139,153 @@ def fold_cost(world) -> float:
 
 def sh_refs(world) -> str:
     return world.git.run("ls-remote", "origin", "refs/l4/plans/*").stdout.strip()
+
+
+# --- the review reuses what the judge already judged (L4-YOLO-022) ----------------------------------------
+
+BASELINE = (  # the capability the units change has a baseline, so its deltas need no Purpose (L4-OSP-007)
+    "# x Specification\n\n## Purpose\nThe capability the units of these tests change, with a baseline.\n\n"
+    "## Requirements\n### Requirement: Base\nThe system SHALL exist.\n"
+)
+SPEC_NEW = "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"
+
+
+def baselined(world):
+    world.commit({"openspec/specs/x/spec.md": BASELINE}, "baseline")
+    return world
+
+
+def reviewed_events(world):
+    return [e.data for e in world.events() if e.type == "plan.reviewed"]
+
+
+def change_and_push(world, name, spec=SPEC_NEW):
+    world.commit({f"openspec/changes/{name}/specs/x/spec.md": spec})
+    world.push_main()
+
+
+def test_scn_yolo_47_an_unchanged_unit_is_not_judged_again(tmp_path):
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    world.judge = type(world.judge)([Step(structured=READY, cost_usd=0.5) for _ in range(10)])
+    world.step()
+    assert len(world.judge.requests) == 3  # a, b and their batch
+    first = reviewed_events(world)[0]
+    assert first["source"] == "ci" and first["judge"]
+    assert first["units"][A]["material"] and "reused_from" not in first["units"][A]
+    assert set(first["batches"]["b1"]["digests"]) == {A, B}
+    change_and_push(world, "b")
+    step = world.step()
+    assert len(world.judge.requests) == 5  # b and the batch only
+    second = reviewed_events(world)[1]
+    assert second["units"][A]["reused_from"]
+    assert second["units"][A]["verdict"] == first["units"][A]["verdict"]
+    assert second["units"][A]["findings"] == first["units"][A]["findings"]
+    assert second["units"][A]["material"] == first["units"][A]["material"]
+    assert "reused_from" not in second["units"][B] and second["units"][B]["material"] != first["units"][B]["material"]
+    totals = [e.data["cost_usd"] for e in world.events() if e.type == "plan.charged"]
+    assert totals == [1.5, 2.5]  # the second review charged two calls, not three
+    assert "plan p1: reviewed: 3 READY, 0 not READY, 2 judged, 1 reused (l4 yolo findings p1)" in step.actions
+
+
+def test_scn_yolo_48_a_changed_prerequisite_makes_its_dependents_judged_again(tmp_path):
+    world = baselined(CycleWorld(tmp_path))
+    world.plan()  # b depends on a
+    world.step()
+    assert len(world.judge.requests) == 3
+    change_and_push(world, "a")
+    world.step()
+    assert len(world.judge.requests) == 6  # a, b (its prerequisite changed) and the batch
+    second = reviewed_events(world)[1]
+    assert "reused_from" not in second["units"][A] and "reused_from" not in second["units"][B]
+
+
+def test_scn_yolo_49_a_review_that_did_not_happen_is_not_reused(tmp_path):
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    bad = [Step(structured={"nonsense": 1}), Step(structured={"nonsense": 2})]  # the repair also fails
+    world.judge = type(world.judge)([*bad, *[Step(structured=READY) for _ in range(8)]])
+    world.step()
+    first = reviewed_events(world)[0]
+    assert first["units"][A]["verdict"] == "BLOCKED" and first["units"][A]["findings"][0]["criterion"] == "schema"
+    seen = len(world.judge.requests)
+    assert seen == 4  # a twice (one repair), b, the batch
+    change_and_push(world, "b")
+    world.step()
+    second = reviewed_events(world)[1]
+    assert len(world.judge.requests) - seen == 3  # a again, b and the batch
+    assert second["units"][A]["verdict"] == "READY" and "reused_from" not in second["units"][A]
+
+
+def test_a_lost_lease_after_the_review_still_appends_the_same_facts(tmp_path, monkeypatch):
+    from l4.yolo.model import PlanMoved
+    from l4.yolo.store import PlanStore
+
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    real, calls = PlanStore.append, []
+
+    def once(self, events, *, files=None, expect):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PlanMoved("moved")
+        return real(self, events, files=files, expect=expect)
+
+    monkeypatch.setattr(PlanStore, "append", once)
+    world.step()
+    assert world.kinds() == ["plan.admitted", "plan.reviewed"] and len(world.judge.requests) == 3
+    data = reviewed_events(world)[0]
+    assert data["source"] == "ci" and data["units"][A]["material"] and data["batches"]["b1"]["digests"]
+
+
+# --- the refusal of a plan prints every finding (L4-ADO-008) -----------------------------------------------
+
+
+def refused_world(tmp_path, count):
+    names = tuple(f"u{n:02d}" for n in range(count))
+    world = baselined(CycleWorld(tmp_path, units=names))
+    for name in names:  # a capability new to openspec/specs with no Purpose: the intake of the unit fails
+        world.commit({f"openspec/changes/{name}/specs/new-{name}/spec.md": SPEC_NEW})
+    world.plan(deps={})
+    return world, names
+
+
+def finding_lines(step):
+    return [a for a in step.actions if "fails the intake checks" in a]
+
+
+def test_scn_ado_23_every_finding_of_a_refused_plan_is_a_line_of_the_log(tmp_path):
+    world, names = refused_world(tmp_path, 8)
+    step = world.step()
+    assert world.kinds() == ["plan.refused"] and len(world.events()[0].data["findings"]) == 8
+    lines = finding_lines(step)
+    assert len(lines) == 8 and all(line.startswith("plan p1: refused: ") for line in lines)
+    assert all("`## Purpose`" in line for line in lines)  # in full, not the first one only
+    assert not any("more:" in a for a in step.actions)
+
+
+def test_scn_ado_25_twelve_findings_print_ten_lines_and_then_the_rest_by_command(tmp_path):
+    world, names = refused_world(tmp_path, 12)
+    step = world.step()
+    assert len(world.events()[0].data["findings"]) == 12  # the ledger keeps all of them
+    assert len(finding_lines(step)) == 10
+    assert step.actions[-1] == "plan p1: … and 2 more: l4 yolo check p1"
+    again = world.step()
+    assert world.kinds() == ["plan.refused"] and not finding_lines(again)  # said once per changed set
+
+
+def test_the_intake_of_a_plans_unit_is_asked_with_the_plans_target(tmp_path, monkeypatch):
+    import l4.yolo.cycle as cycle
+
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    seen = []
+    real = cycle.unit_infos
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("target"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cycle, "unit_infos", spy)
+    world.step()
+    assert "main" in seen
