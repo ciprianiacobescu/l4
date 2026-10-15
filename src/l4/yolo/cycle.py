@@ -57,6 +57,7 @@ from l4.forge.gitlab import push_auth_config
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.sandbox.base import Sandbox
+from l4.sandbox.select import select_sandbox
 from l4.specs.base import SpecProvider, UnitRef, parse_unit_id
 from l4.state.fold import UnitState
 from l4.state.status import UnitSnapshot
@@ -64,6 +65,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.findings import prior_entries
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
@@ -184,6 +186,20 @@ def plan_holds(
         elif live is not None:
             holds[unit] = Hold(f"not in the active plan {live.plan_id}", f"is not in the active plan {live.plan_id}")
     return holds
+
+
+def _entry(v: Verdict, **extra: Any) -> dict[str, Any]:
+    """A subject's entry of `plan.reviewed`: the verdict and its findings, what the judge assumed and could not see, the
+    material key of the judgement and, when it was reused, the `at` of the judgement it came from (L4-YOLO-022)."""
+    entry: dict[str, Any] = {
+        "verdict": v.verdict, "findings": list(v.findings), "assumptions": list(v.assumptions),
+        "missing": list(v.missing),
+    }  # fmt: skip
+    if v.material is not None:
+        entry["material"] = v.material
+    if v.reused_from is not None:
+        entry["reused_from"] = v.reused_from
+    return {**entry, **extra}
 
 
 def review_batches(plan: Plan, result: ReviewResult) -> dict[str, Verdict]:
@@ -799,6 +815,12 @@ class _Step:
             self._write(ctx, [self._event("plan.refused", plan_digest=digest, findings=findings)])
             self._line(ctx.plan_id, f"refused: {len(findings)} finding(s): {findings[0]['text']}")
             return self._after_review(ctx)
+        judge: dict[str, str] = {}
+
+        def sandbox_for(adapter: str, profile: str) -> Sandbox:  # the step's own sandbox; the profile goes on the event
+            judge["profile"] = profile
+            return self.sandbox or select_sandbox(self.cfg.sandbox, self.app.environ, repo=self.app.repo)
+
         try:
             result, cost = review_plan_costed(
                 self.app,
@@ -809,6 +831,8 @@ class _Step:
                 rev=rev,
                 adapters=self.adapters,
                 sandbox=self.sandbox,
+                prior=prior_entries(ctx.read.events, PROMPT_VERSION),
+                sandbox_for=sandbox_for,
                 done=done_units(plan, state),
                 delivered=delivered_on_target(
                     archived_at(self.git, rev, self.cfg), {u: s.state.phase for u, s in self.snaps.items()}
@@ -823,16 +847,22 @@ class _Step:
         order = list(admission.order)
         if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
             events.append(self._event("plan.admitted", plan_digest=digest, order=order, merge=plan.merge))
-        units = {
-            uid: {"verdict": v.verdict, "digest": v.digest, "findings": list(v.findings)}
-            for uid, v in result.units.items()
-        }
+        batch_verdicts = review_batches(plan, result)
+        units = {uid: _entry(v, digest=v.digest) for uid, v in result.units.items()}
+        members = {b.id: [u.id for u in b.units] for b in plan.batches}
         batches = {
-            bid: {"verdict": v.verdict, "findings": list(v.findings)} for bid, v in review_batches(plan, result).items()
+            bid: _entry(v, digests={u: current[u] for u in members.get(bid, ()) if u in current})
+            for bid, v in batch_verdicts.items()
         }
+        extra = {"source": "ci", **({"judge": judge["profile"]} if "profile" in judge else {})}
         events.append(
             self._event(
-                "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, units=units, batches=batches
+                "plan.reviewed",
+                plan_digest=digest,
+                prompt_version=PROMPT_VERSION,
+                units=units,
+                batches=batches,
+                **extra,
             )
         )
         if cost > 0:
@@ -843,8 +873,15 @@ class _Step:
             )  # fmt: skip
             events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
         self._write_review(ctx, events, digest)
-        verdicts = ", ".join(f"{u}={v.verdict}" for u, v in result.units.items())
-        self._line(ctx.plan_id, f"reviewed ({verdicts})")
+        subjects = [*result.units.values(), *batch_verdicts.values()]
+        ready = sum(v.verdict == "READY" for v in subjects)
+        judged = sum(v.material is not None and v.reused_from is None for v in subjects)
+        reused = sum(v.reused_from is not None for v in subjects)
+        self._line(
+            ctx.plan_id,
+            f"reviewed: {ready} READY, {len(subjects) - ready} not READY, {judged} judged, {reused} reused "
+            f"(l4 yolo findings {ctx.plan_id})",
+        )
         return self._after_review(ctx)
 
     def _write_review(self, ctx: _Ctx, events: Sequence[PlanEvent], digest: str) -> None:

@@ -134,3 +134,100 @@ def fold_cost(world) -> float:
 
 def sh_refs(world) -> str:
     return world.git.run("ls-remote", "origin", "refs/l4/plans/*").stdout.strip()
+
+
+# --- the review reuses what the judge already judged (L4-YOLO-022) ----------------------------------------
+
+BASELINE = (  # the capability the units change has a baseline, so its deltas need no Purpose (L4-OSP-007)
+    "# x Specification\n\n## Purpose\nThe capability the units of these tests change, with a baseline.\n\n"
+    "## Requirements\n### Requirement: Base\nThe system SHALL exist.\n"
+)
+SPEC_NEW = "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"
+
+
+def baselined(world):
+    world.commit({"openspec/specs/x/spec.md": BASELINE}, "baseline")
+    return world
+
+
+def reviewed_events(world):
+    return [e.data for e in world.events() if e.type == "plan.reviewed"]
+
+
+def change_and_push(world, name, spec=SPEC_NEW):
+    world.commit({f"openspec/changes/{name}/specs/x/spec.md": spec})
+    world.push_main()
+
+
+def test_scn_yolo_47_an_unchanged_unit_is_not_judged_again(tmp_path):
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    world.judge = type(world.judge)([Step(structured=READY, cost_usd=0.5) for _ in range(10)])
+    world.step()
+    assert len(world.judge.requests) == 3  # a, b and their batch
+    first = reviewed_events(world)[0]
+    assert first["source"] == "ci" and first["judge"]
+    assert first["units"][A]["material"] and "reused_from" not in first["units"][A]
+    assert set(first["batches"]["b1"]["digests"]) == {A, B}
+    change_and_push(world, "b")
+    step = world.step()
+    assert len(world.judge.requests) == 5  # b and the batch only
+    second = reviewed_events(world)[1]
+    assert second["units"][A]["reused_from"]
+    assert second["units"][A]["verdict"] == first["units"][A]["verdict"]
+    assert second["units"][A]["findings"] == first["units"][A]["findings"]
+    assert second["units"][A]["material"] == first["units"][A]["material"]
+    assert "reused_from" not in second["units"][B] and second["units"][B]["material"] != first["units"][B]["material"]
+    totals = [e.data["cost_usd"] for e in world.events() if e.type == "plan.charged"]
+    assert totals == [1.5, 2.5]  # the second review charged two calls, not three
+    assert "plan p1: reviewed: 3 READY, 0 not READY, 2 judged, 1 reused (l4 yolo findings p1)" in step.actions
+
+
+def test_scn_yolo_48_a_changed_prerequisite_makes_its_dependents_judged_again(tmp_path):
+    world = baselined(CycleWorld(tmp_path))
+    world.plan()  # b depends on a
+    world.step()
+    assert len(world.judge.requests) == 3
+    change_and_push(world, "a")
+    world.step()
+    assert len(world.judge.requests) == 6  # a, b (its prerequisite changed) and the batch
+    second = reviewed_events(world)[1]
+    assert "reused_from" not in second["units"][A] and "reused_from" not in second["units"][B]
+
+
+def test_scn_yolo_49_a_review_that_did_not_happen_is_not_reused(tmp_path):
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    bad = [Step(structured={"nonsense": 1}), Step(structured={"nonsense": 2})]  # the repair also fails
+    world.judge = type(world.judge)([*bad, *[Step(structured=READY) for _ in range(8)]])
+    world.step()
+    first = reviewed_events(world)[0]
+    assert first["units"][A]["verdict"] == "BLOCKED" and first["units"][A]["findings"][0]["criterion"] == "schema"
+    seen = len(world.judge.requests)
+    assert seen == 4  # a twice (one repair), b, the batch
+    change_and_push(world, "b")
+    world.step()
+    second = reviewed_events(world)[1]
+    assert len(world.judge.requests) - seen == 3  # a again, b and the batch
+    assert second["units"][A]["verdict"] == "READY" and "reused_from" not in second["units"][A]
+
+
+def test_a_lost_lease_after_the_review_still_appends_the_same_facts(tmp_path, monkeypatch):
+    from l4.yolo.model import PlanMoved
+    from l4.yolo.store import PlanStore
+
+    world = baselined(CycleWorld(tmp_path))
+    world.plan(deps={})
+    real, calls = PlanStore.append, []
+
+    def once(self, events, *, files=None, expect):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PlanMoved("moved")
+        return real(self, events, files=files, expect=expect)
+
+    monkeypatch.setattr(PlanStore, "append", once)
+    world.step()
+    assert world.kinds() == ["plan.admitted", "plan.reviewed"] and len(world.judge.requests) == 3
+    data = reviewed_events(world)[0]
+    assert data["source"] == "ci" and data["units"][A]["material"] and data["batches"]["b1"]["digests"]
