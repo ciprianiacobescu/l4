@@ -107,3 +107,24 @@ def test_a_tail_that_could_not_be_published_is_published_by_the_next_run(
     assert any(e["type"] == "pr.updated" for e in lost)
     third = run_l4([])
     assert third.code == 0 and len(third.pending_files()) == 3  # the kept copy was dropped once published
+
+
+def test_a_refused_pending_ledger_push_is_explained_for_the_forge(
+    run_l4, install_hooks, forge_env, use_fake_gitlab, tdd_repo, monkeypatch
+):
+    """adoption-lessons 1.2b: the lock-ref publication passes the platform too."""
+    from l4 import orchestrator
+
+    hand_off_run(run_l4, install_hooks, forge_env, use_fake_gitlab)
+    refuse_lock_refs(tdd_repo.origin)
+    seen = []
+    real = orchestrator.explain_push_failure
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("platform"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrator, "explain_push_failure", spy)
+    monkeypatch.setattr(orchestrator, "push_platform", lambda cfg, environ, repo: "github")
+    assert run_l4([]).code == 1
+    assert seen == ["github"]

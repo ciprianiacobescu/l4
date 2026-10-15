@@ -57,7 +57,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
 from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
-from l4.forge.pushfail import PushFailed, explain_push_failure
+from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
@@ -280,7 +280,7 @@ class Orchestrator:
             self._push_failed = True
             raise explain_push_failure(
                 exc, branch=s.names.branch, token_env=self.cfg.forge.token_env, environ=s.app.environ,
-                redact=s.app.redactor.redact_text,
+                redact=s.app.redactor.redact_text, platform=push_platform(self.cfg, s.app.environ, s.git.repo),
             ) from None  # fmt: skip
         if self._forge is not None:
             try:
@@ -1165,7 +1165,7 @@ class Orchestrator:
         except GitError as exc:  # one explained error (exit 3 for a credential problem), never a git traceback
             error: Exception = explain_push_failure(
                 exc, branch=s.names.lock_ref, token_env=self.cfg.forge.token_env, environ=s.app.environ,
-                redact=s.app.redactor.redact_text,
+                redact=s.app.redactor.redact_text, platform=push_platform(self.cfg, s.app.environ, s.git.repo),
             )  # fmt: skip
         except Exception as exc:
             error = exc
