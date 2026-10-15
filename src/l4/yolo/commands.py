@@ -629,9 +629,25 @@ def _verdict_json(verdict: Any) -> dict[str, Any]:
     }
 
 
-def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool = False) -> ExitCode:
+def run_review(
+    app: AppContext,
+    *,
+    plan: str,
+    local: bool = False,
+    no_run: bool = False,
+    worktree: bool = False,
+    record: bool = False,
+    fresh: Sequence[str] = (),
+) -> ExitCode:
     """Without `--local`: ask CI to review the plan (`start_run`); the review itself is the CI step's. With `--local`:
-    admit and review here, recording `plan.admitted` and `plan.reviewed` (or `plan.refused`) as the CI step would."""
+    admit and review here, recording `plan.admitted` and `plan.reviewed` (or `plan.refused`) as the CI step would.
+    With `--worktree`: review the working tree (`review_worktree`); `--record` and `--fresh` need it (exit 2)."""
+    if not worktree and (record or fresh):
+        raise L4Exit(ExitCode.USAGE_ERROR, "review: --record and --fresh need --worktree")
+    if worktree:
+        from l4.yolo.review_worktree import run_review_worktree  # late: that module reads this one
+
+        return run_review_worktree(app, plan=plan, fresh=tuple(fresh), record=record, no_run=no_run)
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="review")
@@ -1195,9 +1211,21 @@ __all__ = [
     "run_activate",
     "run_cancel",
     "run_check",
+    "run_accept",
     "run_draft",
+    "run_findings",
     "run_report",
     "run_resume",
     "run_review",
     "run_status",
 ]
+
+
+def run_findings(app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool) -> ExitCode:
+    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json]`: the findings of the latest review (task 2.1)."""
+    raise NotImplementedError
+
+
+def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
+    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` (task 2.2)."""
+    raise NotImplementedError

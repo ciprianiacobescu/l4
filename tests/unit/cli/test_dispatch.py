@@ -18,7 +18,8 @@ SECTION_2_1 = {
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
 YOLO = {
-    f"yolo {w}" for w in ("draft", "check", "review", "activate", "status", "cancel", "resume", "report")
+    f"yolo {w}"
+    for w in ("draft", "check", "review", "findings", "accept", "activate", "status", "cancel", "resume", "report")
 }  # yolo-mode D6
 EXTRA |= YOLO
 
@@ -56,6 +57,8 @@ ARGV = {
     "yolo draft": ["yolo", "draft", "p1"],
     "yolo check": ["yolo", "check", "p1"],
     "yolo review": ["yolo", "review", "p1"],
+    "yolo findings": ["yolo", "findings", "p1"],
+    "yolo accept": ["yolo", "accept", "p1", "openspec:a", "--reason", "go"],
     "yolo activate": ["yolo", "activate", "p1", "--reason", "go"],
     "yolo status": ["yolo", "status"],
     "yolo cancel": ["yolo", "cancel", "p1", "--reason", "why"],

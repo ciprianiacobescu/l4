@@ -45,6 +45,7 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from l4.agents.base import AgentAdapter
 from l4.availability.errors import RoleUnavailable
@@ -106,6 +107,8 @@ class PlanStep(YoloStep):
 
     refusals: Mapping[str, str] = field(default_factory=dict)
     pending_starts: frozenset[str] = frozenset()  # current units of a plan with a `unit.not_started` record pending
+    # unit id -> the accepted review items that concern it: its own subject's and its batch's (L4-YOLO-028)
+    accepted: Mapping[str, tuple[dict[str, Any], ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

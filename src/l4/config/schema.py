@@ -701,10 +701,22 @@ _YOLO_EXTRA = re.compile(r"^extra:[A-Za-z0-9][A-Za-z0-9._-]*$")
 _YOLO_PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 
 
+class YoloReviewCfg(_Strict):
+    """The readiness review (review-resolution design section 8): material budgets and the conditions of
+    `l4 yolo accept`. The module constants in `yolo/readiness.py` stay as the defaults."""
+
+    max_file_chars: int = Field(default=20_000, ge=1000)
+    max_folder_chars: int = Field(default=80_000, ge=1000)
+    max_dependency_chars: int = Field(default=20_000, ge=0)
+    accept_after_rounds: int = Field(default=2, ge=1)
+    accept_by_agents: bool = False
+
+
 class YoloCfg(_Strict):
     """Delivery plans (yolo-mode L4-YOLO-009): `profiles` maps a name to the gate kinds a post-merge check runs."""
 
     profiles: dict[str, list[str]] = Field(default_factory=dict)
+    review: YoloReviewCfg = Field(default_factory=YoloReviewCfg)
 
     @field_validator("profiles")
     @classmethod

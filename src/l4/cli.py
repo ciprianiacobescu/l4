@@ -224,7 +224,21 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "yolo review": ("Ask CI to review a delivery plan (--local: review it here).", lambda: [
         click.Argument(["plan"]),
         _flag("--local", "local", help="Run the readiness review on this machine and record it."),
+        _flag("--worktree", "worktree", help="Review the working tree here, before the push (a dry run)."),
+        _flag("--record", "record", help="With --worktree: record the review in the plan ledger (clean tree only)."),
+        _opt("--fresh", "fresh", multiple=True, help="With --worktree: judge this subject again (repeatable)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch."),
+    ]),
+    "yolo findings": ("Show the findings of the latest review of a plan, with how to resolve each.", lambda: [
+        click.Argument(["plan"]), click.Argument(["subject"], required=False),
+        _flag("--all", "show_all", help="Also the READY subjects, minor findings, assumptions and missing."),
+        _flag("--json", "as_json"),
+    ]),
+    "yolo accept": ("Accept a subject's review as it is, with a reason for the implementer (audited).", lambda: [
+        click.Argument(["plan"]), click.Argument(["subject"]),
+        _opt("--reason", "reason", required=True, help="What the implementer should do (kept in the plan ledger)."),
+        _flag("--withdraw", "withdraw", help="Withdraw an acceptance."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
     ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
         click.Argument(["plan"]),
