@@ -231,12 +231,14 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--worktree", "worktree", help="Review the working tree here, before the push (a dry run)."),
         _flag("--record", "record", help="With --worktree: record the review in the plan ledger (clean tree only)."),
         _opt("--fresh", "fresh", multiple=True, help="With --worktree: judge this subject again (repeatable)."),
+        _flag("--json", "as_json", help="With --worktree: print the findings as JSON (as l4 yolo findings --json)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch."),
     ]),
     "yolo findings": ("Show the findings of the latest review of a plan, with how to resolve each.", lambda: [
         click.Argument(["plan"]), click.Argument(["subject"], required=False),
         _flag("--all", "show_all", help="Also the READY subjects, minor findings, assumptions and missing."),
         _flag("--json", "as_json"),
+        _flag("--worktree", "worktree", help="The latest dry run of review --worktree (local), not the ledger."),
     ]),
     "yolo accept": ("Accept a subject's review as it is, with a reason for the implementer (audited).", lambda: [
         click.Argument(["plan"]), click.Argument(["subject"]),

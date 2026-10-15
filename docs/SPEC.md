@@ -447,8 +447,8 @@ of the harness package.
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`. Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
 | `l4 yolo check PLAN` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings | none |
-| `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]…]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
-| `l4 yolo findings PLAN [SUBJECT] [--all] [--json]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement (L4-YOLO-021) | none |
+| `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
+| `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
 | `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
 | `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
@@ -3525,11 +3525,12 @@ plan it knowingly and say so), to leave `promotion` out unless the person names 
 put finished and deliberately left-out specs in `exclude` and not only in the hand-off message, and to keep an
 integrated unit in the file after an update.
 
-**L4-YOLO-021** Every finding is shown with what to do about it. `l4 yolo findings PLAN [SUBJECT] [--all] [--json]` SHALL print, from the latest review, with no model and no write,
+**L4-YOLO-021** Every finding is shown with what to do about it. `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` SHALL print, from the latest review, with no model and no write,
 each subject that is not READY with every blocking and major finding in full, its id, criterion and a `Resolve:` line,
 the count of minor ones, and the change since the subject's previous judged material (new, repeated, gone, persistent
 criteria). `l4 yolo status`, `l4 yolo review` and the activation refusal MUST show an item's most severe finding and
-name `l4 yolo findings`.
+name `l4 yolo findings`. `--worktree` SHALL read the latest dry run of `l4 yolo review --worktree` from the local cache
+instead of the ledger, against the previous dry run.
 
 **L4-YOLO-022** Material already judged is not judged again. Each subject SHALL have a material key: a hash of the prompt version, the subject kind, and the exact text the judge
 would get, without the list of delivered units. A review MUST reuse, at no cost, the verdict of a recorded
@@ -3552,8 +3553,8 @@ revision shown, that the harness does not implement it again, and that the judge
 readiness prompt version MUST be 4.
 
 **L4-YOLO-026** A review of the working tree before the push. `l4 yolo review PLAN --worktree` SHALL review the working tree's plan file and unit folders with the same prompt,
-rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost, write
-nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
+rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost (`--json`:
+the findings document of `l4 yolo findings --json`), write nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
 `--local`, for committed paths only. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
 adapter is tool-less, and say so.
 
@@ -7529,6 +7530,11 @@ scenario is a spec defect (§26).
 - **Given** no `bwrap` on `PATH` and a judge profile with the adapter `codex`
 - **When** `l4 yolo review p1 --worktree` runs, and when the same review runs with `CI=true`
 - **Then** both exit 3 before any judge call, the first naming a `claude-code` or `opencode` judge profile, the second as today
+
+#### SCN-YOLO-71 (+) The results of a dry run are usable in the loop · L4-YOLO-021
+- **Given** `l4 yolo review p1 --worktree` judged `openspec:b` NEEDS_REVISION with a major `testability` finding, and recorded nothing in the plan ledger
+- **When** `l4 yolo findings p1 --worktree` runs, and `l4 yolo findings p1 --worktree --json`
+- **Then** the first prints `openspec:b: NEEDS_REVISION`, the finding and its `Resolve:` line, and after a second dry run with other material the change since the previous dry run; the second prints the `l4/yolo-findings@1` document; neither calls a model, and `l4 yolo review p1 --worktree --json` prints the same document alone on stdout
 
 #### SCN-YOLO-62 (+) A person accepts a unit after two attempts · L4-YOLO-027
 - **Given** `openspec:a` judged NEEDS_REVISION on two versions of its text (two unit digests), the latest with two major findings, and a terminal

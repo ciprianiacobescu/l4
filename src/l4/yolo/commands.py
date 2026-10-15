@@ -715,16 +715,17 @@ def run_review(
     worktree: bool = False,
     record: bool = False,
     fresh: Sequence[str] = (),
+    as_json: bool = False,
 ) -> ExitCode:
     """Without `--local`: ask CI to review the plan (`start_run`); the review itself is the CI step's. With `--local`:
     admit and review here, recording `plan.admitted` and `plan.reviewed` (or `plan.refused`) as the CI step would.
     With `--worktree`: review the working tree (`review_worktree`); `--record` and `--fresh` need it (exit 2)."""
-    if not worktree and (record or fresh):
-        raise L4Exit(ExitCode.USAGE_ERROR, "review: --record and --fresh need --worktree")
+    if not worktree and (record or fresh or as_json):
+        raise L4Exit(ExitCode.USAGE_ERROR, "review: --record, --fresh and --json need --worktree")
     if worktree:
         from l4.yolo.review_worktree import run_review_worktree  # late: that module reads this one
 
-        return run_review_worktree(app, plan=plan, fresh=tuple(fresh), record=record, no_run=no_run)
+        return run_review_worktree(app, plan=plan, fresh=tuple(fresh), record=record, no_run=no_run, as_json=as_json)
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="review")
@@ -1387,10 +1388,17 @@ def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: 
     return can_accept
 
 
-def run_findings(app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool) -> ExitCode:
-    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json]`: the findings of the latest review, each with how to resolve
-    it (L4-YOLO-021). Reads the ledger and the plan file; calls no model and writes nothing. Exit 2 for an unknown plan
-    or subject, else 0 (a plan with no review included)."""
+def run_findings(
+    app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool, worktree: bool = False
+) -> ExitCode:
+    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]`: the findings of the latest review, each with
+    how to resolve it (L4-YOLO-021). Reads the ledger and the plan file; calls no model and writes nothing. With
+    `--worktree`, the latest `review --worktree` (dry run) from the local cache instead of the ledger. Exit 2 for an
+    unknown plan or subject, else 0 (a plan with no review included)."""
+    if worktree:
+        from l4.yolo.review_worktree import run_findings_worktree  # late: that module reads this one
+
+        return run_findings_worktree(app, plan=plan, subject=subject, show_all=show_all, as_json=as_json)
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="findings")

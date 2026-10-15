@@ -8,6 +8,7 @@ tree only, records the events `--local` would, so that the pushed commit finds i
 
 import json
 import logging
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from l4.yolo import accept, findings, judge_sandbox, worktree
 from l4.yolo.admit import admit, done_units
 from l4.yolo.commands import (
     _append,
+    _entry_of,
     _event,
     _findings_text,
     _held,
@@ -48,6 +50,7 @@ from l4.yolo.state import fold_plan
 log = logging.getLogger("l4.yolo.review_worktree")
 
 CACHE_FILE = "verdicts.jsonl"
+RUNS_FILE = "runs.jsonl"
 _BLOCKED_STATES = ("active", "waiting", "cancelled", "completed")
 
 
@@ -91,6 +94,107 @@ def append_cache(path: Path, lines: Sequence[Mapping[str, Any]]) -> None:
                 handle.write(json.dumps(dict(line), sort_keys=True) + "\n")
     except OSError as exc:  # the cache is the person's convenience: a full disk must not lose the review
         log.warning("the review cache could not be written: %s", exc)
+
+
+def runs_path(app: AppContext, plan_id: str) -> Path:
+    return cache_path(app, plan_id).with_name(RUNS_FILE)
+
+
+def read_runs(path: Path) -> list[dict[str, Any]]:
+    """The dry runs of the current prompt version, oldest first: each `{at, plan_digest, review}` where `review` has the
+    shape of the data of a `plan.reviewed` event. A line that cannot be read is skipped."""
+    out: list[dict[str, Any]] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        try:
+            line = json.loads(raw)
+        except ValueError:
+            continue
+        if (
+            isinstance(line, dict)
+            and isinstance(line.get("review"), dict)
+            and line.get("at")
+            and line.get("prompt_version") == PROMPT_VERSION
+        ):
+            out.append(line)
+    return out
+
+
+def append_run(path: Path, line: Mapping[str, Any]) -> None:
+    """Keep the results of this dry run, for `l4 yolo findings --worktree`; a run that found what the last one did is
+    not kept again."""
+    runs = read_runs(path)
+    if runs and runs[-1]["review"] == line["review"]:
+        return
+    append_cache(path, [line])
+
+
+def _run_events(runs: Sequence[Mapping[str, Any]]) -> list[PlanEvent]:
+    """The dry runs as `plan.reviewed` events, so that `findings.history` reads them as it reads the ledger."""
+    return [
+        PlanEvent(
+            "plan.reviewed",
+            str(run["at"]),
+            {**run["review"], "source": "worktree", "prompt_version": PROMPT_VERSION},
+        )
+        for run in runs
+    ]
+
+
+def run_findings_worktree(
+    app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool
+) -> ExitCode:
+    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json] --worktree`: the results of the latest `review --worktree`
+    (kept in the local cache), rendered as the ledger view is, with the change since the previous dry run. Calls no
+    model and writes nothing. Exit 2 for an unknown plan or subject, else 0."""
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    file = next((f for f in plan_files(ctx.app.repo) if f.plan_id == plan_id), None)
+    if file is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"findings: no plan file .l4/plans/{plan_id}.json in the working tree")
+    runs = read_runs(runs_path(ctx.app, plan_id))
+    if not runs:
+        if as_json:
+            empty = {
+                "schema": findings.SCHEMA,
+                "plan": plan_id,
+                "base": ctx.target,
+                "plan_digest": None,
+                "subjects": [],
+            }
+            ctx.say(json.dumps(empty, indent=2))
+        else:
+            ctx.say(f"{plan_id}: no dry run yet (l4 yolo review {plan_id} --worktree)")
+        return ExitCode.OK
+    review = dict(runs[-1]["review"], plan_digest=runs[-1].get("plan_digest"))
+    if subject is not None and _entry_of(review, subject) is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"findings: {subject} is not in the latest dry run of {plan_id}")
+    infos: Mapping[str, Any] = {}
+    if file.plan is not None:
+        found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
+        infos = unit_infos(ctx.app.repo, found, file.plan.known_ids(), check_intake=False)
+    events = _run_events(runs)
+    options: dict[str, Any] = {
+        "show_all": show_all,
+        "units": _unit_infos_for_render(file.plan, infos) if file.plan is not None else None,
+        "only": subject,
+    }
+
+    def history_of(name: str) -> list[dict[str, Any]]:
+        return findings.history(events, name, PROMPT_VERSION)
+
+    if as_json:
+        ctx.say(json.dumps(findings.render_json(plan_id, ctx.target, review, history_of, **options), indent=2))
+        return ExitCode.OK
+    lines = findings.render(plan_id, ctx.target, review, history_of, **options)
+    for line in lines:
+        ctx.say(line)
+    if not lines:
+        ctx.say(f"{plan_id}: every subject of the latest dry run is READY (--all lists them)")
+    return ExitCode.OK
 
 
 # --- the run ------------------------------------------------------------------------------------------------------
@@ -148,11 +252,17 @@ def _uncommitted(git: Any, paths: Sequence[str]) -> list[str]:
     return [line[3:].strip() for line in done.stdout.splitlines() if line.strip()]
 
 
-def run_review_worktree(app: AppContext, *, plan: str, fresh: Sequence[str], record: bool, no_run: bool) -> ExitCode:
+def run_review_worktree(
+    app: AppContext, *, plan: str, fresh: Sequence[str], record: bool, no_run: bool, as_json: bool = False
+) -> ExitCode:
     """Review the working tree for `plan`. Exit 0 when every subject is READY or holds an acceptance, else 2. `no_run`
-    is accepted for symmetry with `l4 yolo review`: this command starts no run."""
+    is accepted for symmetry with `l4 yolo review`: this command starts no run. With `as_json`, stdout is the findings
+    document (`l4/yolo-findings@1`) and the progress lines go to stderr."""
     plan_id = _plan_id(plan)
     ctx = _open(app)
+    emit = ctx.say
+    if as_json:
+        ctx.say = lambda text="": print(ctx.app.redactor.redact_text(text), file=sys.stderr)  # type: ignore[method-assign]
     rev = _sync(ctx, who="review")
     file = next((f for f in plan_files(ctx.app.repo) if f.plan_id == plan_id), None)
     if file is None:
@@ -259,7 +369,16 @@ def run_review_worktree(app: AppContext, *, plan: str, fresh: Sequence[str], rec
             if not _no_review(v)
         ],
     )
-    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused)
+    append_run(
+        runs_path(ctx.app, plan_id),
+        {
+            "at": stamp,
+            "prompt_version": PROMPT_VERSION,
+            "plan_digest": plan_digest(file.text),
+            "review": _review_data(result, batches),
+        },
+    )
+    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None)
     shown = parsed.limits.max_cost_usd
     recorded = _review_total(read.events)
     limit = f"${shown:.2f}" if shown is not None else "no limit"
@@ -352,6 +471,7 @@ def _show(
     batches: Mapping[str, Verdict],
     subjects: Mapping[str, tuple[str, Verdict]],
     reused: Mapping[str, Verdict],
+    json_out: Any = None,
 ) -> None:
     for name, (kind, verdict) in subjects.items():
         mark = " (reused)" if name in reused else ""
@@ -364,6 +484,18 @@ def _show(
             ctx.say(f"  {name}: material {verdict.material or 'none'}: {verdict.verdict}{mark}")
     review = _review_data(result, batches)
     plan_id = parsed.plan_id
+    if json_out is not None:
+        document = findings.render_json(
+            plan_id,
+            ctx.target,
+            review,
+            lambda subject: findings.history(events, subject, PROMPT_VERSION),
+            units=_unit_infos_for_render(parsed, infos),
+            accepted=state.accepted,
+            holds=accept.holds(state, review),
+        )
+        json_out(json.dumps(document, indent=2))
+        return
     lines = findings.render(
         plan_id,
         ctx.target,

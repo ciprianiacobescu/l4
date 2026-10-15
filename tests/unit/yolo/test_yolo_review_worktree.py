@@ -406,3 +406,72 @@ def test_the_dry_run_cost_is_one_line_and_not_charged_to_the_plan(world, monkeyp
     out = capsys.readouterr().out
     assert "cost: $0.75 in judge calls (a dry run is not charged to the plan's budget of $40.00)" in out
     assert "recorded review cost of the plan" not in out and "(3 judged" not in out
+
+
+# --- the dry-run results in the loop (review-resolution 4.2b) ------------------------------------------------------
+
+
+def test_findings_worktree_renders_the_latest_dry_run(world, monkeypatch, capsys):
+    ready_world(world)
+    judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP]), answer())
+    assert world.l4("review", "p1", "--worktree") == 2
+    capsys.readouterr()
+    assert world.l4("findings", "p1") == 0
+    assert "p1: no review yet" in capsys.readouterr().out  # the ledger holds nothing from a dry run
+    assert world.l4("findings", "p1", "--worktree") == 0
+    out = capsys.readouterr().out
+    assert f"{B}: NEEDS_REVISION" in out and "[major/testability] no inputs" in out and "Resolve:" in out
+    assert f"{A}:" not in out  # READY subjects are not listed
+    assert world.l4("findings", "p1", "--worktree", "--all") == 0
+    assert f"{A}: READY" in capsys.readouterr().out
+    assert world.store().read().head is None  # nothing was recorded
+
+
+def test_findings_worktree_json_has_the_ledger_structure(world, monkeypatch, capsys):
+    ready_world(world)
+    judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP]), answer())
+    world.l4("review", "p1", "--worktree")
+    capsys.readouterr()
+    assert world.l4("findings", "p1", "--worktree", "--json") == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["schema"] == "l4/yolo-findings@1" and doc["plan"] == "p1"
+    (subject,) = [s for s in doc["subjects"] if s["subject"] == B]
+    assert subject["verdict"] == "NEEDS_REVISION" and subject["findings"][0]["resolve"]
+
+
+def test_findings_worktree_shows_the_change_since_the_previous_dry_run(world, monkeypatch, capsys):
+    ready_world(world)
+    judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP]), answer())
+    world.l4("review", "p1", "--worktree")
+    edit_spec(world)
+    other = {"criterion": "interfaces", "severity": "major", "text": "the signature is open"}
+    judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP, other]), answer("NEEDS_REVISION", [other]), spare=3)
+    world.l4("review", "p1", "--worktree")
+    capsys.readouterr()
+    assert world.l4("findings", "p1", "--worktree", B) == 0
+    out = capsys.readouterr().out
+    assert "since the previous judgement:" in out
+
+
+def test_findings_worktree_without_a_dry_run_says_so(world, capsys):
+    ready_world(world)
+    assert world.l4("findings", "p1", "--worktree") == 0
+    assert "no dry run yet" in capsys.readouterr().out
+    assert world.l4("findings", "p1", "--worktree", "--json") == 0
+    assert json.loads(capsys.readouterr().out)["subjects"] == []
+
+
+def test_review_worktree_json_prints_only_the_structure(world, monkeypatch, capsys):
+    ready_world(world)
+    judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP]), answer())
+    assert world.l4("review", "p1", "--worktree", "--json") == 2
+    cap = capsys.readouterr()
+    doc = json.loads(cap.out)  # stdout is the document and nothing else
+    assert doc["schema"] == "l4/yolo-findings@1"
+    assert any(s["subject"] == B and s["findings"] for s in doc["subjects"])
+    assert "cost: $" in cap.err
+
+
+def test_json_needs_worktree_on_review(world):
+    ready_world(world)
+    assert world.l4("review", "p1", "--json") == 2
