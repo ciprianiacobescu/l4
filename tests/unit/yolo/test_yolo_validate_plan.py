@@ -1115,14 +1115,15 @@ def budget_world(tmp_path):
     return world
 
 
+@pytest.mark.parametrize("order", ["sorted", "prerequisite"])
 @pytest.mark.parametrize("budget_name", ["MAX_FOLDER_CHARS", "MAX_DEPENDENCY_CHARS", "tiny"])
-def test_the_validator_reads_a_folder_like_the_review(tmp_path, budget_name):  # SCN-ADO-31
+def test_the_validator_reads_a_folder_like_the_review(tmp_path, budget_name, order):  # SCN-ADO-31
     from l4.yolo import readiness
 
     world = budget_world(tmp_path)
     budget = 3_000 if budget_name == "tiny" else getattr(readiness, budget_name)
-    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=budget)
-    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=budget)
+    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=budget, order=order)
+    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=budget, order=order)
     assert list(mine.cut) == [(p, n) for p, n in folder.cut]
     assert [(p, size) for p, size in mine.omitted] == [
         (o.path, int(o.reason.split("(")[1].split()[0])) for o in folder.omitted if o.size_limit
@@ -1130,13 +1131,42 @@ def test_the_validator_reads_a_folder_like_the_review(tmp_path, budget_name):  #
     assert list(mine.binary) == list(folder.binary)
 
 
-def test_the_validator_shows_the_same_characters_as_the_review(tmp_path):
+@pytest.mark.parametrize("order", ["sorted", "prerequisite"])
+def test_the_validator_shows_the_same_characters_as_the_review(tmp_path, order):
     from l4.yolo import readiness
 
     world = budget_world(tmp_path)
-    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS)
-    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS)
+    folder = readiness.read_folder(
+        world.git, "HEAD", "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS, order=order
+    )
+    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS, order=order)
     assert mine.shown == [(p, len(t)) for p, t in folder.files]
+
+
+def test_a_dependency_is_read_spec_first_so_background_notes_cannot_starve_proposal_and_spec(repo):
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/proposal.md", "# p\n" + "p" * 3_000)
+    touch(repo, "openspec/changes/a/specs/x/spec.md", "# s\n" + "s" * 3_000)
+    touch(repo, "openspec/changes/a/tasks.md", "- [ ] t\n" + "t" * 3_000)
+    touch(repo, "openspec/changes/a/background-notes.md", "n" * 200_000)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+    _, out, _ = run(repo)
+    found = [line for line in out.splitlines() if line.startswith("warning: material_over_budget: openspec:a:")]
+    assert found, out  # the dependency lines (a's own folder is a problem of its own, and not what this checks)
+    assert all("background-notes.md" in line or "tasks.md" in line for line in found), found
+    assert not any("proposal.md" in line or "spec.md" in line for line in found), found
+    assert any("background-notes.md" in line for line in found)
+
+
+def test_a_planned_units_own_folder_stays_in_sorted_order(repo):
+    change(repo, "a")
+    touch(repo, "openspec/changes/a/background-notes.md", "n" * 200_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    config(repo, "yolo:\n  review:\n    max_folder_chars: 3000\n")
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "openspec:a: openspec/changes/a/background-notes.md: " in out
+    assert "openspec/changes/a/proposal.md: omitted" in out
 
 
 # --- yolo.hold (L4-ADO-011; SCN-ADO-36) ------------------------------------------------------------------------
