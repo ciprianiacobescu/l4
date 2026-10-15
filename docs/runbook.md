@@ -957,7 +957,14 @@ on the unit.
   run removes that registration and the directory, because they are the clone's own and lie under
   `$L4_CACHE/worktrees`. It never touches a worktree elsewhere: if you checked the unit branch out in your own
   worktree, the run exits 2 with `the branch <b> is checked out in the worktree <path>`; check out another branch
-  there. Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
+  there. The run also exits 2, and touches nothing, in two cases that look like a leftover:
+  - Another repository's checkout is at the registered path (`which holds a checkout of another repository`). The
+    message names the stale registration of this clone, `<clone>/.git/worktrees/<id>`. Remove that directory (the
+    command `git worktree prune` does nothing here, because the path still exists), or move the other repository's
+    checkout away. Then run again.
+  - The branch is checked out in the main checkout of this clone, or in the checkout you run `l4` from (`this run
+    works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
+  Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
 - `l4 unlock` is not available in 0.3.0 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
@@ -1375,6 +1382,10 @@ names what the harness left out.
 
 The activation is refused with exit 2 and the cause in these cases:
 - The review is for other inputs. Run `l4 yolo review <plan-id>`.
+- The review was made with an older review prompt (`l4 yolo status` shows `review: stale (the review prompt changed)`).
+  Run `l4 yolo review <plan-id>`. After a harness upgrade, CI reviews again (and the judge agent charges for it) every
+  plan that is not yet activated and every plan that is stopped with `inputs_changed`. A plan that is active is not
+  reviewed again, and a resume of a plan stopped for a limit needs no new review.
 - A unit or a batch is not `READY`.
 - `merge: auto` is in the plan, but `forge.merge_policy` is `human`. Set `forge.merge_policy: auto`, or set
   `merge: human` in the plan.

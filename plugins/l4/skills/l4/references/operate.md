@@ -87,7 +87,9 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
 - `l4 yolo check PLAN`: admission only (cycles, unknown units, target is the base branch, open questions). Exit 0 or 2. Changes nothing.
 - `l4 yolo review PLAN`: CI reviews the plan (READY / NEEDS_REVISION / BLOCKED per unit). `--local` runs it here.
 - `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
-  the review is for the current inputs and everything is READY. `merge: auto` also needs `forge.merge_policy: auto`.
+  the review is for the current inputs, was made with the current review prompt, and everything is READY. After a
+  harness upgrade CI reviews again (and charges for) every plan not yet activated and every plan stopped with
+  `inputs_changed`; an active plan is not reviewed again. `merge: auto` also needs `forge.merge_policy: auto`.
   The plan file is frozen too: an edit of it, or of a unit spec, stops an active plan with `inputs_changed`.
 - `l4 yolo status [PLAN] [--json]`: state, units, usage against limits, stop reason, `Next:`.
 - `l4 yolo cancel PLAN --reason "…"`: no new dispatch or merge, for good.

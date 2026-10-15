@@ -180,7 +180,8 @@ A plan with `merge: auto` while `forge.merge_policy` is `human` is refused at ad
    not valid is BLOCKED. A blocking finding is never READY. The reviewer never answers a product question.
 4. Read the review with `l4 yolo status <plan>`.
 5. `l4 yolo activate <plan> --reason "<why>"` is a person's decision. It is refused unless the plan is admitted, the
-   review is for the current plan and unit specs, every unit and batch is READY, `merge` and `forge.merge_policy` agree,
+   review is for the current plan and unit specs and was made with the current review prompt, every unit and batch
+   is READY, `merge` and `forge.merge_policy` agree,
    the target exists on `origin`, and no other plan is active on that target. It freezes a digest of each unit's spec and
    the limits, and starts a run on the target.
 
@@ -188,6 +189,9 @@ Nothing runs from a plan before the activation. The activation freezes the diges
 plan file. If a person changes the spec of a unit afterward (the harness's own task ticks and `verification.md` do not
 count), or edits the plan file, the plan stops with `inputs_changed`. A later review changes only the review, not what
 the activation froze. If the judge fails or times out, L4 records no review and the next run tries again.
+A review made with an older review prompt does not allow an activation. After a harness upgrade, CI reviews again (and
+charges for) every plan that is not yet activated and every plan stopped with `inputs_changed`. An active plan is not
+reviewed again.
 
 ## What runs in each CI run
 
