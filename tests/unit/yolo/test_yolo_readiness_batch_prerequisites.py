@@ -4,7 +4,6 @@ unit of the batch, shown the way a unit's own review shows it, and the ordering 
 import pytest
 
 from l4.agents.fake import FakeAdapter, Step
-from l4.yolo import readiness
 from l4.yolo.model import UnitInfo
 from l4.yolo.readiness import review_plan
 
@@ -31,10 +30,10 @@ def world(tmp_path):
     return w
 
 
-def review(world, plan, steps=4):
+def review(world, plan, steps=4, cfg=None):
     fake = FakeAdapter([Step(structured=answer()) for _ in range(steps)])
     result = review_plan(
-        world.app, make_cfg(), plan, world.units, git=world.git, rev=world.rev, adapters={"fake": fake}
+        world.app, cfg or make_cfg(), plan, world.units, git=world.git, rev=world.rev, adapters={"fake": fake}
     )
     return result, fake
 
@@ -72,13 +71,12 @@ def test_the_batch_level_prerequisites_still_follow_the_unit_prerequisites(world
     assert section.index('source="prerequisite"') < section.index("batch prerequisites") and "- batch b1" in section
 
 
-def test_the_cut_lines_of_a_shown_prerequisite_reach_the_batch(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_DEPENDENCY_CHARS", 200)
+def test_the_cut_lines_of_a_shown_prerequisite_reach_the_batch_in_missing(world):
     world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
     plan = plan_of({A: [], B: [A], C: [A]}, batches=[("b1", [A]), ("b2", [B, C])])
-    result, _ = review(world, plan)
-    assert result.batches["b2"].verdict == "NEEDS_REVISION"
-    assert any(FOLDER_A in f["text"] and "big.md" in f["text"] for f in result.batches["b2"].findings)
+    result, _ = review(world, plan, cfg=make_cfg(yolo={"review": {"max_dependency_chars": 300}}))
+    assert result.batches["b2"].verdict == "READY" and result.batches["b2"].findings == ()
+    assert any(FOLDER_A in m and "big.md" in m and "not shown in full" in m for m in result.batches["b2"].missing)
 
 
 def test_a_prerequisite_without_a_folder_is_shown_as_not_known_to_the_batch(world):

@@ -87,39 +87,41 @@ def test_a_judge_that_fails_on_the_repair_prompt_raises_too(world):
 # --- #16 (R9) cut material is never READY ------------------------------------------------------------------------
 
 
-def test_a_file_cut_at_the_size_limit_makes_ready_needs_revision(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_FILE_CHARS", 200)
-    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
-    result, _ = review(world, plan_of({A: []}), Step(structured=answer()))
+def test_a_file_cut_at_the_size_limit_makes_ready_needs_revision(world):
+    cfg = make_cfg(yolo={"review": {"max_file_chars": 1000}})
+    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 1500 + "\n"})
+    result, _ = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
     verdict = result.units[A]
     assert verdict.verdict == "NEEDS_REVISION"
     (finding,) = verdict.findings
-    assert finding["severity"] == "blocking" and "big.md" in finding["text"] and "left out" in finding["text"]
+    assert finding["severity"] == "blocking" and "big.md has 1501 characters" in finding["text"]
+    assert finding["text"].startswith("material_cut: ") and "Shorten the file" in finding["text"]
 
 
-def test_a_file_over_the_folder_budget_is_named(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_FOLDER_CHARS", 30)
-    world.rev = world.commit({f"{FOLDER_A}/a-first.md": "y" * 40 + "\n", f"{FOLDER_A}/b-second.md": "z" * 40 + "\n"})
-    result, _ = review(world, plan_of({A: []}), Step(structured=answer()))
+def test_a_file_over_the_folder_budget_is_named(world):
+    cfg = make_cfg(yolo={"review": {"max_folder_chars": 1000}})
+    world.rev = world.commit({f"{FOLDER_A}/a-first.md": "y" * 600 + "\n", f"{FOLDER_A}/b-second.md": "z" * 600 + "\n"})
+    result, _ = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
     verdict = result.units[A]
     assert verdict.verdict == "NEEDS_REVISION"
     assert any("b-second.md" in f["text"] for f in verdict.findings)
 
 
-def test_a_blocked_verdict_stays_blocked_when_material_was_cut(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_FILE_CHARS", 200)
-    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
-    result, _ = review(world, plan_of({A: []}), Step(structured=answer("BLOCKED")))
+def test_a_blocked_verdict_stays_blocked_when_material_was_cut(world):
+    cfg = make_cfg(yolo={"review": {"max_file_chars": 1000}})
+    world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 1500 + "\n"})
+    result, _ = review(world, plan_of({A: []}), Step(structured=answer("BLOCKED")), cfg=cfg)
     assert result.units[A].verdict == "BLOCKED"
 
 
-def test_a_cut_dependency_also_forces_the_unit_and_the_batch(world, monkeypatch):
-    monkeypatch.setattr(readiness, "MAX_DEPENDENCY_CHARS", 200)
+def test_a_cut_dependency_is_listed_in_missing_and_forces_nothing(world):
+    cfg = make_cfg(yolo={"review": {"max_dependency_chars": 300}})
     world.rev = world.commit({f"{FOLDER_A}/big.md": "x" * 500 + "\n"})
     plan = plan_of({A: [], B: [A]}, batches=[("b1", [A, B])])
-    result, _ = review(world, plan, *[Step(structured=answer()) for _ in range(3)])
+    result, _ = review(world, plan, *[Step(structured=answer()) for _ in range(3)], cfg=cfg)
     assert result.units[A].verdict == "READY"  # A itself is shown whole
-    assert result.units[B].verdict == "NEEDS_REVISION" and FOLDER_A in result.units[B].findings[0]["text"]
+    assert result.units[B].verdict == "READY" and result.units[B].findings == ()
+    assert any(f"{FOLDER_A}/big.md" in m and "dependency budget 300" in m for m in result.units[B].missing)
     assert result.batches["b1"].verdict == "READY"  # the batch shows whole folders
 
 

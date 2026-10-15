@@ -116,11 +116,30 @@ class Omission:
 
 
 @dataclass(frozen=True)
+class Budgets:
+    """The size limits of the material (`yolo.review`, design D4): per file, per folder of a subject, and per folder
+    of a prerequisite."""
+
+    file: int
+    folder: int
+    dependency: int
+
+    @classmethod
+    def of(cls, cfg: L4Config) -> "Budgets":
+        review = cfg.yolo.review
+        return cls(review.max_file_chars, review.max_folder_chars, review.max_dependency_chars)
+
+
+@dataclass(frozen=True)
 class FolderText:
     path: str
-    files: tuple[tuple[str, str], ...]  # (repository path, text), sorted; a cut file is shown up to its limit
+    files: tuple[tuple[str, str], ...]  # (repository path, text), in reading order; a cut file is shown up to its limit
     omitted: tuple[Omission, ...] = ()  # files the prompt does not show, and why
     cut: tuple[tuple[str, int], ...] = ()  # (repository path, characters left out) of files shown in part
+    sizes: tuple[tuple[str, int], ...] = ()  # (repository path, total characters) of every text file read
+    file_budget: int = MAX_FILE_CHARS
+    budget: int = MAX_FOLDER_CHARS
+    base: str = "the target branch"
 
     @property
     def empty(self) -> bool:
@@ -128,27 +147,70 @@ class FolderText:
 
     @property
     def left_out(self) -> tuple[str, ...]:
-        """What the size limits kept from the judge, one line each (R9)."""
-        cut = [f"{json.dumps(path)}: {n} characters cut at the size limit" for path, n in self.cut]
-        return tuple(cut + [f"{json.dumps(o.path)}: {o.reason}" for o in self.omitted if o.size_limit])
+        """What the size limits kept from the judge, one `material_cut` sentence each (R9, design D4): for a subject."""
+        return tuple(
+            f"material_cut: {path} has {total} characters; the review shows {self.file_budget} per file and "
+            f"{self.budget} per folder (yolo.review.max_file_chars, yolo.review.max_folder_chars). Shorten the file "
+            f"(move background out of the unit folder) or raise the limit in .l4/config.yaml on {self.base}. "
+            "Splitting it does not help: the implementer reads only proposal.md, design.md, requirements.md, "
+            "bugfix.md and specs/*/spec.md."
+            for path, total, _ in self._shortened()
+        )
+
+    def not_in_full(self, who: str, budget: int) -> tuple[str, ...]:
+        """The same files for a prerequisite: listed in `missing`, never blocking (design D4)."""
+        return tuple(
+            f"not shown in full: {json.dumps(who)}: {path} ({shown} of {total} characters shown; "
+            f"dependency budget {budget})"
+            for path, total, shown in self._shortened()
+        )
+
+    def _shortened(self) -> list[tuple[str, int, int]]:
+        """(path, total characters, characters shown) of every file the limits cut or left out."""
+        sizes, cut = dict(self.sizes), dict(self.cut)
+        found = [(path, sizes[path], sizes[path] - n) for path, n in cut.items()]
+        return found + [(o.path, sizes[o.path], 0) for o in self.omitted if o.size_limit]
 
     @property
     def binary(self) -> tuple[str, ...]:
         return tuple(o.path for o in self.omitted if not o.size_limit)
 
 
-def read_folder(git: Git, rev: str, folder: str, *, budget: int) -> FolderText:
+def _rank(rel: str) -> int:
+    """The reading order of a prerequisite (design D4): what a dependent needs first, the task list last."""
+    parts = PurePosixPath(rel).parts
+    if rel in ("proposal.md", "requirements.md"):
+        return 0 if rel == "proposal.md" else 1
+    if parts[0] == "specs" and parts[-1] == "spec.md":
+        return 2
+    return {"bugfix.md": 3, "design.md": 4, "tasks.md": 6}.get(rel, 5)
+
+
+def read_folder(
+    git: Git,
+    rev: str,
+    folder: str,
+    *,
+    budget: int,
+    file_budget: int = MAX_FILE_CHARS,
+    order: str = "sorted",
+    base: str = "the target branch",
+) -> FolderText:
     """The files of `folder` at `rev`, without what the harness writes (`.l4/**`, `verification.md`, `questions.md`,
     `feedback.md`, at any depth, `digest.is_excluded`) and without binary files; each file and the folder are cut at a
-    bounded number of characters, and what was cut is recorded in `cut` and `omitted`."""
+    bounded number of characters, and what was cut is recorded in `cut` and `omitted`. `order` is `"sorted"` (the
+    subject) or `"prerequisite"` (proposal, requirements, specs, bugfix, design, other files, `tasks.md` last)."""
     root = folder.strip("/")
     listing = git.run_bytes("ls-tree", "-r", "-z", "--name-only", rev, "--", root + "/", check=False)
     files: list[tuple[str, str]] = []
     omitted: list[Omission] = []
     cut: list[tuple[str, int]] = []
+    sizes: list[tuple[str, int]] = []
     left = budget
-    for raw in sorted(p for p in listing.split(b"\0") if p):
-        path = raw.decode("utf-8", "replace")
+    paths = sorted(p.decode("utf-8", "replace") for p in listing.split(b"\0") if p)
+    if order == "prerequisite":
+        paths.sort(key=lambda p: _rank(str(PurePosixPath(p).relative_to(root))))  # stable: sorted within a rank
+    for path in paths:
         if is_excluded(PurePosixPath(path).relative_to(root).parts):
             continue
         data = normalise_tasks(path.rsplit("/", 1)[-1], git.run_bytes("show", f"{rev}:{path}", check=False))
@@ -156,7 +218,8 @@ def read_folder(git: Git, rev: str, folder: str, *, budget: int) -> FolderText:
             omitted.append(Omission(path, "binary file"))
             continue
         text = data.decode("utf-8", "replace")
-        shown = text[: min(MAX_FILE_CHARS, max(left, 0))]
+        sizes.append((path, len(text)))
+        shown = text[: min(file_budget, max(left, 0))]
         if len(shown) < len(text):
             if left <= 0:
                 omitted.append(Omission(path, f"over the size limit of the folder ({len(text)} characters)", True))
@@ -165,7 +228,7 @@ def read_folder(git: Git, rev: str, folder: str, *, budget: int) -> FolderText:
             shown += f"\n[cut: {len(text) - len(shown)} characters omitted]"
         left -= len(shown)
         files.append((path, shown))
-    return FolderText(root, tuple(files), tuple(omitted), tuple(cut))
+    return FolderText(root, tuple(files), tuple(omitted), tuple(cut), tuple(sizes), file_budget, budget, base)
 
 
 def _label(text: str) -> str:
@@ -193,6 +256,7 @@ class Subject:
     user: str
     left_out: tuple[str, ...] = ()
     not_shown: tuple[str, ...] = ()
+    not_in_full: tuple[str, ...] = ()  # a prerequisite's files the budget cut: listed in `missing`, never blocking (D4)
     groups_only: bool = False  # a batch with no acceptance profile: batch_acceptance does not apply to it
 
 
@@ -261,6 +325,7 @@ def _unit_subject(
     folder: FolderText,
     deps: Sequence[tuple[str, FolderText | None]],
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
+    dep_budget: int = MAX_DEPENDENCY_CHARS,
 ) -> Subject:
     prerequisites = _prerequisites(plan, deps)
     context = data_block("context", _label(f"in batch {batch.id}; plan {plan.plan_id}, target {plan.target}"))
@@ -274,13 +339,13 @@ def _unit_subject(
         or "(none: the unit depends on nothing)",
         "FOLDERS": data_block("folder", _label(f"{unit.id} ({folder.path})")) + "\n" + _folder_blocks(folder),
     }
-    parts = [(unit.id, folder), *((d, f) for d, f in deps if f is not None)]
-    left_out = tuple(f"{_named(who)} {line}" for who, f in parts for line in f.left_out)
-    return Subject("unit", unit.id, _fill(MATERIAL_TEMPLATE, values), left_out, folder.binary)
+    return Subject(
+        "unit", unit.id, _fill(MATERIAL_TEMPLATE, values), folder.left_out, folder.binary, _cut_of(deps, dep_budget)
+    )
 
 
-def _named(unit_id: str) -> str:
-    return json.dumps(unit_id) + ","
+def _cut_of(deps: Sequence[tuple[str, FolderText | None]], budget: int) -> tuple[str, ...]:
+    return tuple(line for who, f in deps if f is not None for line in f.not_in_full(who, budget))
 
 
 def _batch_subject(
@@ -290,6 +355,7 @@ def _batch_subject(
     skip: Collection[str] = (),
     deps: Sequence[tuple[str, FolderText | None]] = (),
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
+    dep_budget: int = MAX_DEPENDENCY_CHARS,
 ) -> Subject:
     """`deps`: the prerequisites of the units of the batch that are not units of the batch, in plan order."""
     units = [u for u in batch.units if u.id not in skip]
@@ -313,10 +379,11 @@ def _batch_subject(
             for u in units
         ),
     }
-    parts = [*((u.id, folders[u.id]) for u in units), *((d, f) for d, f in deps if f is not None)]
-    left_out = tuple(f"{_named(who)} {line}" for who, f in parts for line in f.left_out)
+    left_out = tuple(line for u in units for line in folders[u.id].left_out)
     not_shown = tuple(p for u in units for p in folders[u.id].binary)
-    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown, groups_only)
+    return Subject(
+        "batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown, _cut_of(deps, dep_budget), groups_only
+    )
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------
@@ -371,13 +438,12 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         if said == "BLOCKED" and not findings:  # nothing is left that a person could fix: the note was all there was
             said = "READY"
     if subject.left_out:
-        text = "material_cut: left out of the review by the size limits, so the review is partial: " + "; ".join(
-            subject.left_out
-        )
+        text = " ".join(subject.left_out)
         findings = (*findings, {"criterion": "material", "severity": "blocking", "text": text})
         said = "NEEDS_REVISION" if said == "READY" else said
     if subject.not_shown:
         missing = (*missing, *(f"not shown to the judge (binary file): {path}" for path in subject.not_shown))
+    missing = (*missing, *subject.not_in_full)
     return Verdict(said, findings, assumptions, missing, verdict.digest)
 
 
@@ -477,6 +543,7 @@ def review_plan_costed(
     timeout_s: int = DEFAULT_TIMEOUT_S,
     done: Collection[str] = (),
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
+    budgets: Budgets | None = None,
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
@@ -484,19 +551,33 @@ def review_plan_costed(
     other units. A batch of done units only is READY. `delivered` (`delivered_on_target`) names the units already
     finished on the target; the judge is told a dependency on one of them is satisfied."""
     revs = _unit_revs(git, cfg, plan, units, rev)
+    limits = budgets or Budgets.of(cfg)
     digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
     folders: dict[str, FolderText] = {}
     for unit in plan.units():
         info = units.get(unit.id)
         folders[unit.id] = (
-            read_folder(git, revs[unit.id], info.folder, budget=MAX_FOLDER_CHARS) if info else FolderText("", ())
+            read_folder(
+                git, revs[unit.id], info.folder, budget=limits.folder, file_budget=limits.file, base=plan.target
+            )
+            if info
+            else FolderText("", ())
         )
     read_deps: dict[str, FolderText | None] = {}
 
     def dependency(dep: str) -> FolderText | None:  # a prerequisite is read once, whoever shows it
         if dep not in read_deps:
             read_deps[dep] = (
-                read_folder(git, revs[dep], units[dep].folder, budget=MAX_DEPENDENCY_CHARS) if dep in units else None
+                read_folder(
+                    git,
+                    revs[dep],
+                    units[dep].folder,
+                    budget=limits.dependency,
+                    file_budget=limits.file,
+                    order="prerequisite",
+                )  # fmt: skip
+                if dep in units
+                else None
             )
         return read_deps[dep]
 
@@ -519,7 +600,7 @@ def review_plan_costed(
                 result_units[unit.id] = _with_digest(blocked(f"unit_missing: {note}"), digest)
                 continue
             deps = [(d, dependency(d)) for d in unit.depends_on]
-            subjects.append((_unit_subject(plan, unit, batch, folder, deps, delivered), digest))
+            subjects.append((_unit_subject(plan, unit, batch, folder, deps, delivered, limits.dependency), digest))
     for batch in plan.batches:
         left = [u for u in batch.units if u.id not in done]
         if len(batch.units) > 1 and not left:
@@ -530,7 +611,7 @@ def review_plan_costed(
             outside = dict.fromkeys(d for u in left for d in u.depends_on if d not in inside)
             batch_deps = [(d, dependency(d)) for d in outside]
             subjects.append(
-                (_batch_subject(plan, batch, folders, skip=done, deps=batch_deps, delivered=delivered), None)
+                (_batch_subject(plan, batch, folders, done, batch_deps, delivered, limits.dependency), None)
             )
     cost = 0.0
     if subjects:
@@ -583,6 +664,7 @@ def review_plan(
 
 __all__ = [
     "READINESS_SCHEMA",
+    "Budgets",
     "FolderText",
     "JudgeFailed",
     "Omission",
