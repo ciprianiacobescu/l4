@@ -766,7 +766,7 @@ budgets:
 observability:
   log_dir: .l4-out/logs
   redact_env: [L4_FORGE_TOKEN, L4_TRIGGER_TOKEN, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-               CODEX_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, KIRO_API_KEY, TYPESAFE_API_KEY, L4_GITHUB_APP_KEY]
+               CODEX_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, KIRO_API_KEY, TYPESAFE_API_KEY, L4_GITHUB_APP_KEY, OPENCODE_API_KEY]
   redact_forge_urls: true      # the forge host is `<forge>` in everything the harness commits (L4-OBS-002)
 ```
 
