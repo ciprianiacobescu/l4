@@ -1,0 +1,6 @@
+plan smoke-gl: 2 units, 2 integrated
+unit                               prerequisites                                dispatched      first run       integrated      C1   C2   C3   C4
+openspec:add-sku-check             -                                            10-15 13:43:27  10-15 13:43:29  10-15 13:53:37  ok   ok   ok   ok
+openspec:add-sku-report            add-sku-check                                10-15 13:54:17  10-15 13:54:18  10-15 13:56:36  ok   ok   ok   ok
+plan events: plan.admitted; plan.reviewed; plan.reviewed; plan.activated(final smoke of the merge candidate b7a5c325: a dependency, a delivered dependency, a spec edit mid-plan and its recovery); plan.stopped(inputs_changed); plan.refused; plan.refused; plan.admitted; plan.reviewed; plan.activated(final smoke recovery: the spec edit reviewed, the verdict question answered); plan.completed
+RESULT: dependencies enforced (C1-C3 hold for every unit)

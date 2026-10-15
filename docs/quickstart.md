@@ -239,16 +239,16 @@ repository:
      job".
   2. Adopt with a version pin:
      ```bash
-     l4 init --ci github --action --harness-ref v0.3.0
+     l4 init --ci github --action --harness-ref v0.4.0
      ```
      `--harness-ref` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with `git ls-remote`. The workflow gets
-     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.3.0`. A ref that resolves to nothing is exit 2. Use
+     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.0`. A ref that resolves to nothing is exit 2. Use
      `--action-repo OWNER/REPO` when the harness was not installed from its own repository.
 - **A public repository, or one of another owner: a copy of the action and a deploy key.** GitHub never lets a public
   repository use a private action.
   1. Adopt with the copy:
      ```bash
-     l4 init --ci github --action --action-copy --harness-ref v0.3.0
+     l4 init --ci github --action --action-copy --harness-ref v0.4.0
      ```
      This writes the action under `.github/actions/l4` (the copy your `l4` ships, so no checkout of the harness is
      needed) and a workflow that uses it with the harness's SSH URL. `l4 upgrade` refreshes that copy too.
@@ -274,7 +274,7 @@ Then, for both forms:
 - `l4 setup github` (above) creates the environment, the secrets and the labels, and dispatches the workflow.
 - `--dependabot` (on `l4 init`) adds `.github/dependabot.yml` for the ecosystem `github-actions`, weekly, so a new
   release arrives as a pull request on the `uses:` line. It merges into an existing file. It does not combine with `--action-copy` (exit 2): in copy mode the pin is the `commit:` input, which Dependabot cannot move; use `l4 upgrade --harness-ref`.
-- `l4 upgrade --harness-ref v0.4.0` (or `--harness-commit <sha>`) moves the pin by hand: it re-renders the whole
+- `l4 upgrade --harness-ref v0.5.0` (or `--harness-commit <sha>`) moves the pin by hand: it re-renders the whole
   workflow from the config with the template of the harness that runs it, so run it with the target version, for
   example `uvx --from git+https://github.com/<owner>/<repo>@<sha> l4 upgrade --harness-commit <sha>`. `l4 doctor` (CFG-006) checks that the `uses:` line is a 40-hex sha.
 - There is no `.l4/bin/l4` in this form. To run `l4` on your machine, install it:

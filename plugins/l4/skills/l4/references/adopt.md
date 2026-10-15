@@ -21,7 +21,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.3.0   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.0   # or @<sha>
 l4 --version
 ```
 
@@ -30,12 +30,12 @@ l4 --version
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --action-repo OWNER/l4 --harness-ref v0.3.0 [--dependabot]
+l4 init --ci github --action --action-repo OWNER/l4 --harness-ref v0.4.0 [--dependabot]
 # public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.3.0
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.0
 ```
 
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.3.0`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.0`; that line
   is the only pin.
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -65,7 +65,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   - **`ci.upload_artifacts: false`** on a **public** repository. The `l4-out` artifact holds the prompts and agent
     transcripts (secrets masked), and any signed-in user can download it.
   - The test gate and the role chains; `l4 doctor --adoption` checks them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.3.0`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.0`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -92,8 +92,8 @@ environment `l4` and set `forge.token_env: L4_FORGE_TOKEN`.
 ## 5. Upgrades
 
 ```sh
-uv tool install --force git+https://github.com/OWNER/l4@v0.4.0
-l4 upgrade --harness-ref v0.4.0
+uv tool install --force git+https://github.com/OWNER/l4@v0.5.0
+l4 upgrade --harness-ref v0.5.0
 ```
 
 Run it with the `l4` of the target version. It re-renders the workflow (and refreshes the copied action in copy mode)

@@ -1,0 +1,35 @@
+2026-10-15T13:39:30Z plan.admitted    
+2026-10-15T13:39:30Z plan.reviewed    
+2026-10-15T13:39:30Z plan.charged plan:review   
+2026-10-15T13:42:31Z plan.reviewed    
+2026-10-15T13:42:31Z plan.charged plan:review   
+2026-10-15T13:43:03Z plan.activated   final smoke of the merge candidate b7a5c325: a dependency, a delivered dependency, a spec edit mid-plan and its recovery 
+2026-10-15T13:43:27Z plan.charged openspec:add-sku-check   
+2026-10-15T13:43:27Z unit.dispatched openspec:add-sku-check   
+2026-10-15T13:47:03Z unit.merge_refused openspec:add-sku-check  stale the target staging (f110a13040) is not in the unit head
+2026-10-15T13:47:25Z plan.charged openspec:add-sku-check   
+2026-10-15T13:47:25Z unit.dispatched openspec:add-sku-check   
+2026-10-15T13:48:22Z plan.charged openspec:add-sku-check   
+2026-10-15T13:48:21Z plan.stopped openspec:add-sku-check  inputs_changed the spec of openspec:add-sku-check changed after the activation
+2026-10-15T13:48:46Z plan.refused    
+2026-10-15T13:49:24Z plan.refused    
+2026-10-15T13:50:38Z plan.admitted    
+2026-10-15T13:50:38Z plan.reviewed    
+2026-10-15T13:50:38Z plan.charged plan:review   
+2026-10-15T13:51:25Z plan.activated   final smoke recovery: the spec edit reviewed, the verdict question answered 
+2026-10-15T13:51:47Z plan.charged openspec:add-sku-check   
+2026-10-15T13:51:47Z unit.dispatched openspec:add-sku-check   
+2026-10-15T13:53:32Z unit.merge_requested openspec:add-sku-check   
+2026-10-15T13:53:35Z unit.merged openspec:add-sku-check   
+2026-10-15T13:53:37Z unit.postcheck openspec:add-sku-check   2 gate(s) passed; skipped (not configured): build, lint, typecheck, e2e
+2026-10-15T13:53:37Z unit.integrated openspec:add-sku-check   
+2026-10-15T13:53:37Z plan.charged openspec:add-sku-check   
+2026-10-15T13:54:17Z plan.charged openspec:add-sku-report   
+2026-10-15T13:54:17Z unit.dispatched openspec:add-sku-report   
+2026-10-15T13:56:31Z unit.merge_requested openspec:add-sku-report   
+2026-10-15T13:56:34Z unit.merged openspec:add-sku-report   
+2026-10-15T13:56:36Z unit.postcheck openspec:add-sku-report   2 gate(s) passed; skipped (not configured): build, lint, typecheck, e2e
+2026-10-15T13:56:36Z unit.integrated openspec:add-sku-report   
+2026-10-15T13:56:36Z plan.charged openspec:add-sku-report   
+2026-10-15T13:57:17Z batch.accepted  sku  
+2026-10-15T13:57:42Z plan.completed    

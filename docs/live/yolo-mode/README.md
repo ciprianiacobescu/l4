@@ -3,7 +3,7 @@
 **Date:** 2026-10-15.
 **Harness:** the two ten-unit scenarios ran on branch `yolo` at `47294b25` (the review-4 fixes, plus the two readiness
 fixes and the repository-keyed worktrees that this run found to be needed; see "Defects"). The stop cases ran on the
-later integration commits, the last ones on `8388c1a4` (both forges) and `5863fb68` (GitLab, the batch profile).
+later integration commits; the final smoke ran the release candidate `b7a5c325` on both forges.
 **Implementer:** `opencode-go/deepseek-v4.1-flash` (OpenCode Go, `OPENCODE_API_KEY`). **Judge:** Claude Code
 (`CLAUDE_CODE_OAUTH_TOKEN`); the first GitLab review fell back to `f-longcat`.
 
@@ -112,6 +112,19 @@ over `add-discounted-total`, in review since `final-gl` was cancelled (MR !20), 
 | The batch check | after both units integrated: `batch.failed`, "test failed (report missing: .l4-out/junit.xml)": defect 7 |
 | Recovery: `l4 yolo resume` after the fix | `plan.resumed` 11:47:40, `batch.accepted smoke` 11:48:03, `plan.completed` 11:48:28 |
 
+## The final smoke of the release candidate (both forges, `b7a5c325`)
+
+The merge candidate (yolo-mode, the live fixes, the experience graph) ran once more on each forge, each with what the
+other forge had covered before.
+
+| | GitHub, `smoke-gh` | GitLab, `smoke-gl` |
+|---|---|---|
+| Units | `add-taxed-total` → `add-taxed-text` | `add-sku-check` → `add-sku-report` |
+| A dependency on units an earlier plan delivered | `add-discounted-total`, `add-vat` | `add-sku-normalize` |
+| Extra | one batch with the acceptance profile `smoke`: `batch.accepted till` (setup ran first) | a spec push to the current unit: `unit.merge_refused stale`, `plan.stopped inputs_changed`, a verdict question answered, review, activation, `plan.completed` |
+| `analyze_enforcement.py` | C1–C4 ok for 2/2 | C1–C4 ok for 2/2 |
+| `plan.completed` | 13:50:19 | 13:57:42 |
+
 ## Defects this run found, each fixed with tests
 
 1. **A batch without an acceptance profile was refused at random.** The review asked the judge whether "the units
@@ -160,4 +173,4 @@ git's https credential helper (an SSH remote works).
 - `analyze_enforcement.py`: the checker.
 - `smoke.py`: the end-to-end check of the ten features.
 - `events-stops-a.txt`, `events-stops-b.txt`, `events-final-gl.txt`: the stop cases; `events-batch-gl.txt`: the batch
-  profile.
+  profile; `events-smoke-gh.txt`, `events-smoke-gl.txt`, `enforcement-smoke-*.txt`: the final smoke.
