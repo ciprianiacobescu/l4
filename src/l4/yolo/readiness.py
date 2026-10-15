@@ -49,15 +49,16 @@ from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES
-from l4.yolo.digest import current_unit_ref, is_excluded, normalise_tasks, unit_digest
+from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
 from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
 # 2: the material changed (tasks.md shown with the digest's normalisation and the note on check marks, prerequisite
 # units of a batch, review 7). 3: the units already delivered on the target are listed, with the note that a
-# dependency on one of them is satisfied. A review recorded with another version is stale,
+# dependency on one of them is satisfied. 4: tasks.md shown as it is; prerequisites spec first and their cut is not
+# blocking; material keys. A review recorded with another version is stale,
 # `plan.reviewed{prompt_version}`; an event without the key counts as 1.
-PROMPT_VERSION = 3
+PROMPT_VERSION = 4
 MAX_DELIVERED = 60
 MAX_CALLS = 2  # the first answer and one repair prompt
 DEFAULT_TIMEOUT_S = 900
@@ -196,7 +197,8 @@ def read_folder(
     order: str = "sorted",
     base: str = "the target branch",
 ) -> FolderText:
-    """The files of `folder` at `rev`, without what the harness writes (`.l4/**`, `verification.md`, `questions.md`,
+    """The files of `folder` at `rev` as they are (the check marks of `tasks.md` too, design D6; the digest normalises
+    them, the material does not), without what the harness writes (`.l4/**`, `verification.md`, `questions.md`,
     `feedback.md`, at any depth, `digest.is_excluded`) and without binary files; each file and the folder are cut at a
     bounded number of characters, and what was cut is recorded in `cut` and `omitted`. `order` is `"sorted"` (the
     subject) or `"prerequisite"` (proposal, requirements, specs, bugfix, design, other files, `tasks.md` last)."""
@@ -213,7 +215,7 @@ def read_folder(
     for path in paths:
         if is_excluded(PurePosixPath(path).relative_to(root).parts):
             continue
-        data = normalise_tasks(path.rsplit("/", 1)[-1], git.run_bytes("show", f"{rev}:{path}", check=False))
+        data = git.run_bytes("show", f"{rev}:{path}", check=False)
         if b"\0" in data:
             omitted.append(Omission(path, "binary file"))
             continue
@@ -267,8 +269,9 @@ GROUPING_NOTE = (
 )
 NOT_APPLICABLE = "batch_acceptance"
 TASKS_NOTE = (
-    "The check marks of the tasks in a tasks.md are the harness's progress, not part of the specification: they are "
-    "shown unchecked, whatever the file says, so a task is never a sign that something is already implemented."
+    "A ticked task (`[x]`) is already delivered on the revision shown: the harness will not implement it again. "
+    "Judge the specification of the open tasks; do not raise a `feasibility` or `duplicate_scope` finding only "
+    "because work is already done."
 )
 ORDER_NOTE = (
     "A prerequisite that is a unit of this plan is delivered and merged into the target before any unit that depends "
