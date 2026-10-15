@@ -1413,9 +1413,11 @@ def run_command(
         elif (
             step.plan_id
             and step.start_next_run
-            and any(u in (step.allow or ()) for u in result.not_started if u not in result.began)
+            and any(u in (step.allow or ()) for u in (*result.not_started, *result.busy) if u not in result.began)
         ):
-            step = replace(step, start_next_run=False)  # the dispatched unit did not start: one trigger runs it once
+            # the dispatched unit did not start, or another run holds it: one trigger runs it once; the other run's
+            # end or the cron is the next trigger
+            step = replace(step, start_next_run=False)
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
@@ -1521,6 +1523,7 @@ def run_units(
     units: list[UnitOutcome] = []
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
+    busy: list[str] = []  # unit ids skipped because another run holds their lease
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
@@ -1553,13 +1556,15 @@ def run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
+        if done.busy:
+            busy.append(ref.id)
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
         if done.exit_code == ExitCode.REJECTED:
             rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
-    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began)
+    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy)
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:

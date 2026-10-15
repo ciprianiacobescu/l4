@@ -80,6 +80,9 @@ class CommandResult:
     # units whose run did start: a plan records the first and clears it with the second (L4-YOLO-013)
     not_started: Mapping[str, tuple[int, str]] = field(default_factory=dict)
     began: Sequence[str] = ()
+    # `run` only: the units skipped because another run holds their lease; a plan does not chain a run for them (the
+    # other run's end, or the cron, is the next trigger)
+    busy: Sequence[str] = ()
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:
