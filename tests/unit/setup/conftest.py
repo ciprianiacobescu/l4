@@ -44,6 +44,7 @@ class FakeGitLab:
     finishing: list[int] = field(default_factory=list)  # triggered pipelines that end at their first poll
     traces: dict[int, str] = field(default_factory=dict)  # job id -> trace text
     deny: set[str] = field(default_factory=set)  # "runners", "schedules": answer 403
+    files_ref: str | None = None  # the branch the files are read on; None: the default branch
     issued: list[str] = field(default_factory=list)  # every bot token value ever created
     requests: list[dict] = field(default_factory=list)
     next_id: int = 1000
@@ -161,7 +162,7 @@ class FakeGitLab:
 
     def files_route(self, method: str, rest: str, query: dict, body: Any) -> httpx.Response:
         name = unquote(rest.removeprefix("/").removesuffix("/raw"))
-        assert query.get("ref") == self.default_branch
+        assert query.get("ref") == (self.files_ref or self.default_branch)
         if name not in self.files:
             return httpx.Response(404, json={"message": "404 File Not Found"})
         return httpx.Response(200, text=self.files[name])

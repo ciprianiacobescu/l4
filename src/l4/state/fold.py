@@ -49,6 +49,19 @@ class CiFailure(_Model):
     preexisting: list[str] = Field(default_factory=list)  # red on H and on the base: not this unit's
 
 
+class Misdirected(_Model):
+    """`pr.misdirected{pr, merged_into, base}` (L4-YOLO-007): the unit's pull request was merged into another branch
+    than the base, so it does not count as the unit's merge and the unit stays `in_review`."""
+
+    pr: int | str | None = None
+    merged_into: str
+    base: str
+
+    @property
+    def text(self) -> str:
+        return f"merged into {self.merged_into}, not the base {self.base}"
+
+
 class PendingSpecEdit(_Model):
     """A person's spec push that a run saw while the unit was `fixing` or `waiting_capacity` (or under `l4 verify`),
     where no edge takes it (L4-OPS-014, design D13, review M3):
@@ -123,6 +136,7 @@ class UnitState(_Model):
     halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
     halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
     restarts: int = 0  # `unit.restarted` events: how many times `l4 restart` began the unit again (L4-OPS-004)
+    misdirected: Misdirected | None = None  # `pr.misdirected`, until the next phase change or a new MR (L4-YOLO-007)
     closed_from: ReturnState | None = None  # `pr.closed` (or the `pr_closed` edge) until `pr_reopened` gives it back
     hinted_heads: list[str] = Field(default_factory=list)  # `resume.hint{head}`: branch heads a halt pointer was for
     updated_at: str | None = None
@@ -159,6 +173,7 @@ def _phase_changed(state: UnitState, event: LedgerEvent) -> None:
     state.halt_reason = _text(event, "reason") if stopped else None
     state.halt_detail = (_text(event, "detail") or _text(event, "reason")) if stopped else None  # L4-OPS-005
     state.phase = target
+    state.misdirected = None
 
 
 def _fix_unit(event: LedgerEvent) -> str | None:
@@ -293,7 +308,19 @@ def _human_verdict(state: UnitState, event: LedgerEvent) -> None:
 
 def _pr_updated(state: UnitState, event: LedgerEvent) -> None:
     if url := _text(event, "url"):
+        if url != state.pr:
+            state.misdirected = None  # a new merge request: the old one's destination says nothing about it
         state.pr = url
+
+
+def _pr_misdirected(state: UnitState, event: LedgerEvent) -> None:
+    merged_into, base = _text(event, "merged_into"), _text(event, "base")
+    if merged_into and base:
+        number = event.data.get("pr")
+        state.misdirected = Misdirected(
+            pr=number if isinstance(number, int | str) and not isinstance(number, bool) else None,
+            merged_into=merged_into, base=base,
+        )  # fmt: skip
 
 
 def _ci_failed(state: UnitState, event: LedgerEvent) -> None:
@@ -474,6 +501,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "fix.done": _fix_done,
     "human.verdict": _human_verdict,
     "pr.updated": _pr_updated,
+    "pr.misdirected": _pr_misdirected,
     "ci.failed": _ci_failed,
     "ci.preexisting": _ci_preexisting,
     "pr.closed": _pr_closed,

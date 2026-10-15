@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Any
 
 from l4.agents.base import ProbeCtx
-from l4.agents.credentials import credential_in, credential_variable
+from l4.agents.credentials import OPENCODE_API_KEY, credential_in, profile_credential_variable
 from l4.agents.factory import Factory
 from l4.agents.gate import GateBusy, busy_detail
 from l4.config.schema import L4Config, Profile
@@ -71,7 +71,11 @@ def provider_steps(profile: Profile, *, platform: str = "gitlab", environment: s
     """A profile that declares its own provider names its own key variable (never a value)."""
     options = profile.opencode_options()
     if options is None or options.provider is None:
-        return ()
+        if profile_credential_variable(profile) != OPENCODE_API_KEY:
+            return ()
+        if platform == "github":
+            return (f"run `l4 setup github --secret {OPENCODE_API_KEY}=<ENV>` (the value comes from your environment)",)
+        return (f"store your OpenCode key as the masked CI variable {OPENCODE_API_KEY}",)
     where = f"{secret_place(environment)}" if platform == "github" else "a masked CI variable on a runner"
     return (
         f"provide the provider key as {options.provider.api_key_env} in the harness environment "
@@ -143,7 +147,7 @@ def adapter_readiness(
         return AdapterReadiness(name, adapter, AdapterState.BUSY, status={"note": busy_detail(adapter)})
     if auth.ok:
         return AdapterReadiness(name, adapter, AdapterState.READY, status=sanitize_status(auth.detail))
-    variable = credential_variable(profile.adapter, profile.auth)
+    variable = profile_credential_variable(profile)
     unset = variable if variable and credential_in(ctx.environ, variable) is None else None
     return AdapterReadiness(
         name,

@@ -1,5 +1,8 @@
 """CFG-006 and CFG-007 (adoption-kit L4-ACT-004): the pin of an action-form workflow, and the local `l4`.
 
+CFG-004: `gates.test.command` is set. The run rejects every unit without it (no test oracle), so nothing else in
+the configuration matters until it is.
+
 CFG-005 (M1.8, A6): an explicitly set list that drops defaults.
 
 CFG-002 (reduced): role chains reference defined profiles, the roles M0 runs (implementer, judges) are not empty,
@@ -77,6 +80,19 @@ def _cfg_005(ctx: DoctorContext) -> CheckResult:
 CFG_005 = register(
     Check("CFG-005", "Explicit lists keep the defaults they replace", "warn", _cfg_005, scopes=CONFIG_SCOPES)
 )
+
+
+def _cfg_004(ctx: DoctorContext) -> CheckResult:
+    if ctx.cfg.gates.test.command.strip():
+        return CheckResult("pass", "gates.test.command is set")
+    return CheckResult(
+        "fail",
+        "gates.test.command is empty: every unit is rejected at run time (there is no test oracle)",
+        "set gates.test.command in .l4/config.yaml, for example `pytest -q`",
+    )
+
+
+CFG_004 = register(Check("CFG-004", "gates.test.command is set", "error", _cfg_004, scopes=CONFIG_SCOPES))
 
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")

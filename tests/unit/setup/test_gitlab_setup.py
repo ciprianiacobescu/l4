@@ -362,6 +362,19 @@ def test_the_include_is_found_and_the_repository_jobs_are_named(gitlab, run_setu
     assert "scheduled pipeline" in ok[0]  # the sweep's pipeline runs these jobs too: said, not hidden
 
 
+def test_a_configured_base_branch_gets_the_include_check_and_the_schedule(gitlab, run_setup, setup_repo):
+    """L4-OPS-016 / L4-YOLO-007: with `forge.base_branch: staging` and `main` the project's default branch, the harness
+    job runs on staging, so the include is checked there and the l4 sweep schedule runs there."""
+    (setup_repo / ".l4").mkdir(exist_ok=True)
+    (setup_repo / ".l4" / "config.yaml").write_text("version: 1\nforge:\n  type: gitlab\n  base_branch: staging\n")
+    gitlab.files_ref = "staging"
+    code, out = run_setup(no_schedule=False)
+    assert code == 0, out
+    assert any(".gitlab-ci.yml on staging" in r for r in rows(out, "OK"))
+    [entry] = gitlab.schedules
+    assert entry["ref"].endswith("staging")
+
+
 def test_untagged_repository_jobs_are_a_warning(gitlab, run_setup):
     gitlab.files[".gitlab-ci.yml"] = GOOD_CI.replace("  tags: [agentic]\n", "")
     _, out = run_setup()

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from l4.vcs.git import Git
+from l4.vcs.repokey import repository_key
 from l4.vcs.trailers import CommitTrailers
 
 
@@ -102,6 +103,11 @@ class TddRepo:
     cache: Path
     setup_script: Path
     origin: Path
+
+    @property
+    def key(self) -> str:
+        """The repository key of the checkout (`l4.vcs.repokey`): part of every worktree and lock path."""
+        return repository_key(self.repo, self.environ)
 
     @property
     def setup_command(self) -> str:

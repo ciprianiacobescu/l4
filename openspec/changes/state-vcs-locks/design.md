@@ -136,7 +136,7 @@ Non-Goals:
 
 - `UnitNames` (frozen): from a unit id and `forge.branch_prefix`: `branch = <prefix><fw>/<name>`,
   `wip_branch = l4-wip/<fw>/<name>`, `lock_ref = refs/l4/locks/<fw>/<name>`, `lock_branch = l4-lock/<fw>/<name>`,
-  `worktree = <cache>/worktrees/<fw>/<name>`, `flock_path = <cache>/locks/<fw>/<name>.lock`.
+  `worktree = <cache>/worktrees/<key>/<fw>/<name>`, `flock_path = <cache>/locks/<key>/<fw>/<name>.lock`, `archive_worktree = <cache>/worktrees/<key>/archive/<fw>/<name>` (`<key>`: the repository key, L4-WTR-001).
   `default_cache_root(env) -> Path` delegates to bootstrap-core's `l4.config.defaults.cache_root(env)` (`$L4_CACHE`, else
   `$XDG_CACHE_HOME/l4`, else `~/.cache/l4`; never inside the repository, as L4-WTR-001 requires).
 

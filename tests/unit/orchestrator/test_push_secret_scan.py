@@ -91,7 +91,7 @@ def test_the_halt_discards_the_secret_commits_and_pushes_the_ledger_alone(run_l4
     state = fold_events(ledger)
     assert (state.phase, state.halt_reason) == ("halted", "secret_in_push")
     # the worktree itself holds no secret commit either
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache, repo_key=run.tdd.key)
     assert SECRET not in run.raw(names.worktree, "log", "-p", "--all")
 
 

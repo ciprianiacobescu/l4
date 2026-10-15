@@ -19,10 +19,13 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from l4.agents.base import EventSink
 from l4.vcs.authorship import AUTHOR, SHA, commit_records, is_harness
 from l4.vcs.git import Git
+
+if TYPE_CHECKING:  # a type only: the module must not load the agent adapters (the experience graph imports it)
+    from l4.agents.base import EventSink
 
 SPEC_ROOT_GLOBS = ("openspec/**", ".kiro/specs/**")  # reported last: a unit or family rule names a hit first
 CONTRACT_PROTECTED_GLOBS = (
@@ -216,7 +219,7 @@ def _prune_empty_parents(root: Path, path: Path) -> None:
 
 
 def revert_protected(
-    git: Git, protected: ProtectedSet, base: str, *, events: EventSink | None = None, excludes: Path | None = None
+    git: Git, protected: ProtectedSet, base: str, *, events: "EventSink | None" = None, excludes: Path | None = None
 ) -> list[Violation]:
     """Put every protected path back to its state at `base` (a commit id). `git` runs in the unit worktree.
     An agent commit (the sandbox makes `.git` read-only, so this is defence in depth) is dropped: HEAD returns to

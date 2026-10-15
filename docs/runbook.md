@@ -24,6 +24,8 @@ Other documents:
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
 11. [Known limits of 0.3.0](#11-known-limits-of-030)
+12. [Delivery plans](#12-delivery-plans)
+13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
 ## Words used in this runbook
 
@@ -73,7 +75,8 @@ Other documents:
 > **CAUTION: Do not use the agent CLIs by hand on a runner for unit work.** Run a login step on a runner only when the
 > note gives it. Do not copy a login to another computer: a copied login can make the original login stop.
 
-The harness never merges a PR. A person merges it.
+The harness never merges a PR. A person merges it. The one exception is a unit in an active delivery plan with
+`merge: auto` ([section 12](#12-delivery-plans)).
 
 ## 2. My unit does not move: where to start
 
@@ -945,8 +948,25 @@ on the unit.
 > run is lost. A local `l4 retry`, `l4 resume` or `l4 restart` while CI works on the same unit can also fail with exit 1.
 
 - Wait for the other run to end. The lock goes when its process stops.
-- If the line has no pid, read the pid in the file `$L4_CACHE/locks/<framework>/<name>.lock` (the default is
-  `~/.cache/l4/`).
+- If the line has no pid, read the pid in the file `$L4_CACHE/locks/<key>/<framework>/<name>.lock` (the default is
+  `~/.cache/l4/`). `<key>` is the repository key: the name of the only directory under `$L4_CACHE/locks/` that holds
+  your unit's file (a runner that serves several projects has one directory for each project). A file at
+  `$L4_CACHE/locks/<framework>/<name>.lock` (no key) belongs to a harness from before the repository key. Its pid
+  is of that older harness, and the current harness ignores the file.
+- After an upgrade, a worktree that the older harness left under `$L4_CACHE/worktrees/<framework>/<name>` (or under
+  another key, after the project was renamed or moved) still has the unit branch checked out in that clone. The next
+  run removes that registration and the directory, because they are the clone's own and lie under
+  `$L4_CACHE/worktrees`. It never touches a worktree elsewhere: if you checked the unit branch out in your own
+  worktree, the run exits 2 with `the branch <b> is checked out in the worktree <path>`; check out another branch
+  there. The run also exits 2, and touches nothing, in two cases that look like a leftover:
+  - Another repository's checkout is at the registered path (`which holds a checkout of another repository`). The
+    message names the stale registration of this clone, `<clone>/.git/worktrees/<id>`. Remove that directory (the
+    command `git worktree prune` does nothing here, because the path still exists), or move the other repository's
+    checkout away. Then run again.
+  - The branch is checked out in the main checkout of this clone, or in the checkout you run `l4` from (`this run
+    works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
+  Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
+  the old lock path, so it does not exclude a job of the new one.
 - `l4 unlock` is not available in 0.3.0 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
@@ -1143,6 +1163,7 @@ promotes. The harness then cuts unit branches from that branch and opens their P
 | Continue a unit whose PR a person closed | Open the PR again, or start the unit over ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). |
 | Try an archive again | `l4 retry --unit <unit> --reason "<why>"`, or `l4 archive --unit <unit> --retry` ([7.6](#76-after-the-merge)). |
 | Use a refused operator label again | Do the command that the note names. Or a member removes the label and adds it again ([7.2](#72-halted)). |
+| Continue a delivery plan that stopped | Find the stop reason, then do the action of the table in [12.3](#123-procedure-a-plan-is-stopped). |
 | Continue after a cancelled run | Start a run ([7.10](#710-cancelled-or-timed-out-run-exit-16)). |
 
 ## 9. What your push does
@@ -1241,6 +1262,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 ci watch` | Follows a pipeline or a run to its end. It needs a token in `GITLAB_TOKEN` or `GH_TOKEN`, or `--auth-env <variable>`. | No |
 | `l4 run --dry-run` | Shows what a run would do. It starts no lease, worktree or agent, and it pushes nothing. It writes the prompts to `.l4-out/dry-run/`. The last line is `would exit <n>`. The exit code is 0. | No |
 | `l4 run [--unit <unit>]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. | Yes |
+| `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
 These commands and options are not available in 0.3.0. They stop with exit 2:
@@ -1292,3 +1314,341 @@ These limits make operation more difficult. Know them before you start.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and
   `budgets.same_error_repeats` are in the config, but no breaker uses them.
 - The commands and options of [10.4](#104-commands-for-operation) that are not available.
+
+## 12. Delivery plans
+
+A delivery plan orders units. It also sets limits for a group of units. A person activates the plan once. The harness
+then runs the units one at a time, in the order of their dependencies. [yolo-mode.md](yolo-mode.md) describes the plan
+file and the safety rules. This section tells you how to operate a plan.
+
+> **CAUTION:** Sections 1 to 11 apply to a plan with `merge: human`. With `merge: auto`, the harness merges the PR of
+> a unit that is in a plan. The harness never merges a unit that is not in an active plan with `merge: auto`.
+
+> **NOTE:** GitLab is not validated live for plans. The plan logic uses only git and calls that exist on GitHub and on
+> GitLab.
+
+### 12.1 The states of a plan
+
+The state of a plan is in the ledger of the plan: the ref `refs/l4/plans/<plan-id>` on `origin`. A person does not
+edit this ref. Use `l4 yolo status <plan-id>` to read the state.
+
+| State | What it means | Who acts next | Command |
+|---|---|---|---|
+| `new` | The plan file is on `<base>`. The harness did not examine it. | Harness | `l4 yolo check <plan-id>` |
+| `refused` | The checks found an error in the plan. | **Person** | `l4 yolo check <plan-id>` |
+| `admitted` | The checks passed. The review did not run yet. | Harness | `l4 yolo review <plan-id>` |
+| `reviewed` | The review ran. A person reads it. | **Person** | `l4 yolo activate <plan-id> --reason "<why>"` |
+| `active` | The harness runs the units. | Harness | `l4 yolo status <plan-id>` |
+| `waiting` | The current unit waits for a person or for capacity. The harness continues by itself when the cause is gone. | **Person**, or harness | 12.4 |
+| `stopped` | A fault stopped the plan. The harness does nothing until a person acts. | **Person** | 12.3 |
+| `cancelled` | A person cancelled the plan. This state is final. | None | `l4 yolo report <plan-id>` |
+| `completed` | Each unit is integrated. The report is ready. | **Person** | `l4 yolo report <plan-id>` |
+
+```mermaid
+stateDiagram-v2
+  [*] --> new
+  new --> refused: checks find an error
+  new --> admitted: checks pass
+  refused --> admitted: plan file corrected, checks pass
+  admitted --> reviewed: review in CI
+  reviewed --> active: l4 yolo activate
+  active --> waiting: question, capacity
+  waiting --> active: the cause is gone (the harness continues), or l4 yolo resume
+  waiting --> stopped: fault
+  active --> stopped: fault
+  stopped --> active: l4 yolo resume
+  active --> cancelled: l4 yolo cancel
+  waiting --> cancelled: l4 yolo cancel
+  stopped --> cancelled: l4 yolo cancel
+  active --> completed: all units integrated
+```
+
+### 12.2 Procedure: review and activate a plan
+
+1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it. To make the file, use 12.8.
+2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing.
+3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.
+4. Run `l4 yolo review <plan-id>`. This starts a run on `<base>`. The run reviews the plan.
+5. Run `l4 yolo status <plan-id>`. Read the verdict of each unit and each batch.
+6. If a verdict is not `READY`, correct the spec of the unit on `<base>`. Do steps 4 and 5 again.
+7. Run `l4 yolo activate <plan-id> --reason "<why>"`.
+
+> **WARNING:** `l4 yolo activate` freezes the spec of each unit and the plan file. If a person changes a frozen spec
+> afterward, the plan stops with `inputs_changed`. The same is true if a person edits the plan file of an active plan.
+> A later review or admission of the file does not change what the activation froze.
+
+The review does not run if the judge agent fails or does not answer in time. The harness then records no review, and
+the next run tries again. If the size limits cut some material, the verdict is at most `NEEDS_REVISION`. The finding
+names what the harness left out.
+
+The activation is refused with exit 2 and the cause in these cases:
+- The review is for other inputs. Run `l4 yolo review <plan-id>`.
+- The review was made with an older review prompt (`l4 yolo status` shows `review: stale (the review prompt changed)`).
+  Run `l4 yolo review <plan-id>`. After a harness upgrade, CI reviews again (and the judge agent charges for it) every
+  plan that is not yet activated and every plan that is stopped with `inputs_changed`. A plan that is active is not
+  reviewed again, and a resume of a plan stopped for a limit needs no new review.
+- A unit or a batch is not `READY`.
+- `merge: auto` is in the plan, but `forge.merge_policy` is `human`. Set `forge.merge_policy: auto`, or set
+  `merge: human` in the plan.
+- The target branch is not on `origin`.
+- Another plan is active on the same target.
+
+The checks of `l4 yolo check` give these findings, among others:
+- `held_by_other_plan`: a unit is also in another plan file. Remove the unit from one of the two files.
+- `unsupported_profile`: a profile names `e2e`, but `gates.e2e.serve` is set. The harness does not start an app server
+  for a plan. Remove `e2e` from the profile.
+- A limit that is not valid: `max_unit_attempts` or `max_runs` below 1, `max_cost_usd` below 0, or a `deadline` with no
+  time zone. Correct the limit.
+
+If the plan file is not valid JSON, `l4 plan` and `l4 yolo status` report the file. Such a file holds no unit. If the
+JSON is readable but the plan is not valid, the file still holds the units that it lists (see 12.5).
+
+### 12.3 Procedure: a plan is `stopped`
+
+1. Run `l4 yolo status <plan-id>`. Find `Stop:` and the reason code.
+2. Find the code in the table below. Do the action in the column `Clear it`.
+3. Run the command in the column `Then`.
+
+The command `l4 yolo resume` is refused with exit 2 while the cause is still there. For a limit stop, the refusal stays until you give an option `--extend-…`, because the figures already include the attempt that stopped the plan. The refusal names the command to
+run first. A stopped plan dispatches and merges nothing. This includes later units that do not depend on the failed
+unit.
+
+| Stop reason | Cause | Clear it | Then |
+|---|---|---|---|
+| `unit_halted` | The current unit is `halted` ([7.2](#72-halted)). | `l4 retry --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `unit_escalated` | The current unit is `escalated` ([7.3](#73-escalated)). | `l4 retry --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `unit_abandoned` | A person closed the PR of the current unit with no merge ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). | Open the PR again, or run `l4 restart --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). `l4 retry` does not move a rejected unit, and a resume cannot clear this stop. | Fix the cause. If it is the spec, correct it (on the unit branch, or on the target when the unit has no branch), push it, and the next run stops the plan with `inputs_changed` and CI reviews the plan. If it is the configuration (for example an empty `gates.test.command`), set it: there is nothing to review. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit, and the next run of the unit reads the corrected spec. You do not need `l4 restart`. If the unit is rejected again, the plan stops again with `unit_rejected`. |
+| `merge_refused` | The push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the push of the harness to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
+| `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
+| `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
+| `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |
+| `limit_runs` | The plan used `limits.max_runs`. | None. Decide if the plan can use more runs. | `l4 yolo resume <plan-id> --reason "<why>" --extend-runs <n>` |
+| `limit_attempts` | A unit used `limits.max_unit_attempts`. The attempts count from the activation: a restart before the plan does not count. A restart after the activation counts as an attempt, and the cost of each attempt stays in the plan. | None. Decide if the unit can have more attempts. | `l4 yolo resume <plan-id> --reason "<why>" --extend-attempts <n>` |
+| `limit_deadline` | The time in `limits.deadline` passed. | None. Decide on a new time. | `l4 yolo resume <plan-id> --reason "<why>" --extend-deadline <ISO-time>` |
+| `inputs_changed` | A person changed a frozen spec of a unit, or the plan file (the `exclude` list too), after the activation. A person also causes it when the plan file is deleted. `l4 yolo status` names the unit, or `plan` for the plan file. | Check the change. If the plan file was deleted, restore it. A resume cannot clear this reason. | `l4 yolo review <plan-id>`, then `l4 yolo activate <plan-id> --reason "<why>"` |
+| `target_missing` | The target branch is not on `origin`. | Create the target branch on `origin` again. | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `unit_missing` | The current unit is not in the units of the target any more. A person removed or moved its folder. This is not true for a merged unit: if the folder of a merged unit moved to the archive, the harness integrates the unit. | Put the unit folder back on the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
+
+> **NOTE:** The usage is never reset. A resume, a restart of a unit and a new activation keep the cost, the runs and the
+> attempts that the plan used. The harness charges each attempt of a unit on its own. A restart starts a new attempt and
+> does not remove the cost of the attempts before it. The attempts of a unit count from the activation. A restart before the plan does not count. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
+
+> **CAUTION:** For `unit_rejected` and `inputs_changed`, the new activation uses the new spec. If you do not want the
+> plan to continue, use `l4 yolo cancel <plan-id> --reason "<why>"`.
+
+### 12.4 Procedure: a plan is `waiting`
+
+A waiting plan is not an error. The harness continues by itself when the cause is gone. You do not have to run a
+command. To continue at once, run `l4 yolo resume <plan-id> --reason "<why>"`. Run `l4 yolo status <plan-id>` to see the
+reason.
+
+| Wait reason | Cause | What to do |
+|---|---|---|
+| The current unit is `awaiting_human` | A question waits for a person. | Answer it ([7.1](#71-awaiting_human-a-question-waits-for-you)). |
+| The current unit is `clarifying` | The clarifier works on a question. | Do nothing. The next run continues. |
+| The current unit is `waiting_capacity` | No agent is available ([7.4](#74-waiting_capacity-no-agent-is-available)). | Correct the cause, or `l4 retry --unit <unit> --reason "<why>"`. |
+| `waits for <unit> (not integrated)` | A unit that this unit needs is not in the target yet, or its profile did not pass. | With `merge: human`, merge the PR of that unit into the target. Then wait for the next run. |
+| `waits for batch <id> (acceptance)` | The acceptance profile of a batch did not run yet. | Do nothing. The next run does the check. |
+| `held by plan <id> (<status>)` | The unit is in a plan file on the target, and the plan is not active. | Activate the plan, or remove the unit from the plan file (see 12.5). |
+| `run_not_started` | The last run of the current unit ended before the unit started: a usage error, a worktree or lease failure, a missing CLI. `l4 yolo status` shows the exit and the reason of that run (for example the worktree message) and its `Next:` line repeats the advice below. The harness starts no next run after a run that did not start the unit, so the plan does not loop. | Read the detail. Fix the cause (the configuration, the runner, the unit branch). Do nothing else: the next trigger, a cron run or a push, runs the unit once more (`l4 yolo resume` does the same at once). A run that starts the unit clears the wait; a run that fails to start it again keeps the plan waiting. Each of these runs counts against `max_runs`. |
+| `unit_not_started` | The unit is eligible but has nothing the harness can run: no task in its `tasks.md`, or a ledger that cannot be read. `l4 yolo status` shows what the unit waits for. | Fix the unit on its branch (add the task, repair the ledger). The plan continues by itself at the next run when the unit has something to run. `l4 yolo resume` wakes it at once, but the plan waits again if the unit still has nothing to run. |
+| `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>` or `the pull request !1 is closed, not open`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
+
+With `merge: human`, a PR must be merged into the target. A merge into another branch does not count. The note of the
+unit shows `merged into <x>, not the base <base>`.
+
+With `merge: auto`, the harness also refuses to merge a unit if its head changed after the checks. The head to push must
+be the tip of the unit branch on `origin` and the head of the PR. If it is not, the harness does not push and does not merge the unit.
+
+The post-merge check applies to each merged unit of the plan that is not integrated, not only to the current unit. If a
+person merges a unit that is not the current unit in a plan with `merge: human`, the next step integrates it.
+
+The profile `all` does not run the `e2e` gate if `gates.e2e.serve` is set, and `l4 yolo status` says so. A profile
+passes only if at least one required gate other than `setup` ran and passed. If no gate ran, the result is an error and
+the plan stops with `postcheck_failed`.
+
+### 12.5 Procedure: cancel a plan
+
+1. Run `l4 yolo cancel <plan-id> --reason "<why>"`.
+2. Run `l4 yolo report <plan-id>`. Read what the plan did.
+
+The harness starts no new unit and merges nothing. A unit that is already running finishes its run. The harness does
+not merge it. A cancelled plan cannot start again. Make a new plan with a new `<plan-id>`.
+
+A cancelled plan still holds its units. A unit that is in a plan file on the target stays `held by plan <id>
+(cancelled)` while the file is there. To release a unit, remove it from the plan file, or remove the file, on `<base>`.
+Then the unit is a normal unit again. Use sections 7.1 to 7.15 for it. A plan file that is not valid still holds the
+units that the harness can read in its JSON. A file that is not JSON holds nothing.
+
+### 12.6 What the harness does in one run
+
+A CI run makes at most one plan step. A step is one of these:
+- one review of a plan;
+- one dispatch of a unit;
+- one merge, with its post-merge checks;
+- one batch check;
+- the completion of the plan.
+
+After a step that leaves work, the run starts the next run on `<base>`. A plan of N units takes about 3N runs.
+
+While a plan is active, a unit that is not in the plan gets no new agent work. The sweep still records its merges, its
+closed PRs and its labels. `l4 run --unit <unit>` exits 13 for a unit that is not the current unit of the plan, and it
+changes nothing.
+
+Three more rules apply:
+- A unit that is already in review when the plan reaches it is adopted. The harness records it as dispatched. Then it
+  merges the unit (`merge: auto`), or waits for the merge of a person (`merge: human`).
+- The harness does not merge a unit that a person removed from the plan file.
+- An error that the harness did not expect in the plan step does not fail the run of the other units. The units of the
+  plan stay held. The next run tries the step again.
+
+### 12.7 Reports, receipts and promotion
+
+- When the plan completes, and at each stop, the harness writes `report.md`. It is in the plan ref and in
+  `.l4-out/yolo/`. Run `l4 yolo report <plan-id>` to read it.
+- Each integrated unit has a receipt in `receipts/<unit-name>.json` in the plan ref.
+- The report says `Promotion to <branch> was not performed`. The harness never pushes, never opens a PR and never merges
+  to the promotion branch. A person promotes the target by hand.
+
+### 12.8 Procedure: make or change a plan
+
+Use this procedure to make a new plan file, or to change a plan after you add or remove a spec.
+
+1. Run `l4 yolo draft <plan-id>`. The command writes `.l4/plans/<plan-id>.json` in your working tree. It lists each spec
+   that no plan lists in the batch `unplanned`, with no dependency. It puts a finished spec in `exclude`. It does not
+   commit, push or call a model. It refuses a file that exists.
+2. Edit the file. Move the units into batches. Add `depends_on` only where a spec uses something that another spec
+   introduces or changes. Give each `exclude` entry a reason that a person can check.
+3. Run `python3 scripts/validate_plan.py` (the skill has the same file in `plugins/l4/skills/l4/scripts/`). Correct each
+   problem. The script prints the order and the waves. A wave shows what could run together. The plan runs one unit at a
+   time.
+4. Run `l4 yolo check <plan-id>`. Correct each finding.
+5. Commit and push the plan file. Write one line of evidence for each dependency in the commit message.
+6. Run `l4 yolo review <plan-id>`, then read it (12.2).
+7. A person runs `l4 yolo activate <plan-id> --reason "<why>"`.
+
+To update a plan that exists, run `l4 yolo draft <plan-id> --update` and do steps 2 to 7 again. The command adds each new
+spec to `unplanned` and keeps all other edits. It names a unit that is gone as `gone: <id>` and does not remove it.
+
+> **WARNING:** A change of the file of an active plan stops the plan with `inputs_changed`. The plan keeps its usage. A
+> person must review and activate the plan again. A spec that has no order with the active plan can go in a new plan.
+> Only one plan can be active on a target.
+
+An agent can do steps 1 to 5 with the skill reference `references/plan.md`. The agent does not activate, resume or cancel
+a plan.
+
+## 13. Reading the history (`l4 kg`)
+
+The `l4 kg` commands let you read the history of all units of one repository. You start them by hand. No run, no
+sweep and no agent starts them. They never change a unit. They never call a model, a forge or the network.
+
+Use them to find mistakes that repeat across units, to see what followed a lesson, and to choose between `l4 retry`
+and `l4 restart`. The numbers are small in most repositories. Each line of a report shows its *n*. Read the *n*
+before you act on a number.
+
+### 13.1 What each command does
+
+| Command | What it does |
+|---|---|
+| `l4 kg build` | Builds the index of the history. It prints what it read and what it skipped. |
+| `l4 kg report [--out <path>] [--min-units <n>]` | Prints a markdown report. It builds the index first when the index is missing or old. `--min-units` is the least number of units for a repeated pattern. The default is 2. |
+| `l4 kg why <id>` | Explains one record. For a unit, it prints the timeline of the unit. For `F-<8 hex>`, `L-<8 hex>`, a run id or `<unit>#Q-<n>`, it prints the records next to it. An unknown id stops with exit 2 and lists the forms that work. |
+| `l4 kg propose [--min-units <n>] [--dry-run]` | Writes a draft lesson to the inbox for each repeated pattern that no lesson covers. A person finishes the draft. |
+
+The report has these sections, in this order: coverage, lessons, repeated attempt failures, repeated findings, gate
+candidates, spec-gap hotspots, profiles by role, and stops. An empty section says `none (n = 0)`. A section that
+matches records by their text says `approximate`.
+
+The lesson section shows what followed a lesson. It does not show what the lesson caused.
+
+### 13.2 What the commands read
+
+The commands read only objects that are committed in git:
+
+- the base branch, which includes the OpenSpec archive and the Kiro specs;
+- the unit branches `origin/<branch prefix><framework>/<name>`;
+- the lock refs, which hold the ledger lines that are not pushed yet;
+- the local refs `refs/l4/attempts/<framework>/<name>/<n>`, which hold the old attempts of a restarted unit;
+- the lessons file and its `_archive/` folder.
+
+The commands never run `git fetch`. They never write a ref, the git index or a tracked file. An input that is corrupt,
+too large or not a regular file is skipped. The coverage section counts each skip by its reason.
+
+### 13.3 Where the index is
+
+The index is a set of three files. It is not in the repository.
+
+1. Find the cache root. It is `$L4_CACHE`, and the default is `~/.cache/l4/`.
+2. Open the folder `kg/<key>/` in the cache root. The key is 16 hex digits of the hash of the path of the repository.
+3. Read `manifest.json` for the refs that the build read, the counts and the skips.
+
+Each repository has its own folder. A command never reads the index of another repository.
+
+> **NOTE:** If `L4_CACHE` points inside the repository, the command stops with exit 2. Set `L4_CACHE` to a folder
+> outside the repository.
+
+You can delete the folder at any time. The next `l4 kg report` builds the index again. The same refs give the same
+files. If a build fails, it leaves the last complete index as it was.
+
+### 13.4 Fetch the old attempts of a restarted unit
+
+The report cannot read an attempt that is not on your computer. The coverage section counts it as
+`attempt_not_local`, and prints the command that fetches it.
+
+1. Run `git fetch origin 'refs/l4/attempts/*:refs/l4/attempts/*'`.
+2. Run `l4 kg report` again.
+3. Make sure that the coverage section no longer shows `attempt_not_local`.
+
+### 13.5 Save a report
+
+By default, the report goes to the terminal.
+
+1. Run `l4 kg report --out .l4-out/kg/report.md`.
+2. Open the file.
+
+> **CAUTION:** `--out` inside the repository must name a path that git ignores. Otherwise the command stops with exit 2
+> and writes nothing. The folder `.l4-out/` is ignored. A path outside the repository also works.
+
+### 13.6 Promote a draft to a lesson
+
+`l4 kg propose` writes a draft. It does not write a lesson. It does not stage or commit. It writes two files to
+`.serena/memories/inbox/kg-<date>/`: the draft `<L-id>.md` and the evidence `<L-id>.evidence.md`. A draft quotes only
+failure classes, titles of deterministic findings, gate names, rule names and globs. It never quotes a judge finding,
+a question, an answer or the output of an agent.
+
+If git does not ignore the inbox folder, the command prints a warning. Add the folder to `.gitignore`.
+
+1. Run `l4 kg propose --dry-run`. Read the list of drafts that the command would write.
+2. Run `l4 kg propose`.
+3. Open the draft and the evidence file.
+4. Replace the line that starts with `TODO(person):` with your advice for the agent.
+5. Change the scope globs if the scope is too wide.
+6. Switch to `<base>`. Do not use a unit branch.
+7. Run `l4 lessons promote <L-id>`. Read the lesson and its scope. Answer the question.
+8. Make sure that the output shows the commit `chore(memory): lesson <L-id> promoted [skip ci]`.
+9. Push the commit.
+
+The command refuses with exit 2, and writes nothing, in these cases:
+
+- The draft still has its `TODO(person):` line, or the body is empty.
+- The draft is not one valid lesson, or its id does not match its dedupe key.
+- HEAD is detached, or HEAD is on a branch under `forge.branch_prefix`. A commit to `.serena/memories/harness/` on a
+  unit branch is a protected-path blocker. Promote on `<base>`.
+- A file is staged, or the lessons file has changes that you did not commit.
+- `memory.enabled` is `false`.
+- There is no terminal and you did not use `--yes`.
+
+Use `--from <dir>` when two inbox folders hold the same id. Use `--no-commit` to write the lesson and to keep the draft.
+The command then prints the two git lines that finish the work.
+
+The harness injects the lesson into a later task when the paths of the task match the scope of the lesson. A lesson
+with no scope goes to every task.
+
+### 13.7 Where a report may be saved
+
+> **WARNING:** A report from a client repository must never go into the `docs/live/` folder of the harness. It holds
+> the text of the client's units.
+
+A report from a test repository can go into `docs/live/` after one check. Run `scripts/dev/scrub.py check`. Save the
+report only when the check is clean.

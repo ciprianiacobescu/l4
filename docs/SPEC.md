@@ -38,7 +38,7 @@ hosted) and `fake`; forges GitHub and GitLab (≥ 17.5 CE) and `local`; CI templ
 at parity; doctor, plan/dry-run, simulate.
 
 Out of scope for v1 (designed for, not built): Spec Kit execution, PR-comment commands (`/l4 …`), auto-merge
-(the config knob exists, the implementation is v1.1), worktree-per-task-wave parallelism, mutation testing
+(exists only inside delivery plans with `merge: auto`, L4-YOLO-008; the harness never merges a unit outside such a plan), worktree-per-task-wave parallelism, mutation testing
 built-ins (available as configured gate commands), a web dashboard.
 
 ---
@@ -199,7 +199,7 @@ moves `uses:` pins, and in copy mode the pin is the `commit:` input, which it ca
 unless `--runner-tag TAG` (repeatable) names a self-hosted one, and `forge.token_env: GITHUB_TOKEN` (the workflow's own
 token) unless `--forge-token-env NAME` is given. When the default role chains name a profile that cannot log in on a hosted
 runner (a `subscription` profile of `codex`, whose login is a stored local file; `claude-code` takes
-`CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets), init MUST print a `todo:` line (and write a
+`CLAUDE_CODE_OAUTH_TOKEN` and `kiro-cli` `KIRO_API_KEY` as secrets, and an `opencode` `auth: api_key` profile with an `opencode/` or `opencode-go/` model `OPENCODE_API_KEY`, L4-PRV-028), init MUST print a `todo:` line (and write a
 `# TODO:` line in the config) naming the profile and what to change, and MUST NOT change the person's agents. The
 `schedule:` trigger of both GitHub workflow forms is `ci.schedule` (a cron string, default `"*/30 * * * *"`; `null`
 leaves the trigger out), re-rendered by `l4 upgrade`. The upload of `.l4-out` (the artifact `l4-out`: prompts and agent
@@ -292,7 +292,11 @@ of the harness package.
 | `l4 s1 export --out DIR [--source FILE]… [--seed N] [--allow-gaps]` \| `canary [--also-repo P]… [--target N] [--min-test N] [--max-variants N] [--test-command CMD] [--out FILE] [--allow-gaps]` \| `score --profile P --dataset FILE --out FILE [--max-requests N] [--gate GATE.json]` \| `report ANSWERS… --dataset FILE [--gate GATE.json] [--profile TUNED] [--out FILE]` \| `audit --dataset DIR [--sample N \| --import FILE]` | System-One data set (M1.6): export ground-truth items from the calibration files (the only door to training data: engine answers are never read), generate labelled canary items from committed units (the canary runs the unit gate command and no browser: a unit's e2e test files, `e2e/**` and the directory `gates.e2e.command` runs, are left out of the tests-ran check and counted as `e2e_skipped:<project>:<unit>`, so the unit's other items still count; running them through `gates.e2e` needs a sandbox and a server and is not done), score a data set with a `backend: system-one` profile, compare engines against the ground truth, audit the labels by hand. `export` and `canary` exit 2 when a split is empty or a quota is unmet; `score` and `report` exit 2 on a data set without or with a damaged `manifest.json`; `score` alone may load a tuned checkpoint whose gate ran and failed | files under `$L4_CACHE/s1` and the paths given; no engine for `export`, `canary`, `audit` |
 | `l4 archive --unit ID` | Run the done-gate and archive | commits |
 | `l4 questions [list\|show Q\|answer Q --text T\|accept Q] --unit ID` | Local helper for humans | edits `questions.md` |
-| `l4 lessons [list\|lint\|promote ID]` | Inspect and curate lessons | edits lessons |
+| `l4 lessons [list\|lint\|promote ID [--from DIR] [--yes] [--no-commit]]` | Inspect and curate lessons. `promote ID` moves one inbox proposal into `memory.lessons_file` through the lessons writer with origin `human_edit`, prints the lesson and its scope first, asks on a terminal (`--yes` without one), refuses a draft with a `TODO(person):` line, HEAD on a unit branch, a staged file or an edited lessons file (exit 2), commits only the lessons paths as `chore(memory): lesson <id> promoted [skip ci]` unless `--no-commit`, and deletes the proposal (L4-KG-013) | edits lessons; one commit; deletes the inbox files |
+| `l4 kg build` | Build the derived index of the repository's unit history from committed git objects (base branch with the OpenSpec archive, unit branches, lock refs, local attempts refs); never fetches (L4-KG-003, L4-KG-004) | writes the index under the cache root only |
+| `l4 kg report [--out PATH] [--min-units N]` | Print the cross-unit report, *n* on every line; builds the index first when it is missing or stale; `--out` inside the repository must be git-ignored, else exit 2 (L4-KG-009) | the index under the cache root; `--out` file |
+| `l4 kg why ID` | The timeline of a unit, or the 1-hop view of `F-<8 hex>`, `L-<8 hex>`, a run id or `<unit>#Q-<n>`, with the source of every line; an unknown id exits 2 (L4-KG-010) | the index under the cache root |
+| `l4 kg propose [--min-units N] [--dry-run]` | Write inbox drafts for recurring patterns that no lesson covers, for a person to finish and promote; never writes `lessons.md`, stages or commits (L4-KG-012) | inbox files; the index under the cache root |
 | `l4 feedback add --kind refactor\|duplication\|tests\|config\|behaviour --text TEXT\|- [--title T] [--at PATH[:L[-L]]]… [--env NAME] [--when W --then T] [--lesson] [--draft] [--unit ID]` | Ask for a change to an open unit (L4-FBK-003): append an item to the unit's `feedback.md` (created when missing) with the lines named by `--at` quoted (at most 40 lines or 4,000 bytes, redacted), Status `submitted` (`draft` with `--draft`), and print the item id, the file and the `git add`, `git commit` and `git push` lines that send it. The unit is `--unit`, else the checked-out `l4/<framework>/<name>` branch; the kind rules of L4-FBK-002 are checked before writing; exit 0, 2 for a bad item, place or unit (nothing written) | edits `feedback.md` only; no commit, push or forge call |
 | `l4 feedback list [--unit ID] [--json]` | List the items of a unit (id, status, kind, first place, title, problems); `--json` prints `l4/feedback@1` | none |
 | `l4 feedback show FB-NNN [--unit ID] [--json]` | Show one item as the file holds it; `--json` adds its problems and its content sha256 | none |
@@ -311,6 +315,14 @@ of the harness package.
 | `l4 retry --unit ID --reason TEXT [--rounds N] [--no-run]` | Continue a stopped unit from where it stopped, by its phase (L4-OPS-001): `halted` back, `escalated` back to `verifying` (at a round limit `--rounds N` adds N fix or feedback rounds, default 1), `waiting_capacity` back now, `in_review` to `verifying`, `merged` the archive retry; any other phase exit 2 with what moves the unit. A person's change of the unit folder since the stop sends the unit to `implementing` (L4-OPS-003). Fetches first; runs no agent, gate or sandbox; then starts the harness's CI on the base branch unless `--no-run` (L4-OPS-002); a refused start prints how to start one and exits 0. The sweep does the same for a member's `l4:retry` label (L4-OPS-008) | ledger commit `chore(<name>): retry [skip ci]`, push, forge call |
 | `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`. Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
+| `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
+| `l4 yolo check PLAN` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings | none |
+| `l4 yolo review PLAN [--local]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here | forge call (a run), or a plan ledger commit with `--local` |
+| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
+| `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
+| `l4 yolo cancel PLAN --reason TEXT` | Stop new dispatch and merges for good (L4-YOLO-013); a unit already running finishes its run and is not merged | `plan.cancelled` (push with a lease) |
+| `l4 yolo resume PLAN --reason TEXT [--extend-cost USD] [--extend-runs N] [--extend-attempts N] [--extend-deadline ISO]` | Leave `stopped` or `waiting` when the cause is gone (L4-YOLO-013, L4-YOLO-014); refused with exit 2 while the cause is still there; `inputs_changed` needs a new review and activation | `plan.resumed` (push with a lease), forge call |
+| `l4 yolo report PLAN` | Print `report.md` of the plan ref, complete or partial (L4-YOLO-015) | none |
 | `l4 eval [--impl P]… [--judge P]… [--ref-judge P] [--unit ID]… [--k N] --out DIR [--cell-timeout DUR] [--resume] [--idle-check CMD] [--runner] [--dry-run]` \| `--warm-cache` \| `--compare OLD [--new FILE \| --baseline-dir DIR] [--max-drop X] [--allow-seed-change] [--require-all] [--json]` | Measure profiles on the fixed seed set through the real implement and verify paths and write a scorecard (§20.1); compare two scorecards and exit 15 when a profile regressed | `--out` files; `--warm-cache` fills the uv cache of the eval |
 
 All commands MUST accept `--config PATH`, `--repo PATH`, `--log-format human|json` and `-v/-q`.
@@ -427,7 +439,9 @@ looks like a secret in config MUST fail validation.
 **L4-CFG-005 Runner paths.** The runner cache `$L4_CACHE` (worktrees, lock files, the probe cache and cool-down
 registry, harness-owned tool prefixes, per-unit sandbox caches, S1 calibration data) MUST default, when the variable is
 unset, to `$XDG_CACHE_HOME/l4`, else `~/.cache/l4`, and MUST resolve **outside** the repository: worktrees live outside
-the repo (L4-WTR-001) and the cross-job `flock` of L4-LCK-001 must be shared by jobs whose build directories differ
+the repo (L4-WTR-001) and the cross-job `flock` of L4-LCK-001 must be shared by jobs of the same project whose build
+directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which is why both paths are keyed by the project's repository key
+(from its `origin` URL, never from a local path) and not by the checkout's location
 [I, decision of the cross-change review 2026-10-03; a repo-local `.l4-cache/` was rejected for these two reasons]. A
 `$L4_CACHE` inside the repository is a usage error (exit 2). `$L4_HOME` (default `~/.local/share/l4`) holds the
 user-local tools that `doctor --fix` installs (L4-DOC-002). Both are environment variables, never config keys and
@@ -714,7 +728,8 @@ forge:
   type: auto                       # auto | github | gitlab | local
   base_branch: main
   branch_prefix: "l4/"
-  merge_policy: human              # human | auto (auto: v1.1)
+  merge_policy: human              # human | auto (auto applies only to units of an active merge: auto plan, L4-YOLO-008;
+                                   # outside such a plan it has no effect and doctor warns)
   token_env: L4_FORGE_TOKEN        # GitHub App/PAT or GitLab project access token
   labels_prefix: "l4:"
   notify_mentions: []              # e.g. ["@alice"]
@@ -743,6 +758,10 @@ ci:
   upload_artifacts: true           # false: the generated GitHub workflows have no upload-artifact step (a public
                                    # repository: any signed-in user can download the `l4-out` artifact)
 
+yolo:
+  profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's
+                                   # acceptance_profile can name; `all` (every configured gate except an e2e gate with a server) and `none` are reserved (L4-YOLO-009)
+
 budgets:
   max_iterations_per_unit: 30      # counted from the ledger (L4-CI-002); sized for ≈40-min jobs (60-min timeout)
   max_cost_usd_per_unit: 50
@@ -754,7 +773,7 @@ budgets:
 observability:
   log_dir: .l4-out/logs
   redact_env: [L4_FORGE_TOKEN, L4_TRIGGER_TOKEN, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-               CODEX_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, KIRO_API_KEY, TYPESAFE_API_KEY, L4_GITHUB_APP_KEY]
+               CODEX_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, KIRO_API_KEY, TYPESAFE_API_KEY, L4_GITHUB_APP_KEY, OPENCODE_API_KEY]
   redact_forge_urls: true      # the forge host is `<forge>` in everything the harness commits (L4-OBS-002)
 ```
 
@@ -1930,6 +1949,18 @@ A bracketed credential variable reaches only its own profile's agent process (L4
 
 [V for `CLAUDE_CODE_OAUTH_TOKEN` on GitHub-hosted runners, docs/spikes/06 finding 10.]
 
+**L4-PRV-028** OpenCode's own providers take their key from OPENCODE_API_KEY. An `opencode` profile with `auth: api_key`, a model of OpenCode's own providers (`opencode/…` or `opencode-go/…`) and
+no custom provider in its options SHALL have `OPENCODE_API_KEY` as its credential variable (L4-PRV-024), as design D16
+says:
+- the generated GitHub job names it;
+- the probe's auth step passes on its presence and fails with `OPENCODE_API_KEY is not set` when it is unset, before
+  any model call;
+- the probe's hello and the agent run receive it, the run through the credential loader (never in the sandbox
+  environment or in an argv);
+- it is redacted by default.
+
+A free model without `auth: api_key`, a subscription profile and a profile with a custom provider MUST be unchanged.
+
 `claude-code` implementer, auth `subscription` [V as one command, spikes/01, except `--mcp-config F`, and `--safe-mode` replaced by `--setting-sources "" --disable-slash-commands` (HB-X1: V live, `/context` and hooks canaries on the runner; a model call was not possible, the runner's OAuth session had expired)]:
 
 ```
@@ -2085,7 +2116,7 @@ verbatim schema failed with `turn.failed` `invalid_json_schema`, exit 1; the str
 | Step | Meaning | Examples |
 |---|---|---|
 | `binary` | executable on PATH, version ≥ profile `min_version` | `codex --version`, `claude --version` |
-| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY` or `KIRO_API_KEY`, L4-PRV-024) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
+| `auth` | credentials present; records **only** `logged_in`, `auth_method`, `plan` — never e-mail or tokens. Env-credential auth proves presence, not validity: `hello` is the authoritative auth check [V, spikes/05: a dummy `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` still yields `loggedIn:true`] | claude `auth status` (keep `loggedIn`, `authMethod`, `subscriptionType`; drop `email`, `orgId`, `orgName`, `projectsDirectory`, `configDirectory`); codex app-server `account/read` (keep `type`, `planType`), or for `api_key` the presence of `CODEX_API_KEY` (`codex login status` writes stderr only and ignores `CODEX_API_KEY` [V]); opencode `auth list` (presence only; strip ANSI, map display names to ids, accept the `Environment` section); gemini credential env or settings (exit 41 = not configured); `kiro-cli whoami --format json` (exit 0 and a flat object with a non-empty `accountType`, 2.27.1 and 2.28.0 [V]; logged out is exit 1 with `{"account": null}`; the e-mail is never kept). With the profile's own credential variable set (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `KIRO_API_KEY`, or `OPENCODE_API_KEY` for an opencode `api_key` profile with an `opencode/` or `opencode-go/` model, L4-PRV-024, L4-PRV-028) auth passes on its presence (`auth_method: env`) with no status command; unset on an `api_key` profile, auth fails with `<VARIABLE> is not set` |
 | `quota` | remaining usage in every window ≥ `min_remaining_percent` (L4-AVL-009), or for OpenRouter-backed profiles a remaining balance and key limit ≥ `availability.min_remaining_usd`; skipped when no zero-cost query exists | codex app-server `account/rateLimits/read` (both windows of the model's bucket, plus `ordinaryUsageAllowed`, `rateLimitReachedType` and `spendControlReached`; never redeem reset credits); claude `TZ=UTC claude -p --safe-mode --no-session-persistence --output-format json "/usage"` (the only source of the per-model weekly window), or the latest `rate_limit_event`; OpenRouter-backed profiles: `GET /api/v1/credits` + `/api/v1/key` against `availability.min_remaining_usd` (default 0.50); Kiro `kiro-cli chat --no-interactive "/usage"` (no model call; `Credits (X of Y covered in plan)` and `resets on YYYY-MM-DD`, parsed into one `credits` window [V, 2.28.0 PRO]; the free-tier text is not recorded, an unknown text is `quota_unrecognised`) |
 | `hello` | minimal prompt must return `L4-OK` within `probe_timeout`, single turn, on the profile's own model (limits are per model, and a warm Sonnet hello costs the same as Haiku [V, spikes/05]); anything else fails | on the profile's own model; the reply is accepted after: trim; remove one wrapping layer (a whole ``` fence with an optional language tag, or a matching `` ` ``/`"`/`'` pair); trim; equals `L4-OK`. Costs: Claude $0.0008 warm to $0.011 cold, about 3 s; Codex about 5 s and about 19k input tokens (run only on a cold cache entry, after the zero-token `model/list`); OpenCode isolated $0.0005, about 3 s, with `--title` [V, spikes/05]. On the reference runner: claude (haiku) 2.6 s, codex 5.4 s, opencode `big-pickle` 6.1 s [V, runner] |
 | `mcp` | configured MCP servers start | Kiro `--require-mcp-startup` exit 3; Claude/Codex init events |
@@ -2937,7 +2968,8 @@ worktree and resume the step; else re-run the step.
   `--force-with-lease=<ref>:<old-sha>`; release by deleting with a lease.
 - a run that cannot acquire the lease because a live holder has it logs `lock.busy{holder}` and skips the unit (exit 0
   for that unit).
-- on shared shell runners, additionally `flock` `$L4_CACHE/locks/<unit>.lock`.
+- on shared shell runners, additionally `flock` `$L4_CACHE/locks/<key>/<fw>/<name>.lock` (`<key>`: the repository key of
+  L4-WTR-001), taken before the unit's worktree is prepared or removed.
 - every fenced WIP push records the WIP commit SHA in the lock commit it advances (`wip_sha`); a new holder
   (L4-STA-003) restores a WIP snapshot only if its SHA equals the `wip_sha` of the last lock commit of a lease that was
   valid when pushed; any other WIP commit is ignored.
@@ -2949,7 +2981,20 @@ in every run's log, and `ci.max_parallel_units` is forced to 1.
 
 ### 12.3 Worktrees
 
-**L4-WTR-001** Worktrees live in `$L4_CACHE/worktrees/<fw>/<name>` (outside the repo, L4-CFG-005), are created with
+**L4-WTR-001** Worktrees live in `$L4_CACHE/worktrees/<key>/<fw>/<name>` (outside the repo, L4-CFG-005; the post-merge
+archive worktree in `$L4_CACHE/worktrees/<key>/archive/<fw>/<name>`), where `<key>` is the repository key, which is the same for every clone and
+build directory of one project and differs between projects, so two projects that share a change name on one runner never meet at a path. A
+checkout found at a path is replaced only if its repository has the same key or its owning clone no longer exists
+(an orphan, whose gitdir points nowhere); a checkout of a repository with another key is never deleted (exit 2). The locks of the
+earlier layout (`$L4_CACHE/locks/<fw>/<name>.lock`) are not used and are not touched. A worktree of this clone that is
+registered under `$L4_CACHE/worktrees` (the earlier layout, or another key after a rename) and has the unit branch (or the
+WIP or archive branch being added) checked out MUST be removed before the new one is added: `git worktree remove
+-f -f` (a locked registration too), the directory deleted when it lies under `$L4_CACHE/worktrees` (the cache path the
+run was given, resolved, not a directory found by name) and holds no checkout of another repository key, `git worktree
+prune`. Only this clone's registrations are read and removed, and its own main worktree is never removed (exit 2). A
+registration elsewhere is a person's worktree: the run exits 2 naming its path.
+The callers hold the keyed unit flock, so a runner's projects are upgraded between pipelines (a job of an older harness
+holds the old lock path). Worktrees are created with
 `git worktree add` from the remote unit branch (created from base when absent), are reused across runs on the same
 runner only after `git fetch` + verification that HEAD matches the remote branch or the WIP snapshot, and are pruned by
 `doctor --fix`. The base branch is brought in by **merge** (pushed history is never rebased). Conflicts in
@@ -3107,6 +3152,225 @@ An unsafe name is refused at render time with exit 2. A base branch such as `l4/
 to be built while `main` receives only what a person promotes, works on GitLab as on GitHub. `l4 upgrade` re-renders
 the job after a change to either key.
 
+### 12.5 Delivery plans and guarded automatic merge (YOLO)
+
+A person selects a batch of spec units, the order between them and the limits, has the plan reviewed, and activates it
+once. L4 then runs the units in dependency order. With `merge: human` people merge and L4 only orders. With
+`merge: auto` L4 merges each verified unit into the integration branch under a guard that the git server enforces,
+checks the result, and goes on until the plan is complete or something stops it. Promotion of the integration branch
+is never automatic. The decisions are in `openspec/changes/yolo-mode/design.md` (D1..D16); the guide for operators is
+`docs/yolo-mode.md`.
+
+**L4-YOLO-001** The delivery plan file. A plan SHALL be the file `.l4/plans/<plan-id>.json` on the base branch, with schema `l4/delivery-plan@1` as design D1
+says. The file name MUST equal `<plan-id>.json`. Unknown fields MUST be refused. `external_dependencies` that is not
+empty MUST be refused with `external dependencies are not supported in this version`. The file MAY have `exclude: [{id, reason}]` (L4-YOLO-017); it is part of the file and of its digest.
+
+**L4-YOLO-002** Admission is deterministic. Admission SHALL check, at the target head: unique unit and batch ids; every unit known to a spec provider; every
+dependency resolvable; no cycle in the graph of units and batches (design D2); known acceptance profiles;
+`target == forge.base_branch`; `merge: auto` only with `forge.merge_policy: auto`; no unit with open questions; every
+unit passing the existing intake checks; no unit already merged. Each failure MUST be a finding with its code. The
+order MUST be topological, with ties broken by batch position, then unit position.
+A unit that the plan itself merged or integrated (its own ledger) is done: when the plan is admitted again (the step's
+review, `l4 yolo check`, `review` and `activate` all pass the ledger state), it MUST NOT get `finished`, `unknown_unit`,
+open question or intake findings, even when its change was archived or its folder is gone. It stays a unit of the graph,
+so the units that depend on it resolve and treat it as integrated. A plan with no ledger state, or with nothing merged,
+MUST still be refused for a merged or unknown unit. The judge MUST NOT be asked about a done unit. An excluded id that
+names a change archived at the target (`<root>/changes/archive/<date>-<name>`, the rule of `scripts/validate_plan.py`)
+is known.
+
+**L4-YOLO-003** Input digests ignore the harness's own writes. The digest of a unit SHALL hash the unit folder as design D3 says: `.l4/**`, `verification.md`, `questions.md` and
+`feedback.md` excluded at any depth, task checkbox markers normalised with the patterns of the Kiro and OpenSpec
+providers themselves (R4). A harness tick, a verification report or a ledger line MUST NOT change the digest; a change
+of a spec, requirement, design or task text MUST. The digest of a unit MUST be taken on `refs/remotes/origin/<unit branch>`
+when it exists, else on the target; a revision or a folder that does not exist MUST raise, and MUST NOT give the digest
+of an empty set (R3).
+
+**L4-YOLO-004** Readiness review in CI. A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
+role reviews each unit and each batch with more than one unit, with the prompt and output schema of design D5, and the
+result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid answer MUST be BLOCKED. A blocking finding
+MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
+NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and
+states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and
+its NEEDS_REVISION MUST become READY when no blocking or major finding remains, and its BLOCKED when no finding is left
+at all. The judge's material for a batch shows
+every prerequisite of its units that is not a unit of the batch, the way the material of a unit shows its prerequisites,
+and both state that a prerequisite unit of the plan is delivered and merged into the target before any unit that depends
+on it starts. The material also lists, as harness text outside the data blocks, the units already delivered on the target (the OpenSpec changes archived at the target revision and the units a provider reads as merged or archived, without the plan's own units, at most 60 names and then a count of the rest) and says that a dependency on one of them is satisfied and is not a `missing_dependency`, so a plan built after another plan needs no entry for them; the names reach the prompt only inside `<l4:data>` blocks. The text of every `tasks.md` in that material MUST show each task marker as `[ ]`, the reading the digest takes, and the material MUST say that the check marks are the harness's progress. File names, unit ids and batch ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that
+times out or fails MUST record no review: the next run tries again (R9). One plan is reviewed per run. Every `plan.reviewed` MUST record the `prompt_version` of the readiness prompt (an event without the key counts as 1), and a review made with a version other than the current one MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`, activation), so a change to the review material or prompt gets the plan reviewed again.
+
+**L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest and the
+limits, and then start a run on the target. It MUST be refused, with exit 2 and the cause, unless: the plan is admitted;
+the latest review is for the current digests; every unit and batch is READY; `merge` and `forge.merge_policy` agree;
+the target exists on `origin`; no other plan is active on the target. Nothing MUST run from a plan before activation.
+Activation freezes the plan digest (`activated_digest`) with the unit digests. From then on, `plan.admitted`,
+`plan.refused` and `plan.reviewed` change only the review fields, never `activated_digest`, the order or the status, and
+a plan file whose digest differs from `activated_digest` MUST stop the plan with `inputs_changed` (R2).
+
+**L4-YOLO-006** The plan ledger is a leased ref. Plan state SHALL be the ledger in `refs/l4/plans/<plan-id>` (design D4). Every write MUST be one commit pushed with
+`--atomic` and a lease on the ref's previous value. A lost lease MUST make the writer read again and decide again; it
+MUST NOT overwrite. The state MUST be a fold of the ledger alone.
+
+**L4-YOLO-007** Bound to the target; a merged PR counts only on the base. Every plan step SHALL use `forge.base_branch` as the target and refuse a plan whose `target` differs. A missing target
+MUST refuse activation and stop an active plan with `target_missing`; there is no fallback branch. For every unit, with
+or without a plan, a merged PR MUST count as the unit's merge only when its destination is `forge.base_branch`; else the
+unit stays `in_review` and its cause says `merged into <x>, not the base <base>`.
+
+**L4-YOLO-008** The guarded merge. With `merge: auto`, the plan step SHALL merge a unit only when all the preconditions of design D8 hold (in review, PASS,
+no open question, no person's commit after the hand-off, the PR open with the target as base, the target tip an
+ancestor of the unit head, and the head to push equals the tip of the unit branch on `origin` and the head of the PR),
+by pushing the unit head to the target without force. The step MUST record `unit.merge_requested` with the lease before
+the push, after it has read the plan again: a cancelled or stopped plan MUST NOT merge (R5). A refused push for
+`non-fast-forward` MUST send the unit to `verifying` once per attempt (`stale`); a second one, or any other refusal,
+MUST stop the plan with `merge_refused` and the forge's reason. The harness MUST NOT merge any unit that is not the
+current unit of an active `merge: auto` plan. When the head of the PR differs from the tip of the unit branch, the step
+MUST read the PR again, up to three times, five seconds apart (a forge may show a push late), before it calls the merge
+not ready, in the run that records that wait for the first time and not in a preview (`l4 run --unit`) or in a later run
+while the wait for that head stands. A merge that stays not ready MUST be a wait (L4-YOLO-013).
+
+**L4-YOLO-009** Post-merge acceptance and integration. After a unit's merge into the target (by the harness or, with `merge: human`, by a person), the plan step SHALL run the
+unit's acceptance profile on the merged target revision (design D9) and record `unit.integrated` only when it passes.
+Every merged unit of the plan that is not integrated MUST be checked, not only the current one (R10). The profile `all`
+MUST leave out the e2e gates that need an app server (`gates.e2e.serve`) and say so in the detail; a profile that names
+`e2e` while `serve` is set MUST be refused at admission (`unsupported_profile`). A profile MUST pass only when at least
+one required gate other than `setup` ran and passed; with no such gate it is an error, never a pass (R7). A named profile that does not list `setup` MUST still run the configured `gates.setup` first, as a prerequisite that never counts toward a pass. A failure MUST
+stop the plan with `postcheck_failed`. With `merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the
+harness with the same guard, and only when every commit on the archive branch after the target tip is a strict harness
+commit, the archive PR is open with the target as its base, and the target is `forge.base_branch` (R6). For every
+unit, the rule "one archive PR at a time" (L4-ARC-007) MUST count only open archive PRs whose base is
+`forge.base_branch`.
+
+**L4-YOLO-010** Dependency order. A plan unit SHALL be dispatched only when every unit it depends on, directly or through a batch prerequisite, is
+integrated, and every prerequisite batch is accepted. A unit's branch MUST NOT exist before that. `l4 run --unit U` MUST
+obey the same rule: a plan unit that is not eligible, or a unit outside an active plan, exits 13 before the lease, with
+the reason, and writes nothing. A unit listed in a plan file on the target MUST be dispatched only by that plan's step,
+while the plan is active; in every other plan status it waits with `held by plan <id> (<status>)`. A unit listed in a
+plan file on the target MUST stay held while the file is there, whatever the status of the plan, a cancelled plan
+included; only the removal of the unit from the file, or of the file, releases it. A plan file that is invalid MUST still
+hold the unit ids that can be read from its JSON (`batches[].units[].id`); a file that is not JSON holds nothing, and
+`l4 plan` and `l4 yolo status` MUST report it. A unit listed in two plan files MUST be a finding (`held_by_other_plan`)
+for the second (R8). While a plan is active, units outside every plan MUST get no new agent work. The sweep MUST still
+observe every unit.
+
+**L4-YOLO-011** Batches. When every unit of a batch is integrated, the plan step SHALL run the batch's acceptance profile on the target tip and
+record `batch.accepted` or `batch.failed`. A failed batch MUST stop the plan. A batch that depends on it MUST NOT start.
+
+**L4-YOLO-012** One plan step per run, and the next run is started. A CI run SHALL make at most one plan step (design D10): one review, or one unit dispatch, or one merge with its checks,
+or one batch check, or the completion. After a step that wrote a record and left work, the run MUST start the next run
+on the target (`start_run`). The step, the holds and the merge-policy listing MUST read the plan files from
+`origin/<forge.base_branch>` when that ref exists and the checkout is not that commit (or has a changed plan file), so
+a local checkout never stops or releases a plan of the target. A named run of the current unit (`l4 run --unit`) MUST be
+charged to the plan like the run of the step.
+
+**L4-YOLO-013** Stops, waits, cancel and resume. The plan SHALL stop, with the reason, when its current unit is `halted`, `escalated`, `abandoned` or `rejected`, when a
+frozen digest changes or the plan file is edited after the activation (`inputs_changed`), when a limit is reached, when
+the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), and as D8,
+D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit is `awaiting_human`, `clarifying` or
+`waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
+plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
+while the merge of its current unit is not ready (no open PR, a PR aimed at another branch, a PR head that is not the
+branch tip); it goes on by itself when the merge is ready. A plan stopped with `unit_rejected` MUST need the cause fixed (the unit's spec, which then needs a new review, or the
+configuration) and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation
+the next run of the unit reads the corrected spec or configuration, and a unit that its run rejects again stops the plan
+again. A unit that its own run rejects (exit 14, for example an empty
+`gates.test.command`) has no phase to show it, so the run MUST record `unit.rejected{unit, run, detail}` on the plan
+ledger when the plan dispatched the unit, and the next plan step MUST stop the plan with `unit_rejected` for that unit,
+recording its spec digest, and not dispatch it again. A run of the plan's current unit that ends before the unit
+started (no `run.started`: a usage error, a lease or worktree failure, a missing CLI) MUST be recorded the same way as
+`unit.not_started{unit, run, exit, detail}`; the next plan step then MUST wait with the reason `run_not_started`, the
+unit and the detail, and MUST NOT start a next run, so that one trigger runs the unit once, the first one included (a
+run that did not start the unit chains no run even when the step dispatched it); a run that starts the unit clears it.
+A run that skips the unit because another run holds its lease is not the unit's failure and MUST NOT be recorded. After a
+run, the plan ledger MUST be read again only to write such a record or to clear a pending one. The reason
+`unit_not_started` is another wait: an eligible unit with nothing to run (no task, an unreadable ledger), which ends
+when the unit has something to run. Outside CI the plan step MUST fetch the target branch before it
+reads the plan files; when the fetch fails it MUST log one line, write nothing to the plan ledger and let no unit run while the last fetched ledger of
+a plan says it is open, else hold the units the plan files list and let the units that no plan lists run. With no plan file known in the clone, no
+unit is held when none of the plan ledgers the clone holds is open (active, waiting or stopped), else none runs. A stopped plan MUST
+dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
+good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
+need a new review and activation.
+At the re-activation the plan MUST keep its current unit only when the new order holds it and every prerequisite of it
+under the new plan is integrated (its dependencies, the units of its prerequisite batches, those batches accepted);
+else the current unit is cleared, and `plan.activated` records `current`. That unit stays a held plan unit: it goes on
+when its prerequisites are integrated, by the usual rules (adopted when it is in review with a PASS, and the guarded
+merge refuses a head that lacks the new target tip). The step MUST NOT choose, adopt or merge a unit whose
+prerequisites are not integrated. The attempts of a unit that is no longer in the plan MUST NOT reach a limit.
+
+**L4-YOLO-014** Plan limits are never reset. Usage (cost, runs, attempts) SHALL be charged into the plan ledger per attempt of a unit (R1): a restart starts a new
+unit ledger, so the usage of the current attempt is charged as `plan.charged{unit, attempt, cost_usd, runs}`, the fold
+keeps the maximum per (unit, attempt) and sums them, and the cost of the earlier attempts is kept. The attempt number
+of a unit is 1 + the number of its attempt refs on `origin`. The cost of the review is charged as the key `plan:review`.
+The limits MUST be evaluated by one implementation, with the extended deadline, for the step and for `l4 yolo resume`
+(R3), and checked before every dispatch and merge. A unit restart and a plan resume MUST NOT reset the usage. More
+allowance MUST be an explicit `l4 yolo resume --extend-…`, recorded. A plan file with `max_unit_attempts` below 1,
+`max_cost_usd` below 0, `max_runs` below 1 or a `deadline` without a time zone MUST be refused (R12).
+
+**L4-YOLO-015** Status, report, receipts, no promotion. `l4 yolo status` SHALL show the plan status, each unit's phase and what it waits for, batch results, usage against
+limits, the stop reason and `Next:`. `l4 status` and `l4 plan` SHALL show the active plan and the wait reasons. On
+completion and on every stop, `report.md` MUST be written to the plan ref and `.l4-out/yolo/`; it MUST state `Promotion
+to <target_branch> was not performed`. Each integrated unit MUST get one receipt (design D12). The harness MUST NOT push,
+open a PR or merge to the promotion target.
+
+**L4-YOLO-016** Documentation. The runbook SHALL have a section on delivery plans (states, commands, every stop and how to clear it) in the style of
+the existing runbook. `docs/yolo-mode.md` SHALL describe the plan file, the two merge modes and their safety rules. The
+skill's operate reference SHALL list the `l4 yolo` commands.
+
+**L4-YOLO-017** Exclusions in the plan file. A plan file MAY list `exclude: [{"id": <unit id>, "reason": <text>}]`: units that this plan deliberately does not
+deliver (design D15). The reason MUST be non-empty text of at most 200 characters, and unknown fields MUST be
+refused. Admission MUST refuse a plan that lists the same unit in `exclude` and in a batch (`excluded_and_planned`), the
+same unit twice in `exclude` (`duplicate_id`), or an excluded id that no spec provider knows and that is not a change
+archived at the target (`unknown_unit`). An excluded unit MUST NOT be held by the plan: while no plan is active on the
+target (for example while the plan waits for its review or its activation, or after it completes) it runs as it would
+without a plan. While a plan is active it gets no new agent work, like every unit outside the active plan (L4-YOLO-010),
+and `l4 yolo status` lists it under `excluded` with the reason. The exclusions are part of the plan
+file, so an edit of them after the activation stops the plan (`inputs_changed`) like any other edit.
+
+**L4-YOLO-018** `l4 yolo draft` scaffolds and updates a plan file. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
+the working tree and nothing else: no commit, no push, no plan ref, no model call. Before it reads the phases of the
+units it MUST fetch the base branch and the unit refs from `origin`, as the other `l4 yolo` commands do, so that a fresh
+clone does not take a unit in review or merged for new work. With no `origin`, or when the fetch fails, it MUST go on
+with the refs the checkout has and print one line saying that the phases may be old. Without `--update` it MUST refuse an
+existing file (exit 2). It lists every unit the spec providers find in the working tree that no plan file lists
+(planned or excluded) and that is not a derived unit whose parent a plan file lists. It puts each unit that is not
+finished into one batch `unplanned` with no dependencies, and each finished unit (`merged`, `archived`) into `exclude`
+with the reason `already <phase>`. `--target` defaults to `forge.base_branch` and `--merge` to `human`. With `--update`
+the file MUST exist and be a valid plan. Units found as above are added to the batch `unplanned` (created last when
+missing) or to `exclude`. A listed unit that the providers no longer find is reported as `gone: <id>` and kept.
+Nothing else in the file changes. The command MUST NOT invent a dependency. It prints what it added and the next steps
+(edit the dependencies and batches, run the validator, `l4 yolo check`). When the plan's local ref says it is active or
+waiting, `--update` warns that the edit stops the plan.
+
+**L4-YOLO-019** A standalone plan validator. The harness SHALL ship `validate_plan.py`, a script that needs only the Python standard library. It is in two places,
+`scripts/validate_plan.py` and `plugins/l4/skills/l4/scripts/validate_plan.py`, and the two copies MUST be byte-equal.
+It reads every `.l4/plans/*.json` of a working tree and finds the units with the providers' discovery rules (design
+D15). It MUST report, with the codes of admission where they are the same check:
+- a plan file that is not a valid plan (schema, file name, limits);
+- `duplicate_id`, `self_dependency`, `unknown_dependency`, `cycle` (on admission's graph of units and batches),
+  `unknown_unit`, `excluded_and_planned`, `external_dependencies` and `empty_plan`;
+- across all plan files: `uncovered`, a unit that no plan lists (planned or excluded), except a derived unit whose
+  parent is listed;
+- `covered_twice`, a unit listed in two plan files.
+
+A planned unit whose OpenSpec change is archived MUST NOT fail the script, because it has no plan state and cannot tell a
+unit that this plan already merged or integrated (which `l4 yolo check` accepts) from an archived unit in a fresh plan
+(which `l4 yolo check` refuses as `unknown_unit`). It MUST print `finished: <id> (archived: l4 yolo check refuses it as
+unknown_unit unless this plan already merged or integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
+quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
+including a deadline written as a Unix time.
+
+It exits 0 when everything is valid, 1 with one line per problem, and 2 on a usage or read error. On success it MUST
+print, for each plan, its dispatch order (the same order as `l4 yolo check`) and its waves (design D15). `--json` MUST
+print the same as one JSON object. The script MUST NOT write anything, use the network or run git.
+
+**L4-YOLO-020** The skill teaches plan creation and update. The skill SHALL have the reference `plugins/l4/skills/l4/references/plan.md`, linked from `SKILL.md`, that teaches an
+agent to create and update a plan from OpenSpec changes and Kiro specs (design D15). It MUST say that the agent never
+activates, resumes or cancels a plan for a person, never writes `refs/l4/plans/*`, and sets `merge: auto` only when the
+person asks and `forge.merge_policy` is `auto`. It MUST tell the agent to check the
+state of every spec first and to exclude, with a reason a person can check, a unit that is started or in review (or to
+plan it knowingly and say so), to leave `promotion` out unless the person names a branch that exists on the remote, to
+put finished and deliberately left-out specs in `exclude` and not only in the hand-off message, and to keep an
+integrated unit in the file after an update.
+
 ---
 
 ## 13. Memory and lessons
@@ -3125,7 +3389,7 @@ Use `getByTestId` with `data-testid` attributes; text selectors broke on copy ch
 
 **L4-MEM-002** Promotion: a lesson is created or reinforced automatically only from (a) a verifier finding whose fix
 unit later passed, (b) a guard violation repeated across runs, (c) a human-edited lesson, or (d) a feedback item with `Lesson: yes` addressed in a PASS round (L4-FBK-009).
-Agent `lesson_proposals` go to `.serena/memories/inbox/<run-id>/` and are promoted only by a human (`l4 lessons promote`) or when they match
+Agent `lesson_proposals` go to `.serena/memories/inbox/<run-id>/` and are promoted only by a human (`l4 lessons promote`, L4-KG-013) or when they match
 an existing dedupe key. Caps: `memory.max_lessons`, `memory.max_bytes`; overflow archives the least recently
 reinforced lessons to `_archive/` (ignored by Serena via `ignored_memory_patterns`).
 
@@ -3151,6 +3415,130 @@ are still injected through the prompt) and logs a warning; Kiro runs MUST NOT li
 
 **L4-MEM-005** Memory changes are committed separately (`chore(memory): …`, `L4-Phase: lessons`) so they are
 visible at the merge gate.
+
+### 13.1 Experience graph (manual)
+
+A person reads the recorded history of one repository's units across units: what keeps failing, what followed each
+lesson, and how one unit got where it is. The person can turn a recurring, recorded mistake into a lesson through the
+inbox and `l4 lessons promote`. Everything is manual. Nothing reaches an agent, a prompt or a run path unless a person
+promotes a lesson. The decisions are in `openspec/changes/experience-graph/design.md` (D1..D10).
+
+**L4-KG-001** Manual only, outside every run path. `l4 kg build`, `l4 kg report`, `l4 kg why` and `l4 kg propose` SHALL run only when a person starts them.
+- No module outside `src/l4/kg/` MAY import `l4.kg`. The only link MUST be the handler string in `commands.py`.
+- `l4.memory.promote` and `l4.memory.inbox` MUST be imported only by `l4.memory.cli`.
+- The `l4 kg` commands MUST NOT call a model, a forge API or the network.
+- They MUST NOT run `git fetch`, `git push` or any git command that writes a ref, the index or a tracked file.
+
+**L4-KG-002** Failures are contained, with the existing exit codes. An `l4 kg` command SHALL exit 0 when it finished, with every skipped input counted and shown. It SHALL exit 2 for a
+usage error: an unknown id, no repository, a refused `--out`, or a cache root inside the repository. It SHALL exit 1
+for an internal error. A failure MUST change no ref, no tracked file, no ledger and no `.l4/` file, and MUST NOT leave
+an index that a later read takes as complete.
+
+**L4-KG-003** A derived index under the cache root. The index SHALL be written to `cache_root(environ, repo) / "kg" / <first 16 hex of sha256(resolved repository path)>`,
+in a folder with mode 0700, and never inside the repository. It SHALL hold:
+- `nodes.jsonl` and `edges.jsonl`: sorted keys, sorted lines, LF, UTF-8;
+- `manifest.json` (`l4/kg-manifest@1`): the harness version, the read refs with their shas, the counts, the skips,
+  and the sha256 of the two other files.
+
+No file MAY hold the build time. The same refs and the same harness version MUST give byte-identical files. `report`,
+`why` and `propose` MUST build the index first when it is missing, incomplete, or built from refs that have moved.
+
+**L4-KG-004** Inputs are committed git objects, never fetched. The build SHALL read with `ls-tree` and `cat-file`, with the existing size caps and symlink rules, from:
+- the base ref (`refs/remotes/origin/<forge.base_branch>`, else `HEAD` with a warning): the OpenSpec `changes/<name>/`
+  folders, every `changes/archive/<date>-<name>/` folder, and the Kiro `.kiro/specs/<name>/` folders;
+- the local unit branches `refs/remotes/origin/<branch_prefix><fw>/<name>`, each with the unit folder and its
+  `<name>-fix-<n>` siblings;
+- the local lock refs, merged with the branch copy as `merge_ledgers` does;
+- the local attempts refs `refs/l4/attempts/<fw>/<name>/<n>`, each one as its own attempt.
+
+The build SHALL read `.l4/ledger/*.jsonl`, `.l4/evidence/round-*/verdict.json`, `memory.lessons_file` and its
+`_archive/`.
+
+A corrupt, oversized, unreadable or non-regular input MUST be skipped and counted by reason, and MUST NOT fail the
+build. An attempts ref that a `unit.restarted` event names and that is not local MUST be counted as
+`attempt_not_local`, and the report MUST print the fetch command. The build MUST NOT fetch.
+
+**L4-KG-005** Typed nodes and edges, each with its source. The graph SHALL have the node and edge types of design D4. Every edge SHALL carry `src`, which is
+`<sha10>:<path>#<seq>` for a ledger event or `<sha10>:<path>#/<json pointer>` for a `verdict.json` field.
+
+A lesson SHALL be linked to a finding pattern only through its dedupe key:
+- a `LESSON_RULES` key links to the recurrence key of that rule's `finding_title`;
+- a `kg-*` key links to the pattern it was proposed from;
+- any other lesson has no finding link.
+
+The lesson's `Source` line MUST NOT be parsed for links.
+
+**L4-KG-006** Recurrence across units by normalised text, labelled approximate. Recurrence SHALL be counted in distinct units, never by finding id, with the normaliser of design D5:
+- **A finding's key** is the normalised title and the normalised criterion alias without its capability part. The
+  second part is empty for a Kiro alias or when there is no criterion.
+- **An attempt failure's class** is the first line of its `reason`, cut before the first `:` or ` (`, normalised, and
+  cut to 120 characters.
+
+Every report section that uses a key MUST say `approximate`.
+
+**L4-KG-007** Blame from recorded fields only. Each finding, question, stop and attempt failure SHALL get exactly one blame value from design D6: `security`, `spec`,
+`environment`, `verifier`, `agent`, or `unknown`. The first matching rule wins. A record that no rule matches MUST be
+`unknown`. No blame MAY come from a model or from free text.
+
+**L4-KG-008** Lesson outcomes as recorded, as a heuristic. For each lesson, the report SHALL show:
+- its injections (from `prompt.rendered{task, lessons}`), by units, runs and tasks;
+- the `task.attempt_failed` of the same run and task after the injection, by failure class;
+- the findings in later rounds of the same unit and attempt whose key is the lesson's linked key (L4-KG-005);
+- a status: `never injected`, `injected, nothing followed`, or `injected, followed by <n> failure(s)`.
+
+The section MUST state that it shows what followed a lesson, not what the lesson caused.
+
+**L4-KG-009** `l4 kg report` with n on every line. `l4 kg report [--out PATH] [--min-units N]` SHALL write markdown with the sections of design D8, in its order:
+coverage, lessons, recurring attempt failures, recurring findings, gate candidates (at least `max(N, 3)` units),
+spec-gap hotspots, profiles by role, and stops. N defaults to 2.
+- The profiles section MUST count what the records show (runs per profile; for implementer profiles the failed
+  attempts, the tasks with a failed attempt and the first-round PASS share) and MUST say that it gives no
+  first-attempt pass share, because a task that passes at its first attempt leaves no record.
+- Every line that carries a number MUST name its *n*, and an empty section MUST say `none (n = 0)`.
+- Lines are sorted by count, then by key.
+- The output goes to stdout by default. `--out` inside the repository MUST name a git-ignored path, else the command
+  exits 2.
+
+**L4-KG-010** `l4 kg why ID` explains one record. `l4 kg why ID` SHALL accept a unit id, `F-<8 hex>`, `L-<8 hex>`, a run id, or `<unit>#Q-<n>`.
+- **For a unit,** it MUST print the timeline of design D9, oldest first. Each line ends with its `src`. The last line
+  holds the facts: stops by code, a spec edit since the last stop, and the attempt number. It names
+  `l4 status --unit ID` for the next command.
+- **For any other id,** it MUST print the 1-hop neighbourhood, with `src` on each edge.
+- An unknown id MUST exit 2 with the accepted forms.
+
+**L4-KG-011** Redacted, local and per repository. Every text field SHALL pass `redact_text` and then `scrub_for_commit` before it enters the index, a report, `why`
+output, or a proposal. The index and reports MUST stay on the person's machine. No command MAY read the index of
+another repository, or combine repositories.
+
+**L4-KG-012** `l4 kg propose` writes drafts for a person, never lessons. `l4 kg propose [--min-units N] [--dry-run]` SHALL write, for each pattern of design D10 that no lesson or
+`LESSON_RULES` rule covers yet, `.serena/memories/inbox/kg-<YYYY-MM-DD>/<L-id>.md` and `<L-id>.evidence.md`.
+- **The draft** is a lessons v1 file with one section, where the id is `lesson_id(dedupe key)`. Its body ends with a
+  `TODO(person):` line.
+- **Allowed text:** a draft MAY quote only failure classes, deterministic finding titles, gate names, guard rule names
+  and globs. It MUST NOT quote a judge finding, a question, an answer or an agent's output.
+- **What it must not touch:** the command MUST NOT write `lessons.md`, stage, or commit.
+- **Ignore warning:** it MUST warn when git does not ignore the inbox folder.
+
+**L4-KG-013** `l4 lessons promote ID` (builds L4-MEM-002's human promotion). `l4 lessons promote ID [--from DIR] [--yes] [--no-commit]` SHALL move one inbox proposal into `memory.lessons_file`
+through `apply_candidates`, with origin `human_edit`. An existing dedupe key MUST be reinforced. The caps MUST hold.
+
+It MUST refuse with exit 2, writing nothing, when any of these is true:
+- `memory.enabled` is false;
+- the proposal is not exactly one valid v1 section, or its id is not `lesson_id(dedupe key)`, or a glob is invalid;
+- the proposal still has a `TODO(person):` line, or an empty body;
+- HEAD is detached or on a branch under `forge.branch_prefix`;
+- anything is staged;
+- the lessons file in the work tree differs from HEAD, or has parse problems;
+- there is no terminal and no `--yes`.
+
+It MUST print the lesson and its scope before it writes. Unless `--no-commit` is given, it MUST commit only the
+lessons paths as `chore(memory): lesson <id> promoted [skip ci]`, with the person's git identity and no `L4-*`
+trailer, and then delete the proposal and its evidence file.
+
+**L4-KG-014** Nothing changes for a repository that does not use it. This change SHALL add no configuration key, no doctor check, no ledger event, no lifecycle edge, no prompt change and
+no CI template change. Every configuration that validates today MUST still validate. `l4 lessons list` and
+`l4 lessons lint` MUST keep their output. Existing tests MUST keep their assertions. Only the command tables of the
+dispatch tests MAY gain rows.
 
 ---
 
@@ -3291,7 +3679,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
-| CFG-004 | error | `gates.test.command` set when `tdd.mode != off` | — |
+| CFG-004 | error | `gates.test.command` is set (an empty one makes the run reject every unit: there is no test oracle; the fix hint names the key) | — |
 | CFG-005 | warn | an explicitly set `odd.forbidden_paths`, `tdd.test_globs` or `tdd.test_support_globs` drops default entries (names them and the `extra_` key that adds instead of replacing) | — |
 | CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |
@@ -3821,6 +4209,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 17 | `human-feedback` | a person asks for changes with `l4 feedback add` and a push: `feedback.md` in the unit folder (kinds refactor, duplication, tests, config, behaviour), items taken at step 0 of the next round into a fix unit task of their kind (a refactor chore with frozen tests, a test chore, or red/green against a written or built criterion), the judge's check of every item, a feedback round limit apart from `max_fix_rounds`, lessons from feedback, follow-up units after the merge, Kiro fix units as bugfix specs (L4-KSP-005) (L4-FBK-001..013; approved 2026-10-12, `openspec/changes/human-feedback/`) | the Kiro dummy-repository run of L4-FBK-013 |
 | 18 | `adoption-kit` | the harness as a GitHub setup action (`.github/actions/l4`: source `action` for the owner's private repositories with no key, source `repository` with a deploy key for the rest), separate caches for the harness and the agent CLIs, `l4 init --action` (a short workflow and one `uses:` pin, no `.l4/bin/`), `--harness-ref` version pins and Dependabot, slim release commits, the harness repository's own sharded test CI, and an installable `l4` skill (L4-ACT-001..008, L4-SKL-001..002; approved 2026-10-12 after spike `l4-action`, `openspec/changes/adoption-kit/`) | the dummy-repository runs of L4-ACT-008 |
 | 19 | `operator-commands` | a stuck unit moves with one command or one label: `l4 retry` / `l4:retry` continues it by its phase and starts a run, `l4 restart` / `l4:restart` starts it over on a new branch and keeps the old head as a ref, `l4:resume` and `l4 resume` still work; the cause of every stop recorded and shown (`REASON` column, `Next:` line); a repeated failure escalates as `same_failure`; a secret halt, a capacity park from `fixing`, a closed PR, a deleted branch and a dismissed verdict question are no longer dead ends; the forge target found from `origin`; the fixer's green gate runs under coverage; a spec push to the unit branch re-enters the unit, and a changed Kiro criterion reopens the tasks that cite it (L4-OPS-001..015; approved 2026-10-13, `openspec/changes/operator-commands/`) | the GitHub dummy-repository runs of L4-OPS-013 |
+| 20 | `yolo-mode` | delivery plans: a plan file `.l4/plans/<id>.json` orders units and batches by dependency; admission is deterministic, a readiness review runs in CI, one person activates it; units run one at a time in dependency order, each started only after the units it needs are merged into the target and pass their acceptance profile; with `merge: auto` the harness merges each verified unit by a fast-forward push guarded by the git server, then checks the merged revision, and stops safely at the first failure; limits never reset; the plan state is a leased ref; a report and receipts; no promotion; exclusions, `l4 yolo draft`, the standalone validator and the plan skill reference (L4-YOLO-001..020; `openspec/changes/yolo-mode/`) | the live run on the GitHub test repository of tasks 9.1..9.4 |
+| 21 | `experience-graph` | a person reads the history of a repository's units with no agent in the loop: `l4 kg build` (a derived index under the cache root, read from committed git objects only, never fetched), `l4 kg report` (lesson outcomes, recurring attempt failures and findings by normalised text, gate candidates, spec-gap hotspots, profiles, stops; *n* on every line), `l4 kg why` (the timeline of one unit, the 1-hop view of one record), `l4 kg propose` (drafts in the inbox for a person); `l4 lessons promote ID` builds the human promotion of L4-MEM-002; no module of a run path imports the graph code (L4-KG-001..014; `openspec/changes/experience-graph/`) | the history of a test repository's units, five report numbers checked against `git show` |
 
 ---
 
@@ -6619,6 +7009,393 @@ scenario is a spec defect (§26).
 - **Given** `forge.base_branch: l4/main` and a GitLab project whose default branch is `main`
 - **When** `l4 init --ci gitlab` or `l4 upgrade` renders the job
 - **Then** the rules compare `$CI_COMMIT_BRANCH` with `"l4/main"`, `L4_BASE_BRANCH` is `l4/main`, and the base checkout detaches to `origin/l4/main`
+
+### 23.20 Delivery plans (YOLO)
+
+#### SCN-YOLO-01 (−) An unknown field refuses the plan · L4-YOLO-001
+- **Given** `.l4/plans/p1.json` with a field `parallel: 3`
+- **When** `l4 yolo check p1` runs
+- **Then** it exits 2 and prints `p1: unknown field parallel`, and records nothing
+
+#### SCN-YOLO-02 (−) External dependencies are refused · L4-YOLO-001
+- **Given** a plan with one entry in `external_dependencies`
+- **When** `l4 yolo check` runs
+- **Then** it exits 2 with `external dependencies are not supported in this version`
+
+#### SCN-YOLO-03 (−) A cycle through a batch prerequisite is found · L4-YOLO-002
+- **Given** batch `b2` depends on batch `b1`, and unit `a` of `b1` depends on unit `c` of `b2`
+- **When** `l4 yolo check` runs
+- **Then** it exits 2 with a `cycle` finding that names `a -> c -> b1 -> a`
+
+#### SCN-YOLO-04 (+) A valid plan prints its order · L4-YOLO-002
+- **Given** units `a`, `b` (needs `a`) in batch `b1`, and `c` (needs `b`) in batch `b2` that depends on `b1`
+- **When** `l4 yolo check` runs
+- **Then** it exits 0 and prints the order `a, b, c`
+
+#### SCN-YOLO-05 (−) A target that is not the base branch is refused · L4-YOLO-002
+- **Given** `forge.base_branch: l4/main` and a plan with `target: main`
+- **When** `l4 yolo check` runs
+- **Then** it exits 2 with `target_mismatch: the plan targets main, the base branch is l4/main`
+
+#### SCN-YOLO-06 (+) A harness tick keeps the digest · L4-YOLO-003
+- **Given** a unit digest taken before implementation
+- **When** the harness ticks task 1.1 to `[x]` and writes `verification.md`
+- **Then** the digest is the same
+
+#### SCN-YOLO-07 (−) A changed requirement changes the digest · L4-YOLO-003
+- **Given** a frozen unit digest
+- **When** a person changes one sentence of `requirements.md`
+- **Then** the digest differs
+
+#### SCN-YOLO-08 (−) An unparsable review is BLOCKED · L4-YOLO-004
+- **Given** a plan with one unit and a judge that answers `ok`
+- **When** the CI step reviews it
+- **Then** `plan.reviewed` records the unit as BLOCKED with `schema_invalid`
+
+#### SCN-YOLO-09 (−) A blocking finding overrides READY · L4-YOLO-004
+- **Given** a judge answer `{"verdict": "READY", "findings": [{"criterion": "contradiction", "severity": "blocking", "text": "…"}]}`
+- **When** the review is recorded
+- **Then** the unit's verdict is NEEDS_REVISION
+
+#### SCN-YOLO-10 (−) A plan reviewed for older inputs is refused · L4-YOLO-005
+- **Given** a plan reviewed READY, after which a person changed the specification text of one unit
+- **When** `l4 yolo activate` runs
+- **Then** it exits 2 with `review is for other inputs: run l4 yolo review <plan>`, and records nothing
+
+#### SCN-YOLO-11 (+) Activation freezes the inputs · L4-YOLO-005
+- **Given** a plan reviewed READY for the current digests
+- **When** `l4 yolo activate p1 --reason "go"` runs
+- **Then** `plan.activated{digests, limits, by, reason}` is on `refs/l4/plans/p1` and a run of the harness is started on the target
+
+#### SCN-YOLO-12 (−) Two writers do not both win · L4-YOLO-006
+- **Given** two processes that read the plan ref at the same commit
+- **When** both append an event
+- **Then** one push succeeds, the other raises `PlanMoved`, and the ref holds exactly one of the two events
+
+#### SCN-YOLO-13 (−) A PR merged into another branch is not the unit's merge · L4-YOLO-007
+- **Given** a unit `in_review` whose PR was retargeted to `release` and merged there
+- **When** the sweep runs
+- **Then** the unit stays `in_review`, no archive PR is opened, and `l4 status --unit` says `merged into release, not the base l4/main`
+
+#### SCN-YOLO-14 (+) A verified unit is merged by a fast-forward push · L4-YOLO-008
+- **Given** an active `merge: auto` plan whose current unit is `in_review` with a PASS, and the target tip in its head
+- **When** the CI step runs
+- **Then** the target's tip is the unit head, `unit.merge_requested` and `unit.merged{head, pr}` are recorded, and the PR is merged on the forge
+
+#### SCN-YOLO-15 (−) A target that moved is not merged · L4-YOLO-008
+- **Given** the same unit, and a person's commit on the target after the verification
+- **When** the CI step runs
+- **Then** nothing is pushed to the target, the unit goes to `verifying` with `retry_requested`, and the plan stays active
+
+#### SCN-YOLO-16 (−) A protected target stops the plan · L4-YOLO-008
+- **Given** a target whose protection refuses direct pushes
+- **When** the merge push is refused
+- **Then** `plan.stopped{merge_refused}` records the forge's message, and no later unit is dispatched
+
+#### SCN-YOLO-17 (−) No merge without a plan · L4-YOLO-008
+- **Given** `forge.merge_policy: auto`, no active plan, and a unit `in_review` with a PASS
+- **When** `l4 run` and the sweep run
+- **Then** the target is not changed, and `l4 doctor` warns that `merge_policy: auto` has no effect without an active plan
+
+#### SCN-YOLO-18 (−) A failing post-merge check stops the plan · L4-YOLO-009
+- **Given** a unit merged into the target whose `all` profile fails on the merged revision
+- **When** the CI step runs the profile
+- **Then** `unit.postcheck{status: fail}` and `plan.stopped{postcheck_failed}` are recorded, and the successor is not dispatched
+
+#### SCN-YOLO-19 (+) The archive PR of a plan unit is merged by the harness · L4-YOLO-009
+- **Given** an OpenSpec plan unit merged by the plan step, and its archive PR opened by the sweep
+- **When** the sweep runs again
+- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived
+
+#### SCN-YOLO-20 (+) B starts only after A is integrated · L4-YOLO-010
+- **Given** an active plan with `b` depending on `a`, and `a` merged but its post-merge check not yet run
+- **When** a CI run happens
+- **Then** the run checks `a`, and the branch of `b` does not exist until a later run after `unit.integrated{a}`
+
+#### SCN-YOLO-21 (−) A direct run cannot jump the order · L4-YOLO-010
+- **Given** an active plan where `b` waits for `a`
+- **When** `l4 run --unit openspec:b` runs
+- **Then** it exits 13 with `run: openspec:b waits for openspec:a (not integrated) (plan p1)`, and nothing is pushed
+
+#### SCN-YOLO-22 (+) A human-merge plan orders without merging · L4-YOLO-010
+- **Given** an active `merge: human` plan with `b` depending on `a`, and a person merges the PR of `a` into the target
+- **When** the next CI runs happen
+- **Then** `a` is integrated after its profile passes, `b` is dispatched, and the harness pushes nothing to the target
+
+#### SCN-YOLO-23 (−) A failed batch check holds the next batch · L4-YOLO-011
+- **Given** batch `b1` with all units integrated and a profile that fails on the target tip
+- **When** the CI step runs
+- **Then** `batch.failed{b1}` and `plan.stopped{batch_failed}` are recorded, and no unit of `b2` is dispatched
+
+#### SCN-YOLO-24 (+) The run after a merge is started by the harness · L4-YOLO-012
+- **Given** a CI run that merged and integrated unit `a`, with `b` waiting for it
+- **When** the run ends
+- **Then** it has called `start_run` on the target once, and the next run dispatches `b`
+
+#### SCN-YOLO-25 (−) A spec push to a plan unit stops the plan · L4-YOLO-013
+- **Given** an active plan, and a person's push that changes the specification text of the current unit on its branch
+- **When** the next CI run happens
+- **Then** `plan.stopped{inputs_changed, unit}` is recorded, and the unit is neither merged nor dispatched again by the plan
+
+#### SCN-YOLO-26 (−) Resume is refused while the unit is still escalated · L4-YOLO-013
+- **Given** a plan stopped with `unit_escalated` and the unit still escalated
+- **When** `l4 yolo resume p1 --reason "x"` runs
+- **Then** it exits 2 with `resume: openspec:b is still escalated: run l4 retry --unit openspec:b first`
+
+#### SCN-YOLO-27 (−) A restart does not reset the plan's attempts · L4-YOLO-014
+- **Given** a plan with `max_unit_attempts: 2` and a unit restarted once
+- **When** the unit is restarted again
+- **Then** the plan stops with `limit_attempts` at its next step
+
+#### SCN-YOLO-28 (+) The completed plan hands off · L4-YOLO-015
+- **Given** an active plan whose last unit is integrated and whose batches are accepted
+- **When** the CI step runs
+- **Then** `plan.completed{revision}` is recorded, `report.md` names the target revision, the units, PRs and merge commits, and says `Promotion to amaster was not performed`, and `amaster` is unchanged
+
+#### SCN-YOLO-29 (+) Every stop reason is in the runbook · L4-YOLO-016
+- **Given** the stop reasons of design D10
+- **When** the docs check runs
+- **Then** each reason code appears in `docs/runbook.md` with the command that clears it
+
+#### SCN-YOLO-30 (−) Specs pushed with their plan do not start on their own · L4-YOLO-010
+- **Given** one commit on the target that adds the unit folders of `a` and `b` and a plan that lists them, not yet activated
+- **When** the CI run for that push happens
+- **Then** the plan is admitted and reviewed, no branch of `a` or `b` is created, and `l4 plan` shows both as `held by plan p1 (reviewed)`
+
+
+#### SCN-YOLO-31 (−) A restart does not reset the plan's cost or attempts · L4-YOLO-014
+- **Given** a plan with `max_unit_attempts: 2`, and a unit that used $2 in its first attempt and was restarted
+- **When** the unit used $1 more in its second attempt and the plan step runs
+- **Then** the plan has used $3 and 2 attempts of the unit, the cost of the first attempt is not lost, and a third attempt stops the plan with `limit_attempts`
+
+#### SCN-YOLO-32 (−) An edited plan file stops an active plan · L4-YOLO-005
+- **Given** an active plan, and a person's push that changes its file `.l4/plans/p1.json` on the target (a unit is added)
+- **When** the next CI run happens
+- **Then** `plan.stopped{inputs_changed, subject: plan}` is recorded, `activated_digest` and the order do not change, and nothing is dispatched or merged
+
+#### SCN-YOLO-33 (−) A PR whose head moved after the check is not merged · L4-YOLO-008
+- **Given** an active `merge: auto` plan whose current unit is `in_review` with a PASS, and a commit pushed to the unit branch after the PR head was read
+- **When** the plan step is ready to push the unit head to the target
+- **Then** the head to push is not the tip of the unit branch on `origin` and the head of the PR, nothing is pushed to the target, and the unit is not merged
+
+#### SCN-YOLO-34 (−) A cancelled plan still holds its units · L4-YOLO-010
+- **Given** a plan that was cancelled, with its file still on the target, and a unit `a` that it lists
+- **When** a CI run happens and `l4 plan` runs
+- **Then** no branch of `a` is created, `l4 plan` shows `held by plan p1 (cancelled)`, and the unit is released only when it is removed from the file or the file is removed
+
+#### SCN-YOLO-35 (+) An excluded unit is not held by the plan · L4-YOLO-017
+- **Given** a plan p1 whose file lists `kiro:pick-priority` in `exclude` with the reason `in review before the plan`
+- **When** a CI run looks for work while p1 is reviewed and not yet active, or after p1 completes
+- **Then** `kiro:pick-priority` runs as it would without a plan
+- **When** a CI run looks for work while p1 is active
+- **Then** `kiro:pick-priority` gets no new agent work (`is not in the active plan p1`), like every unit outside the active plan
+- **And** `l4 yolo status p1` lists it under `excluded` with the reason
+
+#### SCN-YOLO-36 (−) A unit that is both planned and excluded is refused · L4-YOLO-017
+- **Given** a plan file that lists `openspec:a` in a batch and in `exclude`
+- **When** `l4 yolo check p1` runs
+- **Then** it exits 2 with the finding `excluded_and_planned` for `openspec:a`, and nothing is written
+
+#### SCN-YOLO-37 (+) A draft lists every unplanned unit without dependencies · L4-YOLO-018
+- **Given** three OpenSpec changes and two Kiro specs in the working tree, one Kiro spec already merged, and no plan file
+- **When** `l4 yolo draft p1` runs
+- **Then** `.l4/plans/p1.json` is a valid plan with the four other units in batch `unplanned`, each with `depends_on: []`, the merged spec in `exclude` with the reason `already merged`, `target` equal to `forge.base_branch` and `merge: human`; nothing is committed
+
+#### SCN-YOLO-38 (+) An update adds a new spec and keeps the person's edits · L4-YOLO-018
+- **Given** a plan file p1 edited by a person (batches and dependencies), and a new OpenSpec change `openspec:z` that no plan lists
+- **When** `l4 yolo draft p1 --update` runs
+- **Then** `openspec:z` is appended to batch `unplanned` with no dependencies, every other batch, unit, dependency and exclusion is unchanged, and the output says `added: openspec:z`
+
+#### SCN-YOLO-39 (−) A cycle through a batch is found · L4-YOLO-019
+- **Given** a plan where batch b2 depends on batch b1, and a unit of b1 depends on a unit of b2
+- **When** `python3 scripts/validate_plan.py` runs
+- **Then** it exits 1 with `<plan>: cycle: …` naming the path, as `l4 yolo check` does
+
+#### SCN-YOLO-40 (−) A spec that no plan covers is found · L4-YOLO-019
+- **Given** two plan files, and a Kiro spec `kiro:new-report` listed in neither
+- **When** the validator runs
+- **Then** it exits 1 with `uncovered: kiro:new-report (add it to a plan or to a plan's exclude with a reason)`
+
+#### SCN-YOLO-41 (+) A valid plan prints its order and waves · L4-YOLO-019
+- **Given** a plan where D and E depend on A, B and C, F depends on D, G on E, H on F, and I and J depend on nothing
+- **When** the validator runs
+- **Then** it exits 0 and prints wave 1 `A, B, C, I, J`, wave 2 `D, E`, wave 3 `F, G` and wave 4 `H`, and the dispatch order of `l4 yolo check`
+
+#### SCN-YOLO-42 (+) An agent with the skill writes a valid plan · L4-YOLO-020
+- **Given** ten specs with dependencies that their proposals state, and the skill
+- **When** an agent is asked to plan their delivery
+- **Then** the plan file passes the validator, every dependency it lists is stated in the specs, and the agent did not activate the plan
+- **And** the agent started from `l4 yolo draft`, gave one line of evidence per dependency in the commit message, used batches for acceptance checks, excluded specs only with a reason, ran the validator and `l4 yolo check`, and committed and pushed only the plan file
+- **And** an edit of an active plan is described as stopping it until a new review and activation
+
+### 23.21 Experience graph (KG)
+
+#### SCN-KG-01 (+) The run path never loads the graph code · L4-KG-001
+- **Given** the installed harness
+- **When** a fresh interpreter imports `l4.cli`, `l4.orchestrator`, `l4.planner`, `l4.verifier.ladder`, `l4.state.status`, `l4.ci.sweeper`, `l4.archive`, `l4.postmerge`, `l4.memory.round`, `l4.implementer.tdd` and `l4.eval.run`
+- **Then** no `l4.kg*`, `l4.memory.promote` or `l4.memory.inbox` module is in `sys.modules`, and an AST scan finds no import of them outside the allowed modules
+
+#### SCN-KG-02 (−) No network, no model, read-only git · L4-KG-001
+- **Given** a fixture repository with units on the base branch, a unit branch and an attempts ref, `socket.socket` patched to raise, and a recording `Git`
+- **When** `l4 kg build`, `l4 kg report`, `l4 kg why openspec:a` and `l4 kg propose --dry-run` run
+- **Then** each exits 0, and every recorded git subcommand is one of `rev-parse`, `for-each-ref`, `ls-tree`, `cat-file`, `log`, `diff --name-only`, `check-ignore`, `ls-files`, `var`
+
+#### SCN-KG-03 (−) A failed build leaves the repository and the last index as they were · L4-KG-002
+- **Given** a complete index, and a fault injected after `nodes.jsonl` of a new build was renamed
+- **When** `l4 kg build` runs
+- **Then** it exits 1, `git status --porcelain` and every ref are unchanged, and the next `l4 kg report` says `index rebuilt` and gives the same report as a clean build
+
+#### SCN-KG-04 (+) A rebuild is byte-identical · L4-KG-003
+- **Given** a fixture repository at fixed ref shas
+- **When** `l4 kg build` runs twice, the second time after the index folder was deleted
+- **Then** the three files are byte-identical, and the repository's `git status --porcelain` is empty
+
+#### SCN-KG-05 (−) A cache root inside the repository is refused · L4-KG-003
+- **Given** `L4_CACHE=<repo>/.cache`
+- **When** `l4 kg build` runs
+- **Then** it exits 2 with the L4-CFG-005 message, and nothing is written
+
+#### SCN-KG-06 (+) Archived and open units are both read · L4-KG-004
+- **Given** an archived change `changes/archive/2026-10-05-a/` with a ledger and two verdicts on the base, and an open unit `openspec:b` whose ledger is only on `origin/l4/openspec/b`
+- **When** `l4 kg build` runs
+- **Then** both units are nodes, with their runs and rounds, and the coverage counts one archived unit and one branch unit
+
+#### SCN-KG-07 (+) A restarted unit keeps its old attempt · L4-KG-004
+- **Given** a unit restarted once, with `refs/l4/attempts/openspec/a/1` local and a new branch
+- **When** `l4 kg build` runs
+- **Then** `openspec:a@1` and `openspec:a@0` are separate attempt nodes, each with its own runs and rounds
+
+#### SCN-KG-08 (−) Corrupt and unsafe inputs are skipped and counted · L4-KG-004
+- **Given** one unit with a corrupt ledger line, and another with a symlinked `.l4/evidence/round-1`
+- **When** `l4 kg build` runs
+- **Then** it exits 0, the manifest has `ledger_corrupt: 1` and `not_regular: 1`, and every other unit is complete
+
+#### SCN-KG-09 (−) An attempt that is not local is named, never fetched · L4-KG-004
+- **Given** a ledger with `unit.restarted{attempt_ref: refs/l4/attempts/openspec/a/1}` and no such local ref
+- **When** `l4 kg report` runs
+- **Then** the coverage section has `attempt_not_local: 1` and the line `git fetch origin 'refs/l4/attempts/*:refs/l4/attempts/*'`, and no `fetch` was run
+
+#### SCN-KG-10 (+) Every source pointer resolves · L4-KG-005
+- **Given** the index of the SCN-KG-06 fixture
+- **When** a test runs `git cat-file -e <sha>:<path>` for every edge's `src`, and reads the line `seq` or the JSON pointer
+- **Then** each one exists and holds the value the edge states
+
+#### SCN-KG-11 (−) The Source line is not a link · L4-KG-005
+- **Given** a hand-edited lesson whose `Source` says `verifier finding F-1234abcd (openspec:a round 1)`, and whose dedupe key is not a rule key
+- **When** the graph is built
+- **Then** the lesson has no edge to `F-1234abcd` or to any recurrence key
+
+#### SCN-KG-12 (+) One mistake in two units is one recurrence · L4-KG-006
+- **Given** units `openspec:a` and `openspec:b`, each with a deterministic finding `UI criterion without an end-to-end test` on the scenarios `Cart › Shows count` and `Cart › Shows count`, but different criterion ids (different capability folders)
+- **When** the report is built with `--min-units 2`
+- **Then** one recurring-findings line names both units with `n = 2 units`
+
+#### SCN-KG-13 (−) The same title on different scenarios is not merged · L4-KG-006
+- **Given** the same finding title on `Cart › Shows count` in unit a and on `Cart › Clears` in unit b
+- **When** the report is built with `--min-units 2`
+- **Then** no recurring-findings line is written for that title
+
+#### SCN-KG-14 (+) A spec gap is `spec` · L4-KG-007
+- **Given** a `verdict.json` finding with `spec_gap: true`
+- **When** the graph is built
+- **Then** it has `CLASSIFIED → blame:spec`, and its capability is listed under spec-gap hotspots with `n = 1 unit`
+
+#### SCN-KG-15 (−) A judge finding without a spec gap is `unknown` · L4-KG-007
+- **Given** a judge finding (`source: judge`, `spec_gap: false`)
+- **When** the graph is built
+- **Then** it is `blame:unknown`
+
+#### SCN-KG-16 (+) The live case is visible · L4-KG-008
+- **Given** the events of job 5528 (`docs/live/artifacts/job-5528/l4-out/logs/r-20261005T0815Z-5946.jsonl`, which mirrors the ledger): `prompt.rendered{role: red, task: 1.1, lessons: [L-09421538]}`, then `task.attempt_failed{task: 1.1, phase: red, attempt: 1}`, then two more prompts with the lesson and no failure
+- **When** the report is built
+- **Then** `L-09421538` shows `injected 1 unit / 1 task / 3 prompts, followed by 1 failure (red: new tests fail with an error that is neither an assertion nor notimplementederror)`
+
+#### SCN-KG-17 (−) An earlier failure, or another unit's, is not counted · L4-KG-008
+- **Given** an attempt failure of task 1.1 before the injection, and one of another unit's task with no injection
+- **When** the report is built
+- **Then** the lesson shows `injected, nothing followed`
+
+#### SCN-KG-18 (+) Every number names its n · L4-KG-009
+- **Given** the SCN-KG-06 fixture
+- **When** `l4 kg report` runs
+- **Then** a snapshot test matches, and every line with a digit outside an id contains `n = `
+
+#### SCN-KG-19 (−) A report file that git would commit is refused · L4-KG-009
+- **Given** a repository where `docs/report.md` is not ignored
+- **When** `l4 kg report --out docs/report.md` runs
+- **Then** it exits 2 with `docs/report.md is not git-ignored: use .l4-out/kg/ or a path outside the repository`, and writes nothing
+
+#### SCN-KG-20 (+) The history of a restarted unit · L4-KG-010
+- **Given** a unit whose attempt 1 escalated twice with `same_failure`, was restarted, and whose attempt 2 has one FAIL round
+- **When** `l4 kg why openspec:a` runs
+- **Then** the timeline shows both escalations with their detail, the restart with its reason, the FAIL round of attempt 2, and the line `stops: same_failure ×2; spec edited since the last stop: no; attempt 2`
+
+#### SCN-KG-21 (−) An unknown id · L4-KG-010
+- **Given** any index
+- **When** `l4 kg why X-1` runs
+- **Then** it exits 2 and lists the accepted id forms
+
+#### SCN-KG-22 (+) A secret in a branch ledger is not shown · L4-KG-011
+- **Given** a unit branch ledger whose `task.attempt_failed.reason` holds a value of a configured redaction variable
+- **When** `l4 kg build` and `l4 kg report` run
+- **Then** neither the index nor the report contains the value, and both contain the redaction placeholder
+
+#### SCN-KG-23 (−) Two repositories never mix · L4-KG-011
+- **Given** repositories A and B built with the same cache root
+- **When** `l4 kg report` runs in B
+- **Then** the index folders differ by repo key, and the report reads only B's folder (a recording file opener shows no read under A's key)
+
+#### SCN-KG-24 (+) A recurring red failure becomes a draft · L4-KG-012
+- **Given** the failure class `no new test traces <criterion>` in units a and b
+- **When** `l4 kg propose` runs
+- **Then** one draft with dedupe key `kg-a-no-new-test-traces-criterion` and its evidence file are in `inbox/kg-<date>/`, the draft ends with the `TODO(person):` line, `lessons.md` is unchanged, and `git diff --cached` is empty
+
+#### SCN-KG-25 (−) A pattern with a lesson already gets no draft · L4-KG-012
+- **Given** the SCN-KG-24 class, and a lesson in `lessons.md` with the same dedupe key
+- **When** `l4 kg propose` runs
+- **Then** no draft is written for it, and the output says `covered by L-…`
+
+#### SCN-KG-26 (−) Judge text never reaches a draft · L4-KG-012
+- **Given** a judge finding `Edge case not handled` (`source: judge`) in three units
+- **When** `l4 kg propose` runs
+- **Then** no file under `inbox/` contains that title, and the report still lists it under recurring findings
+
+#### SCN-KG-27 (+) A promoted lesson reaches the next matching task through the existing injection · L4-KG-013
+- **Given** a draft with the TODO line replaced by advice and scope `` `src/web/**` ``, on the base branch checkout
+- **When** `l4 lessons promote L-… --yes` runs, and a later task's paths include `src/web/page.py`
+- **Then** `lessons.md` has the lesson, one `chore(memory)` commit by the person holds only the lessons paths, the inbox files are gone, and `inject_for_task` for that task returns the lesson's id
+
+#### SCN-KG-28 (−) An unfinished draft is refused · L4-KG-013
+- **Given** a draft that still has its `TODO(person):` line
+- **When** `l4 lessons promote L-… --yes` runs
+- **Then** it exits 2 with `the proposal still has its TODO(person) line`, and `lessons.md`, the index and HEAD are unchanged
+
+#### SCN-KG-29 (−) A promote on a unit branch is refused · L4-KG-013
+- **Given** HEAD on `l4/openspec/a`
+- **When** `l4 lessons promote L-… --yes` runs
+- **Then** it exits 2 and says that a person's commit to `.serena/memories/harness/` on a unit branch is a protected-path blocker: promote on the base branch
+
+#### SCN-KG-30 (+) The existing behaviour is unchanged · L4-KG-014
+- **Given** the repository's existing configuration fixtures and the full unit suite
+- **When** the suite runs with this change
+- **Then** every existing test passes unchanged, `l4 doctor` on the dummy fixture gives the same checks as before, and `git diff` of `src/l4/config/schema.py`, `src/l4/doctor/`, `src/l4/implementer/`, `src/l4/verifier/` and `src/l4/ci/templates/` is empty
+
+### 23.22 OpenCode's own key (PRV)
+
+#### SCN-PRV-75 (+) The GitHub job names the OpenCode key · L4-PRV-028
+- **Given** an implementer profile `adapter: opencode`, `model: opencode-go/deepseek-v4.1-flash`, `auth: api_key`
+- **When** `l4 init --ci github` or `l4 upgrade` renders the workflow
+- **Then** the `l4` job's `env` has `OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}`
+
+#### SCN-PRV-76 (−) An unset key fails the auth step with no model call · L4-PRV-028
+- **Given** that profile and no `OPENCODE_API_KEY` in the harness environment
+- **When** the availability probe runs
+- **Then** the auth step fails with `OPENCODE_API_KEY is not set`, no hello runs, and the role walks on to the next profile
+
+#### SCN-PRV-77 (+) The run gets the key through the loader only · L4-PRV-028
+- **Given** that profile and `OPENCODE_API_KEY` set in the harness environment
+- **When** the implementer runs
+- **Then** the agent process has `OPENCODE_API_KEY` set by the credential loader, and the value is in no argv, in no sandbox `--setenv` and in no log
 
 ## 24. Definition of done
 

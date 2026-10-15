@@ -22,6 +22,7 @@ profiles:
   impl: {adapter: fake, vendor: a}
   judge: {adapter: fake, vendor: b}
 roles: {implementer: [impl], judges: [judge]}
+gates: {test: {command: pytest -q}}
 """
 
 
@@ -87,7 +88,7 @@ def test_json_output_and_resolved_paths(world, capsys):
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
     expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
     expected += ["S1-001", "S1-002", "COV-001", "SANDBOX-002", "CFG-005", "MEM-002", "CI-002", "ENV-013", "EVAL-001"]
-    expected += ["ENV-014", "CFG-006", "CFG-007"]
+    expected += ["ENV-014", "CFG-004", "CFG-006", "CFG-007", "YOLO-001"]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
         "CI-001",
@@ -100,6 +101,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "ENV-007",
     }  # not GitLab; no agent CLI
     skipped |= {"CFG-006", "CFG-007"}  # not an action adoption
+    skipped |= {"YOLO-001"}  # forge.merge_policy is human
     skipped |= {"S1-001", "S1-002", "COV-001", "ENV-013", "EVAL-001"}  # nothing shadowed, no tuned checkpoint or
     # Ollama host, no project interpreter, no eval baseline in this repository
     # profile; no Kiro; no Laya profile, no e2e gate
@@ -173,7 +175,8 @@ def test_misspelled_role_profile_fails_cfg_002(world, capsys):
     assert "CFG-002" in out and "roles.judges" in out
     write_config(
         repo,
-        "profiles: {claude-code: {adapter: claude-code}}\nroles: {implementer: [claude-code], judges: [claude-code]}\n",
+        "profiles: {claude-code: {adapter: claude-code}}\nroles: {implementer: [claude-code], judges: [claude-code]}\n"
+        "gates: {test: {command: pytest -q}}\n",
     )
     fake_tool(bin_dir, "claude", '#!/bin/sh\necho "2.1.288 (Claude Code)"\n')  # ENV-004: the profile's CLI exists
     assert main(["doctor", "--repo", str(repo)], environ=environ) == 0
@@ -229,7 +232,7 @@ def test_adoption_without_agent_clis_exits_0(world, capsys):
     write_config(
         repo,
         "profiles:\n  impl: {adapter: codex, vendor: openai}\n  judge: {adapter: claude-code, vendor: anthropic}\n"
-        "roles: {implementer: [impl], judges: [judge]}\n",
+        "roles: {implementer: [impl], judges: [judge]}\ngates: {test: {command: pytest -q}}\n",
     )
     assert main(["doctor", "--repo", str(repo)], environ=environ) == 3
     assert "ENV-004" in capsys.readouterr().out

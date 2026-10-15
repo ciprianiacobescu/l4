@@ -1,0 +1,28 @@
+# plan ledger refs/l4/plans/batch-gl (gitlab): time, event, fields (no URLs, no identities)
+2026-10-15T10:48:47Z  plan.admitted        
+2026-10-15T10:48:47Z  plan.reviewed        prompt_version=2 units=add-discounted-total:NEEDS_REVISION,add-sku-normalize:READY
+2026-10-15T10:48:47Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T11:26:43Z  plan.reviewed        prompt_version=3 units=add-discounted-total:NEEDS_REVISION,add-sku-normalize:READY
+2026-10-15T11:26:43Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T11:27:59Z  plan.reviewed        prompt_version=3 units=add-discounted-total:READY,add-sku-normalize:READY
+2026-10-15T11:27:59Z  plan.charged         unit=plan:review attempt=0 runs=0
+2026-10-15T11:28:29Z  plan.activated       reason=task 9.2: a batch with an acceptance profile (smoke), and a unit in review adopted by the plan
+2026-10-15T11:28:53Z  plan.charged         unit=openspec:add-discounted-total attempt=1 runs=1
+2026-10-15T11:28:53Z  unit.dispatched      unit=openspec:add-discounted-total
+2026-10-15T11:29:59Z  unit.merge_requested unit=openspec:add-discounted-total
+2026-10-15T11:30:07Z  unit.merged          unit=openspec:add-discounted-total
+2026-10-15T11:30:10Z  unit.postcheck       unit=openspec:add-discounted-total profile=all
+2026-10-15T11:30:10Z  unit.integrated      unit=openspec:add-discounted-total
+2026-10-15T11:30:10Z  plan.charged         unit=openspec:add-discounted-total attempt=1 runs=1
+2026-10-15T11:30:50Z  plan.charged         unit=openspec:add-sku-normalize attempt=1 runs=1
+2026-10-15T11:30:50Z  unit.dispatched      unit=openspec:add-sku-normalize
+2026-10-15T11:32:43Z  unit.merge_requested unit=openspec:add-sku-normalize
+2026-10-15T11:32:46Z  unit.merged          unit=openspec:add-sku-normalize
+2026-10-15T11:32:48Z  unit.postcheck       unit=openspec:add-sku-normalize profile=all
+2026-10-15T11:32:48Z  unit.integrated      unit=openspec:add-sku-normalize
+2026-10-15T11:32:48Z  plan.charged         unit=openspec:add-sku-normalize attempt=1 runs=1
+2026-10-15T11:33:27Z  batch.failed         batch=smoke detail=test failed (report missing: .l4-out/junit.xml)
+2026-10-15T11:33:27Z  plan.stopped         reason=batch_failed detail=batch smoke: test failed (report missing: .l4-out/junit.xml)
+2026-10-15T11:47:40Z  plan.resumed         reason=batch_failed recovery: the harness now runs gates.setup before a profile's gates
+2026-10-15T11:48:03Z  batch.accepted       batch=smoke profile=smoke
+2026-10-15T11:48:28Z  plan.completed       

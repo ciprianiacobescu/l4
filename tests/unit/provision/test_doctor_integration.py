@@ -20,6 +20,7 @@ profiles:
   impl: {adapter: fake, vendor: a}
   judge: {adapter: fake, vendor: b}
 roles: {implementer: [impl], judges: [judge]}
+gates: {test: {command: pytest -q}}
 """
 
 

@@ -37,7 +37,7 @@ def test_finding_becomes_lesson_and_is_injected_later(run_l4, valid_spec, web_re
     [curated] = run.events("lessons.curated")
     assert curated["action"] == "created" and curated["origin"] == "verifier_finding_fixed"
     # a later task that touches the UI is given it
-    worktree = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache).worktree
+    worktree = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key).worktree
     injection = inject_for_task(worktree, load_config(worktree).memory, ["app.py"])
     assert injection.ids == (curated["id"],) and "end-to-end" in injection.block
 
@@ -90,7 +90,7 @@ def test_a_second_unit_branched_after_the_first_merged_gets_the_lesson_in_its_re
     raw(tdd_repo.repo, "commit", "-q", "-m", "a second unit")
     raw(tdd_repo.repo, "push", "-q", "origin", "main")
     raw(tdd_repo.repo, "fetch", "-q", "origin")
-    names = UnitNames.for_unit(f"openspec:{second}", branch_prefix="l4/", cache=tdd_repo.cache)
+    names = UnitNames.for_unit(f"openspec:{second}", branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
     run = run_l4([red_step()], **web_repo, unit=False)
     assert run.adapter.requests, run.outcome
     block = f'<l4:data kind="lessons" ids="{curated["id"]}">'

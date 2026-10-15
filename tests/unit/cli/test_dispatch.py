@@ -13,9 +13,14 @@ SECTION_2_1 = {
     "simulate", "unlock", "resume", "retry", "restart", "ci render", "ci render-child", "ci map-exit", "upgrade",
     "setup gitlab", "setup github", "ci watch", "eval", "ci cache-key", "ci render-setup",
     "feedback add", "feedback list", "feedback show", "feedback submit", "feedback withdraw",
+    "kg build", "kg report", "kg why", "kg propose",
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
+YOLO = {
+    f"yolo {w}" for w in ("draft", "check", "review", "activate", "status", "cancel", "resume", "report")
+}  # yolo-mode D6
+EXTRA |= YOLO
 
 # minimal valid argv per command, including options that are required
 ARGV = {
@@ -48,6 +53,18 @@ ARGV = {
     "feedback show": ["feedback", "show", "FB-001"],
     "feedback submit": ["feedback", "submit", "FB-001"],
     "feedback withdraw": ["feedback", "withdraw", "FB-001"],
+    "yolo draft": ["yolo", "draft", "p1"],
+    "yolo check": ["yolo", "check", "p1"],
+    "yolo review": ["yolo", "review", "p1"],
+    "yolo activate": ["yolo", "activate", "p1", "--reason", "go"],
+    "yolo status": ["yolo", "status"],
+    "yolo cancel": ["yolo", "cancel", "p1", "--reason", "why"],
+    "yolo resume": ["yolo", "resume", "p1", "--reason", "why"],
+    "yolo report": ["yolo", "report", "p1"],
+    "kg build": ["kg", "build"],
+    "kg report": ["kg", "report"],
+    "kg why": ["kg", "why", "openspec:a"],
+    "kg propose": ["kg", "propose"],
     "s1": ["s1", "export"],
     "eval": ["eval", "--dry-run", "--judge", "j"],
 }

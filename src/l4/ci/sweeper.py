@@ -57,7 +57,7 @@ M1: forge-and-ci 2.51 (WIP-branch cleanup, deleting the archived refs), 2.53 (cl
 
 import logging
 import shutil
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -93,7 +93,7 @@ from l4.forge.base import (
 from l4.forge.gitlab import push_auth_config, strip_remote_credentials
 from l4.forge.pushfail import PushFailed
 from l4.forge.urls import app_forge_urls, origin_url
-from l4.postmerge import ArchiveResult, MergeDetector, MergeVerdict, PostMergeArchiver
+from l4.postmerge import ArchiveResult, MergeDetector, MergeVerdict, PostMergeArchiver, merge_archive_guarded
 from l4.progress import SWEEP_TRACE_TYPES, FilteredTrace, ProgressTrace
 from l4.specs.base import Framework, UnitRef, parse_unit_id
 from l4.specs.providers import provider_for_unit, providers_for
@@ -108,6 +108,7 @@ from l4.vcs.git import Git
 from l4.vcs.locks import Busy, LocalFileLease
 from l4.vcs.names import UnitNames, unit_branch
 from l4.vcs.push import LOCK_REF_PREFIX, PushRejected
+from l4.vcs.repokey import repository_key
 
 if TYPE_CHECKING:
     from l4.orchestrator import UnitRunResult
@@ -219,6 +220,11 @@ class _UnitRun:
         shutil.rmtree(self._scratch, ignore_errors=True)
 
 
+def merged_elsewhere(merged_into: str, base: str) -> str:
+    """The cause of an `in_review` unit whose MR was merged into another branch (L4-YOLO-007, SCN-YOLO-13)."""
+    return f"merged into {merged_into}, not the base {base}"
+
+
 class Sweeper:
     def __init__(
         self,
@@ -231,13 +237,18 @@ class Sweeper:
         *,
         retry: bool = False,
         ci: bool = False,
+        auto_units: Collection[str] = (),
     ) -> None:
         self.app, self.cfg, self.git, self.forge = app, cfg, git, forge
+        self._auto_units = frozenset(auto_units)  # the units of an active `merge: auto` plan (L4-YOLO-009)
         self._archiver, self._detector, self._retry, self._ci = archiver, detector, retry, ci
         self.urls = app_forge_urls(app, cfg)  # what a ledger commits for the forge host, and how its URLs compare
+        self._key: str | None = None
         self._merged: dict[str, list[PullRequest]] | None = None
         self._open: dict[str, PullRequest] | None = None
         self._newest: dict[str, PullRequest] | None = None
+        self.misdirected: dict[str, str] = {}  # unit id -> `merged into <x>, not the base <base>` (L4-YOLO-007)
+        self._misdirected_prs: dict[str, tuple[int, str]] = {}  # unit id -> (the merged MR's number, where it went)
 
     def run(self, snapshots: Sequence[UnitSnapshot]) -> list[SweepAction]:
         candidates = [s for s in snapshots if s.state.phase in _SWEPT]
@@ -299,15 +310,28 @@ class Sweeper:
 
     def _own_mr(self, snapshot: UnitSnapshot, merged: dict[str, list[PullRequest]]) -> PullRequest | None:
         """The merged MR that is this unit's: the one its ledger names, else (no `pr.updated` was recorded) the latest
-        of the branch. An older MR of a branch name that was used before is not."""
+        of the branch. An older MR of a branch name that was used before is not. A merged MR counts only when it was
+        merged into `forge.base_branch` (L4-YOLO-007): one retargeted and merged elsewhere is logged, remembered in
+        `misdirected` for the unit's cause, and the unit stays as it is."""
         branch = unit_branch(snapshot.ref.id, self.cfg.forge.branch_prefix)
         prs = merged.get(branch, [])
         wanted = snapshot.state.pr
         if wanted is None:
-            return prs[0] if prs else None
-        found = next((pr for pr in prs if self.urls.canonical(pr.url) == self.urls.canonical(wanted)), None)
-        if prs and found is None:
-            log.info("%s: the merged MR of %s is not the unit's MR %s", snapshot.ref.id, branch, wanted)
+            found = prs[0] if prs else None
+        else:
+            found = next((pr for pr in prs if self.urls.canonical(pr.url) == self.urls.canonical(wanted)), None)
+            if prs and found is None:
+                log.info("%s: the merged MR of %s is not the unit's MR %s", snapshot.ref.id, branch, wanted)
+        base = self.cfg.forge.base_branch
+        if found is not None and found.base_branch != base:
+            log.warning(
+                "%s: %s was merged into %s, not the base %s", snapshot.ref.id, found.url, found.base_branch, base
+            )
+            self.misdirected[snapshot.ref.id] = merged_elsewhere(found.base_branch, base)
+            self._misdirected_prs[snapshot.ref.id] = (found.number, found.base_branch)
+            return None
+        self.misdirected.pop(snapshot.ref.id, None)
+        self._misdirected_prs.pop(snapshot.ref.id, None)
         return found
 
     def _retire(self, snapshots: Sequence[UnitSnapshot], errors: list[Exception]) -> list[SweepAction]:
@@ -340,10 +364,17 @@ class Sweeper:
         folder = f"{base}:{where}/{name}"
         return bool(self.git.run("rev-parse", "--verify", "--quiet", folder, check=False).stdout.strip())
 
+    def _repo_key(self) -> str:
+        """The repository key of this clone, read once per sweep (the paths of every unit carry it)."""
+        if self._key is None:
+            self._key = repository_key(self.app.repo, self.app.environ)
+        return self._key
+
     def _retire_one(self, unit_id: str, lock: str, sha: str) -> SweepAction | None:
         names = UnitNames.for_unit(
-            unit_id, branch_prefix=self.cfg.forge.branch_prefix, cache=cache_root(self.app.environ, repo=self.app.repo)
-        )
+            unit_id, branch_prefix=self.cfg.forge.branch_prefix, cache=cache_root(self.app.environ, repo=self.app.repo),
+            repo_key=self._repo_key(),
+        )  # fmt: skip
         merged = self._merged_mrs()
         if not merged or not merged.get(names.archive_branch):
             return None  # the archive MR is open, closed or never was: the lock ref is still the unit's
@@ -391,7 +422,9 @@ class Sweeper:
     def _sweep(self, snapshot: UnitSnapshot, pr: PullRequest | None) -> SweepAction | None:
         ref = snapshot.ref
         if snapshot.state.phase == Phase.IN_REVIEW.value and pr is None:
-            return self._ci_duty(snapshot) if self._ci else None  # the MR is open (or closed): the merge duty is idle
+            noted = self._note_misdirected(snapshot)
+            ci = self._ci_duty(snapshot) if self._ci else None  # the MR is open (or closed): the merge duty is idle
+            return noted or ci
         names = self._archiver.names(ref)
         failure = self._unresolved_failure(names)
         if (
@@ -418,6 +451,21 @@ class Sweeper:
                 run.close(code)
             finally:
                 lease.release()
+
+    def _note_misdirected(self, snapshot: UnitSnapshot) -> SweepAction | None:
+        """`pr.misdirected{pr, merged_into, base}` once per merged MR (L4-YOLO-007, SCN-YOLO-13): the pending ledger
+        carries the cause that `l4 status --unit` shows; the unit's phase does not change."""
+        found = self._misdirected_prs.get(snapshot.ref.id)
+        if found is None:
+            return None
+        number, merged_into = found
+        known = snapshot.state.misdirected
+        if known is not None and str(known.pr) == str(number) and known.merged_into == merged_into:
+            return None
+        base = self.cfg.forge.base_branch
+        fields: dict[str, object] = {"pr": number, "merged_into": merged_into, "base": base}
+        action = SweepAction(snapshot.ref.id, "misdirected", merged_elsewhere(merged_into, base))
+        return self._record_ci(snapshot, "pr.misdirected", fields, action)
 
     # --- feedback on a merged unit (L4-FBK-010) -------------------------------------------------------------------
 
@@ -937,6 +985,30 @@ class Sweeper:
         except ForgeError as exc:  # the note is a courtesy: `archive.failed` in the ledger carries the verdict
             log.warning("%s: the sticky note could not be written: %s", ref.id, self.app.redactor.redact_text(str(exc)))
 
+    def _merge_archive(self, ref: UnitRef, pr: PullRequest, run: _UnitRun) -> SweepAction:
+        """The archive MR of a unit of an active `merge: auto` plan is merged by the harness: its branch is pushed to
+        the base as a fast-forward under the same guard as a unit merge (`merge_archive_guarded`, L4-YOLO-009,
+        SCN-YOLO-19).
+        `archive.merged{head}` on success, `archive.failed{reason}` on any refusal (the MR stays for a person); the
+        plan does not wait for it."""
+        unit, branch = ref.id, pr.head_branch
+        fetch = fetch_auth_config(self.cfg, self.app.environ)
+        self.git.fetch("origin", refspecs=(f"+refs/heads/{branch}:refs/remotes/origin/{branch}",), config=fetch)
+        head = self.git.rev_parse(f"refs/remotes/origin/{branch}")
+        if head is None:
+            outcome_text = f"the archive branch {branch} is not on origin"
+        else:
+            outcome = merge_archive_guarded(self.app, self.cfg, self.git, head, self.cfg.forge.base_branch, pr=pr)
+            outcome_text = "" if outcome.status == "merged" else f"{outcome.status}: {outcome.detail}"
+        if not outcome_text:
+            run.event("archive.merged", head=head, number=pr.number)
+            log.info("%s: archive MR !%s merged by the harness (fast-forward to %s)", unit, pr.number, str(head)[:10])
+            return SweepAction(unit, "archive_merged", pr.url)
+        reason = self.app.redactor.redact_text(outcome_text)[:500]
+        run.event("archive.failed", reason=reason, **self._inputs(ref))
+        log.warning("%s: archive MR !%s was not merged by the harness: %s", unit, pr.number, reason)
+        return SweepAction(unit, "archive_failed", reason)
+
     def _record(
         self, ref: UnitRef, result: ArchiveResult, run: _UnitRun, recorded: bool, pr: PullRequest | None = None
     ) -> SweepAction:
@@ -948,6 +1020,8 @@ class Sweeper:
         if result.status == "opened" and result.pr is not None:
             run.event("archive.opened", number=result.pr.number, url=result.pr.url, branch=result.pr.head_branch)
             log.info("%s: archive MR !%s opened: %s", unit, result.pr.number, result.pr.url)
+            if unit in self._auto_units:
+                return self._merge_archive(ref, result.pr, run)
             return SweepAction(unit, "archive_opened", result.pr.url)
         if result.status == "failed":
             run.event("archive.failed", reason=self.app.redactor.redact_text(result.detail)[:500], **self._inputs(ref))
@@ -956,6 +1030,8 @@ class Sweeper:
             return SweepAction(unit, "archive_failed", result.detail)
         if result.status == "existing" and result.pr is not None:
             log.info("%s: archive MR !%s is open", unit, result.pr.number)
+            if unit in self._auto_units:
+                return self._merge_archive(ref, result.pr, run)
             return SweepAction(unit, "archive_existing", result.pr.url)
         if result.status == "pending":
             log.info("%s: archive pending: %s", unit, result.detail)
@@ -986,4 +1062,7 @@ def sweep(
         kiro_root=cfg.spec.kiro.root,
         fetch_config=fetch,
     )
-    return Sweeper(app, cfg, git, forge, archiver, detector, retry=retry, ci=ci).run(snapshots)
+    from l4.yolo.cycle import auto_plan_units  # the plan step imports the sweeper's neighbours: read at call time
+
+    auto = auto_plan_units(app, cfg, git)
+    return Sweeper(app, cfg, git, forge, archiver, detector, retry=retry, ci=ci, auto_units=auto).run(snapshots)

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from importlib.resources import files
 from typing import Literal
 
-from l4.agents.credentials import credential_variable
+from l4.agents.credentials import profile_credential_variable
 from l4.config.schema import L4Config
 from l4.provision.catalog import adapters_in_use
 
@@ -89,7 +89,7 @@ def credential_secrets(cfg: L4Config) -> list[str]:
     for adapter, profiles in adapters_in_use(cfg).items():
         for name in profiles:
             profile = cfg.profiles[name]
-            variable = credential_variable(adapter, profile.auth)
+            variable = profile_credential_variable(profile)
             if variable:
                 names.add(variable)
             options = profile.opencode_options() if adapter == "opencode" else None

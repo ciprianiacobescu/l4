@@ -1,0 +1,85 @@
+# plan ledger refs/l4/plans/valuation: time, event, fields (no URLs, no identities)
+2026-10-15T05:30:31Z  plan.admitted        
+2026-10-15T05:30:31Z  plan.reviewed        units=invoice-line:READY,invoice-lines:READY,stock-ledger:READY,units-surplus:READY,add-money-format:READY,add-shelf-label:READY,add-stock-valuation:READY,add-summary-currency:READY,add-valuation-summary:READY,add-vat:READY
+2026-10-15T05:30:31Z  plan.charged         unit=plan:review attempt=0 runs=0 cost_usd=0.470247
+2026-10-15T05:32:10Z  plan.activated       reason=complex scenario on a public repository: five waves of unit dependencies, DeepSeek Flash on OpenCode Go as the implementer, auto-merge into l4/main (live test requested by the maintainer)
+2026-10-15T05:32:44Z  plan.charged         unit=openspec:add-money-format attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:32:44Z  unit.dispatched      unit=openspec:add-money-format
+2026-10-15T05:33:52Z  plan.charged         unit=openspec:add-money-format attempt=1 runs=2 cost_usd=0.006555
+2026-10-15T05:33:52Z  unit.dispatched      unit=openspec:add-money-format
+2026-10-15T05:34:45Z  plan.charged         unit=openspec:add-money-format attempt=1 runs=3 cost_usd=0.009248
+2026-10-15T05:34:45Z  unit.dispatched      unit=openspec:add-money-format
+2026-10-15T05:35:46Z  unit.merge_requested unit=openspec:add-money-format
+2026-10-15T05:35:50Z  unit.merged          unit=openspec:add-money-format
+2026-10-15T05:35:52Z  unit.postcheck       unit=openspec:add-money-format revision=f8df4b5f
+2026-10-15T05:35:52Z  unit.integrated      unit=openspec:add-money-format revision=f8df4b5f
+2026-10-15T05:35:52Z  plan.charged         unit=openspec:add-money-format attempt=1 runs=3 cost_usd=0.035796
+2026-10-15T05:36:29Z  plan.charged         unit=kiro:stock-ledger attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:36:29Z  unit.dispatched      unit=kiro:stock-ledger
+2026-10-15T05:39:52Z  unit.merge_requested unit=kiro:stock-ledger
+2026-10-15T05:39:56Z  unit.merged          unit=kiro:stock-ledger
+2026-10-15T05:39:58Z  unit.postcheck       unit=kiro:stock-ledger revision=8b86507e
+2026-10-15T05:39:58Z  unit.integrated      unit=kiro:stock-ledger revision=8b86507e
+2026-10-15T05:39:58Z  plan.charged         unit=kiro:stock-ledger attempt=1 runs=1 cost_usd=0.060813
+2026-10-15T05:40:27Z  plan.charged         unit=openspec:add-vat attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:40:27Z  unit.dispatched      unit=openspec:add-vat
+2026-10-15T05:42:18Z  unit.merge_requested unit=openspec:add-vat
+2026-10-15T05:42:23Z  unit.merged          unit=openspec:add-vat
+2026-10-15T05:42:25Z  unit.postcheck       unit=openspec:add-vat revision=1fca646c
+2026-10-15T05:42:25Z  unit.integrated      unit=openspec:add-vat revision=1fca646c
+2026-10-15T05:42:25Z  plan.charged         unit=openspec:add-vat attempt=1 runs=1 cost_usd=0.034178
+2026-10-15T05:43:07Z  batch.accepted       batch=w1 revision=f910360c
+2026-10-15T05:43:45Z  plan.charged         unit=openspec:add-stock-valuation attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:43:45Z  unit.dispatched      unit=openspec:add-stock-valuation
+2026-10-15T05:46:19Z  unit.merge_requested unit=openspec:add-stock-valuation
+2026-10-15T05:46:24Z  unit.merged          unit=openspec:add-stock-valuation
+2026-10-15T05:46:26Z  unit.postcheck       unit=openspec:add-stock-valuation revision=8027e5ac
+2026-10-15T05:46:26Z  unit.integrated      unit=openspec:add-stock-valuation revision=8027e5ac
+2026-10-15T05:46:26Z  plan.charged         unit=openspec:add-stock-valuation attempt=1 runs=1 cost_usd=0.052898
+2026-10-15T05:47:01Z  plan.charged         unit=kiro:invoice-line attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:47:01Z  unit.dispatched      unit=kiro:invoice-line
+2026-10-15T05:50:39Z  unit.merge_requested unit=kiro:invoice-line
+2026-10-15T05:50:43Z  unit.merged          unit=kiro:invoice-line
+2026-10-15T05:50:45Z  unit.postcheck       unit=kiro:invoice-line revision=48a5f155
+2026-10-15T05:50:45Z  unit.integrated      unit=kiro:invoice-line revision=48a5f155
+2026-10-15T05:50:45Z  plan.charged         unit=kiro:invoice-line attempt=1 runs=1 cost_usd=0.074011
+2026-10-15T05:51:12Z  batch.accepted       batch=w2 revision=48a5f155
+2026-10-15T05:51:34Z  plan.charged         unit=openspec:add-valuation-summary attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:51:34Z  unit.dispatched      unit=openspec:add-valuation-summary
+2026-10-15T05:53:42Z  unit.merge_requested unit=openspec:add-valuation-summary
+2026-10-15T05:53:47Z  unit.merged          unit=openspec:add-valuation-summary
+2026-10-15T05:53:49Z  unit.postcheck       unit=openspec:add-valuation-summary revision=3cf267ba
+2026-10-15T05:53:49Z  unit.integrated      unit=openspec:add-valuation-summary revision=3cf267ba
+2026-10-15T05:53:49Z  plan.charged         unit=openspec:add-valuation-summary attempt=1 runs=1 cost_usd=0.061879
+2026-10-15T05:54:21Z  plan.charged         unit=kiro:invoice-lines attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:54:21Z  unit.dispatched      unit=kiro:invoice-lines
+2026-10-15T05:58:49Z  unit.merge_requested unit=kiro:invoice-lines
+2026-10-15T05:58:54Z  unit.merged          unit=kiro:invoice-lines
+2026-10-15T05:58:56Z  unit.postcheck       unit=kiro:invoice-lines revision=43accb44
+2026-10-15T05:58:56Z  unit.integrated      unit=kiro:invoice-lines revision=43accb44
+2026-10-15T05:58:56Z  plan.charged         unit=kiro:invoice-lines attempt=1 runs=1 cost_usd=0.07939
+2026-10-15T05:59:21Z  batch.accepted       batch=w3 revision=43accb44
+2026-10-15T05:59:47Z  plan.charged         unit=openspec:add-summary-currency attempt=1 runs=1 cost_usd=0.0
+2026-10-15T05:59:47Z  unit.dispatched      unit=openspec:add-summary-currency
+2026-10-15T06:02:18Z  unit.merge_requested unit=openspec:add-summary-currency
+2026-10-15T06:02:23Z  unit.merged          unit=openspec:add-summary-currency
+2026-10-15T06:02:26Z  unit.postcheck       unit=openspec:add-summary-currency revision=f9472bbf
+2026-10-15T06:02:26Z  unit.integrated      unit=openspec:add-summary-currency revision=f9472bbf
+2026-10-15T06:02:26Z  plan.charged         unit=openspec:add-summary-currency attempt=1 runs=1 cost_usd=0.044121
+2026-10-15T06:02:59Z  batch.accepted       batch=w4 revision=f6c7372a
+2026-10-15T06:03:23Z  plan.charged         unit=openspec:add-shelf-label attempt=1 runs=1 cost_usd=0.0
+2026-10-15T06:03:23Z  unit.dispatched      unit=openspec:add-shelf-label
+2026-10-15T06:05:28Z  unit.merge_requested unit=openspec:add-shelf-label
+2026-10-15T06:05:33Z  unit.merged          unit=openspec:add-shelf-label
+2026-10-15T06:05:35Z  unit.postcheck       unit=openspec:add-shelf-label revision=ad6ddf29
+2026-10-15T06:05:35Z  unit.integrated      unit=openspec:add-shelf-label revision=ad6ddf29
+2026-10-15T06:05:35Z  plan.charged         unit=openspec:add-shelf-label attempt=1 runs=1 cost_usd=0.039703
+2026-10-15T06:06:11Z  plan.charged         unit=kiro:units-surplus attempt=1 runs=1 cost_usd=0.0
+2026-10-15T06:06:11Z  unit.dispatched      unit=kiro:units-surplus
+2026-10-15T06:08:43Z  unit.merge_requested unit=kiro:units-surplus
+2026-10-15T06:08:47Z  unit.merged          unit=kiro:units-surplus
+2026-10-15T06:08:50Z  unit.postcheck       unit=kiro:units-surplus revision=f5ed57ab
+2026-10-15T06:08:50Z  unit.integrated      unit=kiro:units-surplus revision=f5ed57ab
+2026-10-15T06:08:50Z  plan.charged         unit=kiro:units-surplus attempt=1 runs=1 cost_usd=0.043204
+2026-10-15T06:09:18Z  batch.accepted       batch=w5 revision=f5ed57ab
+2026-10-15T06:09:43Z  plan.completed       revision=f5ed57ab

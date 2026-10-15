@@ -86,7 +86,7 @@ class Job:
                 ["/bin/sh", "-c", f'{shlex.join(l4)}; echo "l4 exit $?"'], cwd=tdd.repo, env=env,
                 stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT, start_new_session=True,
             )  # fmt: skip
-        self.names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd.cache)
+        self.names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd.cache, repo_key=tdd.key)
         _wait_until(lambda: self.marker.exists() or self.shell.poll() is not None, START_S, "the agent to start")
         assert self.marker.exists(), self.output()
         self.agent_pid = json.loads(self.marker.read_text())["pid"]

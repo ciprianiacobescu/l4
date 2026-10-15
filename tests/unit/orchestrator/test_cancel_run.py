@@ -82,7 +82,7 @@ def test_the_lock_is_free_after_a_cancel(run_l4, monkeypatch):
 
     from ..conftest import UNIT
 
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=first.tdd.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=first.tdd.cache, repo_key=first.tdd.key)
     lease = LocalFileLease(names.flock_path, unit=UNIT, run_id="r-next")
     lease.acquire()  # free at once, not only when the process ends
     lease.release()

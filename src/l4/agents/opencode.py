@@ -36,10 +36,19 @@ from l4.agents.base import (
 )
 from l4.agents.claude_code import STRUCTURED_DETAIL
 from l4.agents.contract import attach_file_result
+from l4.agents.credentials import credential_loader
 from l4.agents.opencode_provider import key_from, provider_config, provider_host, reachable, write_key_file
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
-from l4.availability.probes import _binary, _hello_verdict, _timed, probe_env, status_class
+from l4.availability.probes import (
+    _binary,
+    _hello_verdict,
+    _timed,
+    credential_auth,
+    credential_env,
+    probe_env,
+    status_class,
+)
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.config.schema import OpencodeOptions, Profile
 from l4.safepath import resolve_tool
@@ -205,12 +214,13 @@ class OpenCodeAdapter:
                 **isolation_env(config_dir, config_content(req.permission_policy, step_dir, model, options, key_path)),
             }
             argv = self.build_command(req, exe=exe, workdir=workdir)
-            cmd = wrap_command(req, argv, env, workdir)
-            outcome = self._proc.run(
-                cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
-                stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
-                interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
-            )  # fmt: skip
+            with credential_loader(req) as load:  # OPENCODE_API_KEY (L4-PRV-028): a 0600 file, never env or argv
+                cmd = wrap_command(req, load(argv), env, workdir)
+                outcome = self._proc.run(
+                    cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
+                    stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=req.prompt, timeout_s=req.timeout_s,
+                    interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
+                )  # fmt: skip
         finally:
             if key_path is not None:
                 key_path.unlink(missing_ok=True)  # the credential does not outlive the step
@@ -333,6 +343,8 @@ def probe_opencode(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeRes
     if step == "auth":
         if _has_provider(options):
             return _provider_auth(options, ctx)
+        if (decided := credential_auth(profile, ctx)) is not None:  # OPENCODE_API_KEY decides (L4-PRV-028)
+            return decided
         if model.startswith(FREE_PREFIX):
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
@@ -380,7 +392,7 @@ def _hello(
         config_dir.mkdir()
         key_path = write_key_file(config_dir, key) if key is not None else None
         content = config_content(PermissionPolicy("judge"), work, model, options, key_path)
-        env = probe_env(ctx, isolation_env(config_dir, content))
+        env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env(config_dir, content)})
         argv = [exe, "run", "--pure", "--format", "json", "-m", model, "--title", "l4 hello", ctx.hello_prompt]
         done, millis = _timed(ctx, argv, env, work)
     stream = _scan((done.stdout or "").splitlines())

@@ -40,3 +40,13 @@ def load_app_config(app: AppContext) -> tuple[AppContext, L4Config]:
     app.redactor.adopt(redactor_for_config(cfg, app.environ))
     app.redactor.forge_urls = None  # built for this config, on first use (`l4.forge.urls.app_forge_urls`)
     return app, cfg
+
+
+def attach_forge_urls(app: AppContext, cfg: L4Config) -> None:
+    """Build the forge-host scrubber for `app.redactor` now (`scrub_for_commit` does nothing before). It lives here
+    and imports `l4.forge` only when called, so that a module that must not load the forge client (the experience
+    graph, L4-KG-011) can still scrub the forge host from what it writes and shows. Nothing is fetched: the hosts
+    come from the CI variables, the config and the `origin` URL."""
+    from l4.forge.urls import app_forge_urls
+
+    app_forge_urls(app, cfg)

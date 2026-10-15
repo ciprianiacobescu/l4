@@ -12,8 +12,12 @@ import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from l4.agents.base import AdapterError, RunRequest
+
+if TYPE_CHECKING:
+    from l4.config.schema import Profile
 
 CREDENTIAL_FILE = "credential"
 LOADER_NAME = "l4-credential"  # $0 of the loader
@@ -31,6 +35,25 @@ def credential_variable(adapter: str | None, auth: str | None) -> str | None:
     if adapter == "kiro-cli":
         return "KIRO_API_KEY"  # the headless form of the Kiro account login, for both modes
     return None
+
+
+OPENCODE_OWN_PREFIXES = ("opencode/", "opencode-go/")  # OpenCode's own providers (Zen, Go)
+OPENCODE_API_KEY = "OPENCODE_API_KEY"
+
+
+def profile_credential_variable(profile: "Profile") -> str | None:
+    """The credential variable of `profile` (L4-PRV-028, design D16): OPENCODE_API_KEY for an opencode profile with
+    `auth: api_key`, a model of OpenCode's own providers and no custom provider; else `credential_variable` of its
+    adapter and auth. Every caller that has a profile uses this one."""
+    if (
+        profile.adapter == "opencode"
+        and profile.auth == "api_key"
+        and (profile.model or "").startswith(OPENCODE_OWN_PREFIXES)
+    ):
+        options = profile.opencode_options()
+        if options is None or options.provider is None:
+            return OPENCODE_API_KEY
+    return credential_variable(profile.adapter, profile.auth)
 
 
 def hosted_login_problem(adapter: str | None, auth: str | None) -> str | None:
@@ -73,7 +96,7 @@ def loader_argv(variable: str, value_file: Path, argv: Sequence[str]) -> list[st
 def credential_loader(req: RunRequest) -> Iterator[Callable[[list[str]], list[str]]]:
     """For one agent run: yields the function that puts the loader in front of the agent argv (the identity when the
     profile has no variable or the harness environment has none set). The value file lives only inside the block."""
-    variable = credential_variable(req.profile.adapter, req.profile.auth)
+    variable = profile_credential_variable(req.profile)
     value = credential_in(req.host_env, variable)
     if variable is None or value is None:
         yield list

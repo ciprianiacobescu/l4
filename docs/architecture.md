@@ -534,7 +534,7 @@ flowchart LR
 * **Templates** shipped for both platforms at parity: GitHub reusable workflow + caller, GitLab CI/CD component +
   `include`. `l4 init` generates the caller files.
 * **Shell-executor runners** (like the reference runner) share a filesystem between jobs: worktrees live under
-  `$L4_CACHE/worktrees/<unit>` with a `flock`; agent CLIs and other user-local tools are checked by `l4 doctor`, the
+  `$L4_CACHE/worktrees/<repository key>/<fw>/<unit>` with a `flock` under `$L4_CACHE/locks/<repository key>/`; agent CLIs and other user-local tools are checked by `l4 doctor`, the
   first job of every pipeline, which also installs missing ones user-locally when `ci.self_provision` resolves true
   (AD-18); root-level prerequisites and logins stay human steps. Subscription logins are shared per runner, so runs of the same `(tool, login)` are
   serialised to avoid OAuth refresh races.

@@ -143,7 +143,7 @@ def test_a_unit_whose_only_open_parent_has_optional_children_needs_no_agent(run_
 def _rejected_reasons(tdd_repo) -> list[str]:
     from l4.vcs.names import UnitNames
 
-    names = UnitNames.for_unit("kiro:discounts", branch_prefix="l4/", cache=tdd_repo.cache)
+    names = UnitNames.for_unit("kiro:discounts", branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
     files = sorted((names.worktree / SPEC / ".l4" / "ledger").glob("*.jsonl"))
     events = [json.loads(line) for f in files for line in f.read_text().splitlines()]
     return [r for e in events if e["type"] == "unit.rejected" for r in e["reasons"]]

@@ -15,7 +15,6 @@ from typing import Any, Protocol
 
 from l4.config.schema import MemoryCfg
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
-from l4.implementer.prompt import defuse
 from l4.memory.lessons import Lesson, Problem, parse_lessons, select_lessons
 from l4.vcs.git import Git
 
@@ -42,6 +41,8 @@ def build_lessons_block(lessons: Sequence[Lesson], redact: Callable[[str], str] 
         return ""
     ids = ",".join(lesson.id for lesson in lessons)
     text = "\n\n".join(f"### {lesson.id} {lesson.title}\n{lesson.body}".rstrip() for lesson in lessons)
+    from l4.implementer.prompt import defuse  # lazy: it loads the agent adapters, which the experience graph must not
+
     return f'<l4:data kind="lessons" ids="{ids}">\n{defuse(redact(text))}\n</l4:data>'
 
 

@@ -2,7 +2,8 @@
 
 M0 never reuses a worktree: it is removed and recreated from the remote unit branch (or from base), so a crashed
 run restarts the current task from the last pushed checkpoint. The fetch before it prunes (G8, `l4.vcs.refresh`).
-SPEC gap, to amend: the path has no repository key, so `_remove` refuses a path owned by another repository.
+The path carries the repository key (`l4.vcs.repokey`); `_remove` replaces a checkout of this project or an orphan
+and refuses one that another repository owns.
 M1: state-vcs-locks 1.12 (reuse after fetch + HEAD check), 1.13/1.14 (WIP snapshot), 1.27/1.28 (merge base in).
 """
 
@@ -17,6 +18,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import UnitNames
 from l4.vcs.refresh import unit_refspecs
+from l4.vcs.repokey import key_of_common_dir
 
 
 @dataclass(frozen=True)
@@ -36,14 +38,18 @@ class WorktreeManager:
         branch_prefix: str,
         remote: str = "origin",
         fetch_config: Sequence[tuple[str, str]] = (),
+        cache: Path,
     ) -> None:
         """`fetch_config` is the credential helper (`git -c` pairs): once the forge hook strips the runner's userinfo
-        from the origin URL, a later unit's fetch of an internal project has no other credential."""
+        from the origin URL, a later unit's fetch of an internal project has no other credential. `cache` is the
+        runner cache root (`$L4_CACHE`, `l4.config.defaults.cache_root`): a registration of a unit branch under its
+        `worktrees` directory is this clone's own leftover. Required: a forgotten argument is a TypeError."""
         self._git = git
         self._base = base_branch
         self._prefix = branch_prefix
         self._remote = remote
         self._fetch_config = fetch_config
+        self._cache = cache
 
     def ensure(self, names: UnitNames) -> Worktree:
         self._refresh_and_clear(names.worktree)
@@ -86,38 +92,149 @@ class WorktreeManager:
 
     def _add(self, branch: str, path: Path, start: str, source: Literal["remote_branch", "base"]) -> Worktree:
         path.parent.mkdir(parents=True, exist_ok=True)
+        self._release_branch(branch, path)
         # -B resets a local branch left over from an earlier run to the start point
         self._git.run("worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
         return Worktree(path, branch, start, source)
+
+    def _release_branch(self, branch: str, target: Path) -> None:
+        """`git worktree add -B` fails when another worktree of this clone has `branch` checked out. A leftover of the
+        layout without a repository key, or under another key (the project was renamed or moved), is this clone's own
+        registration under `<cache>/worktrees` (the cache root the caller passed, resolved): remove it, unless the
+        path holds another project's checkout (exit 2) or is the clone's own main worktree or the checkout the run works
+        in (exit 2). One anywhere
+        else is a person's checkout: refuse, naming it. Only this clone's registrations are read (`git worktree
+        list`). The callers hold the unit's flock, which is keyed: a job of an older harness on the same runner
+        holds the old lock path, so upgrade a runner's projects between pipelines (docs/runbook.md)."""
+        owned = (self._cache.resolve() / "worktrees").resolve()
+        main = self._main_worktree()
+        own = self._own_checkout()
+        for path in self._registered_at(branch):
+            if path == target.resolve():
+                continue
+            if path == main:
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is checked out in the main worktree {path} of this clone; "
+                    "check out another branch there, then run again",
+                )
+            if path == own:
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is checked out in the worktree {path} this run works in; "
+                    "run l4 from another checkout of this repository, then run again",
+                )
+            if owned not in path.parents:
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is checked out in the worktree {path}, which is outside the l4 cache; "
+                    "check out another branch there or remove that worktree, then run again",
+                )
+            if not self._belongs_to_this_repository(path):
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is registered at {path}, which holds a checkout of another repository; "
+                    f"refusing to delete it (remove this clone's stale registration {self._registration_of(path)}, "
+                    "or move that checkout away), then run again",
+                )
+            # two forces: a locked registration is removed too
+            self._git.run("worktree", "remove", "-f", "-f", str(path), check=False)
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+            self._git.run("worktree", "prune")
+
+    def _own_checkout(self) -> Path | None:
+        """The checkout this run works in: the resolved top level of the Git the manager uses. Never ours to delete,
+        whether it is the main worktree or a linked one."""
+        top = self._git.run("rev-parse", "--show-toplevel", check=False).stdout.strip()
+        return Path(top).resolve() if top else None
+
+    def _registration_of(self, path: Path) -> str:
+        """The directory `<clone>/.git/worktrees/<id>` that registers `path` in this clone (`git worktree prune` does
+        not remove it while the path exists)."""
+        common = Path(self._git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+        for entry in sorted((common / "worktrees").glob("*/gitdir")):
+            try:
+                if Path(entry.read_text(encoding="utf-8").strip()).parent.resolve() == path.resolve():
+                    return str(entry.parent)
+            except OSError:
+                continue
+        return f"under {common / 'worktrees'}"
+
+    def _main_worktree(self) -> Path | None:
+        """The clone's own checkout: the first `worktree` entry of the porcelain listing. Never ours to delete."""
+        listing = self._git.run("worktree", "list", "--porcelain").stdout
+        for line in listing.splitlines():
+            if line.startswith("worktree "):
+                return Path(line[len("worktree ") :]).resolve()
+        return None
+
+    def _registered_at(self, branch: str) -> list[Path]:
+        listing = self._git.run("worktree", "list", "--porcelain").stdout
+        found: list[Path] = []
+        here: Path | None = None
+        for line in listing.splitlines():
+            if line.startswith("worktree "):
+                here = Path(line[len("worktree ") :]).resolve()
+            elif line == f"branch refs/heads/{branch}" and here is not None:
+                found.append(here)
+        return found
 
     def remove(self, path: Path) -> None:
         self._remove(path)
 
     def _belongs_to_this_repository(self, path: Path) -> bool:
-        """False for a checkout that another repository owns. Worktree and lock paths carry no repository key (SPEC
-        L4-WTR-001), so two projects on one runner that share a change name meet at the same path; deleting it would
-        destroy the other project's live worktree. A path without a `.git` is junk and is ours to replace."""
+        """Whether `path` is ours to replace. Three outcomes for an existing checkout, by repository key
+        (`l4.vcs.repokey`, SPEC L4-WTR-001): the same key (another clone or build directory of this project; the
+        unit's flock, held by every caller before it prepares or removes the path, serialises those jobs) and an
+        orphan (its gitdir points into a clone that no longer exists, so its origin cannot be read) are ours; a
+        different key is another project's live checkout and is refused. A path without a `.git` is junk."""
         marker = path / ".git"
         if not marker.exists() and not marker.is_symlink():
             return True
-        common = Path(self._git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()).resolve()
+        common = self._common_dir_of(path, marker)
+        if common is None:
+            return False  # a `.git` we cannot read: not ours to delete
+        if common == "orphan":
+            return True
+        ours = Path(self._git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()).resolve()
+        if common == ours:
+            return True
+        return key_of_common_dir(common, self._git.env) == key_of_common_dir(ours, self._git.env)
+
+    @staticmethod
+    def _common_dir_of(path: Path, marker: Path) -> Path | Literal["orphan"] | None:
+        """The git common dir of the checkout at `path`; "orphan" when its gitdir no longer exists; None when the
+        marker cannot be read."""
+        if marker.is_dir():
+            return marker.resolve()  # a clone's own `.git` directory
         try:
-            text = marker.read_text(encoding="utf-8", errors="replace") if marker.is_file() else ""
+            text = marker.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return False
+            return None
         prefix = "gitdir:"
         if not text.startswith(prefix):
-            return False  # a real `.git` directory: a clone, not one of our worktrees
+            return None
         gitdir = Path(text[len(prefix) :].strip())
         gitdir = (gitdir if gitdir.is_absolute() else path / gitdir).resolve()
-        return common in gitdir.parents
+        if not gitdir.is_dir():
+            return "orphan"
+        pointer = gitdir / "commondir"
+        if pointer.is_file():
+            target = Path(pointer.read_text(encoding="utf-8", errors="replace").strip())
+            gitdir = (target if target.is_absolute() else gitdir / target).resolve()
+            if not gitdir.is_dir():
+                return "orphan"
+        return gitdir
 
     def _remove(self, path: Path) -> None:
         if not self._belongs_to_this_repository(path):
             raise L4Exit(
                 ExitCode.USAGE_ERROR,
                 f"{path} is a checkout of another repository; refusing to delete it "
-                "(two projects share a change name on this runner)",
+                "(another project's checkout at a path of the keyed cache, or a path outside the cache)",
             )
         self._git.run("worktree", "remove", "--force", str(path), check=False)  # not registered: nothing to do
         if path.is_symlink():

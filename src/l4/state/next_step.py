@@ -40,6 +40,8 @@ def reason(facts: "UnitFacts") -> str | None:
         return f"fix unit questions: {', '.join(facts.fix_questions_open)}"
     if phase == Phase.WAITING_CAPACITY.value and facts.retry_after:
         return f"until {facts.retry_after}"
+    if phase == Phase.IN_REVIEW.value and facts.misdirected:
+        return facts.misdirected  # L4-YOLO-007: the merge went to another branch, so the unit is not merged
     if phase == CORRUPT_PHASE:
         return facts.corrupt
     return None
@@ -78,6 +80,8 @@ def next_step(facts: "UnitFacts", *, branch: str, questions_path: str) -> str:
         until = f"until {facts.retry_after}" if facts.retry_after else "for the cool-down to end"
         return f"wait {until}, or l4 retry --unit {unit} --reason TEXT"
     if phase == Phase.IN_REVIEW.value:
+        if facts.misdirected:
+            return f"the PR {facts.misdirected}: move the change to the base, or l4 restart --unit {unit} --reason TEXT"
         return "review and merge the PR, or ask for changes with l4 feedback add"
     if phase == CORRUPT_PHASE:
         return RUNBOOK_CORRUPT
