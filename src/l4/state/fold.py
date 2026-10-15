@@ -424,6 +424,7 @@ def _unit_restarted(state: UnitState, event: LedgerEvent) -> None:
     }  # fmt: skip
     for name in UnitState.model_fields:
         setattr(state, name, keep.get(name, getattr(fresh, name)))
+    state._accepted_answers.clear()  # a PrivateAttr: the old work's answers never settle a later PASS
     if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
         state.resumed_signals.append(signal)
 
