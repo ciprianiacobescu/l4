@@ -19,11 +19,12 @@ from typing import Any
 
 import click
 
+from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.sweeper import sweep as run_sweep
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
-from l4.exitcodes import plan_exit_code
+from l4.exitcodes import ExitCode, plan_exit_code
 from l4.forge.urls import ForgeUrls, app_forge_urls
 from l4.implementer.tasks import answers_unblock, open_blocking_questions, questions_hold
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
@@ -378,6 +379,9 @@ def run_plan(
     app: AppContext, *, units: tuple[str, ...], as_json: bool, probe: bool, sweep: bool, detailed_exitcode: bool
 ) -> CommandResult:
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
+    if sweep and (warning := stale_pin_stop(cfg, app.repo, app.environ)):  # L4-ADO-005: no work, exit 0
+        click.echo(app.redactor.redact_text(warning), err=True)
+        return CommandResult(ExitCode.OK)
     rows = snapshots(app, cfg, units)
     if sweep and (done := run_sweep(app, cfg, Git(app.repo, environ=app.environ), rows, ci=True)):
         for action in done:

@@ -15,6 +15,7 @@ import re
 
 from l4.buildinfo import harness_commit
 from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH
+from l4.ci.pin_guard import FIX, pin_check
 from l4.config import defaults as d
 from l4.config.schema import effective_delivery
 from l4.doctor.context import DoctorContext
@@ -174,31 +175,12 @@ CFG_007 = register(Check("CFG-007", "A local l4 is on PATH (action adoption)", "
 def _cfg_008(ctx: DoctorContext) -> CheckResult:
     """In a CI job with `harness.delivery: action`, the harness that is running (`L4_HARNESS_COMMIT`, or the commit it
     was installed from) is the pin of `.github/workflows/l4.yml` on the checked-out base. A schedule runs the default
-    branch's copy, so a base that moved on leaves a cron run on the old harness (L4-ADO-005). A warning: the pin
-    itself is CFG-006's."""
-    if ctx.env.get("GITHUB_ACTIONS") != "true":
-        return CheckResult("skip", "applies to CI jobs only")
-    if effective_delivery(ctx.cfg) != "action":
-        return CheckResult("skip", f"harness.delivery is {effective_delivery(ctx.cfg)}, not action")
-    running = harness_commit()
-    if running is None:
-        return CheckResult("skip", "the running harness has no known commit")
-    try:
-        found = read_pin((ctx.repo / WORKFLOW_RELPATH).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError):
-        return CheckResult("skip", f"{WORKFLOW_RELPATH} cannot be read (CFG-006 says so)")
-    pinned = found.effective if found is not None else None
-    if pinned is None:
-        return CheckResult("skip", f"{WORKFLOW_RELPATH} names no pin (CFG-006 says so)")
-    if pinned == running:
-        return CheckResult("pass", f"the running harness is the base's pin, {running[:12]}")
-    return CheckResult(
-        "fail",
-        f"this job runs the harness {running} but {WORKFLOW_RELPATH} on the base pins {pinned}: the run is "
-        "on a copy of the workflow that is not the base's (a scheduled run uses the default branch's copy)",
-        f"update {WORKFLOW_RELPATH} on the default branch to the base's copy (merge it, or `l4 upgrade` and copy the "
-        "file there)",
-    )
+    branch's copy, so a base that moved on leaves a cron run on the old harness (L4-ADO-005); `l4 plan --sweep` and
+    `l4 run` then do no work (`l4.ci.pin_guard`). A warning: the pin itself is CFG-006's."""
+    check = pin_check(ctx.cfg, ctx.repo, ctx.env, harness_commit())
+    if check.status == "mismatch":
+        return CheckResult("fail", check.problem, FIX)
+    return CheckResult(check.status, check.reason)
 
 
 CFG_008 = register(

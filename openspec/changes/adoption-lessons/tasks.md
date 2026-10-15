@@ -7,6 +7,7 @@
 - [x] 1.4 Doctor row `CFG-008` (warn, scope `ci`) compares `read_pin` of the base workflow with `harness_commit()`; on a
   mismatch the CI entry point does no work and exits 0 after printing a `::warning::` annotation with both commits and
   the fix (L4-ADO-005). It is skipped outside CI, for a delivery other than `action`, or with no running commit [L4-ADO-005] [SCN-ADO-13, SCN-ADO-14, SCN-ADO-15] — test: tests/unit/doctor/test_action_pin.py (test first) — code: src/l4/doctor/checks_config.py — verify: uv run pytest tests/unit/doctor -q
+- [x] 1.4b The no-work behaviour of 1.4: `l4.ci.pin_guard` (`pin_check`, shared with CFG-008; `stale_pin_stop`) is called first by `l4 plan --sweep` and `l4 run` (not `--dry-run`); on a mismatch they print the `::warning::` annotation (both commits, the fix) to stderr and exit 0 without work [L4-ADO-005] [SCN-ADO-13, SCN-ADO-14, SCN-ADO-15] — test: tests/unit/ci/test_pin_guard.py — code: src/l4/ci/pin_guard.py, src/l4/planner.py, src/l4/orchestrator.py, src/l4/doctor/checks_config.py — verify: uv run pytest tests/unit/ci tests/unit/doctor -q
 - [x] 1.5 `l4 upgrade` prints the default-branch reminder when the local `origin/HEAD` is not the base. `l4 setup github` prints a FAILED row when the default branch's `l4.yml` pin differs from the base's. Needs 1.3 [L4-ADO-005] [SCN-ADO-16] — test: tests/unit/init/test_upgrade.py, tests/unit/setup/test_github_setup.py (tests first) — code: src/l4/init/upgrade.py, src/l4/setup/github.py — verify: uv run pytest tests/unit/init tests/unit/setup -q
 
 ## 2. The test gate
