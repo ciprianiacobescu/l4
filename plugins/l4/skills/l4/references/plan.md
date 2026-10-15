@@ -1,0 +1,109 @@
+# Making and updating a delivery plan
+
+A plan is the file `.l4/plans/<id>.json` on the base branch. It orders spec units (OpenSpec changes, Kiro specs) and
+sets limits. Your job is to write that file correctly and hand it to a person. The full guide for the person is
+`docs/yolo-mode.md`; stops are in `docs/runbook.md` section 12.
+
+**When to make one.** Only when specs must run in an order. One spec, or specs with no order between them, need no
+plan: they run as usual. Every spec of the repository must be in a plan or in a plan's `exclude`.
+
+**Waves are not parallel runs.** The validator prints waves: what COULD run together because nothing orders it. The
+plan still runs one unit at a time, in the printed order.
+
+## Create
+
+1. Start from the scaffold. It lists every spec that no plan lists, in one batch `unplanned`, with no dependencies,
+   and writes nothing else (no commit, no push, no model call):
+
+   ```sh
+   l4 yolo draft <id> [--target BRANCH] [--merge human|auto]
+   ```
+
+   It refuses an existing file. Finished specs go into `exclude` with the reason `already merged`.
+2. Read each spec's proposal or requirements, and its tasks. Add `depends_on: ["<unit id>"]` **only** when a spec
+   uses something that another spec introduces or changes: a module, a function, a data field, a file, an endpoint, a
+   config key. Two specs that change the same code in conflicting ways are ordered too. Prefer fewer edges. A guess is
+   not evidence: when you cannot point to a line, add no dependency.
+3. Use a batch to group units that share an acceptance check (`acceptance_profile`, a profile of `yolo.profiles`).
+   Do not invent profiles.
+4. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters).
+5. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.
+
+Example: `add-pricing` adds a module, `use-pricing` calls it, `report-export` is independent, `legacy-import` is
+deliberately outside.
+
+```json
+{
+  "schema": "l4/delivery-plan@1",
+  "plan_id": "pricing",
+  "target": "l4/main",
+  "merge": "human",
+  "limits": {"max_cost_usd": 20, "max_unit_attempts": 2},
+  "external_dependencies": [],
+  "batches": [
+    {"id": "pricing", "depends_on": [], "units": [
+      {"id": "openspec:add-pricing", "depends_on": []},
+      {"id": "openspec:use-pricing", "depends_on": ["openspec:add-pricing"]}
+    ]},
+    {"id": "reports", "depends_on": [], "units": [
+      {"id": "kiro:report-export", "depends_on": []}
+    ]}
+  ],
+  "exclude": [
+    {"id": "kiro:legacy-import", "reason": "owned by another team; its PR is open"}
+  ]
+}
+```
+
+Here `add-pricing` and `report-export` are in wave 1 and `use-pricing` is in wave 2; the plan still runs them one
+after the other.
+
+## Validate
+
+Run both, from the repository root, and fix every problem they print. Never silence one: not by deleting a
+dependency you cannot justify, nor by excluding a spec only to make the check pass.
+
+```sh
+python3 <skill dir>/scripts/validate_plan.py
+l4 yolo check <id>
+```
+
+- The script needs only Python. It reads every `.l4/plans/*.json`, finds the units like the harness does, and checks
+  the schema, the graph (cycles, unknown units, duplicates) and the coverage across all plan files (`uncovered`,
+  `covered_twice`). On success it prints the dispatch order and the waves. Exit 0 is valid, 1 lists problems.
+- `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
+  against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
+
+## Hand off
+
+Commit and push the plan file only, never a spec edit with it. One evidence line per dependency goes in the commit
+message, naming the spec file that shows it:
+
+```sh
+git add .l4/plans/<id>.json
+git commit -m "plan pricing: add-pricing, use-pricing, report-export
+
+openspec:use-pricing depends on openspec:add-pricing: use-pricing's tasks call add-pricing's parse_price() (add-pricing/specs/pricing/spec.md)
+exclude kiro:legacy-import: its PR is open and owned by another team"
+git push
+```
+
+Then stop. A person reads the review (`l4 yolo review <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
+
+## Update
+
+A new spec means `l4 yolo draft <id> --update`. It appends the new specs to the batch `unplanned` (or to `exclude`),
+keeps everything else, and reports a spec that is gone as `gone: <id>` without removing it. Then move the new unit
+where it belongs, add its dependencies on evidence, and validate, commit and push as above.
+
+An **active plan stops (`inputs_changed`) when its file changes**. It needs a new review and a new activation by a
+person; its usage (cost, runs, attempts) is kept. Say so in your hand-off. A spec with no order to the active plan can
+go into a new plan instead, which leaves the active file alone. Only one plan is active on a target, so a person activates the new one after the first completes.
+
+## Never
+
+- Activate, resume or cancel a plan for a person. Those are their decisions.
+- Write `refs/l4/plans/*`. It is the harness's ledger.
+- Set `merge: auto` unless the person asked and `forge.merge_policy` is `auto`.
+- Edit a unit's spec to make a plan valid. Change the plan, or ask.
+- Add a dependency you cannot support with a line of a spec.

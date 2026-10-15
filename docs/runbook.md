@@ -1347,7 +1347,7 @@ stateDiagram-v2
 
 ### 12.2 Procedure: review and activate a plan
 
-1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it.
+1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it. To make the file, use 12.8.
 2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing.
 3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.
 4. Run `l4 yolo review <plan-id>`. This starts a run on `<base>`. The run reviews the plan.
@@ -1387,7 +1387,7 @@ JSON is readable but the plan is not valid, the file still holds the units that 
 2. Find the code in the table below. Do the action in the column `Clear it`.
 3. Run the command in the column `Then`.
 
-The command `l4 yolo resume` is refused with exit 2 while the cause is still there. The refusal names the command to
+The command `l4 yolo resume` is refused with exit 2 while the cause is still there. For a limit stop, the refusal stays until you give an option `--extend-…`, because the figures already include the attempt that stopped the plan. The refusal names the command to
 run first. A stopped plan dispatches and merges nothing. This includes later units that do not depend on the failed
 unit.
 
@@ -1396,21 +1396,21 @@ unit.
 | `unit_halted` | The current unit is `halted` ([7.2](#72-halted)). | `l4 retry --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `unit_escalated` | The current unit is `escalated` ([7.3](#73-escalated)). | `l4 retry --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `unit_abandoned` | A person closed the PR of the current unit with no merge ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). | Open the PR again, or run `l4 restart --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
-| `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). A resume cannot clear it. | Correct the spec. | `l4 yolo review <plan-id>`, then `l4 yolo activate <plan-id> --reason "<why>"` |
-| `merge_refused` | The push to the target was refused. The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the push of the harness to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The next step tries the merge once more. |
+| `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). A resume cannot clear it. | Correct the spec on the unit branch. Push it. The plan then stops with `inputs_changed`. CI reviews the plan. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit again. You do not need `l4 restart`. |
+| `merge_refused` | The push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the push of the harness to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
 | `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
-| `limit_cost` | The plan used `limits.max_cost_usd`. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |
+| `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |
 | `limit_runs` | The plan used `limits.max_runs`. | None. Decide if the plan can use more runs. | `l4 yolo resume <plan-id> --reason "<why>" --extend-runs <n>` |
-| `limit_attempts` | A unit used `limits.max_unit_attempts`. A restart counts as an attempt, and the cost of each attempt stays in the plan. | None. Decide if the unit can have more attempts. | `l4 yolo resume <plan-id> --reason "<why>" --extend-attempts <n>` |
+| `limit_attempts` | A unit used `limits.max_unit_attempts`. The attempts count from the activation: a restart before the plan does not count. A restart after the activation counts as an attempt, and the cost of each attempt stays in the plan. | None. Decide if the unit can have more attempts. | `l4 yolo resume <plan-id> --reason "<why>" --extend-attempts <n>` |
 | `limit_deadline` | The time in `limits.deadline` passed. | None. Decide on a new time. | `l4 yolo resume <plan-id> --reason "<why>" --extend-deadline <ISO-time>` |
-| `inputs_changed` | A person changed a frozen spec of a unit, or the plan file, after the activation. `l4 yolo status` names the unit, or `plan` for the plan file. | Check the change. A resume cannot clear this reason. | `l4 yolo review <plan-id>`, then `l4 yolo activate <plan-id> --reason "<why>"` |
+| `inputs_changed` | A person changed a frozen spec of a unit, or the plan file (the `exclude` list too), after the activation. A person also causes it when the plan file is deleted. `l4 yolo status` names the unit, or `plan` for the plan file. | Check the change. If the plan file was deleted, restore it. A resume cannot clear this reason. | `l4 yolo review <plan-id>`, then `l4 yolo activate <plan-id> --reason "<why>"` |
 | `target_missing` | The target branch is not on `origin`. | Create the target branch on `origin` again. | `l4 yolo resume <plan-id> --reason "<why>"` |
-| `unit_missing` | The current unit is not in the units of the target any more. A person removed or moved its folder. | Put the unit folder back on the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
+| `unit_missing` | The current unit is not in the units of the target any more. A person removed or moved its folder. This is not true for a merged unit: if the folder of a merged unit moved to the archive, the harness integrates the unit. | Put the unit folder back on the target. | `l4 yolo resume <plan-id> --reason "<why>"` |
 
 > **NOTE:** The usage is never reset. A resume, a restart of a unit and a new activation keep the cost, the runs and the
 > attempts that the plan used. The harness charges each attempt of a unit on its own. A restart starts a new attempt and
-> does not remove the cost of the attempts before it. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
+> does not remove the cost of the attempts before it. The attempts of a unit count from the activation. A restart before the plan does not count. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
 
 > **CAUTION:** For `unit_rejected` and `inputs_changed`, the new activation uses the new spec. If you do not want the
 > plan to continue, use `l4 yolo cancel <plan-id> --reason "<why>"`.
@@ -1471,6 +1471,13 @@ While a plan is active, a unit that is not in the plan gets no new agent work. T
 closed PRs and its labels. `l4 run --unit <unit>` exits 13 for a unit that is not the current unit of the plan, and it
 changes nothing.
 
+Three more rules apply:
+- A unit that is already in review when the plan reaches it is adopted. The harness records it as dispatched. Then it
+  merges the unit (`merge: auto`), or waits for the merge of a person (`merge: human`).
+- The harness does not merge a unit that a person removed from the plan file.
+- An error that the harness did not expect in the plan step does not fail the run of the other units. The units of the
+  plan stay held. The next run tries the step again.
+
 ### 12.7 Reports, receipts and promotion
 
 - When the plan completes, and at each stop, the harness writes `report.md`. It is in the plan ref and in
@@ -1478,3 +1485,30 @@ changes nothing.
 - Each integrated unit has a receipt in `receipts/<unit-name>.json` in the plan ref.
 - The report says `Promotion to <branch> was not performed`. The harness never pushes, never opens a PR and never merges
   to the promotion branch. A person promotes the target by hand.
+
+### 12.8 Procedure: make or change a plan
+
+Use this procedure to make a new plan file, or to change a plan after you add or remove a spec.
+
+1. Run `l4 yolo draft <plan-id>`. The command writes `.l4/plans/<plan-id>.json` in your working tree. It lists each spec
+   that no plan lists in the batch `unplanned`, with no dependency. It puts a finished spec in `exclude`. It does not
+   commit, push or call a model. It refuses a file that exists.
+2. Edit the file. Move the units into batches. Add `depends_on` only where a spec uses something that another spec
+   introduces or changes. Give each `exclude` entry a reason that a person can check.
+3. Run `python3 scripts/validate_plan.py` (the skill has the same file in `plugins/l4/skills/l4/scripts/`). Correct each
+   problem. The script prints the order and the waves. A wave shows what could run together. The plan runs one unit at a
+   time.
+4. Run `l4 yolo check <plan-id>`. Correct each finding.
+5. Commit and push the plan file. Write one line of evidence for each dependency in the commit message.
+6. Run `l4 yolo review <plan-id>`, then read it (12.2).
+7. A person runs `l4 yolo activate <plan-id> --reason "<why>"`.
+
+To update a plan that exists, run `l4 yolo draft <plan-id> --update` and do steps 2 to 7 again. The command adds each new
+spec to `unplanned` and keeps all other edits. It names a unit that is gone as `gone: <id>` and does not remove it.
+
+> **WARNING:** A change of the file of an active plan stops the plan with `inputs_changed`. The plan keeps its usage. A
+> person must review and activate the plan again. A spec that has no order with the active plan can go in a new plan.
+> Only one plan can be active on a target.
+
+An agent can do steps 1 to 5 with the skill reference `references/plan.md`. The agent does not activate, resume or cancel
+a plan.
