@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -272,3 +272,247 @@ def resolve(
             f"or ask again with l4 yolo review {plan_id} --worktree --fresh {subject}."
         )
     return "Read the finding and change the specification it points to, then run the review again."
+
+
+# --- showing the findings ---------------------------------------------------------------------------------------------
+
+SCHEMA = "l4/yolo-findings@1"
+_RANK = {"blocking": 0, "major": 1, "minor": 2}
+
+
+def _by_severity(items: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Blocking, major, minor; the judge's order within a severity. An unknown severity comes last."""
+    return sorted(items, key=lambda f: _RANK.get(str(f.get("severity")), len(_RANK)))
+
+
+def most_severe(findings: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """The finding the one-line views show: the first blocking, else the first major, else the first minor."""
+    ordered = _by_severity(findings)
+    return ordered[0] if ordered else None
+
+
+@dataclass(frozen=True)
+class UnitInfo:
+    """What the plan says about a subject, for its `Resolve:` lines: a batch is given as `batch:<id>` with no folder."""
+
+    folder: str | None = None
+    batch: str | None = None
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _Facts:
+    subject: str
+    verdict: str
+    material: str | None
+    findings: list[dict[str, Any]]
+    assumptions: list[str]
+    missing: list[str]
+    since: RoundDiff | None
+    persistent: dict[str, int]
+    accepted: Mapping[str, Any] | None
+    holds: bool
+    accept_available: bool
+
+
+def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
+    for prefix, group in (("", review.get("units")), (BATCH_PREFIX, review.get("batches"))):
+        for ident, entry in (group or {}).items():
+            if isinstance(entry, dict) and entry.get("verdict") is not None:
+                yield f"{prefix}{ident}", entry
+
+
+def _facts(
+    review: Mapping[str, Any],
+    history_of: Callable[[str], Sequence[Mapping[str, Any]]],
+    *,
+    show_all: bool,
+    only: str | None,
+    accepted: Mapping[str, Mapping[str, Any]] | None,
+    holds: Mapping[str, bool] | None,
+    can_accept: Callable[[str], bool] | None,
+) -> list[_Facts]:
+    out: list[_Facts] = []
+    for subject, entry in _subjects(review):
+        verdict = str(entry["verdict"])
+        if only is not None:
+            if subject != only:
+                continue
+        elif verdict == "READY" and not show_all:
+            continue
+        hist = list(history_of(subject))
+        material = entry.get("material") or (hist[-1]["material"] if hist else None)
+        judgements = judged(hist)
+        earlier = [j for j in judgements if j["material"] != material]
+        findings = [dict(f) for f in entry.get("findings") or ()]
+        since = diff(earlier[-1].get("findings") or (), findings) if earlier else None
+        accept = (accepted or {}).get(subject)
+        accept_holds = bool((holds or {}).get(subject, False)) if accept else False
+        available = (
+            verdict != "READY"
+            and not (accept and accept_holds)
+            and can_accept is not None
+            and bool(can_accept(subject))
+        )
+        out.append(
+            _Facts(
+                subject=subject,
+                verdict=verdict,
+                material=str(material) if material else None,
+                findings=findings,
+                assumptions=[str(a) for a in entry.get("assumptions") or ()],
+                missing=[str(m) for m in entry.get("missing") or ()],
+                since=since,
+                persistent=persistent(judgements),
+                accepted=accept,
+                holds=accept_holds,
+                accept_available=available,
+            )
+        )
+    return out
+
+
+def _resolver(plan_id: str, base: str, units: Mapping[str, UnitInfo] | None):
+    known = [u for u in (units or {}) if not u.startswith(BATCH_PREFIX)]
+
+    def line(subject: str, finding: Mapping[str, Any]) -> str:
+        info = (units or {}).get(subject)
+        if info is None and subject.startswith(BATCH_PREFIX):
+            info = UnitInfo(batch=subject[len(BATCH_PREFIX) :])
+        info = info or UnitInfo()
+        return resolve(
+            plan_id,
+            base,
+            subject,
+            finding,
+            folder=info.folder,
+            batch=info.batch,
+            depends_on=info.depends_on,
+            known_units=known,
+        )
+
+    return line
+
+
+def render(
+    plan_id: str,
+    base: str,
+    review: Mapping[str, Any],
+    history_of: Callable[[str], Sequence[Mapping[str, Any]]],
+    *,
+    show_all: bool = False,
+    units: Mapping[str, UnitInfo] | None = None,
+    accepted: Mapping[str, Mapping[str, Any]] | None = None,
+    holds: Mapping[str, bool] | None = None,
+    can_accept: Callable[[str], bool] | None = None,
+    only: str | None = None,
+) -> list[str]:
+    """The text of `l4 yolo findings` for the latest review (`review` is the data of its `plan.reviewed` event;
+    `history_of(subject)` is `history(...)` of the ledger). `can_accept(subject)` is the caller's `accept.check` made
+    boolean. `only` names one subject, shown whatever its verdict."""
+    resolver = _resolver(plan_id, base, units)
+    lines: list[str] = []
+    for fact in _facts(
+        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept
+    ):
+        lines.append(f"{fact.subject}: {fact.verdict}")
+        shown = _by_severity(fact.findings)
+        minors = [f for f in shown if f.get("severity") == "minor"]
+        for f in shown if show_all else [f for f in shown if f.get("severity") != "minor"]:
+            lines.append(f"  {finding_id(fact.subject, f)} [{f.get('severity')}/{f.get('criterion')}] {f.get('text')}")
+            lines.append(f"    Resolve: {resolver(fact.subject, f)}")
+        if minors and not show_all:
+            n = len(minors)
+            lines.append(f"  {n} minor finding{'s' if n != 1 else ''} (--all shows {'them' if n != 1 else 'it'})")
+        if show_all:
+            lines.extend(f"  assumption: {a}" for a in fact.assumptions)
+            lines.extend(f"  missing: {m}" for m in fact.missing)
+        if fact.since is not None:
+            s = fact.since
+            lines.append(
+                f"  since the previous judgement: {len(s.new)} new, {len(s.repeated)} repeated, {len(s.gone)} gone"
+            )
+        if fact.persistent:
+            lines.append("  persistent: " + ", ".join(f"{c} ×{n}" for c, n in fact.persistent.items()))
+        if fact.accepted is not None:
+            state = "holds" if fact.holds else "no longer holds: the material changed"
+            lines.append(
+                f"  accepted by {fact.accepted.get('by')} ({fact.accepted.get('actor')}): "
+                f"{fact.accepted.get('reason')} ({state})"
+            )
+        if fact.accept_available:
+            lines.append(f"  accept: l4 yolo accept {plan_id} {fact.subject} --reason TEXT")
+    return lines
+
+
+def render_json(
+    plan_id: str,
+    base: str,
+    review: Mapping[str, Any],
+    history_of: Callable[[str], Sequence[Mapping[str, Any]]],
+    *,
+    show_all: bool = False,
+    units: Mapping[str, UnitInfo] | None = None,
+    accepted: Mapping[str, Mapping[str, Any]] | None = None,
+    holds: Mapping[str, bool] | None = None,
+    can_accept: Callable[[str], bool] | None = None,
+    only: str | None = None,
+) -> dict[str, Any]:
+    """The same facts as `render`, as a JSON-serialisable document (`schema: l4/yolo-findings@1`). Every finding of a
+    shown subject is listed, minor ones too, in the order of `render`."""
+    resolver = _resolver(plan_id, base, units)
+    subjects: list[dict[str, Any]] = []
+    for fact in _facts(
+        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept
+    ):
+        since = None
+        if fact.since is not None:
+            since = {
+                "new": len(fact.since.new),
+                "repeated": len(fact.since.repeated),
+                "gone": len(fact.since.gone),
+                "by_criterion": [
+                    {"criterion": c, "severity": s, "before": before, "now": now}
+                    for (c, s), (before, now) in fact.since.by_criterion.items()
+                ],
+            }
+        subjects.append(
+            {
+                "subject": fact.subject,
+                "verdict": fact.verdict,
+                "material": fact.material,
+                "findings": [
+                    {
+                        "id": finding_id(fact.subject, f),
+                        "criterion": f.get("criterion"),
+                        "severity": f.get("severity"),
+                        "text": f.get("text"),
+                        "resolve": resolver(fact.subject, f),
+                    }
+                    for f in _by_severity(fact.findings)
+                ],
+                "minor": sum(1 for f in fact.findings if f.get("severity") == "minor"),
+                "assumptions": fact.assumptions,
+                "missing": fact.missing,
+                "since": since,
+                "persistent": fact.persistent,
+                "accepted": (
+                    {
+                        "by": fact.accepted.get("by"),
+                        "actor": fact.accepted.get("actor"),
+                        "reason": fact.accepted.get("reason"),
+                        "holds": fact.holds,
+                    }
+                    if fact.accepted is not None
+                    else None
+                ),
+                "accept_available": fact.accept_available,
+            }
+        )
+    return {
+        "schema": SCHEMA,
+        "plan": plan_id,
+        "base": base,
+        "plan_digest": review.get("plan_digest"),
+        "subjects": subjects,
+    }
