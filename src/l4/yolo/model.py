@@ -47,6 +47,13 @@ class PlanBatch(_Strict):
     units: list[PlanUnit]
 
 
+class PlanExclusion(_Strict):
+    """A unit this plan deliberately does not deliver (D15, L4-YOLO-017): it is not held and runs as without a plan."""
+
+    id: str
+    reason: str = Field(min_length=1, max_length=200)
+
+
 class PlanLimits(_Strict):
     """The plan's limits (D11). R12: at least one attempt and one run, a cost of zero or more, a deadline with a time
     zone (a naive one cannot be compared with the clock)."""
@@ -78,6 +85,7 @@ class Plan(_Strict):
     limits: PlanLimits = Field(default_factory=PlanLimits)
     external_dependencies: list[dict[str, Any]] = Field(default_factory=list)
     batches: list[PlanBatch]
+    exclude: list[PlanExclusion] = Field(default_factory=list)
 
     def units(self) -> list[PlanUnit]:
         """Every unit, in file order (batch position, then unit position)."""
@@ -85,6 +93,10 @@ class Plan(_Strict):
 
     def unit_ids(self) -> list[str]:
         return [u.id for u in self.units()]
+
+    def known_ids(self) -> list[str]:
+        """The unit ids admission must look up: the planned units and the excluded ones (D15), each once."""
+        return list(dict.fromkeys([*self.unit_ids(), *(x.id for x in self.exclude)]))
 
     def batch_of(self, unit_id: str) -> PlanBatch | None:
         return next((b for b in self.batches if any(u.id == unit_id for u in b.units)), None)

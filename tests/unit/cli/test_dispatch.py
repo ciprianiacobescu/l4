@@ -16,7 +16,9 @@ SECTION_2_1 = {
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
-YOLO = {f"yolo {w}" for w in ("check", "review", "activate", "status", "cancel", "resume", "report")}  # yolo-mode D6
+YOLO = {
+    f"yolo {w}" for w in ("draft", "check", "review", "activate", "status", "cancel", "resume", "report")
+}  # yolo-mode D6
 EXTRA |= YOLO
 
 # minimal valid argv per command, including options that are required
@@ -50,6 +52,7 @@ ARGV = {
     "feedback show": ["feedback", "show", "FB-001"],
     "feedback submit": ["feedback", "submit", "FB-001"],
     "feedback withdraw": ["feedback", "withdraw", "FB-001"],
+    "yolo draft": ["yolo", "draft", "p1"],
     "yolo check": ["yolo", "check", "p1"],
     "yolo review": ["yolo", "review", "p1"],
     "yolo activate": ["yolo", "activate", "p1", "--reason", "go"],

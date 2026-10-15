@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 
 FINAL = frozenset({"cancelled", "completed"})  # statuses no command changes any more
 RELEASES = "completed"  # the one status that holds no unit: the plan integrated them all (a cancelled plan still holds)
+ACTIVATED = ("active", "waiting", "stopped")  # activated and not final: these plans win a unit two files list
 INVALID = "invalid"  # the status shown for a plan file that is not a plan and has no ledger
 
 
@@ -144,9 +145,9 @@ def unit_infos(
     return infos
 
 
-def readable_unit_ids(text: str) -> list[str] | None:
-    """The unit ids a plan file names in `batches[].units[].id`, in file order, whatever else is wrong with it (R8);
-    None when the text is not a JSON object. Entries of the wrong shape are skipped."""
+def _raw_ids(text: str) -> tuple[list[str], list[str]] | None:
+    """(the unit ids in `batches[].units[].id`, the ids in `exclude[].id`), each in file order and once, whatever else
+    is wrong with the file; None when the text is not a JSON object. Entries of the wrong shape are skipped."""
     try:
         raw = json.loads(text)
     except ValueError:
@@ -161,7 +162,31 @@ def readable_unit_ids(text: str) -> list[str] | None:
             unit_id = unit.get("id") if isinstance(unit, dict) else None
             if isinstance(unit_id, str) and unit_id and unit_id not in ids:
                 ids.append(unit_id)
-    return ids
+    excluded: list[str] = []
+    entries = raw.get("exclude")
+    for entry in entries if isinstance(entries, list) else []:
+        entry_id = entry.get("id") if isinstance(entry, dict) else None
+        if isinstance(entry_id, str) and entry_id and entry_id not in excluded:
+            excluded.append(entry_id)
+    return ids, excluded
+
+
+def readable_unit_ids(text: str) -> list[str] | None:
+    """The unit ids a plan file names in `batches[].units[].id`, in file order, whatever else is wrong with it (R8),
+    without the ids its `exclude` names (D15: an excluded unit is not held); None when the text is not a JSON object.
+    Entries of the wrong shape are skipped."""
+    found = _raw_ids(text)
+    if found is None:
+        return None
+    ids, excluded = found
+    return [i for i in ids if i not in excluded]
+
+
+def listed_ids(file: "PlanFile") -> set[str]:
+    """Every unit id a plan file lists, planned or excluded (what `l4 yolo draft` and the validator count as covered),
+    whatever else is wrong with the file; empty for a file that is not a JSON object."""
+    found = _raw_ids(file.text)
+    return set() if found is None else {*found[0], *found[1]}
 
 
 @dataclass(frozen=True)
@@ -173,13 +198,16 @@ class PlanHolds:
 def holds_of(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> PlanHolds:
     """unit id -> (plan id, plan status) for every unit listed in a plan file (design D10, R8), and the files that
     hold nothing because they are not JSON. A completed plan holds nothing (SCN-YOLO-28). The status is the plan's
-    own (`new` without a ledger, `invalid` for a file that is not a plan and has no ledger). A unit listed by two
-    plans is held by the first file in path order; admission of the second plan refuses it (`held_by_other_plan`)."""
-    held: dict[str, tuple[str, str]] = {}
+    own (`new` without a ledger, `invalid` for a file that is not a plan and has no ledger). A unit listed in a
+    plan's `exclude` is not held by it (D15). A unit listed by two plans is held by the plan that is active, waiting
+    or stopped when there is one (review #15), else by the first file in path order; admission of the other plan
+    refuses it (`held_by_other_plan`)."""
+    candidates: dict[str, list[tuple[str, str]]] = {}  # unit id -> (plan id, status) of each file that lists it
     unreadable: list[PlanFile] = []
     for file in files:
         if file.plan is not None:
-            unit_ids: list[str] | None = file.plan.unit_ids()
+            left_out = {x.id for x in file.plan.exclude}
+            unit_ids: list[str] | None = [u for u in file.plan.unit_ids() if u not in left_out]
             fallback = "new"
         else:
             unit_ids = readable_unit_ids(file.text)
@@ -191,7 +219,11 @@ def holds_of(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> Plan
         if status == RELEASES:
             continue
         for unit_id in unit_ids:
-            held.setdefault(unit_id, (file.plan_id, status))
+            candidates.setdefault(unit_id, []).append((file.plan_id, status))
+    # review #15: the plan that is activated and not final holds the unit, whatever its path; else the first file
+    held = {
+        unit_id: next((c for c in holders if c[1] in ACTIVATED), holders[0]) for unit_id, holders in candidates.items()
+    }
     return PlanHolds(held, unreadable)
 
 
