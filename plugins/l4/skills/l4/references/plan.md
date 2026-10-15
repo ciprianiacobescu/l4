@@ -94,6 +94,8 @@ admission and the review. Fix its findings the same way.
   merged or integrated it.
 - `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
   against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
+- Errors (exit 1): a planned unit's own folder over the budget; a delta with no baseline or no `## Purpose`. A
+  dependency's folder over the budget is only a `warning:` line (exit 0).
 
 ## Check and fix the review
 
@@ -102,12 +104,17 @@ Before the person reviews the plan, run the same review yourself and fix what it
 1. `python3 <skill dir>/scripts/validate_plan.py` clean.
 2. `l4 yolo review <id> --worktree`. It reads the working tree, writes nothing and charges the plan nothing. Only changed
    units are judged again, so repeat it after each fix. Exit 0 means every subject is READY.
-3. `l4 yolo findings <id> --json`. For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
+3. `l4 yolo findings <id> --worktree --json` (the dry run records nothing, so without `--worktree` it is empty). For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
    and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
    wording.
 4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
 5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record`, then push. CI then does not
    judge again. Hand off as below.
+
+`--worktree` needs no sandbox for a `claude-code` or `opencode` judge: outside CI it runs unsandboxed and prints the
+line that says so (the judge has no tools and runs in an empty folder). In CI it fails closed. Minor findings show
+with `findings --all`. After `--worktree`, `findings <id> --worktree` (add `--json`) shows its results, and
+`review <id> --worktree --json` prints the same document.
 
 A person may need an `l4 yolo accept` when the judge keeps finding more after real fixes. It is not your tool:
 - Never run it unless `yolo.review.accept_by_agents` is true in `.l4/config.yaml` on the base branch **and** the
@@ -116,9 +123,13 @@ A person may need an `l4 yolo accept` when the judge keeps finding more after re
 - Otherwise stop and ask the person. Print the exact command for them:
   `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
 
-Stop and ask the person when: a finding asks for a product decision; two rounds repeat the same criterion on the same
-unit; the fix needs a spec cut that drops required behaviour; `--worktree` exits 3 (no sandbox, codex judge). Do not
-shorten a spec only to fit a budget. Move background to `docs/`, or ask for a larger `yolo.review` budget.
+Stop and ask the person when: two rounds repeat the same criterion on the same unit; the fix needs a spec cut that
+drops required behaviour; `--worktree` exits 3 (a judge with a shell and no sandbox: ask for a `claude-code` or
+`opencode` judge profile). Do not shorten a spec only to fit a budget. Move background to `docs/`, or ask for a larger
+`yolo.review` budget.
+
+When a finding needs a product decision, ask the person. Working unattended, decide, and record the decision and its
+reason in the change's `design.md` (create one) under `## Decisions`, so a person can review it.
 
 ## Hand off
 
@@ -155,5 +166,6 @@ active file alone. Only one plan is active on a target, so a person activates th
 - Activate, resume or cancel a plan for a person. Those are their decisions.
 - Write `refs/l4/plans/*`. It is the harness's ledger.
 - Set `merge: auto` unless the person asked and `forge.merge_policy` is `auto`.
-- Edit a unit's spec to make a plan valid. Change the plan, or ask.
+- Weaken or delete a requirement or scenario to silence a check or fit a budget. Fix a spec when the validator or the
+  review finds a real gap in it; change the plan for a plan problem.
 - Add a dependency you cannot support with a line of a spec.
