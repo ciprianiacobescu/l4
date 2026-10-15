@@ -1312,9 +1312,94 @@ def run_findings(app: AppContext, *, plan: str, subject: str | None, show_all: b
     return ExitCode.OK
 
 
+MAX_REASON = 1000
+
+
+def _digests_of(entry: Mapping[str, Any]) -> dict[str, str]:
+    """The digests an entry judged: a batch's `digests`, else the unit's own."""
+    digests = entry.get("digests")
+    if isinstance(digests, Mapping):
+        return {str(k): str(v) for k, v in digests.items()}
+    return {}
+
+
 def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
-    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` (task 2.2)."""
-    raise NotImplementedError
+    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]`: record that a person (or, when the target's
+    configuration allows it, an agent) accepts the latest verdict of one subject as it is (L4-YOLO-027, design D7).
+    Reads as `activate` does and writes one event with the lease. A person sees every finding of the subject and
+    types the plan id; `--yes` replaces that only for an agent that `yolo.review.accept_by_agents` lets accept.
+    Exit 2 for every refusal, with the cause and the fix; nothing is recorded then."""
+    text = reason.strip()
+    if not text:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: --reason must say why (what the implementer should do)")
+    if len(text) > MAX_REASON:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: --reason has {len(text)} characters; at most {MAX_REASON}")
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    _sync(ctx, who="accept")
+    _valid(ctx, _file(ctx, plan_id, "accept"), "accept")
+    store = ctx.store(plan_id)
+    read = store.read()
+    state = fold_plan(plan_id, read.events)
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
+    if withdraw:
+        if subject not in state.accepted:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} has no acceptance: nothing to withdraw")
+        event = _event("plan.acceptance_withdrawn", subject=subject, reason=text, by=ctx.who(), actor=who[0])
+        _append(store, [event], read.head)
+        ctx.say(f"{plan_id}: the acceptance of {subject} is withdrawn")
+        ctx.say(f"Next: l4 yolo review {plan_id}")
+        return ExitCode.OK
+    review = _latest_review(read.events)
+    if review is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {plan_id} has no review yet: run l4 yolo review {plan_id}")
+    latest = _entry_of(review, subject)
+    if latest is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} is not in the latest review of {plan_id}")
+    judged = fnd.judged(fnd.history(read.events, subject, PROMPT_VERSION))
+    refusal = accepting.check(state, judged, subject, latest, accepting.target_config(ctx.git, ctx.target_ref), who)
+    if refusal is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {refusal.message}\nFix: {refusal.fix}")
+    if latest.get("material") is None:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"accept: the review of {subject} predates material keys, so an acceptance could not be bound to it\n"
+            f"Fix: l4 yolo review {plan_id}",
+        )
+    if who[0] == "person":
+        _show_and_confirm(ctx, plan_id, subject, review, read.events, state)
+    elif not yes:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, "accept: no terminal to ask the plan id on: an agent that may accept passes --yes"
+        )
+    found = [dict(f) for f in latest.get("findings") or []]
+    event = _event(
+        "plan.accepted", subject=subject, material=latest["material"], prompt_version=PROMPT_VERSION,
+        plan_digest=review.get("plan_digest"), digests=_digests_of(latest) or ({subject: latest.get("digest")}),
+        verdict=latest["verdict"], findings=found, findings_sha=fnd.findings_sha(found), reason=text, by=ctx.who(),
+        actor=who[0], marker=who[1], rounds=fnd.rounds_not_ready(read.events, subject),
+    )  # fmt: skip
+    _append(store, [event], read.head)
+    ctx.say(f"accepted: {subject} by {event.data['by']} ({who[0]}): {text}")
+    ctx.say(f"Next: l4 yolo status {plan_id}")
+    return ExitCode.OK
+
+
+def _show_and_confirm(
+    ctx: _Ctx, plan_id: str, subject: str, review: Mapping[str, Any], events: Sequence[PlanEvent], state: PlanState
+) -> None:
+    """Print every finding of the subject, then ask for the plan id; any other answer exits 2 with nothing recorded."""
+    lines = fnd.render(
+        plan_id, ctx.target, review, lambda name: fnd.history(events, name, PROMPT_VERSION), show_all=True,
+        only=subject, accepted=state.accepted, holds=accepting.holds(state, review),
+    )  # fmt: skip
+    for line in lines:
+        ctx.say(line)
+    answer = click.prompt(
+        f"Type the plan id ({plan_id}) to accept the findings of {subject} as they are", default="", show_default=False
+    )
+    if str(answer).strip() != plan_id:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: the plan id was not typed: nothing was recorded")
 
 
 __all__ = [
