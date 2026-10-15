@@ -456,3 +456,48 @@ def test_the_job_names_opencodes_own_key():
     assert env["OPENCODE_API_KEY"] == "${{ secrets.OPENCODE_API_KEY }}"
     others = cfg(profiles=config.model_dump()["profiles"], roles={"implementer": ["free", "sub"], "judges": ["free"]})
     assert "OPENCODE_API_KEY" not in parsed(others)["jobs"]["l4"]["env"]
+
+
+JEV = {"backend": "system-one", "engine": "jev", "base_url": "https://api.typesafe.ai", "model": "jev-1.13.0",
+       "api_key_env": "TYPESAFE_API_KEY", "vendor": "typesafe"}  # fmt: skip
+
+
+def _secret_names(config: L4Config) -> list[str]:
+    from l4.ci.github import credential_secrets
+
+    return credential_secrets(config)
+
+
+def test_a_system_one_judge_key_reaches_the_job():
+    """SCN-ADO-47: the api_key_env of a system-one profile in roles.s1_judge is named in the job env."""
+    config = cfg(profiles={"jev": JEV}, roles={"s1_judge": ["jev"]})
+    assert "TYPESAFE_API_KEY" in _secret_names(config)
+    env = parsed(config)["jobs"]["l4"]["env"]
+    assert env["TYPESAFE_API_KEY"] == "${{ secrets.TYPESAFE_API_KEY }}"
+
+
+def test_a_shadow_engine_key_is_named_once():
+    """SCN-ADO-48: a profile in both lists gives one entry, and a shadow-only profile gives its key."""
+    other = {**JEV, "api_key_env": "OTHER_S1_KEY"}
+    config = cfg(
+        profiles={"jev": JEV, "shadow": other},
+        roles={"s1_judge": ["jev"]},
+        verifier={"s1": {"shadow": ["jev", "shadow"]}},
+    )
+    names = _secret_names(config)
+    assert names.count("TYPESAFE_API_KEY") == 1 and names.count("OTHER_S1_KEY") == 1
+    assert render_github_ci(config).count("TYPESAFE_API_KEY:") == 1
+
+
+def test_a_local_system_one_engine_adds_nothing():
+    """SCN-ADO-49: laya-local has no key; the env is the same as without the profile."""
+    laya = cfg(profiles={"laya": {"backend": "system-one", "engine": "laya-local"}}, roles={"s1_judge": ["laya"]})
+    assert render_github_ci(laya) == render_github_ci(L4Config())
+
+
+def test_a_system_one_key_equal_to_the_forge_token_is_not_added_twice():
+    config = cfg(
+        profiles={"jev": {**JEV, "api_key_env": "L4_FORGE_TOKEN"}},
+        roles={"s1_judge": ["jev"]},
+    )
+    assert "L4_FORGE_TOKEN" not in _secret_names(config)

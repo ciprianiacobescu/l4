@@ -167,3 +167,47 @@ def test_clis_none_skips_the_cli_cache():
     for step_id in ("clikey", "clis"):
         step = next(s for s in _steps() if s.get("id") == step_id)
         assert "inputs.clis" in step["if"] and "none" in step["if"]
+
+
+# --- the Laya cache (adoption-lessons 7.4, L4-ADO-019, design D9) ----------------------------------------------------
+
+LAYA = {"laya": {"backend": "system-one", "engine": "laya-local"}}
+RUNNER = {"RUNNER_OS": "Linux", "RUNNER_ARCH": "X64", "ImageOS": "ubuntu24"}
+
+
+def laya_key(repo: Path, capsys, environ=RUNNER) -> str:
+    capsys.readouterr()
+    assert main(["ci", "cache-key", "laya", "--repo", str(repo)], environ=dict(environ)) == 0
+    return capsys.readouterr().out.strip()
+
+
+def test_the_laya_key_names_the_runner_the_pin_and_the_checkpoint(tmp_path, capsys):
+    write_config(tmp_path, {"s1_judge": ["laya"]}, LAYA)
+    expected = f"l4-laya-Linux-X64-ubuntu24-{catalog.LAYA_VERSION}-{catalog.LAYA_CHECKPOINT}"
+    assert laya_key(tmp_path, capsys) == expected == "l4-laya-Linux-X64-ubuntu24-0.3.24-typed-decisions"
+    (tmp_path / ".l4/config.yaml").write_text(
+        yaml.safe_dump({"profiles": LAYA, "verifier": {"s1": {"shadow": ["laya"]}}})
+    )
+    assert laya_key(tmp_path, capsys) == expected  # the shadow list counts
+
+
+def test_there_is_no_laya_key_without_a_laya_local_profile_in_a_system_one_list(tmp_path, capsys):
+    """SCN-ADO-53: no config, a profile used nowhere, or another engine: nothing is printed."""
+    assert laya_key(tmp_path, capsys) == ""
+    write_config(tmp_path, {}, LAYA)
+    assert laya_key(tmp_path, capsys) == ""
+    jev = {"jev": {"backend": "system-one", "engine": "jev", "base_url": "https://api.typesafe.ai", "api_key_env": "K"}}
+    write_config(tmp_path, {"s1_judge": ["jev"]}, jev)
+    assert laya_key(tmp_path, capsys) == ""
+
+
+def test_the_cli_cache_key_does_not_change_with_a_laya_profile(tmp_path, capsys):
+    claude = {"claude": {"adapter": "claude-code", "model": "sonnet"}}
+    write_config(tmp_path, {"implementer": ["claude"]}, claude)
+    before = key_of(tmp_path, capsys)
+    write_config(tmp_path, {"implementer": ["claude"], "s1_judge": ["laya"]}, {**claude, **LAYA})
+    assert key_of(tmp_path, capsys) == before
+
+
+def test_an_unknown_cache_still_exits_2(tmp_path, capsys):
+    assert main(["ci", "cache-key", "nope", "--repo", str(tmp_path)], environ={}) == 2

@@ -38,13 +38,14 @@ def test_inputs_and_outputs_are_those_of_the_design():
     assert defaults["self-provision"] == "auto" and defaults["clis"] == "auto" and defaults["command"] == ""
     assert set(DOC["outputs"]) == {
         "source", "harness-cache-hit", "clis-cache-hit", "version", "clis-cache-key", "clis-cache-paths",
+        "laya-cache-hit", "laya-cache-key", "laya-cache-paths",
     }  # fmt: skip
 
 
 def test_cache_hit_outputs_read_true_or_false():
     """actions/cache leaves `cache-hit` empty on a miss (seen live, run 38301695561): the outputs compare it, so a
     caller reads `true` or `false`, never an empty string."""
-    for name, step in (("harness-cache-hit", "restore"), ("clis-cache-hit", "clis")):
+    for name, step in (("harness-cache-hit", "restore"), ("clis-cache-hit", "clis"), ("laya-cache-hit", "laya")):
         assert DOC["outputs"][name]["value"] == f"${{{{ steps.{step}.outputs.cache-hit == 'true' }}}}"
 
 
@@ -271,7 +272,13 @@ def test_cli_cache_excludes_the_harness_links_and_the_npm_download_cache():
     assert step("clis")["with"]["path"] == "${{ steps.clipaths.outputs.paths }}"  # the list is held once, below
     paths = action_cli_paths()
     assert paths == list(CLI_CACHE_PATHS)
-    assert [p for p in paths if p.startswith("!")] == ["!~/.local/bin/uv", "!~/.local/bin/uvx", "!~/.local/bin/l4"]
+    assert [p for p in paths if p.startswith("!")] == [
+        "!~/.local/bin/uv",
+        "!~/.local/bin/uvx",
+        "!~/.local/bin/l4",
+        "!~/.local/bin/laya-serve",
+        "!~/.local/share/l4/laya",
+    ]  # fmt: skip: Laya has a cache of its own
     assert paths.index("~/.local/bin") < paths.index("!~/.local/bin/uv")  # a later `!` removes earlier matches
     assert "~/.cache/l4" not in paths and "~/.cache/l4/npm" not in paths
     assert "~/.cache/l4/installers" in paths
@@ -284,3 +291,32 @@ def test_the_action_shipped_in_the_package_is_the_repository_one():
 
     repo_file = Path(__file__).resolve().parents[3] / ".github" / "actions" / "l4" / "action.yml"
     assert packaged_action() == repo_file.read_bytes()
+
+
+def action_laya_paths() -> list[str]:
+    lines = step("layapaths")["run"].splitlines()
+    start = lines.index("paths<<L4_LAYA_PATHS")
+    return lines[start + 1 : lines.index("L4_LAYA_PATHS", start)]
+
+
+def test_laya_has_a_cache_of_its_own_restored_only_with_a_key():
+    """L4-ADO-019, SCN-ADO-52/53: a separate restore, held to the `clis` switch, and nothing without a key."""
+    from l4.ci.github import LAYA_CACHE_PATHS
+
+    assert step("layakey")["if"] == "inputs.clis != 'none'" and step("layapaths")["if"] == "inputs.clis != 'none'"
+    assert 'l4" ci cache-key laya' in step("layakey")["run"]
+    restore = step("laya")
+    assert restore["uses"].startswith("actions/cache/restore@")
+    assert restore["if"] == "inputs.clis != 'none' && steps.layakey.outputs.key != ''"
+    assert restore["with"] == {
+        "path": "${{ steps.layapaths.outputs.paths }}",
+        "key": "${{ steps.layakey.outputs.key }}",
+    }
+    assert action_laya_paths() == list(LAYA_CACHE_PATHS)
+    assert DOC["outputs"]["laya-cache-key"]["value"] == "${{ steps.layakey.outputs.key }}"
+    assert DOC["outputs"]["laya-cache-paths"]["value"] == "${{ steps.layapaths.outputs.paths }}"
+
+
+def test_the_cli_cache_key_step_is_unchanged_by_laya():
+    run = step("clikey")["run"]
+    assert "cache-key clis)" in run and 'echo "key=l4-clis-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-image}-$suffix"' in run

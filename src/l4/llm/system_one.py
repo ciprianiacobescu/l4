@@ -38,7 +38,7 @@ import httpx
 
 from l4.agents.base import EventSink
 from l4.agents.factory import RoleUnavailable
-from l4.config.defaults import resolve_executable
+from l4.config.defaults import cache_root, resolve_executable
 from l4.config.schema import L4Config, Profile
 from l4.llm.s1_checkpoint import (
     GATE_PROBLEMS,
@@ -259,6 +259,14 @@ def _script_interpreter(path: str) -> list[str]:
             return []
         return words[1:2]
     return argv
+
+
+def laya_interpreter(argv0: str) -> str:
+    """The interpreter the installed `laya-serve` script names (the uv tool's own), or "" when it cannot be told."""
+    try:
+        return next(iter(_script_interpreter(argv0)), "")
+    except OSError:
+        return ""
 
 
 def _minimal_env(environ: Mapping[str, str]) -> dict[str, str]:
@@ -575,6 +583,15 @@ def laya_checkpoint_present(environ: Mapping[str, str], checkpoint: str) -> bool
     return any(snapshots.glob(f"*/{checkpoint}/model.safetensors"))
 
 
+def laya_hf_environ(environ: Mapping[str, str], checkpoint: str) -> Mapping[str, str]:
+    """`environ`, with `HF_HOME` pointed at the l4 Hugging Face home that provisioning fills (`$L4_CACHE/laya/hf`,
+    design D9 step 4) when none is set and only that home has the checkpoint. The default cache wins when it has it."""
+    if environ.get("HF_HOME") or laya_checkpoint_present(environ, checkpoint):
+        return environ
+    ours = str(cache_root(environ) / "laya" / "hf")
+    return {**environ, "HF_HOME": ours} if laya_checkpoint_present({"HF_HOME": ours}, checkpoint) else environ
+
+
 def _ollama_version(text: object) -> tuple[int, int, int] | None:
     match = re.match(r"v?(\d+)\.(\d+)\.(\d+)", text) if isinstance(text, str) else None
     return None if match is None else (int(match[1]), int(match[2]), int(match[3]))
@@ -645,6 +662,7 @@ def _probe(
                 return None, problem
             environ = {**environ, "HF_HOME": str(overlay_home(checkpoint, environ))}
             checkpoint = LAYA_MODEL
+        environ = laya_hf_environ(environ, checkpoint)
         if not laya_checkpoint_present(environ, checkpoint):
             return None, f"the {checkpoint} checkpoint is not in the Hugging Face cache"
         serve_log = log["log_path"].parent / "laya-serve.log" if log["log_path"] is not None else None

@@ -17,9 +17,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from l4.config.schema import L4Config
+from l4.llm.system_one import laya_interpreter
 from l4.proc import Runner as CommandRunner
 from l4.provision.catalog import (
     INSTALLER_URLS,
+    LAYA_CHECKPOINT,
+    LAYA_REPO,
     NODE_VERSION,
     NPM_PACKAGES,
     ToolSpec,
@@ -38,6 +41,7 @@ from l4.provision.runner import (
     find_tool,
     installed_version,
     is_satisfied,
+    laya_checkpoint_cached,
     plan_fixes,
     save_installer,
     scrub_env,
@@ -196,8 +200,35 @@ def _install_agent(ctx: _Ctx, tool: ToolSpec) -> None:
         _run_saved_installer(ctx, INSTALLER_URLS[tool.adapter or ""], "bash")
 
 
+def _install_laya(ctx: _Ctx, tool: ToolSpec) -> None:
+    """Design D9: the wheels go to Laya's own uv tool directory (CPU torch), `laya-serve` is linked into the user's bin,
+    and the checkpoint goes to the l4 Hugging Face home. Whatever is already there at the pin is kept: only the missing
+    half is installed, so a runner that `prereqs.sh` provisioned downloads nothing again."""
+    laya = ctx.paths.laya_tools
+    if not is_satisfied(tool, installed_version(tool, ctx.paths, ctx.env, ctx.run)):
+        uv = find_tool("uv", ctx.paths, ctx.env)
+        if uv is None:
+            raise InstallFailed("uv is not available: install uv first")
+        switches = {"UV_TOOL_DIR": str(laya), "UV_TOOL_BIN_DIR": str(laya / "bin")}
+        argv = [str(uv), "tool", "install", "--torch-backend", "cpu", f"laya[serve]=={tool.version}"]
+        _checked(ctx, argv, env={**ctx.clean, **switches})
+        _link(laya / "bin" / tool.binary, ctx.paths.local_bin / tool.binary)
+    if not laya_checkpoint_cached(ctx.paths, ctx.env):
+        found = find_tool(tool.binary, ctx.paths, ctx.env)  # the Laya just installed, or the one that was there
+        python = (laya_interpreter(str(found)) if found else "") or str(laya / "laya" / "bin" / "python")
+        code = (
+            "from huggingface_hub import snapshot_download as s; "
+            f"s({LAYA_REPO!r}, allow_patterns=[{LAYA_CHECKPOINT + '/*'!r}])"
+        )
+        hf_home = ctx.paths.laya_hf_home
+        hf_home.mkdir(parents=True, exist_ok=True)
+        _checked(ctx, [python, "-c", code], env={**ctx.clean, "HF_HOME": str(hf_home)})
+
+
 def _install(ctx: _Ctx, tool: ToolSpec) -> None:
-    if tool.kind == "uv":
+    if tool.kind == "laya":
+        _install_laya(ctx, tool)
+    elif tool.kind == "uv":
         switches = {"UV_NO_MODIFY_PATH": "1", "UV_INSTALL_DIR": str(ctx.paths.local_bin)}
         _run_saved_installer(ctx, INSTALLER_URLS["uv"], "sh", extra_env=switches)
     elif tool.kind == "node":
@@ -213,8 +244,10 @@ def _verified(ctx: _Ctx, tool: ToolSpec) -> str:
     if found is None:
         raise InstallFailed(f"{tool.name} was installed but reports no version")
     if not is_satisfied(tool, found):
-        wanted = tool.version if tool.kind == "openspec" else f">= {tool.min_version}"
+        wanted = tool.version if tool.kind in ("openspec", "laya") else f">= {tool.min_version}"
         raise InstallFailed(f"installed {found}, but {wanted} is needed")
+    if tool.kind == "laya" and not laya_checkpoint_cached(ctx.paths, ctx.env):
+        raise InstallFailed(f"the {LAYA_CHECKPOINT} checkpoint is not in the Hugging Face cache after the fetch")
     return found
 
 

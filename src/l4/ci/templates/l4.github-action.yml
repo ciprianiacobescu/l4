@@ -55,6 +55,7 @@ jobs:
       - name: doctor
         run: l4 @@DOCTOR@@ || l4 ci map-exit $?
 @@CLIS_SAVE@@
+@@LAYA_SAVE@@
       - name: plan
         run: l4 plan --sweep || l4 ci map-exit $?
       - name: run
