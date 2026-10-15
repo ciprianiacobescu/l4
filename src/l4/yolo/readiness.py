@@ -446,7 +446,8 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
     """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
     the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
     are listed in `missing` and so is what a prerequisite's budget cut. Then the rules of L4-YOLO-023: a
-    `batch_acceptance` finding on a unit becomes an assumption; a NEEDS_REVISION with no finding gets the harness
+    minor or major `batch_acceptance` finding on a unit (any severity on a batch without a
+    profile) becomes an assumption; a NEEDS_REVISION with no finding gets the harness
     finding `verdict`; a NEEDS_REVISION whose findings are all minor is READY (the findings stay). The judge's own
     `blocking` and a BLOCKED are not touched."""
     findings, said, missing, assumptions = verdict.findings, verdict.verdict, verdict.missing, verdict.assumptions
@@ -458,17 +459,20 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         if subject.kind == "unit"
         else ""
     )
-    if why and any(f["criterion"] == NOT_APPLICABLE for f in findings):
+    # on a unit only a minor or major note can be moved: a blocking finding is the judge's own and stays (D3)
+    moved = tuple(
+        f
+        for f in findings
+        if f["criterion"] == NOT_APPLICABLE and (subject.groups_only or f["severity"] in ("minor", "major"))
+    )
+    if why and moved:
         # the plan file has nowhere to state a batch outcome: the finding cannot be fixed, so it is kept as a note
-        assumptions = (
-            *assumptions,
-            *(f"{why}, {f['severity']}: {f['text']}" for f in findings if f["criterion"] == NOT_APPLICABLE),
-        )
-        findings = tuple(f for f in findings if f["criterion"] != NOT_APPLICABLE)
+        assumptions = (*assumptions, *(f"{why}, {f['severity']}: {f['text']}" for f in moved))
+        findings = tuple(f for f in findings if f not in moved)
         if said == "NEEDS_REVISION" and not any(f["severity"] in ("blocking", "major") for f in findings):
             said = "READY"
-        if said == "BLOCKED" and not findings:  # nothing is left that a person could fix: the note was all there was
-            said = "READY"
+        if said == "BLOCKED" and not findings and subject.groups_only:
+            said = "READY"  # a subject that only groups units: the note was all there was
     if subject.left_out:
         text = " ".join(subject.left_out)
         findings = (*findings, {"criterion": "material", "severity": "blocking", "text": text})
