@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from l4.cli import main
 from l4.config.schema import L4Config, YoloReviewCfg
 from l4.exitcodes import ExitCode
-from l4.yolo import accept, commands, findings, judge_sandbox, review_worktree, worktree
+from l4.yolo import accept, commands, judge_sandbox, review_worktree, worktree
 from l4.yolo.cycle import PlanStep
 from l4.yolo.model import Verdict
 from l4.yolo.state import fold_plan
@@ -64,8 +64,6 @@ def test_an_old_ledger_folds_as_before():
 
 def test_the_new_modules_are_stubs():
     calls = [
-        (findings.finding_id, ("u", {})),
-        (findings.findings_sha, ([],)),
         (accept.actor, ({}, False)),
         (worktree.snapshot, (None, [])),
         (worktree.clean, (None, [])),
