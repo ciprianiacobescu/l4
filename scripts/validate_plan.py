@@ -290,14 +290,33 @@ def _folder_files(repo: Path, folder: str) -> list[str]:
     return sorted(found, key=lambda path: path.encode("utf-8", "surrogateescape"))
 
 
-def read_folder(repo: Path, folder: str, *, budget: int, max_file: int = MAX_FILE_CHARS) -> FolderRead:
+def _rank(rel: str) -> int:
+    """`readiness._rank`: the reading order of a prerequisite, what a dependent needs first and the task list last."""
+    parts = Path(rel).parts
+    if rel == "proposal.md":
+        return 0
+    if rel == "requirements.md":
+        return 1
+    if parts[0] == "specs" and parts[-1] == "spec.md":
+        return 2
+    return {"bugfix.md": 3, "design.md": 4, "tasks.md": 6}.get(rel, 5)
+
+
+def read_folder(
+    repo: Path, folder: str, *, budget: int, max_file: int = MAX_FILE_CHARS, order: str = "sorted"
+) -> FolderRead:
     """`readiness.read_folder` on the working tree: skip the harness's files (`digest.is_excluded`), show a `tasks.md`
     with every task marker as `[ ]`, leave out a binary file, show each file up to `max_file` and the folder up to
-    `budget`; a file the budget runs out in is cut (the `[cut: ...]` line counts), one after it is omitted."""
+    `budget`; a file the budget runs out in is cut (the `[cut: ...]` line counts), one after it is omitted. `order` is
+    `"sorted"` (a planned unit's own folder) or `"prerequisite"` (a dependency: proposal, requirements, specs, bugfix,
+    design, other files, `tasks.md` last)."""
     root = folder.strip("/")
     out = FolderRead()
     left = budget
-    for path in _folder_files(repo, root):
+    paths = _folder_files(repo, root)
+    if order == "prerequisite":
+        paths.sort(key=lambda p: _rank(Path(p).relative_to(root).as_posix()))  # stable: sorted within a rank
+    for path in paths:
         parts = Path(path).relative_to(root).parts
         if any(p in EXCLUDED_DIRS for p in parts[:-1]) or parts[-1] in EXCLUDED_FILES:
             continue
@@ -1103,7 +1122,9 @@ def budget_problems(
     for dep, by in dependents.items():
         if dep in known:
             folder = unit_folder(dep, openspec_root, kiro_root)
-            for path, what in budget_lines(read_folder(repo, folder, budget=limits[2], max_file=limits[0])):
+            for path, what in budget_lines(
+                read_folder(repo, folder, budget=limits[2], max_file=limits[0], order="prerequisite")
+            ):
                 lines.append(
                     f"warning: material_over_budget: {dep}: {path}: {what} (as a dependency of {', '.join(by)})"
                 )
