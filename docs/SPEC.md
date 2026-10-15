@@ -7228,22 +7228,6 @@ scenario is a spec defect (§26).
 - **And** the agent started from `l4 yolo draft`, gave one line of evidence per dependency in the commit message, used batches for acceptance checks, excluded specs only with a reason, ran the validator and `l4 yolo check`, and committed and pushed only the plan file
 - **And** an edit of an active plan is described as stopping it until a new review and activation
 
-### 23.21 OpenCode's own key (PRV)
-
-#### SCN-PRV-75 (+) The GitHub job names the OpenCode key · L4-PRV-028
-- **Given** an implementer profile `adapter: opencode`, `model: opencode-go/deepseek-v4.1-flash`, `auth: api_key`
-- **When** `l4 init --ci github` or `l4 upgrade` renders the workflow
-- **Then** the `l4` job's `env` has `OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}`
-
-#### SCN-PRV-76 (−) An unset key fails the auth step with no model call · L4-PRV-028
-- **Given** that profile and no `OPENCODE_API_KEY` in the harness environment
-- **When** the availability probe runs
-- **Then** the auth step fails with `OPENCODE_API_KEY is not set`, no hello runs, and the role walks on to the next profile
-
-#### SCN-PRV-77 (+) The run gets the key through the loader only · L4-PRV-028
-- **Given** that profile and `OPENCODE_API_KEY` set in the harness environment
-- **When** the implementer runs
-- **Then** the agent process has `OPENCODE_API_KEY` set by the credential loader, and the value is in no argv, in no sandbox `--setenv` and in no log
 ### 23.21 Experience graph (KG)
 
 #### SCN-KG-01 (+) The run path never loads the graph code · L4-KG-001
@@ -7395,6 +7379,23 @@ scenario is a spec defect (§26).
 - **Given** the repository's existing configuration fixtures and the full unit suite
 - **When** the suite runs with this change
 - **Then** every existing test passes unchanged, `l4 doctor` on the dummy fixture gives the same checks as before, and `git diff` of `src/l4/config/schema.py`, `src/l4/doctor/`, `src/l4/implementer/`, `src/l4/verifier/` and `src/l4/ci/templates/` is empty
+
+### 23.22 OpenCode's own key (PRV)
+
+#### SCN-PRV-75 (+) The GitHub job names the OpenCode key · L4-PRV-028
+- **Given** an implementer profile `adapter: opencode`, `model: opencode-go/deepseek-v4.1-flash`, `auth: api_key`
+- **When** `l4 init --ci github` or `l4 upgrade` renders the workflow
+- **Then** the `l4` job's `env` has `OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}`
+
+#### SCN-PRV-76 (−) An unset key fails the auth step with no model call · L4-PRV-028
+- **Given** that profile and no `OPENCODE_API_KEY` in the harness environment
+- **When** the availability probe runs
+- **Then** the auth step fails with `OPENCODE_API_KEY is not set`, no hello runs, and the role walks on to the next profile
+
+#### SCN-PRV-77 (+) The run gets the key through the loader only · L4-PRV-028
+- **Given** that profile and `OPENCODE_API_KEY` set in the harness environment
+- **When** the implementer runs
+- **Then** the agent process has `OPENCODE_API_KEY` set by the credential loader, and the value is in no argv, in no sandbox `--setenv` and in no log
 
 ## 24. Definition of done
 
