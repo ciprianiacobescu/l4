@@ -926,6 +926,153 @@ def test_only_planned_units_are_read_for_deltas(repo):
     assert run(repo)[0] == 0
 
 
+# --- review budgets (L4-ADO-010; SCN-ADO-29, -30, -31) -------------------------------------------------------
+
+
+def test_the_review_constants_equal_the_harness():
+    from l4.yolo import digest, readiness
+
+    assert vp.MAX_FILE_CHARS == readiness.MAX_FILE_CHARS
+    assert vp.MAX_FOLDER_CHARS == readiness.MAX_FOLDER_CHARS
+    assert vp.MAX_DEPENDENCY_CHARS == readiness.MAX_DEPENDENCY_CHARS
+    assert vp.EXCLUDED_DIRS == digest.EXCLUDED_DIRS
+    assert vp.EXCLUDED_FILES == digest.EXCLUDED_FILES
+    assert vp.TASK_MARKER.pattern == digest._MARKER.pattern
+
+
+def big_unit(repo: Path, name: str, tasks_chars: int = 7000, lead: int = 20_148 - 1) -> None:
+    # spec files first (alphabetical), tasks.md last: the dependency budget of 20,000 runs out inside tasks.md
+    change(repo, name)
+    touch(repo, f"openspec/changes/{name}/design.md", "d" * 100)
+    touch(repo, f"openspec/changes/{name}/spec-a.md", "a" * 19_000)
+    touch(repo, f"openspec/changes/{name}/spec-b.md", "b" * (lead - 19_000 - 100 - 1))
+    touch(repo, f"openspec/changes/{name}/tasks.md", "t" * (27_148 - lead))
+
+
+def test_a_dependency_over_its_budget_is_a_warning_and_exit_0(repo):  # SCN-ADO-29
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 19_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 8_148)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+    code, out, _ = run(repo)
+    assert code == 0, out
+    found = [line for line in out.splitlines() if "material_over_budget" in line]
+    assert found == [
+        "warning: material_over_budget: openspec:a: openspec/changes/a/tasks.md: 7148 characters cut "
+        "(as a dependency of openspec:b)"
+    ]
+
+
+def test_a_cut_of_a_planned_units_own_folder_is_a_problem(repo):
+    change(repo, "a")
+    touch(repo, "openspec/changes/a/huge.md", "x" * 25_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "p1: material_over_budget: openspec:a: openspec/changes/a/huge.md: 5000 characters cut" in out
+
+
+def test_an_omitted_file_is_reported_with_its_size(repo):
+    change(repo, "a")
+    for n in range(5):
+        touch(repo, f"openspec/changes/a/f{n}.md", "x" * 20_000)
+    touch(repo, "openspec/changes/a/z.md", "x" * 30)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 1
+    assert "openspec:a: openspec/changes/a/z.md: omitted" in out and "(30 characters)" in out
+
+
+def test_harness_files_do_not_count(repo):  # SCN-ADO-30
+    change(repo, "a")
+    for n in range(3):
+        touch(repo, f"openspec/changes/a/spec{n}.md", "x" * 19_000)
+    touch(repo, "openspec/changes/a/verification.md", "v" * 30_000)
+    touch(repo, "openspec/changes/a/.l4/log/notes.md", "n" * 30_000)
+    touch(repo, "openspec/changes/a/sub/feedback.md", "f" * 30_000)
+    put(repo, plan("p1", [units("openspec:a")]))
+    code, out, _ = run(repo)
+    assert code == 0 and "material_over_budget" not in out, out
+
+
+def test_a_prerequisite_in_an_outer_batch_dependency_is_read_at_the_dependency_budget(repo):
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 20_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 10)
+    put(
+        repo,
+        plan(
+            "p1",
+            [
+                {"id": "b1", "units": [{"id": "openspec:a"}]},
+                {"id": "b2", "units": [{"id": "openspec:b", "depends_on": ["openspec:a"]}], "depends_on": ["b1"]},
+            ],
+        ),
+    )
+    code, out, _ = run(repo)
+    assert code == 0
+    assert "warning: material_over_budget: openspec:a: openspec/changes/a/tasks.md: omitted" in out
+
+
+def test_the_json_output_carries_the_budget_lines(repo):
+    change(repo, "b")
+    touch(repo, "openspec/changes/a/design.md", "d" * 19_000)
+    touch(repo, "openspec/changes/a/tasks.md", "t" * 8_148)
+    put(repo, plan("p1", [units("openspec:a", "openspec:b", deps={"openspec:b": ["openspec:a"]})]))
+    code, out, _ = run(repo, "--json")
+    data = json.loads(out)
+    assert code == 0 and data["ok"] is True
+    assert len(data["budget_warnings"]) == 1 and "7148 characters cut" in data["budget_warnings"][0]
+
+
+def budget_world(tmp_path):
+    from .yolo_review_world import World
+
+    world = World(tmp_path)
+    files = {
+        "openspec/changes/u/a.md": "A" * 15_000,
+        "openspec/changes/u/b.md": "B" * 25_000,
+        "openspec/changes/u/c.md": "C" * 19_000,
+        "openspec/changes/u/d.md": "D" * 30,
+        "openspec/changes/u/tasks.md": "- [x] one\n  * [~] two\n1. [-] three\n- [ ] four\n" + "t" * 2_000,
+        "openspec/changes/u/verification.md": "v" * 50_000,
+        "openspec/changes/u/.l4/x.md": "x" * 50_000,
+        "openspec/changes/u/deep/.l4/y.md": "y" * 50_000,
+        "openspec/changes/u/deep/questions.md": "q" * 50_000,
+        "openspec/changes/u/\u00e9t\u00e9.md": "caf\u00e9 " * 3_000,
+        "openspec/changes/u/Z-last.md": "z" * 10,
+    }
+    world.commit(files)
+    (world.repo / "openspec/changes/u/bin.dat").write_bytes(b"ab\0cd")
+    world.git.run("add", "-A")
+    world.git.run("commit", "--quiet", "-m", "bin")
+    return world
+
+
+@pytest.mark.parametrize("budget_name", ["MAX_FOLDER_CHARS", "MAX_DEPENDENCY_CHARS", "tiny"])
+def test_the_validator_reads_a_folder_like_the_review(tmp_path, budget_name):  # SCN-ADO-31
+    from l4.yolo import readiness
+
+    world = budget_world(tmp_path)
+    budget = 3_000 if budget_name == "tiny" else getattr(readiness, budget_name)
+    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=budget)
+    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=budget)
+    assert list(mine.cut) == [(p, n) for p, n in folder.cut]
+    assert [(p, size) for p, size in mine.omitted] == [
+        (o.path, int(o.reason.split("(")[1].split()[0])) for o in folder.omitted if o.size_limit
+    ]
+    assert list(mine.binary) == list(folder.binary)
+
+
+def test_the_validator_shows_the_same_characters_as_the_review(tmp_path):
+    from l4.yolo import readiness
+
+    world = budget_world(tmp_path)
+    folder = readiness.read_folder(world.git, "HEAD", "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS)
+    mine = vp.read_folder(world.repo, "openspec/changes/u", budget=readiness.MAX_FOLDER_CHARS)
+    assert mine.shown == [(p, len(t)) for p, t in folder.files]
+
+
 def test_the_help_epilog_names_the_new_checks(repo):
-    for word in ("spec_no_baseline", "spec_no_purpose"):
+    for word in ("spec_no_baseline", "spec_no_purpose", "material_over_budget"):
         assert word in vp.HELP_EPILOG

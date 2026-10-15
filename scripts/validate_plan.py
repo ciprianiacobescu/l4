@@ -43,6 +43,13 @@ DEFAULT_OPENSPEC_ROOT = "openspec"
 DEFAULT_KIRO_ROOT = ".kiro/specs"
 FRAMEWORKS = ("openspec", "kiro")
 SPEC_KEY = r"""^(?:spec|"spec"|'spec')\s*:"""  # the top-level key, plain or quoted like YAML allows
+# The readiness review's limits and file rules (`l4.yolo.readiness`, `l4.yolo.digest`); a test holds them equal.
+MAX_FILE_CHARS = 20_000
+MAX_FOLDER_CHARS = 80_000
+MAX_DEPENDENCY_CHARS = 20_000
+EXCLUDED_DIRS = frozenset({".l4"})
+EXCLUDED_FILES = frozenset({"verification.md", "questions.md", "feedback.md"})
+TASK_MARKER = re.compile(rb"(?m)^((?:\xef\xbb\xbf)?[ \t\xc2\xa0]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]*\[)[ xX\-~](\])")
 # The rules of `l4.specs.openspec` (`MIN_PURPOSE_CHARS`, `MAX_PURPOSE_BYTES`, `_purpose`); a test holds them equal.
 MIN_PURPOSE_CHARS = 50
 MAX_PURPOSE_BYTES = 256 * 1024
@@ -58,7 +65,11 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
   covered_twice (a unit planned in two plan files); for each OpenSpec unit that a plan file plans:
   spec_no_baseline (a MODIFIED, RENAMED or REMOVED section in a delta `specs/<capability>/spec.md` whose capability
   has no openspec/specs/<capability>/spec.md in the working tree) and spec_no_purpose (the delta of such a capability
-  has no `## Purpose` of at least 50 characters).
+  has no `## Purpose` of at least 50 characters); and material_over_budget: a file the readiness review would cut or
+  leave out, read the way the review reads it (a planned unit's folder at 80,000 characters, a unit named in a
+  depends_on at 20,000, each file at 20,000; harness files and binary files are not read). A cut of a planned unit's
+  own folder is a problem (exit 1). A dependency's cut is a line `warning: material_over_budget: ...` on standard
+  output that leaves the exit code alone: the review lists it as not shown in full without blocking.
 
 What only `l4 yolo check` can check (it needs git, the target head and the configuration): open questions, the intake
 checks of each spec, finished units, acceptance profiles, the target against forge.base_branch, and the merge policy.
@@ -248,6 +259,82 @@ def purpose_problems(repo: Path, openspec_root: str, change: str) -> list[tuple[
                 )
             )
     return found
+
+
+# --- the readiness review's reading of a unit folder (yolo-mode design D4, L4-ADO-010) ---------------------------
+
+
+class FolderRead:
+    """`readiness.FolderText` for the working tree: what the review would show, cut and leave out of a folder."""
+
+    def __init__(self) -> None:
+        self.shown: list[tuple[str, int]] = []  # (repository path, characters shown, the cut marker included)
+        self.cut: list[tuple[str, int]] = []  # (repository path, characters left out) of a file shown in part
+        self.omitted: list[tuple[str, int]] = []  # (repository path, characters) of a file the folder budget dropped
+        self.binary: list[str] = []
+
+
+def _folder_files(repo: Path, folder: str) -> list[str]:
+    """Every file below `folder` (repository paths), a symlink as a file, in UTF-8 byte order of the path."""
+    base = repo.joinpath(*Path(folder).parts)
+    found: list[str] = []
+    for current, dirs, names in os.walk(base):
+        here = Path(current)
+        for name in [*names, *(d for d in dirs if (here / d).is_symlink())]:
+            found.append((here / name).relative_to(repo).as_posix())
+    return sorted(found, key=lambda path: path.encode("utf-8", "surrogateescape"))
+
+
+def read_folder(repo: Path, folder: str, *, budget: int) -> FolderRead:
+    """`readiness.read_folder` on the working tree: skip the harness's files (`digest.is_excluded`), show a `tasks.md`
+    with every task marker as `[ ]`, leave out a binary file, show each file up to MAX_FILE_CHARS and the folder up to
+    `budget`; a file the budget runs out in is cut (the `[cut: ...]` line counts), one after it is omitted."""
+    root = folder.strip("/")
+    out = FolderRead()
+    left = budget
+    for path in _folder_files(repo, root):
+        parts = Path(path).relative_to(root).parts
+        if any(p in EXCLUDED_DIRS for p in parts[:-1]) or parts[-1] in EXCLUDED_FILES:
+            continue
+        full = repo / path
+        try:
+            data = os.readlink(full).encode("utf-8", "surrogateescape") if full.is_symlink() else full.read_bytes()
+        except OSError:
+            continue
+        if parts[-1] == "tasks.md":
+            data = TASK_MARKER.sub(rb"\1 \2", data)
+        if b"\0" in data:
+            out.binary.append(path)
+            continue
+        text = data.decode("utf-8", "replace")
+        shown = text[: min(MAX_FILE_CHARS, max(left, 0))]
+        if len(shown) < len(text):
+            if left <= 0:
+                out.omitted.append((path, len(text)))
+                continue
+            out.cut.append((path, len(text) - len(shown)))
+            shown += f"\n[cut: {len(text) - len(shown)} characters omitted]"
+        left -= len(shown)
+        out.shown.append((path, len(shown)))
+    return out
+
+
+def unit_folder(unit_id: str, openspec_root: str, kiro_root: str) -> str:
+    framework, _, name = unit_id.partition(":")
+    return "/".join(
+        [
+            *Path(openspec_root if framework == "openspec" else kiro_root).parts,
+            *(["changes"] if framework == "openspec" else []),
+            name,
+        ]
+    )
+
+
+def budget_lines(read: FolderRead) -> list[tuple[str, str]]:
+    """(file, what the review does to it) for each cut and each omitted file."""
+    return [(path, f"{n} characters cut") for path, n in read.cut] + [
+        (path, f"omitted: the folder budget is spent ({size} characters)") for path, size in read.omitted
+    ]
 
 
 # --- the configuration: a small block-style reader -----------------------------------------------------------------
@@ -747,6 +834,7 @@ class PlanReport:
         self.planned: list[str] = []  # the unit ids the file names in its batches, whatever else is wrong
         self.excluded: list[str] = []
         self.finished: list[str] = []  # planned units whose OpenSpec change is archived
+        self.deps: dict[str, list[str]] | None = None  # unit -> depends_on, once the schema passed
 
     def add(self, code: str, subject: str, text: str) -> None:
         self.problems.append((code, subject, text))
@@ -797,6 +885,7 @@ def check_plan(file_name: str, text: str, known: set[str], finished: set[str]) -
     unit_ids = {u["id"] for u in units}
     batch_ids = {b["id"] for b in batches}
     plan_id = raw["plan_id"]
+    report.deps = {u["id"]: list(u.get("depends_on", [])) for u in units}
     if not units:
         report.add("empty_plan", plan_id, "the plan has no unit")
     for dup in _duplicates([u["id"] for u in units]):
@@ -900,6 +989,7 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
             if unit in known and unit.startswith("openspec:"):
                 for code, delta_file, text in purpose_problems(repo, openspec_root, unit.partition(":")[2]):
                     report.add(code, unit, f"{delta_file}: {text}")
+    warnings_budget = budget_problems(repo, args, reports, known)
     problems = [
         {"plan": r.plan_id, "code": c, "subject": s, "text": t} for r in reports for (c, s, t) in r.problems
     ] + [{"plan": None, "code": c, "subject": s, "text": t} for (c, s, t) in coverage]
@@ -911,7 +1001,36 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
         "plans": {r.plan_id: {"order": r.order, "waves": r.waves} for r in reports if r.order is not None},
         "units": sorted(known),
         "warnings": warnings,
+        "budget_warnings": warnings_budget,
     }
+
+
+def budget_problems(repo: Path, args: argparse.Namespace, reports: list[PlanReport], known: set[str]) -> list[str]:
+    """Add `material_over_budget` to the plan reports for a planned unit's own folder (a problem) and return the
+    warning lines for dependencies (the review lists them as not shown in full without blocking)."""
+    _, openspec_root, kiro_root, _ = resolve_discovery(repo, args)
+    dependents: dict[str, list[str]] = {}
+    for report in reports:
+        if report.deps is None:
+            continue
+        for unit, deps in report.deps.items():
+            if unit in known:
+                for path, what in budget_lines(
+                    read_folder(repo, unit_folder(unit, openspec_root, kiro_root), budget=MAX_FOLDER_CHARS)
+                ):
+                    report.add("material_over_budget", unit, f"{path}: {what}")
+            for dep in deps:
+                if unit != dep and unit not in dependents.setdefault(dep, []):
+                    dependents[dep].append(unit)
+    lines = []
+    for dep, by in dependents.items():
+        if dep in known:
+            folder = unit_folder(dep, openspec_root, kiro_root)
+            for path, what in budget_lines(read_folder(repo, folder, budget=MAX_DEPENDENCY_CHARS)):
+                lines.append(
+                    f"warning: material_over_budget: {dep}: {path}: {what} (as a dependency of {', '.join(by)})"
+                )
+    return lines
 
 
 def problem_line(problem: dict) -> str:
@@ -928,7 +1047,7 @@ def finished_line(unit: str) -> str:
 
 
 def render(result: dict) -> str:
-    finished = [finished_line(unit) for unit in result["finished"]]
+    finished = [finished_line(unit) for unit in result["finished"]] + result["budget_warnings"]
     if result["problems"]:
         return "\n".join([*(problem_line(p) for p in result["problems"]), *finished])
     lines = []
