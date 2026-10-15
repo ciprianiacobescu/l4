@@ -21,7 +21,7 @@ before the first review.
 Before the push, run both:
 
 ```sh
-npx --yes @fission-ai/openspec@1.14.0 validate <change> --strict
+openspec validate <change> --strict   # or: npx --yes @fission-ai/openspec@1.14.0 validate <change> --strict
 python3 <skill dir>/scripts/validate_plan.py
 ```
 
