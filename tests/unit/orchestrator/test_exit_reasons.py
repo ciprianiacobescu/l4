@@ -61,9 +61,7 @@ def test_a_failing_unit_is_listed_in_outcome_json_with_its_reason(run_l4, monkey
 
 
 def test_a_halt_names_its_cause(run_l4):
-    run = run_l4(
-        [Step(structured=result("red")), Step(structured=result("red"))], implementer={"max_task_attempts": 2}
-    )
+    run = run_l4([Step(structured=result("red")), Step(structured=result("red"))], implementer={"max_task_attempts": 2})
     assert run.code == 13
     assert "max_task_attempts" in run.outcome["units"][0]["exit_reason"]
 
@@ -108,3 +106,12 @@ def test_the_human_push_hint_says_the_next_run_continues_from_it():
 def test_push_failed_stays_an_l4_exit_with_its_code():
     assert PushFailed(ExitCode.INTERNAL_ERROR, "m", refused=True).code == ExitCode.INTERNAL_ERROR
     assert isinstance(PushFailed(ExitCode.DOCTOR_FAILED, "m"), L4Exit)
+
+
+def test_a_rejected_unit_says_why_in_its_outcome_and_the_run_lists_it(run_l4):
+    """A rejection leaves the unit with no phase, so the reason is the exit reason: a delivery plan records it
+    (L4-YOLO-013)."""
+    run = run_l4([], test={"command": ""})
+    assert run.code == 14
+    (unit,) = run.outcome["units"]
+    assert unit["exit_reason"] == "rejected: gates.test.command is not configured: there is no test oracle"

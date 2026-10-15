@@ -214,7 +214,8 @@ when the cause is gone. `l4 yolo resume` also wakes it.
 A plan with `merge: auto` also waits when the merge of the current unit is not ready, for example when the unit has no
 open PR, or the PR is aimed at another branch than the target. The reason is `merge_not_ready`. The detail is recorded
 once and `l4 yolo status` shows it. The plan continues by itself when the merge is ready. If the PR shows an old head
-after a push, the step reads the PR again, three times, five seconds apart, before it calls the merge not ready.
+after a push, the step reads the PR again, three times, five seconds apart, before it calls the merge not ready. It does
+so in the run that records the wait, not in a preview and not in later runs while the wait for that head stands.
 
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,

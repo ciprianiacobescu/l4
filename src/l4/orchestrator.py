@@ -103,7 +103,7 @@ from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
 from l4.verifier.verdicts import legacy_round, verdict_status
-from l4.yolo.cycle import PlanStep, failed_plan_step, yolo_step
+from l4.yolo.cycle import PlanStep, failed_plan_step, record_rejections, yolo_step
 
 MAX_EDIT_COMMITS = 10  # commits named in the ledger line of a spec edit
 MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many auto-answers is a human's to unblock
@@ -532,6 +532,7 @@ class Orchestrator:
         ]
         s.ledger.append("unit.rejected", reasons=reasons)
         log.error("%s rejected: %s", s.ref.id, "; ".join(reasons))
+        self._exit_reason = f"rejected: {'; '.join(reasons)}"[:300]  # a delivery plan records it (L4-YOLO-013)
         return ExitCode.REJECTED
 
     def _lint_scenarios(self) -> ExitCode | None:
@@ -711,6 +712,7 @@ class Orchestrator:
         if reasons:
             self.services.ledger.append("unit.rejected", reasons=reasons)
             log.error("%s rejected: %s", self.services.ref.id, "; ".join(reasons))
+            self._exit_reason = f"rejected: {'; '.join(reasons)}"[:300]  # a delivery plan records it (L4-YOLO-013)
             return ExitCode.REJECTED
         pending = any(not t.done for t in required(tasks))
         self._go(Trigger.UNIT_DISCOVERED_PENDING if pending else Trigger.UNIT_DISCOVERED_DONE)
@@ -1394,6 +1396,10 @@ def run_command(
         code=most_severe([result.code, failure, *refusal_codes]),
         units=[*outcomes, *result.units],
     )
+    try:  # a unit the plan dispatched and its run rejected is on the plan ledger before the next run (L4-YOLO-013)
+        record_rejections(app, cfg, git, step, result.rejected)
+    except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
+        log.warning("plan: a rejection was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
     _start_next_run(app, cfg, step)
     log_artefacts(app.out_dir, app.run_id)
@@ -1495,6 +1501,7 @@ def run_units(
     exit 10, untouched, for the next run. The first unit always starts."""
     codes: list[int] = []
     units: list[UnitOutcome] = []
+    rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
@@ -1527,7 +1534,9 @@ def run_units(
         longest = max(longest, (clock.now() - began).total_seconds())
         codes.append(done.exit_code)
         units.append(done.outcome)
-    return CommandResult(most_severe(codes), units)
+        if done.exit_code == ExitCode.REJECTED:
+            rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
+    return CommandResult(most_severe(codes), units, rejected=rejected)
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:
