@@ -88,9 +88,45 @@ class WorktreeManager:
 
     def _add(self, branch: str, path: Path, start: str, source: Literal["remote_branch", "base"]) -> Worktree:
         path.parent.mkdir(parents=True, exist_ok=True)
+        self._release_branch(branch, path)
         # -B resets a local branch left over from an earlier run to the start point
         self._git.run("worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
         return Worktree(path, branch, start, source)
+
+    def _release_branch(self, branch: str, target: Path) -> None:
+        """`git worktree add -B` fails when another worktree of this clone has `branch` checked out. A leftover of the
+        layout without a repository key, or under another key (the project was renamed or moved), is this clone's own
+        registration under `$L4_CACHE/worktrees`: remove it. One anywhere else is a person's checkout: refuse, naming
+        it. Only this clone's registrations are read (`git worktree list`). The callers hold the unit's flock, which is
+        keyed: a job of an older harness on the same runner holds the old lock path, so upgrade a runner's projects
+        between pipelines (docs/runbook.md)."""
+        root = next((p for p in (target.resolve(), *target.resolve().parents) if p.name == "worktrees"), None)
+        for path in self._registered_at(branch):
+            if path == target.resolve():
+                continue
+            if root is None or root not in path.parents:
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is checked out in the worktree {path}, which is outside the l4 cache; "
+                    "check out another branch there or remove that worktree, then run again",
+                )
+            self._git.run("worktree", "remove", "--force", str(path), check=False)
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+            self._git.run("worktree", "prune")
+
+    def _registered_at(self, branch: str) -> list[Path]:
+        listing = self._git.run("worktree", "list", "--porcelain").stdout
+        found: list[Path] = []
+        here: Path | None = None
+        for line in listing.splitlines():
+            if line.startswith("worktree "):
+                here = Path(line[len("worktree ") :]).resolve()
+            elif line == f"branch refs/heads/{branch}" and here is not None:
+                found.append(here)
+        return found
 
     def remove(self, path: Path) -> None:
         self._remove(path)

@@ -202,3 +202,44 @@ def test_a_branch_of_another_prefix_is_not_pruned(make_repo, git_for, raw, names
     git.fetch("origin")
     WorktreeManager(git, base_branch="main", branch_prefix="l4/").ensure(names)
     assert git.rev_parse("refs/remotes/origin/feature") is not None
+
+
+def _holder(repo: Path, raw, path: Path, branch: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw(repo, "worktree", "add", "-q", "-B", branch, str(path), "origin/main")
+    (path / "MARK").write_text("x")
+
+
+@pytest.mark.parametrize("old_parts", [("openspec", "x"), ("old-key-0123456789", "openspec", "x")])
+def test_a_registration_of_the_branch_under_the_cache_is_removed(
+    make_repo, git_for, raw, names, tmp_path: Path, old_parts
+):
+    """An older layout, or another repository key, left this clone's own worktree holding the unit branch: the add
+    would fail with "already used by worktree" on every run (L4-WTR-001)."""
+    repo = make_repo(remote=True)
+    cache = tmp_path / "cache"
+    old = cache.joinpath("worktrees", *old_parts)
+    _holder(repo, raw, old, "l4/openspec/x")
+    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    assert worktree.path == names.worktree and not old.exists()
+    assert "worktree " + str(old.resolve()) not in raw(repo, "worktree", "list", "--porcelain")
+
+
+def test_a_wip_branch_registration_under_the_cache_is_removed_too(make_repo, git_for, raw, tmp_path: Path):
+    repo = make_repo(remote=True)
+    old = tmp_path / "cache" / "worktrees" / "openspec" / "wip"
+    _holder(repo, raw, old, "l4-wip/openspec/x")
+    target = tmp_path / "cache" / "worktrees" / "proj-0123456789" / "openspec" / "wip-new"
+    manager = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/")
+    assert manager.ensure_from_base("l4-wip/openspec/x", target).path == target and not old.exists()
+
+
+def test_a_person_s_worktree_outside_the_cache_holding_the_branch_is_refused(make_repo, git_for, raw, names, tmp_path):
+    repo = make_repo(remote=True)
+    mine = tmp_path / "my-own-checkout"
+    _holder(repo, raw, mine, "l4/openspec/x")
+    with pytest.raises(L4Exit) as caught:
+        WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    assert caught.value.code == ExitCode.USAGE_ERROR
+    assert str(mine.resolve()) in str(caught.value) and "l4/openspec/x" in str(caught.value)
+    assert (mine / "MARK").exists()  # untouched
