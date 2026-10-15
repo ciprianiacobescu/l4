@@ -71,6 +71,40 @@ def test_another_major_finding_keeps_the_batch_needs_revision(world):
     assert verdict.verdict == "NEEDS_REVISION" and verdict.findings == (OTHER,)
 
 
-def test_blocked_stays_blocked(world):
-    verdict, _ = run(world, None, answer("BLOCKED", [GAP]))
-    assert verdict.verdict == "BLOCKED"
+def test_blocked_stays_blocked_while_a_finding_is_left(world):
+    verdict, _ = run(world, None, answer("BLOCKED", [GAP, OTHER]))
+    assert verdict.verdict == "BLOCKED" and verdict.findings == (OTHER,)
+
+
+def test_a_blocked_verdict_with_only_the_not_applicable_finding_is_ready_and_keeps_it_as_a_note(world):
+    gap = {"criterion": "batch_acceptance", "severity": "blocking", "text": "the batch outcome cannot be judged"}
+    other = {"criterion": "contradiction", "severity": "blocking", "text": "a and b disagree"}
+    for extra in ({}, {"acceptance_profile": "none"}):
+        verdict = _batch_verdict(world, extra, answer("BLOCKED", [gap]))
+        assert verdict.verdict == "READY" and verdict.findings == ()
+        assert any("batch_acceptance does not apply" in a for a in verdict.assumptions)
+    kept = _batch_verdict(world, {}, answer("BLOCKED", [gap, other]))  # another finding is left: BLOCKED stays
+    assert kept.verdict == "BLOCKED" and [f["criterion"] for f in kept.findings] == ["contradiction"]
+    profiled = _batch_verdict(world, {"acceptance_profile": "all"}, answer("BLOCKED", [gap]))
+    assert profiled.verdict == "BLOCKED" and len(profiled.findings) == 1
+
+
+def _batch_verdict(world, batch_extra, batch_answer):
+    import json
+
+    from l4.agents.fake import FakeAdapter, Step
+    from l4.yolo.model import load_plan
+    from l4.yolo.readiness import review_plan
+
+    from .yolo_review_world import make_cfg
+
+    batch = {"id": "b1", "units": [{"id": A}, {"id": B}], **batch_extra}
+    plan = load_plan(json.dumps({"schema": "l4/delivery-plan@1", "plan_id": "p1", "target": "main", "merge": "human",
+                                 "batches": [batch]}))  # fmt: skip
+    fake = FakeAdapter(
+        [Step(structured=answer("READY")), Step(structured=answer("READY")), Step(structured=batch_answer)]
+    )
+    result = review_plan(
+        world.app, make_cfg(), plan, world.units, git=world.git, rev=world.rev, adapters={"fake": fake}
+    )
+    return result.batches["b1"]

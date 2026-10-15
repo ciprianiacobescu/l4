@@ -76,7 +76,8 @@ result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid an
 MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
 NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and
 states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and
-its NEEDS_REVISION MUST become READY when no blocking or major finding remains. The judge's material for a batch shows
+its NEEDS_REVISION MUST become READY when no blocking or major finding remains, and its BLOCKED when no finding is left
+at all. The judge's material for a batch shows
 every prerequisite of its units that is not a unit of the batch, the way the material of a unit shows its prerequisites,
 and both state that a prerequisite unit of the plan is delivered and merged into the target before any unit that depends
 on it starts. File names, unit ids and batch ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that
@@ -274,11 +275,16 @@ again. A unit that its own run rejects (exit 14, for example an empty
 ledger when the plan dispatched the unit, and the next plan step MUST stop the plan with `unit_rejected` for that unit,
 recording its spec digest, and not dispatch it again. A run of the plan's current unit that ends before the unit
 started (no `run.started`: a usage error, a lease or worktree failure, a missing CLI) MUST be recorded the same way as
-`unit.not_started{unit, run, exit, detail}`; the next plan step then MUST wait with the reason `unit_not_started`, the
-unit and the detail, and MUST NOT start a next run, so that one trigger runs the unit once; a run that starts the unit
-clears it. Outside CI the plan step MUST fetch the target branch before it
+`unit.not_started{unit, run, exit, detail}`; the next plan step then MUST wait with the reason `run_not_started`, the
+unit and the detail, and MUST NOT start a next run, so that one trigger runs the unit once, the first one included (a
+run that did not start the unit chains no run even when the step dispatched it); a run that starts the unit clears it.
+A run that skips the unit because another run holds its lease is not the unit's failure and MUST NOT be recorded. After a
+run, the plan ledger MUST be read again only to write such a record or to clear a pending one. The reason
+`unit_not_started` is another wait: an eligible unit with nothing to run (no task, an unreadable ledger), which ends
+when the unit has something to run. Outside CI the plan step MUST fetch the target branch before it
 reads the plan files; when the fetch fails it MUST log one line, write nothing to the plan ledger and let no unit run while the last fetched ledger of
-a plan says it is open, else hold the units the plan files list and let the units that no plan lists run. A stopped plan MUST
+a plan says it is open, else hold the units the plan files list and let the units that no plan lists run. With no plan file known in the clone, no
+unit is held when none of the plan ledgers the clone holds is open (active, waiting or stopped), else none runs. A stopped plan MUST
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.

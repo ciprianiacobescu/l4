@@ -250,8 +250,9 @@ def auto_plan_units(app: AppContext, cfg: L4Config, git: Git) -> frozenset[str]:
 
 
 def fetch_cause(app: AppContext, exc: GitError, limit: int = 160) -> str:
-    """Why a git fetch failed, for one line: what git said (its `fatal:` or `error:` line, else the first line of its stderr), then the exit status; the
-    command line, which is long and says nothing, is left out so that a cut keeps the cause."""
+    """Why a git fetch failed, for one line: what git said (its `fatal:` or `error:` line, else the first line of its
+    stderr), then the exit status; the command line, which is long and says nothing, is left out so that a cut keeps
+    the cause."""
     said = [x.strip() for x in str(getattr(exc, "stderr", "") or "").splitlines() if x.strip()]
     cause = next((x for x in said if x.startswith(("fatal:", "error:"))), said[0] if said else None)
     text = cause if cause else (str(exc).splitlines() or [type(exc).__name__])[0]

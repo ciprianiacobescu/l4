@@ -2981,8 +2981,14 @@ in every run's log, and `ci.max_parallel_units` is forced to 1.
 archive worktree in `$L4_CACHE/worktrees/<key>/archive/<fw>/<name>`), where `<key>` is the repository key, which is the same for every clone and
 build directory of one project and differs between projects, so two projects that share a change name on one runner never meet at a path. A
 checkout found at a path is replaced only if its repository has the same key or its owning clone no longer exists
-(an orphan, whose gitdir points nowhere); a checkout of a repository with another key is never deleted (exit 2). Directories of the
-earlier layout (`$L4_CACHE/worktrees/<fw>/<name>`, `$L4_CACHE/locks/<fw>/<name>.lock`) are not used and are not touched. Worktrees are created with
+(an orphan, whose gitdir points nowhere); a checkout of a repository with another key is never deleted (exit 2). The locks of the
+earlier layout (`$L4_CACHE/locks/<fw>/<name>.lock`) are not used and are not touched. A worktree of this clone that is
+registered under `$L4_CACHE/worktrees` (the earlier layout, or another key after a rename) and has the unit branch (or the
+WIP or archive branch being added) checked out MUST be removed before the new one is added: `git worktree remove
+--force`, the directory deleted when it lies under `$L4_CACHE/worktrees`, `git worktree prune`. Only this clone's
+registrations are read and removed. A registration elsewhere is a person's worktree: the run exits 2 naming its path.
+The callers hold the keyed unit flock, so a runner's projects are upgraded between pipelines (a job of an older harness
+holds the old lock path). Worktrees are created with
 `git worktree add` from the remote unit branch (created from base when absent), are reused across runs on the same
 runner only after `git fetch` + verification that HEAD matches the remote branch or the WIP snapshot, and are pruned by
 `doctor --fix`. The base branch is brought in by **merge** (pushed history is never rebased). Conflicts in
@@ -3173,14 +3179,14 @@ of a spec, requirement, design or task text MUST. The digest of a unit MUST be t
 when it exists, else on the target; a revision or a folder that does not exist MUST raise, and MUST NOT give the digest
 of an empty set (R3).
 
-**L4-YOLO-004** Readiness review in CI.
-A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
+**L4-YOLO-004** Readiness review in CI. A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
 role reviews each unit and each batch with more than one unit, with the prompt and output schema of design D5, and the
 result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid answer MUST be BLOCKED. A blocking finding
 MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
 NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and
 states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and
-its NEEDS_REVISION MUST become READY when no blocking or major finding remains. The judge's material for a batch shows
+its NEEDS_REVISION MUST become READY when no blocking or major finding remains, and its BLOCKED when no finding is left
+at all. The judge's material for a batch shows
 every prerequisite of its units that is not a unit of the batch, the way the material of a unit shows its prerequisites,
 and both state that a prerequisite unit of the plan is delivered and merged into the target before any unit that depends
 on it starts. File names, unit ids and batch ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that
@@ -3264,11 +3270,16 @@ again. A unit that its own run rejects (exit 14, for example an empty
 ledger when the plan dispatched the unit, and the next plan step MUST stop the plan with `unit_rejected` for that unit,
 recording its spec digest, and not dispatch it again. A run of the plan's current unit that ends before the unit
 started (no `run.started`: a usage error, a lease or worktree failure, a missing CLI) MUST be recorded the same way as
-`unit.not_started{unit, run, exit, detail}`; the next plan step then MUST wait with the reason `unit_not_started`, the
-unit and the detail, and MUST NOT start a next run, so that one trigger runs the unit once; a run that starts the unit
-clears it. Outside CI the plan step MUST fetch the target branch before it
+`unit.not_started{unit, run, exit, detail}`; the next plan step then MUST wait with the reason `run_not_started`, the
+unit and the detail, and MUST NOT start a next run, so that one trigger runs the unit once, the first one included (a
+run that did not start the unit chains no run even when the step dispatched it); a run that starts the unit clears it.
+A run that skips the unit because another run holds its lease is not the unit's failure and MUST NOT be recorded. After a
+run, the plan ledger MUST be read again only to write such a record or to clear a pending one. The reason
+`unit_not_started` is another wait: an eligible unit with nothing to run (no task, an unreadable ledger), which ends
+when the unit has something to run. Outside CI the plan step MUST fetch the target branch before it
 reads the plan files; when the fetch fails it MUST log one line, write nothing to the plan ledger and let no unit run while the last fetched ledger of
-a plan says it is open, else hold the units the plan files list and let the units that no plan lists run. A stopped plan MUST
+a plan says it is open, else hold the units the plan files list and let the units that no plan lists run. With no plan file known in the clone, no
+unit is held when none of the plan ledgers the clone holds is open (active, waiting or stopped), else none runs. A stopped plan MUST
 dispatch and merge nothing, later independent units included. `l4 yolo cancel` MUST stop new dispatch and merges for
 good. `l4 yolo resume` MUST be refused while the cause is still there (design D10's table), and `inputs_changed` MUST
 need a new review and activation.

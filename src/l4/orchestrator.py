@@ -1410,8 +1410,10 @@ def run_command(
         cleared = record_run_starts(app, cfg, git, step, result.not_started, result.began)
         if cleared and not step.start_next_run:
             step = replace(step, start_next_run=True)
-        elif step.plan_id and step.start_next_run and any(
-            u in (step.allow or ()) for u in result.not_started if u not in result.began
+        elif (
+            step.plan_id
+            and step.start_next_run
+            and any(u in (step.allow or ()) for u in result.not_started if u not in result.began)
         ):
             step = replace(step, start_next_run=False)  # the dispatched unit did not start: one trigger runs it once
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops

@@ -82,7 +82,7 @@ When a live holder has the lease, the run SHALL log `lock.busy{holder}`, skip th
 - **THEN** exactly one succeeds; the other logs `lock.busy{holder}` and exits 0 without touching the unit.
 
 ### Requirement: L4-LCK-001 (part h) Local flock on shared runners
-On shared shell runners the harness SHALL additionally hold an exclusive non-blocking `flock` on `$L4_CACHE/locks/<unit>.lock` for the whole mutation. In the walking skeleton this flock plus the in-process mutex is the lease.
+On shared shell runners the harness SHALL additionally hold an exclusive non-blocking `flock` on `$L4_CACHE/locks/<key>/<fw>/<name>.lock` (`<key>`: the repository key of L4-WTR-001) for the whole mutation, taken before the unit's worktree is prepared or removed. In the walking skeleton this flock plus the in-process mutex is the lease.
 
 #### Scenario: SCN-LCK-N15 (+) Flock excludes a second process
 - **GIVEN** process A holds the flock for unit X

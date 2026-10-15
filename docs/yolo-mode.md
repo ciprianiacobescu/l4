@@ -223,10 +223,12 @@ once and `l4 yolo status` shows it. The plan continues by itself when the merge 
 after a push, the step reads the PR again, three times, five seconds apart, before it calls the merge not ready. It does
 so in the run that records the wait, not in a preview and not in later runs while the wait for that head stands.
 
-A plan also waits, with the reason `unit_not_started`, when the last run of its current unit ended before the unit
+A plan also waits, with the reason `run_not_started`, when the last run of its current unit ended before the unit
 started: a usage error, a worktree or lease failure, a missing CLI. The harness records the exit and the reason of that
 run (`l4 yolo status` shows them) and starts no next run, so a unit that cannot start does not loop. The next trigger,
-a cron run or a push, runs the unit once more; a run that starts the unit clears the wait.
+a cron run or a push, runs the unit once more, and only once; a run that starts the unit clears the wait. A run that
+skipped the unit because another run holds its lease is not a failure of the unit and is not recorded. The reason
+`unit_not_started` is a different wait: the unit is eligible but has nothing to run (no task, an unreadable ledger).
 
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,

@@ -26,7 +26,7 @@ def test_an_old_layout_worktree_holding_the_branch_is_replaced(run_l4, tdd_repo)
 
 def test_a_second_run_after_the_worktree_moved_to_the_old_layout(run_l4, tdd_repo):
     names_path = tdd_repo.cache / "worktrees" / tdd_repo.key / "openspec" / "add-discount-codes"
-    first = run_l4([red_step()])
+    run_l4([red_step()])
     assert names_path.exists()  # one red step: the run ends early with the branch pushed
     old = tdd_repo.cache / "worktrees" / "openspec" / "add-discount-codes"
     old.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +37,7 @@ def test_a_second_run_after_the_worktree_moved_to_the_old_layout(run_l4, tdd_rep
 
 
 def test_a_renamed_project_replaces_the_worktree_of_its_old_key(run_l4, tdd_repo):
-    first = run_l4([red_step()])
+    run_l4([red_step()])
     old_key = tdd_repo.key
     old = tdd_repo.cache / "worktrees" / old_key / "openspec" / "add-discount-codes"
     assert old.exists()

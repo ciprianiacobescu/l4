@@ -320,6 +320,8 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         findings = tuple(f for f in findings if f["criterion"] != NOT_APPLICABLE)
         if said == "NEEDS_REVISION" and not any(f["severity"] in ("blocking", "major") for f in findings):
             said = "READY"
+        if said == "BLOCKED" and not findings:  # nothing is left that a person could fix: the note was all there was
+            said = "READY"
     if subject.left_out:
         text = "material_cut: left out of the review by the size limits, so the review is partial: " + "; ".join(
             subject.left_out

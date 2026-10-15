@@ -180,7 +180,7 @@ class WorktreeManager:
             raise L4Exit(
                 ExitCode.USAGE_ERROR,
                 f"{path} is a checkout of another repository; refusing to delete it "
-                "(a leftover of the layout without a repository key, or a path outside the keyed cache)",
+                "(another project's checkout at a path of the keyed cache, or a path outside the cache)",
             )
         self._git.run("worktree", "remove", "--force", str(path), check=False)  # not registered: nothing to do
         if path.is_symlink():

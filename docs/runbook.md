@@ -947,8 +947,18 @@ on the unit.
 > run is lost. A local `l4 retry`, `l4 resume` or `l4 restart` while CI works on the same unit can also fail with exit 1.
 
 - Wait for the other run to end. The lock goes when its process stops.
-- If the line has no pid, read the pid in the file `$L4_CACHE/locks/<framework>/<name>.lock` (the default is
-  `~/.cache/l4/`).
+- If the line has no pid, read the pid in the file `$L4_CACHE/locks/<key>/<framework>/<name>.lock` (the default is
+  `~/.cache/l4/`). `<key>` is the repository key: the name of the only directory under `$L4_CACHE/locks/` that holds
+  your unit's file (a runner that serves several projects has one directory for each project). A file at
+  `$L4_CACHE/locks/<framework>/<name>.lock` (no key) belongs to a harness from before the repository key. Its pid
+  is of that older harness, and the current harness ignores the file.
+- After an upgrade, a worktree that the older harness left under `$L4_CACHE/worktrees/<framework>/<name>` (or under
+  another key, after the project was renamed or moved) still has the unit branch checked out in that clone. The next
+  run removes that registration and the directory, because they are the clone's own and lie under
+  `$L4_CACHE/worktrees`. It never touches a worktree elsewhere: if you checked the unit branch out in your own
+  worktree, the run exits 2 with `the branch <b> is checked out in the worktree <path>`; check out another branch
+  there. Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
+  the old lock path, so it does not exclude a job of the new one.
 - `l4 unlock` is not available in 0.3.0 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
@@ -1429,7 +1439,8 @@ reason.
 | `waits for <unit> (not integrated)` | A unit that this unit needs is not in the target yet, or its profile did not pass. | With `merge: human`, merge the PR of that unit into the target. Then wait for the next run. |
 | `waits for batch <id> (acceptance)` | The acceptance profile of a batch did not run yet. | Do nothing. The next run does the check. |
 | `held by plan <id> (<status>)` | The unit is in a plan file on the target, and the plan is not active. | Activate the plan, or remove the unit from the plan file (see 12.5). |
-| `unit_not_started` | The last run of the current unit ended before the unit started: a usage error, a worktree or lease failure, a missing CLI. `l4 yolo status` shows the exit and the reason of that run (for example the worktree message). The harness starts no next run, so the plan does not loop. | Read the detail. Fix the cause (the configuration, the runner, the unit branch). Do nothing else: the next trigger, a cron run or a push, runs the unit once more. A run that starts the unit clears the wait; a run that fails to start it again keeps the plan waiting. |
+| `run_not_started` | The last run of the current unit ended before the unit started: a usage error, a worktree or lease failure, a missing CLI. `l4 yolo status` shows the exit and the reason of that run (for example the worktree message) and its `Next:` line repeats the advice below. The harness starts no next run after a run that did not start the unit, so the plan does not loop. | Read the detail. Fix the cause (the configuration, the runner, the unit branch). Do nothing else: the next trigger, a cron run or a push, runs the unit once more (`l4 yolo resume` does the same at once). A run that starts the unit clears the wait; a run that fails to start it again keeps the plan waiting. Each of these runs counts against `max_runs`. |
+| `unit_not_started` | The unit is eligible but has nothing the harness can run: no task in its `tasks.md`, or a ledger that cannot be read. `l4 yolo status` shows what the unit waits for. | Fix the unit on its branch (add the task, repair the ledger). The plan continues by itself at the next run when the unit has something to run. `l4 yolo resume` wakes it at once, but the plan waits again if the unit still has nothing to run. |
 | `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>` or `the pull request !1 is closed, not open`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
 
 With `merge: human`, a PR must be merged into the target. A merge into another branch does not count. The note of the
