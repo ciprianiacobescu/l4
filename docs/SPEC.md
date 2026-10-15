@@ -3169,7 +3169,7 @@ of an empty set (R3).
 role reviews each unit and each batch with more than one unit, with the prompt and output schema of design D5, and the
 result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid answer MUST be BLOCKED. A blocking finding
 MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
-NEEDS_REVISION, with a finding that names what was left out. File names, unit ids and batch ids MUST reach the prompt only
+NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and its NEEDS_REVISION MUST become READY when no blocking or major finding remains. File names, unit ids and batch ids MUST reach the prompt only
 inside `<l4:data>` blocks. A judge that times out or fails MUST record no review: the next run tries again (R9). One plan
 is reviewed per run.
 

@@ -100,6 +100,7 @@ def test_a_minor_finding_leaves_ready_alone(world):
 
 def test_a_batch_with_two_units_is_reviewed_as_a_whole(world):
     plan = plan_of({A: [], B: [A]})
+    plan.batches[0].acceptance_profile = "fast"  # a batch with a profile is reviewed on batch_acceptance too
     gap = {"criterion": "batch_acceptance", "severity": "major", "text": "no end-to-end check"}
     fake = judge(Step(structured=answer()), Step(structured=answer()), Step(structured=answer("NEEDS_REVISION", [gap])))
     result = review(world, plan, fake)

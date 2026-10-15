@@ -49,7 +49,7 @@ from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
 from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
-from l4.yolo.model import Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
+from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
 PROMPT_VERSION = 1
@@ -187,6 +187,15 @@ class Subject:
     user: str
     left_out: tuple[str, ...] = ()
     not_shown: tuple[str, ...] = ()
+    groups_only: bool = False  # a batch with no acceptance profile: batch_acceptance does not apply to it
+
+
+GROUPING_NOTE = (
+    "This batch only groups units, has no acceptance profile and states no outcome of its own, so batch_acceptance "
+    "does not apply to it. Review what lies between its units: contradiction, duplicate_scope, missing_dependency, "
+    "and the interfaces the units share."
+)
+NOT_APPLICABLE = "batch_acceptance"
 
 
 def _batch_deps(ids: Sequence[str]) -> str:
@@ -224,10 +233,14 @@ def _batch_subject(
 ) -> Subject:
     units = [u for u in batch.units if u.id not in skip]
     context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
+    groups_only = batch.acceptance_profile == PROFILE_NONE
     values = {
         "SUBJECT_KIND": "batch",
         "SUBJECT_ID": data_block("subject", _label(batch.id)),
-        "ENTRY": data_block("plan entry", _entry(batch)) + "\n" + context,
+        "ENTRY": data_block("plan entry", _entry(batch))
+        + "\n"
+        + context
+        + ("\n" + GROUPING_NOTE if groups_only else ""),
         "DEPENDENCIES": _batch_deps(batch.depends_on) or "(none: the batch depends on nothing)",
         "FOLDERS": "\n\n".join(
             data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
@@ -236,7 +249,7 @@ def _batch_subject(
     }
     left_out = tuple(f"{_named(u.id)} {line}" for u in units for line in folders[u.id].left_out)
     not_shown = tuple(p for u in units for p in folders[u.id].binary)
-    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown)
+    return Subject("batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown, groups_only)
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------
@@ -274,7 +287,20 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
     """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
     the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
     are listed in `missing`."""
-    findings, said, missing = verdict.findings, verdict.verdict, verdict.missing
+    findings, said, missing, assumptions = verdict.findings, verdict.verdict, verdict.missing, verdict.assumptions
+    if subject.groups_only and any(f["criterion"] == NOT_APPLICABLE for f in findings):
+        # the plan file has nowhere to state a batch outcome: the finding cannot be fixed, so it is kept as a note
+        assumptions = (
+            *assumptions,
+            *(
+                f"batch_acceptance does not apply (the batch has no acceptance profile), {f['severity']}: {f['text']}"
+                for f in findings
+                if f["criterion"] == NOT_APPLICABLE
+            ),
+        )
+        findings = tuple(f for f in findings if f["criterion"] != NOT_APPLICABLE)
+        if said == "NEEDS_REVISION" and not any(f["severity"] in ("blocking", "major") for f in findings):
+            said = "READY"
     if subject.left_out:
         text = "material_cut: left out of the review by the size limits, so the review is partial: " + "; ".join(
             subject.left_out
@@ -283,7 +309,7 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         said = "NEEDS_REVISION" if said == "READY" else said
     if subject.not_shown:
         missing = (*missing, *(f"not shown to the judge (binary file): {path}" for path in subject.not_shown))
-    return Verdict(said, findings, verdict.assumptions, missing, verdict.digest)
+    return Verdict(said, findings, assumptions, missing, verdict.digest)
 
 
 # --- the judge call ------------------------------------------------------------------------------------------------
