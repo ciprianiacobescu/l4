@@ -45,7 +45,8 @@ class _NoGate(Exception):
 
 def profile_kinds(cfg: L4Config, profile: str, profiles: Mapping[str, Sequence[str]] | None) -> list[str]:
     """The gate kinds of `profile`: the reserved names first, then `profiles`, else `cfg.yolo.profiles` when the
-    config has them. `ValueError` for an unknown profile or a kind that is not a gate kind."""
+    config has them; a named profile that does not list `setup` gets it first when `gates.setup` is configured (it never
+    counts toward a pass). `ValueError` for an unknown profile or a kind that is not a gate kind."""
     if profile == PROFILE_NONE:
         return []
     if profile == PROFILE_ALL:
@@ -57,6 +58,8 @@ def profile_kinds(cfg: L4Config, profile: str, profiles: Mapping[str, Sequence[s
     for kind in kinds:
         if kind not in KINDS and not kind.startswith(EXTRA):
             raise ValueError(f"profile {profile}: {kind!r} is not a gate kind")
+    if cfg.gates.setup and "setup" not in kinds:  # a fresh worktree has no environment: setup is a prerequisite
+        kinds.insert(0, "setup")
     return kinds
 
 

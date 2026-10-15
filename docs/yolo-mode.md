@@ -87,7 +87,8 @@ yolo:
 ```
 
 The gate kinds are `setup`, `build`, `lint`, `typecheck`, `test`, `e2e` and `extra:<name>`. A profile passes only when at
-least one required gate other than `setup` ran and passed. A profile with no such gate is an error, never a pass. `none`
+least one required gate other than `setup` ran and passed. A profile with no such gate is an error, never a pass. When `gates.setup` is configured and a profile does not list `setup`, `setup` runs first by
+itself, because the check runs on a fresh worktree; it never counts toward a pass, and a failed setup fails the check. `none`
 is valid for a batch only.
 
 `all` leaves out the `e2e` gates that need an app server (`gates.e2e.serve`), and the result says so. A profile that

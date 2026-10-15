@@ -3228,7 +3228,7 @@ unit's acceptance profile on the merged target revision (design D9) and record `
 Every merged unit of the plan that is not integrated MUST be checked, not only the current one (R10). The profile `all`
 MUST leave out the e2e gates that need an app server (`gates.e2e.serve`) and say so in the detail; a profile that names
 `e2e` while `serve` is set MUST be refused at admission (`unsupported_profile`). A profile MUST pass only when at least
-one required gate other than `setup` ran and passed; with no such gate it is an error, never a pass (R7). A failure MUST
+one required gate other than `setup` ran and passed; with no such gate it is an error, never a pass (R7). A named profile that does not list `setup` MUST still run the configured `gates.setup` first, as a prerequisite that never counts toward a pass. A failure MUST
 stop the plan with `postcheck_failed`. With `merge: auto`, the OpenSpec archive PR of a plan unit MUST be merged by the
 harness with the same guard, and only when every commit on the archive branch after the target tip is a strict harness
 commit, the archive PR is open with the target as its base, and the target is `forge.base_branch` (R6). For every

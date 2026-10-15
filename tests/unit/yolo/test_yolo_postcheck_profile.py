@@ -205,3 +205,38 @@ def test_setup_plus_one_required_gate_that_passes_is_a_pass(world):
 def test_a_failing_required_gate_is_still_a_fail_even_after_setup(world):
     result = run(world, cfg(setup=[HAS_MARKER], lint=["sh -c 'exit 1'"]), "all")
     assert result.status == "fail"
+
+
+def test_a_named_profile_runs_the_configured_setup_first_by_itself(world):  # the fresh worktree has no environment
+    config = cfg(setup=[HAS_MARKER], test={"command": JUNIT})
+    result = run(world, config, "smoke", profiles={"smoke": ["test"]})
+    assert result.status == "pass", result.detail
+    assert [g.name for g in result.gates] == ["setup", "test"]
+
+
+def test_a_profile_that_lists_setup_runs_it_once(world):
+    config = cfg(setup=[HAS_MARKER], test={"command": JUNIT})
+    result = run(world, config, "smoke", profiles={"smoke": ["setup", "test"]})
+    assert result.status == "pass" and [g.name for g in result.gates] == ["setup", "test"]
+
+
+def test_a_failed_implicit_setup_fails_the_check_and_names_setup(world):
+    config = cfg(setup=["sh -c 'exit 4'"], test={"command": JUNIT})
+    result = run(world, config, "smoke", profiles={"smoke": ["test"]})
+    assert result.status == "fail" and "setup" in result.detail
+    assert [(g.name, g.status) for g in result.gates] == [("setup", "fail")]
+
+
+def test_a_profile_of_setup_alone_is_still_an_error(world):
+    result = run(world, cfg(setup=[HAS_MARKER]), "s", profiles={"s": ["setup"]})
+    assert result.status == "error" and "no required gate other than setup" in result.detail
+
+
+def test_implicit_setup_alone_never_counts_as_a_pass(world):
+    result = run(world, cfg(setup=[HAS_MARKER]), "s", profiles={"s": ["test"]})  # no test configured
+    assert result.status == "error" and "no required gate other than setup" in result.detail
+
+
+def test_without_a_configured_setup_a_profile_runs_only_its_kinds(world):
+    result = run(world, cfg(test={"command": JUNIT}), "smoke", profiles={"smoke": ["test"]})
+    assert result.status == "pass" and [g.name for g in result.gates] == ["test"]
