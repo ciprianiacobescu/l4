@@ -217,6 +217,11 @@ Each requirement SHALL be proven on GitHub, with run ids and evidence under `doc
 
 The GitLab pipeline start SHALL be proven by a recorded API exchange or a live call.
 
+#### Scenario: SCN-OPS-25 (+) The runbook has one command and one label per stuck situation
+- **GIVEN** the runbook of the release
+- **WHEN** a person looks up a halted, an escalated, an abandoned and a waiting unit
+- **THEN** each has one command and one label, and section 11 names none of the limits that L4-OPS-001..012 remove
+
 ### Requirement: L4-OPS-014 A spec push to the unit branch re-enters the unit by itself
 A person's commit on the unit branch, after the harness's last commit, that changes the unit folder outside `.l4/`,
 `verification.md`, `questions.md`, `feedback.md` and fix-unit folders SHALL send the unit to `implementing` at the next
