@@ -525,11 +525,26 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
 # --- l4 yolo draft ---------------------------------------------------------------------------------------------------
 
 
+def _sync_phases(app: AppContext, cfg: L4Config, git: Git) -> None:
+    """Fetch the base branch and the unit refs the phases are read from (as the other `l4 yolo` commands do), so a fresh
+    clone does not take a unit in review or merged for new work. No `origin`, or a fetch that fails: go on with the
+    refs the checkout has, and say so in one line."""
+    if git.run("remote", "get-url", "origin", check=False).returncode != 0:
+        click.echo("draft: no origin to fetch from: the phases may be old")
+        return
+    try:
+        fetch_unit_refs(app, cfg, git)
+    except GitError as exc:
+        reason = app.redactor.redact_text(str(exc)).strip().splitlines()[-1][:160] if str(exc).strip() else "failed"
+        click.echo(f"draft: could not fetch from origin ({reason}): the phases may be old")
+
+
 def run_draft(
     app: AppContext, *, plan: str, target: str | None = None, merge: str | None = None, update: bool = False
 ) -> ExitCode:
     """Write `.l4/plans/<plan>.json` in the working tree from the specs the providers find there (design D15,
-    L4-YOLO-018): no git write, no network, no model. Exit 0 written (or nothing to add), 2 refused."""
+    L4-YOLO-018): no commit, no push, no model; it fetches the unit refs first (`_sync_phases`). Exit 0 written (or
+    nothing to add), 2 refused."""
     plan_id = _plan_id(plan)
     app, cfg = load_app_config(app)
     path = app.repo / PLANS_DIR / f"{plan_id}.json"
@@ -541,6 +556,7 @@ def run_draft(
     if update and (target is not None or merge is not None):
         raise L4Exit(ExitCode.USAGE_ERROR, "draft: --target and --merge set a new file; --update changes nothing else")
     git = Git(app.repo, environ=app.environ)
+    _sync_phases(app, cfg, git)
     files = plan_files(app.repo)
     own = next((f for f in files if f.plan_id == plan_id), None)
     data: dict[str, Any] = {}

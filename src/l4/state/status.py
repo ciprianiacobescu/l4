@@ -444,9 +444,7 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
     urls = app_forge_urls(app, cfg)
     from l4.yolo.commands import plan_lines  # here: the plan commands import this module
 
-    plans = plan_lines(
-        app.repo, Git(app.repo, environ=app.environ), {s.ref.id: s.state.phase for s in rows}, cfg
-    )
+    plans = plan_lines(app.repo, Git(app.repo, environ=app.environ), {s.ref.id: s.state.phase for s in rows}, cfg)
     if as_json:
         units = [
             {

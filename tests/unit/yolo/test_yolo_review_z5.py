@@ -77,3 +77,69 @@ def test_the_merge_mode_comes_from_the_plan_file_of_the_target(world):
     app, cfg = load_app_config(world.app)
     git = Git(app.repo, environ=app.environ)
     assert auto_merge_plan_active(app.repo, git, cfg) is True
+
+
+# --- 4: l4 yolo draft syncs before it reads the phases ---------------------------------------------------------
+
+UNIT_REF = "refs/remotes/origin/l4/openspec/add-b"
+OLD = "the phases may be old"
+
+
+def push_unit_branch(world):
+    """A unit branch and a lock ref that exist on the origin only: what a fresh clone has not fetched."""
+    seeder = world.remote_clone()
+    seeder.run("fetch", "--quiet", "origin")
+    seeder.run(
+        "push",
+        "--quiet",
+        "origin",
+        "origin/main:refs/heads/l4/openspec/add-b",
+        "origin/main:refs/l4/locks/openspec/add-b",
+    )
+    assert world.clone.rev_parse(UNIT_REF) is None
+
+
+def seen_at_discover(world, monkeypatch):
+    """What the clone had when draft first read the phases."""
+    import l4.yolo.commands as commands
+
+    seen = {}
+    real = commands.discover
+
+    def discover(cfg, git, providers, wanted=()):
+        seen["branch"] = git.rev_parse(UNIT_REF)
+        seen["lock"] = git.rev_parse("refs/l4/locks/openspec/add-b")
+        return real(cfg, git, providers, wanted)
+
+    monkeypatch.setattr(commands, "discover", discover)
+    return seen
+
+
+def test_draft_fetches_the_unit_refs_before_it_reads_the_phases(world, monkeypatch, capsys):
+    push_unit_branch(world)
+    seen = seen_at_discover(world, monkeypatch)
+    assert world.l4("draft", "p1") == 0
+    assert seen["branch"] is not None and seen["lock"] is not None
+    assert OLD not in capsys.readouterr().out
+
+
+def test_draft_with_no_origin_goes_on_and_says_the_phases_may_be_old(world, monkeypatch, capsys):
+    world.clone.run("remote", "remove", "origin")
+    assert world.l4("draft", "p1") == 0
+    out = capsys.readouterr().out
+    assert [line for line in out.splitlines() if OLD in line] == [
+        "draft: no origin to fetch from: the phases may be old"
+    ]
+    assert (world.app.repo / ".l4/plans/p1.json").exists()
+
+
+def test_draft_whose_fetch_fails_goes_on_and_says_the_phases_may_be_old(world, capsys):
+    world.clone.run("remote", "set-url", "origin", str(world.root / "no-such-remote"))
+    assert world.l4("draft", "p1") == 0
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if OLD in line]
+    assert (
+        len(lines) == 1
+        and lines[0].startswith("draft: could not fetch from origin")
+        and "wrote .l4/plans/p1.json" in out
+    )

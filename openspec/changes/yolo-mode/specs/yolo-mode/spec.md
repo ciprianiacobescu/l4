@@ -354,7 +354,10 @@ file, so an edit of them after the activation stops the plan (`inputs_changed`) 
 
 ### Requirement: L4-YOLO-018 `l4 yolo draft` scaffolds and updates a plan file
 `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
-the working tree and nothing else: no commit, no push, no ref, no model call. Without `--update` it MUST refuse an
+the working tree and nothing else: no commit, no push, no plan ref, no model call. Before it reads the phases of the
+units it MUST fetch the base branch and the unit refs from `origin`, as the other `l4 yolo` commands do, so that a fresh
+clone does not take a unit in review or merged for new work. With no `origin`, or when the fetch fails, it MUST go on
+with the refs the checkout has and print one line saying that the phases may be old. Without `--update` it MUST refuse an
 existing file (exit 2). It lists every unit the spec providers find in the working tree that no plan file lists
 (planned or excluded) and that is not a derived unit whose parent a plan file lists. It puts each unit that is not
 finished into one batch `unplanned` with no dependencies, and each finished unit (`merged`, `archived`) into `exclude`
