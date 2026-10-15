@@ -162,3 +162,12 @@ def test_mem002_is_registered_as_a_config_warning():
     load_check_modules()
     check = next(c for c in REGISTRY.checks() if c.id == "MEM-002")
     assert check.severity == "warn" and {"ci", "local", "config"} <= check.scopes
+
+
+def test_laya_and_serena_hints_name_the_runner_fix(make_ctx):
+    """On a CI runner the fix is `l4 doctor --ci --fix` (adoption-lessons 6.3, L4-ADO-015); prereqs.sh stays."""
+    ctx, _ = make_ctx(tools={}, cfg=config(profiles={"laya": Profile(backend="system-one", engine="laya-local")},
+                                           roles={"s1_judge": ["laya"]}))  # fmt: skip
+    for result in (cm._env_006(ctx), cm._env_008(ctx)):
+        assert result.status == "fail" and "l4 doctor --ci --fix" in (result.fix_hint or "")
+        assert "prereqs.sh --with-" in (result.fix_hint or "")

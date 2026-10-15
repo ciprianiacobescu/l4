@@ -88,7 +88,7 @@ def test_json_output_and_resolved_paths(world, capsys):
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
     expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
     expected += ["S1-001", "S1-002", "COV-001", "SANDBOX-002", "CFG-005", "MEM-002", "CI-002", "ENV-013", "EVAL-001"]
-    expected += ["ENV-014", "CFG-004", "CFG-006", "CFG-007", "YOLO-001", "CI-003"]
+    expected += ["ENV-014", "CFG-004", "CFG-006", "CFG-007", "YOLO-001", "CI-003", "S1-003"]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
         "CI-001",
@@ -101,7 +101,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "ENV-007",
     }  # not GitLab; no agent CLI
     skipped |= {"CFG-006", "CFG-007"}  # not an action adoption
-    skipped |= {"YOLO-001", "CI-003"}  # merge_policy is human; no CI file
+    skipped |= {"YOLO-001", "CI-003", "S1-003"}  # merge_policy is human; no CI file; no S1 judge profile
     skipped |= {"S1-001", "S1-002", "COV-001", "ENV-013", "EVAL-001"}  # nothing shadowed, no tuned checkpoint or
     # Ollama host, no project interpreter, no eval baseline in this repository
     # profile; no Kiro; no Laya profile, no e2e gate
@@ -239,10 +239,29 @@ def test_adoption_without_agent_clis_exits_0(world, capsys):
     assert main(["doctor", "--adoption", "--no-gates", "--json", "--repo", str(repo)], environ=environ) == 0
     ids = {c["id"] for c in json.loads(capsys.readouterr().out)["checks"]}
     assert {"CFG-002", "SPEC-001"} <= ids
-    assert not {i for i in ids if i.startswith(("ENV-", "PRV-", "SANDBOX-", "COV-", "LIVE-", "S1-"))}
+    assert not {i for i in ids if i.startswith(("ENV-", "PRV-", "SANDBOX-", "COV-", "LIVE-", "S1-"))} - {"S1-003"}
 
 
 def test_no_gates_without_adoption_is_a_usage_error(world, capsys):
     repo, environ, _ = world
     assert main(["doctor", "--no-gates", "--repo", str(repo)], environ=environ) == 2
     assert "--no-gates" in capsys.readouterr().err
+
+
+def test_only_adoption_marks_the_doctor_context(world, monkeypatch, capsys):
+    """S1-003 starts `laya-serve` under `--adoption` and only checks the install under `--ci` (L4-ADO-015)."""
+    import l4.doctor.run as run_module
+
+    repo, environ, _ = world
+    seen: list[bool] = []
+    real = run_module.run_checks
+
+    def spy(ctx, **kw):
+        seen.append(ctx.adoption)
+        return real(ctx, **kw)
+
+    monkeypatch.setattr(run_module, "run_checks", spy)
+    main(["doctor", "--adoption", "--no-gates", "--json", "--repo", str(repo)], environ=environ)
+    main(["doctor", "--ci", "--json", "--repo", str(repo)], environ=environ)
+    capsys.readouterr()
+    assert seen == [True, False]

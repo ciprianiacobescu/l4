@@ -30,6 +30,7 @@ class DoctorContext:
     run: Run
     python_version: tuple[int, int, int]
     unit: str | None = None  # set for unit-aware checks under `--unit ID`
+    adoption: bool = False  # `l4 doctor --adoption`: a row may start what `--ci` only checks is installed (S1-003)
 
 
 def system_context(repo: Path, cfg: L4Config, environ: Mapping[str, str]) -> DoctorContext:
