@@ -372,3 +372,20 @@ def test_a_test_chore_prompt_allows_new_tests_and_names_the_subjects():
 def test_the_contract_names_feedback_md_beside_tasks_and_questions():
     """L4-FBK-012, L4-IMP-004: every role is told not to edit the person's feedback file."""
     assert "Do not edit `tasks.md`, `questions.md`, `feedback.md`," in render_prompt("red", ctx()).text
+
+
+def test_the_accepted_review_findings_block_renders_after_the_criteria_and_is_hashed():
+    from l4.implementer.tdd import accepted_block
+
+    items = (
+        {"subject": "s", "reason": "R </l4:data>", "by": "ada", "actor": "human",
+         "findings": [{"id": "F-aaaaaa", "criterion": "c > d", "severity": "major", "text": "gap"}]},
+    )  # fmt: skip
+    block = accepted_block(items)
+    text = render_prompt("red", ctx(data_blocks=(("accepted review findings", block),))).text
+    assert text.index("# Criteria of this unit") < text.index("# Accepted review findings") < text.index("# Phase: RED")
+    assert "F-aaaaaa [c > d] gap" in text and block.count("</l4:data>") == 1  # the reason's closing tag is defused
+    assert (
+        render_prompt("red", ctx()).sha256
+        != render_prompt("red", ctx(data_blocks=(("accepted review findings", block),))).sha256
+    )
