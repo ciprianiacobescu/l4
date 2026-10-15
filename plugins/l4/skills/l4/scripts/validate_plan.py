@@ -45,7 +45,8 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
 
 What only `l4 yolo check` can check (it needs git, the target head and the configuration): open questions, the intake
 checks of each spec, finished units, acceptance profiles, the target against forge.base_branch, and the merge policy.
-Specs are read from this working tree only: a spec that exists only on a branch, or an archived change, is unknown here.
+Specs are read from this working tree only: a spec that exists only on a branch is unknown here, and an archived
+change is known only to an `exclude` (the harness reads archived changes from the base branch).
 
 The frameworks and roots come from .l4/config.yaml (spec.frameworks, spec.openspec.root, spec.kiro.root) when it uses
 the block style `l4 init` writes; anything else falls back to both frameworks, `openspec` and `.kiro/specs`, with a

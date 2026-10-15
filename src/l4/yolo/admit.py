@@ -132,9 +132,9 @@ def admit(
     plan: Plan, *, known_units: Mapping[str, UnitInfo], cfg: L4Config, held: Mapping[str, str] | None = None
 ) -> Admission:
     """Check `plan` at the target head (design D2). `known_units` holds what the spec providers found there. `held`
-    maps a unit id to the id of the plan file that already lists it (`plans.held_by`, first file in path order): a unit
-    of this plan that another plan holds is a `held_by_other_plan` finding (R8); entries naming this plan are no
-    finding."""
+    maps a unit id to the id of the plan that holds it (`plans.held_by`: the activated plan, else the first file in
+    path order): a unit of this plan that another plan holds is a `held_by_other_plan` finding (R8); entries naming
+    this plan are no finding."""
     found: list[Finding] = []
 
     def add(code: str, subject: str, text: str) -> None:
