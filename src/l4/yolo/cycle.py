@@ -60,10 +60,9 @@ from l4.state.fold import UnitState
 from l4.state.status import UnitSnapshot
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
-from l4.vcs.push import ATTEMPT_REF_PREFIX
 from l4.yolo.admit import FINISHED_PHASES, admit, merged_not_integrated, next_eligible
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
-from l4.yolo.limits import reached_at
+from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
     PLAN_ID,
@@ -83,7 +82,7 @@ from l4.yolo.plans import PlanFile, holds_of, plan_files, unit_infos
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import review_plan_costed
 from l4.yolo.report import render_report
-from l4.yolo.state import fold_plan
+from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
 
 log = logging.getLogger("l4.yolo.cycle")
@@ -317,7 +316,8 @@ class _Step:
         self.target = cfg.forge.base_branch
         self.ctxs: dict[str, _Ctx] = {}
         self.actions: list[str] = []
-        self._attempts: dict[str, int | None] = {}  # unit id -> 1 + its attempt refs on origin (None: not readable)
+        self._judge_down = False  # a judge failed in this run: the plans still to review wait for a later run
+        self._attempts: dict[str, int | None] = {}  # unit id -> its attempt refs on origin (None: not readable)
 
     # --- loading ----------------------------------------------------------------------------------------------------
 
@@ -419,6 +419,7 @@ class _Step:
                 self._file_deleted()
                 if not self.files:  # every plan file is gone: the units are ordinary units again
                     return PlanStep(allow=None, actions=tuple(self.actions))
+                self._rejected_fixed()
                 done = self._reviews()
                 if done is not None:
                     return done
@@ -538,22 +539,39 @@ class _Step:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text, encoding="utf-8")
 
+    def _live_charge(self, ctx: _Ctx, unit: str | None) -> list[PlanEvent]:
+        """The `plan.charged` of the unit's current attempt, when the ledger does not hold its live figures yet (R1,
+        R3): the cost its ledger shows now and its attempt. Every stop writes it before `plan.stopped`, so the plan
+        ledger holds what the step read, whatever a `l4 restart` does to the unit's own ledger afterwards."""
+        snap = self.snaps.get(unit) if unit else None
+        if unit is None or snap is None or unit in ctx.state.integrated or not is_unit_key(unit):
+            return []
+        charge = self._charged(ctx, unit, snap)
+        attempt, cost = int(charge.data["attempt"]), float(charge.data["cost_usd"])
+        if ctx.state.used.attempts.get(unit, 0) >= attempt and cost <= self._charged_of(ctx, unit, attempt)[0]:
+            return []
+        return [charge]
+
     def _stop(
         self, ctx: _Ctx, reason: str, detail: str | None = None, unit: str | None = None,
-        before: Sequence[PlanEvent] = (),
+        before: Sequence[PlanEvent] = (), charge: str | None = None, digest: str | None = None,
     ) -> PlanStep:  # fmt: skip
+        """`plan.stopped`, after the live charge of `charge` (default: the plan's current unit) and the events `before`.
+        `digest`: the spec digest of the stop's unit when the stop depends on it (`unit_rejected`, R8)."""
         shown = self.app.redactor.redact_text(detail) if detail else None
-        stopped = self._event("plan.stopped", reason=reason, detail=shown, unit=unit)
-        self._with_report(ctx, [*before, stopped])
+        stopped = self._event("plan.stopped", reason=reason, detail=shown, unit=unit, digest=digest)
+        self._with_report(ctx, [*self._live_charge(ctx, charge or ctx.state.current), *before, stopped])
         self._line(ctx.plan_id, f"stopped ({reason}{f', {unit}' if unit else ''}){f': {shown}' if shown else ''}")
         return self._result(frozenset(), start_next_run=False, plan_id=ctx.plan_id)
 
     def _after_review(self, ctx: _Ctx, *, start_next_run: bool = False) -> PlanStep:
         """The step was a review (or a refusal): one plan step per run, so while another plan is active nothing of it
-        is dispatched in this run."""
+        is dispatched in this run. That plan goes on in the next run, which this run asks for (R9)."""
         live = live_plan(self.files, self._states(), self.target)
         return self._result(
-            frozenset() if live is not None else None, start_next_run=start_next_run, plan_id=ctx.plan_id
+            frozenset() if live is not None else None,
+            start_next_run=start_next_run or live is not None,
+            plan_id=ctx.plan_id,
         )
 
     # --- 1. reviews -------------------------------------------------------------------------------------------------
@@ -585,6 +603,8 @@ class _Step:
             self._line(ctx.plan_id, f"refused: {'; '.join(file.invalid.errors)}")
             return self._after_review(ctx)
         plan = file.plan
+        if self._judge_down:
+            return None
         rev = self._target_rev()
         folders = unit_infos(self.app.repo, self.found, plan.unit_ids(), check_intake=False)
         current = {u: self._digest(u, i.folder) for u, i in folders.items()}
@@ -608,7 +628,8 @@ class _Step:
         except (RoleLimit, RoleUnavailable) as exc:  # `JudgeFailed` is a `RoleUnavailable`: nothing is recorded (R9)
             reason = self.app.redactor.redact_text(str(exc) or type(exc).__name__).splitlines()[0][:200]
             self._line(ctx.plan_id, f"the review waits, no judge could run ({reason}); a later run tries again")
-            return self._after_review(ctx, start_next_run=False)
+            self._judge_down = True  # no other plan goes to the judge in this run; the active plan goes on (review #4)
+            return None
         events = []
         order = list(admission.order)
         if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
@@ -628,10 +649,31 @@ class _Step:
                 default=0.0,
             )  # fmt: skip
             events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
-        self._write(ctx, events)
+        self._write_review(ctx, events, digest)
         verdicts = ", ".join(f"{u}={v.verdict}" for u, v in result.units.items())
         self._line(ctx.plan_id, f"reviewed ({verdicts})")
         return self._after_review(ctx)
+
+    def _write_review(self, ctx: _Ctx, events: Sequence[PlanEvent], digest: str) -> None:
+        """The review is paid for: when the lease is lost, the ref is read again and the same facts are appended once
+        more, with no second judge call, unless the plan moved in a way that makes this review stale (another review,
+        refusal or admission, a new plan digest, or a plan that can no longer be reviewed) (review #16)."""
+        try:
+            self._write(ctx, events)
+        except PlanMoved:
+            seen = len(ctx.read.events)
+            fresh = ctx.store.read()
+            ctx.refresh(fresh)
+            since = fresh.events[seen:]
+            newer = any(
+                e.type in ("plan.reviewed", "plan.refused")
+                or (e.type == "plan.admitted" and e.data.get("plan_digest") != digest)
+                for e in since
+            )
+            if newer or not self._reviewable(ctx.state):
+                log.info("plan %s: the ref moved during the review and the review is stale: it is dropped", ctx.plan_id)
+                raise
+            self._write(ctx, events, facts=True)
 
     @staticmethod
     def _reviewed_current(state: PlanState, digest: str, current: Mapping[str, str]) -> bool:
@@ -644,49 +686,27 @@ class _Step:
     # --- attempts, limits (R1, R3) ----------------------------------------------------------------------------------
 
     def _attempt(self, ctx: _Ctx, snap: UnitSnapshot) -> int:
-        """The attempt the unit is on: 1 + the number of its `refs/l4/attempts/<fw>/<name>/<n>` refs on origin (`l4
-        restart` keeps each old head there, R1). When origin cannot be asked, the highest attempt already charged
-        stands: an attempt number never goes down."""
+        """The attempt the unit is on in this plan: `limits.live_attempt` of the unit's attempt refs on origin (`l4
+        restart` keeps each old head there, R1) less the refs it had at the activation (R13). When origin cannot be
+        asked, the highest attempt already charged stands: an attempt number never goes down."""
         unit = snap.ref.id
         if unit not in self._attempts:
-            pattern = f"{ATTEMPT_REF_PREFIX}{snap.ref.framework.value}/{snap.ref.name}/*"
-            try:
-                listing = self.git.run(
-                    "ls-remote", "origin", pattern, config=fetch_auth_config(self.cfg, self.app.environ)
-                ).stdout
-                refs = [line.split("\t")[-1].strip() for line in listing.splitlines() if "\t" in line]
-                self._attempts[unit] = 1 + sum(1 for ref in refs if ref.rsplit("/", 1)[-1].isdigit())
-            except GitError as exc:
-                log.warning("%s: its attempt refs could not be listed: %s", unit, str(exc).splitlines()[0][:200])
-                self._attempts[unit] = None
-        counted = self._attempts[unit]
-        return max(counted or 1, ctx.state.used.attempts.get(unit, 1))
+            self._attempts[unit] = attempt_refs(self.git, unit, fetch_auth_config(self.cfg, self.app.environ))
+        return live_attempt(ctx.state, unit, self._attempts[unit])
 
     @staticmethod
     def _charged_of(ctx: _Ctx, unit: str, attempt: int) -> tuple[float, int]:
         """The cost and the runs `plan.charged` already holds for one attempt of a unit (the fold's maximum)."""
-        cost, runs = 0.0, 0
-        for event in ctx.read.events:
-            same = event.type == "plan.charged" and event.data.get("unit") == unit
-            if same and int(event.data.get("attempt", 1) or 0) == attempt:
-                cost = max(cost, float(event.data.get("cost_usd") or 0))
-                runs = max(runs, int(event.data.get("runs") or 0))
-        return cost, runs
+        return charged_of(ctx.read.events, unit, attempt)
 
     def _limit_state(self, ctx: _Ctx, unit: str | None) -> PlanState:
         """The folded state with what `unit` has used and the ledger does not hold yet: the cost its ledger shows now
-        and the attempt it is on. Only that unit runs (the plan is serial), and its charge is written at its next
-        dispatch or integration, so without this a limit would fire one run late."""
-        state = ctx.state
+        and the attempt it is on (`limits.live_state`, the figures `l4 yolo resume` and `status` read too). Only that
+        unit runs (the plan is serial), and its charge is written at its next dispatch, integration or stop."""
         snap = self.snaps.get(unit) if unit else None
-        if unit is None or snap is None or unit in state.integrated:
-            return state
-        attempt = self._attempt(ctx, snap)
-        charged_cost, _ = self._charged_of(ctx, unit, attempt)
-        used = state.used.model_copy(deep=True)
-        used.cost_usd += max(0.0, snap.state.cost_usd - charged_cost)
-        used.attempts[unit] = max(used.attempts.get(unit, 0), attempt)
-        return state.model_copy(update={"used": used})
+        if unit is None or snap is None:
+            return ctx.state
+        return live_state(ctx.state, ctx.read.events, unit, self._attempt(ctx, snap), snap.state.cost_usd)
 
     def _limit_reached(self, ctx: _Ctx, unit: str | None) -> tuple[str, str, str | None] | None:
         """(stop reason, detail, unit) of the first limit reached (D11, R3): `limits.reached_at` on the state."""
@@ -749,6 +769,8 @@ class _Step:
             return self._stop(ctx, "unit_missing", f"{current} is not among the units of the target", current)
         if current and snap is not None:
             phase = snap.state.phase or ""
+            if phase == "rejected":
+                return self._rejected(ctx, snap)
             if phase in STOPPED_PHASES:
                 return self._stop(ctx, f"unit_{phase}", snap.state.halt_detail or snap.state.halt_reason, current)
             if phase not in FINISHED_PHASES and phase in WAIT_PHASES and self._unit_action(snap) not in _ACTIONABLE:
@@ -794,6 +816,55 @@ class _Step:
         adopts it as its current unit (review #2)."""
         verdict = snap.state.last_verdict
         return (snap.state.phase or "") == "in_review" and verdict is not None and verdict.verdict == "PASS"
+
+    def _rejected(self, ctx: _Ctx, snap: UnitSnapshot) -> PlanStep:
+        """The current unit is `rejected` (R8). The stop records the spec digest the unit was rejected at. A
+        re-activation after a fix (the frozen digest is no longer that one) asks for the same continuation as `l4
+        retry` (`retry_unit`, by `plan`). A retry that cannot move the unit stops the plan again, and says why."""
+        from l4.state.retry import retry_unit  # retry imports the orchestrator, which imports this module
+
+        unit, state = snap.ref.id, ctx.state
+        rejections = [
+            e for e in ctx.read.events
+            if e.type == "plan.stopped" and e.data.get("reason") == "unit_rejected" and e.data.get("unit") == unit
+        ]  # fmt: skip
+        seen = rejections[-1].data.get("digest") if rejections else None
+        detail = snap.state.halt_detail or snap.state.halt_reason
+        if seen is not None and seen != state.digests.get(unit):
+            reason = f"the spec of {unit} was fixed after it was rejected (plan {ctx.plan_id})"
+            try:
+                result = retry_unit(
+                    self.app, self.cfg, self.git, self.providers[unit], snap.ref, reason=reason, by="plan"
+                )
+            except L4Exit as exc:
+                log.info("%s: the retry of a rejected unit was refused: %s", unit, exc)
+                detail = (
+                    f"{unit} was fixed after it was rejected, but its phase is still rejected and a retry cannot move "
+                    f"it: l4 restart --unit {unit} --reason TEXT, then l4 yolo activate {ctx.plan_id} --reason TEXT"
+                )
+            else:
+                if result.outcome.phase_after != "rejected":
+                    self._line(ctx.plan_id, f"{unit}: its spec was fixed, it goes on ({result.outcome.phase_after})")
+                    return self._result(frozenset(), start_next_run=True, plan_id=ctx.plan_id)
+                detail = f"{unit} is still rejected after the retry"
+        return self._stop(ctx, "unit_rejected", detail, unit, digest=state.digests.get(unit))
+
+    def _rejected_fixed(self) -> None:
+        """A plan stopped with `unit_rejected` whose unit now has another spec digest than the one it was rejected at:
+        the person fixed it, so the plan is stopped again as `inputs_changed{unit}`. CI then reviews the plan again, and
+        a person activates it again (R8)."""
+        for ctx in list(self.ctxs.values()):
+            state = ctx.state
+            if state.status != "stopped" or state.stop_reason != "unit_rejected" or not state.stop_unit:
+                continue
+            if ctx.file.plan is None or ctx.file.plan.target != self.target:
+                continue
+            unit = state.stop_unit
+            info = unit_infos(self.app.repo, self.found, [unit], check_intake=False).get(unit)
+            stopped = _last(ctx.read.events, "plan.stopped", unit)
+            seen = (stopped.data.get("digest") if stopped is not None else None) or state.digests.get(unit)
+            if info is not None and seen is not None and self._digest(unit, info.folder) != seen:
+                self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after it was rejected", unit)
 
     def _cause_gone(self, ctx: _Ctx) -> str | None:
         """For a waiting plan: why it may go on (`the cause is gone: <unit> is <phase>`), None while its current unit
@@ -1068,7 +1139,7 @@ class _Step:
                 return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
             return self._wait(ctx, phase or "not_started", unit, snap)  # it cannot run and cannot be adopted (#2)
         if (limit := self._limit_reached(ctx, unit)) is not None:
-            return self._stop(ctx, limit[0], limit[1], limit[2])
+            return self._stop(ctx, limit[0], limit[1], limit[2], charge=unit)
         # the charge first: the fold gives a new attempt its own stale retry when it sees the dispatch (D8)
         self._write(ctx, self._dispatch_events(ctx, unit, snap, adopted=adopt))
         if not adopt:

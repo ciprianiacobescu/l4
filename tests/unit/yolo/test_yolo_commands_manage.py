@@ -5,8 +5,6 @@ cancel, the report, and every refusal of a resume (design D10's table)."""
 import json
 from datetime import UTC, datetime
 
-import pytest
-
 import l4.yolo.commands as commands
 from l4.yolo.digest import plan_digest
 from l4.yolo.model import PlanState
@@ -234,10 +232,16 @@ def test_resume_of_an_abandoned_unit_needs_a_reopened_pr_or_a_restart(world, mon
     assert "is still abandoned" in err and "l4 restart --unit openspec:add-b" in err
 
 
-@pytest.mark.parametrize("reason", ["inputs_changed", "unit_rejected"])
-def test_resume_never_clears_a_changed_spec(world, capsys, reason):
-    active_world(world, ev("plan.stopped", reason=reason, unit=B))
+def test_resume_never_clears_a_changed_spec(world, capsys):
+    active_world(world, ev("plan.stopped", reason="inputs_changed", unit=B))
     assert "run l4 yolo review p1, then l4 yolo activate p1" in resume(world, capsys)
+
+
+def test_resume_of_a_rejected_unit_says_to_fix_the_spec_first(world, capsys):  # review #8
+    active_world(world, ev("plan.stopped", reason="unit_rejected", unit=B))
+    err = resume(world, capsys)
+    assert "openspec:add-b was rejected: fix its spec and push it" in err
+    assert "the next run stops the plan with inputs_changed and CI reviews it, then l4 yolo activate p1" in err
 
 
 def test_resume_waits_for_the_questions(world, monkeypatch, capsys):

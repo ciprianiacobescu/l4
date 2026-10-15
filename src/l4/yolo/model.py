@@ -206,6 +206,7 @@ class PlanState(BaseModel):
     review: dict[str, str] = Field(default_factory=dict)  # unit or `batch:<id>` -> verdict
     digests: dict[str, str] = Field(default_factory=dict)  # frozen at activation: unit -> digest
     limits: dict[str, Any] = Field(default_factory=dict)  # frozen at activation (PlanLimits as a dict)
+    attempt_base: dict[str, int] = Field(default_factory=dict)  # R13: unit -> its attempt refs when the plan began
     current: str | None = None  # the unit dispatched and not yet integrated
     merged: dict[str, str] = Field(default_factory=dict)  # unit -> merge commit (head)
     integrated: dict[str, str] = Field(default_factory=dict)  # unit -> target revision

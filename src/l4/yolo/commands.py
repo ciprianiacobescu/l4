@@ -59,7 +59,10 @@ from l4.yolo.limits import (
     LIMIT_ATTEMPTS,
     LIMIT_COST,
     LIMIT_RUNS,
+    attempt_refs,
     effective_limits,
+    live_attempt,
+    live_state,
     reached_at,
     resume_allows,
 )
@@ -197,6 +200,7 @@ class _Units:
 
     infos: dict[str, UnitInfo] = field(default_factory=dict)
     phases: dict[str, str | None] = field(default_factory=dict)
+    costs: dict[str, float] = field(default_factory=dict)  # unit id -> the cost its own ledger shows (this attempt)
 
 
 @contextlib.contextmanager
@@ -224,7 +228,8 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
         infos = unit_infos(path, found, wanted, check_intake=intake)
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
-    return _Units(infos, phases)
+        costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
+    return _Units(infos, phases, costs)
 
 
 def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
@@ -272,6 +277,19 @@ class ReviewView:
         return self.kind == "current" and not self.problems
 
 
+def _rejected_at(events: Sequence[PlanEvent], state: PlanState) -> str | None:
+    """The spec digest of the unit a plan was stopped with `unit_rejected` for: the one recorded by the stop, else the
+    one frozen at the activation (R8). None for a plan that is not stopped for a rejected unit."""
+    if state.status != "stopped" or state.stop_reason != "unit_rejected" or not state.stop_unit:
+        return None
+    unit = state.stop_unit
+    stops = [
+        e for e in events
+        if e.type == "plan.stopped" and e.data.get("reason") == "unit_rejected" and e.data.get("unit") == unit
+    ]  # fmt: skip
+    return (stops[-1].data.get("digest") if stops else None) or state.digests.get(unit)
+
+
 def _first_line(findings: Any) -> str:
     rows = [f for f in findings or [] if isinstance(f, dict)]
     rows.sort(key=lambda f: 0 if f.get("severity") == "blocking" else 1)
@@ -312,6 +330,15 @@ def _review_view(
 
 def _money(value: float | None) -> str:
     return "unlimited" if value is None else f"${value:.2f}"
+
+
+def _live_usage(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], units: _Units, unit: str | None) -> PlanState:
+    """The state with the live figures the plan step checks the limits on (`limits.live_state`): the attempt `unit`
+    is on (`limits.live_attempt` of its attempt refs on origin) and the cost its ledger shows now."""
+    if unit is None or unit not in units.phases:
+        return state
+    attempt = live_attempt(state, unit, attempt_refs(ctx.git, unit, ctx.fetch_cfg))
+    return live_state(state, events, unit, attempt, units.costs.get(unit, 0.0))
 
 
 # --- what stops a resume ------------------------------------------------------------------------------------------
@@ -355,8 +382,10 @@ def resume_blocker(
     *,
     target_present: bool = True,
     now: datetime | None = None,
+    live: PlanState | None = None,
 ) -> Blocker | None:
-    """The cause that is still there, per design D10's table; None when a resume may go."""
+    """The cause that is still there, per design D10's table; None when a resume may go. `live`: the state with the
+    figures the plan step checks the limits on (`_live_usage`); the ledger's `state` when not given."""
     review_again = f"l4 yolo review {plan_id}, then l4 yolo activate {plan_id} --reason TEXT"
     if state.status == "waiting":
         unit = state.current
@@ -373,6 +402,12 @@ def resume_blocker(
             )
         return None
     reason, unit = state.stop_reason or "", state.stop_unit
+    if reason == "unit_rejected" and unit:
+        return Blocker(
+            f"{unit} was rejected: fix its spec and push it; the next run stops the plan with inputs_changed and CI "
+            f"reviews it, then l4 yolo activate {plan_id}",
+            f"fix the spec of {unit} and push it; after the review, l4 yolo activate {plan_id} --reason TEXT",
+        )
     if reason in ("inputs_changed", "unit_rejected"):
         what = f"{unit} was rejected" if reason == "unit_rejected" and unit else f"{plan_id} stopped with {reason}"
         return Blocker(f"{what}: run l4 yolo review {plan_id}, then l4 yolo activate {plan_id}", review_again)
@@ -396,7 +431,7 @@ def resume_blocker(
     if reason == "target_missing" and not target_present:
         return Blocker("the target branch is still missing on origin: push it again first", "push the target branch")
     if reason.startswith("limit_"):
-        return _limit_blocker(plan_id, state, plan, extend, now or _now())
+        return _limit_blocker(plan_id, live or state, plan, extend, now or _now())
     return None
 
 
@@ -514,12 +549,27 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         return ExitCode.USAGE_ERROR
     now = _digests(ctx, parsed, units)
     if not local:
+        seen, unit = _rejected_at(read.events, state), state.stop_unit or "a unit"
+        if seen is not None and now.get(unit) == seen:  # R8: CI reviews the plan once the spec has changed
+            ctx.say(
+                f"{plan_id}: {unit} was rejected and its spec has not changed: fix the spec and push it. The next "
+                f"run on {ctx.target} then stops the plan with inputs_changed and CI reviews it; then l4 yolo "
+                f"activate {plan_id} --reason TEXT. A unit on a branch stays rejected until l4 restart --unit {unit} "
+                f"--reason TEXT"
+            )
+            return ExitCode.OK
         view = _review_view(parsed, file.text, state, read.events, now)
         if view.kind == "current":
             ctx.say(f"{plan_id}: already reviewed for these inputs ({'READY' if view.ready else 'not READY'})")
             _print_findings(ctx, view.problems)
             return ExitCode.OK
-        ctx.say(f"{plan_id}: review requested; CI reviews it at the next run on {ctx.target}")
+        if seen is not None:
+            ctx.say(
+                f"{plan_id}: the spec of {unit} changed; the next run on {ctx.target} records inputs_changed and CI "
+                f"reviews the plan"
+            )
+        else:
+            ctx.say(f"{plan_id}: review requested; CI reviews it at the next run on {ctx.target}")
         if not no_run:
             ctx.say(start_run_line(ctx.app, ctx.cfg))
         return ExitCode.OK
@@ -592,6 +642,15 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"then l4 yolo resume {plan_id} --reason TEXT",
         )
     units = _read_units(ctx, rev, parsed.unit_ids(), intake=True)
+    seen, rejected = _rejected_at(read.events, state), state.stop_unit
+    stays = seen is not None and rejected in units.infos and units.phases.get(rejected) == "rejected"
+    if stays and _now_digest(ctx, rejected, units.infos[rejected].folder) == seen:  # a restarted unit has no phase
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"activate: {rejected} was rejected, is still rejected and its spec has not changed: fix the spec and "
+            f"push it, then l4 yolo review {plan_id} and l4 yolo activate {plan_id} --reason TEXT; or restart the "
+            f"unit (l4 restart --unit {rejected} --reason TEXT)",
+        )
     admission = admit(parsed, known_units=units.infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state))
     if not admission.ok:
         raise L4Exit(
@@ -625,9 +684,10 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"activate: plan {other.plan_id} is already active, waiting or stopped on {parsed.target}: "
             f"let it finish, or run l4 yolo cancel {other.plan_id} --reason TEXT first",
         )
+    base = {u: n for u in parsed.unit_ids() if (n := attempt_refs(ctx.git, u, ctx.fetch_cfg)) is not None}
     event = _event(
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
-        merge=parsed.merge, by=ctx.who(), reason=reason.strip(),
+        merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base,
     )  # fmt: skip
     _append(store, [event], read.head)
     ctx.say(f"{plan_id}: activated on {parsed.target} ({len(parsed.unit_ids())} unit(s), merge: {parsed.merge})")
@@ -693,12 +753,19 @@ def run_resume(
     on_origin = _branch_on_origin(ctx, ctx.target)
     parsed: Plan | None = None
     phases: dict[str, str | None] = {}
+    units = _Units()
     if on_origin:
         rev = _sync(ctx, who="resume")
         file = next((f for f in plan_files_at(ctx.git, ctx.target_ref) if f.plan_id == plan_id), None)
         parsed = file.plan if file else None
-        phases = _read_units(ctx, rev, parsed.unit_ids() if parsed else [], intake=False).phases
-    blocker = resume_blocker(plan_id, state, read.events, parsed, phases, extend, target_present=on_origin, now=_now())
+        units = _read_units(ctx, rev, parsed.unit_ids() if parsed else [], intake=False)
+        phases = units.phases
+    live = None
+    if on_origin and state.stop_reason and state.stop_reason.startswith("limit_"):
+        live = _live_usage(ctx, state, read.events, units, state.stop_unit or state.current)  # what the step checks
+    blocker = resume_blocker(
+        plan_id, state, read.events, parsed, phases, extend, target_present=on_origin, now=_now(), live=live
+    )
     if blocker is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"resume: {blocker.message}")
     _append(store, [_event("plan.resumed", by=ctx.who(), reason=reason.strip(), extend=extend.as_data())], read.head)
@@ -722,6 +789,11 @@ def run_report(app: AppContext, *, plan: str) -> ExitCode:
 
 def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker: Blocker | None) -> str:
     status = state.status
+    if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the spec first
+        return (
+            f"fix the spec of {state.stop_unit or 'the unit'} and push it (the next run records inputs_changed and CI "
+            f"reviews the plan), then l4 yolo activate {plan_id} --reason TEXT"
+        )
     if status in _BEFORE_ACTIVATION or (
         status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")
     ):
@@ -761,10 +833,13 @@ def _describe(
     if file is None:
         out["problems"] = [f"{pid}: no plan file on origin/{ctx.target}"]
     limits = effective_limits(state, plan.limits.model_dump(mode="json") if plan else None)
+    used = state.used
+    if rev is not None and state.status in ("active", "waiting", "stopped") and state.current:
+        used = _live_usage(ctx, state, read.events, units, state.current).used  # the figures the step checks
     out["usage"] = {
-        "cost_usd": state.used.cost_usd, "cost_limit": limits.cost_usd, "runs": state.used.runs,
+        "cost_usd": used.cost_usd, "cost_limit": limits.cost_usd, "runs": used.runs,
         "runs_limit": limits.runs,
-        "attempts": dict(state.used.attempts), "attempts_limit": limits.attempts,
+        "attempts": dict(used.attempts), "attempts_limit": limits.attempts,
         "deadline": limits.deadline.strftime("%Y-%m-%dT%H:%M:%SZ") if limits.deadline else None,
     }  # fmt: skip
     view = None
@@ -801,7 +876,10 @@ def _describe(
         out["wait"] = state.wait_reason
     blocker = None
     if state.status in ("stopped", "waiting"):
-        blocker = resume_blocker(pid, state, read.events, plan, units.phases, Extend(), now=_now())
+        live = None
+        if rev is not None and (state.stop_reason or "").startswith("limit_"):
+            live = _live_usage(ctx, state, read.events, units, state.stop_unit or state.current)
+        blocker = resume_blocker(pid, state, read.events, plan, units.phases, Extend(), now=_now(), live=live)
     out["next"] = _next_line(pid, state, view, blocker)
     return out
 

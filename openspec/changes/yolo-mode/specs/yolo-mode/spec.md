@@ -265,7 +265,9 @@ need a new review and activation.
 Usage (cost, runs, attempts) SHALL be charged into the plan ledger per attempt of a unit (R1): a restart starts a new
 unit ledger, so the usage of the current attempt is charged as `plan.charged{unit, attempt, cost_usd, runs}`, the fold
 keeps the maximum per (unit, attempt) and sums them, and the cost of the earlier attempts is kept. The attempt number
-of a unit is 1 + the number of its attempt refs on `origin`. The cost of the review is charged as the key `plan:review`.
+of a unit in the plan is 1 + the number of its attempt refs on `origin` less the number it had when the plan was activated
+(`plan.activated{attempt_base}`), so restarts before the plan do not count; every stop writes the live charge of the
+current attempt before `plan.stopped`. The cost of the review is charged as the key `plan:review`.
 The limits MUST be evaluated by one implementation, with the extended deadline, for the step and for `l4 yolo resume`
 (R3), and checked before every dispatch and merge. A unit restart and a plan resume MUST NOT reset the usage. More
 allowance MUST be an explicit `l4 yolo resume --extend-…`, recorded. A plan file with `max_unit_attempts` below 1,

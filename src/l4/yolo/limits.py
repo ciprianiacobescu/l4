@@ -12,13 +12,19 @@ own). The deadline is reached when `now >=` it. A unit that is integrated is not
 `limit_cost`, `limit_runs`, `limit_attempts` and `limit_deadline`, checked in that order.
 """
 
-from collections.abc import Mapping
+import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from l4.yolo.model import PlanState
+from l4.vcs.errors import GitError
+from l4.vcs.git import Git
+from l4.vcs.push import ATTEMPT_REF_PREFIX
+from l4.yolo.model import PlanEvent, PlanState
 from l4.yolo.state import ALL_UNITS, apply_extend, is_unit_key, parse_time
+
+log = logging.getLogger("l4.yolo.limits")
 
 LIMIT_COST = "limit_cost"
 LIMIT_RUNS = "limit_runs"
@@ -112,3 +118,54 @@ def resume_allows(
     after = state.model_copy(deep=True)
     apply_extend(after, dict(extend) if extend else None)
     return reached(after, now=now, fallback=fallback)
+
+
+# --- the live figures of a unit (R1, R3, R13): one place for the plan step and `l4 yolo resume` -----------------
+
+
+def attempt_refs(git: Git, unit: str, config: Sequence[tuple[str, str]] = ()) -> int | None:
+    """How many `refs/l4/attempts/<fw>/<name>/<n>` refs `unit` has on origin (`l4 restart` keeps each old head there),
+    or None when origin cannot be asked."""
+    pattern = f"{ATTEMPT_REF_PREFIX}{unit.replace(':', '/', 1)}/*"
+    try:
+        listing = git.run("ls-remote", "origin", pattern, config=config).stdout
+    except GitError as exc:
+        log.warning("%s: its attempt refs could not be listed: %s", unit, str(exc).splitlines()[0][:200])
+        return None
+    refs = [line.split("\t")[-1].strip() for line in listing.splitlines() if "\t" in line]
+    return sum(1 for ref in refs if ref.rsplit("/", 1)[-1].isdigit())
+
+
+def live_attempt(state: PlanState, unit: str, refs: int | None) -> int:
+    """The attempt `unit` is on in this plan: 1 + its attempt refs on origin, minus the refs it had when the plan was
+    activated (`attempt_base`, R13: a restart before the plan is not an attempt of the plan). When origin cannot be
+    asked (`refs` None), and always as a floor, the highest attempt already charged stands: an attempt number never
+    goes down. This is the one function the plan step and `l4 yolo resume` count attempts with."""
+    counted = 1 if refs is None else 1 + max(0, refs - state.attempt_base.get(unit, 0))
+    return max(counted, state.used.attempts.get(unit, 1))
+
+
+def charged_of(events: Sequence[PlanEvent], unit: str, attempt: int) -> tuple[float, int]:
+    """The cost and the runs `plan.charged` already holds for one attempt of a unit (the fold's maximum)."""
+    cost, runs = 0.0, 0
+    for event in events:
+        same = event.type == "plan.charged" and event.data.get("unit") == unit
+        if same and int(event.data.get("attempt", 1) or 0) == attempt:
+            cost = max(cost, float(event.data.get("cost_usd") or 0))
+            runs = max(runs, int(event.data.get("runs") or 0))
+    return cost, runs
+
+
+def live_state(
+    state: PlanState, events: Sequence[PlanEvent], unit: str | None, attempt: int, unit_cost: float
+) -> PlanState:
+    """The folded state with what `unit` has used and the ledger does not hold yet: the cost its ledger shows now
+    (`unit_cost`) and the attempt it is on (`attempt`). Only that unit runs (the plan is serial). The plan step checks
+    its limits on this state, and `l4 yolo resume` and `l4 yolo status` read the same figures."""
+    if unit is None or unit in state.integrated or not is_unit_key(unit):
+        return state
+    charged_cost, _ = charged_of(events, unit, attempt)
+    used = state.used.model_copy(deep=True)
+    used.cost_usd += max(0.0, unit_cost - charged_cost)
+    used.attempts[unit] = max(used.attempts.get(unit, 0), attempt)
+    return state.model_copy(update={"used": used})

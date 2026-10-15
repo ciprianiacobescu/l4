@@ -26,6 +26,11 @@ plan's cost and runs but are not units: they have no entry in `used.attempts`.
 kept under the key `*`) or a `{unit: n}` mapping. An `extend.deadline` raises `extended_deadline` (the latest wins; a
 time without a zone is read as UTC).
 
+`plan.activated{attempt_base: {unit: n}}` records how many attempt refs each unit had on origin at the activation (R13):
+the unit's attempts in the plan are counted from there, and a re-activation keeps the first base of a unit. A
+`plan.resumed` that a person recorded resets `stale_merges` (the harness's own wake-up does not): the next step tries
+the merge once more.
+
 `unit.dispatched` resets the unit's `stale_merges` when its attempts grew since its last `stale` refusal (a new attempt
 gets its one `stale` retry, D8). An event type the fold does not know is ignored (forward compatible) and logged at
 debug.
@@ -124,6 +129,8 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                     state.merge = admitted[2]  # type: ignore[assignment]
             state.digests = {str(k): str(v) for k, v in (data.get("digests") or {}).items()}
             state.limits = dict(data.get("limits") or {})
+            for base_unit, refs in (data.get("attempt_base") or {}).items():  # R13: the first record of a unit stands
+                state.attempt_base.setdefault(str(base_unit), int(_number(refs)))
             state.activated_by = _text(data.get("by"))
             state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
             if data.get("merge") in MERGE:
@@ -176,6 +183,9 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 state.status = "active"
                 state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
                 apply_extend(state, data.get("extend"))
+                if data.get("by") != "harness":  # a person's resume: the next step tries the merge once more (R7)
+                    state.stale_merges.clear()
+                    stale_at.clear()
         elif kind == "plan.cancelled":
             if state.status not in _FINAL:
                 state.status = "cancelled"
