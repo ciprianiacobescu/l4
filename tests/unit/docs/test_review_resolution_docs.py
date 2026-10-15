@@ -35,3 +35,13 @@ def test_the_yolo_guide_describes_the_review_rules() -> None:
     review = guide[guide.index("## The review") : guide.index("## What runs in each CI run")]
     for needle in ("l4 yolo findings", "--worktree", "max_dependency_chars", "check marks", "l4 yolo accept"):
         assert needle.lower() in review.lower(), needle
+
+
+def test_the_plan_reference_tells_an_agent_to_iterate_and_not_to_accept() -> None:  # SCN-YOLO-70
+    skill = ROOT / "plugins" / "l4" / "skills" / "l4" / "references"
+    plan = (skill / "plan.md").read_text(encoding="utf-8")
+    for needle in ("--worktree", "--record", "l4 yolo findings", "accept_by_agents", "validate_plan.py"):
+        assert needle in plan, needle
+    operate = (skill / "operate.md").read_text(encoding="utf-8")
+    for needle in ("l4 yolo findings", "l4 yolo accept", "--worktree", "--record", "--fresh"):
+        assert needle in operate, needle

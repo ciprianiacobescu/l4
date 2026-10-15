@@ -94,6 +94,31 @@ admission and the review. Fix its findings the same way.
 - `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
   against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
 
+## Check and fix the review
+
+Before the person reviews the plan, run the same review yourself and fix what it finds. Do not push first.
+
+1. `python3 <skill dir>/scripts/validate_plan.py` clean.
+2. `l4 yolo review <id> --worktree`. It reads the working tree, writes nothing and charges the plan nothing. Only changed
+   units are judged again, so repeat it after each fix. Exit 0 means every subject is READY.
+3. `l4 yolo findings <id> --json`. For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
+   and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
+   wording.
+4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Specs follow `references/spec.md`.
+5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record`, then push. CI then does not
+   judge again. Hand off as below.
+
+A person may need an `l4 yolo accept` when the judge keeps finding more after real fixes. It is not your tool:
+- Never run it unless `yolo.review.accept_by_agents` is true in `.l4/config.yaml` on the base branch **and** the
+  subject was judged not READY on two versions of its text. Then give a `--reason` that tells the implementer what to do.
+- Never for a BLOCKED subject, a blocking finding, or a `material_cut` of the unit's own folder: those are fixed.
+- Otherwise stop and ask the person. Print the exact command for them:
+  `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
+
+Stop and ask the person when: a finding asks for a product decision; two rounds repeat the same criterion on the same
+unit; the fix needs a spec cut that drops required behaviour; `--worktree` exits 3 (no sandbox, codex judge). Do not
+shorten a spec only to fit a budget. Move background to `docs/`, or ask for a larger `yolo.review` budget.
+
 ## Hand off
 
 Commit and push the plan file. When the specs it lists are new (not on the target yet), commit them in the SAME commit,
@@ -111,7 +136,7 @@ git push
 l4 yolo check <id>
 ```
 
-Then stop. A person reads the review (`l4 yolo review <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
+Then stop. A person reads the review (`l4 yolo findings <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
 
 ## Update
 

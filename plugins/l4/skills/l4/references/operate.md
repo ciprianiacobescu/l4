@@ -86,6 +86,13 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
 
 - `l4 yolo check PLAN`: admission only (cycles, unknown units, target is the base branch, open questions). Exit 0 or 2. Changes nothing.
 - `l4 yolo review PLAN`: CI reviews the plan (READY / NEEDS_REVISION / BLOCKED per unit). `--local` runs it here.
+  `--worktree` reviews the working tree before the push (dry, writes nothing); `--record` records a committed tree so CI
+  does not review again; `--fresh SUBJECT` judges a subject again.
+- `l4 yolo findings PLAN [SUBJECT] [--all] [--json]`: every blocking and major finding with its id and a `Resolve:` line,
+  and what changed since the previous judgement. Reads only.
+- `l4 yolo accept PLAN SUBJECT --reason "…"`: a person accepts a subject's remaining findings on record (never for
+  BLOCKED, a blocking finding or a cut of the unit's folder; agents only if `yolo.review.accept_by_agents` is true on
+  the base branch). Not an agent's command by default.
 - `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
   the review is for the current inputs, was made with the current review prompt, and everything is READY. After a
   harness upgrade CI reviews again (and charges for) every plan not yet activated and every plan stopped with
