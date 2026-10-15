@@ -351,3 +351,27 @@ def test_scn_yolo_58_a_recorded_review_of_the_commit_spares_the_ci_review(tmp_pa
     assert world.kinds() == ["plan.admitted", "plan.reviewed", "plan.charged"]  # and recorded no new review
     state = fold_plan(PLAN, world.events())
     assert state.review_plan_digest and set(state.review.values()) == {"READY"}
+
+
+def test_a_second_local_review_of_unchanged_material_judges_nothing_and_costs_nothing(world, monkeypatch, capsys):
+    """review-resolution 2.3b: `--local` hands the judge the verdicts of the ledger, as the CI step and `--worktree`."""
+    ready_world(world)
+
+    def local_judge(*answers):
+        fake = FakeAdapter([Step(structured=a, cost_usd=0.25) for a in answers])
+        real = review_plan_costed
+        monkeypatch.setattr(
+            "l4.yolo.commands.review_plan_costed", lambda *a, **kw: real(*a, adapters={"fake": fake}, **kw)
+        )
+        return fake
+
+    first = local_judge(answer(), answer(), answer())
+    assert world.l4("review", "p1", "--local") == 0
+    assert len(first.requests) == 3
+    capsys.readouterr()
+    again = local_judge()  # an empty script: any call fails the test
+    assert world.l4("review", "p1", "--local") == 0
+    reviewed = [e for e in world.events() if e.type == "plan.reviewed"]
+    assert again.requests == [] and len(reviewed) == 2 and reviewed[-1].data["cost_usd"] == 0
+    assert all("reused_from" in v for v in reviewed[-1].data["units"].values())
+    assert [e.type for e in world.events()].count("plan.charged") == 1
