@@ -311,7 +311,7 @@ of the harness package.
 | `l4 retry --unit ID --reason TEXT [--rounds N] [--no-run]` | Continue a stopped unit from where it stopped, by its phase (L4-OPS-001): `halted` back, `escalated` back to `verifying` (at a round limit `--rounds N` adds N fix or feedback rounds, default 1), `waiting_capacity` back now, `in_review` to `verifying`, `merged` the archive retry; any other phase exit 2 with what moves the unit. A person's change of the unit folder since the stop sends the unit to `implementing` (L4-OPS-003). Fetches first; runs no agent, gate or sandbox; then starts the harness's CI on the base branch unless `--no-run` (L4-OPS-002); a refused start prints how to start one and exits 0. The sweep does the same for a member's `l4:retry` label (L4-OPS-008) | ledger commit `chore(<name>): retry [skip ci]`, push, forge call |
 | `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`. Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
-| `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. No commit, no push, no model | the plan file in the working tree |
+| `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
 | `l4 yolo check PLAN` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings | none |
 | `l4 yolo review PLAN [--local]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here | forge call (a run), or a plan ledger commit with `--local` |
 | `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
@@ -3291,7 +3291,10 @@ and `l4 yolo status` lists it under `excluded` with the reason. The exclusions a
 file, so an edit of them after the activation stops the plan (`inputs_changed`) like any other edit.
 
 **L4-YOLO-018** `l4 yolo draft` scaffolds and updates a plan file. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
-the working tree and nothing else: no commit, no push, no ref, no model call. Without `--update` it MUST refuse an
+the working tree and nothing else: no commit, no push, no plan ref, no model call. Before it reads the phases of the
+units it MUST fetch the base branch and the unit refs from `origin`, as the other `l4 yolo` commands do, so that a fresh
+clone does not take a unit in review or merged for new work. With no `origin`, or when the fetch fails, it MUST go on
+with the refs the checkout has and print one line saying that the phases may be old. Without `--update` it MUST refuse an
 existing file (exit 2). It lists every unit the spec providers find in the working tree that no plan file lists
 (planned or excluded) and that is not a derived unit whose parent a plan file lists. It puts each unit that is not
 finished into one batch `unplanned` with no dependencies, and each finished unit (`merged`, `archived`) into `exclude`
@@ -3314,9 +3317,9 @@ D15). It MUST report, with the codes of admission where they are the same check:
 - `covered_twice`, a unit listed in two plan files.
 
 A planned unit whose OpenSpec change is archived MUST NOT fail the script, because it has no plan state and cannot tell a
-unit that this plan already integrated (which `l4 yolo check` accepts) from a finished unit in a fresh plan (which
-`l4 yolo check` refuses as `finished`). It MUST print `finished: <id> (archived: l4 yolo check accepts it only when this
-plan already integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
+unit that this plan already merged or integrated (which `l4 yolo check` accepts) from an archived unit in a fresh plan
+(which `l4 yolo check` refuses as `unknown_unit`). It MUST print `finished: <id> (archived: l4 yolo check refuses it as
+unknown_unit unless this plan already merged or integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
 quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
 including a deadline written as a Unix time.
 
@@ -3517,7 +3520,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
-| CFG-004 | error | `gates.test.command` set when `tdd.mode != off` | — |
+| CFG-004 | error | `gates.test.command` is set (an empty one makes the run reject every unit: there is no test oracle; the fix hint names the key) | — |
 | CFG-005 | warn | an explicitly set `odd.forbidden_paths`, `tdd.test_globs` or `tdd.test_support_globs` drops default entries (names them and the `extra_` key that adds instead of replacing) | — |
 | CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |

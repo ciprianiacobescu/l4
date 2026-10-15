@@ -21,8 +21,9 @@ plan still runs one unit at a time, in the printed order.
 
    It refuses an existing file. It puts a finished spec into `exclude` with the reason `already <phase>` (for example
    `already merged`, `already archived`).
-2. Check the state of every spec before you order it: `l4 status`, or `l4 plan`. In a fresh clone, fetch the
-   harness state first (`git fetch origin '+refs/l4/*:refs/l4/*'`): without it both show old phases, for example
+2. Check the state of every spec before you order it: `l4 status`, or `l4 plan`. `l4 yolo draft` fetches the unit
+   refs by itself (offline it says the phases may be old); `l4 status` and `l4 plan` do not. In a fresh clone, fetch
+   the harness state first (`git fetch origin '+refs/l4/*:refs/l4/*'`): without it they show old phases, for example
    `verified` for a unit that is in review or merged. A unit that is started, in review or
    has an open PR is not new work. Exclude it with a reason a person can check (`in review before the plan: PR #8`), or
    plan it knowingly and say so in the hand-off. Under `merge: auto` the plan adopts a unit in review with a PASS and
@@ -85,7 +86,8 @@ l4 yolo check <id>
 - The script needs only Python. It reads every `.l4/plans/*.json`, finds the units like the harness does, and checks
   the schema, the graph (cycles, unknown units, duplicates) and the coverage across all plan files (`uncovered`,
   `covered_twice`). On success it prints the dispatch order and the waves. Exit 0 is valid, 1 lists problems. A planned
-  unit whose change is archived prints `finished: <id>`: remove it, unless this plan already integrated it.
+  unit whose change is archived prints `finished: <id>`: remove it, because `l4 yolo check` refuses it as `unknown_unit`, unless this plan already
+  merged or integrated it.
 - `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
   against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
 

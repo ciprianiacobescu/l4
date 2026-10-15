@@ -700,9 +700,10 @@ def test_a_planned_unit_whose_change_is_archived_is_accepted_with_a_finished_lin
     code, out, _ = run(repo)
     assert code == 0 and "p1: valid (2 unit(s))" in out
     assert (
-        "finished: openspec:done (archived: l4 yolo check accepts it only when this plan already integrated it)" in out
+        "finished: openspec:done (archived: l4 yolo check refuses it as unknown_unit unless this plan already "
+        "merged or integrated it)" in out
     )
-    assert "unknown_unit" not in out
+    assert "p1: unknown_unit" not in out  # no problem line: the script only says what `l4 yolo check` does
     doc = json.loads(run(repo, "--json")[1])
     assert doc["ok"] is True and doc["finished"] == ["openspec:done"]
 
@@ -716,8 +717,9 @@ def test_a_planned_unit_with_no_change_at_all_is_still_unknown(repo):
 
 def test_the_help_and_the_docstring_say_an_archived_planned_unit_is_accepted(repo):
     out = run(repo, "--help")[1]
-    assert "already integrated" in " ".join(out.split())
-    assert "already integrated" in " ".join((vp.__doc__ or "").split())
+    assert "already merged or integrated" in " ".join(out.split())
+    assert "already merged or integrated" in " ".join((vp.__doc__ or "").split())
+    assert "refuses it as unknown_unit" in " ".join((vp.__doc__ or "").split())
 
 
 def test_an_excluded_archived_change_is_known(repo):

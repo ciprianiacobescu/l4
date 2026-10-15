@@ -360,7 +360,10 @@ file, so an edit of them after the activation stops the plan (`inputs_changed`) 
 
 ### Requirement: L4-YOLO-018 `l4 yolo draft` scaffolds and updates a plan file
 `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto] [--update]` SHALL write `.l4/plans/<plan-id>.json` in
-the working tree and nothing else: no commit, no push, no ref, no model call. Without `--update` it MUST refuse an
+the working tree and nothing else: no commit, no push, no plan ref, no model call. Before it reads the phases of the
+units it MUST fetch the base branch and the unit refs from `origin`, as the other `l4 yolo` commands do, so that a fresh
+clone does not take a unit in review or merged for new work. With no `origin`, or when the fetch fails, it MUST go on
+with the refs the checkout has and print one line saying that the phases may be old. Without `--update` it MUST refuse an
 existing file (exit 2). It lists every unit the spec providers find in the working tree that no plan file lists
 (planned or excluded) and that is not a derived unit whose parent a plan file lists. It puts each unit that is not
 finished into one batch `unplanned` with no dependencies, and each finished unit (`merged`, `archived`) into `exclude`
@@ -394,9 +397,9 @@ D15). It MUST report, with the codes of admission where they are the same check:
 - `covered_twice`, a unit listed in two plan files.
 
 A planned unit whose OpenSpec change is archived MUST NOT fail the script, because it has no plan state and cannot tell a
-unit that this plan already integrated (which `l4 yolo check` accepts) from a finished unit in a fresh plan (which
-`l4 yolo check` refuses as `finished`). It MUST print `finished: <id> (archived: l4 yolo check accepts it only when this
-plan already integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
+unit that this plan already merged or integrated (which `l4 yolo check` accepts) from an archived unit in a fresh plan
+(which `l4 yolo check` refuses as `unknown_unit`). It MUST print `finished: <id> (archived: l4 yolo check refuses it as
+unknown_unit unless this plan already merged or integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
 quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
 including a deadline written as a Unix time.
 

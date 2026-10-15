@@ -1,6 +1,6 @@
 # ruff: noqa: F811
 """`l4 yolo draft` (L4-YOLO-018, design D15; SCN-YOLO-37, SCN-YOLO-38): the plan file scaffolded or updated from the
-specs of the working tree, with no dependency, no git write, no network."""
+specs of the working tree, with no dependency and no git write beyond the fetch of the unit refs."""
 
 import dataclasses
 import json
@@ -66,11 +66,13 @@ def plan_path(world, plan_id="p1") -> Path:
 
 
 def snapshot(world):
+    """HEAD, the local branches, tags and plan refs, and the history. The remote-tracking refs are left out: the draft
+    fetches them (L4-YOLO-018) and writes no other ref."""
     git = world.clone
     return (
         git.run("rev-parse", "HEAD").stdout,
-        git.run("for-each-ref").stdout,
-        git.run("log", "--all", "--oneline").stdout,
+        git.run("for-each-ref", "refs/heads", "refs/tags", "refs/l4/plans").stdout,
+        git.run("log", "--branches", "--oneline").stdout,
     )
 
 

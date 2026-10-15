@@ -100,7 +100,8 @@ Do not write the file from nothing. Let L4 list the specs, then add the order yo
 
 1. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto]` writes `.l4/plans/<plan-id>.json` in the working
    tree. It lists every spec that no plan lists in one batch `unplanned` with no dependencies, and puts a finished spec
-   into `exclude` with the reason `already <phase>` (for example `already merged`). It commits and pushes nothing,
+   into `exclude` with the reason `already <phase>` (for example `already merged`). It first fetches the base branch and the unit refs, so that a fresh clone reads the
+   real phases (without an `origin`, or when the fetch fails, it says the phases may be old). It commits and pushes nothing,
    calls no model, and refuses an existing file. It never adds a dependency: an order is a claim about the specs, and you must make it.
 2. Edit the file: move units into batches, add `depends_on` only where a spec uses something that another spec
    introduces or changes, and give each exclusion a reason that a person can check.
