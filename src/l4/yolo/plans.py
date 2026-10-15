@@ -201,11 +201,20 @@ def held_by(states: Mapping[str, PlanState], files: Sequence[PlanFile]) -> dict[
 
 
 def active_on(states: Mapping[str, PlanState], files: Sequence[PlanFile], target: str) -> PlanFile | None:
-    """The plan file whose plan is active, waiting or stopped on `target` (at most one may be activated per target);
-    None when there is none. A stopped plan still counts: it holds its units and blocks a second activation."""
+    """The plan whose ledger says active, waiting or stopped on `target` (at most one may be activated per target);
+    None when there is none. A stopped plan still counts: it holds its units and blocks a second activation. The
+    ledger decides, the file or not (review #10): a plan whose file is deleted, or no longer a plan, still counts
+    until it is cancelled; the result is then a `PlanFile` with no plan (`plan_id` and the path it had), because a
+    ledger without a file does not say which target it was on."""
+    live = ("active", "waiting", "stopped")
+    seen = set()
     for file in files:
-        if file.plan is None or file.plan.target != target:
+        seen.add(file.plan_id)
+        if file.plan is not None and file.plan.target != target:
             continue
-        if file.plan_id in states and states[file.plan_id].status in ("active", "waiting", "stopped"):
+        if file.plan_id in states and states[file.plan_id].status in live:
             return file
+    for plan_id in sorted(states):
+        if plan_id not in seen and states[plan_id].status in live:
+            return PlanFile(plan_id, f"{PLANS_DIR}/{plan_id}.json", "", None, None)
     return None

@@ -23,7 +23,8 @@ def test_a_repository_without_a_plan_file_is_left_alone(world):
     before = list(world.git.history)
     step = world.step()
     assert step.allow is None and step.actions == () and step.start_next_run is False
-    assert world.git.history == before  # not even a fetch of a plan ref
+    network = ("fetch", "ls-remote", "push")  # a local `git log` of the plan folder is the only read
+    assert not any(w in args for args in world.git.history[len(before) :] for w in network)
     assert sh_refs(world) == ""
 
 

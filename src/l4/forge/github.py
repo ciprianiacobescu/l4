@@ -243,6 +243,7 @@ class GitHubForge:
             state="merged" if merged else ("open" if data.get("state") == "open" else "closed"),
             labels=tuple(str(x["name"]) for x in data.get("labels", ())),
             merge_commit_sha=str(data["merge_commit_sha"]) if merged and data.get("merge_commit_sha") else None,
+            head_sha=str(data["head"]["sha"]) if data["head"].get("sha") else None,
         )  # fmt: skip
 
     def project_url(self) -> str:

@@ -3,7 +3,7 @@ confirm_merged. SCN-YOLO-14 (merged), SCN-YOLO-15 (a moved target is refused by 
 target is refused)."""
 
 import stat
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -257,17 +257,28 @@ def test_precondition_five_a_branch_that_is_gone_is_not_merged(world):
     assert world.target() == tip
 
 
-@dataclass(frozen=True)
-class PullWithHead(PullRequest):
-    head_sha: str | None = None
-
-
 def test_precondition_five_the_head_the_forge_shows_must_be_the_head_to_push(world):
-    pr = PullWithHead(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha="b" * 40)
+    pr = PullRequest(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha="b" * 40)
     out = merge(world, forge=FakeForge(pr))
     assert out.status == "not_ready" and "pull request head" in out.detail
-    ok = PullWithHead(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha=world.head)
+    ok = PullRequest(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha=world.head)
     assert merge(world, forge=FakeForge(ok)).status == "merged"
+
+
+def test_a_pr_head_that_differs_from_the_branch_tip_is_not_merged(world):
+    pr = PullRequest(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha="c" * 40)
+    tip = world.target()
+    out = merge(world, forge=FakeForge(pr))
+    assert out.status == "not_ready" and "pull request head" in out.detail
+    assert world.target() == tip
+    same = PullRequest(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", (), head_sha=world.head)
+    assert merge(world, forge=FakeForge(same)).status == "merged"
+
+
+def test_a_pr_without_a_reported_head_still_merges_on_the_ls_remote_check(world):
+    pr = PullRequest(7, PR_URL, BRANCH, "main", "[l4] x", False, "open", ())
+    assert pr.head_sha is None
+    assert merge(world, forge=FakeForge(pr)).status == "merged"
 
 
 def test_before_push_runs_after_every_precondition_with_the_outcome_to_be(world):  # R5

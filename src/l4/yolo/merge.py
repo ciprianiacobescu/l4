@@ -185,7 +185,7 @@ def merge_guarded(
             "the next run verifies the new head",
             head=head, pr=pr.number,
         )  # fmt: skip
-    forge_head = getattr(pr, "head_sha", None)  # the forges that report the PR head sha (R5, fifth precondition)
+    forge_head = pr.head_sha  # None when the forge does not report it (the local forge): the ls-remote check stands
     if forge_head and forge_head != head:
         return _not_ready(
             f"the pull request head {forge_head[:10]} is not the head to merge {head[:10]}", head=head, pr=pr.number
