@@ -38,14 +38,18 @@ class WorktreeManager:
         branch_prefix: str,
         remote: str = "origin",
         fetch_config: Sequence[tuple[str, str]] = (),
+        cache: Path | None = None,
     ) -> None:
         """`fetch_config` is the credential helper (`git -c` pairs): once the forge hook strips the runner's userinfo
-        from the origin URL, a later unit's fetch of an internal project has no other credential."""
+        from the origin URL, a later unit's fetch of an internal project has no other credential. `cache` is the
+        runner cache root (`$L4_CACHE`, `l4.config.defaults.cache_root`): a registration of a unit branch under its
+        `worktrees` directory is this clone's own leftover; without it no registration is ever removed."""
         self._git = git
         self._base = base_branch
         self._prefix = branch_prefix
         self._remote = remote
         self._fetch_config = fetch_config
+        self._cache = cache
 
     def ensure(self, names: UnitNames) -> Worktree:
         self._refresh_and_clear(names.worktree)
@@ -96,26 +100,50 @@ class WorktreeManager:
     def _release_branch(self, branch: str, target: Path) -> None:
         """`git worktree add -B` fails when another worktree of this clone has `branch` checked out. A leftover of the
         layout without a repository key, or under another key (the project was renamed or moved), is this clone's own
-        registration under `$L4_CACHE/worktrees`: remove it. One anywhere else is a person's checkout: refuse, naming
-        it. Only this clone's registrations are read (`git worktree list`). The callers hold the unit's flock, which is
-        keyed: a job of an older harness on the same runner holds the old lock path, so upgrade a runner's projects
-        between pipelines (docs/runbook.md)."""
-        root = next((p for p in (target.resolve(), *target.resolve().parents) if p.name == "worktrees"), None)
+        registration under `<cache>/worktrees` (the cache root the caller passed, resolved): remove it, unless the
+        path holds another project's checkout (exit 2) or is the clone's own main worktree (exit 2). One anywhere
+        else is a person's checkout: refuse, naming it. Only this clone's registrations are read (`git worktree
+        list`). The callers hold the unit's flock, which is keyed: a job of an older harness on the same runner
+        holds the old lock path, so upgrade a runner's projects between pipelines (docs/runbook.md)."""
+        owned = (self._cache.resolve() / "worktrees").resolve() if self._cache is not None else None
+        main = self._main_worktree()
         for path in self._registered_at(branch):
             if path == target.resolve():
                 continue
-            if root is None or root not in path.parents:
+            if path == main:
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is checked out in the main worktree {path} of this clone; "
+                    "check out another branch there, then run again",
+                )
+            if owned is None or owned not in path.parents:
                 raise L4Exit(
                     ExitCode.USAGE_ERROR,
                     f"the branch {branch} is checked out in the worktree {path}, which is outside the l4 cache; "
                     "check out another branch there or remove that worktree, then run again",
                 )
-            self._git.run("worktree", "remove", "--force", str(path), check=False)
+            if not self._belongs_to_this_repository(path):
+                raise L4Exit(
+                    ExitCode.USAGE_ERROR,
+                    f"the branch {branch} is registered at {path}, which holds a checkout of another repository; "
+                    "refusing to delete it (remove the stale registration with `git worktree prune`, or move "
+                    "that checkout), then run again",
+                )
+            # two forces: a locked registration is removed too
+            self._git.run("worktree", "remove", "-f", "-f", str(path), check=False)
             if path.is_symlink():
                 path.unlink()
             elif path.exists():
                 shutil.rmtree(path)
             self._git.run("worktree", "prune")
+
+    def _main_worktree(self) -> Path | None:
+        """The clone's own checkout: the first `worktree` entry of the porcelain listing. Never ours to delete."""
+        listing = self._git.run("worktree", "list", "--porcelain").stdout
+        for line in listing.splitlines():
+            if line.startswith("worktree "):
+                return Path(line[len("worktree ") :]).resolve()
+        return None
 
     def _registered_at(self, branch: str) -> list[Path]:
         listing = self._git.run("worktree", "list", "--porcelain").stdout

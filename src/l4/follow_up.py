@@ -107,7 +107,7 @@ def make_follow_up(
         return None
     manager = WorktreeManager(
         git, base_branch=cfg.forge.base_branch, branch_prefix=cfg.forge.branch_prefix,
-        fetch_config=fetch_auth_config(cfg, app.environ),
+        fetch_config=fetch_auth_config(cfg, app.environ), cache=cache,
     )  # fmt: skip
     tree = manager.ensure_from_base(names.branch, names.worktree)
     try:

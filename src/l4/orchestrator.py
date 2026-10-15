@@ -1269,7 +1269,7 @@ def run_unit_in_worktree(
     def open_writer() -> LedgerWriter:
         manager = WorktreeManager(
             git, base_branch=cfg.forge.base_branch, branch_prefix=cfg.forge.branch_prefix,
-            fetch_config=fetch_auth_config(cfg, app.environ),
+            fetch_config=fetch_auth_config(cfg, app.environ), cache=cache_root(app.environ, repo=app.repo),
         )  # fmt: skip
         tree = manager.ensure(names)
         unit_dir = tree.path / relative

@@ -220,7 +220,7 @@ def test_a_registration_of_the_branch_under_the_cache_is_removed(
     cache = tmp_path / "cache"
     old = cache.joinpath("worktrees", *old_parts)
     _holder(repo, raw, old, "l4/openspec/x")
-    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/").ensure(names)
+    worktree = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=cache).ensure(names)
     assert worktree.path == names.worktree and not old.exists()
     assert "worktree " + str(old.resolve()) not in raw(repo, "worktree", "list", "--porcelain")
 
@@ -230,7 +230,7 @@ def test_a_wip_branch_registration_under_the_cache_is_removed_too(make_repo, git
     old = tmp_path / "cache" / "worktrees" / "openspec" / "wip"
     _holder(repo, raw, old, "l4-wip/openspec/x")
     target = tmp_path / "cache" / "worktrees" / "proj-0123456789" / "openspec" / "wip-new"
-    manager = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/")
+    manager = WorktreeManager(git_for(repo), base_branch="main", branch_prefix="l4/", cache=tmp_path / "cache")
     assert manager.ensure_from_base("l4-wip/openspec/x", target).path == target and not old.exists()
 
 
