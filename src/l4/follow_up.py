@@ -23,7 +23,7 @@ from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.forge.base import fetch_auth_config
 from l4.forge.gitlab import push_auth_config
-from l4.forge.pushfail import explain_push_failure
+from l4.forge.pushfail import explain_push_failure, push_platform
 from l4.outcome import new_run_id
 from l4.specs.base import Criterion, Framework, SpecProvider, UnitRef
 from l4.specs.criteria import openspec_criteria
@@ -183,7 +183,7 @@ def _commit_and_push(
             return False
         raise explain_push_failure(
             exc, branch=names.branch, token_env=cfg.forge.token_env, environ=app.environ,
-            redact=app.redactor.redact_text,
+            redact=app.redactor.redact_text, platform=push_platform(cfg, app.environ, git.repo),
         ) from None  # fmt: skip
     remote_ref = f"refs/remotes/origin/{names.branch}"
     if git.rev_parse(remote_ref) is None:  # a clone with a narrower fetch refspec: the next listing needs the ref

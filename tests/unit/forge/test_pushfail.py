@@ -100,3 +100,37 @@ def test_a_deleted_branch_names_l4_restart():
     assert out.code is ExitCode.INTERNAL_ERROR
     assert "l4 restart --unit openspec:x --reason TEXT" in str(out)
     assert "rerun the unit" not in str(out) and "never forces" in str(out)
+
+
+# --- adoption-lessons 1.2 (L4-ADO-004): the forge's own token rules ---------------------------------------------------
+
+_403 = "fatal: unable to access 'https://h/p.git/': The requested URL returned error: 403"
+
+
+def _on(platform, environ=None, token_env="L4_FORGE_TOKEN"):
+    return explain_push_failure(
+        err(_403), branch=BRANCH, token_env=token_env, environ=environ or {}, redact=lambda s: s, platform=platform
+    )
+
+
+def test_github_wording_on_github():  # SCN-ADO-10
+    text = str(_on("github", {"L4_FORGE_TOKEN": "x"}))
+    assert "contents: write" in text and "pull-requests: write" in text
+    assert "Developer role" not in text and "write_repository" not in text
+
+
+def test_gitlab_wording_on_gitlab():  # SCN-ADO-11
+    text = str(_on("gitlab", {"L4_FORGE_TOKEN": "x"}))
+    assert "write_repository" in text and "Developer role" in text
+    assert "contents: write" not in text
+
+
+def test_an_unset_token_is_named_on_github_outside_ci():  # SCN-ADO-12
+    text = str(_on("github", {}, token_env="GITHUB_TOKEN"))
+    assert "GITHUB_TOKEN is not set" in text
+
+
+def test_an_unset_token_is_named_on_gitlab_outside_ci_and_a_set_one_is_not():
+    assert "L4_FORGE_TOKEN is not set" in str(_on("gitlab", {}))
+    assert "is not set" not in str(_on("github", {"L4_FORGE_TOKEN": "x"}))
+    assert "job token" not in str(_on("gitlab", {}))  # the runner sentence stays GitLab CI only
