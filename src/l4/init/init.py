@@ -515,7 +515,10 @@ def _action_pin(
     if repository is None:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
-            "init --action: the repository that holds the setup action is unknown; pass --action-repo OWNER/REPO",
+            "init --action: the repository that holds the setup action is unknown: this l4 has no install origin "
+            "(a checkout or a wheel, not a git install). Run the released harness, "
+            "`uv tool run --from git+https://github.com/OWNER/l4@vX.Y.Z l4 init --action …`, or pass "
+            "--action-repo OWNER/REPO",
         )
     try:
         ActionPin(repository, "0" * 40)
