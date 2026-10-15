@@ -18,7 +18,7 @@ def _yolo_001(ctx: DoctorContext) -> CheckResult:
     from l4.yolo.commands import auto_merge_plan_active  # here: the plan commands import much of the harness
 
     try:
-        active = auto_merge_plan_active(ctx.repo, Git(ctx.repo, environ=ctx.env))
+        active = auto_merge_plan_active(ctx.repo, Git(ctx.repo, environ=ctx.env), ctx.cfg)
     except (GitError, L4Exit):
         active = False  # no git, not a repository, or refs that cannot be read (ENV rows say so): the warning stands
     if active:

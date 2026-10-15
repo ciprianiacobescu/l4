@@ -11,9 +11,10 @@ Exit 0: everything is valid. Exit 1: one line per problem, `<plan id>: <code>: <
 problems `uncovered: <unit> (...)` and `covered_twice: <unit> (...)`. Exit 2: a usage or read error.
 
 A planned unit whose OpenSpec change is archived is not an error here: the script has no plan state, so it cannot tell
-a unit that this plan already integrated (which `l4 yolo check` accepts) from a fresh plan that lists a finished one
-(which `l4 yolo check` refuses as `finished`). It prints `finished: <id> (archived: l4 yolo check accepts it only when
-this plan already integrated it)` and the exit code stays 0 if nothing else is wrong.
+a unit that this plan already merged or integrated (which `l4 yolo check` accepts) from a fresh plan that lists an
+archived one (which `l4 yolo check` refuses as `unknown_unit`). It prints `finished: <id> (archived: l4 yolo check
+refuses it as unknown_unit unless this plan already merged or integrated it)` and the exit code stays 0 if nothing else
+is wrong.
 """
 
 from __future__ import annotations
@@ -56,7 +57,8 @@ checks of each spec, finished units, acceptance profiles, the target against for
 Specs are read from this working tree only: a spec that exists only on a branch is unknown here. An archived change
 is known to an `exclude`, and a planned unit whose change is archived is accepted too, with a line
 `finished: <id> (archived: ...)`: the script has no plan state, so it cannot tell a unit that this plan already
-integrated (`l4 yolo check` accepts it) from a finished unit in a fresh plan (`l4 yolo check` refuses it).
+merged or integrated (`l4 yolo check` accepts it) from an archived unit in a fresh plan (`l4 yolo check` refuses it as
+unknown_unit).
 
 The frameworks and roots come from .l4/config.yaml (spec.frameworks, spec.openspec.root, spec.kiro.root) when it uses
 the block style `l4 init` writes (keys may be quoted, a byte order mark is ignored); anything else falls back to
@@ -700,7 +702,7 @@ def _raw_ids(raw: dict) -> tuple[list[str], list[str]]:
 def check_plan(file_name: str, text: str, known: set[str], finished: set[str]) -> PlanReport:
     """Everything `l4 yolo check` finds in one plan file without git, the configuration or the target head.
     `finished` holds the archived changes: an `exclude` may name one, and so may a batch (listed in `report.finished`,
-    not an error: only `l4 yolo check` knows whether this plan already integrated it)."""
+    not an error: only `l4 yolo check` knows whether this plan already merged or integrated it)."""
     stem = file_name[: -len(".json")]
     report = PlanReport(stem)
     try:
@@ -842,7 +844,10 @@ def problem_line(problem: dict) -> str:
 
 
 def finished_line(unit: str) -> str:
-    return f"finished: {unit} (archived: l4 yolo check accepts it only when this plan already integrated it)"
+    return (
+        f"finished: {unit} (archived: l4 yolo check refuses it as unknown_unit unless this plan already merged or "
+        "integrated it)"
+    )
 
 
 def render(result: dict) -> str:

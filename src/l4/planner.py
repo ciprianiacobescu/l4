@@ -231,13 +231,13 @@ def with_plan_holds(
     """Delivery plans (yolo-mode L4-YOLO-010, SCN-YOLO-30): a unit a plan holds is not actionable and shows why
     (`held by plan p1 (reviewed)`, `waits for openspec:a (not integrated)`, `not in the active plan p1`). Read-only: the
     plan state is the local `refs/l4/plans/*` the run's refresh fetched. No plan file, no change."""
-    from l4.yolo.cycle import local_states, plan_holds  # the plan step imports this module for its facts
-    from l4.yolo.plans import plan_files
+    from l4.yolo.cycle import local_states, plan_holds, target_plan_files  # the plan step imports this module
 
-    files = plan_files(app.repo)
+    git = Git(app.repo, environ=app.environ)
+    files = target_plan_files(app, cfg, git)  # the files the plan step reads, so a laptop and CI agree
     if not files:
         return entries
-    states = local_states(Git(app.repo, environ=app.environ), files)
+    states = local_states(git, files)
     holds = plan_holds(files, states, {s.ref.id: s.state.phase for s in rows}, cfg.forge.base_branch)
     shown = []
     for entry in entries:
@@ -249,13 +249,12 @@ def with_plan_holds(
     return shown
 
 
-def plan_file_notes(app: AppContext) -> list[str]:
+def plan_file_notes(app: AppContext, cfg: L4Config) -> list[str]:
     """One line for each plan file that is not a JSON object: it holds no unit (R8), so a person who expects it to hold
     its units is told. No plan file, no line."""
-    from l4.yolo.cycle import unreadable_plan_files
-    from l4.yolo.plans import plan_files
+    from l4.yolo.cycle import target_plan_files, unreadable_plan_files
 
-    return unreadable_plan_files(plan_files(app.repo))
+    return unreadable_plan_files(target_plan_files(app, cfg, Git(app.repo, environ=app.environ)))
 
 
 def _issue_ids(snapshot: UnitSnapshot, *kinds: str) -> tuple[str, ...]:
@@ -386,7 +385,7 @@ def run_plan(
                 click.echo(app.redactor.redact_text(f"{action.unit}: ci: {action.detail}"), err=True)
         rows = snapshots(app, cfg, units)  # the sweep wrote pending events: fold them
     entries = with_plan_holds(app, cfg, rows, compute_plan([facts_of(s) for s in rows]))
-    for note in plan_file_notes(app):  # stderr: stdout is the plan, and `--json` must stay JSON
+    for note in plan_file_notes(app, cfg):  # stderr: stdout is the plan, and `--json` must stay JSON
         click.echo(app.redactor.redact_text(note), err=True)
     found: dict[str, Any] | None = None
     lines: list[str] = []

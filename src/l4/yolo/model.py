@@ -48,7 +48,8 @@ class PlanBatch(_Strict):
 
 
 class PlanExclusion(_Strict):
-    """A unit this plan deliberately does not deliver (D15, L4-YOLO-017): it is not held and runs as without a plan."""
+    """A unit this plan deliberately does not deliver (D15, L4-YOLO-017): it is held only while a plan is active on the
+    target; before and after that it runs as without a plan."""
 
     id: str
     reason: str = Field(min_length=1, max_length=200)

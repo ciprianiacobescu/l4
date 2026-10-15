@@ -3308,9 +3308,9 @@ D15). It MUST report, with the codes of admission where they are the same check:
 - `covered_twice`, a unit listed in two plan files.
 
 A planned unit whose OpenSpec change is archived MUST NOT fail the script, because it has no plan state and cannot tell a
-unit that this plan already integrated (which `l4 yolo check` accepts) from a finished unit in a fresh plan (which
-`l4 yolo check` refuses as `finished`). It MUST print `finished: <id> (archived: l4 yolo check accepts it only when this
-plan already integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
+unit that this plan already merged or integrated (which `l4 yolo check` accepts) from an archived unit in a fresh plan
+(which `l4 yolo check` refuses as `unknown_unit`). It MUST print `finished: <id> (archived: l4 yolo check refuses it as
+unknown_unit unless this plan already merged or integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
 quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
 including a deadline written as a Unix time.
 
@@ -3511,7 +3511,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
-| CFG-004 | error | `gates.test.command` set when `tdd.mode != off` | — |
+| CFG-004 | error | `gates.test.command` is set (an empty one makes the run reject every unit: there is no test oracle; the fix hint names the key) | — |
 | CFG-005 | warn | an explicitly set `odd.forbidden_paths`, `tdd.test_globs` or `tdd.test_support_globs` drops default entries (names them and the `extra_` key that adds instead of replacing) | — |
 | CFG-006 | error | `harness.delivery: action`: the workflow's `uses:` names a 40-hex sha (the only pin); with a copy of the action (`uses: ./.github/actions/l4`) its `commit` input is the pin and must be 40 hex; a published action given `source: repository` and a `commit` that differs from its sha fails, naming both (L4-ACT-004) | — |
 | CFG-007 | info | `harness.delivery: action` without `.l4/bin/l4`: whether an `l4` is on `PATH`, else the `uv tool install` hint (L4-ACT-004) | — |

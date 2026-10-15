@@ -388,9 +388,9 @@ D15). It MUST report, with the codes of admission where they are the same check:
 - `covered_twice`, a unit listed in two plan files.
 
 A planned unit whose OpenSpec change is archived MUST NOT fail the script, because it has no plan state and cannot tell a
-unit that this plan already integrated (which `l4 yolo check` accepts) from a finished unit in a fresh plan (which
-`l4 yolo check` refuses as `finished`). It MUST print `finished: <id> (archived: l4 yolo check accepts it only when this
-plan already integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
+unit that this plan already merged or integrated (which `l4 yolo check` accepts) from an archived unit in a fresh plan
+(which `l4 yolo check` refuses as `unknown_unit`). It MUST print `finished: <id> (archived: l4 yolo check refuses it as
+unknown_unit unless this plan already merged or integrated it)` and keep exit 0 when nothing else is wrong. Its reading of the configuration MUST accept a
 quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
 including a deadline written as a Unix time.
 

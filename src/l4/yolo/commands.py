@@ -53,7 +53,7 @@ from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
-from l4.yolo.cycle import REVIEW_KEY, review_batches
+from l4.yolo.cycle import REVIEW_KEY, plan_source, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import Found, new_draft, update_draft
 from l4.yolo.limits import (
@@ -1074,11 +1074,12 @@ def local_plans(git: Git) -> dict[str, list[PlanEvent]]:
     return plans
 
 
-def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None]) -> list[str]:
+def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None], cfg: L4Config | None = None) -> list[str]:
     """`plan <id>: <status>[, unit U (<phase>)], <integrated>/<total> integrated, $<used>/$<limit>` for each plan with a
-    ref in this checkout that is not final (L4-YOLO-015). `phases` is unit id -> phase."""
+    ref in this checkout that is not final (L4-YOLO-015). `phases` is unit id -> phase. The plan files are the target's
+    (`cfg` given, as the plan step reads them), else the working tree's."""
     try:
-        files = {f.plan_id: f for f in plan_files(repo)}
+        files = {f.plan_id: f for f in _plan_files_of(repo, git, cfg)}
         ledgers = local_plans(git)
     except GitError:
         return []
@@ -1099,10 +1100,20 @@ def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None]) -> list[s
     return lines
 
 
-def auto_merge_plan_active(repo: Path, git: Git) -> bool:
+def _plan_files_of(repo: Path, git: Git, cfg: L4Config | None) -> list[PlanFile]:
+    """The plan files the plan step reads (`cycle.target_plan_files`) when the configuration is known, else the
+    working tree's."""
+    if cfg is None:
+        return plan_files(repo)
+    ref = plan_source(cfg, git)
+    return plan_files(repo) if ref is None else plan_files_at(git, ref)
+
+
+def auto_merge_plan_active(repo: Path, git: Git, cfg: L4Config | None = None) -> bool:
     """Is some plan with `merge: auto` active, waiting or stopped in this checkout's plan refs (L4-YOLO-008)? The merge
-    mode is the plan file's in the working tree, else what the ledger recorded."""
-    files = {f.plan_id: f for f in plan_files(repo)}
+    mode is the plan file's (the target's when `cfg` is given, else the working tree's), else what the ledger
+    recorded."""
+    files = {f.plan_id: f for f in _plan_files_of(repo, git, cfg)}
     for pid, events in local_plans(git).items():
         state = fold_plan(pid, events)
         if state.status not in _HOLDING:

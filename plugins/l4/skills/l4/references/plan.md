@@ -85,7 +85,8 @@ l4 yolo check <id>
 - The script needs only Python. It reads every `.l4/plans/*.json`, finds the units like the harness does, and checks
   the schema, the graph (cycles, unknown units, duplicates) and the coverage across all plan files (`uncovered`,
   `covered_twice`). On success it prints the dispatch order and the waves. Exit 0 is valid, 1 lists problems. A planned
-  unit whose change is archived prints `finished: <id>`: remove it, unless this plan already integrated it.
+  unit whose change is archived prints `finished: <id>`: remove it, because `l4 yolo check` refuses it as `unknown_unit`, unless this plan already
+  merged or integrated it.
 - `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
   against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
 
