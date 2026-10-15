@@ -206,7 +206,7 @@ for more scenarios in it. To review before pushing, the operator had to build a 
   | feasibility | Split the unit (a new change folder and a plan entry) or remove the part that needs a person, a secret or a service. |
   | duplicate_scope | Remove the overlap from one of the units the finding names. |
   | contradiction | Make the two statements agree, in this folder or in a prerequisite's. |
-  | missing_dependency | Add the unit it needs to `depends_on` of `<subject>` in `.l4/plans/<plan>.json` (batch `<b>`). When the text names a known unit id that is not in `depends_on`, the exact entry is suggested; nothing is parsed beyond known ids. |
+  | missing_dependency | Add a `depends_on` to `<subject>` in `.l4/plans/<plan>.json` (batch `<b>`) only on a unit of the plan that introduces it; if the code already exists on the base branch, say so in the spec instead. When the text names a known unit id that is not in `depends_on`, the exact entry is suggested; nothing is parsed beyond known ids. |
   | batch_acceptance | State the batch outcome in a unit's proposal, or give batch `<b>` an acceptance profile that can show it. |
   | material (harness) | D4's message: file, size, budget, config key, the fix. |
   | schema / unit_missing / completeness (harness) | No review happened for this item: run the review again / push the folder or remove the unit from the plan. |

@@ -68,11 +68,13 @@ digest differs from `activated_digest` MUST stop the plan with `inputs_changed` 
 ## ADDED Requirements
 
 ### Requirement: L4-YOLO-021 Every finding is shown with what to do about it
-`l4 yolo findings PLAN [SUBJECT] [--all] [--json]` SHALL print, from the latest review, with no model and no write,
+`l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` SHALL print, from the latest review, with no model and no write,
 each subject that is not READY with every blocking and major finding in full, its id, criterion and a `Resolve:` line,
 the count of minor ones, and the change since the subject's previous judged material (new, repeated, gone, persistent
 criteria). `l4 yolo status`, `l4 yolo review` and the activation refusal MUST show an item's most severe finding and
 name `l4 yolo findings`.
+`--worktree` SHALL read the latest dry run of `l4 yolo review --worktree` from the local cache instead of the ledger,
+against the previous dry run.
 
 #### Scenario: SCN-YOLO-43 (+) Each major finding comes with how to resolve it
 - **GIVEN** a latest review where `openspec:a` is NEEDS_REVISION with a major `testability` finding and a minor `outcome` finding
@@ -93,6 +95,11 @@ name `l4 yolo findings`.
 - **GIVEN** `openspec:b` NEEDS_REVISION with a major `missing_dependency` finding whose text names `openspec:a`, a unit of the plan that is not in `openspec:b`'s `depends_on`
 - **WHEN** `l4 yolo findings p1` runs
 - **THEN** the `Resolve:` line says to add `"openspec:a"` to `depends_on` of `openspec:b` in `.l4/plans/p1.json` (batch `b1`)
+
+#### Scenario: SCN-YOLO-71 (+) The results of a dry run are usable in the loop
+- **GIVEN** `l4 yolo review p1 --worktree` judged `openspec:b` NEEDS_REVISION with a major `testability` finding, and recorded nothing in the plan ledger
+- **WHEN** `l4 yolo findings p1 --worktree` runs, and `l4 yolo findings p1 --worktree --json`
+- **THEN** the first prints `openspec:b: NEEDS_REVISION`, the finding and its `Resolve:` line, and after a second dry run with other material the change since the previous dry run; the second prints the `l4/yolo-findings@1` document; neither calls a model, and `l4 yolo review p1 --worktree --json` prints the same document alone on stdout
 
 ### Requirement: L4-YOLO-022 Material already judged is not judged again
 Each subject SHALL have a material key: a hash of the prompt version, the subject kind, and the exact text the judge
@@ -170,8 +177,8 @@ readiness prompt version MUST be 4.
 
 ### Requirement: L4-YOLO-026 A review of the working tree before the push
 `l4 yolo review PLAN --worktree` SHALL review the working tree's plan file and unit folders with the same prompt,
-rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost, write
-nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
+rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost (`--json`:
+the findings document of `l4 yolo findings --json`), write nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
 `--local`, for committed paths only. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
 adapter is tool-less, and say so.
 

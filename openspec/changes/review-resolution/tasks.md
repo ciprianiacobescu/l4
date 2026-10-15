@@ -70,9 +70,7 @@ orchestrator. "World" fixtures: `tests/unit/yolo/yolo_review_world.py` (readines
 - [x] 4.1 `docs/runbook.md`: a procedure "12.2a The review is not READY" with the exact commands (`l4 yolo findings <plan-id>`, edit, `l4 yolo review <plan-id> --worktree`, commit, `l4 yolo review <plan-id> --worktree --record`, push, or `l4 yolo accept <plan-id> <subject> --reason "<what the implementer should do>"`, then `l4 yolo activate`), the conditions (`accept_after_rounds`, `accept_by_agents`, what can never be accepted), the macOS note (an unsandboxed tool-less judge outside CI), the cost line; 12.2 step 6 points to 12.2a; the activation refusals list the acceptance line; 12.4 gets the row `accepted_finding_open`; `docs/yolo-mode.md` gets a section "The review" (incremental review, budgets and the prerequisite order, check marks, the verdict rules, the override and where accepted findings go). Test: SCN-YOLO-70 as an assertion in the existing docs check (`scripts/check_spec.py` or the test that checks the stop reasons, SCN-YOLO-29). (L4-YOLO-029)
 - [x] 4.2 The skill: `plugins/l4/skills/l4/references/plan.md` — iterate with `l4 yolo review <id> --worktree` (dry) and `l4 yolo findings`, record with `--record` before the push, never accept unless `yolo.review.accept_by_agents` is true on the target, and then only after two rounds with a reason that tells the implementer what to do; ask the person with the exact `l4 yolo accept` command otherwise; `operate.md` lists `findings`, `accept`, `--worktree`/`--record`/`--fresh`. `docs/SPEC.md` §12.5: L4-YOLO-021..029, the MODIFIED text of -004 and -005, SCN-YOLO-43..70; `scripts/check_spec.py docs/SPEC.md` clean. (L4-YOLO-029)
 
-## 5. Integration, review, live check (orchestrator)
-
-- [ ] 4.2a The toolset works for an agent (acceptance test of this change, with the skill). A fixture repository with a
+- [x] 4.2a The toolset works for an agent (acceptance test of this change, with the skill). A fixture repository with a
   plan of three OpenSpec units and three seeded defects: a unit that calls a helper another unit defines but has no
   `depends_on` on it; a dependency folder over `yolo.review.max_dependency_chars` because of a background file; a
   requirement whose failure behaviour has no scenario. A subagent that has only the skill (`plugins/l4/skills/l4`) and
@@ -81,6 +79,9 @@ orchestrator. "World" fixtures: `tests/unit/yolo/yolo_review_world.py` (readines
   READY on every subject without pushing and without `l4 yolo accept`. Record the transcript summary (commands run,
   rounds, cost) in `plugins/l4/tests/with-skill.md` as a new scenario. A failure here is a defect of the toolset or the
   skill: fix it, do not weaken the fixture. (L4-YOLO-021, L4-YOLO-026)
+  Result: pass (2 judged rounds, $0.38); the feedback became review-resolution 4.2b. S8 and S9 stay "to run: the orchestrator".
+
+## 5. Integration, review, live check (orchestrator)
 
 - [ ] 5.1 Merge the wave branches in order; the full unit suite; ruff; mypy; `check_spec`; `openspec validate review-resolution --strict` (only the MODIFIED L4-YOLO-004 and -005 may exceed 500 characters, as they do today).
 - [ ] 5.2 One independent adversarial review of the whole change (session model): the binding of acceptances, the sandbox choice, the cache keys (a stale reuse is the worst defect here), and the `merge: auto` wait. Fix confirmed findings with tests.

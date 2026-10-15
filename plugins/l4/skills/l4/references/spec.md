@@ -12,7 +12,8 @@ before the first review.
 - **failure_cases.** Say what happens when a stage does not run, raises, or gets bad input.
 - **feasibility.** Use only tools the runner has. Say in prose what is already delivered; ticked tasks are done.
 - **material_cut.** Stay inside the review budgets (`yolo.review.max_file_chars`, `max_folder_chars`,
-  `max_dependency_chars`; `validate_plan.py` prints overruns). Move background to `docs/`.
+  `max_dependency_chars`; `validate_plan.py` prints overruns: a unit's own folder over the budget is an error, a dependency's folder a
+  warning). Move background to `docs/`.
 - **OpenSpec form.**
   - Where `openspec/specs/<cap>/` does not exist on the base branch, write `## ADDED Requirements` and a `## Purpose`.
   - A MODIFIED block keeps every scenario name of the requirement it replaces.
@@ -21,7 +22,7 @@ before the first review.
 Before the push, run both:
 
 ```sh
-openspec validate <change> --strict   # or: npx --yes @fission-ai/openspec@1.14.0 validate <change> --strict
+openspec validate <change> --strict   # or --all --strict; or: npx --yes @fission-ai/openspec@1.14.0 validate --all --strict
 python3 <skill dir>/scripts/validate_plan.py
 ```
 
