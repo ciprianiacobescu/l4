@@ -442,7 +442,8 @@ has the code in `reason` and the text in `detail`. `breaker.tripped` has a short
 
 1. Install `l4` at the same version as the pin of your project.
    - Setup-action form: `uv tool install git+https://github.com/<owner>/<harness repo>@<tag or commit>`. A private
-     harness repository needs the ssh form: `uv tool install git+ssh://git@github.com/<owner>/<harness>.git@<sha>`.
+     harness repository works with your own git credentials: https with your credential helper or token, or the ssh
+     form `uv tool install git+ssh://git@github.com/<owner>/<harness>.git@<sha>`.
    - Vendored form: use `.l4/bin/l4` in the project. Type it from the repository root.
    - Fetched form: use `.l4/bin/l4` in the project. Type it from the repository root. It runs `uvx` with the pinned
      commit.
@@ -469,6 +470,10 @@ has the code in `reason` and the text in `detail`. `breaker.tripped` has a short
    ```sh
    read -rs L4_FORGE_TOKEN && export L4_FORGE_TOKEN
    ```
+
+Outside CI, when that variable is empty, the pushes of these commands use your own git credentials (the keychain, a
+credential helper or an ssh key). The calls to the forge's API (labels, pull requests, the start of a run) still need the
+token. When the variable is set, the push uses it.
 
 In this runbook, `l4` means the command of step 1. What each command needs:
 
@@ -511,7 +516,8 @@ and `l4 restart` start a run for you, unless you add `--no-run`.
 
 **Other ways that a run starts:**
 
-- The schedule. On GitHub, `ci.schedule` sets it (the default is every 30 minutes). On GitLab, `l4 setup gitlab --cron`
+- The schedule. On GitHub, `ci.schedule` sets it (the default is every 30 minutes), and GitHub runs it from the workflow
+  file on the **default branch**, with the pin that file has (see [7.15](#715-use-a-separate-base-branch-for-example-l4main)). On GitLab, `l4 setup gitlab --cron`
   makes it (the default is `*/30 * * * *`).
 - A push to `<base>`, for example a merge.
 - A push to a unit branch. [Section 9](#9-what-your-push-does) gives the exceptions.
@@ -995,7 +1001,11 @@ computer, the line can say that the project is unknown. Do step 6 of [section 5]
 
 - The token is not set in the job.
 - The install of an agent CLI failed.
-- The forge refused a push, because of permissions or branch protection.
+- The forge refused a push, because of permissions or branch protection. The message names the rules of the forge that
+  refused it. On GitHub the token needs `contents: write` and `pull-requests: write` (the workflow's `permissions`, or a
+  fine-grained token), and the branch must not be protected against it. On GitLab the token must be a project access
+  token with the `write_repository` and `api` scopes and the Developer role or higher. If the message says that the token
+  variable is not set, set it.
 - `gates.setup` failed.
 - Bubblewrap is not usable on the runner.
 - The shim prints `uv was not found` or `uvx was not found`.
@@ -1129,7 +1139,12 @@ promotes. The harness then cuts unit branches from that branch and opens their P
 4. Commit the changed config and CI file, and push them to `l4/main`.
 5. On GitHub, also copy `.github/workflows/l4.yml` to `main`, and push it.
 
-   GitHub starts the schedule and a dispatched run only from the file on the default branch.
+   GitHub starts the schedule and a dispatched run only from the file on the default branch. Copy the file again
+   after every `l4 upgrade`: a stale copy runs the old pin. A run with a pin other than the base's does no work and
+   prints a warning that names both commits (doctor row `CFG-008`).
+5a. Run `l4 setup github`. It adds `main` to the deployment branches of the environment `l4` (a job that runs on the
+   default branch cannot read the environment's secrets otherwise), and it checks that `main` has the workflow file.
+   Run it after step 5 is merged: until then the dispatch answers 404 and the row is `FAILED`.
 
 6. Merge a spec into `l4/main` to start its unit.
 7. Promote `l4/main` to `main` with a PR, when you are ready.
@@ -1378,8 +1393,9 @@ stateDiagram-v2
 > A later review or admission of the file does not change what the activation froze.
 
 The review does not run if the judge agent fails or does not answer in time. The harness then records no review, and
-the next run tries again. If the size limits cut some material, the verdict is at most `NEEDS_REVISION`. The finding
-names what the harness left out.
+the next run tries again. If the size limits cut some of the unit's own material, the verdict is at most `NEEDS_REVISION`, and the finding names
+the file, its size, the budget and the key to raise. The limits are `yolo.review.max_file_chars` (20,000),
+`max_folder_chars` (80,000) and `max_dependency_chars` (20,000). A cut of a prerequisite folder does not block.
 
 The activation is refused with exit 2 and the cause in these cases:
 - The review is for other inputs. Run `l4 yolo review <plan-id>`.

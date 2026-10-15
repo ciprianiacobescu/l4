@@ -27,6 +27,9 @@ measurements [live/free/README.md](live/free/README.md), and the code reads cite
 * **sample-consumer is not changed.** Section 6 has a recommended block for the maintainer. Its current fallback,
   Big Pickle, may use the data it receives to improve the model [doc]. The block replaces it with LongCat, which has
   zero retention.
+* **Defaults of `l4 init`.** A new repository gets a Laya profile as `roles.s1_judge` (free, local, no key). `--s1 jev`
+  writes a Jev profile that reads `TYPESAFE_API_KEY`, and `--s1 none` writes neither. The hosted-runner cost of Laya and
+  the Jev rows measured on a consumer are added after the live run of adoption-lessons 9.3.
 * **More free capacity needs the maintainer** (section 8):
   * a Zen API key: Jev 1.13 Free as System One;
   * an `opencode auth login` for OpenRouter `:free` models and for Gemini;
