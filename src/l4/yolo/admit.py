@@ -3,7 +3,8 @@
 `admit` checks a plan against what the target head knows, without any model: unique ids, known units, resolvable
 dependencies, no cycle, known acceptance profiles, profiles this runner can run (`unsupported_profile`: R7), the
 target, the merge mode, open questions, intake, finished units, units another plan file already lists
-(`held_by_other_plan`: R8) and external dependencies. Every problem is a `Finding` with a code. The graph has one
+(`held_by_other_plan`: R8) and external dependencies. A unit that the plan itself merged or integrated (its ledger
+`state`) is done and has no unit-level finding. Every problem is a `Finding` with a code. The graph has one
 node per unit and one per batch: a unit waits for the units it depends on and for the batch nodes its batch depends
 on; a batch node waits for all of its units. The order is topological; among nodes ready together, batch position
 decides, then unit position.

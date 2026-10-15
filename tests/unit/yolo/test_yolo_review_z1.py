@@ -9,7 +9,6 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode
-from l4.outcome import CommandResult
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.commands import Extend, resume_blocker
 from l4.yolo.digest import plan_digest
@@ -256,7 +255,7 @@ def push_archive_of_a(w):
     w.clone.run("push", "-q", "origin", "main")
 
 
-def integrated_a_ledger(w, text):
+def integrated_a_ledger(w):
     w.seed(
         "p1",
         cev("plan.admitted", plan_digest="old", order=[CA, CB], merge="human"),
@@ -272,7 +271,7 @@ def integrated_a_ledger(w, text):
 def test_check_review_and_activate_accept_a_plan_that_integrated_an_archived_unit(cmd_world, forge, capsys):  # noqa: F811
     w = cmd_world
     w.push_plan(plan_doc({CA: [], CB: [CA]}, merge="human"))
-    integrated_a_ledger(w, w.plan_text)
+    integrated_a_ledger(w)
     push_archive_of_a(w)
     w.pull()
     assert w.l4("check", "p1") == 0
@@ -429,7 +428,7 @@ def test_a_unit_that_lost_current_is_not_merged_with_a_head_that_lacks_the_new_d
     got = st(w)
     assert w.tip() == head_c and A not in got.integrated and A not in got.merged
     assert [e.data["reason"] for e in w.events() if e.type == "unit.merge_refused"] == ["stale"]
-    assert retried == [A] and CommandResult  # the existing stale path asks for a retry
+    assert retried == [A]  # the existing stale path asks for a retry
 
 
 def test_activate_drops_the_current_unit_that_has_a_new_dependency_and_keeps_one_that_has_none(cmd_world, forge):  # noqa: F811
