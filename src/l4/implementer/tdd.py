@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from l4.accepted import read_accepted
 from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts, read_result_file
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
@@ -68,7 +69,7 @@ from l4.implementer.guards import (
     restore_frozen,
     restore_test_paths,
 )
-from l4.implementer.prompt import PromptContext, collect_sources, defuse, render_prompt, result_values_line
+from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
     RESULT_SCHEMA,
@@ -524,6 +525,32 @@ def _previous_attempt_block(wb: Workbench, task: Task) -> tuple[tuple[str, str],
     return (("previous attempt", block),)
 
 
+ACCEPTED_RULE = (
+    "The specification of this unit has these gaps, which a person accepted. Where the specification is silent, follow "
+    "the person's reason. Say in notes_for_verifier how you handled each one, by its id."
+)
+
+
+def accepted_block(items: Sequence[Mapping[str, Any]]) -> str:
+    """The data block `accepted review findings` (L4-YOLO-028): the rule, then per item the person's reason and the
+    findings as `F-... [criterion] text`. Empty when there are no findings."""
+    lines: list[str] = []
+    for item in items:
+        findings = item.get("findings") or ()
+        if not findings:
+            continue
+        who = f" ({item['by']})" if item.get("by") else ""
+        lines += ["", f"Reason{who}: {item['reason']}"]
+        lines += [f"{f['id']} [{f['criterion']}] {f['text']}" for f in findings]
+    return data_block("accepted review findings", "\n".join([ACCEPTED_RULE, *lines])) if lines else ""
+
+
+def _accepted(wb: Workbench) -> tuple[tuple[str, str], ...]:
+    """The accepted review findings the run wrote into the unit folder (`.l4/review-accepted.json`) as a block."""
+    block = accepted_block(read_accepted(wb.ref.path))
+    return (("accepted review findings", block),) if block else ()
+
+
 def _lessons(wb: Workbench, task: Task) -> Injection:
     """The lessons that apply to the task, as a data block (SPEC L4-MEM-003); one `lessons.injected` event when any."""
     paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()])
@@ -560,6 +587,7 @@ def _prompt(
         data_blocks=(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
+            *_accepted(wb),
             *_previous_attempt_block(wb, task),
         ),
     )  # fmt: skip
