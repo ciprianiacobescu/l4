@@ -97,6 +97,7 @@ from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
 from l4.vcs.names import UnitNames
+from l4.vcs.repokey import repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
@@ -1247,8 +1248,9 @@ def run_unit_in_worktree(
     `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
-        ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
-    )
+        ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo),
+        repo_key=repository_key(app.repo, app.environ),
+    )  # fmt: skip
     relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve())
     snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
     if resume_reason is None and (stopped := _refuse_stopped(app, snapshot.state, ref, snapshot.spec_edit)) is not None:

@@ -155,7 +155,7 @@ def test_a_run_that_pushed_nothing_is_read_from_the_unit_worktree(seeds_root: Pa
     """A rate-limited first step parks the unit before any push: its ledger exists only in the cell's cache."""
 
     def write(repo: Path) -> None:
-        ledger = tmp_path / "cell" / "cache" / "worktrees" / "openspec" / "add-shelf-code"
+        ledger = tmp_path / "cell" / "cache" / "worktrees" / "shelf-0123456789" / "openspec" / "add-shelf-code"
         ledger = ledger / "openspec" / "changes" / "add-shelf-code" / ".l4" / "ledger"
         ledger.mkdir(parents=True)
         (ledger / "r-9.jsonl").write_text(

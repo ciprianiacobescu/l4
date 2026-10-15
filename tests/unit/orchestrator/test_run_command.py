@@ -77,7 +77,7 @@ def test_present_hooks_called_in_lifecycle_order(run_l4, install_hooks):
 
 
 def test_busy_unit_skipped_exit_0(run_l4, tdd_repo):
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
     other = LocalFileLease(names.flock_path, unit=UNIT, run_id="r-20261003T0000Z-0000")
     other.acquire()
     try:
@@ -98,7 +98,7 @@ def test_final_ledger_lines_are_committed_and_pushed(run_l4):
     finished = run.events("run.finished")
     assert len(finished) == 1 and finished[0]["seq"] == max(e["seq"] for e in run.ledger())
     # the file on the branch is byte-identical to the one in the worktree
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache, repo_key=run.tdd.key)
     (local,) = (names.worktree / UNIT_DIR / ".l4" / "ledger").glob("*.jsonl")
     assert run.pushed(f"{UNIT_DIR}/.l4/ledger/{local.name}") == local.read_text()
 
@@ -168,7 +168,7 @@ def test_deferred_flags_exit_2(run_l4):
 
 def _nothing_started(run, tdd_repo) -> None:
     """A config error is found before the lease, the worktree and any probe."""
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
     assert not names.flock_path.exists() and not names.worktree.exists()
     assert run.adapter.requests == []
 
@@ -208,7 +208,7 @@ def test_empty_role_chains_are_a_configuration_error_not_a_capacity_wait(tdd_rep
         monkeypatch.setitem(ADAPTERS, "fake", lambda adapter=adapter: adapter)
         code = main(["run", "--unit", UNIT, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ)
         assert code == 2, roles
-        names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache)
+        names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
         assert not names.flock_path.exists() and not names.worktree.exists() and adapter.requests == []
 
 
@@ -218,7 +218,7 @@ def test_nothing_to_do_exits_0_before_any_lease_worktree_probe_or_agent(run_l4, 
     runs, probes, branch_head = len(first.events("run.started")), len(first.events("availability.selected")), first.raw(
         tdd_repo.origin, "rev-parse", BRANCH
     )
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
     before = sorted(p.name for p in names.worktree.rglob("*.jsonl"))
     capsys.readouterr()
     second = run_l4([], unit=False)  # the routed CI job: `l4 run` without --unit

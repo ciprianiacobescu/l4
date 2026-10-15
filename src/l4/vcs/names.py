@@ -48,12 +48,15 @@ class UnitNames:
     lock_ref: str
     lock_branch: str
     archive_branch: str  # <prefix>archive/<framework>/<name>: the post-merge archive MR (L4-ARC-007)
-    worktree: Path  # $L4_CACHE/worktrees/<fw>/<name>, outside the repository
-    flock_path: Path  # $L4_CACHE/locks/<fw>/<name>.lock
-    archive_worktree: Path  # $L4_CACHE/worktrees/archive/<fw>/<name>
+    worktree: Path  # $L4_CACHE/worktrees/<key>/<fw>/<name>, outside the repository
+    flock_path: Path  # $L4_CACHE/locks/<key>/<fw>/<name>.lock
+    archive_worktree: Path  # $L4_CACHE/worktrees/<key>/archive/<fw>/<name>
 
     @classmethod
-    def for_unit(cls, unit_id: str, *, branch_prefix: str, cache: Path) -> "UnitNames":
+    def for_unit(cls, unit_id: str, *, branch_prefix: str, cache: Path, repo_key: str) -> "UnitNames":
+        """`repo_key` is `l4.vcs.repokey.repository_key`: the paths carry it so two projects never share one."""
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", repo_key):
+            raise ValueError(f"not a usable repository key: {repo_key!r}")
         framework, name = parse_unit_id(unit_id)  # ValueError for anything that is not <framework>:<safe name>
         fw = framework.value
         return cls(
@@ -63,7 +66,7 @@ class UnitNames:
             lock_ref=lock_ref(unit_id),
             lock_branch=f"l4-lock/{fw}/{name}",
             archive_branch=f"{branch_prefix}archive/{fw}/{name}",
-            worktree=cache / "worktrees" / fw / name,
-            flock_path=cache / "locks" / fw / f"{name}.lock",
-            archive_worktree=cache / "worktrees" / "archive" / fw / name,
+            worktree=cache / "worktrees" / repo_key / fw / name,
+            flock_path=cache / "locks" / repo_key / fw / f"{name}.lock",
+            archive_worktree=cache / "worktrees" / repo_key / "archive" / fw / name,
         )

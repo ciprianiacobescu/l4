@@ -52,7 +52,7 @@ def test_the_fold_of_a_halted_unit_keeps_code_and_detail(run_l4):
     run = run_l4([red_step(), red_step()], implementer={"max_task_attempts": 1})
     from l4.vcs.names import UnitNames
 
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=run.tdd.cache, repo_key=run.tdd.key)
     state = fold(read_ledger(names.worktree / UNIT_DIR).events, UNIT)
     assert (state.phase, state.halt_reason) == ("halted", "max_task_attempts")
     assert state.halt_detail is not None and state.halt_detail.startswith("task 1.1: max_task_attempts")

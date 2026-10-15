@@ -69,7 +69,7 @@ def test_a_halt_names_its_cause(run_l4):
 
 
 def test_a_busy_unit_says_it_was_skipped_because_another_run_holds_it(run_l4, tdd_repo):
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache)
+    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=tdd_repo.cache, repo_key=tdd_repo.key)
     other = LocalFileLease(names.flock_path, unit=UNIT, run_id="r-20261003T0000Z-0000")
     other.acquire()
     try:

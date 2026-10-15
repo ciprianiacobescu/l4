@@ -18,6 +18,7 @@ from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.locks import LocalFileLease
 from l4.vcs.names import UnitNames
+from l4.vcs.repokey import repository_key
 
 from .ops_world import (  # noqa: F401
     BRANCH,
@@ -246,7 +247,12 @@ def test_a_merged_unit_is_refused(world, forge, monkeypatch):
 
 def test_a_locked_unit_is_refused(world, forge):
     world.run(failing_reds())
-    names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=cache_root(world.app.environ, repo=world.app.repo))
+    names = UnitNames.for_unit(
+        UNIT,
+        branch_prefix="l4/",
+        cache=cache_root(world.app.environ, repo=world.app.repo),
+        repo_key=repository_key(world.app.repo, world.app.environ),
+    )
     lease = LocalFileLease(names.flock_path, unit=UNIT, run_id="r-20261013T1000Z-aaaa")
     lease.acquire()
     before = refs_of(world)

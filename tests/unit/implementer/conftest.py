@@ -95,7 +95,9 @@ def make_bench(tdd_repo: TddRepo) -> Callable[..., Bench]:
         cfg = load_config(repo)
         app = AppContext(repo, None, "human", 0, RUN_ID, environ, Redactor({}))
         git = Git(repo, environ=environ)
-        names = UnitNames.for_unit(UNIT, branch_prefix=cfg.forge.branch_prefix, cache=tdd_repo.cache)
+        names = UnitNames.for_unit(
+            UNIT, branch_prefix=cfg.forge.branch_prefix, cache=tdd_repo.cache, repo_key=tdd_repo.key
+        )
         worktree = WorktreeManager(git, base_branch="main", branch_prefix="l4/").ensure(names)
         wgit = git.at(worktree.path)
         provider = providers_for(cfg, worktree.path, environ)[0]

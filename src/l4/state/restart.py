@@ -65,6 +65,7 @@ from l4.vcs.git import Git
 from l4.vcs.locks import Busy, LocalFileLease
 from l4.vcs.names import UnitNames
 from l4.vcs.push import ATTEMPT_REF_PREFIX, PushRejected
+from l4.vcs.repokey import repository_key
 from l4.vcs.trailers import CommitTrailers
 
 log = logging.getLogger("l4.restart")
@@ -100,8 +101,9 @@ def restart_unit(
     """The restart of one unit, steps 1 to 6 of the module text; no run is started. `L4Exit(USAGE_ERROR)` for a refusal,
     `L4Exit(INTERNAL_ERROR, "the branch moved: run l4 restart again")` for a lost lease."""
     names = UnitNames.for_unit(
-        ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
-    )
+        ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo),
+        repo_key=repository_key(app.repo, app.environ),
+    )  # fmt: skip
     config = push_auth_config(cfg, app.environ, origin_url(app.repo, app.environ))
     state = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     forge = _forge(cfg, app)

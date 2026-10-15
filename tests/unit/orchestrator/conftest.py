@@ -61,7 +61,7 @@ class Run:
 
     def local_events(self, event_type: str) -> list[dict]:
         """From the unit's worktree, for a run that pushed nothing."""
-        names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=self.tdd.cache)
+        names = UnitNames.for_unit(UNIT, branch_prefix="l4/", cache=self.tdd.cache, repo_key=self.tdd.key)
         files = sorted((names.worktree / UNIT_DIR / ".l4" / "ledger").glob("*.jsonl"))
         events = [json.loads(line) for f in files for line in f.read_text().splitlines()]
         return [e for e in events if e["type"] == event_type]

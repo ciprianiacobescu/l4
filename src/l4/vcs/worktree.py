@@ -2,7 +2,8 @@
 
 M0 never reuses a worktree: it is removed and recreated from the remote unit branch (or from base), so a crashed
 run restarts the current task from the last pushed checkpoint. The fetch before it prunes (G8, `l4.vcs.refresh`).
-SPEC gap, to amend: the path has no repository key, so `_remove` refuses a path owned by another repository.
+The path carries the repository key (`l4.vcs.repokey`); `_remove` replaces a checkout of this project or an orphan
+and refuses one that another repository owns.
 M1: state-vcs-locks 1.12 (reuse after fetch + HEAD check), 1.13/1.14 (WIP snapshot), 1.27/1.28 (merge base in).
 """
 
@@ -17,6 +18,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import UnitNames
 from l4.vcs.refresh import unit_refspecs
+from l4.vcs.repokey import key_of_common_dir
 
 
 @dataclass(frozen=True)
@@ -94,30 +96,55 @@ class WorktreeManager:
         self._remove(path)
 
     def _belongs_to_this_repository(self, path: Path) -> bool:
-        """False for a checkout that another repository owns. Worktree and lock paths carry no repository key (SPEC
-        L4-WTR-001), so two projects on one runner that share a change name meet at the same path; deleting it would
-        destroy the other project's live worktree. A path without a `.git` is junk and is ours to replace."""
+        """Whether `path` is ours to replace. Three outcomes for an existing checkout, by repository key
+        (`l4.vcs.repokey`, SPEC L4-WTR-001): the same key (another clone or build directory of this project; the
+        unit's flock, held by every caller before it prepares or removes the path, serialises those jobs) and an
+        orphan (its gitdir points into a clone that no longer exists, so its origin cannot be read) are ours; a
+        different key is another project's live checkout and is refused. A path without a `.git` is junk."""
         marker = path / ".git"
         if not marker.exists() and not marker.is_symlink():
             return True
-        common = Path(self._git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()).resolve()
+        common = self._common_dir_of(path, marker)
+        if common is None:
+            return False  # a `.git` we cannot read: not ours to delete
+        if common == "orphan":
+            return True
+        ours = Path(self._git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()).resolve()
+        if common == ours:
+            return True
+        return key_of_common_dir(common, self._git.env) == key_of_common_dir(ours, self._git.env)
+
+    @staticmethod
+    def _common_dir_of(path: Path, marker: Path) -> Path | Literal["orphan"] | None:
+        """The git common dir of the checkout at `path`; "orphan" when its gitdir no longer exists; None when the
+        marker cannot be read."""
+        if marker.is_dir():
+            return marker.resolve()  # a clone's own `.git` directory
         try:
-            text = marker.read_text(encoding="utf-8", errors="replace") if marker.is_file() else ""
+            text = marker.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return False
+            return None
         prefix = "gitdir:"
         if not text.startswith(prefix):
-            return False  # a real `.git` directory: a clone, not one of our worktrees
+            return None
         gitdir = Path(text[len(prefix) :].strip())
         gitdir = (gitdir if gitdir.is_absolute() else path / gitdir).resolve()
-        return common in gitdir.parents
+        if not gitdir.is_dir():
+            return "orphan"
+        pointer = gitdir / "commondir"
+        if pointer.is_file():
+            target = Path(pointer.read_text(encoding="utf-8", errors="replace").strip())
+            gitdir = (target if target.is_absolute() else gitdir / target).resolve()
+            if not gitdir.is_dir():
+                return "orphan"
+        return gitdir
 
     def _remove(self, path: Path) -> None:
         if not self._belongs_to_this_repository(path):
             raise L4Exit(
                 ExitCode.USAGE_ERROR,
                 f"{path} is a checkout of another repository; refusing to delete it "
-                "(two projects share a change name on this runner)",
+                "(a leftover of the layout without a repository key, or a path outside the keyed cache)",
             )
         self._git.run("worktree", "remove", "--force", str(path), check=False)  # not registered: nothing to do
         if path.is_symlink():

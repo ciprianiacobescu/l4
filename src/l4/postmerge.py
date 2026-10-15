@@ -37,6 +37,7 @@ from l4.state.pending import merge_ledgers, read_pending_files
 from l4.vcs.errors import GitError
 from l4.vcs.git import BOT_IDENTITY, Git
 from l4.vcs.names import UnitNames
+from l4.vcs.repokey import repository_key
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import fix_units_of
@@ -151,6 +152,7 @@ class PostMergeArchiver:
         fetch_config: Sequence[tuple[str, str]] = (),
     ) -> None:
         self._cfg, self._app, self._git, self._forge = cfg, app, git, forge
+        self._key: str | None = None
         self._other_base_said: set[int] = set()  # archive MRs to another base, said once per sweep (L4-YOLO-009)
         root = cfg.spec.openspec.root
         self._provider_for = provider_for or (lambda path: OpenSpecProvider(path, app.environ, root=root))
@@ -170,7 +172,9 @@ class PostMergeArchiver:
 
     def names(self, ref: UnitRef) -> UnitNames:
         cache = cache_root(self._app.environ, repo=self._app.repo)
-        return UnitNames.for_unit(ref.id, branch_prefix=self._cfg.forge.branch_prefix, cache=cache)
+        if self._key is None:
+            self._key = repository_key(self._app.repo, self._app.environ)  # once per command
+        return UnitNames.for_unit(ref.id, branch_prefix=self._cfg.forge.branch_prefix, cache=cache, repo_key=self._key)
 
     def open_archive_pr(self, ref: UnitRef, *, iteration: int = 1) -> ArchiveResult:
         names = self.names(ref)

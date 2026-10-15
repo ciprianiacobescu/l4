@@ -38,6 +38,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import BOT_IDENTITY, Git
 from l4.vcs.locks import Busy, LocalFileLease
 from l4.vcs.names import UnitNames
+from l4.vcs.repokey import repository_key
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixunit import plan_follow_up, redact_plan
@@ -97,7 +98,9 @@ def make_follow_up(
     name = follow_up_name(parent.name, n)
     follow_id = f"{parent.framework.value}:{name}"
     cache = cache_root(app.environ, repo=app.repo)
-    names = UnitNames.for_unit(follow_id, branch_prefix=cfg.forge.branch_prefix, cache=cache)
+    names = UnitNames.for_unit(
+        follow_id, branch_prefix=cfg.forge.branch_prefix, cache=cache, repo_key=repository_key(app.repo, app.environ)
+    )
     push_config = push_auth_config(cfg, app.environ)
     if _on_origin(git, names.branch, cfg, app):
         log.info("%s: %s is on origin already", parent.id, names.branch)
@@ -194,13 +197,15 @@ def perform_follow_ups(
     """A follow-up for every merged unit the planner says `follow_up` for (takeable items, none open)."""
     made: list[FollowUpMade] = []
     errors: list[Exception] = []
+    key = repository_key(app.repo, app.environ) if snapshots else ""
     for snapshot in snapshots:
         offer = snapshot.follow_up
         if snapshot.state.phase != Phase.MERGED.value or offer is None or not offer.items or offer.open:
             continue
         names = UnitNames.for_unit(
-            snapshot.ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo)
-        )
+            snapshot.ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo),
+            repo_key=key,
+        )  # fmt: skip
         lease = LocalFileLease(names.flock_path, unit=snapshot.ref.id, run_id=app.run_id)
         try:
             lease.acquire()
