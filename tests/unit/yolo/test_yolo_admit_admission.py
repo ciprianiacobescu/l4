@@ -249,3 +249,22 @@ def test_plan_intake_keeps_every_error_cut_at_600_each_and_adds_the_hint(tmp_pat
     assert "a" * 600 in detail and "a" * 601 not in detail and "b" * 500 in detail
     assert refusal in detail and intake_hint(refusal, "staging") in detail
     assert len(detail) > 1400  # the 300-character cut of the whole is gone
+
+
+def test_plan_intake_adds_the_purpose_errors_of_a_new_capability(tmp_path):  # SCN-ADO-21
+    from l4.specs.base import Framework, UnitRef, ValidationReport
+    from l4.yolo.plans import intake
+
+    unit = tmp_path / "openspec" / "changes" / "c"
+    (unit / "specs" / "dreaming").mkdir(parents=True)
+    (unit / "specs" / "dreaming" / "spec.md").write_text("## ADDED Requirements\n\n### Requirement: X\nText.\n")
+
+    class Valid:
+        def validate(self, ref, strict=True):
+            return ValidationReport(True, ())
+
+        def criteria(self, ref):
+            return []
+
+    ok, detail = intake(Valid(), UnitRef(Framework.OPENSPEC, "c", unit), tmp_path)  # type: ignore[arg-type]
+    assert not ok and "specs/dreaming/spec.md" in detail and "Purpose" in detail

@@ -365,8 +365,7 @@ class OpenSpecProvider:
             raw = read_regular_file(self.unit_dir(parent) / "specs" / capability / "spec.md", limit=MAX_PURPOSE_BYTES)
         except (FileNotFoundError, UnsafeFile, SpecError):
             raw = b""
-        match = re.search(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", raw.decode("utf-8", "replace"), re.M | re.S)
-        purpose = _flat(match.group(1), 1500) if match else ""
+        purpose = _purpose_of(raw)
         if len(purpose) >= MIN_PURPOSE_CHARS:
             return purpose
         return f"Regression scenarios for the {capability} capability, found by the verifier in {parent.name}."
@@ -407,6 +406,7 @@ class OpenSpecProvider:
 
 
 MAX_PURPOSE_BYTES = 256 * 1024
+_PURPOSE_RE = re.compile(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
 MAX_INTAKE_ERROR_CHARS = 600  # what intake keeps of each ERROR (L4-ADO-008): per issue, never of the whole
 MIN_PURPOSE_CHARS = 50
 MAX_TITLE_CHARS = 160
@@ -506,3 +506,42 @@ def intake_errors(report: ValidationReport, target: str) -> list[str]:
         hint = intake_hint(i.message, target)
         lines.append(f"{text} {hint}" if hint else text)
     return lines
+
+
+def _purpose_of(raw: bytes) -> str:
+    """The text of a spec file's `## Purpose` section on one line (at most 1500 characters), or ""."""
+    match = _PURPOSE_RE.search(raw.decode("utf-8", "replace"))
+    return _flat(match.group(1), 1500) if match else ""
+
+
+def purpose_issues(unit_dir: Path, specs_root: Path) -> list[ValidationIssue]:
+    """L4-OSP-007 for a unit that is not a fix unit: one ERROR per delta (`specs/<capability>/spec.md`) of a capability
+    that `specs_root` (`openspec/specs`) lacks, when its `## Purpose` has fewer than 50 characters. Without it the
+    archive writes a `TBD` that fails strict validation. A delta that cannot be read is left to `validate`."""
+    issues: list[ValidationIssue] = []
+    folder = unit_dir / "specs"
+    try:
+        capabilities = sorted(p.name for p in folder.iterdir() if p.is_dir())
+    except OSError:
+        return issues
+    for capability in capabilities:
+        if (specs_root / capability / "spec.md").is_file():
+            continue
+        try:
+            raw = read_regular_file(folder / capability / "spec.md", limit=MAX_PURPOSE_BYTES)
+        except (OSError, UnsafeFile, SpecError):
+            continue
+        found = len(_purpose_of(raw))
+        if found < MIN_PURPOSE_CHARS:
+            have = f"has {found}" if found else "has none"
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    f"specs/{capability}/spec.md",
+                    f"capability `{capability}` is new (it has no baseline spec), so its delta needs a "
+                    f"`## Purpose` of at least {MIN_PURPOSE_CHARS} characters (it {have}); without one the archive "
+                    "writes a placeholder that fails strict validation",
+                    None,
+                )
+            )
+    return issues

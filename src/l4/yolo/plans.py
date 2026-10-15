@@ -23,9 +23,9 @@ from pathlib import Path, PurePosixPath
 
 from l4.config.schema import L4Config
 from l4.gates.odd import scenario_conflicts
-from l4.specs.base import Framework, SpecProvider, UnitRef
+from l4.specs.base import Framework, SpecProvider, UnitRef, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
-from l4.specs.openspec import intake_errors
+from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.questions import QuestionStatus
 from l4.state.status import UnitSnapshot
 from l4.vcs.git import Git
@@ -137,6 +137,10 @@ def intake(provider: SpecProvider, ref: UnitRef, repo: Path, *, target: str = "t
     except Exception as exc:  # noqa: BLE001 - a validation that cannot run is an intake failure, never a crash
         return False, f"validation could not run: {type(exc).__name__}: {exc}"[:300]
     errors = intake_errors(report, target)  # every ERROR, 600 characters each, never cut as a whole (L4-ADO-008)
+    if ref.framework is Framework.OPENSPEC:  # L4-ADO-007: the Purpose of a capability new to openspec/specs
+        errors += intake_errors(
+            ValidationReport(False, tuple(purpose_issues(ref.path, repo / "openspec" / "specs"))), target
+        )
     if errors:
         return False, "; ".join(errors)
     if ref.framework is Framework.OPENSPEC:
