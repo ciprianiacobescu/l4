@@ -156,6 +156,30 @@ def test_units_not_ready_are_named_with_the_first_line_of_their_findings(world, 
     err = refused(world, capsys)
     assert f"{B}: NEEDS_REVISION: contradiction: B contradicts A" in err
     assert "second line" not in err and A not in err.replace(B, "")
+    assert err.rstrip().endswith("Next: l4 yolo findings p1")
+
+
+def test_the_line_of_an_item_is_its_most_severe_finding_not_the_first(world, capsys):
+    world.push_plan()
+    findings = {
+        B: [
+            {"criterion": "outcome", "severity": "minor", "text": "minor first"},
+            {"criterion": "testability", "severity": "major", "text": "major second"},
+        ]
+    }
+    world.seed("p1", world.reviewed({B: "NEEDS_REVISION"}, findings))
+    err = refused(world, capsys)
+    assert f"{B}: NEEDS_REVISION: testability: major second" in err and "minor first" not in err
+
+
+def test_a_current_review_that_is_not_ready_names_the_findings_command(world, forge, capsys):
+    world.push_plan()
+    findings = {B: [{"criterion": "testability", "severity": "major", "text": "no scenario"}]}
+    world.seed("p1", world.reviewed({B: "NEEDS_REVISION"}, findings))
+    assert world.l4("review", "p1") == 0
+    out = capsys.readouterr().out
+    assert f"{B}: NEEDS_REVISION: testability: no scenario" in out
+    assert out.rstrip().endswith("Next: l4 yolo findings p1")
 
 
 def test_a_batch_that_is_not_ready_is_named(world, capsys):

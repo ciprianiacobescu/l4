@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from l4.cli import main
 from l4.config.schema import L4Config, YoloReviewCfg
 from l4.exitcodes import ExitCode
-from l4.yolo import commands, judge_sandbox, review_worktree
+from l4.yolo import judge_sandbox, review_worktree
 from l4.yolo.cycle import PlanStep
 from l4.yolo.model import Verdict
 from l4.yolo.state import fold_plan
@@ -66,10 +66,6 @@ def test_the_new_modules_are_stubs():
     """The wave-2 entry points are still stubs; wave 1's modules are implemented and tested on their own."""
     with pytest.raises(NotImplementedError):
         review_worktree.run_review_worktree(None, plan="p1", fresh=(), record=False, no_run=False)
-    with pytest.raises(NotImplementedError):
-        commands.run_findings(None, plan="p1", subject=None, show_all=False, as_json=False)
-    with pytest.raises(NotImplementedError):
-        commands.run_accept(None, plan="p1", subject="s", reason="r", withdraw=False, yes=False)
     assert judge_sandbox.TOOL_LESS_ADAPTERS == ("claude-code", "opencode", "fake")
     assert "app" in inspect.signature(review_worktree.run_review_worktree).parameters
 

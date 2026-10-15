@@ -28,6 +28,7 @@ import contextlib
 import json
 import logging
 import shutil
+import sys
 import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -52,6 +53,8 @@ from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
+from l4.yolo import accept as accepting
+from l4.yolo import findings as fnd
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
@@ -296,12 +299,14 @@ def _rejected_at(events: Sequence[PlanEvent], state: PlanState) -> str | None:
 
 
 def _first_line(findings: Any) -> str:
+    """The most severe finding (`findings.most_severe`: blocking, then major, then minor; the judge's order within a
+    severity) as `<criterion>: <first line of its text>`."""
     rows = [f for f in findings or [] if isinstance(f, dict)]
-    rows.sort(key=lambda f: 0 if f.get("severity") == "blocking" else 1)
-    if not rows:
+    top = fnd.most_severe(rows)
+    if top is None:
         return "no finding recorded"
-    text = str(rows[0].get("text") or "").strip().splitlines()
-    criterion = rows[0].get("criterion")
+    text = str(top.get("text") or "").strip().splitlines()
+    criterion = top.get("criterion")
     head = text[0] if text else "no text"
     return f"{criterion}: {head}" if criterion else head
 
@@ -692,6 +697,8 @@ def run_review(
         if view.kind == "current":
             ctx.say(f"{plan_id}: already reviewed for these inputs ({'READY' if view.ready else 'not READY'})")
             _print_findings(ctx, view.problems)
+            if view.problems:
+                ctx.say(f"Next: l4 yolo findings {plan_id}")
             return ExitCode.OK
         if seen is not None:
             ctx.say(
@@ -742,7 +749,10 @@ def run_review(
     for name, verdict in [*result.units.items(), *((f"batch {b}", v) for b, v in batches.items())]:
         line = f"  {name}: {verdict.verdict}"
         ctx.say(line if verdict.verdict == "READY" else f"{line}: {_first_line(verdict.findings)}")
-    ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
+    if any(v.verdict != "READY" for v in (*result.units.values(), *batches.values())):
+        ctx.say(f"Next: l4 yolo findings {plan_id}")
+    else:
+        ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
     return ExitCode.OK
 
 
@@ -819,6 +829,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
                 [
                     f"activate: the review is not READY for {len(view.problems)} item(s):",
                     *(f"  {p}" for p in view.problems),
+                    f"Next: l4 yolo findings {plan_id}",
                 ]
             ),
         )
@@ -954,7 +965,10 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
         if view is None or view.kind != "current":
             return f"l4 yolo review {plan_id}"
         if view.problems:
-            return f"fix the specs named above, push them, then l4 yolo review {plan_id}"
+            return (
+                f"l4 yolo findings {plan_id}: fix the specs it names and push them, or review the working tree "
+                f"first (l4 yolo review {plan_id} --worktree)"
+            )
         return f"l4 yolo activate {plan_id} --reason TEXT"
     if status == "waiting" and state.wait_reason == "run_not_started":
         return (
@@ -1199,6 +1213,110 @@ def auto_merge_plan_active(repo: Path, git: Git, cfg: L4Config | None = None) ->
     return False
 
 
+# --- l4 yolo findings ----------------------------------------------------------------------------------------------
+
+
+def _stdin_tty() -> bool:
+    return bool(sys.stdin is not None and sys.stdin.isatty())
+
+
+def _latest_review(events: Sequence[PlanEvent]) -> dict[str, Any] | None:
+    return next((dict(e.data) for e in reversed(events) if e.type == "plan.reviewed"), None)
+
+
+def _entry_of(review: Mapping[str, Any], subject: str) -> dict[str, Any] | None:
+    """The subject's entry (`<unit id>` or `batch:<id>`) in the data of a `plan.reviewed` event."""
+    if subject.startswith("batch:"):
+        entry = (review.get("batches") or {}).get(subject[len("batch:") :])
+    else:
+        entry = (review.get("units") or {}).get(subject)
+    return entry if isinstance(entry, dict) and entry.get("verdict") is not None else None
+
+
+def _subject_infos(plan: Plan | None, units: _Units | None) -> dict[str, fnd.UnitInfo]:
+    """What `findings.render` needs to write the `Resolve:` lines: the folder, the batch and the `depends_on` of each
+    unit, and the batch of a `batch:<id>` subject."""
+    infos: dict[str, fnd.UnitInfo] = {}
+    if plan is None:
+        return infos
+    for batch in plan.batches:
+        infos[f"batch:{batch.id}"] = fnd.UnitInfo(batch=batch.id)
+        for unit in batch.units:
+            known = units.infos.get(unit.id) if units else None
+            infos[unit.id] = fnd.UnitInfo(
+                folder=known.folder if known else None, batch=batch.id, depends_on=tuple(unit.depends_on)
+            )
+    return infos
+
+
+def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: Mapping[str, Any]) -> Any:
+    """`can_accept(subject)` for `findings.render`: would `accept.check` let this caller accept the subject now?"""
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
+    target = accepting.target_config(ctx.git, ctx.target_ref)
+
+    def can_accept(subject: str) -> bool:
+        entry = _entry_of(review, subject)
+        if entry is None:
+            return False
+        judged = fnd.judged(fnd.history(events, subject, PROMPT_VERSION))
+        return accepting.check(state, judged, subject, entry, target, who) is None
+
+    return can_accept
+
+
+def run_findings(app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool) -> ExitCode:
+    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json]`: the findings of the latest review, each with how to resolve
+    it (L4-YOLO-021). Reads the ledger and the plan file; calls no model and writes nothing. Exit 2 for an unknown plan
+    or subject, else 0 (a plan with no review included)."""
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    rev = _sync(ctx, who="findings")
+    file = next((f for f in plan_files_at(ctx.git, ctx.target_ref) if f.plan_id == plan_id), None)
+    read = ctx.store(plan_id).read()
+    if file is None and read.head is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"findings: no plan {plan_id} on origin/{ctx.target}")
+    state = fold_plan(plan_id, read.events)
+    review = _latest_review(read.events)
+    if review is None:
+        if as_json:
+            empty = {"schema": fnd.SCHEMA, "plan": plan_id, "base": ctx.target, "plan_digest": None, "subjects": []}
+            ctx.say(json.dumps(empty, indent=2))
+        else:
+            ctx.say(f"{plan_id}: no review yet (l4 yolo review {plan_id}, or --worktree before the push)")
+        return ExitCode.OK
+    if subject is not None and _entry_of(review, subject) is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"findings: {subject} is not in the latest review of {plan_id}")
+    parsed = file.plan if file is not None else None
+    units = _read_units(ctx, rev, parsed.known_ids(), intake=False) if parsed is not None else None
+    options: dict[str, Any] = {
+        "show_all": show_all,
+        "units": _subject_infos(parsed, units),
+        "accepted": state.accepted,
+        "holds": accepting.holds(state, review),
+        "can_accept": _acceptor(ctx, state, read.events, review),
+        "only": subject,
+    }
+
+    def history_of(name: str) -> list[dict[str, Any]]:
+        return fnd.history(read.events, name, PROMPT_VERSION)
+
+    if as_json:
+        ctx.say(json.dumps(fnd.render_json(plan_id, ctx.target, review, history_of, **options), indent=2))
+        return ExitCode.OK
+    lines = fnd.render(plan_id, ctx.target, review, history_of, **options)
+    if lines:
+        for line in lines:
+            ctx.say(line)
+    else:
+        ctx.say(f"{plan_id}: every subject of the latest review is READY (--all lists them)")
+    return ExitCode.OK
+
+
+def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
+    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` (task 2.2)."""
+    raise NotImplementedError
+
+
 __all__ = [
     "Blocker",
     "Extend",
@@ -1219,13 +1337,3 @@ __all__ = [
     "run_review",
     "run_status",
 ]
-
-
-def run_findings(app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool) -> ExitCode:
-    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json]`: the findings of the latest review (task 2.1)."""
-    raise NotImplementedError
-
-
-def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
-    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` (task 2.2)."""
-    raise NotImplementedError
