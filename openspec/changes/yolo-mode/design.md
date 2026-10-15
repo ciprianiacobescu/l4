@@ -182,7 +182,7 @@ class PlanState(BaseModel):
 
 `src/l4/yolo/readiness.py`. The judge role (the first available profile of `roles.judges`) reviews:
 - each unit: the unit folder at the target head, the plan entry, the units it depends on (names and their folders);
-- each batch with more than one unit: all its units' folders together.
+- each batch with more than one unit: all its units' folders together, and the folders of the prerequisites of its units that are not units of the batch (as a unit shows them); a prerequisite unit of the plan is delivered and merged before a unit that depends on it starts, and the material says so.
 
 Prompt template `src/l4/yolo/prompts/readiness.md`; output schema `src/l4/yolo/schemas/readiness.schema.json`:
 

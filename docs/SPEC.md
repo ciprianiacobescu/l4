@@ -3165,13 +3165,18 @@ of a spec, requirement, design or task text MUST. The digest of a unit MUST be t
 when it exists, else on the target; a revision or a folder that does not exist MUST raise, and MUST NOT give the digest
 of an empty set (R3).
 
-**L4-YOLO-004** Readiness review in CI. A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
+**L4-YOLO-004** Readiness review in CI.
+A CI run SHALL review a plan whose latest `plan.reviewed` is not for its current plan digest and unit digests: the judge
 role reviews each unit and each batch with more than one unit, with the prompt and output schema of design D5, and the
 result is recorded as `plan.reviewed`. An empty, unparsable or schema-invalid answer MUST be BLOCKED. A blocking finding
 MUST make the verdict at least NEEDS_REVISION. Material that the size limits cut MUST make the verdict at least
-NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and its NEEDS_REVISION MUST become READY when no blocking or major finding remains. File names, unit ids and batch ids MUST reach the prompt only
-inside `<l4:data>` blocks. A judge that times out or fails MUST record no review: the next run tries again (R9). One plan
-is reviewed per run.
+NEEDS_REVISION, with a finding that names what was left out. A batch with no acceptance profile only groups units and
+states no outcome, so a `batch_acceptance` finding on it MUST be dropped from the verdict and kept as an assumption, and
+its NEEDS_REVISION MUST become READY when no blocking or major finding remains. The judge's material for a batch shows
+every prerequisite of its units that is not a unit of the batch, the way the material of a unit shows its prerequisites,
+and both state that a prerequisite unit of the plan is delivered and merged into the target before any unit that depends
+on it starts. File names, unit ids and batch ids MUST reach the prompt only inside `<l4:data>` blocks. A judge that
+times out or fails MUST record no review: the next run tries again (R9). One plan is reviewed per run.
 
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest and the
 limits, and then start a run on the target. It MUST be refused, with exit 2 and the cause, unless: the plan is admitted;
