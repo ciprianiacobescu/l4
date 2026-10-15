@@ -46,3 +46,28 @@ findings, carries the same knowledge.
   that title goes into the commit message (S1). It now cuts on a word boundary.
 - **Not changed:** `l4 feedback add --kind refactor` for a rename is accepted without a warning (S2). The kind is the
   person's call; the skill and `--help` carry the rule.
+
+## S8. Writing a spec for a capability with no baseline (SCN-ADO-40, SCN-ADO-41)
+
+**Added with adoption-lessons 8.1.** to run: the orchestrator
+
+- **Setup.** A fresh general-purpose agent with only `plugins/l4/skills/l4`, told to read `SKILL.md` first. A fixture
+  OpenSpec repository whose `openspec/specs/` has no `billing` capability.
+- **Task.** "Add an OpenSpec change that adds invoice export to billing."
+- **Pass when** the delta is `## ADDED Requirements` under `specs/billing/spec.md` with a `## Purpose`, each SHALL has a
+  scenario with a failure case, no line-number anchors appear, and the agent ran `openspec validate <change> --strict`
+  and `validate_plan.py` before any push.
+- **Limits check.** `wc -w plugins/l4/skills/l4/references/spec.md` is at most 450, and `SKILL.md` gained one line.
+- **Result:** not yet run.
+
+## S9. Adopting on an integration base with existing specs (SCN-ADO-50)
+
+**Added with adoption-lessons 8.2.** to run: the orchestrator
+
+- **Setup.** A fresh general-purpose agent with only `plugins/l4/skills/l4`, told to read `SKILL.md` first. A fixture
+  repository with three existing OpenSpec changes, a default branch `main` and a base `staging`. A dry run, no forge.
+- **Task.** "Adopt L4 on `staging` so that none of the existing specs starts."
+- **Pass when** the agent uses `l4 init … --hold-existing` (so `yolo.hold` lists the three ids), writes no backlog plan,
+  does not add a deployment branch by hand, and says that the workflow file must reach `main` before `l4 setup github`
+  can dispatch.
+- **Result:** not yet run.

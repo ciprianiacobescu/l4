@@ -182,7 +182,7 @@ A plan with `merge: auto` while `forge.merge_policy` is `human` is refused at ad
 4. Read the review with `l4 yolo status <plan>`.
 5. `l4 yolo activate <plan> --reason "<why>"` is a person's decision. It is refused unless the plan is admitted, the
    review is for the current plan and unit specs and was made with the current review prompt, every unit and batch
-   is READY, `merge` and `forge.merge_policy` agree,
+   is READY or accepted by a person (see "The review"), `merge` and `forge.merge_policy` agree,
    the target exists on `origin`, and no other plan is active on that target. It freezes a digest of each unit's spec and
    the limits, and starts a run on the target.
 
@@ -193,6 +193,41 @@ the activation froze. If the judge fails or times out, L4 records no review and 
 A review made with an older review prompt does not allow an activation. After a harness upgrade, CI reviews again (and
 charges for) every plan that is not yet activated and every plan stopped with `inputs_changed`. An active plan is not
 reviewed again.
+
+## The review
+
+The runbook has the procedure (section 12.2a). These are the rules.
+
+- **Findings.** `l4 yolo findings <plan>` shows each subject that is not READY with every blocking and major finding in
+  full: an id, the criterion, the text and a `Resolve:` line. It also shows the change since the previous judgement and
+  the criteria that keep coming back. `l4 yolo status` and the activation refusal show the most severe finding of each
+  item and name this command.
+- **Incremental.** The judge is asked only about a subject whose material has no recorded verdict. The material is the
+  unit folder (check marks included), its plan entry, its prerequisites as the judge sees them and the review prompt
+  version. An unchanged unit keeps its verdict at no cost. A change to a prerequisite judges its dependents again. A
+  review that did not happen (`schema`, `unit_missing`, `completeness`) is never reused.
+- **Budgets.** `yolo.review.max_file_chars`, `max_folder_chars` and `max_dependency_chars` (20,000, 80,000, 20,000)
+  limit what the judge reads. A prerequisite folder is shown in this order: proposal, requirements, `specs/**/spec.md`,
+  bugfix, design, other files, then `tasks.md`. A cut of a prerequisite does not block: it is listed in the unit's
+  `missing`. A cut of the unit's own folder is a blocking `material` finding with the file, its size, the budget, the key
+  and the fix. `validate_plan.py` prints the same overruns before the push; `l4 yolo check` prints them after it, from the target.
+- **Check marks.** The judge sees `tasks.md` as the file has it. A ticked task is delivered, and is not a reason for a
+  `feasibility` or `duplicate_scope` finding. The unit digest still ignores the marks.
+- **Verdict rules.** A NEEDS_REVISION with minor findings only is READY, with the findings kept. A NEEDS_REVISION with no
+  finding gets one (criterion `verdict`) that shows the judge's `missing` list. A `batch_acceptance` finding on a unit is
+  an assumption.
+- **Before the push.** `l4 yolo review <plan> --worktree` reviews the working tree with the same rules. It is a dry run
+  with a local cache. `--record` records a committed tree, so CI does not review again. Without `bwrap`, outside CI, a
+  tool-less judge (`claude-code`, `opencode`) runs unsandboxed and says so.
+- **The override.** `l4 yolo accept <plan> <subject> --reason "<text>"` accepts the remaining findings of a subject on
+  record. It needs at least `yolo.review.accept_after_rounds` (2) versions of the subject's text judged not READY. It is
+  never allowed for BLOCKED, a blocking finding or a cut of the subject's own folder. An agent may accept only when
+  `yolo.review.accept_by_agents` is true in the configuration on the base branch. The acceptance holds while the
+  material and the findings stay the same. The activation lists every acceptance.
+- **Where an accepted finding goes.** The unit folder gets `.l4/review-accepted.json`. The implementer's prompt holds
+  the findings and the reason. The verifier's judge answers for each finding whether the work addressed it. With
+  `merge: auto`, a unit with a PASS whose accepted finding is not addressed is not merged: the plan waits with
+  `accepted_finding_open`.
 
 ## What runs in each CI run
 
@@ -295,6 +330,9 @@ example with a PR. You can squash there. L4 never does it.
 | `l4 yolo draft <plan> [--target B] [--merge human\|auto] [--update]` | Writes or updates the plan file in the working tree from the specs that no plan lists. Commits nothing. |
 | `l4 yolo check <plan>` | Checks the plan and prints the order. Changes nothing. |
 | `l4 yolo review <plan> [--local]` | Reviews the plan in CI now, or here with `--local`. |
+| `l4 yolo review <plan> --worktree [--record] [--fresh <subject>]` | Reviews the working tree before the push (a dry run); `--record` records a committed tree. |
+| `l4 yolo findings <plan> [<subject>] [--all] [--json]` | Shows the findings of the latest review with how to resolve each. Changes nothing. |
+| `l4 yolo accept <plan> <subject> --reason <text> [--withdraw]` | A person accepts the remaining findings of a subject, on record. |
 | `l4 yolo activate <plan> --reason <text>` | Freezes the inputs and starts the plan. |
 | `l4 yolo status [<plan>] [--json]` | Shows the state, the units, the usage and `Next:`. |
 | `l4 yolo cancel <plan> --reason <text>` | Stops the plan for good. |

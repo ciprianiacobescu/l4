@@ -196,12 +196,12 @@ summary: 5 ok, 2 new, 1 set, 0 kept, 1 warn, 0 fail -> exit 0
 One command does it, with a token that has admin on the repository (`GH_TOKEN`; its value is never printed):
 
 ```bash
-.l4/bin/l4 setup github --secret CLAUDE_CODE_OAUTH_TOKEN=CLAUDE_CODE_OAUTH_TOKEN --watch
+l4 setup github --secret CLAUDE_CODE_OAUTH_TOKEN=CLAUDE_CODE_OAUTH_TOKEN --watch
 ```
 
 It is idempotent: a second run prints `KEPT` rows. It sets up:
-- the environment `l4`, which `ci.github_environment` names, with a deployment branch policy for the base branch and the
-  unit prefix (`l4/*`, `l4/**/*`);
+- the environment `l4`, which `ci.github_environment` names, with a deployment branch policy for the base branch, the
+  unit prefix (`l4/*`, `l4/**/*`) and the default branch when it is not the base (the schedule runs there);
 - each `--secret NAME=ENVVAR`, sealed into that environment;
 - the variable `L4_SELF_PROVISION=true` for a hosted runner;
 - the workflow permissions: write, and Actions may create pull requests;
@@ -212,9 +212,11 @@ It then dispatches the `l4` workflow, and `--watch` follows it (`l4 ci watch --r
 
 **The forge token.** With `forge.token_env: GITHUB_TOKEN`, the workflow's own token is enough: the harness opens and
 labels pull requests as `github-actions[bot]`. Its one limit is that GitHub starts no workflow run for its pushes, so the
-repository's other CI does not run on the hand-off. The harness reports that as `not_run`. To keep that CI, put a
-fine-grained token, or a GitHub App's, in the environment as `L4_FORGE_TOKEN`, with contents, pull requests, commit
-statuses and actions write.
+repository's other CI does not run on any L4 pull request. The harness reports that as `not_run`. To have that CI run:
+1. Put a fine-grained token, or a GitHub App's, in the environment as the secret `L4_FORGE_TOKEN`, with contents, pull
+   requests, commit statuses and actions write (`--secret L4_FORGE_TOKEN=L4_FORGE_TOKEN`).
+2. Set `forge.token_env: L4_FORGE_TOKEN` in `.l4/config.yaml` (or init with `--forge-token-env L4_FORGE_TOKEN`).
+3. Run `l4 upgrade`, which re-renders the workflow so that the job reads the secret.
 
 **Agent secrets.** Add the one for each agent your role chains use. The generated job passes exactly these to the
 harness:
@@ -243,7 +245,8 @@ repository:
      ```
      `--harness-ref` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with `git ls-remote`. The workflow gets
      `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.0`. A ref that resolves to nothing is exit 2. Use
-     `--action-repo OWNER/REPO` when the harness was not installed from its own repository.
+     `--action-repo OWNER/REPO` only when `l4` runs from a checkout or was not installed from the harness repository:
+     a checkout has no install origin, and `init` then exits 2.
 - **A public repository, or one of another owner: a copy of the action and a deploy key.** GitHub never lets a public
   repository use a private action.
   1. Adopt with the copy:
@@ -262,7 +265,9 @@ runner and `--forge-token-env NAME` to use a token of your own. A hosted runner 
 subscription cannot log in there, so init prints a `todo:` line naming the profile; give it `auth: api_key` and the
 secret `CODEX_API_KEY`, or name another profile in the role (`claude-code` takes `CLAUDE_CODE_OAUTH_TOKEN`).
 
-The workflow also runs on a schedule, every 30 minutes by default. On a private repository that costs about 1,400
+The workflow also runs on a schedule, every 30 minutes by default. GitHub runs a schedule only from the workflow file
+on the **default branch**. When your base branch is another branch, that file must be on the default branch too, with
+the same pin (`l4 setup github` checks it). On a private repository that costs about 1,400
 runner-minutes a month even when idle: set `ci.schedule` in `.l4/config.yaml` to a slower cron (for example
 `"0 * * * *"`) or to `null` for no schedule, then run `l4 upgrade`, which re-renders the workflow.
 

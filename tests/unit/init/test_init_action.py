@@ -63,7 +63,10 @@ def test_the_action_repository_defaults_to_the_one_in_harness_repo(target: Path,
 def test_no_action_repository_to_name_is_exit_2(target: Path, git_environ, capsys, monkeypatch):
     monkeypatch.setattr("l4.init.init.harness_origin", lambda: None)
     assert init(target, git_environ, "--action", "--harness-commit", SHA) == 2
-    assert "--action-repo" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no install origin" in err  # the cause (SCN-ADO-51)
+    assert "uv tool run --from git+https://github.com/OWNER/l4@vX.Y.Z" in err
+    assert "--action-repo OWNER/REPO" in err
     assert not (target / ".l4").exists()
 
 
