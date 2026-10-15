@@ -23,11 +23,12 @@ has one, else the target. File names, unit ids, batch ids and the plan's own wor
 `<l4:data>` blocks, defused (R9); the `source` label of a block is escaped too.
 """
 
+import hashlib
 import json
 import re
 import shutil
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -260,6 +261,12 @@ class Subject:
     not_shown: tuple[str, ...] = ()
     not_in_full: tuple[str, ...] = ()  # a prerequisite's files the budget cut: listed in `missing`, never blocking (D4)
     groups_only: bool = False  # a batch with no acceptance profile: batch_acceptance does not apply to it
+    key_text: str = ""  # `user` with the delivered block left empty: what the material key covers (design D2)
+
+    @property
+    def name(self) -> str:
+        """The subject as the CLI, the events and the cache name it: a unit id, or `batch:<id>`."""
+        return self.id if self.kind == "unit" else f"batch:{self.id}"
 
 
 GROUPING_NOTE = (
@@ -332,19 +339,24 @@ def _unit_subject(
 ) -> Subject:
     prerequisites = _prerequisites(plan, deps)
     context = data_block("context", _label(f"in batch {batch.id}; plan {plan.plan_id}, target {plan.target}"))
-    values = {
-        "SUBJECT_KIND": "unit",
-        "SUBJECT_ID": data_block("subject", _label(unit.id)),
-        "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context + "\n" + TASKS_NOTE,
-        "DEPENDENCIES": "\n\n".join(
-            [*prerequisites, _batch_deps(batch.depends_on), _delivered_note(plan, delivered)]
-        ).strip()
-        or "(none: the unit depends on nothing)",
-        "FOLDERS": data_block("folder", _label(f"{unit.id} ({folder.path})")) + "\n" + _folder_blocks(folder),
-    }
+
+    def text(listed: Mapping[str, str]) -> str:
+        values = {
+            "SUBJECT_KIND": "unit",
+            "SUBJECT_ID": data_block("subject", _label(unit.id)),
+            "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context + "\n" + TASKS_NOTE,
+            "DEPENDENCIES": "\n\n".join(
+                [*prerequisites, _batch_deps(batch.depends_on), _delivered_note(plan, listed)]
+            ).strip()
+            or "(none: the unit depends on nothing)",
+            "FOLDERS": data_block("folder", _label(f"{unit.id} ({folder.path})")) + "\n" + _folder_blocks(folder),
+        }
+        return _fill(MATERIAL_TEMPLATE, values)
+
     return Subject(
-        "unit", unit.id, _fill(MATERIAL_TEMPLATE, values), folder.left_out, folder.binary, _cut_of(deps, dep_budget)
-    )
+        "unit", unit.id, text(delivered), folder.left_out, folder.binary, _cut_of(deps, dep_budget),
+        key_text=text({}),
+    )  # fmt: skip
 
 
 def _cut_of(deps: Sequence[tuple[str, FolderText | None]], budget: int) -> tuple[str, ...]:
@@ -364,29 +376,39 @@ def _batch_subject(
     units = [u for u in batch.units if u.id not in skip]
     context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
     groups_only = batch.acceptance_profile == PROFILE_NONE
-    values = {
-        "SUBJECT_KIND": "batch",
-        "SUBJECT_ID": data_block("subject", _label(batch.id)),
-        "ENTRY": data_block("plan entry", _entry(batch))
-        + "\n"
-        + context
-        + "\n"
-        + TASKS_NOTE
-        + ("\n" + GROUPING_NOTE if groups_only else ""),
-        "DEPENDENCIES": "\n\n".join(
-            [*_prerequisites(plan, deps), _batch_deps(batch.depends_on), _delivered_note(plan, delivered)]
-        ).strip()
-        or "(none: the batch depends on nothing)",
-        "FOLDERS": "\n\n".join(
-            data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
-            for u in units
-        ),
-    }
+
+    def text(listed: Mapping[str, str]) -> str:
+        values = {
+            "SUBJECT_KIND": "batch",
+            "SUBJECT_ID": data_block("subject", _label(batch.id)),
+            "ENTRY": data_block("plan entry", _entry(batch))
+            + "\n"
+            + context
+            + "\n"
+            + TASKS_NOTE
+            + ("\n" + GROUPING_NOTE if groups_only else ""),
+            "DEPENDENCIES": "\n\n".join(
+                [*_prerequisites(plan, deps), _batch_deps(batch.depends_on), _delivered_note(plan, listed)]
+            ).strip()
+            or "(none: the batch depends on nothing)",
+            "FOLDERS": "\n\n".join(
+                data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
+                for u in units
+            ),
+        }
+        return _fill(MATERIAL_TEMPLATE, values)
+
     left_out = tuple(line for u in units for line in folders[u.id].left_out)
     not_shown = tuple(p for u in units for p in folders[u.id].binary)
     return Subject(
-        "batch", batch.id, _fill(MATERIAL_TEMPLATE, values), left_out, not_shown, _cut_of(deps, dep_budget), groups_only
+        "batch", batch.id, text(delivered), left_out, not_shown, _cut_of(deps, dep_budget), groups_only, text({})
     )
+
+
+def material_key(kind: str, key_text: str) -> str:
+    """The material key of a subject (design D2): the prompt version, the kind and the user text without the delivered
+    block, so a verdict is reused exactly when the judge would be shown the same thing."""
+    return hashlib.sha256(f"{PROMPT_VERSION}\0{kind}\0{key_text}".encode()).hexdigest()[:16]
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------
@@ -545,6 +567,30 @@ def _unit_revs(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, UnitInfo
     return revs
 
 
+def _given_revs(plan: Plan, units: Mapping[str, UnitInfo], given: Mapping[str, str], rev: str) -> dict[str, str]:
+    wanted = dict.fromkeys([u.id for u in plan.units()] + [d for u in plan.units() for d in u.depends_on])
+    return {u: given.get(u, rev) for u in wanted if u in units}
+
+
+NO_REVIEW = ("schema", "unit_missing", "completeness")  # harness findings: a verdict that is no review is never reused
+
+
+def _reusable(entry: Mapping[str, Any]) -> bool:
+    return not any(f.get("criterion") in NO_REVIEW for f in entry.get("findings", ()))
+
+
+def _reused(entry: Mapping[str, Any], key: str, digest: str | None) -> Verdict:
+    return Verdict(
+        entry["verdict"],
+        tuple(dict(f) for f in entry.get("findings", ())),
+        tuple(entry.get("assumptions", ())),
+        tuple(entry.get("missing", ())),
+        digest,
+        key,
+        entry.get("at") or entry.get("reused_from"),
+    )
+
+
 def review_plan_costed(
     app: AppContext,
     cfg: L4Config,
@@ -559,14 +605,24 @@ def review_plan_costed(
     timeout_s: int = DEFAULT_TIMEOUT_S,
     done: Collection[str] = (),
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
+    prior: Mapping[str, Mapping[str, Any]] = {},  # noqa: B006 - read only
+    fresh: Collection[str] = (),
+    revs: Mapping[str, str] | None = None,
     budgets: Budgets | None = None,
+    sandbox_for: Callable[[str, str], Sandbox] | None = None,
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
     not asked about them (they are READY, with their digest when their folder is there) and a batch is reviewed on its
     other units. A batch of done units only is READY. `delivered` (`delivered_on_target`) names the units already
-    finished on the target; the judge is told a dependency on one of them is satisfied."""
-    revs = _unit_revs(git, cfg, plan, units, rev)
+    finished on the target; the judge is told a dependency on one of them is satisfied.
+
+    `prior` maps a material key to a recorded entry (`plan.reviewed`): a subject whose key is there and whose name
+    (`Subject.name`) is not in `fresh` gets that verdict again (`reused_from`), with no judge call and no cost, unless
+    the entry is no review (a harness `schema`, `unit_missing` or `completeness` finding). `revs` replaces the revision
+    every unit and prerequisite is read on (the working-tree snapshot). The judge and its sandbox are created only when
+    a subject is judged; `sandbox_for(adapter, profile)` then replaces `sandbox` and `select_sandbox`."""
+    revs = _unit_revs(git, cfg, plan, units, rev) if revs is None else _given_revs(plan, units, revs, rev)
     limits = budgets or Budgets.of(cfg)
     digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
     folders: dict[str, FolderText] = {}
@@ -630,7 +686,15 @@ def review_plan_costed(
                 (_batch_subject(plan, batch, folders, done, batch_deps, delivered, limits.dependency), None)
             )
     cost = 0.0
-    if subjects:
+    asked: list[tuple[Subject, str | None, str]] = []
+    for subject, digest in subjects:
+        key = material_key(subject.kind, subject.key_text)
+        entry = prior.get(key)
+        if entry is not None and subject.name not in fresh and _reusable(entry):
+            (result_units if subject.kind == "unit" else result_batches)[subject.id] = _reused(entry, key, digest)
+        else:
+            asked.append((subject, digest, key))
+    if asked:
         factory = Factory(
             cfg,
             ProbeCtx(app.environ, cache_root(app.environ, repo=app.repo), run_process, forbid=(app.repo,)),
@@ -639,12 +703,15 @@ def review_plan_costed(
             clock=SystemClock(),
         )
         selected = factory.for_role(ROLE, f"plan:{plan.plan_id}", serves=JUDGE_ADAPTERS)
-        chosen = sandbox or select_sandbox(cfg.sandbox, app.environ, repo=app.repo)
+        if sandbox_for is not None:
+            chosen = sandbox_for(selected.profile.adapter, selected.profile_name)
+        else:
+            chosen = sandbox or select_sandbox(cfg.sandbox, app.environ, repo=app.repo)
         calls = _Calls(app, cfg, git, plan.plan_id, selected, chosen)
-        for subject, digest in subjects:
+        for subject, digest, key in asked:
             verdict, spent = calls.ask(subject, timeout_s=timeout_s, digest=digest)
             cost += spent
-            verdict = _amend(verdict, subject)
+            verdict = replace(_amend(verdict, subject), material=key)
             (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
     for batch in plan.batches:  # a batch with a unit that cannot be reviewed is not reviewed as a whole either
         if len(batch.units) > 1 and batch.id not in result_batches:
@@ -686,6 +753,7 @@ __all__ = [
     "Omission",
     "Subject",
     "delivered_on_target",
+    "material_key",
     "read_folder",
     "review_plan",
     "review_plan_costed",
