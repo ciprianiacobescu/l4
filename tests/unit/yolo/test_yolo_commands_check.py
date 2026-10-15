@@ -82,3 +82,40 @@ def test_status_json_is_valid_for_a_plan_that_is_only_a_file(world, capsys):
     assert world.l4("status", "p1", "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert data["plans"][0]["plan_id"] == "p1" and data["plans"][0]["status"] == "new"
+
+
+# --- review budgets (L4-ADO-010; SCN-ADO-32) -----------------------------------------------------------------
+
+
+def big_tasks(chars: int) -> str:
+    head = "## 1. A\n\n- [ ] 1.1 Add the greeting\n\n"
+    return head + ("background that does not belong in a unit folder\n" * (chars // 48 + 1))[: chars - len(head)]
+
+
+def test_a_dependency_over_its_budget_is_printed_and_the_exit_stays_0(world, capsys):
+    """SCN-ADO-32: B depends on A, whose tasks.md is read last and cut."""
+    world.push({"openspec/changes/add-greeting/tasks.md": big_tasks(27_148)}, "a big tasks.md")
+    world.push_plan()
+    assert world.l4("check", "p1") == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0].startswith("p1: admitted") and lines[1].startswith("order:")
+    (line,) = [x for x in lines if x.startswith("warning: material_over_budget")]
+    assert line.startswith(f"warning: material_over_budget: {A}: openspec/changes/add-greeting/tasks.md: ")
+    assert line.endswith(f" characters cut (as a dependency of {B})")
+    assert world.store().read().head is None
+
+
+def test_a_planned_unit_over_its_folder_budget_is_printed_without_the_warning_prefix(world, capsys):
+    world.push({"openspec/changes/add-b/design.md": "x" * 26_000}, "a big design.md")
+    world.push_plan()
+    assert world.l4("check", "p1") == 0
+    out = capsys.readouterr().out
+    assert f"material_over_budget: {B}: openspec/changes/add-b/design.md: 6000 characters cut" in out
+    assert "warning: material_over_budget: " + B not in out
+
+
+def test_a_plan_within_its_budgets_prints_no_budget_line(world, capsys):
+    world.push_plan()
+    assert world.l4("check", "p1") == 0
+    assert "material_over_budget" not in capsys.readouterr().out

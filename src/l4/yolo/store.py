@@ -105,7 +105,7 @@ class PlanStore:
         self.config = tuple(config)
         self.push_config = self.config if push_config is None else tuple(push_config)
         self._token_env, self._environ, self._redact = token_env, environ or {}, redact
-        self._platform = platform
+        self._platform = platform  # the forge a refused push is explained for (`pushfail.push_platform`)
 
     @staticmethod
     def list_plans(git: Git, config: Sequence[tuple[str, str]] = ()) -> list[str]:

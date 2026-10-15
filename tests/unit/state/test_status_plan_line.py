@@ -65,3 +65,27 @@ def test_json_carries_the_plan_lines(world, capsys):
     fetch_plan(world)
     assert world.l4_raw("status", "--json") == 0
     assert json.loads(capsys.readouterr().out)["plans"][0].startswith("plan p1: active")
+
+
+def test_a_plan_that_is_not_active_says_how_many_units_it_holds(world):
+    """SCN-ADO-39."""
+    world.push_plan()
+    world.seed("p1", ev("plan.refused", plan_digest="x", findings=[]))
+    world.pull()
+    fetch_plan(world)
+    git = Git(world.app.repo, environ=world.app.environ)
+    (line,) = plan_lines(world.app.repo, git, {})
+    assert line == (
+        "plan p1: refused (holds 2 units; none of them runs until the plan is fixed, completed or its file is "
+        "removed), 0/2 integrated, $0.00/$40.00"
+    )
+
+
+def test_an_active_plan_does_not_say_it_holds_units(world):
+    world.push_plan()
+    world.seed("p1", ev("plan.activated", plan_digest="x", digests={}, by="a", reason="r", limits={}))
+    world.pull()
+    fetch_plan(world)
+    git = Git(world.app.repo, environ=world.app.environ)
+    (line,) = plan_lines(world.app.repo, git, {})
+    assert "holds" not in line

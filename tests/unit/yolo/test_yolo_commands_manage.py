@@ -59,7 +59,24 @@ def test_status_of_a_plan_not_ready_says_to_fix_the_specs(world, capsys):
     world.seed("p1", world.reviewed({B: "BLOCKED"}))
     assert world.l4("status", "p1") == 0
     out = capsys.readouterr().out
-    assert f"{B}: BLOCKED" in out and "Next: fix the specs named above, push them, then l4 yolo review p1" in out
+    assert (
+        f"{B}: BLOCKED" in out
+        and (
+            "Next: l4 yolo findings p1: fix the specs it names and push them, "
+            "or review the working tree first (l4 yolo review p1 --worktree)"
+        )
+        in out
+    )
+
+
+def test_status_of_a_plan_that_is_not_active_says_how_many_units_it_holds(world, capsys):
+    world.push_plan()
+    assert world.l4("status", "p1") == 0
+    assert "holds 2 units; none of them runs until the plan is fixed, completed or its file is removed" in (
+        capsys.readouterr().out
+    )
+    assert world.l4("status", "p1", "--json") == 0
+    assert json.loads(capsys.readouterr().out)["plans"][0]["holds"] == 2
 
 
 def test_status_of_an_active_plan_shows_units_batches_usage_and_waits(world, capsys):
