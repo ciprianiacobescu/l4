@@ -96,7 +96,7 @@ from l4.yolo.plans import (
     readable_unit_ids,
     unit_infos,
 )
-from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, Budgets, delivered_on_target, read_folder, review_plan_costed
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
 
@@ -531,6 +531,44 @@ def _print_findings(ctx: _Ctx, lines: Sequence[str]) -> None:
         ctx.say(f"  {line}")
 
 
+def budget_overruns(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, UnitInfo], rev: str) -> list[str]:
+    """`material_over_budget` lines for the files the readiness review would cut or leave out (L4-ADO-010), read as the
+    review reads them (`read_folder`): a planned unit's own folder at the folder budget, a unit named in a `depends_on`
+    at the dependency budget, in the prerequisite order. A dependency's line starts with `warning: ` (the review lists
+    it as not shown in full without blocking). Units are read at `rev`, not on their branches."""
+    limits = Budgets.of(cfg)
+
+    def lines(folder: str, *, budget: int, order: str) -> list[tuple[str, str]]:
+        text = read_folder(git, rev, folder, budget=budget, file_budget=limits.file, order=order)
+        sizes = dict(text.sizes)
+        found = [(path, f"{n} characters cut") for path, n in text.cut]
+        found += [
+            (o.path, f"omitted: the folder budget is spent ({sizes.get(o.path, 0)} characters)")
+            for o in text.omitted
+            if o.size_limit
+        ]
+        return found
+
+    out: list[str] = []
+    dependents: dict[str, list[str]] = {}
+    for unit in plan.units():
+        if unit.id in units:
+            out += [
+                f"material_over_budget: {unit.id}: {path}: {what}"
+                for path, what in lines(units[unit.id].folder, budget=limits.folder, order="sorted")
+            ]
+        for dep in unit.depends_on:
+            if dep != unit.id and unit.id not in dependents.setdefault(dep, []):
+                dependents[dep].append(unit.id)
+    for dep, by in dependents.items():
+        if dep in units:
+            out += [
+                f"warning: material_over_budget: {dep}: {path}: {what} (as a dependency of {', '.join(by)})"
+                for path, what in lines(units[dep].folder, budget=limits.dependency, order="prerequisite")
+            ]
+    return out
+
+
 def run_check(app: AppContext, *, plan: str) -> ExitCode:
     """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write."""
     plan_id = _plan_id(plan)
@@ -559,6 +597,8 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
+    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, units.infos, rev):  # a warning: the exit code stays 0
+        ctx.say(line)
     return ExitCode.OK
 
 
