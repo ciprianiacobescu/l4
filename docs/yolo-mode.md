@@ -55,7 +55,7 @@ The id uses lowercase letters, digits and `-`, and starts with a letter or a dig
 | `merge` | `human` or `auto`. See below. |
 | `promotion` | Optional note for the hand-off. Only `mode: manual` is valid. L4 never promotes. |
 | `limits` | Optional. A missing limit is unlimited, except `max_unit_attempts`, which is 2. |
-| `external_dependencies` | Must be empty in this version. |
+| `external_dependencies` | Must be empty in this version. Units already delivered on the target (archived OpenSpec changes, merged or archived units) are shown to the readiness judge as satisfied dependencies, so a plan built after another plan needs no entry for them. |
 | `batches` | A batch is a group of units. A batch can depend on other batches. |
 | `exclude` | Optional. A list of `{"id", "reason"}`: units that this plan deliberately does not deliver. The reason is text of 1 to 200 characters. See below. |
 | `units[].depends_on` | Unit ids in the same plan. |

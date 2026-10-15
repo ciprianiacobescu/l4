@@ -91,7 +91,7 @@ from l4.yolo.plans import (
     readable_unit_ids,
     unit_infos,
 )
-from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
 
@@ -682,7 +682,14 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         return ExitCode.OK
     try:
         result, cost = review_plan_costed(
-            ctx.app, ctx.cfg, parsed, units.infos, git=ctx.git, rev=rev, done=done_units(parsed, state)
+            ctx.app,
+            ctx.cfg,
+            parsed,
+            units.infos,
+            git=ctx.git,
+            rev=rev,
+            done=done_units(parsed, state),
+            delivered=delivered_on_target(archived_at(ctx.git, rev, ctx.cfg), units.phases),
         )
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None

@@ -18,8 +18,8 @@ def world(tmp_path):
     return CycleWorld(tmp_path)
 
 
-def test_the_prompt_version_is_2():
-    assert PROMPT_VERSION == 2
+def test_the_prompt_version_is_3():
+    assert PROMPT_VERSION == 3
 
 
 def test_the_ci_step_records_the_prompt_version(world):

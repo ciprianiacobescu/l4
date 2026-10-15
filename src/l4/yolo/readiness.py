@@ -48,14 +48,17 @@ from l4.sandbox.env import build_agent_env
 from l4.sandbox.select import select_sandbox
 from l4.schemacheck import validate
 from l4.vcs.git import Git
+from l4.yolo.admit import FINISHED_PHASES
 from l4.yolo.digest import current_unit_ref, is_excluded, normalise_tasks, unit_digest
 from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
 
 SCHEMA_ID = "l4/yolo-readiness@1"
 # 2: the material changed (tasks.md shown with the digest's normalisation and the note on check marks, prerequisite
-# units of a batch, review 7). A review recorded with another version is stale, `plan.reviewed{prompt_version}`; an
-# event without the key counts as 1.
-PROMPT_VERSION = 2
+# units of a batch, review 7). 3: the units already delivered on the target are listed, with the note that a
+# dependency on one of them is satisfied. A review recorded with another version is stale,
+# `plan.reviewed{prompt_version}`; an event without the key counts as 1.
+PROMPT_VERSION = 3
+MAX_DELIVERED = 60
 MAX_CALLS = 2  # the first answer and one repair prompt
 DEFAULT_TIMEOUT_S = 900
 MAX_FILE_CHARS = 20_000
@@ -209,6 +212,32 @@ ORDER_NOTE = (
 )
 
 
+def delivered_on_target(archived: Collection[str], phases: Mapping[str, str | None]) -> dict[str, str]:
+    """The units already finished on the target: the OpenSpec changes archived at the target revision
+    (`plans.archived_at`) and the units a provider reads as merged or archived (`admit.FINISHED_PHASES`), unit id ->
+    "archived" or "finished". The caller already holds both; nothing is discovered here."""
+    found = {u: "finished" for u, phase in phases.items() if phase in FINISHED_PHASES}
+    found.update(dict.fromkeys(archived, "archived"))
+    return found
+
+
+def _delivered_note(plan: Plan, delivered: Mapping[str, str]) -> str:
+    """Harness text on the units already delivered on the target, outside the data blocks except for the names
+    (repository text): a dependency on one of them is satisfied. The plan's own units are not listed; the list is
+    capped."""
+    own = {u.id for u in plan.units()}
+    names = sorted(u for u in delivered if u not in own)
+    if not names:
+        return ""
+    shown = "\n".join(f"- {_label(u)} ({delivered[u]})" for u in names[:MAX_DELIVERED])
+    more = len(names) - MAX_DELIVERED
+    tail = f"\nand {more} more are delivered; the list shows the first {MAX_DELIVERED} names." if more > 0 else ""
+    return (
+        "Already delivered on the target (a dependency on one of these is satisfied and is not a missing_dependency; "
+        "it is not a unit of this plan):\n" + data_block("already delivered", shown) + tail
+    )
+
+
 def _batch_deps(ids: Sequence[str]) -> str:
     return data_block("batch prerequisites", "\n".join(f"- batch {b}" for b in ids)) if ids else ""
 
@@ -226,7 +255,12 @@ def _prerequisites(plan: Plan, deps: Sequence[tuple[str, FolderText | None]]) ->
 
 
 def _unit_subject(
-    plan: Plan, unit: PlanUnit, batch: PlanBatch, folder: FolderText, deps: Sequence[tuple[str, FolderText | None]]
+    plan: Plan,
+    unit: PlanUnit,
+    batch: PlanBatch,
+    folder: FolderText,
+    deps: Sequence[tuple[str, FolderText | None]],
+    delivered: Mapping[str, str] = {},  # noqa: B006 - read only
 ) -> Subject:
     prerequisites = _prerequisites(plan, deps)
     context = data_block("context", _label(f"in batch {batch.id}; plan {plan.plan_id}, target {plan.target}"))
@@ -234,7 +268,9 @@ def _unit_subject(
         "SUBJECT_KIND": "unit",
         "SUBJECT_ID": data_block("subject", _label(unit.id)),
         "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context + "\n" + TASKS_NOTE,
-        "DEPENDENCIES": "\n\n".join([*prerequisites, _batch_deps(batch.depends_on)]).strip()
+        "DEPENDENCIES": "\n\n".join(
+            [*prerequisites, _batch_deps(batch.depends_on), _delivered_note(plan, delivered)]
+        ).strip()
         or "(none: the unit depends on nothing)",
         "FOLDERS": data_block("folder", _label(f"{unit.id} ({folder.path})")) + "\n" + _folder_blocks(folder),
     }
@@ -253,6 +289,7 @@ def _batch_subject(
     folders: Mapping[str, FolderText],
     skip: Collection[str] = (),
     deps: Sequence[tuple[str, FolderText | None]] = (),
+    delivered: Mapping[str, str] = {},  # noqa: B006 - read only
 ) -> Subject:
     """`deps`: the prerequisites of the units of the batch that are not units of the batch, in plan order."""
     units = [u for u in batch.units if u.id not in skip]
@@ -267,7 +304,9 @@ def _batch_subject(
         + "\n"
         + TASKS_NOTE
         + ("\n" + GROUPING_NOTE if groups_only else ""),
-        "DEPENDENCIES": "\n\n".join([*_prerequisites(plan, deps), _batch_deps(batch.depends_on)]).strip()
+        "DEPENDENCIES": "\n\n".join(
+            [*_prerequisites(plan, deps), _batch_deps(batch.depends_on), _delivered_note(plan, delivered)]
+        ).strip()
         or "(none: the batch depends on nothing)",
         "FOLDERS": "\n\n".join(
             data_block("folder", _label(f"{u.id} ({folders[u.id].path})")) + "\n" + _folder_blocks(folders[u.id])
@@ -437,11 +476,13 @@ def review_plan_costed(
     sandbox: Sandbox | None = None,
     timeout_s: int = DEFAULT_TIMEOUT_S,
     done: Collection[str] = (),
+    delivered: Mapping[str, str] = {},  # noqa: B006 - read only
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
     not asked about them (they are READY, with their digest when their folder is there) and a batch is reviewed on its
-    other units. A batch of done units only is READY."""
+    other units. A batch of done units only is READY. `delivered` (`delivered_on_target`) names the units already
+    finished on the target; the judge is told a dependency on one of them is satisfied."""
     revs = _unit_revs(git, cfg, plan, units, rev)
     digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
     folders: dict[str, FolderText] = {}
@@ -478,7 +519,7 @@ def review_plan_costed(
                 result_units[unit.id] = _with_digest(blocked(f"unit_missing: {note}"), digest)
                 continue
             deps = [(d, dependency(d)) for d in unit.depends_on]
-            subjects.append((_unit_subject(plan, unit, batch, folder, deps), digest))
+            subjects.append((_unit_subject(plan, unit, batch, folder, deps, delivered), digest))
     for batch in plan.batches:
         left = [u for u in batch.units if u.id not in done]
         if len(batch.units) > 1 and not left:
@@ -488,7 +529,9 @@ def review_plan_costed(
             # the prerequisites of the units reviewed that lie outside the batch, once each, in plan order
             outside = dict.fromkeys(d for u in left for d in u.depends_on if d not in inside)
             batch_deps = [(d, dependency(d)) for d in outside]
-            subjects.append((_batch_subject(plan, batch, folders, skip=done, deps=batch_deps), None))
+            subjects.append(
+                (_batch_subject(plan, batch, folders, skip=done, deps=batch_deps, delivered=delivered), None)
+            )
     cost = 0.0
     if subjects:
         factory = Factory(
@@ -544,6 +587,7 @@ __all__ = [
     "JudgeFailed",
     "Omission",
     "Subject",
+    "delivered_on_target",
     "read_folder",
     "review_plan",
     "review_plan_costed",

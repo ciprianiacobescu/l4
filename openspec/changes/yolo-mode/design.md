@@ -196,10 +196,11 @@ Prompt template `src/l4/yolo/prompts/readiness.md`; output schema `src/l4/yolo/s
 - A `blocking` finding makes the verdict at least NEEDS_REVISION whatever the model said.
 - The material shows every `tasks.md` with the digest's normalisation (`digest.normalise_tasks`: each task marker as `[ ]`) and always says that the check marks are the harness's progress, so a ticked task of a started unit is never read as work already done.
 - A batch with no acceptance profile only groups units: its material says so, a `batch_acceptance` finding on it is moved to the assumptions, and a NEEDS_REVISION with no blocking or major finding left becomes READY.
+- The material lists the units already delivered on the target (archived OpenSpec changes at the target revision and units read as merged or archived, minus the plan's own, capped at 60 names), as harness text with the names in a data block, and says that a dependency on one of them is satisfied and is not a `missing_dependency`: a plan cannot name a delivered unit, and one built after another plan depends on such units (prompt version 3).
 - The reviewer never answers a product question: an open question stays a question (admission refuses open questions).
 - One review per plan digest and unit digests: the CI step reviews a plan when its latest `plan.reviewed` is for other
   digests, or was made with another `PROMPT_VERSION` (recorded as `prompt_version` in every `plan.reviewed`; an event
-  without the key counts as 1; the version is 2 since the material changed). `l4 yolo status` shows
+  without the key counts as 1; the version is 3 since the material changed). `l4 yolo status` shows
   `review: stale (the review prompt changed)` and activation refuses such a review.
 - The adapter call reuses the judge's adapter machinery (`agents/factory.py`, the prompt contract of the judge), with
   the judge's tool restrictions (read-only).
