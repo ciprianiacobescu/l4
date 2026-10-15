@@ -9,6 +9,7 @@ from l4.yolo.digest import plan_digest
 from l4.yolo.state import fold_plan
 
 from .yolo_cycle_world import CycleWorld, ev, unit_id
+from .yolo_review_world import PURPOSE_X
 
 A, B = unit_id("a"), unit_id("b")
 
@@ -177,7 +178,7 @@ def test_the_dispatch_after_a_fixed_spec_is_rejected_again_and_stops_the_plan_on
     )
 
 
-FIXED_SPEC = (
+FIXED_SPEC = PURPOSE_X + (
     "## ADDED Requirements\n\n### Requirement: R1 fixed\nThe system SHALL work.\n\n#### Scenario: S\n"
     "- **WHEN** x\n- **THEN** y\n"
 )

@@ -13,8 +13,16 @@ from l4.safepath import safe_path
 from l4.vcs.git import Git
 from l4.yolo.model import Plan, load_plan
 
-SPEC_A = "## ADDED Requirements\n### Requirement: A greets\nA SHALL greet.\n#### Scenario: hello\n- WHEN x THEN y\n"
-SPEC_B = "## ADDED Requirements\n### Requirement: B uses A\nB SHALL call A.\n#### Scenario: call\n- WHEN x THEN z\n"
+# a capability new to `openspec/specs` needs a `## Purpose` of at least 50 characters at intake (L4-OSP-007)
+PURPOSE_X = "## Purpose\nThe greeting capability of the review world: A greets and B calls A, as the plan delivers.\n\n"
+SPEC_A = (
+    PURPOSE_X
+    + "## ADDED Requirements\n### Requirement: A greets\nA SHALL greet.\n#### Scenario: hello\n- WHEN x THEN y\n"
+)
+SPEC_B = (
+    PURPOSE_X
+    + "## ADDED Requirements\n### Requirement: B uses A\nB SHALL call A.\n#### Scenario: call\n- WHEN x THEN z\n"
+)
 
 
 def environment(root: Path) -> dict[str, str]:

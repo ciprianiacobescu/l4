@@ -19,6 +19,7 @@ from l4.yolo.state import fold_plan
 from .test_yolo_merge_guard import BRANCH, PR_URL, FakeForge, World
 from .yolo_cycle_world import CycleWorld, ev, unit_id
 from .yolo_ledger_world import sh
+from .yolo_review_world import PURPOSE_X
 
 A, B = unit_id("a"), unit_id("b")
 
@@ -220,7 +221,7 @@ def test_retry_does_not_move_a_unit_that_is_rejected(tmp_path):
     assert refusal is not None and "correct the spec on l4/openspec/a, then the next run reads it again" in str(refusal)
 
 
-NEW_SPEC = (
+NEW_SPEC = PURPOSE_X + (
     "## ADDED Requirements\n\n### Requirement: R1 fixed\nThe system SHALL work.\n\n#### Scenario: S\n"
     "- **WHEN** x\n- **THEN** y\n"
 )

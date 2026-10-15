@@ -10,6 +10,7 @@ from l4.yolo.digest import plan_digest
 from l4.yolo.state import fold_plan
 
 from .yolo_cycle_world import PLAN, READY, CycleWorld, ev, unit_id
+from .yolo_review_world import PURPOSE_X
 
 A, B = unit_id("a"), unit_id("b")
 
@@ -46,7 +47,9 @@ def test_a_reviewed_plan_is_not_reviewed_again_until_an_input_changes(world):
     head = world.store().read().head
     world.step()
     assert world.store().read().head == head  # nothing recorded, the judge was not asked again
-    world.commit({"openspec/changes/a/specs/x/spec.md": "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"})
+    world.commit(
+        {"openspec/changes/a/specs/x/spec.md": PURPOSE_X + "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"}
+    )
     world.push_main()
     world.step()
     assert world.kinds() == ["plan.admitted", "plan.reviewed", "plan.reviewed"]
@@ -58,7 +61,9 @@ def test_the_judges_cost_is_charged_as_a_running_total(world):
     world.step()  # two units and their batch: three calls
     (charged,) = [e.data for e in world.events() if e.type == "plan.charged"]
     assert charged["unit"] == "plan:review" and charged["cost_usd"] == 1.5 and charged["attempt"] == 0
-    world.commit({"openspec/changes/a/specs/x/spec.md": "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"})
+    world.commit(
+        {"openspec/changes/a/specs/x/spec.md": PURPOSE_X + "## ADDED Requirements\n### Requirement: A\nA SHALL act.\n"}
+    )
     world.push_main()
     world.step()  # reviewed again: the key holds the running total, because the fold keeps the maximum per key
     assert [e.data["cost_usd"] for e in world.events() if e.type == "plan.charged"] == [1.5, 3.0]

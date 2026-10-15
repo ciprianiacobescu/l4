@@ -19,9 +19,10 @@ from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.state import fold_plan
 
 from .yolo_cycle_world import CycleWorld, ev, unit_id
+from .yolo_review_world import PURPOSE_X
 
 A, B, C = unit_id("a"), unit_id("b"), unit_id("c")
-FIXED_SPEC = (
+FIXED_SPEC = PURPOSE_X + (
     "## ADDED Requirements\n\n### Requirement: R1 fixed\nThe system SHALL work.\n\n"
     "#### Scenario: S\n- **WHEN** x\n- **THEN** y\n"
 )

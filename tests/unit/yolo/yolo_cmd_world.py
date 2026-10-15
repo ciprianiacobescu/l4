@@ -19,7 +19,11 @@ from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
 A, B = "openspec:add-greeting", "openspec:add-b"
-SPEC_B = (
+# a capability new to `openspec/specs` needs a `## Purpose` of at least 50 characters at intake (L4-OSP-007)
+PURPOSE_B = (
+    "## Purpose\nThe counter capability: B counts, and the count is the observable result the plan delivers.\n\n"
+)
+SPEC_B = PURPOSE_B + (
     "## ADDED Requirements\n\n### Requirement: B counts\nThe `count()` function SHALL return 1.\n\n"
     "#### Scenario: Counting\n- **WHEN** `count()` is called\n- **THEN** it returns 1\n"
 )

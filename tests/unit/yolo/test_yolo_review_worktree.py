@@ -36,14 +36,8 @@ def judge(monkeypatch, *answers, cost=0.25, spare=0):
     return fake
 
 
-SPEC_B_PURPOSE = (
-    "## Purpose\nThe counter capability: B counts, and the count is the observable result the plan delivers.\n\n"
-)
-
-
 def ready_world(world):
-    """The plan pushed, and unit B with the `## Purpose` a capability new to `openspec/specs` needs at intake."""
-    world.push({"openspec/changes/add-b/specs/b/spec.md": SPEC_B_PURPOSE + SPEC_B}, "purpose for b")
+    """The plan pushed (unit B's delta already carries the `## Purpose` a new capability needs at intake)."""
     world.push_plan()
     world.pull()
     return world
@@ -192,7 +186,6 @@ def test_an_active_plan_is_not_reviewed(world, monkeypatch, capsys):
 
 
 def test_a_plan_file_only_in_the_working_tree_is_reviewed(world, monkeypatch, capsys):
-    world.push({"openspec/changes/add-b/specs/b/spec.md": SPEC_B_PURPOSE + SPEC_B}, "purpose for b")
     world.pull()
     path = world.app.repo / ".l4/plans/p1.json"
     path.parent.mkdir(parents=True, exist_ok=True)

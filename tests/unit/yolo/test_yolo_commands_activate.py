@@ -10,7 +10,7 @@ from l4.yolo.model import PlanMoved, ReviewResult, Verdict
 from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
-from .yolo_cmd_world import A, B, auto_world, ev, forge, plan_doc, world  # noqa: F401
+from .yolo_cmd_world import PURPOSE_B, A, B, auto_world, ev, forge, plan_doc, world  # noqa: F401
 
 
 def reviewed_world(world, **kwargs):
@@ -121,7 +121,7 @@ def test_a_review_for_older_inputs_is_refused(world, forge, capsys):
     reviewed_world(world)
     world.push(
         {
-            "openspec/changes/add-b/specs/b/spec.md": "## ADDED Requirements\n\n### Requirement: B counts\n"
+            "openspec/changes/add-b/specs/b/spec.md": PURPOSE_B + "## ADDED Requirements\n\n### Requirement: B counts\n"
             "The `count()` function SHALL return 2.\n\n#### Scenario: Counting\n- **WHEN** `count()` is called\n"
             "- **THEN** it returns 2\n"
         }

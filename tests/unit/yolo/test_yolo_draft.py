@@ -19,6 +19,7 @@ from .yolo_cmd_world import A, B, ev, plan_doc, world  # noqa: F401
 
 C, K1, K2 = "openspec:add-c", "kiro:k1", "kiro:k2"
 SPEC_C = (
+    "## Purpose\nThe other capability: C counts, and the count is the observable result the plan delivers.\n\n"
     "## ADDED Requirements\n\n### Requirement: C counts\nThe `other()` function SHALL return 2.\n\n"
     "#### Scenario: Other\n- **WHEN** `other()` is called\n- **THEN** it returns 2\n"
 )
