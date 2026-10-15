@@ -19,15 +19,25 @@ plan still runs one unit at a time, in the printed order.
    l4 yolo draft <id> [--target BRANCH] [--merge human|auto]
    ```
 
-   It refuses an existing file. Finished specs go into `exclude` with the reason `already merged`.
-2. Read each spec's proposal or requirements, and its tasks. Add `depends_on: ["<unit id>"]` **only** when a spec
+   It refuses an existing file. It puts a finished spec into `exclude` with the reason `already <phase>` (for example
+   `already merged`, `already archived`).
+2. Check the state of every spec before you order it: `l4 status`, or `l4 plan`. A unit that is started, in review or
+   has an open PR is not new work. Exclude it with a reason a person can check (`in review before the plan: PR #8`), or
+   plan it knowingly and say so in the hand-off. Under `merge: auto` the plan adopts a unit in review with a PASS and
+   merges it. Finished specs and specs left out on purpose go in `exclude`, never only in the hand-off message.
+3. Read each spec's proposal or requirements, and its tasks. Add `depends_on: ["<unit id>"]` **only** when a spec
    uses something that another spec introduces or changes: a module, a function, a data field, a file, an endpoint, a
    config key. Two specs that change the same code in conflicting ways are ordered too. Prefer fewer edges. A guess is
    not evidence: when you cannot point to a line, add no dependency.
-3. Use a batch to group units that share an acceptance check (`acceptance_profile`, a profile of `yolo.profiles`).
+4. Use a batch to group units that share an acceptance check (`acceptance_profile`, a profile of `yolo.profiles`).
    Do not invent profiles.
-4. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters).
-5. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.
+5. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters). An
+   excluded unit is not held by the plan: it runs as without a plan while no plan is active on the target, and gets no
+   new agent work while one is active, like every unit outside the plan.
+6. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.
+7. Leave `promotion` out unless the person names the branch and it exists on the remote (`git ls-remote --heads origin
+   <branch>`). Never invent one. `promotion` is `{"mode": "manual", "target_branch": "<branch>"}`, only a note for the
+   hand-off: L4 never promotes.
 
 Example: `add-pricing` adds a module, `use-pricing` calls it, `report-export` is independent, `legacy-import` is
 deliberately outside.
@@ -70,7 +80,8 @@ l4 yolo check <id>
 
 - The script needs only Python. It reads every `.l4/plans/*.json`, finds the units like the harness does, and checks
   the schema, the graph (cycles, unknown units, duplicates) and the coverage across all plan files (`uncovered`,
-  `covered_twice`). On success it prints the dispatch order and the waves. Exit 0 is valid, 1 lists problems.
+  `covered_twice`). On success it prints the dispatch order and the waves. Exit 0 is valid, 1 lists problems. A planned
+  unit whose change is archived prints `finished: <id>`: remove it, unless this plan already integrated it.
 - `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
   against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
 
@@ -97,7 +108,8 @@ keeps everything else, and reports a spec that is gone as `gone: <id>` without r
 where it belongs, add its dependencies on evidence, and validate, commit and push as above.
 
 An **active plan stops (`inputs_changed`) when its file changes**. It needs a new review and a new activation by a
-person; its usage (cost, runs, attempts) is kept. Say so in your hand-off. A spec with no order to the active plan can
+person; its usage (cost, runs, attempts) is kept. Say so in your hand-off. Keep a unit that the plan has integrated in
+the file: it counts as done. A spec with no order to the active plan can
 go into a new plan instead, which leaves the active file alone. Only one plan is active on a target, so a person activates the new one after the first completes.
 
 ## Never

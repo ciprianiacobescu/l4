@@ -449,7 +449,9 @@ repository should be in a plan, or deliberately outside all plans.
 - **Exclusions.** `Plan.exclude: list[PlanExclusion]`, where `PlanExclusion(_Strict)` is `id: str` and
   `reason: str` (`min_length=1`, `max_length=200`). It is part of the plan file and so of the plan digest. Admission
   adds `excluded_and_planned`, `duplicate_id` for a repeated exclusion, and `unknown_unit` for an excluded id that no
-  provider knows. `plans.holds_of` and `readable_unit_ids` leave excluded ids out: an excluded unit is not held.
+  provider knows. `plans.holds_of` and `readable_unit_ids` leave excluded ids out: an excluded unit is not held by the plan.
+  While a plan is active on the target the unit still gets no new agent work, like any unit outside the plan (D10);
+  while no plan is active (review, activation, after completion) it runs as without a plan.
   `l4 yolo status` lists the exclusions with their reasons.
 - **Derived units.** `<parent>-fix-<n>` and `<parent>-followup-<n>` (the `fixmark` and `followup` name patterns) are
   covered when their parent is listed, so that feedback on a planned unit does not make the repository uncovered.

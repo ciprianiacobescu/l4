@@ -67,7 +67,9 @@ batches that its batch depends on.
 ### Exclusions
 
 Every spec of the repository should be in a plan or in a plan's `exclude`. An excluded unit is **not held** by the plan:
-it runs as it would without the plan, and `l4 yolo status` lists it with its reason. The exclusions are part of the plan
+while no plan is active on the target (the plan waits for its review or activation, or it completed) it runs as it would
+without a plan. While a plan is active it gets no new agent work, like every unit outside the active plan.
+`l4 yolo status` lists it under `excluded` with its reason. The exclusions are part of the plan
 file, so an edit of them after the activation stops the plan (`inputs_changed`). Admission refuses a unit that is both
 planned and excluded (`excluded_and_planned`), a unit excluded twice (`duplicate_id`) and an excluded id that no spec
 provider knows (`unknown_unit`).
@@ -98,8 +100,8 @@ Do not write the file from nothing. Let L4 list the specs, then add the order yo
 
 1. `l4 yolo draft <plan-id> [--target BRANCH] [--merge human|auto]` writes `.l4/plans/<plan-id>.json` in the working
    tree. It lists every spec that no plan lists in one batch `unplanned` with no dependencies, and puts a finished spec
-   into `exclude` with the reason `already merged`. It commits and pushes nothing, calls no model, and refuses an
-   existing file. It never adds a dependency: an order is a claim about the specs, and you must make it.
+   into `exclude` with the reason `already <phase>` (for example `already merged`). It commits and pushes nothing,
+   calls no model, and refuses an existing file. It never adds a dependency: an order is a claim about the specs, and you must make it.
 2. Edit the file: move units into batches, add `depends_on` only where a spec uses something that another spec
    introduces or changes, and give each exclusion a reason that a person can check.
 3. Run the validator, then `l4 yolo check <plan-id>`. The validator is `scripts/validate_plan.py` (the same file is in
@@ -110,7 +112,8 @@ Do not write the file from nothing. Let L4 list the specs, then add the order yo
 4. Commit and push the plan file only. Then review and activate (below).
 5. To add a spec later, run `l4 yolo draft <plan-id> --update`. It appends the new specs to `unplanned` (or to `exclude`),
    keeps every other edit, and reports a unit that is gone as `gone: <id>` without removing it. It warns when the plan is
-   active or waiting, because the edit stops it.
+   active or waiting, because the edit stops it. A unit that the plan has integrated stays in the file and counts as
+   done. An edit stops the plan (`inputs_changed`) and needs a new review and activation.
 
 The skill reference `references/plan.md` teaches an agent these steps. The agent never activates, resumes or cancels a
 plan, never writes `refs/l4/plans/*`, and sets `merge: auto` only when you ask and `forge.merge_policy` is `auto`.
