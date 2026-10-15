@@ -497,3 +497,61 @@ def test_one_plan_step_per_run_a_review_of_another_plan_dispatches_nothing(tmp_p
     assert step.allow == frozenset() and step.start_next_run is True  # the active plan goes on in the next run (#9)
     assert "unit.dispatched" not in world.kinds()  # the active plan waits for the next run
     assert world.step().allow == frozenset({A})  # nothing left to review: the active plan's step
+
+
+# --- accepted review findings travel with the unit (L4-YOLO-028) ---------------------------------------
+
+
+def _accepted(subject, text, reason="the spec is silent on it; use a plain path"):
+    return {
+        "findings": [{"criterion": "testability", "severity": "major", "text": text}],
+        "reason": reason,
+        "by": "alice",
+        "actor": "person",
+    }
+
+
+def _reactivate_with(world, accepted):
+    text = (world.repo / ".l4" / "plans" / "p1.json").read_text(encoding="utf-8")
+    from l4.yolo.digest import plan_digest
+
+    world.seed(
+        ev("plan.activated", plan_digest=plan_digest(text), digests=world.digests(), limits={}, by="alice",
+           reason="go", accepted=accepted)
+    )  # fmt: skip
+
+
+def test_a_dispatch_carries_the_accepted_items_of_the_unit_and_its_batch(world):
+    from l4.yolo.findings import finding_id
+
+    active(world)
+    _reactivate_with(
+        world,
+        {A: _accepted(A, "no example"), "batch:b1": _accepted("batch:b1", "order unclear"), B: _accepted(B, "other")},
+    )
+    step = world.step()
+    assert step.allow == frozenset({A})
+    items = {i["subject"]: i for i in step.accepted[A]}
+    assert set(items) == {A, "batch:b1"}  # B's own item does not travel with A
+    one = items[A]
+    assert (one["reason"], one["by"], one["actor"]) == ("the spec is silent on it; use a plain path", "alice", "person")
+    assert one["findings"] == [
+        {"id": finding_id(A, f), **f} for f in _accepted(A, "no example")["findings"]
+    ]  # the id is the finding's own
+
+
+def test_a_unit_with_no_accepted_item_carries_nothing(world):
+    active(world)
+    _reactivate_with(world, {B: _accepted(B, "other")})
+    step = world.step()
+    assert step.allow == frozenset({A}) and A not in step.accepted
+
+
+def test_a_later_run_of_the_current_unit_and_a_preview_carry_the_same_items(world):
+    active(world)
+    _reactivate_with(world, {A: _accepted(A, "no example")})
+    first = world.step()
+    again = world.step({"a": world.snapshot("a", "implementing")})  # the current unit's next run
+    assert again.allow == frozenset({A}) and again.accepted == first.accepted != {}
+    preview = world.step({"a": world.snapshot("a", "implementing")}, read_only=True)
+    assert preview.allow == frozenset({A}) and preview.accepted == first.accepted

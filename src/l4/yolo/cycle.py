@@ -65,7 +65,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
-from l4.yolo.findings import prior_entries
+from l4.yolo.findings import finding_id, prior_entries
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
@@ -641,6 +641,7 @@ class _Step:
                 refusals[unit] = (
                     reason or f"waits for the plan step of this run (plan {live.plan_id if live else plan_id})"
                 )
+        accepted = self._accepted(plan_id or (live.plan_id if live else None), allow)
         pending = frozenset(
             ctx.state.current
             for ctx in self.ctxs.values()
@@ -649,7 +650,40 @@ class _Step:
         return PlanStep(
             allow=allow, actions=(*self.actions, *extra), start_next_run=start_next_run,
             plan_id=plan_id or (live.plan_id if live else None), refusals=refusals, pending_starts=pending,
+            accepted=accepted,
         )  # fmt: skip
+
+    def _accepted(self, plan_id: str | None, allow: frozenset[str]) -> dict[str, tuple[dict[str, Any], ...]]:
+        """The accepted review items each allowed unit of the plan carries to its run: the items of the activation
+        (`activated_accepted`) whose subject is the unit or its batch, each finding with its id (L4-YOLO-028)."""
+        ctx = self.ctxs.get(plan_id) if plan_id else None
+        if ctx is None or ctx.file.plan is None or not ctx.state.activated_accepted:
+            return {}
+        out: dict[str, tuple[dict[str, Any], ...]] = {}
+        for batch in ctx.file.plan.batches:
+            for unit in batch.units:
+                if unit.id not in allow:
+                    continue
+                items = tuple(
+                    {
+                        "subject": subject,
+                        "reason": data.get("reason", ""),
+                        "by": data.get("by", ""),
+                        "actor": data.get("actor", ""),
+                        "findings": [
+                            {
+                                "id": finding_id(subject, f),
+                                **{k: f.get(k, "") for k in ("criterion", "severity", "text")},
+                            }
+                            for f in data.get("findings") or ()
+                        ],
+                    }
+                    for subject in (unit.id, f"batch:{batch.id}")
+                    if (data := ctx.state.activated_accepted.get(subject)) is not None
+                )
+                if items:
+                    out[unit.id] = items
+        return out
 
     # --- writing ----------------------------------------------------------------------------------------------------
 
