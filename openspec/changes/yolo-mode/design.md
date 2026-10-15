@@ -389,7 +389,7 @@ The harness never merges a unit that is not in an active `merge: auto` plan, wha
 - **A unit branch runs its own pinned harness** (0.3.0 gotcha). The plan step runs in the base checkout (the target's
   harness), so the plan logic is always the target's version; a unit run may use an older pin until the base merge.
 - **Both forges, one mechanism.** The design uses only git and calls that exist on both forges. GitLab was checked the
-  same way on 2026-10-14 (vps5, project `ai-cici/l4-yolo-dummy`, MR !1): the MR was `merged` within 5 s of the push,
+  same way on 2026-10-14 (a self-hosted GitLab, a disposable project, MR !1): the MR was `merged` within 5 s of the push,
   `merge_commit_sha` = the head. Both forges are validated live in task group 9.
 
 ## Migration Plan
