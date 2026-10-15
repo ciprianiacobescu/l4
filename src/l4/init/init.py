@@ -66,6 +66,19 @@ DEFAULT_PROFILES: dict[str, dict[str, str]] = {
     "claude-code": {"adapter": "claude-code", "vendor": "anthropic", "auth": "subscription"},
 }
 DEFAULT_ROLES: dict[str, list[str]] = {"implementer": ["codex"], "judges": ["claude-code"]}
+# The System One profile `l4 init` writes (design D8, L4-ADO-016): Laya by default; Jev on request. Jev's output is
+# never a training label (TypeSafe MCA 2.3(b)).
+S1_CHOICES = ("laya", "jev", "none")
+S1_PROFILES: dict[str, dict[str, str]] = {
+    "laya": {"backend": "system-one", "engine": "laya-local"},
+    "jev": {
+        "backend": "system-one", "engine": "jev", "base_url": "https://api.typesafe.ai", "model": "jev-1.13.0",
+        "api_key_env": "TYPESAFE_API_KEY", "vendor": "typesafe",
+    },
+}  # fmt: skip
+S1_NONE_TODO = (
+    "no System One: roles.s1_judge is empty; add a laya or jev profile to enable step 8 and the clarifier's S1"
+)
 HOSTED_FORGE_TOKEN = "GITHUB_TOKEN"  # the workflow's own token: an action adoption's default (adoption-kit D6)
 
 
@@ -98,6 +111,7 @@ def render_config(
     token_env: str | None = None,
     todos: tuple[str, ...] = (),
     hold: tuple[str, ...] = (),
+    s1: str = "laya",
 ) -> str:
     """The M0 pair of SPEC 3.2: Codex implements, Claude Code judges, a different vendor each. Models are left to the
     CLIs' defaults; set `model` and `options.reasoning_effort` on a profile to pin them. `ci`: the platform, or `both`
@@ -108,7 +122,8 @@ def render_config(
     harness comes from the setup action, whose pin is the workflow's `uses:` line: no version and no commit here.
     `runner_tags` (written as `ci.runner_tags`, `()` meaning GitHub-hosted) and `token_env` (`forge.token_env`) are
     written only when given; `todos` are extra `# TODO:` lines at the top; `hold` is written as `yolo.hold`, and no key
-    when it is empty (L4-ADO-012)."""
+    when it is empty (L4-ADO-012); `s1` (`laya`, `jev` or `none`) picks the System One profile and `roles.s1_judge`
+    (L4-ADO-016)."""
     platform = "auto" if ci == "both" else ci
     pins = (
         {"delivery": "action"}
@@ -120,8 +135,8 @@ def render_config(
         "harness": pins,
         "spec": {"frameworks": ["openspec"]},
         "gates": proposal.gates if proposal else GATES,
-        "profiles": DEFAULT_PROFILES,
-        "roles": DEFAULT_ROLES,
+        "profiles": {**DEFAULT_PROFILES, **({s1: S1_PROFILES[s1]} if s1 in S1_PROFILES else {})},
+        "roles": {**DEFAULT_ROLES, **({"s1_judge": [s1]} if s1 in S1_PROFILES else {})},
         "forge": {"type": platform, **({"token_env": token_env} if token_env else {})},
         "ci": {"platform": platform, **({"runner_tags": list(runner_tags)} if runner_tags is not None else {})},
         **({} if memory else {"memory": {"enabled": False}}),
@@ -300,6 +315,7 @@ def plan_init(
     runner_tags: tuple[str, ...] = (),
     token_env: str = HOSTED_FORGE_TOKEN,
     hold_existing: bool = False,
+    s1: str = "laya",
 ) -> InitPlan:
     """Everything init will write, or an exit-2 refusal naming what is in the way. `fetched`: (repository, commit) of a
     harness fetched at run time (L4-GHP-010): the fetched shim, and no vendored copy. `action`: the harness comes from
@@ -308,7 +324,7 @@ def plan_init(
     GitHub-hosted runner unless `runner_tags` are given, and uses the workflow's own `GITHUB_TOKEN` unless `token_env`
     says otherwise; a profile that cannot log in there is named in a todo. `hold_existing`: the ids of the units the
     spec providers find now (all frameworks, as `spec.frameworks: auto` would) are written, sorted, as `yolo.hold`
-    (L4-ADO-012)."""
+    (L4-ADO-012). `s1`: the System One profile written (`laya`, `jev` or `none`, L4-ADO-016)."""
     vendor: VendorSource | None = None
     repository: str | None = None
     if action is not None:
@@ -322,10 +338,11 @@ def plan_init(
     proposal = propose_gates(detect_python(repo))
     held = existing_unit_ids(repo, environ) if hold_existing else ()
     login_todos = hosted_login_todos() if action is not None and not runner_tags else ()
+    login_todos += (S1_NONE_TODO,) if s1 == "none" else ()
     config_text = render_config(
         None if action else commit, ci, memory=not ignored, proposal=proposal, repository=repository,
         delivery="action" if action else None, runner_tags=runner_tags if action else None,
-        token_env=token_env if action else None, todos=login_todos, hold=held,
+        token_env=token_env if action else None, todos=login_todos, hold=held, s1=s1,
     )  # fmt: skip
     cfg = loaded_config(config_text)
     files = [PlannedFile(str(CONFIG_RELPATH), config_text.encode(), 0o644)]
@@ -562,6 +579,7 @@ def run_init(
     runner_tag: tuple[str, ...] = (),
     forge_token_env: str | None = None,
     hold_existing: bool = False,
+    s1: str = "laya",
 ) -> ExitCode:
     if harness_ref is not None and harness_commit_pin is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, "init: --harness-ref and --harness-commit exclude each other")
@@ -615,7 +633,7 @@ def run_init(
     plan = plan_init(
         app.repo, app.environ, force=force, harness=harness, ci=ci or "gitlab", ci_edit=not no_ci_edit, fetched=fetched,
         action=pin, dependabot=dependabot, runner_tags=tuple(runner_tag),
-        token_env=forge_token_env or HOSTED_FORGE_TOKEN, hold_existing=hold_existing,
+        token_env=forge_token_env or HOSTED_FORGE_TOKEN, hold_existing=hold_existing, s1=s1,
     )  # None was refused  # fmt: skip
     apply_plan(app.repo, plan)
     for planned in plan.files:

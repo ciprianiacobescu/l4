@@ -353,3 +353,49 @@ def test_without_the_flag_the_units_are_not_held(target: Path, git_environ):
     make_changes(target, "alpha")
     assert init(target, git_environ, *BASE) == 0
     assert "yolo" not in yaml.safe_load((target / ".l4/config.yaml").read_text())
+
+
+def written_config(target: Path) -> dict:
+    return yaml.safe_load((target / ".l4/config.yaml").read_text())
+
+
+def test_laya_is_the_default_system_one(target: Path, git_environ):
+    """SCN-ADO-45"""
+    assert init(target, git_environ, *BASE) == 0
+    config = written_config(target)
+    assert config["roles"]["s1_judge"] == ["laya"]
+    assert config["profiles"]["laya"] == {"backend": "system-one", "engine": "laya-local"}
+    cfg = load_config(target)
+    assert cfg.profiles["laya"].engine == "laya-local" and cfg.roles.s1_judge == ["laya"]
+    assert "TYPESAFE_API_KEY" not in (target / WORKFLOW).read_text()
+
+
+def test_s1_jev_writes_the_typesafe_profile_and_the_workflow_names_its_key(target: Path, git_environ):
+    """SCN-ADO-46"""
+    assert init(target, git_environ, *BASE, "--s1", "jev") == 0
+    config = written_config(target)
+    assert config["roles"]["s1_judge"] == ["jev"]
+    assert config["profiles"]["jev"] == {
+        "backend": "system-one",
+        "engine": "jev",
+        "base_url": "https://api.typesafe.ai",
+        "model": "jev-1.13.0",
+        "api_key_env": "TYPESAFE_API_KEY",
+        "vendor": "typesafe",
+    }
+    assert "laya" not in config["profiles"]
+    load_config(target)
+    assert "TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}" in (target / WORKFLOW).read_text()
+
+
+def test_s1_none_writes_no_system_one_and_a_todo(target: Path, git_environ, capsys):
+    assert init(target, git_environ, *BASE, "--s1", "none") == 0
+    config = written_config(target)
+    assert "s1_judge" not in config["roles"] and "laya" not in config["profiles"]
+    assert "# TODO:" in (target / ".l4/config.yaml").read_text()
+    assert "todo:" in capsys.readouterr().err
+    load_config(target)
+
+
+def test_an_unknown_s1_choice_is_exit_2(target: Path, git_environ):
+    assert init(target, git_environ, *BASE, "--s1", "grok") == 2

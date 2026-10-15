@@ -204,3 +204,14 @@ def test_hold_existing_is_a_flag_of_init(target: Path, harness_repo: Path, git_e
     (folder / "proposal.md").write_text("## Why\nx\n")
     assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor", "--hold-existing") == 0
     assert yaml.safe_load((target / ".l4/config.yaml").read_text())["yolo"] == {"hold": ["openspec:alpha"]}
+
+
+def test_the_vendored_form_also_enables_laya_by_default(target: Path, harness_repo: Path, git_environ):
+    assert init(target, harness_repo, git_environ, "--ci", "gitlab", "--vendor") == 0
+    assert yaml.safe_load((target / ".l4/config.yaml").read_text())["roles"]["s1_judge"] == ["laya"]
+
+
+def test_the_cache_key_help_names_the_laya_cache(capsys):
+    assert main(["ci", "cache-key", "--help"], environ={}) == 0
+    out = capsys.readouterr().out
+    assert "laya" in out and "clis" in out
