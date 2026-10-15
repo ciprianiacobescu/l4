@@ -37,7 +37,7 @@ from l4.implementer.tasks import select_next_step, task_scope
 from l4.memory.inject import branch_changed_files, inject_for_task, task_paths
 from l4.orchestrator import ACTIONABLE
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
-from l4.planner import PlanEntry, compute_plan, facts_of
+from l4.planner import PlanEntry, compute_plan, facts_of, with_plan_holds
 from l4.sandbox.base import SandboxSpec
 from l4.sandbox.env import build_agent_env
 from l4.sim.availability import AvailabilityView, NullAvailability, ProbingAvailability, roles_needed
@@ -77,6 +77,7 @@ class Step:
     prompt: Path | None = None
     command: str | None = None
     base_moved: str | None = None  # step 0 would merge the base: what and where it can conflict
+    held: str | None = None  # a delivery plan holds the unit: why (a named run of it exits 13)
 
 
 def _safe(text: str) -> str:
@@ -154,12 +155,14 @@ def _prompt(
 
 def _step(
     app: AppContext, cfg: L4Config, view: AvailabilityView, provider: SpecProvider, ref: UnitRef,
-    snapshot: UnitSnapshot, entry: PlanEntry,
+    snapshot: UnitSnapshot, entry: PlanEntry, held: str | None = None,
 ) -> Step:  # fmt: skip
     phase = entry.phase or "none"
     roles = roles_needed({entry.next_action})
     status = view.head(roles[0]).status if roles else "unknown"
     base = Step(ref.id, phase, entry.next_action, None, None, status, _EXIT_OF_PHASE.get(phase, ExitCode.OK))
+    if held is not None:  # a plan holds it: the real run refuses it by name and starts nothing otherwise
+        return replace(base, held=held, expected_exit=ExitCode.HALTED, availability="unknown")
     if entry.next_action != "implement":
         return base
     head = _head(cfg, "implementer")
@@ -196,6 +199,8 @@ def _render(app: AppContext, cfg: L4Config, steps: Sequence[Step], exit_code: Ex
     out = ["l4 run --dry-run: no lease, worktree, agent, push or forge write"]
     for s in steps:
         out.append(f"\n{s.unit}  phase={s.phase}  next={s.action}" + (f"  task={s.task} ({s.step})" if s.task else ""))
+        if s.held is not None:
+            out.append(f"  held: {s.held}")
         if s.base_moved is not None:
             out.append(f"  {s.base_moved}")
         if s.prompt is not None:
@@ -223,12 +228,17 @@ def run_dry(app: AppContext, *, units: tuple[str, ...] = (), probe: bool = False
     refresh_refs(app, cfg, git)
     pairs = select_units(providers_for(cfg, app.repo, app.environ), units)
     snapshots = {ref.id: load_snapshot(p, git, ref, branch_prefix=cfg.forge.branch_prefix) for p, ref in pairs}
-    entries = {e.unit: e for e in compute_plan([facts_of(s) for s in snapshots.values()])}
+    planned = compute_plan([facts_of(s) for s in snapshots.values()])
+    shown = with_plan_holds(
+        app, cfg, list(snapshots.values()), planned
+    )  # delivery plans hold their units (L4-YOLO-010)
+    held = {a.unit: a.reason for a, b in zip(shown, planned, strict=True) if a is not b}
+    entries = {e.unit: e for e in shown}
     chosen = [(p, ref) for p, ref in pairs if units or entries[ref.id].next_action in ACTIONABLE]
     view: AvailabilityView = (
         ProbingAvailability(cfg, app.environ, app.repo) if probe else NullAvailability(cfg)
     )  # no probe unless asked (SCN-DRY-02)
-    steps = [_step(app, cfg, view, p, ref, snapshots[ref.id], entries[ref.id]) for p, ref in chosen]
+    steps = [_step(app, cfg, view, p, ref, snapshots[ref.id], entries[ref.id], held.get(ref.id)) for p, ref in chosen]
     steps = [replace(s, base_moved=_base_moved(cfg, git, s.unit)) for s in steps]
     would = most_severe(s.expected_exit for s in steps) if steps else ExitCode.OK
     click.echo(app.redactor.redact_text(_render(app, cfg, steps, would)))

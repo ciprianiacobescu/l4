@@ -120,9 +120,10 @@ def test_a_unit_outside_the_active_plan_exits_13(run, world):
     assert result.units[0].exit_reason == "run: openspec:b is not in the active plan p1"
 
 
-def test_the_eligible_unit_may_be_named_and_runs_without_a_record(world, run):
+def test_the_current_unit_may_be_named_and_runs_without_a_record(world, run):
     world.plan()
     world.activate()
+    world.seed(ev("unit.dispatched", unit=A, run="r0"))  # the eligible unit is the step's to dispatch (review #11)
     before = world.kinds()
     result = run(units=(A,))
     assert result.code == ExitCode.OK and run.runner.chosen == [[A]]
