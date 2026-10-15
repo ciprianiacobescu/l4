@@ -221,7 +221,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
         click.Argument(["plan"]),
     ]),
-    "yolo review": ("Ask CI to review a delivery plan (--local: review it here).", lambda: [
+    "yolo review": ("Ask CI to review a plan (--local: here; --worktree: the working tree, before the push).", lambda: [
         click.Argument(["plan"]),
         _flag("--local", "local", help="Run the readiness review on this machine and record it."),
         _flag("--worktree", "worktree", help="Review the working tree here, before the push (a dry run)."),
@@ -245,7 +245,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--reason", "reason", required=True, help="Why the plan is activated (kept in the plan ledger)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
-    "yolo status": ("Show a delivery plan (or all of them): units, usage, the stop or wait, and Next.", lambda: [
+    "yolo status": ("Show a plan (or all): units, review, acceptances, usage, the stop or wait, Next.", lambda: [
         click.Argument(["plan"], required=False), _flag("--json", "as_json"),
     ]),
     "yolo cancel": ("Cancel a delivery plan: nothing more is dispatched or merged.", lambda: [

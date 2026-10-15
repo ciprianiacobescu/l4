@@ -47,6 +47,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
 from l4.forge.gitlab import push_auth_config
+from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.specs.providers import providers_for
@@ -144,6 +145,7 @@ class _Ctx:
         return PlanStore(
             self.git, plan_id, self.fetch_cfg, push_config=self.push_cfg, token_env=self.cfg.forge.token_env,
             environ=self.app.environ, redact=self.app.redactor.redact_text,
+            platform=push_platform(self.cfg, self.app.environ, self.app.repo),
         )  # fmt: skip
 
     def say(self, text: str = "") -> None:
@@ -236,7 +238,7 @@ def _workspace(ctx: _Ctx, rev: str) -> Iterator[tuple[Path, Git]]:
 def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> _Units:
     with _workspace(ctx, rev) as (path, git):
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
-        infos = unit_infos(path, found, wanted, check_intake=intake)
+        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target)
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
     return _Units(infos, phases, costs)
