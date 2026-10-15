@@ -48,6 +48,7 @@ class CmdWorld:
         (root / CONFIG_FILE).write_text(yaml.safe_dump(config), encoding="utf-8")
         self.root, self.app = root, sim_app(root)
         self.clone = Git(self.app.repo, environ=self.app.environ)
+        self.clone.run("config", "user.name", "alex")
         self.clone.run("config", "user.email", "alex@example.com")
         self.remote = Git(self.sim.remote, environ=self.app.environ)
         self.unit_b()
