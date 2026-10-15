@@ -81,3 +81,52 @@ def test_a_json_file_that_is_not_an_object_holds_nothing():
 def test_a_unit_listed_in_two_plans_is_held_by_the_first_file():
     files = [file("p1", plan_text("p1", ["openspec:a"])), file("p2", plan_text("p2", ["openspec:a"]))]
     assert held_by({}, files) == {"openspec:a": ("p1", "new")}
+
+
+# --- yolo.hold (L4-ADO-011, design D5) ------------------------------------------------------------------------------
+
+from l4.yolo.cycle import Hold, config_holds, plan_holds  # noqa: E402
+
+from .yolo_review_world import make_cfg  # noqa: E402
+
+HELD = Hold("held by yolo.hold", "is held by yolo.hold")
+
+
+def cfg_with(*hold):
+    return make_cfg(yolo={"hold": list(hold)})
+
+
+def test_config_holds_matches_an_id_and_a_pattern():
+    cfg = cfg_with("openspec:a", "kiro:*")
+    assert config_holds(cfg, ["openspec:a", "openspec:b", "kiro:x"], set()) == {"openspec:a": HELD, "kiro:x": HELD}
+
+
+def test_config_holds_leaves_a_listed_unit_to_its_plan():
+    assert config_holds(cfg_with("*"), ["openspec:a", "openspec:b"], {"openspec:a"}) == {"openspec:b": HELD}
+
+
+def test_config_holds_with_no_entry_holds_nothing():
+    assert config_holds(cfg_with(), ["openspec:a"], set()) == {}
+
+
+def test_plan_holds_adds_the_config_hold_for_a_unit_no_plan_lists():
+    files = [file("p1", plan_text("p1", ["openspec:a"]))]
+    phases = {"openspec:a": "implementing", "openspec:b": "implementing", "openspec:c": None}
+    holds = plan_holds(files, {}, phases, "main", cfg_with("openspec:b", "openspec:c", "openspec:a"))
+    assert holds["openspec:b"] == holds["openspec:c"] == HELD
+    assert holds["openspec:a"].reason == "held by plan p1 (new)"  # a listed unit follows its plan
+
+
+def test_plan_holds_never_holds_a_merged_or_archived_unit():
+    phases = {"openspec:a": "merged", "openspec:b": "archived", "openspec:c": "implementing"}
+    assert plan_holds([], {}, phases, "main", cfg_with("*")) == {"openspec:c": HELD}
+
+
+def test_plan_holds_without_a_config_is_as_before():
+    assert plan_holds([], {}, {"openspec:a": None}, "main") == {}
+
+
+def test_an_excluded_unit_is_listed_and_so_not_held_by_the_config():
+    files = [file("p1", plan_text("p1", ["openspec:a"], exclude=[{"id": "openspec:b", "reason": "later"}]))]
+    holds = plan_holds(files, {}, {"openspec:b": None}, "main", cfg_with("*"))
+    assert holds == {}

@@ -198,3 +198,17 @@ def test_base_moved_line_says_none_without_overlap_and_is_absent_when_contained(
     raw(tdd_repo.repo, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
     _, out, _ = dry_run(tdd_repo, capsys, "--unit", "openspec:add-discount-codes")
     assert "base moved" not in out
+
+
+def test_dry_run_shows_a_unit_held_by_yolo_hold(tdd_repo, capsys):
+    """SCN-ADO-33: the dry run starts nothing for a unit `yolo.hold` names; named, it would exit 13."""
+    tdd_repo.write_config()
+    config = tdd_repo.repo / ".l4" / "config.yaml"
+    config.write_text(config.read_text() + "yolo:\n  hold: ['openspec:add-discount-codes']\n")
+    code = main(["run", "--dry-run", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ)
+    out = capsys.readouterr().out
+    assert code == 0 and "add-discount-codes" not in out and out.strip().splitlines()[-1] == "would exit 0"
+    code = main(["run", "--dry-run", "--unit", "openspec:add-discount-codes", "--repo", str(tdd_repo.repo)],
+                environ=tdd_repo.environ)  # fmt: skip
+    out = capsys.readouterr().out
+    assert code == 0 and "held: held by yolo.hold" in out and "would exit 13" in out

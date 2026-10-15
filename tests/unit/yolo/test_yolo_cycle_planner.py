@@ -79,3 +79,76 @@ def test_the_plan_reads_the_local_refs_and_writes_nothing(world, plan):
     before = world.git.run("for-each-ref").stdout
     plan()
     assert world.git.run("for-each-ref").stdout == before
+
+
+# --- yolo.hold (L4-ADO-011, SCN-ADO-33..35) -------------------------------------------------------------------------
+
+
+def hold(world, *patterns):
+    world.cfg = world.cfg.model_copy(update={"yolo": world.cfg.yolo.model_copy(update={"hold": list(patterns)})})
+
+
+def test_scn_ado_33_l4_plan_shows_a_held_unit_and_nothing_to_run(world, plan):
+    hold(world, A, B)
+    result, rows = plan()
+    assert rows[A]["reason"] == rows[B]["reason"] == "held by yolo.hold"
+    assert not rows[A]["actionable"] and rows[A]["next_action"] == "none"
+    assert result.actionable == ()
+
+
+def test_a_merged_unit_is_not_shown_held(world, plan):
+    hold(world, "*")
+    plan.snapshots["b"] = world.snapshot("b", "merged")
+    _, rows = plan()
+    assert rows[A]["reason"] == "held by yolo.hold" and rows[B]["reason"] != "held by yolo.hold"
+
+
+def test_scn_ado_33_the_step_allows_only_the_units_not_held_and_calls_no_judge(world):
+    hold(world, A)
+    step = world.step()
+    assert step.allow == frozenset({B})
+    assert step.refusals == {A: "is held by yolo.hold"}
+    assert step.plan_id is None and not step.actions
+    assert world.kinds() == [] and world.judge.requests == []
+
+
+def test_every_unit_held_allows_none(world):
+    hold(world, "openspec:*")
+    step = world.step()
+    assert step.allow == frozenset() and set(step.refusals) == {A, B}
+
+
+def test_an_empty_hold_leaves_the_step_as_it_was(world):
+    assert world.step().allow is None
+
+
+def test_a_merged_unit_is_allowed_by_the_step(world):
+    hold(world, "*")
+    step = world.step({"b": world.snapshot("b", "merged")})
+    assert step.allow == frozenset({B}) and A in step.refusals
+
+
+def test_scn_ado_34_a_new_unit_runs_alone(tmp_path):
+    world = CycleWorld(tmp_path, units=("a", "b", "c"))
+    hold(world, A, B)
+    assert world.step().allow == frozenset({unit_id("c")})
+
+
+def test_scn_ado_35_a_pattern_holds_a_new_unit_until_a_plan_lists_it(tmp_path):
+    world = CycleWorld(tmp_path, units=("a", "b", "c"))
+    hold(world, "*")
+    C = unit_id("c")
+    first = world.step()
+    assert first.allow == frozenset() and first.refusals[C] == "is held by yolo.hold"
+    world.plan(deps={}, batches=[{"id": "b1", "units": [{"id": C}]}])
+    world.activate(order=[C])
+    step = world.step()
+    assert step.allow == frozenset({C}) and step.plan_id == "p1"  # the plan lists c: it follows the plan
+    assert step.refusals[A] == "is held by yolo.hold"  # a and b stay held, not 'outside the active plan'
+
+
+def test_a_named_run_of_a_held_unit_is_refused_with_the_reason(world):
+    hold(world, A)
+    step = world.step(read_only=True)
+    assert step.allow is not None and A not in step.allow
+    assert step.refusals[A] == "is held by yolo.hold"
