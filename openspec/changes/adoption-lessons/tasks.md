@@ -10,7 +10,7 @@
 
 ## 2. The test gate
 
-- [ ] 2.1 The plugin-shadow guard in `run_gate`. A new `shadowing_plugin(worktree, addopts)` uses the rules of design D1; when it finds a shadow, the gate fails naming the file and starts no process. `build_gate_env` does not change. Correct the docstring of `gates/trace.py` [L4-ADO-001] [SCN-ADO-01, SCN-ADO-02, SCN-ADO-03] — test: tests/unit/gates/test_runner.py with five fixtures: root `l4_trace.py`; root `l4_cov/__init__.py`; nested `src/pkg/l4_trace.py`; root `coverage.py`; `python scripts/check.py` importing a sibling (test first) — code: src/l4/gates/runner.py, src/l4/gates/trace.py — verify: uv run pytest tests/unit/gates tests/unit/implementer -q
+- [x] 2.1 The plugin-shadow guard in `run_gate`. A new `shadowing_plugin(worktree, addopts)` uses the rules of design D1; when it finds a shadow, the gate fails naming the file and starts no process. `build_gate_env` does not change. Correct the docstring of `gates/trace.py` [L4-ADO-001] [SCN-ADO-01, SCN-ADO-02, SCN-ADO-03] — test: tests/unit/gates/test_runner.py with five fixtures: root `l4_trace.py`; root `l4_cov/__init__.py`; nested `src/pkg/l4_trace.py`; root `coverage.py`; `python scripts/check.py` importing a sibling (test first) — code: src/l4/gates/runner.py, src/l4/gates/trace.py — verify: uv run pytest tests/unit/gates tests/unit/implementer -q
 
 ## 3. OpenSpec intake
 
