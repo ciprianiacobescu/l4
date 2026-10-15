@@ -494,6 +494,6 @@ def test_one_plan_step_per_run_a_review_of_another_plan_dispatches_nothing(tmp_p
     world.plan(plan_id="p2", deps={}, batches=[{"id": "b1", "units": [{"id": unit_id("c")}]}])
     step = world.step()
     assert world.kinds("p2") == ["plan.admitted", "plan.reviewed"]
-    assert step.allow == frozenset() and step.start_next_run is False
+    assert step.allow == frozenset() and step.start_next_run is True  # the active plan goes on in the next run (#9)
     assert "unit.dispatched" not in world.kinds()  # the active plan waits for the next run
     assert world.step().allow == frozenset({A})  # nothing left to review: the active plan's step

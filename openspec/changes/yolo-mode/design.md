@@ -398,6 +398,11 @@ disagreed. These decisions replace the text above where they differ.
   runs}` carries the totals of that attempt; the fold keeps the maximum per (unit, attempt) and sums them. Attempts used
   by a unit = the highest attempt number charged. The review's cost is charged as `plan.charged{unit: "plan:review",
   attempt: 0, …}` by the CI step and by `review --local`; status and report skip keys that start with `plan:`.
+  The attempts of a unit in a plan are counted from the refs it had at the activation: `plan.activated{attempt_base:
+  {unit: n}}` records them (the first record of a unit stands on a re-activation), and the attempt in the plan is 1 +
+  refs − base, so a restart before the plan is not an attempt of the plan. Every stop writes the live `plan.charged` of
+  the unit's current attempt before `plan.stopped`, and the step, `l4 yolo resume` and `l4 yolo status` compute the live
+  attempt and cost with the same functions (`limits.live_attempt`, `limits.live_state`).
 - **R2. The activated plan is frozen (D4, D10).** `plan.activated` freezes the plan digest as `activated_digest`.
   `plan.admitted`, `plan.refused` and `plan.reviewed` recorded while the plan is activated (active, waiting, stopped)
   change only the review fields, never `activated_digest`, `order` or the status. A plan file whose digest differs from
