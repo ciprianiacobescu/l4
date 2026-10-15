@@ -184,3 +184,82 @@ def test_repo_defaults_to_the_origin(run_setup, github):
     code, _ = run_setup(dry_run=True)
     assert code == 0
     assert ("GET", f"/repos/{REPO}") in github.requests
+
+
+# --- adoption-lessons 1.3 (L4-ADO-002): the default branch of an integration base ---
+
+WORKFLOW_PATH = ".github/workflows/l4.yml"
+
+
+def workflow(sha: str) -> str:
+    return (
+        "name: l4\non:\n  workflow_dispatch: {}\njobs:\n  l4:\n    runs-on: ubuntu-latest\n    steps:\n"
+        f"      - uses: o/l4/.github/actions/l4@{sha}\n"
+    )
+
+
+def integration_base(
+    project, github, *, on_default: bool = True, default_sha: str = "a" * 40, base_sha: str = "a" * 40
+):
+    (project / ".l4" / "config.yaml").write_text(
+        "forge:\n  base_branch: staging\nci:\n  runner_tags: []\n", encoding="utf-8"
+    )
+    github.default_branch = "main"
+    github.files[("staging", WORKFLOW_PATH)] = workflow(base_sha)
+    if on_default:
+        github.files[("main", WORKFLOW_PATH)] = workflow(default_sha)
+
+
+def test_an_integration_base_gets_the_default_branch_policy(run_setup, github, project):  # SCN-ADO-04
+    integration_base(project, github)
+    code, out = run_setup()
+    assert code == 0, out
+    assert [p["name"] for p in github.policies["l4"]] == ["staging", "l4/*", "l4/**/*", "main"]
+    assert ("GET", f"/repos/{REPO}/contents/{WORKFLOW_PATH}") in github.requests
+    code, out = run_setup()
+    assert code == 0, out
+    assert all(r.startswith("KEPT") for r in rows(out)), out
+    assert [p["name"] for p in github.policies["l4"]] == ["staging", "l4/*", "l4/**/*", "main"]
+    assert any("branch policy main" in r for r in rows(out))
+
+
+def test_a_missing_workflow_on_the_default_branch_is_failed_and_sends_no_dispatch(
+    run_setup, github, project
+):  # SCN-ADO-05
+    integration_base(project, github, on_default=False)
+    code, out = run_setup()
+    assert code == int(ExitCode.DOCTOR_FAILED), out
+    failed = [r for r in rows(out) if r.startswith("FAILED")]
+    assert len(failed) == 1 and "main" in failed[0] and WORKFLOW_PATH in failed[0], out
+    assert not any(path.endswith("/dispatches") for _, path in github.requests)
+
+
+def test_a_base_that_is_the_default_branch_adds_nothing_and_reads_no_workflow(run_setup, github):  # SCN-ADO-06
+    code, out = run_setup()
+    assert code == 0, out
+    assert [p["name"] for p in github.policies["l4"]] == ["main", "l4/*", "l4/**/*"]
+    assert not any("/contents/" in path for _, path in github.requests)
+
+
+def test_a_dry_run_reads_the_default_branch_workflow_and_writes_nothing(run_setup, github, project):
+    integration_base(project, github, on_default=False)
+    code, out = run_setup(dry_run=True)
+    assert code == int(ExitCode.DOCTOR_FAILED), out
+    assert github.writes() == []
+
+
+def test_a_token_without_contents_read_is_a_failed_row_not_a_crash(run_setup, github, project):
+    integration_base(project, github)
+    route = github.route
+
+    def deny(method, path, query, body):
+        if "/contents/" in path:
+            import httpx
+
+            return httpx.Response(403, json={"message": "Resource not accessible by personal access token"})
+        return route(method, path, query, body)
+
+    github.route = deny  # type: ignore[method-assign]
+    code, out = run_setup()
+    assert code == int(ExitCode.DOCTOR_FAILED), out
+    assert any(r.startswith("FAILED") and "Contents: read" in r for r in rows(out)), out

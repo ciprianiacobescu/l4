@@ -37,6 +37,7 @@ class FakeGitHub:
     requests: list[tuple[str, str]] = field(default_factory=list)  # (method, path below the base)
     strays: list[str] = field(default_factory=list)  # requests that left the base host or carried another token
     steps: dict[int, int] = field(default_factory=dict)
+    files: dict[tuple[str, str], str] = field(default_factory=dict)  # (ref, path) -> text, for the contents API
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -151,6 +152,15 @@ class FakeGitHub:
                 200,
                 json=[{"name": n} for n in self.labels],
                 headers={"Link": '<https://elsewhere.example.test/repositories/1/labels?page=2>; rel="next"'},
+            )
+        if m := re.fullmatch(r"/contents/(.+)", rest):
+            ref = query.get("ref", self.default_branch)
+            text = self.files.get((ref, m.group(1)))
+            if text is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            encoded = base64.b64encode(text.encode()).decode()
+            return httpx.Response(
+                200, json={"type": "file", "path": m.group(1), "encoding": "base64", "content": encoded}
             )
         if rest == "/actions/workflows/l4.yml/dispatches" and method == "POST":
             self.add_run(max([r["id"] for r in self.runs], default=100) + 1, body["ref"])

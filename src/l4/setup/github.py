@@ -185,6 +185,7 @@ class Setup:
         self.api, self.forge, self.o, self.emit, self.environ = api, forge, options, emit, environ
         self.root = f"/repos/{options.repo}"
         self.env_exists = False
+        self.default_branch = options.base  # read from the repository in `admin()`
 
     def write(self, method: str, path: str, body: Any) -> None:
         if not self.o.dry_run:
@@ -202,6 +203,7 @@ class Setup:
                 "Administration: write, Environments: write, Variables and Secrets: write)",
             )  # fmt: skip
             return False
+        self.default_branch = str(repo.get("default_branch") or self.o.base)
         self.emit.raw(f"OK      repository {self.o.repo} the token has admin permission")  # a check, not a state row
         return True
 
@@ -232,12 +234,46 @@ class Setup:
             self.emit.row("KEPT", f"environment {env}")
         found = self.api.get(f"{self.root}{path}/deployment-branch-policies", {"per_page": 100}) if have else None
         names = {str(p.get("name")) for p in (found or {}).get("branch_policies", [])}
-        for pattern in dict.fromkeys((self.o.base, f"{self.o.prefix}*", f"{self.o.prefix}**/*")):
+        # the default branch too when it is not the base: schedule and dispatch run from it (L4-ADO-002)
+        wanted = (self.o.base, f"{self.o.prefix}*", f"{self.o.prefix}**/*", self.default_branch)
+        for pattern in dict.fromkeys(wanted):
             if pattern in names:
                 self.emit.row("KEPT", f"branch policy {pattern}", f"of environment {env}")
                 continue
             self.write("POST", f"{path}/deployment-branch-policies", {"name": pattern, "type": "branch"})
             self.emit.row("CREATED", f"branch policy {pattern}", f"of environment {env}")
+
+    def workflow_text(self, ref: str) -> str | None:
+        """The text of `.github/workflows/l4.yml` on `ref` (the contents API), or None when the file is not there."""
+        found = self.api.get(f"{self.root}/contents/{WORKFLOW_RELPATH}", {"ref": ref})  # a 403: see the caller
+        if not isinstance(found, dict) or found.get("encoding") != "base64":
+            return None
+        return base64.b64decode(str(found.get("content", ""))).decode("utf-8", errors="replace")
+
+    def default_branch_workflow(self) -> None:
+        """GitHub runs schedule and dispatch only from the default branch: when it is not the base, its copy of the
+        workflow must exist (L4-ADO-002, design D2). Nothing is read when the base is the default branch."""
+        default = self.default_branch
+        if default == self.o.base:
+            return
+        try:
+            text = self.workflow_text(default)
+        except GhError as exc:
+            if exc.status != 403:
+                raise
+            self.emit.row(
+                "FAILED", f"workflow {WORKFLOW_RELPATH} on {default}",
+                "the token cannot read the repository's contents (Contents: read)",
+            )  # fmt: skip
+            return
+        if text is None:
+            self.emit.row(
+                "FAILED", f"workflow {WORKFLOW_RELPATH} on {default}",
+                f"{default} has no {WORKFLOW_RELPATH}: GitHub runs schedule and dispatch only from the default "
+                "branch; merge a pull request that adds it",
+            )  # fmt: skip
+            return
+        self.emit.row("KEPT", f"workflow {WORKFLOW_RELPATH} on {default}", "present")
 
     def secrets(self) -> None:
         env = self.o.environment
@@ -308,6 +344,7 @@ class Setup:
             return None
         self.workflow_permissions()
         self.environment()
+        self.default_branch_workflow()
         self.secrets()
         self.self_provision()
         self.labels()
