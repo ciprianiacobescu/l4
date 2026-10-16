@@ -287,6 +287,10 @@ no work and end with exit 0 and a warning annotation (`::warning::`) that names 
 default branch's copy, so a scheduled run neither acts with the old harness nor turns red every schedule. Outside CI, or without a running commit, the check is
 skipped.
 `l4 upgrade` SHALL print the same reminder when the local `origin/HEAD` names a branch other than the base.
+When `l4 upgrade` changes the harness pin it SHALL also name, from the remote-tracking refs it already has (no network),
+the open unit branches on origin whose own copy pins another commit than the new one, and say that a push to one of
+them does no work (it runs that branch's older workflow copy) and that runs start on the base (`l4 retry`,
+`l4 questions` and the schedule do that).
 
 **L4-ADO-006** `l4 doctor --adoption` names CI jobs that the gates do not mirror. `l4 doctor --adoption` SHALL warn about each job of the repository's own CI that runs on `push` or `pull_request` and
 has a `run:` command that no gate command, setup command or `yolo.profiles` gate contains. The comparison ignores a
@@ -421,7 +425,7 @@ of the harness package.
 | `l4 verify --unit ID [--dry-run]` | Run only the verifier on a unit | evidence files, commits |
 | `l4 s1 export --out DIR [--source FILE]… [--seed N] [--allow-gaps]` \| `canary [--also-repo P]… [--target N] [--min-test N] [--max-variants N] [--test-command CMD] [--out FILE] [--allow-gaps]` \| `score --profile P --dataset FILE --out FILE [--max-requests N] [--gate GATE.json]` \| `report ANSWERS… --dataset FILE [--gate GATE.json] [--profile TUNED] [--out FILE]` \| `audit --dataset DIR [--sample N \| --import FILE]` | System-One data set (M1.6): export ground-truth items from the calibration files (the only door to training data: engine answers are never read), generate labelled canary items from committed units (the canary runs the unit gate command and no browser: a unit's e2e test files, `e2e/**` and the directory `gates.e2e.command` runs, are left out of the tests-ran check and counted as `e2e_skipped:<project>:<unit>`, so the unit's other items still count; running them through `gates.e2e` needs a sandbox and a server and is not done), score a data set with a `backend: system-one` profile, compare engines against the ground truth, audit the labels by hand. `export` and `canary` exit 2 when a split is empty or a quota is unmet; `score` and `report` exit 2 on a data set without or with a damaged `manifest.json`; `score` alone may load a tuned checkpoint whose gate ran and failed | files under `$L4_CACHE/s1` and the paths given; no engine for `export`, `canary`, `audit` |
 | `l4 archive --unit ID` | Run the done-gate and archive | commits |
-| `l4 questions [list] [--unit ID] [--json]` \| `show Q-NNN --unit ID [--json]` \| `accept Q-NNN --unit ID [--no-push]` \| `answer Q-NNN --unit ID --text TEXT [--no-push]` | List and show open questions (read from the fetched unit branch, never the work tree); accept or answer one: `accept` and `answer` commit and push to the unit branch, `--no-push` shows the change (L4-QMD-007..009) | `questions.md` on the unit branch (commit and push) |
+| `l4 questions [list] [--unit ID] [--json]` \| `show Q-NNN --unit ID [--json]` \| `accept Q-NNN --unit ID [--no-push] [--no-run]` \| `answer Q-NNN --unit ID --text TEXT [--no-push] [--no-run]` | List and show open questions (read from the fetched unit branch, never the work tree); accept or answer one: `accept` and `answer` commit (with `[skip ci]`) and push to the unit branch, then start the harness's CI on the base branch unless `--no-run`; `--no-push` shows the change and starts nothing (L4-QMD-007..009) | `questions.md` on the unit branch (commit and push), forge call |
 | `l4 lessons [list\|lint\|promote ID [--from DIR] [--yes] [--no-commit]]` | Inspect and curate lessons. `promote ID` moves one inbox proposal into `memory.lessons_file` through the lessons writer with origin `human_edit`, prints the lesson and its scope first, asks on a terminal (`--yes` without one), refuses a draft with a `TODO(person):` line, HEAD on a unit branch, a staged file or an edited lessons file (exit 2), commits only the lessons paths as `chore(memory): lesson <id> promoted [skip ci]` unless `--no-commit`, and deletes the proposal (L4-KG-013) | edits lessons; one commit; deletes the inbox files |
 | `l4 kg build` | Build the derived index of the repository's unit history from committed git objects (base branch with the OpenSpec archive, unit branches, lock refs, local attempts refs); never fetches (L4-KG-003, L4-KG-004) | writes the index under the cache root only |
 | `l4 kg report [--out PATH] [--min-units N]` | Print the cross-unit report, *n* on every line; builds the index first when it is missing or stale; `--out` inside the repository must be git-ignored, else exit 2 (L4-KG-009) | the index under the cache root; `--out` file |
@@ -1322,8 +1326,8 @@ When the fetch fails, both forms SHALL read the refs that exist and print a warn
 exit 0 unless the unit or the question does not exist.
 
 
-**L4-QMD-008** `l4 questions accept` and `answer` write on the unit branch and push. `l4 questions accept Q-NNN --unit U [--no-push]` SHALL set the Status of an open question to `accepted`.
-`l4 questions answer Q-NNN --unit U --text TEXT [--no-push]` SHALL write TEXT as the question's answer and set its
+**L4-QMD-008** `l4 questions accept` and `answer` write on the unit branch and push. `l4 questions accept Q-NNN --unit U [--no-push] [--no-run]` SHALL set the Status of an open question to `accepted`.
+`l4 questions answer Q-NNN --unit U --text TEXT [--no-push] [--no-run]` SHALL write TEXT as the question's answer and set its
 Status to `answered`. `--text -` reads standard input.
 
 Each form SHALL work on the fetched head of the branch that holds the unit's folder. That is the unit's own branch, or
@@ -1342,11 +1346,16 @@ or the command refuses:
 
 The command SHALL make one commit with the operator's own git identity, without a checkout. The subject is
 `answer Q-NNN (<unit name>): <title>` or `accept Q-NNN (<unit name>): <title>`. The body names the Status, the actor
-and `Via: l4 questions`. The message MUST NOT carry an `L4-` trailer or `[skip ci]`, so that the push starts CI. The
-command SHALL push the commit to the branch without force, and SHALL write no ledger event. The next run records
-`question.answered` as it does for a hand edit.
+and `Via: l4 questions`. The message MUST NOT carry an `L4-` trailer, and MUST carry a `[skip ci]` line: a push to a
+unit branch runs that branch's own copy of the workflow, which can pin an older harness than the base's (its pin guard
+then does no work, CFG-008), and it would start the repository's own CI on a unit that is in the middle of TDD. The
+command SHALL push the commit to the branch without force, and SHALL write no ledger event. After a successful push it
+SHALL start a run on the base branch exactly as `l4 retry` does (L4-OPS-002; `start_run_line`): `run started on <base>`,
+`a run is already queued on <base>`, or `start a run with: <the exact command or page>` with exit 0 when the forge refuses
+or no token is set. `--no-run` skips the start. The next run records `question.answered` as it does for a hand edit.
 
-`--no-push` SHALL print the diff of `questions.md` and the commit message, and write, commit and push nothing.
+`--no-push` SHALL print the diff of `questions.md` and the commit message, and write, commit and push nothing, and start
+no run.
 
 The command MUST refuse with exit 2, change nothing, and print `questions: <cause>` and a `Fix:` line in each of these
 cases:
@@ -5968,7 +5977,7 @@ scenario is a spec defect (§26).
 #### SCN-QMD-15 (+) An answer is committed, pushed and read by the next run · L4-QMD-008
 - **Given** unit A `awaiting_human` with Q-002 `open`, blocking 3.1, on branch `l4/openspec/a`
 - **When** a person runs `l4 questions answer Q-002 --unit openspec:a --text "Block login until the address is verified."`
-- **Then** one commit `answer Q-002 (a): <title>` by the person is pushed to `l4/openspec/a`, without force and without `L4-Run:` or `[skip ci]`; the diff touches only Q-002's Status line, its Answer body and its index row; and the run that the push starts records `question.answered{id: "Q-002", by: human}` and gives the answer to the prompt of 3.1
+- **Then** one commit `answer Q-002 (a): <title>` by the person is pushed to `l4/openspec/a`, without force, without `L4-Run:` and with a `[skip ci]` line; the diff touches only Q-002's Status line, its Answer body and its index row; the command then starts a run on the base branch (`run started on <base>`, as L4-OPS-002 says for retry; `--no-run` skips it); and that run records `question.answered{id: "Q-002", by: human}` and gives the answer to the prompt of 3.1
 
 #### SCN-QMD-16 (+) Accept takes the clarifier suggestion · L4-QMD-008
 - **Given** Q-003 `open` with a clarifier suggestion

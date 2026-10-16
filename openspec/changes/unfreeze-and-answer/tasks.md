@@ -221,7 +221,7 @@ probe of design section 1.1 did.
 
   Needs 4.4.
   - Test first, in `test_questions_cli.py` with the world of 4.2: SCN-QMD-15 (up to the push; the message has no `L4-`
-    line and no `[skip ci]`; author = the test's git identity), SCN-QMD-16, SCN-QMD-17, SCN-QMD-19 (a second clone
+    line and has a `[skip ci]` line, then a run is started on the base; author = the test's git identity), SCN-QMD-16, SCN-QMD-17, SCN-QMD-19 (a second clone
     pushes between the fetch and the push).
   - Verify: as 4.2.
   [L4-QMD-008] [SCN-QMD-15, SCN-QMD-16, SCN-QMD-17, SCN-QMD-19]

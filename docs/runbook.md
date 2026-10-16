@@ -635,7 +635,7 @@ command.
    git push
    ```
 
-The push starts a run. The unit moves when your answers free a task. `l4 plan` then shows `answers submitted: Q-NNN`.
+A push to a unit branch runs that branch's own copy of `l4.yml`, which can be older than the base's and pin an older harness; the harness then does no work. So start the run on the base branch: `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on the base branch). The unit moves when your answers free a task. `l4 plan` then shows `answers submitted: Q-NNN`. `l4 questions accept` and `answer` do this for you: their commit has `[skip ci]` and the command starts the run on the base (`--no-run` skips it).
 
 **For verdict questions** (`- **Kind:** verdict`; the title starts with `Criterion C-…`, `Finding F-…` or `Hold H-…`):
 

@@ -63,11 +63,16 @@ or the command refuses:
 
 The command SHALL make one commit with the operator's own git identity, without a checkout. The subject is
 `answer Q-NNN (<unit name>): <title>` or `accept Q-NNN (<unit name>): <title>`. The body names the Status, the actor
-and `Via: l4 questions`. The message MUST NOT carry an `L4-` trailer or `[skip ci]`, so that the push starts CI. The
-command SHALL push the commit to the branch without force, and SHALL write no ledger event. The next run records
-`question.answered` as it does for a hand edit.
+and `Via: l4 questions`. The message MUST NOT carry an `L4-` trailer, and MUST carry a `[skip ci]` line: a push to a
+unit branch runs that branch's own copy of the workflow, which can pin an older harness than the base's (its pin guard
+then does no work, CFG-008), and it would start the repository's own CI on a unit that is in the middle of TDD. The
+command SHALL push the commit to the branch without force, and SHALL write no ledger event. After a successful push it
+SHALL start a run on the base branch exactly as `l4 retry` does (L4-OPS-002; `start_run_line`): `run started on <base>`,
+`a run is already queued on <base>`, or `start a run with: <the exact command or page>` with exit 0 when the forge refuses
+or no token is set. `--no-run` skips the start. The next run records `question.answered` as it does for a hand edit.
 
-`--no-push` SHALL print the diff of `questions.md` and the commit message, and write, commit and push nothing.
+`--no-push` SHALL print the diff of `questions.md` and the commit message, and write, commit and push nothing, and start
+no run.
 
 The command MUST refuse with exit 2, change nothing, and print `questions: <cause>` and a `Fix:` line in each of these
 cases:
@@ -88,7 +93,7 @@ cases:
 #### Scenario: SCN-QMD-15 (+) An answer is committed, pushed and read by the next run
 - **GIVEN** unit A `awaiting_human` with Q-002 `open`, blocking 3.1, on branch `l4/openspec/a`
 - **WHEN** a person runs `l4 questions answer Q-002 --unit openspec:a --text "Block login until the address is verified."`
-- **THEN** one commit `answer Q-002 (a): <title>` by the person is pushed to `l4/openspec/a`, without force and without `L4-Run:` or `[skip ci]`; the diff touches only Q-002's Status line, its Answer body and its index row; and the run that the push starts records `question.answered{id: "Q-002", by: human}` and gives the answer to the prompt of 3.1
+- **THEN** one commit `answer Q-002 (a): <title>` by the person is pushed to `l4/openspec/a`, without force, without `L4-Run:` and with a `[skip ci]` line; the diff touches only Q-002's Status line, its Answer body and its index row; the command then starts a run on the base branch (as `l4 retry` does; `--no-run` skips it); and that run records `question.answered{id: "Q-002", by: human}` and gives the answer to the prompt of 3.1
 
 #### Scenario: SCN-QMD-16 (+) Accept takes the clarifier suggestion
 - **GIVEN** Q-003 `open` with a clarifier suggestion

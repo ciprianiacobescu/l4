@@ -18,7 +18,7 @@
 ## Answering `questions.md`
 
 Use the command first. It reads `questions.md` on the unit branch on `origin`, edits only the Status, the Answer and the
-index row, commits, and pushes. The push resumes the unit.
+index row, commits (`[skip ci]`), pushes, and starts a run on the base branch, which resumes the unit.
 
 ```sh
 l4 questions --unit FW:NAME                        # open questions; "draft" has an answer but is still open
@@ -27,7 +27,7 @@ l4 questions answer Q-NNN --unit FW:NAME --text "…"   # --text - reads stdin
 l4 questions accept Q-NNN --unit FW:NAME           # take the clarifier's suggestion (not for a verdict question)
 ```
 
-Add `--no-push` to print the diff and the commit message and write nothing. A refusal exits 2 with a `Fix:` line.
+Add `--no-push` to print the diff and the commit message and write nothing, or `--no-run` to push without starting the run. For a hand edit, after the push start a run on the base (`gh workflow run l4.yml --ref <base>`, or the GitLab pipeline): a push to a unit branch runs that branch's own, possibly older, workflow copy. A refusal exits 2 with a `Fix:` line.
 
 **Agent rule.** If you are an agent (an agent marker in the environment, or stdin is not a terminal), you may write only
 a question whose kind is in `clarifier.auto_accept_kinds` (default `technical`), that is not a verdict question, and

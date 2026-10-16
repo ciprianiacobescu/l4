@@ -18,8 +18,8 @@ verified (read in the code at the cited line, or run), **[I]** inferred (follows
 4. A person's answer can now unfreeze a support file (not an ignore file). The harness note on a blocked green
    question says what an answer can and cannot unfreeze (D7).
 5. `l4 questions` reads `questions.md` from the fetched unit branch and writes it with the harness's own parser and
-   section-scoped edits. It makes one plain commit as the operator (no `L4-Run:` trailer, no `[skip ci]`, so CI
-   starts) and pushes without force. `--no-push` is dry (D8 to D10).
+   section-scoped edits. It makes one plain commit as the operator (no `L4-Run:` trailer, a `[skip ci]` line) and
+   pushes without force, then starts a run on the base branch. `--no-push` is dry (D8 to D10).
 6. Agents: the actor rule of `l4 yolo accept`. An agent may answer the kinds in `clarifier.auto_accept_kinds` when the
    answer names no frozen path. Everything else needs `clarifier.answer_by_agents: true` on the base branch (D11).
 
@@ -365,15 +365,20 @@ does not undo an open when it is built.
    Via: l4 questions
    ```
    For `accept`, the subject starts with `accept` and the Status line is `accepted`. The message has no `L4-` trailer
-   and no `[skip ci]`, so the push starts CI on both forges (section 1.3). The commit is a person's commit under the
+   and a `[skip ci]` line. A push to a unit branch runs that branch's own workflow copy, which can pin an older
+   harness than the base's (the pin guard then does no work, CFG-008), and it starts the repository's own CI on a
+   unit in the middle of TDD; the command starts the run on the base instead (step 6). The commit is a person's commit under the
    author rule (`src/l4/vcs/authorship.py:28-32`).
 6. **Push.** Push `<commit>:refs/heads/<branch>` to `origin` without force. The push uses the auth of
    `push_auth_config`, which is the person's own credentials outside CI.
    - A push that is rejected as not a fast-forward is refusal R12. Nothing changes.
    - Any other push failure exits 1 with `explain_push_failure`'s text.
    - On success, the tracking ref moves to the commit and the command prints
-     `pushed <sha10> to <branch>: the push starts a run`, `Next: l4 status --unit <unit>`. When the operator has the
-     branch checked out, it also prints `your checkout of <branch> is behind: git pull`.
+     `pushed <sha10> to <branch>: the push starts no run ([skip ci])`, then, when the operator has the branch checked
+     out, `your checkout of <branch> is behind: git pull`, then the line of `start_run_line` (`l4 retry`'s: `run started
+     on <base>`, `a run is already queued on <base>`, or `start a run with: <command>` with exit 0), then
+     `Next: l4 status --unit <unit>`. `--no-run` prints `no run started (--no-run)` and the by-hand command instead.
+     `--no-push` starts nothing.
 7. **No ledger write.** The command writes no ledger event. The run that the push starts records
    `question.answered{by: human}` as it does for a hand edit (section 1.3). An unfreeze then follows from that record
    as today.

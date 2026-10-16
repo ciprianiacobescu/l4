@@ -34,7 +34,7 @@ way out was a hand edit of a file.
 - **`l4 questions`** lists open questions (all units, or one with `--unit`) and shows one question.
   `l4 questions accept Q-NNN --unit U` and `l4 questions answer Q-NNN --unit U --text TEXT` edit `questions.md` on the
   unit branch with the harness's own parser and section-scoped edits. They make one commit that names the question
-  and push it, and the push starts the run that resumes the unit. `--no-push` shows the change and writes nothing.
+  and push it (`[skip ci]`), and start a run on the base branch, which resumes the unit (`--no-run` skips that). `--no-push` shows the change and writes nothing.
   Each refusal exits 2 with a `Fix:` line.
 - **Agents.** The actor rule of `l4 yolo accept` applies. An agent may answer a question of a kind in
   `clarifier.auto_accept_kinds` whose answer names no frozen path. A product, ambiguous or verdict question, and an
