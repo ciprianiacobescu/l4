@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4.fsutil import UnsafeFile, read_regular_file
-from l4.implementer.result import RESULT_SCHEMA, TraceRules, trace_rules
+from l4.implementer.result import FILE_RESULT_SCHEMA, RESULT_SCHEMA, TraceRules, trace_rules
 from l4.specs.base import Criterion
 
 Role = Literal["red", "green", "single"]
@@ -271,23 +271,21 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other."
         )
     parts.append(gate)
-    fields = (
-        f'phase "{role}", task_ids ["{ctx.task_key}"], criteria_ids = the criterion ids your work traces, '
-        "tests_added = the pytest node ids you added, suppressions = every new `# noqa` or `# type: ignore`, "
-        "files_changed; use null for anything you have nothing for."
-    )
+    version = f"{contract.name}@{contract.version}+{phase.name}@{phase.version}"
     if ctx.result_path is None:  # a native adapter: the CLI enforces the schema
-        output = f"# Output\nYour final message is the result JSON object (schema enforced): {fields}"
-    else:  # prompt contract (SPEC 8.1): nothing enforces the schema, so the prompt carries it (live job 5465)
-        schema = json.dumps(RESULT_SCHEMA, separators=(",", ":"), sort_keys=True)
-        output = (
-            f"# Output\nYour final message is the result JSON object: {fields}\n"
-            f"Write your result object to `{ctx.result_path}`.\n"
-            f"It must have status and summary (both required) and conform to this JSON Schema:\n{schema}"
+        fields = (
+            f'phase "{role}", task_ids ["{ctx.task_key}"], criteria_ids = the criterion ids your work traces, '
+            "tests_added = the pytest node ids you added, suppressions = every new `# noqa` or `# type: ignore`, "
+            "files_changed; use null for anything you have nothing for."
         )
+        output = f"# Output\nYour final message is the result JSON object (schema enforced): {fields}"
+    else:  # prompt contract (SPEC 8.1, design D1): nothing enforces the schema, so the prompt carries it
+        template = load_template("output")
+        schema = json.dumps(FILE_RESULT_SCHEMA, separators=(",", ":"), sort_keys=True)
+        output = template.body.strip("\n").replace("{path}", str(ctx.result_path)).replace("{schema}", schema)
+        version += f"+{template.name}@{template.version}"
     parts.append(output)
     text = "\n\n".join(parts) + "\n"
-    version = f"{contract.name}@{contract.version}+{phase.name}@{phase.version}"
     return RenderedPrompt(
         text, hashlib.sha256(text.encode("utf-8")).hexdigest(), version, tuple(p for p, _ in ctx.sources)
     )

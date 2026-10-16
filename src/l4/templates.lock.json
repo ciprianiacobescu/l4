@@ -11,6 +11,10 @@
     "sha256": "29adc0f3f7213e2b1393ec01db370128c2e76dce658e2d68ef81e1a0a38ddab9",
     "version": 5
   },
+  "implementer/output": {
+    "sha256": "d35afa19cc5474aee1e2985d3f70ccbeb76103e459615a6809880bf945e58b54",
+    "version": 1
+  },
   "implementer/red": {
     "sha256": "9470113fe548923e6ddd237582f078d8b4920ffee2cac5663219960b1a003bec",
     "version": 9
