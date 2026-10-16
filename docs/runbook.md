@@ -108,6 +108,7 @@ On GitHub, a red job shows process exit 1 for each code except 10, 11, 12 and 13
 | The job is red with exit 16 | cancelled run | [7.10](#710-cancelled-or-timed-out-run-exit-16) |
 | The log says `nothing to do: no unit has a next step`, but you expect work | — | [Section 4](#4-find-the-state-and-the-cause), then [section 9](#9-what-your-push-does) |
 | No run started after your push | — | [Section 9](#9-what-your-push-does) |
+| The job runs, and its log has no new line for a long time | a working run, or a stuck one | [4.6](#46-is-the-job-stuck) |
 
 Each stuck unit has one command and one label. Use the command from your computer. Use the label on the PR. A label
 needs a member who is not the user of the forge token.
@@ -290,6 +291,10 @@ The important log lines:
 | `[l4] <unit> halted: max_task_attempts (task <k>: <p1> <f1>, <p2> <f2>)` | The halt, with the failed attempts of each profile. |
 | `[l4] <unit> task <k> <phase>: the prompt holds the person's retry note of <ts>` | The prompt of the step carries the `--reason` of your `l4 retry` (`prompt.rendered`). |
 | `[l4] <unit> verdict <PASS\|FAIL\|NEEDS_HUMAN> (round <n>, …)` | The result of a verification round. |
+| `[l4] <unit> agent <phase> step started (task <k>, attempt <n>, <agent>)` | An agent step starts. This line is at INFO since 0.4.5. |
+| `[l4] <unit> task <k> <phase> attempt <n>: <profile> working <elapsed>, <c> tool calls, last activity <t> ago` | The heartbeat line. It shows that the agent step goes on. L4 writes it every `implementer.heartbeat` (default 2 minutes). While a tool call is open, the line ends with `, <m> tool call(s) open for <t>`. A `command` step gives no count: the line is `working <elapsed>`. Read [4.6](#46-is-the-job-stuck). |
+| `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout)` | A warning. The agent printed nothing for `implementer.idle_timeout` and had no open tool call, so L4 stopped it (`agent.idle`). The attempt failed. |
+| `red: <n> new tests fail, as intended` (one: `red: 1 new test fails, as intended`) | The red gate is as it must be: only new tests fail, and they fail by an assertion. The raw gate line is now at DEBUG. For another red result, the raw gate line stays at INFO. |
 | `[l4] run: <unit>: waiting_capacity, retry_after <time>: <why>` | No agent is available, and when the harness tries again. With no recorded time, the line is `[l4] run: <why>`. |
 | `[l4] run: <unit> rejected: <reasons>` | The spec is not correct (exit 14). |
 | `[l4] run: <unit>: internal error: <Type>: <message>` | One unit stopped with an error. The other units go on. |
@@ -364,6 +369,7 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
    | `TASKS` | Done and total required tasks of `tasks.md`. |
    | `OPEN-Q` | The ids of open questions. |
    | `VERDICT` | The last verdict: `PASS`, `FAIL` or `NEEDS_HUMAN`. |
+   | `LAST` | The time since the newest event in the ledger of the unit, for example `6m ago`. `-` means that the unit has no event. |
    | `SOURCE` | `branch`: from the unit branch. `worktree`: from your checkout (no branch found). `archive`: from an archived OpenSpec change that has `feedback.md`. |
    | `FEEDBACK` | The count of feedback items in each state. It shows only when a unit has feedback. |
 
@@ -383,6 +389,16 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
    Retry note: the --reason of l4 retry goes to the implementer of task 1.1
    Next: l4 retry --unit <unit> --reason TEXT
    ```
+
+   Two more lines can follow `Stopped in run:`:
+
+   ```text
+   Last activity: 6m ago (agent.finished, task 2.1, run 24680)
+   Open run: 24681 started 21m ago, no end recorded: https://github.com/<owner>/<repo>/actions/runs/24681
+   ```
+
+   `Last activity:` is the newest event in the ledger, with its type, its task and its run. `Open run:` shows the newest `l4 run` that started and has no end recorded.
+   The link shows only when the ledger holds the CI link of the run (`run.started.ci_url`).
 
    `Cause:` and `Stopped in run:` show only while the unit is stopped. `Or:` shows only for a unit that a label
    moves. `Retry note:` shows only for a unit halted on `max_task_attempts` that names a task. `--json` then has
@@ -406,6 +422,8 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
    | `feedback_rounds_used`, `feedback_rounds_extra` | Feedback rounds used, and rounds added by a retry or a resume. The limit is `feedback.max_rounds` (default 5) plus `feedback_rounds_extra`. |
    | `refused_signals` | Operator labels that the harness did not accept, and why. |
    | `ci_failure` | The red jobs of your own CI on the hand-off commit. |
+   | `last_activity` | The newest event: `ts`, `type`, `run_id`, and `task` when the event has one. `null` when the unit has no event. |
+   | `open_run` | The run with no end recorded: `run_id`, `started`, and `ci_url` when the ledger holds it. `null` when no run is open. |
 
 5. Show the next action of each unit:
 
@@ -447,6 +465,76 @@ The event `result.normalized{task, phase, attempt, source, fixes}` says that the
 an agent step. `source` is `result` or `final_message`. `fixes` lists `{field, fix, from?, to?, was?, count?, length?}`
 and holds no text of the agent. The event `agent.finished` has `context_peak_tokens` or `context_peak_percent` when the
 agent's stream shows the largest context of one call.
+
+The event `agent.idle{task, phase, attempt, profile, silent_s, tool_calls}` says that L4 stopped an agent that had no
+activity for `implementer.idle_timeout`. It comes before `agent.finished` of the same step. The event `run.started` has
+the field `ci_url` (`run.started.ci_url`), the CI link of the run. The event `gate.finished` of a red gate has `red_new_failing` (the number of new tests
+that fail by an assertion). The heartbeat line is not a ledger event.
+
+### 4.6 Is the job stuck?
+
+Use this procedure when the job runs and its log has no new line for a long time. A step of an agent can take many
+minutes. A long step is not a fault. Look for signs of life first.
+
+1. Read the log of the running job. While an agent step runs, L4 writes a heartbeat line every `implementer.heartbeat`
+   (default 2 minutes):
+
+   ```text
+   [l4] <unit> task 2.1 green attempt 1: <profile> working 6m, 14 tool calls, last activity 20s ago
+   [l4] <unit> task 2.1 green attempt 1: <profile> working 12m, 31 tool calls, last activity 40s ago, 1 tool call open for 4m
+   ```
+
+   The line has the form `working <elapsed>, <c> tool calls, last activity <t> ago`. When a tool call is open, it
+   ends with `<m> tool call open for <t>` (or `<m> tool calls open for <t>`: the time of the oldest call).
+
+   | What you see | What it means |
+   |---|---|
+   | The count of tool calls grows, and `last activity` is small | The agent works. Wait. |
+   | `last activity` grows, and a tool call is open | A long command runs, for example a test run. Wait. |
+   | `last activity` grows, and no tool call is open | The agent is silent. L4 stops it after `implementer.idle_timeout` (default 10 minutes). |
+   | No heartbeat line for more than 2 minutes | The step is not running. The job can wait for a gate, a judge or a push. Read the last lines of the log. |
+
+2. Know the limits. L4 stops an agent step in two cases:
+
+   - The agent prints nothing for `implementer.idle_timeout` (default 10 minutes) and has no open tool call. L4 sends
+     SIGINT, waits 5 seconds, and then kills the process. The log has the warning `no activity from <profile> for <t>`.
+   - One agent step takes more than 30 minutes. The failure reason is `the agent step reached its time limit (30m)`.
+
+   Both stops fail the attempt, not the unit. After `implementer.escalate_after` failed attempts, the next profile of
+   `roles.implementer` takes the phase. To change a limit, set `implementer.idle_timeout` or `implementer.heartbeat` in
+   `.l4/config.yaml` (`0` turns the rule off; the minimums are `1m` and `30s`). The harness pin must be 0.4.5 or later
+   before you edit the config, because the schema is strict.
+
+3. In the red step, the line `red: <n> new tests fail, as intended` says that the new tests fail, as they must. The
+   agent step that follows is the green step.
+
+4. Read the state from your computer. Do the fetch of [4.4](#44-use-l4-status-and-l4-plan-on-your-computer) first. Then:
+
+   ```sh
+   l4 status --unit <unit>
+   ```
+
+   `Last activity:` shows the newest event of the unit. `Open run:` shows the run that has no end recorded, with its CI
+   link. For a delivery plan, `l4 yolo status` shows the same two lines for the current unit.
+
+5. On GitHub, list the runs that are still in progress:
+
+   ```sh
+   gh run list --workflow l4.yml --status in_progress
+   ```
+
+   A run in this list works, or is stuck. Compare its age with the heartbeat lines in its log. If the heartbeat lines
+   stop and the age grows, cancel the run (`gh run cancel <run-id>`). The next run starts the unit again.
+
+6. Know what `l4 status` cannot show:
+
+   - A run shows on the unit branch only from its first step commit. In the first minutes of a run, `Last activity:`
+     is from the run before.
+   - `Last activity:` can be one step old, because the ledger is pushed at each step commit.
+   - A cancelled run shows as `Open run:` with its age, until a later run starts. The age and the link let you check.
+   - On GitLab, the job summary of 0.4.5 does not exist. Read the job log.
+
+On GitHub, the summary page of the run also lists each finished task with its attempts, profile and time.
 
 ## 5. Prepare your computer for l4 commands
 
@@ -1448,6 +1536,12 @@ These limits make operation more difficult. Know them before you start.
   caller follows the agent rule of [7.1](#71-awaiting_human-a-question-waits-for-you). To see the change before
   the push, use `--no-push`.
 - The commands and options of [10.4](#104-commands-for-operation) that are not available.
+- An OpenCode step or a `command` step with one silent command longer than `implementer.idle_timeout` is stopped. The
+  stream of OpenCode shows a tool call only at its end, so L4 cannot see that the call is open. Raise
+  `implementer.idle_timeout` for such a project. A claude-code, codex or kiro-cli step is not stopped while a tool call
+  is open.
+- `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
+  pushed at each step commit. A cancelled run shows as an open run until a later run starts.
 
 ## 12. Delivery plans
 
