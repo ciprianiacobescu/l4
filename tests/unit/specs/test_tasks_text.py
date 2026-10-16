@@ -3,7 +3,7 @@
 from l4.specs.base import Framework
 from l4.specs.kiro import parse_kiro_tasks
 from l4.specs.openspec import parse_openspec_tasks
-from l4.specs.tasks_text import task_text
+from l4.specs.tasks_text import task_context, task_text
 
 KIRO = (
     "# Tasks\n"
@@ -76,3 +76,48 @@ def test_crlf_is_normalised():
 def test_bom_is_dropped():
     data = "﻿- [x] 1. First\n  - detail\n".encode()
     assert task_text(data, parse_kiro_tasks(data)[0], Framework.KIRO) == "- [ ] 1. First\n  - detail\n"
+
+
+NESTED = (
+    "# Tasks\n"
+    "\n"
+    "## 1. Root conftest.py\n"
+    "\n"
+    "- [ ] 1.1 First\n"
+    "- [ ] 1.2 Second\n"
+    "\n"
+    "### 1.A Sub section\n"
+    "- [ ] 1.3 Third\n"
+    "\n"
+    "## 2. Pricing\n"
+    "- [ ] 2.1 Fourth\n"
+    "\n"
+    "- [ ] 3.1 Before any heading of its own\n"
+)
+
+
+def context(text: str, index: int) -> str:
+    data = text.encode()
+    return task_context(data, parse_openspec_tasks(data)[index], Framework.OPENSPEC)
+
+
+def test_context_is_the_enclosing_headings_then_the_task_text():
+    assert context(NESTED, 0) == "# Tasks\n## 1. Root conftest.py\n- [ ] 1.1 First\n"
+
+
+def test_context_holds_the_parent_headings_and_not_a_sibling_section():
+    assert context(NESTED, 2) == "# Tasks\n## 1. Root conftest.py\n### 1.A Sub section\n- [ ] 1.3 Third\n\n"
+    assert "Root conftest" not in context(NESTED, 3)
+    assert context(NESTED, 3).startswith("# Tasks\n## 2. Pricing\n")
+
+
+def test_context_of_a_task_without_a_heading_is_its_text():
+    data = b"- [ ] 1.1 First\n  more\n"
+    task = parse_openspec_tasks(data)[0]
+    assert task_context(data, task, Framework.OPENSPEC) == task_text(data, task, Framework.OPENSPEC)
+
+
+def test_context_ignores_a_hash_line_in_a_code_fence():
+    data = b"## Real\n\n```\n# not a heading\n```\n- [ ] 1.1 First\n"
+    task = parse_openspec_tasks(data)[0]
+    assert task_context(data, task, Framework.OPENSPEC) == "## Real\n- [ ] 1.1 First\n"

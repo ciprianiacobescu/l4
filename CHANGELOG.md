@@ -19,6 +19,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   workflow copy pins another harness than the new one, and says that a push to one of them does no work and that runs
   start on the base.
 - The runbook (7.1) and the skill say to start a run on the base after a hand-edited answer is pushed.
+- A Python support file named in the heading of a task's section in `tasks.md` (for example `## 1. Root conftest.py`) now opens in green like one named in the task line, under the same trust check (an active plan or the base branch); a heading of another section, a glob or `../` opens nothing.
 
 ## 0.4.2 (2026-10-16)
 

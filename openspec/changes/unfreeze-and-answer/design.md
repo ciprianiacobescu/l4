@@ -161,8 +161,12 @@ text before it took effect.
   Kiro's `_links_below` reads (`src/l4/specs/kiro.py:119-128`) [V]. The marker is read as `[ ]`. A new helper
   `task_text(data, task, framework)` in `src/l4/specs/tasks_text.py` returns it. `Task` has only the title
   (`src/l4/specs/base.py:125-139`) [V], so the helper reads the file.
-- **Ancestors do not count.** Only the task's own block counts. A parent task's text does not, because a parent may
-  span tasks with different needs.
+- **Enclosing headings count; parent tasks do not.** The text that names a file is `task_context(data, task,
+  framework)`: the Markdown headings (`#` to `####`) that enclose the task in the same file, outermost first (the
+  closest heading above and each parent heading above that; a heading of another section and a `#` line inside a code
+  fence do not count), then the task's block. Headings are part of the same reviewed file, so D2 applies to the
+  combined text (the base-branch check compares the combined text of the same task key). `task_text` is unchanged for
+  other callers. A parent task's text does not count, because a parent may span tasks with different needs.
 - **Candidates.** A candidate is a path of the red manifest whose kind is `support` and that meets all of these
   conditions. Paths come from the manifest, not from the text, so a path outside the repository, a `..` segment or a
   glob can never be a candidate:

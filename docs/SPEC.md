@@ -1719,13 +1719,16 @@ pending leaves of one parent into one step.
 - it is not an ignore file;
 - it was a regular file at the red commit;
 - the red commit did not add or change it;
-- the task's text block names it.
+- the task's text block or one of its enclosing headings names it.
 
 To open a path means: the path is dropped from the frozen set of that green attempt and kept by the test-path freeze.
 The text block is the task's checkbox line and the lines after it, up to the next task line or heading. Its check
-marker is read as `[ ]`.
+marker is read as `[ ]`. The text that names a file is the task's text block and its enclosing headings: the closest
+`#` to `####` heading line above the task in the same `tasks.md`, and each parent heading above that, up to the top (a
+heading of another section does not count; a `#` line inside a code fence is no heading). A heading is part of the
+same reviewed file as the task line, so (a) and (b) below apply to the headings and the text block together.
 
-A path is named when it is a whole token of the text block: a repository-relative path, which may be followed by
+A path is named when it is a whole token of that text: a repository-relative path, which may be followed by
 `:<line>`, sentence punctuation or a backtick. One leading `./` is allowed when it starts the token. There is no case
 folding and no glob. A longer or shorter path is another token. A text block that names more than 3 candidates opens
 the first 3 in sorted order.
@@ -4585,7 +4588,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 20 | `yolo-mode` | delivery plans: a plan file `.l4/plans/<id>.json` orders units and batches by dependency; admission is deterministic, a readiness review runs in CI, one person activates it; units run one at a time in dependency order, each started only after the units it needs are merged into the target and pass their acceptance profile; with `merge: auto` the harness merges each verified unit by a fast-forward push guarded by the git server, then checks the merged revision, and stops safely at the first failure; limits never reset; the plan state is a leased ref; a report and receipts; no promotion; exclusions, `l4 yolo draft`, the standalone validator and the plan skill reference (L4-YOLO-001..020; `openspec/changes/yolo-mode/`) | the live run on the GitHub test repository of tasks 9.1..9.4 |
 | 21 | `experience-graph` | a person reads the history of a repository's units with no agent in the loop: `l4 kg build` (a derived index under the cache root, read from committed git objects only, never fetched), `l4 kg report` (lesson outcomes, recurring attempt failures and findings by normalised text, gate candidates, spec-gap hotspots, profiles, stops; *n* on every line), `l4 kg why` (the timeline of one unit, the 1-hop view of one record), `l4 kg propose` (drafts in the inbox for a person); `l4 lessons promote ID` builds the human promotion of L4-MEM-002; no module of a run path imports the graph code (L4-KG-001..014; `openspec/changes/experience-graph/`) | the history of a test repository's units, five report numbers checked against `git show` |
 | 22 | `adoption-lessons` | the lessons of the first real consumer adoption as general fixes: a gate refuses a module that shadows an evidence plugin; `l4 setup github` covers the default branch of an integration base and checks its workflow; a laptop push keeps the person's git credentials and a refused push names the forge's own rules; a run with another pin than the base's does no work; `l4 doctor --adoption` names unmirrored CI jobs and the System One state; a single OpenSpec unit is validated strictly with every finding shown; `validate_plan.py` checks deltas and review budgets; `yolo.hold` and `l4 init --hold-existing` replace the backlog plan; Laya is the default System One and runners install it; the workflow names System One keys; a spec-writing reference in the skill (L4-ADO-001..019; `openspec/changes/adoption-lessons/`, `docs/plan/adoption-lessons.md`) | the live runs of tasks 9.3 on the consumer or the public dummy |
-| 23 | `unfreeze-and-answer` | a task whose own reviewed text names a Python test-support file (for example `conftest.py`) may change it in green, and a person's answer may unfreeze a support file, never an ignore file; an opened file keeps its old statements, rebinds no name and patches no code of the unit; the note of a blocked green question says how to unfreeze; `l4 questions` lists, shows, accepts and answers on the unit branch with `--no-push` and an agent rule (`clarifier.answer_by_agents`); the runbook and the skill teach the command; every stub command says `(not yet implemented)` in `--help` (L4-IMP-014..016, L4-QMD-007..009, L4-OPS-017; `openspec/changes/unfreeze-and-answer/`) | the live runs of tasks 7.3 on a dummy repository |
+| 23 | `unfreeze-and-answer` | a task whose own reviewed text (and its enclosing headings) names a Python test-support file (for example `conftest.py`) may change it in green, and a person's answer may unfreeze a support file, never an ignore file; an opened file keeps its old statements, rebinds no name and patches no code of the unit; the note of a blocked green question says how to unfreeze; `l4 questions` lists, shows, accepts and answers on the unit branch with `--no-push` and an agent rule (`clarifier.answer_by_agents`); the runbook and the skill teach the command; every stub command says `(not yet implemented)` in `--help` (L4-IMP-014..016, L4-QMD-007..009, L4-OPS-017; `openspec/changes/unfreeze-and-answer/`) | the live runs of tasks 7.3 on a dummy repository |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -5832,6 +5835,16 @@ scenario is a spec defect (§26).
 - **Given** an opened `conftest.py`
 - **When** green replaces it with a symlink to a file outside the repository
 - **Then** the link is removed, the red version is checked out, and `guard.violation{rule: "opened file", why: "a symlink"}` is recorded
+
+#### SCN-IMP-174 (+) A section heading that names the file opens it for the tasks below · L4-IMP-014
+- **Given** an active plan (or the base branch) whose `tasks.md` has the heading `## 1. Root conftest.py` above task 1.2 "Fixtures of the spec: `otlp_receiver`, `closed_port`", which does not name `conftest.py`, and a root `conftest.py` that red did not change
+- **When** green adds the fixtures to `conftest.py`
+- **Then** `task.unfrozen{task: "1.2", paths: ["conftest.py"], reason: "named_by_task"}` is recorded with the plan or base source of the heading and the task together, and the edit is kept
+
+#### SCN-IMP-175 (−) The heading of another section, a glob or `../` opens nothing · L4-IMP-014
+- **Given** `conftest.py` is named in the heading of section 1 only, or the enclosing heading says `**/conftest.py` or `../conftest.py`
+- **When** green changes `conftest.py` in a task of section 2, or of the section whose heading has the glob or `../`
+- **Then** no `task.unfrozen` is recorded and the file is put back with `guard.violation{path: "conftest.py", phase: "green"}`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

@@ -37,10 +37,18 @@ def tasks_path(bench):
     return bench.wb.ref.path / "tasks.md"
 
 
-def prepare(bench, *, text: str = NAMING, conftest: str = OLD_CONFTEST, base: bool = False, plan: bool = False):
+def prepare(
+    bench,
+    *,
+    text: str = NAMING,
+    conftest: str = OLD_CONFTEST,
+    base: bool = False,
+    plan: bool = False,
+    head: str | None = None,
+):
     """A root support file and a task text, committed before red. `base`: origin/main has the same text.
     `plan`: the unit folder's digest was frozen at activation."""
-    heading = tasks_path(bench).read_text().split("- [ ]")[0]
+    heading = head if head is not None else tasks_path(bench).read_text().split("- [ ]")[0]
     tasks_path(bench).write_text(heading + text)
     (bench.wb.worktree / CONFTEST).write_text(conftest)
     commit(bench, "support file and task text")
@@ -325,3 +333,59 @@ def test_green_that_replaces_the_opened_file_with_a_symlink_is_put_back(make_ben
     assert event["why"] == "a symlink"
     assert not (bench.wb.worktree / CONFTEST).is_symlink()
     assert (bench.wb.worktree / CONFTEST).read_text() == OLD_CONFTEST
+
+
+# --- the section heading is part of the reviewed text ---
+
+SECTION_ONLY = "- [ ] 1.1 Add `apply_discount` and the fixtures of the spec\n"
+
+
+def test_a_heading_that_names_the_file_opens_it_under_a_plan_source(make_bench):
+    """SCN-IMP-174"""
+    bench, task, red, green = run_both(
+        make_bench, green_writing(NEW_CONFTEST), text=SECTION_ONLY, head="## 1. Root conftest.py\n\n", plan=True
+    )
+    assert green.status == "ok", green.reason
+    assert violations(bench) == []
+    [event] = bench.events("task.unfrozen")
+    assert event["paths"] == [CONFTEST] and event["source"].startswith("plan:p1@")
+
+
+def test_a_heading_that_names_the_file_opens_it_under_a_base_source(make_bench):
+    """SCN-IMP-174"""
+    bench, task, red, green = run_both(
+        make_bench, green_writing(NEW_CONFTEST), text=SECTION_ONLY, head="## 1. Root conftest.py\n\n", base=True
+    )
+    assert green.status == "ok", green.reason
+    [event] = bench.events("task.unfrozen")
+    assert event["paths"] == [CONFTEST] and event["source"].startswith("base:")
+
+
+def test_a_heading_edited_after_the_base_branch_gives_no_source(make_bench):
+    bench = make_bench([])
+    task = prepare(bench, text=SECTION_ONLY, head="## 1. Group\n\n", base=True)
+    tasks_path(bench).write_text(tasks_path(bench).read_text().replace("## 1. Group", "## 1. Root conftest.py"))
+    commit(bench, "a person edits the heading")
+    assert task_source(bench.wb, task) is None
+
+
+def test_a_heading_of_another_section_does_not_count(make_bench):
+    """SCN-IMP-175"""
+    head = "## 1. Root conftest.py\n\n- [ ] 0.1 Other\n\n## 2. Pricing\n\n"
+    bench = make_bench([red_env(), green_writing(NEW_CONFTEST)])
+    task = prepare(bench, text=SECTION_ONLY, head=head, plan=True)
+    task = next(t for t in bench.wb.provider.tasks(bench.wb.ref) if t.key == "1.1")
+    red = run_red(bench.wb, task, attempt=1)
+    assert red.status == "ok", red.reason
+    run_green(bench.wb, task, red, attempt=1)
+    assert bench.events("task.unfrozen") == []
+    assert [e["path"] for e in violations(bench)] == [CONFTEST]
+
+
+@pytest.mark.parametrize("heading", ["## 1. Fixtures in `**/conftest.py`", "## 1. Fixtures in `../conftest.py`"])
+def test_a_heading_with_a_glob_or_dot_dot_opens_nothing(make_bench, heading):
+    """SCN-IMP-175"""
+    bench, task, red, green = run_both(
+        make_bench, green_writing(NEW_CONFTEST), text=SECTION_ONLY, head=f"{heading}\n\n", plan=True
+    )
+    assert bench.events("task.unfrozen") == []

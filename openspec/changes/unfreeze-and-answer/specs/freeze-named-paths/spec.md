@@ -13,13 +13,16 @@ In the green step of a task, the harness SHALL open each path of the red manifes
 - it is not an ignore file;
 - it was a regular file at the red commit;
 - the red commit did not add or change it;
-- the task's text block names it.
+- the task's text block or one of its enclosing headings names it.
 
 To open a path means: the path is dropped from the frozen set of that green attempt and kept by the test-path freeze.
 The text block is the task's checkbox line and the lines after it, up to the next task line or heading. Its check
-marker is read as `[ ]`.
+marker is read as `[ ]`. The text that names a file is the task's text block and its enclosing headings: the closest
+`#` to `####` heading line above the task in the same `tasks.md`, and each parent heading above that, up to the top (a
+heading of another section does not count; a `#` line inside a code fence is no heading). A heading is part of the
+same reviewed file as the task line, so (a) and (b) below apply to the headings and the text block together.
 
-A path is named when it is a whole token of the text block: a repository-relative path, which may be followed by
+A path is named when it is a whole token of that text: a repository-relative path, which may be followed by
 `:<line>`, sentence punctuation or a backtick. One leading `./` is allowed when it starts the token. There is no case
 folding and no glob. A longer or shorter path is another token. A text block that names more than 3 candidates opens
 the first 3 in sorted order.
