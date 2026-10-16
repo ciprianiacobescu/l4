@@ -18,7 +18,7 @@ from pathlib import PurePosixPath
 
 from ..config.schema import L4Config
 from ..evidence.scope import file_kind
-from .guards import _MODULE_HOOKS, _bound
+from .guards import _MODULE_HOOKS
 
 
 def check_opened(
@@ -48,15 +48,62 @@ def _kept_and_not_rebound(old: list[ast.stmt], new: list[ast.stmt]) -> str | Non
             added.append(node)
     if kept < len(old):
         return "changes an existing statement"
-    bound = {name for node in old for name in _bound(node)}
+    state: dict[str, bool] = {}  # name -> True while every binding of it is a plain `import name...`
+    for node in old:
+        for name, plain in _binds(node).items():
+            state[name] = state.get(name, True) and plain
     for node in added:
         if isinstance(node, ast.Import | ast.ImportFrom) and any(ast.dump(node) == ast.dump(o) for o in old):
             continue  # a repeated import is no rebinding
-        for name in sorted(_bound(node)):
-            if name in bound or _MODULE_HOOKS.match(name):
+        for name, plain in sorted(_binds(node).items()):
+            # `import x.y` binds `x` to the module object `import x.z` binds: re-importing a package rebinds nothing
+            if _MODULE_HOOKS.match(name) or (name in state and not (plain and state[name])):
                 return f"rebinds {name}"
-        bound |= _bound(node)
+            state[name] = state.get(name, True) and plain
     return None
+
+
+def _binds(node: ast.stmt) -> dict[str, bool]:
+    """The module-level names a top-level statement binds, each with whether that is only a plain `import name[.sub]`
+    (no alias). Only a plain name (assignment, `for`, `with ... as`, `:=`, `except ... as`, `del`) or an import, def,
+    class or `global` binds: `os.environ[k] = v` and `a.b = v` bind nothing. Function, class and lambda bodies and
+    comprehensions are other scopes."""
+    out: dict[str, bool] = {}
+
+    def add(name: str, plain: bool = False) -> None:
+        out[name] = out.get(name, True) and plain
+
+    todo: list[ast.AST] = [node]
+    while todo:
+        cur = todo.pop()
+        if isinstance(cur, ast.Import):
+            for a in cur.names:
+                add(a.asname or a.name.split(".")[0], not a.asname)
+        elif isinstance(cur, ast.ImportFrom):
+            for a in cur.names:
+                add(a.asname or a.name)
+        elif isinstance(cur, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            add(cur.name)
+            if cur is not node:
+                continue
+            todo.extend(cur.decorator_list)  # a walrus in a decorator runs in the module scope
+        elif isinstance(cur, ast.Lambda):
+            continue
+        elif isinstance(cur, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            todo.extend(n.target for n in ast.walk(cur) if isinstance(n, ast.NamedExpr))  # `:=` binds outside
+            continue
+        elif isinstance(cur, ast.Name) and isinstance(cur.ctx, ast.Store | ast.Del):
+            add(cur.id)
+        elif isinstance(cur, ast.Global | ast.Nonlocal):
+            for name in cur.names:
+                add(name)
+        elif isinstance(cur, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and cur.name:
+            add(cur.name)
+        elif isinstance(cur, ast.MatchMapping) and cur.rest:
+            add(cur.rest)
+        if not isinstance(cur, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            todo.extend(ast.iter_child_nodes(cur))
+    return out
 
 
 def unit_modules(paths: Iterable[str], cfg: L4Config) -> frozenset[str]:
