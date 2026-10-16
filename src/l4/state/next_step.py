@@ -12,10 +12,21 @@ from l4.state.lifecycle import Phase
 if TYPE_CHECKING:
     from l4.planner import UnitFacts
 
+NO_CONVERTIBLE_FINDING = "no_convertible_finding"  # `phase.changed{to: escalated, reason}` of the fix loop (L4-OPS-022)
 CONTINUES = "nothing: the harness continues at the next run"
 RUNBOOK_CORRUPT = "see docs/runbook.md section 7.9"
 CORRUPT_PHASE = "corrupt"  # `l4.state.status.CORRUPT_PHASE`: a status value, not a lifecycle phase
 _STOPPED = (Phase.HALTED.value, Phase.ESCALATED.value)
+
+
+def feedback_way_out(unit: str) -> str:
+    """The step of a unit escalated with `no_convertible_finding` (L4-OPS-022): the round failed on a human finding that
+    no fix task can be derived from, and a retry alone repeats the same verdict. The feedback is the concrete fix."""
+    return (
+        "a retry alone repeats the same verdict; first give the fix the human's finding asks for as feedback: "
+        f"l4 feedback add --unit {unit} --kind behaviour --when ... --then ... --text ... "
+        f"(then the git lines it prints), then l4 retry --unit {unit} --reason TEXT"
+    )
 
 
 def _unique(*groups: tuple[str, ...]) -> tuple[str, ...]:
@@ -70,6 +81,8 @@ def next_step(facts: "UnitFacts", *, branch: str, questions_path: str) -> str:
     """The one command or action that moves the unit. `branch` and `questions_path` say where an answer goes. The
     command stays bare (`l4 retry --unit U --reason TEXT`); the label that does the same is `label_for`."""
     phase, unit = facts.phase, facts.unit
+    if phase == Phase.ESCALATED.value and facts.halt_reason == NO_CONVERTIBLE_FINDING:
+        return feedback_way_out(unit)
     if phase in _STOPPED:
         return f"l4 retry --unit {unit} --reason TEXT"
     if phase == Phase.ABANDONED.value:

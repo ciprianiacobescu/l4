@@ -12,6 +12,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.forge.base import LabelEvent
+from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
 
 DEVELOPER = 30  # GitLab's access level for Developer (members with Write access on GitHub)
 
@@ -80,7 +81,9 @@ def retry_label(label: str) -> str:
     return label.removesuffix("resume") + "retry" if label.endswith("resume") else label
 
 
-def halted_section(phase: str, reason: str, unit: str, label: str, *, feedback: bool = False) -> str:
+def halted_section(
+    phase: str, reason: str, unit: str, label: str, *, feedback: bool = False, reason_code: str | None = None
+) -> str:
     """The sticky-note section of a unit that stopped (SPEC L4-ARC-002, L4-CLI-002, L4-OPS-008): why, and what continues
     it: the `retry` label (a `resume` label passed in is named as `retry`) or `l4 retry`, which adds the round itself.
     The halting run writes it with its last mirror sync, and the sweep writes it again around a refusal. `feedback`: the
@@ -89,6 +92,13 @@ def halted_section(phase: str, reason: str, unit: str, label: str, *, feedback: 
     why = " ".join(reason.split())[:300]
     label = retry_label(label)
     command = f"`l4 retry --unit {unit} --reason TEXT`"
+    if phase == "escalated" and reason_code == NO_CONVERTIBLE_FINDING:
+        return "\n".join([
+            f"### Escalated: {why}",
+            "",
+            f"To go on: {feedback_way_out(unit)}. The retry is also the label `{label}` on this merge request, "
+            "after the feedback is pushed.",
+        ])  # fmt: skip
     if phase == "escalated":
         kind = "feedback" if feedback else "fix"
         return "\n".join([

@@ -159,6 +159,21 @@ def test_a_stopped_unit_with_a_spec_edit_is_not_refused_by_a_run_of_that_unit(wo
     assert _refuse_stopped(world.app, state, ref, SpecEdit(("a" * 40,), "b" * 40, "a" * 40)) is None
 
 
+def test_a_run_of_a_unit_escalated_with_no_convertible_finding_is_told_the_feedback_way(world):
+    """SCN-OPS-38 (L4-OPS-022): the refusal of `l4 run --unit` names feedback before the retry."""
+    from l4.orchestrator import _refuse_stopped
+    from l4.specs.base import Framework, UnitRef
+    from l4.state.fold import UnitState
+
+    state = UnitState(
+        unit=UNIT, phase="escalated", halt_reason="no_convertible_finding", halt_detail="no finding can be converted"
+    )
+    ref = UnitRef(Framework.OPENSPEC, NAME, world.app.repo / UNIT_REL)
+    refused = _refuse_stopped(world.app, state, ref)
+    assert refused is not None and "l4 feedback add --unit" in refused.outcome.exit_reason
+    assert "a retry alone repeats the same verdict" in refused.outcome.exit_reason
+
+
 def test_the_plan_and_a_named_run_take_a_halted_unit_with_a_spec_edit(world):
     from l4.planner import facts_of, next_action
     from l4.state.status import snapshots

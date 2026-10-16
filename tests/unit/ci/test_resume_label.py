@@ -59,6 +59,20 @@ def test_the_escalated_section_says_how_the_unit_goes_on():
     assert "Neither the label" not in text
 
 
+def test_the_escalated_section_with_no_convertible_finding_names_feedback_first():
+    """SCN-OPS-38 (L4-OPS-022): the label is the retry, and it helps after the feedback only."""
+    from l4.ci.resume_label import halted_section
+
+    text = halted_section(
+        "escalated", "no finding of this round can be converted into a fix task", "openspec:x", "l4:resume",
+        reason_code="no_convertible_finding",
+    )  # fmt: skip
+    assert text.index("l4 feedback add --unit openspec:x --kind behaviour") < text.index("l4 retry --unit")
+    assert "a retry alone repeats the same verdict" in text and "also the label `l4:retry`" in text
+    plain = halted_section("escalated", "fix rounds used 3/3", "openspec:x", "l4:resume", reason_code="same_failure")
+    assert "feedback" not in plain
+
+
 def test_the_escalated_section_at_the_feedback_limit_names_feedback_rounds():
     from l4.ci.resume_label import halted_section
 

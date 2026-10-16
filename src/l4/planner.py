@@ -68,6 +68,9 @@ class UnitFacts:
     retry_after: str | None = None  # waiting_capacity: when the earliest cool-down ends
     previous_phase: str | None = None  # waiting_capacity: the phase the unit was parked from
     halt_detail: str | None = None  # halted or escalated: the person's text of the stop (L4-OPS-005, L4-OPS-006)
+    halt_reason: str | None = (
+        None  # halted or escalated: the code of the stop (L4-OPS-022 reads `no_convertible_finding`)
+    )
     drafts: tuple[str, ...] = ()  # an answer is written but Status is still `open`: never consumed (SCN-QMD-03)
     unreadable: tuple[str, ...] = ()  # questions whose section or Blocking tasks line could not be read
     verdicts_open: tuple[str, ...] = ()  # verdict questions the verifier asked and nobody answered
@@ -319,6 +322,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         retry_after=snapshot.state.retry_after,
         previous_phase=snapshot.state.previous_phase,
         halt_detail=snapshot.state.halt_detail,
+        halt_reason=snapshot.state.halt_reason,
         drafts=_issue_ids(snapshot, "unsubmitted_answer"),
         unreadable=_issue_ids(snapshot, "unreadable_section", "unreadable_blocking"),
         verdicts_open=verdicts.open,

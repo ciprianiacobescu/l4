@@ -130,3 +130,21 @@ def test_json_carries_halt_task_and_halt_fix_unit(unit_repo, trailers, capsys):
     _, out, _ = run_cli(unit_repo, capsys, "status", "--json")
     [unit] = json.loads(out)["units"]
     assert (unit["halt_task"], unit["halt_fix_unit"]) == ("1.1", "add-x-fix-1")
+
+
+def test_status_of_a_unit_escalated_with_no_convertible_finding_names_feedback_first(unit_repo, trailers, capsys):
+    """SCN-OPS-38 / SCN-OPS-39 (L4-OPS-022): `Next:` and `next` say feedback before the retry; other causes keep it."""
+    detail = "no finding of this round can be converted into a fix task"
+    rows = [
+        *IMPLEMENTING,
+        ("phase.changed", {"from": "implementing", "to": "escalated", "reason": "no_convertible_finding",
+                           "detail": detail}),
+    ]  # fmt: skip
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *rows), trailers)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    nxt = out.splitlines()[-1]
+    assert nxt.startswith("Next: a retry alone repeats the same verdict; first give the fix")
+    assert nxt.index("l4 feedback add --unit openspec:add-x --kind behaviour") < nxt.index("l4 retry --unit")
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--json")
+    (unit,) = json.loads(out)["units"]
+    assert "l4 feedback add --unit openspec:add-x" in unit["next"] and unit["halt_reason"] == "no_convertible_finding"

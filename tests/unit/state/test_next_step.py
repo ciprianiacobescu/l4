@@ -23,6 +23,29 @@ def test_a_stopped_unit_is_retried(phase):
     assert step(phase) == "l4 retry --unit openspec:x --reason TEXT"
 
 
+def test_the_escalation_with_no_convertible_finding_names_feedback_before_the_retry():
+    """SCN-OPS-38 (L4-OPS-022): a retry alone repeats the verdict."""
+    got = step("escalated", halt_reason="no_convertible_finding")
+    assert got.index("l4 feedback add --unit openspec:x --kind behaviour --when") < got.index(
+        "l4 retry --unit openspec:x --reason TEXT"
+    )
+    assert "--then" in got and "--text" in got and "a retry alone repeats the same verdict" in got
+
+
+@pytest.mark.parametrize(
+    ("phase", "code"),
+    [
+        ("escalated", "fix_rounds_exhausted"),
+        ("escalated", "same_failure"),
+        ("escalated", None),
+        ("halted", "no_convertible_finding"),
+    ],
+)
+def test_other_causes_keep_the_plain_retry(phase, code):
+    """SCN-OPS-39 (L4-OPS-022)."""
+    assert step(phase, halt_reason=code) == "l4 retry --unit openspec:x --reason TEXT"
+
+
 def test_an_abandoned_unit_is_restarted():
     assert step("abandoned") == "l4 restart --unit openspec:x --reason TEXT"
 
