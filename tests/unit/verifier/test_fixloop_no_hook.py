@@ -16,7 +16,7 @@ def no_fix_loop() -> None:
 
 
 def test_the_tasks_of_a_fix_unit_do_not_move(run_l4, valid_spec, fake_clock):
-    invalid = Step(structured={"status": "ok"})  # no `summary`: a failed attempt
+    invalid = Step()  # no result object: a failed attempt
     run = run_l4([red_step(), noqa_green(), invalid, invalid, invalid], **TWO)
     assert run.code == 13
     assert run.events("implementer.escalated") == [] and run.events("implementer.escalation_skipped") == []

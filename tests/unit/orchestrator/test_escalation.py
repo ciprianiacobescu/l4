@@ -17,7 +17,7 @@ from .conftest import BRANCH, UNIT
 from .test_fallback import RESETS, TWO
 
 FAIL = Step(structured=result("red"))  # "no tests added": a failed red attempt
-INVALID = Step(structured={"status": "ok"})  # no `summary`: a failed attempt too
+INVALID = Step()  # no result object: a failed attempt too
 
 
 def vendors(run) -> list[str | None]:

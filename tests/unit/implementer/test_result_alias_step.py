@@ -48,6 +48,13 @@ def test_the_alias_exists_during_the_step_and_a_result_written_through_it_is_acc
         (alias / "result.json").write_text(json.dumps(RESULT), encoding="utf-8")
 
     seen = around(bench, write)
+    inner = bench.adapter.run
+
+    def attach(req):  # what a prompt-contract adapter does after the run (`attach_file_result`)
+        run = inner(req)
+        return dataclasses.replace(run, structured=json.loads(req.result_path.read_text(encoding="utf-8")))
+
+    bench.adapter.run = attach  # type: ignore[method-assign]
     outcome = run_red(bench.wb, TASK, attempt=1)
     assert seen["during"] is True
     assert outcome.status == "ok", outcome.reason

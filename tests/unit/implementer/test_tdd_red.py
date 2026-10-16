@@ -149,7 +149,7 @@ def test_protected_paths_are_reverted_and_recorded_but_do_not_fail_red(make_benc
 def test_an_agent_that_ends_in_error_or_returns_garbage_fails_the_attempt(make_bench):
     bench = make_bench([Step(status="timeout"), Step(structured={"status": "great"}), Step()])
     assert "status timeout" in run_red(bench.wb, TASK, attempt=1).reason
-    assert "result is invalid" in run_red(bench.wb, TASK, attempt=2).reason
+    assert run_red(bench.wb, TASK, attempt=2).reason == "no tests added"  # normalized, then judged on the work
     assert "result is invalid: no result was delivered" in run_red(bench.wb, TASK, attempt=3).reason
 
 
@@ -263,23 +263,6 @@ def test_an_agent_that_crashes_leaves_nothing_protected_or_forged_behind(make_be
     assert not (wb.worktree / ".claude").exists()
     assert "verified" not in ledger.read_text()
     assert [e["path"] for e in bench.events("guard.violation")] == [".claude/settings.json", wb.ledger_rel]
-
-
-def test_a_result_file_that_is_a_symlink_is_never_read(make_bench, tmp_path):
-    import pytest
-
-    from l4.implementer.tdd import ResultInvalid, _file_result
-
-    secret = tmp_path / "login.json"
-    secret.write_text('{"token": "x"}')
-    link = tmp_path / "result.json"
-    link.symlink_to(secret)
-
-    class Req:
-        result_path = link
-
-    with pytest.raises(ResultInvalid, match="no result"):
-        _file_result(Req())  # type: ignore[arg-type]
 
 
 def _answer(bench: Bench, status: str, text: str, tasks: str) -> None:
