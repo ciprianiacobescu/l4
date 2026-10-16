@@ -6,6 +6,21 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.3 (2026-10-16)
+
+### Fixed
+- `l4 questions accept` and `answer` pushed the answer to the unit branch and relied on that push to start a run.
+  GitHub runs a push with the workflow file of the pushed branch, which still pinned the old harness after the base had
+  moved its pin: the pin guard (CFG-008) did no work and the unit did not resume. The push also started the
+  repository's own CI on a unit that was in the middle of TDD, and its red tests left a misleading red check on the
+  pull request. The commit now carries `[skip ci]` and the command starts a run on the base branch, as `l4 retry` does
+  (`--no-run` skips it; a refused start prints how to start one by hand and exits 0).
+- `l4 upgrade` now names the open unit branches on origin (from the remote-tracking refs it has, no network) whose own
+  workflow copy pins another harness than the new one, and says that a push to one of them does no work and that runs
+  start on the base.
+- The runbook (7.1) and the skill say to start a run on the base after a hand-edited answer is pushed.
+- A Python support file named in the heading of a task's section in `tasks.md` (for example `## 1. Root conftest.py`) now opens in green like one named in the task line, under the same trust check (an active plan or the base branch); a heading of another section, a glob or `../` opens nothing.
+
 ## 0.4.2 (2026-10-16)
 
 ### Added

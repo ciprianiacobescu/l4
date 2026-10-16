@@ -48,13 +48,15 @@ QUESTIONS_HELP = (
     + """
 
 Reads questions.md on the fetched unit branch on origin, never your work tree. accept and answer write one commit \
-to that branch and push it (no force), so the push starts the run that takes the answer.
+to that branch and push it (no force) with [skip ci]; the command then starts a run on the base branch, \
+which takes the answer (--no-run skips that).
 
 \b
 l4 questions [list] [--unit U] [--json]        the open questions of one unit, or of every unit with a branch
 l4 questions show Q-NNN --unit U [--json]      one question: what accept takes, the frozen paths it would unfreeze
-l4 questions accept Q-NNN --unit U [--no-push] take the clarifier's suggestion as the answer
-l4 questions answer Q-NNN --unit U --text TEXT [--no-push]
+l4 questions accept Q-NNN --unit U [--no-push] [--no-run]
+                                               take the clarifier's suggestion as the answer
+l4 questions answer Q-NNN --unit U --text TEXT [--no-push] [--no-run]
                                                write your answer (--text - reads standard input)
 
 --no-push prints the diff and the commit message and writes nothing. A caller that is an agent (an agent marker \
@@ -161,6 +163,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--text", "text", help="answer: the answer. - reads standard input."),
         _flag("--json", "as_json", help="list, show: print l4/questions@1 JSON."),
         _flag("--no-push", "no_push", help="accept, answer: print the diff and the commit message; write nothing."),
+        _flag("--no-run", "no_run", help="accept, answer: do not start the harness's CI on the base branch."),
     ]),
     "feedback add": (feedback_help.ADD_HELP, lambda: [
         _opt("--kind", "kind", required=True,

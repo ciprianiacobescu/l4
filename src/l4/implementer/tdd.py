@@ -99,7 +99,7 @@ from l4.specs.kiro import parse_kiro_tasks
 from l4.specs.markers import MAX_TASKS_BYTES
 from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
-from l4.specs.tasks_text import task_text
+from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.verifier.scan import task_tags
 from l4.yolo.digest import RevisionMissing, unit_digest
@@ -1193,10 +1193,11 @@ def _regular_blob(wb: Workbench, rev: str, path: str) -> bytes | None:
 
 
 def _block_of(data: bytes, key: str, framework: Framework) -> str | None:
-    """The text block of the one task `key` of a `tasks.md`, or None when the file has none or several of that key."""
+    """The text a person reviewed for the one task `key` of a `tasks.md` (its enclosing headings and its text block), or
+    None when the file has none or several of that key."""
     tasks = parse_openspec_tasks(data) if framework is Framework.OPENSPEC else parse_kiro_tasks(data)
     found = [t for t in tasks if t.key == key]
-    return task_text(data, found[0], framework) if len(found) == 1 else None
+    return task_context(data, found[0], framework) if len(found) == 1 else None
 
 
 def named_task_text(wb: Workbench, task: Task) -> tuple[str, str] | None:

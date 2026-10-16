@@ -51,7 +51,7 @@ from l4.init.init import (
 )
 from l4.init.pytest_marker import MarkerEdit, MarkerRefusal, register_l4_marker
 from l4.init.vendor import VendorSource, collect_vendor_source, harness_root
-from l4.vcs.git import Git
+from l4.vcs.git import Git, GitError
 
 log = logging.getLogger("l4.upgrade")
 
@@ -415,6 +415,57 @@ def apply_upgrade(repo: Path, plan: UpgradePlan) -> None:
     load_config(repo)  # the upgraded file must load
 
 
+def _branch_pin(git: Git, ref: str, delivery: str) -> str | None:
+    """The harness commit that the branch's own files pin: for an action adoption the setup action in its workflow,
+    for a fetched or vendored one `harness.commit` of its config. None when the file is absent or says nothing."""
+    path = WORKFLOW_RELPATH if delivery == "action" else str(CONFIG_RELPATH)
+    shown = git.run("show", f"{ref}:{path}", check=False)
+    if shown.returncode != 0 or len(shown.stdout) > MAX_CONFIG_BYTES:
+        return None
+    if delivery == "action":
+        found = read_pin(shown.stdout)
+        return found.effective if found is not None else None
+    try:
+        document = yaml.safe_load(shown.stdout)
+    except yaml.YAMLError:
+        return None
+    harness = document.get("harness") if isinstance(document, dict) else None
+    commit = harness.get("commit") if isinstance(harness, dict) else None
+    return str(commit) if commit else None
+
+
+def stale_branches_note(repo: Path, environ: Mapping[str, str], commit: str) -> str | None:
+    """After a pin moved: the open unit branches on origin (the remote-tracking refs the last fetch left, no network)
+    whose own copy pins another commit. GitHub runs a push with the workflow of the pushed branch, so a push to one of
+    them runs the old pin, whose guard (CFG-008) does no work; runs start on the base."""
+    try:
+        cfg = load_config(repo)
+        git = Git(repo, environ=environ)
+        listed = git.run(
+            "for-each-ref", "--format=%(refname:strip=3)", f"refs/remotes/origin/{cfg.forge.branch_prefix}", check=False
+        )
+        if listed.returncode != 0:
+            return None
+        delivery = effective_delivery(cfg)
+        stale = [
+            name
+            for name in listed.stdout.split()
+            if name != cfg.forge.base_branch
+            and (pin := _branch_pin(git, f"refs/remotes/origin/{name}", delivery)) is not None
+            and pin != commit
+        ]
+    except (L4Exit, GitError, OSError):
+        return None
+    if not stale:
+        return None
+    shown = ", ".join(stale[:5]) + (f" and {len(stale) - 5} more" if len(stale) > 5 else "")
+    return (
+        f"{len(stale)} open unit branch(es) on origin keep the old workflow copy ({shown}): a push to one of them "
+        f"does no work (GitHub runs the pushed branch's copy, which pins the old harness); runs start on the base, "
+        f"{cfg.forge.base_branch} (`l4 retry`, `l4 questions` and the schedule do that)"
+    )
+
+
 def run_upgrade(
     app: AppContext,
     *,
@@ -454,6 +505,10 @@ def run_upgrade(
         )
     if plan.missing:
         click.echo(f"not in {CONFIG_RELPATH}, the defaults apply (nothing is written): {', '.join(plan.missing)}")
+    if plan.vendor_differs or plan.files:  # the pin moved (or would): the unit branches have their own copies
+        stale = stale_branches_note(app.repo, app.environ, plan.commit)
+        if stale is not None:
+            click.echo(stale)
     if not dry_run:
         apply_upgrade(app.repo, plan)
     return ExitCode.OK
