@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, load_template, render_prompt
-from l4.implementer.result import RESULT_SCHEMA
+from l4.implementer.result import FILE_RESULT_SCHEMA
 from l4.specs.base import Criterion, Framework
 
 
@@ -150,7 +150,7 @@ def test_a_result_path_is_rendered_literally_when_the_adapter_writes_a_file():
 def test_a_prompt_contract_prompt_carries_the_result_schema():
     """Live finding (job 5465): opencode was told the result path but not the schema, so it wrote every field the
     Output line names and none of the required `status` and `summary` (no native flag enforces the schema there)."""
-    schema = json.dumps(RESULT_SCHEMA, separators=(",", ":"), sort_keys=True)
+    schema = json.dumps(FILE_RESULT_SCHEMA, separators=(",", ":"), sort_keys=True)
     text = render_prompt("red", ctx(result_path=Path("/tmp/res/result.json"))).text
     output = text[text.index("# Output") :]
     assert schema in output

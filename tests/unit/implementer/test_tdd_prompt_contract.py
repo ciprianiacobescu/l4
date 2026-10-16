@@ -3,7 +3,7 @@
 import dataclasses
 import json
 
-from l4.implementer.result import RESULT_SCHEMA
+from l4.implementer.result import FILE_RESULT_SCHEMA
 from l4.implementer.tdd import run_red
 
 from .conftest import red_step
@@ -31,7 +31,7 @@ def test_a_prompt_contract_adapter_is_given_the_result_schema(make_bench):
     caps = dataclasses.replace(bench.adapter.capabilities(), schema_mode="prompt_contract")
     bench.adapter.capabilities = lambda: caps  # type: ignore[method-assign]
     run_red(bench.wb, TASK, attempt=1)
-    assert json.dumps(RESULT_SCHEMA, separators=(",", ":"), sort_keys=True) in bench.adapter.requests[0].prompt
+    assert json.dumps(FILE_RESULT_SCHEMA, separators=(",", ":"), sort_keys=True) in bench.adapter.requests[0].prompt
 
 
 def test_a_kiro_leaf_s_requirement_links_reach_the_prompt(make_bench):
