@@ -584,6 +584,101 @@ def test_an_unfrozen_path_of_another_task_is_still_a_blocker(tmp_path, git_envir
         assert "tests/test_a.py" in finding.detail and out.unfrozen == [], other
 
 
+CONFTEST = "import os\n"
+
+
+def _opened_history(tmp_path, git_environ, *, reason="named_by_task", source="plan:p1@abc", **unfrozen):
+    repo, base = new_repo(
+        tmp_path, git_environ, {"conftest.py": CONFTEST, "tests/test_a.py": "def test_a():\n    assert 1\n"}
+    )
+    red = repo.commit("red", task="2.1", tdd="red")
+    repo.write({"conftest.py": CONFTEST + 'os.environ.setdefault("APP_OTEL_ENABLED", "false")\n'})
+    green = repo.commit("green", task="2.1", tdd="green")
+    data = {"task": "2.1", "paths": ["conftest.py"], "red_sha": red, "reason": reason, "source": source, **unfrozen}
+    repo.events = [
+        event("task.red_ok", 1, task="2.1", sha=red, frozen=["conftest.py"]),
+        event("task.unfrozen", 2, **data),
+        event("task.done", 3, task="2.1", sha=green),
+    ]
+    return repo, base, green
+
+
+def test_a_file_opened_by_the_task_text_is_listed_with_its_source_not_a_blocker(tmp_path, git_environ):
+    """SCN-IMP-167"""
+    repo, base, green = _opened_history(tmp_path, git_environ)
+    out = check_freeze(repo.context(base, green))
+    assert out.findings == []
+    assert out.unfrozen == ["conftest.py (task 2.1, opened by its text, plan:p1@abc)"]
+    assert out.note.endswith("(+1 opened by task text)") and "human answers" not in out.note
+    assert check_test_paths(repo.context(base, green)).findings == []
+
+
+def test_opened_and_answered_files_are_counted_apart_and_an_old_event_reads_as_a_human_answer(tmp_path, git_environ):
+    repo, base, green = _opened_history(tmp_path, git_environ)
+    repo.events[1] = event(
+        "task.unfrozen", 2, task="2.1", paths=["conftest.py"], question="Q-001", red_sha=repo.events[1].data["red_sha"]
+    )
+    out = check_freeze(repo.context(base, green))
+    assert out.unfrozen == ["conftest.py (task 2.1, unfrozen by Q-001 (human))"]
+    assert "(+1 unfrozen by human answers)" in out.note and "opened by task text" not in out.note
+
+
+def test_an_opened_event_of_another_red_commit_does_not_allow_the_change(tmp_path, git_environ):
+    for index, other in enumerate(({"red_sha": "f" * 40}, {"task": "2.2"}, {"paths": ["other.py"]})):
+        folder = tmp_path / str(index)
+        folder.mkdir()
+        repo, base, green = _opened_history(folder, git_environ, **other)
+        out = check_freeze(repo.context(base, green))
+        [finding] = out.findings
+        assert "conftest.py" in finding.detail and out.unfrozen == [], other
+
+
+def test_an_opened_event_with_no_paths_counts_and_lists_nothing(tmp_path, git_environ):
+    """SCN-IMP-165: every named file stayed kept, so the event has `paths: []` and only `kept`."""
+    repo, base, green = _opened_history(tmp_path, git_environ, paths=[], kept={"tests/test_a.py": "a red test"})
+    out = check_freeze(repo.context(base, green))
+    [finding] = out.findings  # conftest.py changed and nothing opened it
+    assert "conftest.py" in finding.detail and out.unfrozen == []
+    assert "opened by task text" not in out.note and "human answers" not in out.note
+    assert check_scan(repo.context(base, green)).findings == []
+
+
+def _patching_history(tmp_path, git_environ, body: str, paths=("conftest.py",)):
+    repo, base = new_repo(tmp_path, git_environ, {"conftest.py": CONFTEST, "src/app/otel.py": "enabled = True\n"})
+    red = repo.commit("red", task="2.1", tdd="red")
+    repo.write({"conftest.py": CONFTEST + body, "src/app/otel.py": "enabled = False\n"})
+    green = repo.commit("green", task="2.1", tdd="green")
+    repo.events = [
+        event("task.red_ok", 1, task="2.1", sha=red, frozen=["conftest.py"]),
+        event("task.unfrozen", 2, task="2.1", paths=list(paths), red_sha=red, reason="named_by_task"),
+        event("task.done", 3, task="2.1", sha=green),
+    ]
+    return repo.context(base, green)
+
+
+PATCH = "\n\n@pytest.fixture(autouse=True)\ndef _off(monkeypatch):\n    monkeypatch.%s\n"
+
+
+def test_an_opened_file_that_patches_the_units_code_is_a_blocker(tmp_path, git_environ):
+    """SCN-IMP-172"""
+    ctx = _patching_history(tmp_path, git_environ, PATCH % 'setattr("app.otel.enabled", lambda: False)')
+    out = check_scan(ctx)
+    [finding] = out.findings
+    assert finding.severity is Severity.BLOCKER
+    assert "an opened support file patches the unit's code" in finding.title + finding.detail
+    assert "conftest.py" in finding.detail and "app.otel.enabled" in finding.detail
+
+
+def test_an_opened_file_that_sets_an_env_var_is_not_a_blocker(tmp_path, git_environ):
+    ctx = _patching_history(tmp_path, git_environ, PATCH % 'setenv("APP_OTEL_ENABLED", "false")')
+    assert check_scan(ctx).findings == []
+
+
+def test_a_patch_in_a_file_no_task_unfrozen_names_gets_no_opened_file_finding(tmp_path, git_environ):
+    ctx = _patching_history(tmp_path, git_environ, PATCH % 'setattr("app.otel.enabled", lambda: False)', ("x.py",))
+    assert not [f for f in check_scan(ctx).findings if "opened support file" in f.title + f.detail]
+
+
 # --- L4-IMP-006 (7): a green or fix-chore commit changes no path of the test globs ---------------------------------
 
 
