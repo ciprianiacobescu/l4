@@ -41,13 +41,19 @@ from l4.specs.providers import providers_for
 from l4.state.budget import feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.fold import UnitState
 from l4.state.lifecycle import Phase, Trigger
-from l4.state.status import load_snapshot, refresh_refs, select_runnable, snapshots
+from l4.state.status import (
+    load_snapshot,
+    note_binding,
+    note_lines,
+    refresh_refs,
+    select_runnable,
+    snapshots,
+)
 from l4.vcs.git import Git
 from l4.vcs.names import unit_branch
 from l4.vcs.refresh import unit_refspecs
 
 log = logging.getLogger("l4.retry")
-NOTE_LIMIT = 300  # the reason that `Orchestrator.resume` records and the prompt block reads
 
 _CONTINUES = frozenset(
     {Phase.INTAKE, Phase.READY, Phase.CLARIFYING, Phase.IMPLEMENTING, Phase.IMPLEMENTED, Phase.VERIFYING,
@@ -80,30 +86,6 @@ def refuse(ref: UnitRef, state: UnitState, cfg: L4Config, relative: str) -> L4Ex
     else:
         return None
     return L4Exit(ExitCode.USAGE_ERROR, text)
-
-
-def note_binding(state: UnitState) -> tuple[str | None, str | None]:
-    """The task (and fix unit) that a person's note binds to: the one that tripped `max_task_attempts` on a `halted`
-    unit; `(None, None)` for every other stop, which names no task (L4-OPS-018, D11)."""
-    if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
-        return state.halt_task, state.halt_fix_unit
-    return None, None
-
-
-def note_lines(command: str, state: UnitState, reason: str) -> list[str]:
-    """The lines that `l4 retry` and `l4 resume` print about the note, from the state before they recorded: the cut
-    of a long reason, then where the reason goes (L4-OPS-018, D13)."""
-    lines = []
-    if len(reason) > NOTE_LIMIT:
-        cut = f"{command}: the reason is longer than {NOTE_LIMIT} characters"
-        lines.append(f"{cut}; the implementer reads the first {NOTE_LIMIT}")
-    task, _ = note_binding(state)
-    lines.append(
-        f"note: the reason goes to the next steps of task {task}"
-        if task
-        else "note: the stop names no task, so no implementer step reads the reason"
-    )
-    return lines
 
 
 def retry_unit(
