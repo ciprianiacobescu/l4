@@ -114,9 +114,10 @@ hold id, so it is not void. The reject-to-accept test runs the whole chain.
 ## 3. Risks
 
 - `plan_fix_unit` drops candidates past `MAX_FIX_TASKS`. If that many feedback items sort ahead of a convertible
-  reject candidate, the plan is feedback-only, that reject is neither in `consumed` nor in the not converted list, and
-  the read-time rule of D1 still consumes it. The person would have to reject again. This is rare, and the write-time
-  list cannot fix it without changing what `feedback_only` means for the round counting [I].
+  reject candidate, the plan is feedback-only and that reject is neither in `consumed` nor in the not converted list.
+  A spawn written by 0.4.6 and later carries `lists_unconverted: true`, and only its `consumed` list counts, so that
+  reject stays in force (review of this change). The read-time rule of D1 applies only to spawns without the marker,
+  the ones 0.4.5 and older wrote, where this rare case can still consume such a reject; the person rejects again [I].
 - The comment of D6 holds the visible text of the old answer; a comment that a person typed inside the old answer is
   not copied (git history keeps it).
 - D1 reads a ledger of 0.4.5 where a person's reject came before a feedback-only spawn that was caused by something

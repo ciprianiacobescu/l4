@@ -3130,7 +3130,8 @@ errors`, and a later run of the unit does not call the verifier again.
 unit that took it is spawned (`fix.spawned.consumed`). A round whose only fix tasks are feedback tasks (`feedback_only`)
 takes no reject, because the planner lists a human reject that has no criterion and no `WHEN … THEN …` as not
 converted. `effective_verdicts` SHALL drop a `reject` whose `human.verdict` event is before (in ledger order) a
-`fix.spawned` event with `feedback_only: true`; this covers ledgers written by 0.4.5 and older. A `reject` recorded
+`fix.spawned` event with `feedback_only: true` and no `lists_unconverted: true`, the event as 0.4.5 and older wrote it.
+A spawn that has `lists_unconverted: true` consumes only the questions of its `consumed` list. A `reject` recorded
 after that event stays in force. A `fix.spawned` without `feedback_only: true` keeps the rule that only the questions of
 its `consumed` list are consumed, and an `accept` is not changed. When the fix loop spawns a feedback-only fix unit, the
 `consumed` list of its `fix.spawned` event SHALL also hold the questions of the rejects in force that the round listed as
@@ -7103,7 +7104,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-65 (−) A reject after the spawn, and a spawn that is not feedback-only, keep the reject · L4-VER-016
 - **Given** in turn: the reject recorded after a feedback-only `fix.spawned`; the reject before a `fix.spawned` with no `feedback_only` and `consumed: []`
 - **When** `effective_verdicts` reads each
-- **Then** the reject is in force in both
+- **Then** the reject is in force in both; and a reject that a feedback-only spawn with `lists_unconverted: true` does not name in `consumed` stays in force
 
 #### SCN-VER-66 (+) The new spawn lists the rejects it could not convert · L4-VER-016
 - **Given** a FAIL round whose only blocking findings are a rejected hold with no scenario (question Q-004) and a feedback item

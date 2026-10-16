@@ -227,6 +227,19 @@ def test_a_reject_after_a_feedback_only_spawn_and_before_another_kind_of_spawn_s
     assert effective_verdicts(plain, {A: sha})[A].decision == "reject"
 
 
+def test_a_spawn_that_lists_its_unconverted_rejects_consumes_only_those():
+    """L4-VER-016: a feedback-only spawn written by 0.4.6 and later names the rejects it consumes; an earlier reject it
+    does not name (one a task could be derived from, left waiting) stays in force."""
+    sha_a, sha_b = text_sha256(crit(A)), text_sha256(crit(B))
+    events = [
+        verdict_event(1, "Q-004", A, "reject", sha_a),
+        verdict_event(2, "Q-005", B, "reject", sha_b),
+        _spawn(3, feedback_only=True, lists_unconverted=True, consumed=["Q-004"]),
+    ]
+    got = effective_verdicts(events, {A: sha_a, B: sha_b})
+    assert A not in got and got[B].decision == "reject"
+
+
 def test_a_feedback_only_spawn_leaves_an_accept_and_a_newer_reject_alone():
     sha = text_sha256(crit(A))
     accept = verdict_event(1, "Q-001", A, "accept", sha)

@@ -7,12 +7,15 @@ request, so the next round judges the fixed code instead of failing on the same 
 
 ### Requirement: L4-VER-016 A feedback-only fix unit consumes the rejects its round could not convert
 `effective_verdicts` SHALL drop a `reject` verdict whose `human.verdict` event is before (in ledger order) a
-`fix.spawned` event with `feedback_only: true`. A `reject` recorded after that event SHALL stay in force. A
+`fix.spawned` event with `feedback_only: true` and no `lists_unconverted: true` (the event as 0.4.5 and older wrote
+it). A spawn with `lists_unconverted: true` SHALL consume only the questions of its `consumed` list. A `reject` recorded
+after that event SHALL stay in force. A
 `fix.spawned` without `feedback_only: true` SHALL keep the rule that only the questions of its `consumed` list are
 consumed. An `accept` SHALL NOT be changed by this rule.
 
 When the fix loop spawns a feedback-only fix unit, the `consumed` list of its `fix.spawned` event SHALL also hold the
-questions of the rejects in force that the round listed as not converted.
+questions of the rejects in force that the round listed as not converted, and the event SHALL carry
+`lists_unconverted: true`.
 
 A hold that is raised again in a later round and has no verdict in force SHALL be asked as a new hold question.
 
@@ -24,7 +27,7 @@ A hold that is raised again in a later round and has no verdict in force SHALL b
 #### Scenario: SCN-VER-65 (−) A reject after the spawn, and a spawn that is not feedback-only, keep the reject
 - **GIVEN** in turn: the reject recorded after a feedback-only `fix.spawned`; the reject before a `fix.spawned` with no `feedback_only` and `consumed: []`
 - **WHEN** `effective_verdicts` reads each
-- **THEN** the reject is in force in both
+- **THEN** the reject is in force in both; and a reject that a feedback-only spawn with `lists_unconverted: true` does not name in `consumed` stays in force
 
 #### Scenario: SCN-VER-66 (+) The new spawn lists the rejects it could not convert
 - **GIVEN** a FAIL round whose only blocking findings are a rejected hold with no scenario (question Q-004) and a feedback item

@@ -82,6 +82,9 @@ class Refusal:
         return L4Exit(ExitCode.USAGE_ERROR, f"questions: {self.message}\nFix: {self.fix}")
 
 
+_REPLACEABLE = (QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED)  # a verdict answer `answer --replace` may replace
+
+
 def _usage(message: str, fix: str = "l4 questions --help") -> L4Exit:
     return Refusal(message, fix).exit()
 
@@ -605,13 +608,13 @@ def check_question(
                 f"{qid} is superseded by {successor}",
                 f"answer {successor}: l4 questions show {successor} --unit {unit}",
             )
-        if verdict and question.status is QuestionStatus.ANSWERED and not replace:
+        if verdict and question.status in _REPLACEABLE and not replace:
             return Refusal(
                 f"{qid} is answered",
                 f"to replace the answer on purpose: l4 questions answer {qid} --unit {unit} "
                 f'--text "accept <reason>" --replace (or "reject <reason>"); the previous answer stays in the section',
             )
-        if not (replace and verdict and question.status is QuestionStatus.ANSWERED):
+        if not (replace and verdict and question.status in _REPLACEABLE):
             if replace and not verdict:
                 return Refusal(
                     f"{qid} is not a verdict question: --replace is for an answered verdict question",

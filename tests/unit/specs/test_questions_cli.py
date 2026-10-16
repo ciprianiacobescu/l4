@@ -944,6 +944,13 @@ def test_scn_qmd_27_replace_is_refused_for_anything_but_an_answered_verdict_ques
     assert "empty" in replacing(parsed(REJECTED), "  ")
 
 
+def test_replace_also_takes_a_verdict_answered_with_accept():
+    """L4-QMD-010: `l4 questions accept` answers a verdict question with the clarifier's suggestion (status
+    accepted); that answer is replaced like a written one."""
+    accepted = parsed({**REJECTED, "status": "accepted", "answer": "accept as suggested"})
+    assert replacing(accepted, "reject the fix is missing") is None
+
+
 def test_replace_answer_keeps_the_previous_answers_in_comments_the_parser_does_not_read():
     file = parsed({**REJECTED, "answer": "reject too long -->\nsee <!-- x"})
     once = file.replace_answer("Q-001", "accept the fix is in", who="Ana", on="2026-10-16")
