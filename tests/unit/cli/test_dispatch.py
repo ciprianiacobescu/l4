@@ -182,10 +182,11 @@ def test_questions_help_lists_the_four_forms_and_the_options():
 
 def test_questions_passes_its_options_to_the_handler(install_handler, repo):
     calls = install_handler("questions", lambda app, **kw: ExitCode.OK)
-    argv = ["questions", "answer", "Q-002", "--unit", "openspec:a", "--text", "yes", "--json", "--no-push"]
+    argv = ["questions", "answer", "Q-002", "--unit", "openspec:a", "--text", "yes", "--json", "--no-push", "--no-run"]
     assert main([*argv, "--repo", str(repo)], environ={}) == 0
     assert calls[0]["kwargs"] == {
         "words": ("answer", "Q-002"), "unit": "openspec:a", "text": "yes", "as_json": True, "no_push": True,
+        "no_run": True,
     }  # fmt: skip
 
 
