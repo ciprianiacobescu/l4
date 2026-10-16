@@ -428,3 +428,38 @@ def test_a_hold_raised_again_after_a_feedback_only_spawn_is_asked_as_a_new_quest
         tmp_path, "u", existing=QuestionsFile.load(path), consumed=consumed, round_no=4, **ask
     )
     assert again == ["Q-002"]
+
+
+def test_a_replaced_reject_becomes_an_accept_that_clears_the_fail(tmp_path):
+    """SCN-QMD-28 (L4-QMD-010): `consume_verdicts` records the changed answer as a second `human.verdict`, the latest
+    one per target wins, and the hold raises no finding and is not asked again."""
+    from l4.verifier.verdicts import consume_verdicts, effective_verdicts, finding_sha256
+
+    class Sink:
+        def __init__(self) -> None:
+            self.events: list[LedgerEvent] = []
+
+        def append(self, event_type: str, /, **data) -> None:
+            self.events.append(LedgerEvent(STAMP, "r-1", UNIT, len(self.events) + 1, event_type, data))
+
+    sink, path, hid = Sink(), tmp_path / "questions.md", hold_id(LONG_DIFF)
+    raise_verdict_questions(
+        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), ledger=sink,
+        round_no=3, redactor=Redactor({}), holds=[LONG_DIFF],
+    )  # fmt: skip
+    file = QuestionsFile.load(path)
+    assert file is not None
+    file = file.set_answer("Q-001", "reject split the unit in two").set_status("Q-001", QuestionStatus.ANSWERED)
+    file.save(path)
+    assert consume_verdicts(file, sink.events, sink, []) == ["Q-001"]
+    current = {hid: finding_sha256(hid)}
+    rejected = effective_verdicts(sink.events, current)
+    assert rejected[hid].decision == "reject"
+    assert [f.source for f in settle_holds([], [LONG_DIFF], rejected)] == ["human"]  # the FAIL of the loop
+    file = file.replace_answer("Q-001", "accept the fix is in", who="Ana", on="2026-10-16")
+    file.save(path)
+    assert consume_verdicts(file, sink.events, sink, []) == ["Q-001"]
+    assert [e.data["decision"] for e in sink.events if e.type == "human.verdict"] == ["reject", "accept"]
+    accepted = effective_verdicts(sink.events, current)
+    assert accepted[hid].decision == "accept" and accepted[hid].reason == "the fix is in"
+    assert settle_holds([], [LONG_DIFF], accepted) == [] and unresolved_holds([LONG_DIFF], accepted) == []

@@ -62,6 +62,9 @@ l4 questions accept Q-NNN --unit U [--no-push] [--no-run]
                                                take the clarifier's suggestion as the answer
 l4 questions answer Q-NNN --unit U --text TEXT [--no-push] [--no-run]
                                                write your answer (--text - reads standard input)
+l4 questions answer Q-NNN --unit U --text TEXT --replace
+                                               replace the answer of an answered verdict question (accept or reject);
+                                               the old answer stays in the section
 
 --no-push prints the diff and the commit message and writes nothing. A caller that is an agent (an agent marker \
 in the environment, or standard input that is not a terminal) may write only a question of a kind in \
@@ -168,6 +171,8 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--json", "as_json", help="list, show: print l4/questions@1 JSON."),
         _flag("--no-push", "no_push", help="accept, answer: print the diff and the commit message; write nothing."),
         _flag("--no-run", "no_run", help="accept, answer: do not start the harness's CI on the base branch."),
+        _flag("--replace", "replace", help="answer: replace the answer of an answered verdict question; the old "
+                                           "answer stays in the section."),
     ]),
     "feedback add": (feedback_help.ADD_HELP, lambda: [
         _opt("--kind", "kind", required=True,

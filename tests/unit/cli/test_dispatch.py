@@ -186,8 +186,12 @@ def test_questions_passes_its_options_to_the_handler(install_handler, repo):
     assert main([*argv, "--repo", str(repo)], environ={}) == 0
     assert calls[0]["kwargs"] == {
         "words": ("answer", "Q-002"), "unit": "openspec:a", "text": "yes", "as_json": True, "no_push": True,
-        "no_run": True,
+        "no_run": True, "replace": False,
     }  # fmt: skip
+    again = install_handler("questions", lambda app, **kw: ExitCode.OK)
+    argv = ["questions", "answer", "Q-002", "--unit", "openspec:a", "--text", "accept it", "--replace"]
+    assert main([*argv, "--repo", str(repo)], environ={}) == 0
+    assert again[0]["kwargs"]["replace"] is True
 
 
 @pytest.mark.parametrize("name", sorted(SECTION_2_1))

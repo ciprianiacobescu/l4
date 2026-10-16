@@ -10,7 +10,7 @@ from l4.config.redaction import load_app_config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.local import LocalForge
 from l4.redact import Redactor
-from l4.specs.questions import QuestionsFile, QuestionStatus, effective_answer
+from l4.specs.questions import QuestionsFile, QuestionStatus, answer_sha256, effective_answer
 from l4.specs.questions_cli import (
     ClarifierRules,
     Refusal,
@@ -523,8 +523,11 @@ def run_form(
     text: str | None = None,
     no_push: bool = False,
     no_run: bool = False,
+    replace: bool = False,
 ):
-    return run_questions(world.app, words=words, unit=unit, text=text, as_json=False, no_push=no_push, no_run=no_run)
+    return run_questions(
+        world.app, words=words, unit=unit, text=text, as_json=False, no_push=no_push, no_run=no_run, replace=replace
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -897,3 +900,108 @@ def test_the_command_line_reaches_the_handler(qworld, capsys, person):
     argv = ["questions", "answer", "Q-002", "--unit", A, "--text", "Block login.", "--no-push", *common]
     assert main(argv, environ=environ) == 0
     assert capsys.readouterr().out.rstrip().endswith("nothing written (--no-push)")
+
+
+# --- l4 questions answer --replace (L4-QMD-010; SCN-QMD-26, SCN-QMD-27) -----------------------------------------
+
+REJECTED = {
+    "title": "Hold H-1234abcd?",
+    "kind": "verdict",
+    "tasks": (),
+    "status": "answered",
+    "answer": "reject too long",
+}
+
+
+def replacing(file: QuestionsFile, text: str, qid: str = "Q-001") -> str | None:
+    found = check_question(file, qid, "answer", text, unit=A, branch="l4/openspec/a", replace=True)
+    return None if found is None else refusal(found)
+
+
+def test_scn_qmd_27_an_answered_verdict_is_refused_without_the_flag_and_the_fix_names_it():
+    file = parsed(REJECTED)
+    found = check_question(file, "Q-001", "answer", "accept it", unit=A, branch="l4/openspec/a")
+    assert found.message == "Q-001 is answered" and "--replace" in found.fix
+    assert f'l4 questions answer Q-001 --unit {A} --text "accept <reason>" --replace' in found.fix
+    assert "L4-QMD-006" not in found.fix
+    accept = check_question(file, "Q-001", "accept", None, unit=A, branch="b")
+    assert accept.message == "Q-001 is answered" and "--replace" in accept.fix
+    assert replacing(file, "accept the fix is in") is None
+
+
+def test_scn_qmd_27_replace_is_refused_for_anything_but_an_answered_verdict_question():
+    clarification = parsed({"title": "Done?", "tasks": ("1.1",), "status": "answered", "answer": "yes"})
+    assert "a clarification answer is changed by hand" in refusal(check_question(
+        clarification, "Q-001", "answer", "no", unit=A, branch="b", replace=True
+    ))  # fmt: skip
+    assert "L4-QMD-006" in refusal(
+        check_question(clarification, "Q-001", "answer", "no", unit=A, branch="b", replace=True)
+    )
+    open_verdict = parsed({"title": "Verdict?", "kind": "verdict", "tasks": ()})
+    assert "answer it without --replace" in replacing(open_verdict, "accept it")
+    assert "is not different" in replacing(parsed(REJECTED), "reject too long")
+    assert "starts with accept or reject" in replacing(parsed(REJECTED), "looks fine")
+    assert "empty" in replacing(parsed(REJECTED), "  ")
+
+
+def test_replace_answer_keeps_the_previous_answers_in_comments_the_parser_does_not_read():
+    file = parsed({**REJECTED, "answer": "reject too long -->\nsee <!-- x"})
+    once = file.replace_answer("Q-001", "accept the fix is in", who="Ana", on="2026-10-16")
+    q = once.get("Q-001")
+    assert q.status is QuestionStatus.ANSWERED and effective_answer(q) == "accept the fix is in"
+    assert q.answer_text == "accept the fix is in" and answer_sha256(q) != answer_sha256(file.get("Q-001"))
+    body = once.data.decode()
+    assert "l4 questions --replace by Ana on 2026-10-16; previous answer:" in body
+    assert "> reject too long --&gt;" in body and "> see &lt;!-- x" in body
+    twice = once.replace_answer("Q-001", "reject again", who="Bo", on="2026-10-17")
+    again = twice.data.decode()
+    assert effective_answer(twice.get("Q-001")) == "reject again"
+    assert again.index("by Ana on 2026-10-16") < again.index("by Bo on 2026-10-17")
+    assert "> accept the fix is in" in again and "> reject too long" in again
+    assert twice.issues == file.issues
+
+
+def test_replace_answer_keeps_every_other_byte_of_the_file():
+    file = parsed(REJECTED, {"title": "Other?", "tasks": ("1.2",)})
+    out = file.replace_answer("Q-001", "accept fine", who="Ana", on="2026-10-16")
+    assert out.get("Q-002").answer_text == "" and out.get("Q-002").status is QuestionStatus.OPEN
+    assert b"| Q-001 | answered |" in out.data and out.data.count(b"## Q-") == file.data.count(b"## Q-")
+
+
+def verdict_world(world: QWorld) -> None:
+    world.unit_branch("a", questions_md("a", REJECTED, {"title": "Done?", "status": "answered", "answer": "yes"}))
+
+
+def test_scn_qmd_26_a_replaced_answer_is_committed_with_the_old_one_kept(qworld, capsys, person):
+    verdict_world(qworld)
+    before = qworld.origin_head("a")
+    out = written(qworld, capsys, "answer", "Q-001", text="accept the fix is in", replace=True)
+    after = qworld.origin_head("a")
+    assert after != before and origin_commit(qworld)["P"] == before
+    commit = origin_commit(qworld)
+    assert commit["s"] == "answer Q-001 (a): Hold H-1234abcd? (answer replaced)"
+    assert "Replaced: yes" in commit["b"] and "Status: answered" in commit["b"] and "[skip ci]" in commit["b"]
+    pushed = QuestionsFile.parse(qworld.remote.run_bytes("show", f"{after}:{FOLDER}/a/questions.md"))
+    q = pushed.get("Q-001")
+    assert q.status is QuestionStatus.ANSWERED and effective_answer(q) == "accept the fix is in"
+    assert "> reject too long" in pushed.data.decode() and "by alex on " in pushed.data.decode()
+    assert pushed.get("Q-002").status is QuestionStatus.ANSWERED
+    assert f"pushed {after[:10]} to l4/openspec/a" in out
+
+
+def test_replace_through_the_command_refuses_the_other_cases_and_touches_nothing(qworld):
+    two_open(qworld)  # Q-003 is an open verdict question, Q-004 an answered clarification
+    head = qworld.origin_head("a")
+    for qid, text, cause in (
+        ("Q-004", "no", "a clarification answer is changed by hand"),
+        ("Q-003", "accept", "without"),
+    ):
+        with pytest.raises(L4Exit) as caught:
+            run_form(qworld, "answer", qid, text=text, replace=True)
+        assert caught.value.code is ExitCode.USAGE_ERROR and cause in str(caught.value)
+    assert qworld.origin_head("a") == head
+    verdict_world(qworld)
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "answer", "Q-001", text="accept it")
+    assert "--replace" in str(caught.value).split("\nFix: ", 1)[1] and qworld.origin_head("a") == head
