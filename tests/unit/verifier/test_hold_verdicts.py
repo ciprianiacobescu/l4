@@ -7,8 +7,7 @@ part of the hold's question, and the one answer settles both."""
 import pytest
 
 from l4.redact import Redactor
-from l4.specs.questions import QuestionsFile
-from l4.specs.questions import QuestionStatus
+from l4.specs.questions import QuestionsFile, QuestionStatus
 from l4.state.ledger import LedgerEvent
 from l4.verifier.fixunit import plan_fix_unit
 from l4.verifier.types import Finding, HumanVerdict, Severity, Verdict, VerifyResult
@@ -416,7 +415,9 @@ def test_a_hold_raised_again_after_a_feedback_only_spawn_is_asked_as_a_new_quest
             "question": "Q-001", "target": hid, "decision": "reject", "by": "human", "reason": "too long",
             "text_sha256": finding_sha256(hid),
         }),
-        LedgerEvent(STAMP, "r-1", UNIT, 11, "fix.spawned", {"fix_unit": "u-fix-1", "feedback_only": True, "consumed": []}),
+        LedgerEvent(
+            STAMP, "r-1", UNIT, 11, "fix.spawned", {"fix_unit": "u-fix-1", "feedback_only": True, "consumed": []}
+        ),
     ]  # fmt: skip
     effective = effective_verdicts(events, {hid: finding_sha256(hid)})
     assert effective == {}
