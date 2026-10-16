@@ -75,7 +75,9 @@ def test_the_body_never_has_an_l4_run_line():
 def test_body_links_the_evidence_on_the_unit_branch_and_advises_merge_commits():
     body = render_pr_body("openspec:x", "l4/openspec/x", "openspec/changes/x/verification.md", "https://h.test/g/p")
     assert "(https://h.test/g/p/-/blob/l4/openspec/x/openspec/changes/x/verification.md)" in body
-    assert "never merges" in body
+    assert "never merges" not in body
+    assert "Who merges it: a person, unless the unit is in an active delivery plan with `merge: auto`" in body
+    assert "then the harness merges it after verification passes (see `l4 yolo status`)" in body
     plain = render_pr_body("openspec:x", "l4/openspec/x", "openspec/changes/x/verification.md", None)
     assert "`openspec/changes/x/verification.md`" in plain and "http" not in plain
 
@@ -123,3 +125,14 @@ def test_the_operator_labels_are_retry_restart_and_resume_under_the_prefix():
 
     assert operator_labels("l4:") == ["l4:retry", "l4:restart", "l4:resume"]
     assert operator_labels("x-") == ["x-retry", "x-restart", "x-resume"]
+
+
+def test_the_archive_body_says_who_merges_it():
+    from l4.postmerge import ARCHIVE_BODY
+
+    text = " ".join(ARCHIVE_BODY.split())
+    assert "never merges" not in text
+    assert (
+        "- Merge it with the merge-commit method. A person merges it, unless its unit is in an active delivery plan "
+        "with `merge: auto`; then the harness merges it." in text
+    )
