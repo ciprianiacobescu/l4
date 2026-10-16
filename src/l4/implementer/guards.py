@@ -31,6 +31,7 @@ IGNORE_FILE_GLOBS = (".gitignore", "**/.gitignore")
 class FrozenFile:
     sha256: str | None  # None: the file is a symlink or unreadable at the red commit (it is restored regardless)
     kind: Kind
+    in_red: bool = False
 
 
 @dataclass(frozen=True)

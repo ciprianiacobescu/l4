@@ -9,7 +9,8 @@ import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
-from l4.implementer.guards import FreezeManifest
+from l4.implementer.guards import IGNORE_FILE_GLOBS, FreezeManifest
+from l4.security.protected import glob_match
 from l4.specs.questions import (
     Question,
     QuestionKind,
@@ -27,9 +28,14 @@ _HUMAN_STATUSES = (QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED)
 
 @dataclass(frozen=True)
 class Grant:
-    question: str
-    answer_sha256: str
+    """`question` and `answer_sha256` are None for a grant by the task's own text (`reason == "named_by_task"`, then
+    `source` says whose text); an old ledger event without a `reason` is a `human_answer`."""
+
+    question: str | None
+    answer_sha256: str | None
     paths: tuple[str, ...]
+    reason: str = "human_answer"
+    source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,18 +51,53 @@ class Unfreeze:
 
     @property
     def question(self) -> str | None:
-        return ", ".join(g.question for g in self.grants) or None
+        return ", ".join(g.question for g in self.grants if g.question) or None
 
     @property
     def answer_sha256(self) -> str | None:
-        return self.grants[0].answer_sha256 if self.grants else None
+        return next((g.answer_sha256 for g in self.grants if g.answer_sha256), None)
 
 
-def names_path(text: str, path: str) -> bool:
+def names_path(text: str, path: str, *, dot_slash: bool = False) -> bool:
     """`path` as a token of `text`: a repository-relative path, optionally followed by `:<line>` (or a line range) or
-    by sentence punctuation. A longer path (`x.pyc`, `x.py.bak`, `dir/x.py`) is another token."""
-    pattern = rf"(?<![\w./-]){re.escape(path)}(?::\d+(?:[-:]\d+)?)?(?![\w/-]|\.\w)"
+    by sentence punctuation. A longer path (`x.pyc`, `x.py.bak`, `dir/x.py`) is another token. `dot_slash`: one `./`
+    that starts the token may come before the path (`./x.py`); the `./` of `../x.py` does not."""
+    lead = r"(?:\./)?" if dot_slash else ""
+    pattern = rf"(?<![\w./-]){lead}{re.escape(path)}(?::\d+(?:[-:]\d+)?)?(?![\w/-]|\.\w)"
     return re.search(pattern, text) is not None
+
+
+def _is_ignore_file(path: str) -> bool:
+    return any(glob_match(glob, path) for glob in IGNORE_FILE_GLOBS)
+
+
+def named_by_task(text: str, manifest: FreezeManifest, *, source: str) -> Unfreeze:
+    """The support files of `manifest` that the text block of a task names (D3 of unfreeze-and-answer): a Python file
+    that is not an ignore file, was a regular file at the red commit and that red did not add or change. Paths come
+    from the manifest, so a path outside it (another task's test file) is neither opened nor listed. At most
+    `MAX_PATHS_PER_QUESTION` open, in sorted order; every other named manifest path is `kept` with its reason."""
+    opened: list[str] = []
+    kept: list[tuple[str, str]] = []
+    for path in sorted(manifest.files):
+        if not names_path(text, path, dot_slash=True):
+            continue
+        frozen = manifest.files[path]
+        if frozen.kind == "test":
+            kept.append((path, "a red test of this task"))
+        elif _is_ignore_file(path):
+            kept.append((path, "an ignore file"))
+        elif frozen.in_red:
+            kept.append((path, "the red step of this task changed it"))
+        elif not path.endswith(".py"):
+            kept.append((path, "not a Python file: a person decides"))
+        elif frozen.sha256 is None:
+            kept.append((path, "a symlink at the red commit"))
+        elif len(opened) >= MAX_PATHS_PER_QUESTION:
+            kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named"))
+        else:
+            opened.append(path)
+    grants = (Grant(None, None, tuple(opened), reason="named_by_task", source=source),) if opened else ()
+    return Unfreeze(grants, tuple(kept))
 
 
 NOTE_PREFIX = "Harness note:"
@@ -103,8 +144,9 @@ def unfrozen(
     """The test files of `manifest` that the answers of `questions` unfreeze for a task whose own key and ancestors are
     `scope`. A question counts when its Status is `answered` or `accepted` by a human, the ledger recorded an answer
     with the digest of the text as it is now, its kind is not `verdict` and it blocks the task. The text must name the
-    file; a support or ignore file it names stays frozen (`kept`). An `accepted` answer is the clarifier's suggestion,
-    so the question itself (title, Context, Options) must name the file too; a human's own answer may name any test."""
+    file; a test or a support file it names opens, an ignore file stays frozen (`kept`). An `accepted` answer is the
+    clarifier's suggestion, so the question itself (title, Context, Options) must name the file too; a human's own
+    answer may name any test or support file."""
     digests = _recorded_digests(events)
     grants: list[Grant] = []
     kept: list[tuple[str, str]] = []
@@ -118,10 +160,8 @@ def unfrozen(
         if digest is None or answer is None or digest not in digests.get(question.id, set()):
             continue
         named = [path for path in sorted(manifest.files) if names_path(answer, path)]
-        tests = [p for p in named if manifest.files[p].kind == "test"]
-        for path in named:
-            if manifest.files[path].kind != "test":
-                kept.append((path, "a support or ignore file stays frozen"))
+        tests = [p for p in named if not _is_ignore_file(p)]  # a test or a support file: the person decides
+        kept.extend((p, "an ignore file") for p in named if _is_ignore_file(p))
         if question.status is QuestionStatus.ACCEPTED:  # the clarifier's text: it may not widen what was asked
             asked = "\n".join(
                 (question.title, unescape_text(question.context_text), unescape_text(question.options_text))
