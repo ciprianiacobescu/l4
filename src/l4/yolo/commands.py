@@ -1494,6 +1494,17 @@ def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdra
     state = fold_plan(plan_id, read.events)
     who = accepting.actor(ctx.app.environ, _stdin_tty())
     if withdraw:
+        if not (
+            state.status in _BEFORE_ACTIVATION
+            or (state.status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected"))
+        ):
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                f"accept: {plan_id} is {state.status}: the acceptances were frozen at its activation and the runs "
+                "read the frozen ones, so a withdrawal now would change nothing\n"
+                f"Fix: cancel the plan (l4 yolo cancel {plan_id}), or change the spec and review again "
+                f"(l4 yolo review {plan_id})",
+            )
         if subject not in state.accepted:
             raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} has no acceptance: nothing to withdraw")
         event = _event("plan.acceptance_withdrawn", subject=subject, reason=text, by=ctx.who(), actor=who[0])

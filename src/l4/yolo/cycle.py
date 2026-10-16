@@ -1308,14 +1308,29 @@ class _Step:
         answered `addressed: true`, as the wait detail (`<unit>: F-… not addressed: <evidence>; …`); None when none is
         open. An id without an answer is open (`no answer recorded`)."""
         unit = snap.ref.id
+        completes = self._completes_batch(ctx, unit)
         ids = [
-            f["id"] for item in self._accepted(ctx.plan_id, frozenset({unit})).get(unit, ()) for f in item["findings"]
-        ]
+            f["id"]
+            for item in self._accepted(ctx.plan_id, frozenset({unit})).get(unit, ())
+            if completes or not str(item["subject"]).startswith("batch:")
+            for f in item["findings"]
+        ]  # batch-level items travel to every unit, but only the unit that completes the batch must have them answered
         held = [fid for fid in dict.fromkeys(ids) if fid not in snap.state.accepted_addressed]
         if not held:
             return None
         why = (f"{fid} not addressed: {snap.state.accepted_evidence.get(fid) or 'no answer recorded'}" for fid in held)
         return f"{unit}: {'; '.join(why)}"[:MAX_WAIT_DETAIL]
+
+    @staticmethod
+    def _completes_batch(ctx: _Ctx, unit: str) -> bool:
+        """True when every other unit of the unit's batch is integrated: this merge completes the batch."""
+        plan = ctx.file.plan
+        if plan is None:
+            return True
+        for batch in plan.batches:
+            if any(u.id == unit for u in batch.units):
+                return all(u.id == unit or u.id in ctx.state.integrated for u in batch.units)
+        return True
 
     def _accepted_wait_gone(self, ctx: _Ctx, unit: str | None) -> str | None:
         """Why a plan waiting with `accepted_finding_open` may go on, None while the same findings are open (the detail

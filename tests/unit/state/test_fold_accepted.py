@@ -93,3 +93,9 @@ def test_the_state_dumps_the_new_fields_in_a_stable_order():
     text = dump_state(state(judged(ONE), judged(TWO), verdict())).decode()
     assert text == dump_state(state(judged(TWO), judged(ONE), verdict())).decode()
     assert '"accepted_addressed": [\n    "F-0a1b2c",\n    "F-3d4e5f"\n  ]' in text
+
+
+def test_a_restart_forgets_the_answers_of_the_old_work():
+    restarted = ("unit.restarted", {"attempt": 1, "previous_head": "h", "reason": "redo", "by": "me"})
+    got = state(judged(ONE), restarted, verdict())
+    assert got.accepted_addressed == frozenset() and got.accepted_evidence == {}

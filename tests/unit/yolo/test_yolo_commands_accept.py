@@ -171,6 +171,33 @@ def test_withdrawing_what_was_not_accepted_is_refused(world, person, capsys):
     assert "nothing to withdraw" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "later", [("plan.activated",), ("plan.activated", "plan.waiting"), ("plan.activated", "plan.stopped")]
+)
+def test_a_withdrawal_after_activation_is_refused_and_says_what_to_do(world, person, capsys, later):
+    accepted_world(world)
+    assert world.l4("accept", "p1", A, "--reason", REASON) == 0
+    data = {"plan.activated": {"plan_digest": "x", "digests": {}, "limits": {}, "by": "a", "reason": "r"},
+            "plan.waiting": {"reason": "merge_not_ready", "unit": A, "detail": "d"},
+            "plan.stopped": {"reason": "unit_halted", "unit": A}}  # fmt: skip
+    world.seed("p1", *(ev(kind, **data[kind]) for kind in later))
+    before = world.store().read().head
+    capsys.readouterr()
+    assert world.l4("accept", "p1", A, "--withdraw", "--reason", "no") == 2
+    out = capsys.readouterr()
+    assert "withdrawn" not in out.out and "cancel" in out.err and "l4 yolo review" in out.err
+    assert world.store().read().head == before and not recorded(world, "plan.acceptance_withdrawn")
+
+
+def test_a_withdrawal_on_a_plan_stopped_with_inputs_changed_is_allowed(world, person):
+    accepted_world(world)
+    assert world.l4("accept", "p1", A, "--reason", REASON) == 0
+    world.seed("p1", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="a", reason="r"),
+               ev("plan.stopped", reason="inputs_changed", unit=A))  # fmt: skip
+    assert world.l4("accept", "p1", A, "--withdraw", "--reason", "the spec changed") == 0
+    assert recorded(world, "plan.acceptance_withdrawn")
+
+
 @pytest.mark.parametrize("reason", ["", "   ", "x" * 1001])
 def test_the_reason_is_required_and_at_most_1000_characters(world, person, capsys, reason):
     accepted_world(world)
