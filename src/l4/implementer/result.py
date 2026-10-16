@@ -5,6 +5,7 @@ schema file is a copy of SPEC 7.4; tests/unit/implementer/test_result.py keeps i
 M1: implementer-tdd-loop 1.9 (`build_repair_prompt`).
 """
 
+import copy
 import json
 import re
 from collections.abc import Collection, Mapping
@@ -33,6 +34,21 @@ def _load_schema() -> dict[str, Any]:
 
 
 RESULT_SCHEMA = _load_schema()  # what `RunRequest.result_schema` carries
+
+
+def _file_schema() -> dict[str, Any]:
+    """The schema of a result the agent writes to a file: L4 knows the phase, the task and the files, so it asks for
+    the status and the summary and the optional parts only."""
+    schema = copy.deepcopy(RESULT_SCHEMA)
+    schema["$id"] = FILE_RESULT_SCHEMA_ID
+    for name in ("phase", "task_ids", "files_changed", "tests_added"):
+        schema["properties"].pop(name, None)
+    schema["required"] = ["status", "summary"]
+    return schema
+
+
+FILE_RESULT_SCHEMA_ID = "l4/implementer-file-result@1"
+FILE_RESULT_SCHEMA = _file_schema()
 
 
 class _Open(BaseModel):

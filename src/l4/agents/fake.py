@@ -5,7 +5,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from l4.agents.base import (
     AdapterError,
@@ -41,6 +41,9 @@ class Step:
     tool_rejections: list[dict[str, str]] = field(default_factory=list)
     transient: bool = False  # an `error` step that is a server-side overload (a 529): the caller may retry it
     api_status: int | None = None
+    last_message: str | None = None  # the text after the last tool call, as an adapter reports it
+    rejected: dict[str, Any] | None = None  # a structured reply the schema refused
+    result_problem: Literal["missing", "not_json", "not_object", "invalid"] | None = None
 
 
 class FakeAdapter:
@@ -100,4 +103,5 @@ class FakeAdapter:
             model_resolved=step.model if self._served_model else None,
             permission_denials=list(step.permission_denials), tool_rejections=list(step.tool_rejections),
             transient=step.transient, api_status=step.api_status,
+            last_message=step.last_message, rejected=step.rejected, result_problem=step.result_problem,
         )  # fmt: skip
