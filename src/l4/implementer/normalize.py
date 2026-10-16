@@ -286,6 +286,8 @@ def normalize(found: Found, facts: StepFacts) -> Normalized:
     suppression or an exemption, never changes a present allowed status, and touches no file."""
     obj: dict[str, Any] = drop_nulls(copy.deepcopy(found.obj))  # `null` means absent
     fixes: list[Fix] = []
+    if found.source == "final_message":  # the agent wrote no usable result file: a person should see that
+        fixes.append(Fix(field="result", fix="set", from_="final_message"))
     _aliases(obj, fixes)
     _harness_fields(obj, facts, fixes)
     _questions(obj, fixes)

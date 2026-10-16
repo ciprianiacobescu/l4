@@ -48,7 +48,8 @@ After each implementer step, and before the guards and the gates, the harness SH
 normalize it. It SHALL take, in this order: the result that the adapter delivered (a native result, or a
 prompt-contract file's JSON object as written); the object that a native adapter's schema refused (`rejected`); the
 last JSON object in the agent's own final text that has a top-level `status` or `summary` key. It MUST NOT take an
-object from a file in the worktree or from any other path.
+object from a file in the worktree or from any other path. An object taken from the final text is itself recorded as the repair `{field: "result", fix: "set", from:
+"final_message"}`, so `result.normalized` shows every step whose agent wrote no usable result file.
 
 The normalization SHALL apply these rules, with the limits, enums and pattern read from `l4/implementer-result@1`:
 - `null` means absent; the alias `notes` becomes `notes_for_verifier` and `suppressions_list` becomes `suppressions`

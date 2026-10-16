@@ -234,7 +234,7 @@ def test_rule_8_the_objects_own_json_text_is_taken_out_of_the_final_message():
     assert "{" not in done.obj["summary"] and done.obj["summary"].startswith("Added the tests.")
     done = run(obj, facts(last=text), "final_message", text)  # only the object: nothing is left
     assert done.obj["summary"] == NO_SUMMARY
-    assert done.fixes == [Fix("summary", "set", from_="none")]
+    assert done.fixes == [Fix("result", "set", from_="final_message"), Fix("summary", "set", from_="none")]
 
 
 @pytest.mark.parametrize("bad", ["", "   \n", 7, None, ["s"], {"a": 1}])
@@ -505,3 +505,11 @@ def test_property_a_valid_blocked_input_stays_blocked_with_its_questions():
         obj = {"status": "blocked", "phase": "red", "task_ids": ["1.1"], "summary": "s", "questions": questions}
         done = run(obj, facts(rng.choice(["red", "green"])))
         assert done.obj["status"] == "blocked" and done.obj.get("questions", []) == questions
+
+
+def test_an_object_from_the_final_message_is_recorded_even_with_nothing_else_to_repair():
+    """SCN-IMP-191: the agent wrote no usable result file; the event says so, so a person can see it."""
+    obj = {"status": "done", "summary": "added two tests"}
+    done = run(obj, facts(last=json.dumps(obj)), "final_message", json.dumps(obj))
+    assert done.fixes == [Fix("result", "set", from_="final_message")]
+    assert done.obj["summary"] == "added two tests"
