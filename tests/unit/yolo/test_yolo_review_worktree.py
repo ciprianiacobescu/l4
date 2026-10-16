@@ -284,6 +284,7 @@ def test_record_writes_the_events_ci_would(world, monkeypatch, capsys):
     assert data["sandbox"] == "none" and data["judge"] and data["cost_usd"] == 0.75
     assert data["units"][A]["digest"] == unit_digest(world.clone, "HEAD", FOLDER_A) and data["units"][A]["material"]
     assert data["batches"]["b1"]["material"]
+    assert data["batches"]["b1"]["digests"] == {A: data["units"][A]["digest"], B: data["units"][B]["digest"]}  # as CI
     assert charged.data == {"unit": "plan:review", "attempt": 0, "cost_usd": 0.75, "runs": 0}
     assert "Next: git push; CI finds this review current and does not review again" in capsys.readouterr().out
 
@@ -460,6 +461,8 @@ def test_a_second_local_review_of_unchanged_material_judges_nothing_and_costs_no
     again = local_judge()  # an empty script: any call fails the test
     assert world.l4("review", "p1", "--local") == 0
     reviewed = [e for e in world.events() if e.type == "plan.reviewed"]
+    first_data = reviewed[0].data  # `--local` records the digests of the batch's units, as CI does (accept counts rounds)
+    assert first_data["batches"]["b1"]["digests"] == {u: first_data["units"][u]["digest"] for u in (A, B)}
     assert again.requests == [] and len(reviewed) == 2 and reviewed[-1].data["cost_usd"] == 0
     assert all("reused_from" in v for v in reviewed[-1].data["units"].values())
     assert [e.type for e in world.events()].count("plan.charged") == 1

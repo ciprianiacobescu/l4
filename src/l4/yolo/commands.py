@@ -84,6 +84,7 @@ from l4.yolo.model import (
     PlanInvalid,
     PlanMoved,
     PlanState,
+    ReviewResult,
     UnitInfo,
 )
 from l4.yolo.plans import (
@@ -706,6 +707,21 @@ def _verdict_json(verdict: Any) -> dict[str, Any]:
     return out
 
 
+def batch_entries(
+    plan: Plan, result: ReviewResult, batches: Mapping[str, Any], entry: Any = _verdict_json
+) -> dict[str, dict[str, Any]]:
+    """The ledger entries of the batches, each with the digests of its units' text as CI records them: `l4 yolo accept`
+    counts a batch's rounds by them."""
+    members = {b.id: [u.id for u in b.units] for b in plan.batches}
+    out: dict[str, dict[str, Any]] = {}
+    for bid, verdict in batches.items():
+        digests = {
+            u: result.units[u].digest for u in members.get(bid, ()) if u in result.units and result.units[u].digest
+        }
+        out[bid] = {**entry(verdict), **({"digests": digests} if digests else {})}
+    return out
+
+
 def run_review(
     app: AppContext,
     *,
@@ -823,7 +839,7 @@ def run_review(
             "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, cost_usd=cost, by=ctx.who(),
             source="local", **chosen,
             units={u: _verdict_json(v) for u, v in result.units.items()},
-            batches={b: _verdict_json(v) for b, v in batches.items()},
+            batches=batch_entries(parsed, result, batches),
         ),
     ]  # fmt: skip
     if cost > 0:  # the judge's cost is the plan's (R1): the running total of `plan:review`, attempt 0
@@ -1382,8 +1398,7 @@ def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: 
         entry = _entry_of(review, subject)
         if entry is None:
             return False
-        judged = fnd.judged(fnd.history(events, subject, PROMPT_VERSION))
-        return accepting.check(state, judged, subject, entry, target, who) is None
+        return accepting.check(state, events, subject, entry, target, who) is None
 
     return can_accept
 
@@ -1487,8 +1502,9 @@ def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdra
     latest = _entry_of(review, subject)
     if latest is None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} is not in the latest review of {plan_id}")
-    judged = fnd.judged(fnd.history(read.events, subject, PROMPT_VERSION))
-    refusal = accepting.check(state, judged, subject, latest, accepting.target_config(ctx.git, ctx.target_ref), who)
+    refusal = accepting.check(
+        state, read.events, subject, latest, accepting.target_config(ctx.git, ctx.target_ref), who
+    )
     if refusal is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {refusal.message}\nFix: {refusal.fix}")
     if latest.get("material") is None:

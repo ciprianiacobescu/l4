@@ -41,6 +41,7 @@ from l4.yolo.commands import (
     _sync,
     _valid,
     _verdict_json,
+    batch_entries,
 )
 from l4.yolo.cycle import REVIEW_KEY, review_batches
 from l4.yolo.digest import RevisionMissing, plan_digest
@@ -405,7 +406,7 @@ def run_review_worktree(
             "cost_usd": cost,
             "by": ctx.who(),
             "units": {u: _recorded(v, ledger, provenance) for u, v in result.units.items()},
-            "batches": {b: _recorded(v, ledger, provenance) for b, v in batches.items()},
+            "batches": batch_entries(parsed, result, batches, lambda v: _recorded(v, ledger, provenance)),
         }
         if labels:
             reviewed["sandbox"] = "none" if "none" in labels else labels[0]
