@@ -11,6 +11,8 @@ Status: the harness runs end to end on GitLab with a self-hosted shell runner, a
 runners. `l4 init --ci github` writes the workflow, and `l4 setup github` does the forge setup (the environment, its
 secrets and branch rules, the workflow permissions, the labels and a first run).
 
+What changed in each release: [CHANGELOG.md](CHANGELOG.md).
+
 ## Getting started
 
 ```bash

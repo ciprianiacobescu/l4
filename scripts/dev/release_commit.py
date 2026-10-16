@@ -23,7 +23,7 @@ from pathlib import Path
 # Always shipped (a missing src/ or pyproject.toml is an error) and shipped only when present.
 REQUIRED = ("src", "pyproject.toml")
 OPTIONAL = (
-    "uv.lock", "README.md", "LICENSE", ".github/actions/l4",
+    "uv.lock", "README.md", "CHANGELOG.md", "LICENSE", ".github/actions/l4",
     ".claude-plugin", "plugins/l4/.claude-plugin", "plugins/l4/skills",  # the l4 skill (not its tests/)
 )  # fmt: skip
 SHIPPED = REQUIRED + OPTIONAL

@@ -91,7 +91,7 @@ def test_second_release_parent_is_the_first(repo: Path):
     changes = {
         "src/l4/deep/mod.py": "x = 2\n", "LICENSE": "MIT\n", ".claude-plugin/marketplace.json": "{}\n",
         "plugins/l4/.claude-plugin/plugin.json": "{}\n", "plugins/l4/skills/l4/SKILL.md": "s\n",
-        "plugins/l4/tests/baseline.md": "b\n",
+        "plugins/l4/tests/baseline.md": "b\n", "CHANGELOG.md": "# Changelog\n",
     }  # fmt: skip
     second_source = commit_all(repo, changes, "two")
     second = rc.build(repo, second_source, "0.3.1")
@@ -99,6 +99,7 @@ def test_second_release_parent_is_the_first(repo: Path):
     assert git(repo, "rev-parse", "release") == second
     shipped = files_of(repo, second)
     assert "LICENSE" in shipped and "plugins/l4/skills/l4/SKILL.md" in shipped
+    assert "CHANGELOG.md" in shipped  # consumers read what changed in the release they pin
     assert ".claude-plugin/marketplace.json" in shipped and "plugins/l4/.claude-plugin/plugin.json" in shipped
     assert "plugins/l4/tests/baseline.md" not in shipped  # the skill's test records stay out of a release
     assert not any(f.startswith(("docs/", "tests/", ".github/workflows/")) for f in shipped)

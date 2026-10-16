@@ -1,7 +1,7 @@
 name: release
 
 # A tag `src-vX.Y.Z` on the main history becomes one slim commit on branch `release` (src/, pyproject.toml, uv.lock,
-# README.md, LICENSE, .github/actions/l4/, the l4 plugin and skill), tagged `vX.Y.Z`, with `v0` moved to it (L4-ACT-006).
+# README.md, CHANGELOG.md, LICENSE, .github/actions/l4/, the l4 plugin and skill), tagged `vX.Y.Z`, with `v0` moved to it (L4-ACT-006).
 # Consumers pin `vX.Y.Z`; they never download docs/live/ or the history.
 
 on:

@@ -219,7 +219,7 @@ line. A copy of the action keeps its git URL (it redirects), so `--action-repo` 
 
 **L4-ACT-006** The harness repository MUST have `release.yml`. On a tag `src-vX.Y.Z` it MUST: refuse a source commit
 whose checks failed; build a commit on branch `release` holding only `src/`, `pyproject.toml`, `uv.lock`, `README.md`,
-`LICENSE` (when present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`), whose parent is the previous release commit and whose
+`CHANGELOG.md` and `LICENSE` (when present), `.github/actions/l4/` and the `l4` plugin (`.claude-plugin/`, `plugins/l4/.claude-plugin/`, `plugins/l4/skills/`), whose parent is the previous release commit and whose
 message names the source sha (`scripts/dev/release_commit.py`); check that its tree equals a `git archive` of those
 paths at the source sha; tag it `vX.Y.Z` and move `v0`; and create a GitHub release naming the source sha. Consumers
 pin `vX.Y.Z`; the download is about 0.8 MB instead of the 27 MB `docs/live/` adds to the main history.
