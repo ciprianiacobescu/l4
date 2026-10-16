@@ -63,7 +63,8 @@ def test_doctor_end_to_end_exit_codes(world, capsys):
     # healthy: exit 0, no outcome.json (doctor is not an outcome command)
     assert main(["doctor", "--repo", str(repo)], environ=environ) == 0
     out = capsys.readouterr().out
-    assert "ENV-001" in out and "ENV-002" in out and "ENV-003" in out and "fail" not in out
+    # " fail " is the status column: CFG-009 says "fails" in prose
+    assert "ENV-001" in out and "ENV-002" in out and "ENV-003" in out and " fail " not in out
     assert not (repo / ".l4-out").exists()
     # a mistyped key: exit 2 with the did-you-mean message, no checks run
     write_config(repo, "verifer: {independence: none}\n")
@@ -88,7 +89,7 @@ def test_json_output_and_resolved_paths(world, capsys):
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
     expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
     expected += ["S1-001", "S1-002", "COV-001", "SANDBOX-002", "CFG-005", "MEM-002", "CI-002", "ENV-013", "EVAL-001"]
-    expected += ["ENV-014", "CFG-004", "CFG-006", "CFG-007", "CFG-008", "YOLO-001", "CI-003", "S1-003"]
+    expected += ["ENV-014", "CFG-004", "CFG-006", "CFG-007", "CFG-008", "CFG-009", "YOLO-001", "CI-003", "S1-003"]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
         "CI-001",
