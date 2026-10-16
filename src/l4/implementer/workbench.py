@@ -227,6 +227,7 @@ class Workbench:
         network: bool | None = None,
         must_contain: Collection[str] = (),
         extra_env: Mapping[str, str] | None = None,
+        note: Callable[[TestReport], dict] | None = None,
     ) -> GateResult:
         """`network` defaults to `gates.network`; the setup step passes True (it downloads the dependencies).
         `extra_env` (the coverage plugin's `cov_env`) is merged with the trace plugin's: `PYTEST_ADDOPTS` and
@@ -236,7 +237,7 @@ class Workbench:
             name, command, tuple(reports), self.cfg.gates.test.format, duration_seconds(self.cfg.gates.timeout),
             frozenset(must_contain),
         )  # fmt: skip
-        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env)
+        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note)
 
     def run_gate_spec(
         self,
@@ -246,6 +247,7 @@ class Workbench:
         tree: Path | None = None,
         extra_env: Mapping[str, str] | None = None,
         caches: tuple[CacheMount, ...] | None = None,
+        note: Callable[[TestReport], dict] | None = None,
     ) -> GateResult:
         """The one way a gate runs, in the unit's worktree or in another checkout of the repository (the merge base the
         verifier serves): bytecode purged before, the protected set put back after, the trace plugin loaded, the
@@ -276,11 +278,14 @@ class Workbench:
                       *revert_unsnapshotted(git, self.protected, excludes=self.excludes)]:  # fmt: skip
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
         self.restore_ledger()
+        readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
+        extra = note(result.report) if note is not None and readable else {}
         self.emit(
             "gate.finished", name=spec.name, status=result.status, exit_code=result.exit_code, reason=result.reason,
             log=os.path.relpath(log, self.out_dir.parent), tests=result.report.total if result.report else None,
             passed=len(result.report.ids_with("passed")) if result.report else None,
             failed=len(result.report.ids_with("failed") | result.report.ids_with("error")) if result.report else None,
+            **extra,
         )  # fmt: skip
         return result
 

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from l4.agents.activity import codex_signals
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
@@ -243,6 +244,7 @@ class CodexAdapter:
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path, stderr_path=stderr_path,
                 stdin=req.prompt, timeout_s=req.timeout_s, interrupt=req.interrupt,
                 stall_timeout_s=req.stall_timeout_s,
+                watch=req.watch, reader=codex_signals,
             )  # fmt: skip
         result_text = read_result_file(req.result_path)
         result = self.parse(

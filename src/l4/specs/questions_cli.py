@@ -29,7 +29,7 @@ from l4.forge.base import fetch_auth_config
 from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import explain_push_failure, push_platform
 from l4.forge.urls import origin_url
-from l4.implementer.guards import IGNORE_FILE_GLOBS
+from l4.implementer.guards import IGNORE_FILE_GLOBS, tracked_files
 from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, names_path
 from l4.redact import Redactor
 from l4.security.protected import glob_match
@@ -287,6 +287,34 @@ def frozen_paths(events: Sequence[LedgerEvent], tasks: Sequence[str], fix: str |
     return found
 
 
+def existing_tests(
+    git: Git, folder: "Folder", cfg: L4Config, question: Question, frozen: Mapping[str, Sequence[str]]
+) -> dict[str, tuple[str, ...]]:
+    """Per held task that has a red commit, the tracked test files at the folder's head that the question or its answer
+    names and that its frozen list does not hold: a pre-existing test that red did not touch, which an answer that
+    names it opens for green (`implementer.unfreeze.unfrozen`)."""
+    tasks = [t for t in question.blocking_tasks if t in frozen]
+    if not tasks or not folder.head:
+        return {}
+    text = "\n".join(
+        unescape_text(part)
+        for part in (question.title, question.context_text, question.options_text, question.suggestion_text)
+    )
+    text += "\n" + (effective_answer(question) or "")
+    try:
+        listed = tracked_files(git.run_bytes("ls-tree", "-r", "-z", folder.head))
+    except GitError:
+        return {}
+    globs = cfg.tdd.test_globs
+    support = (*cfg.tdd.test_support_globs, *IGNORE_FILE_GLOBS)
+    named = sorted(
+        p
+        for p, regular in listed
+        if regular and p in text and any(glob_match(g, p) for g in globs) and not any(glob_match(g, p) for g in support)
+    )
+    return {t: tuple(p for p in named if p not in frozen[t]) for t in tasks}
+
+
 @dataclass(frozen=True)
 class PathEffect:
     """What an accepted suggestion does to one frozen path of a held task (design D7)."""
@@ -295,19 +323,25 @@ class PathEffect:
     path: str
     unfreezes: bool
     why: str  # when it stays frozen: the reason
+    existing: bool = False  # a pre-existing test of the repository, not a file of the task's red step
 
 
 def _is_ignore_file(path: str) -> bool:
     return any(glob_match(glob, path) for glob in IGNORE_FILE_GLOBS)
 
 
-def suggestion_effects(question: Question, frozen: Mapping[str, Sequence[str]]) -> list[PathEffect]:
+def suggestion_effects(
+    question: Question, frozen: Mapping[str, Sequence[str]], existing: Mapping[str, Sequence[str]] | None = None
+) -> list[PathEffect]:
     """The frozen paths of the held tasks that the suggestion names, and whether an accepted suggestion unfreezes each
     (the rule of `implementer.unfreeze.unfrozen` for an `accepted` question): a support or test file that the question
     itself (title, Context, Options) names too opens, an ignore file stays frozen, at most
-    `MAX_PATHS_PER_QUESTION` per question. A verdict question unfreezes nothing."""
+    `MAX_PATHS_PER_QUESTION` per question. A verdict question unfreezes nothing. `existing`: per task, the
+    pre-existing tracked test files (`existing_tests`), which open the same way."""
     if question.kind is QuestionKind.VERDICT or not question.suggestion_text:
         return []
+    old = existing or {}
+    frozen = {t: (*frozen[t], *old.get(t, ())) for t in frozen}
     text = unescape_text(question.suggestion_text)
     asked = "\n".join((question.title, unescape_text(question.context_text), unescape_text(question.options_text)))
     tasks = [t for t in question.blocking_tasks if t in frozen]
@@ -324,7 +358,12 @@ def suggestion_effects(question: Question, frozen: Mapping[str, Sequence[str]]) 
         else:
             opened += 1
             verdict[path] = (True, "")
-    return [PathEffect(t, p, *verdict[p]) for t in tasks for p in sorted(frozen[t]) if p in verdict]
+    return [
+        PathEffect(t, p, *verdict[p], existing=p in old.get(t, ()))
+        for t in tasks
+        for p in sorted(frozen[t])
+        if p in verdict
+    ]
 
 
 @dataclass(frozen=True)
@@ -432,7 +471,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
     events, warning = folder_events(git, folder)
     warnings += [warning] if warning else []
     frozen = frozen_paths(events, q.blocking_tasks, folder.fix)
-    effects = suggestion_effects(q, frozen) if q.status is QuestionStatus.OPEN else []
+    old = existing_tests(git, folder, cfg, q, frozen)
+    frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}  # an agent may not name them either
+    effects = suggestion_effects(q, frozen, old) if q.status is QuestionStatus.OPEN else []
     takes = unescape_text(q.suggestion_text) or None
     who, marker = actor(app.environ, sys.stdin.isatty())
     rules = clarifier_rules(git, cfg.forge.base_branch)
@@ -456,7 +497,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
             "blocking": list(q.blocking_tasks), "title": q.title, "branch": folder.branch, "section": section,
             "accept": {"takes": takes},
             "frozen": [
-                {"task": e.task, "path": e.path, "unfreezes": e.unfreezes, "why": e.why} for e in effects
+                {"task": e.task, "path": e.path, "unfreezes": e.unfreezes, "why": e.why}
+                | ({"existing": True} if e.existing else {})  # the key is there only for a pre-existing test
+                for e in effects
             ],
             "caller": {"actor": who, "marker": marker, "accept": accept_why, "answer": answer_why},
             "warnings": warnings, "next": commands,
@@ -479,8 +522,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
                 f"accept takes: {takes}" if takes else "accept takes: no clarifier suggestion: answer it with --text"
             )
         for e in effects:
+            kind = "the pre-existing test " if e.existing else ""
             out.append(
-                f"an accepted suggestion unfreezes {e.path} for the next green of {e.task}"
+                f"an accepted suggestion unfreezes {kind}{e.path} for the next green of {e.task}"
                 if e.unfreezes
                 else f"an accepted suggestion leaves {e.path} frozen for {e.task} ({e.why})"
             )
@@ -693,6 +737,8 @@ def agent_refusal(app: AppContext, git: Git, cfg: L4Config, edit: Edit) -> Refus
         return None
     events, _warning = folder_events(git, edit.folder)
     frozen = frozen_paths(events, edit.question.blocking_tasks, edit.folder.fix)
+    old = existing_tests(git, edit.folder, cfg, edit.question, frozen)
+    frozen = {t: (*paths, *old.get(t, ())) for t, paths in frozen.items()}
     effective = unescape_text(edit.question.suggestion_text) if edit.form == "accept" else edit.text
     rules = clarifier_rules(git, cfg.forge.base_branch)
     return check_agent(edit.form, edit.question, effective, frozen, rules, cfg.forge.base_branch)

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4.accepted import read_accepted
+from l4.agents.activity import ActivityWatch, Beat, ago, beat_text
 from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
@@ -31,6 +32,7 @@ from l4.ci.failing_step import (
 )
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
+from l4.config.schema import duration_seconds
 from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, reject_symlinks
@@ -107,15 +109,13 @@ from l4.verifier.scan import task_tags
 from l4.yolo.digest import RevisionMissing, unit_digest
 
 log = logging.getLogger("l4.implementer")
+beat_log = logging.getLogger("l4")  # the progress trace's logger: the heartbeat line looks like its lines
 Phase = Literal["red", "green", "single"]
 Status = Literal["ok", "failed", "blocked"]
 LIMIT_STATUSES = ("quota", "rate_limited", "auth")
 MAX_LISTED = 5
 HANG_EXIT = 70  # the exit code `l4_trace` ends a run with after a hard hang
 HANG_FRAME_CHARS = 1500
-# An implementer run that prints nothing this long is killed (status timeout). A constant because SPEC section 5 has
-# no key for it; M1: implementer-tdd-loop (config) if a project needs another value.
-STALL_TIMEOUT_S = 600.0
 MAX_LOG_READ_CHARS = 200_000
 CI_REASON_LINES = 15  # the end of a failing CI step's output that the retry prompt shows
 
@@ -675,13 +675,25 @@ def agent_step(
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
     env = build_agent_env(wb.host_env, spec, extra=extra)
+    impl_cfg = wb.cfg.implementer
+    fix_unit = wb.event_context.get("fix_unit")
+    tag = f"[{fix_unit}] " if isinstance(fix_unit, str) and fix_unit else ""
+    profile = wb.selected.profile_name
+
+    def on_beat(beat: Beat) -> None:  # L4-IMP-023: a console and log line, never a ledger event
+        beat_log.info(
+            "%s %stask %s %s attempt %s: %s %s", wb.ref.id, tag, task.key, role, attempt, profile, beat_text(beat)
+        )
+
+    idle_s = duration_seconds(impl_cfg.idle_timeout)
+    watch = ActivityWatch(duration_seconds(impl_cfg.heartbeat), on_beat)  # clock: time.monotonic, the runner's
     request = RunRequest(
         profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
         prompt=prompt, result_path=tmp / "result.json", raw_events_path=raw_events,
         env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
         permission_policy=PermissionPolicy("implement", gate_prefix=wb.cfg.gates.test.command),
         wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
-        stall_timeout_s=STALL_TIMEOUT_S, host_env=wb.host_env,
+        stall_timeout_s=float(idle_s) if idle_s else None, watch=watch, host_env=wb.host_env,
     )  # fmt: skip
     try:
         resultalias.link(wb.worktree, tmp)  # the short path a prompt-contract adapter writes its result to (MAG)
@@ -698,6 +710,11 @@ def agent_step(
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
             wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+    if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
+        wb.emit(
+            "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
+            silent_s=round(watch.stopped_idle_s), tool_calls=watch.snapshot(watch.clock()).tool_calls,
+        )  # fmt: skip
     wb.emit(
         "agent.finished", task=task.key, phase=role, status=run.status, exit_code=run.exit_code, detail=run.detail,
         model=run.model_resolved, input_tokens=run.usage.input_tokens, output_tokens=run.usage.output_tokens,
@@ -718,8 +735,14 @@ def agent_step(
         raise RoleLimit(run)
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
+        if run.status == "timeout":
+            reason = (
+                f"the agent showed no activity for {impl_cfg.idle_timeout} (implementer.idle_timeout), so L4 stopped it"
+                if watch.stopped_idle_s is not None
+                else f"the agent step reached its time limit ({ago(request.timeout_s)})"
+            )
         # a prompt-contract adapter validated the result file (`agents/contract.py`): its detail names the paths
-        invalid = (run.detail or "").startswith("result invalid")
+        invalid = run.status != "timeout" and (run.detail or "").startswith("result invalid")
         return StepOutcome("failed", reason=reason, excerpt=result_values_line(RESULT_SCHEMA, role) if invalid else "")
     values = result_values_line(RESULT_SCHEMA, role)
     found = find_result(run)
@@ -767,6 +790,25 @@ def _red_commit_message(wb: Workbench, task: Task, *, already_satisfied: bool) -
     return f"test({wb.ref.name}): {what} [skip ci]"
 
 
+def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
+    """Design D9: the keys that `gate.finished` of a red test gate gets. `{"red_new_failing": n}` when at least one
+    test fails and every failing test is new and failed by assertion or `NotImplementedError` without the hang marker,
+    and the report has no collection error that the base report lacks; else `{}`. It changes no verdict."""
+
+    def note(report: TestReport) -> dict:
+        failing = sorted(i for i in report.tests if report.tests[i].status in ("failed", "error"))
+        if not failing or set(report.collection_errors) - set(base_report.collection_errors):
+            return {}
+        new = new_test_ids(base_report, report)
+        for i in failing:
+            case = report.tests[i]
+            if i not in new or case.failure_kind in (None, "other") or TIMEOUT_MARKER in case.message:
+                return {}
+        return {"red_new_failing": len(failing)}
+
+    return note
+
+
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
     stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
@@ -800,7 +842,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     run_setup(wb)  # an agent-edited environment must not decide the gate
     changed = wb.changed_files()
     test_files = any(_matches(tdd.test_globs, p) or _matches(tdd.test_support_globs, p) for p in changed)
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, note=red_note(base_report))
     if (out := tampered("test run")) is not None:
         return out
     if gate.report is None:
@@ -1356,9 +1398,8 @@ def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: 
     (all for a file the task's text opened, rule 3 for a support file a human answer unfroze). A file that breaks one is
     put back to its red version and recorded as `guard.violation{rule: "opened file"}`."""
     by_text = {p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}
-    checked = sorted(
-        p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or manifest.files[p].kind == "support")
-    )
+    support = {p for p, f in manifest.files.items() if f.kind == "support"}
+    checked = sorted(p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or p in support))
     if not checked:
         return
     modules = unit_modules({*wb.branch_changed_files(), *wb.changed_files()}, wb.cfg)

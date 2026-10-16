@@ -105,7 +105,7 @@ class CommandAdapter:
         outcome = self._proc.run(
             cmd.argv, cmd.env, req.cwd, stdout_path=req.raw_events_path,
             stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=None, timeout_s=req.timeout_s,
-            interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
+            interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s, watch=req.watch, reader=None,
         )  # fmt: skip
         result = RunResult(status="error", raw_events_path=req.raw_events_path, exit_code=outcome.returncode)
         if outcome.timed_out or outcome.stalled:

@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 
+from l4.agents.activity import ago
 from l4.state.ledger import LedgerEvent
 
 log = logging.getLogger("l4")
@@ -95,6 +96,7 @@ class ProgressTrace:
             "question.answered": self._answered,
             "task.started": self._task_started,
             "step.started": self._step_started,
+            "agent.idle": self._agent_idle,
             "agent.finished": self._agent_finished,
             "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
@@ -265,8 +267,17 @@ class ProgressTrace:
         self._steps[(e.data.get("fix_unit"), e.data.get("task"), e.data.get("phase"))] = e.ts
         d = e.data
         return (
-            logging.DEBUG,
+            logging.INFO,
             f"agent {d.get('phase')} step started (task {d.get('task')}, attempt {d.get('attempt')}, {d.get('agent')})",
+        )
+
+    def _agent_idle(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        silent = _num(d.get("silent_s"))
+        return (
+            logging.WARNING,
+            f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: no activity from {d.get('profile')} "
+            f"for {ago(silent or 0)}; L4 stopped it (implementer.idle_timeout)",
         )
 
     def _agent_finished(self, e: LedgerEvent) -> tuple[int, str]:
@@ -318,8 +329,16 @@ class ProgressTrace:
         who = e.data.get("task") or e.data.get("role") or e.data.get("profile")
         return logging.INFO, f"cost +{_usd(usd)} ({who}), run total {_usd(self._cost)}"
 
-    def _gate(self, e: LedgerEvent) -> tuple[int, str]:
+    def _gate(self, e: LedgerEvent) -> _Line | list[_Line]:
         d = e.data
+        new = d.get("red_new_failing")
+        if isinstance(new, int) and not isinstance(new, bool) and new > 0:  # a red gate that fails only on new tests
+            tests = "1 new test fails" if new == 1 else f"{new} new tests fail"
+            return [(logging.INFO, f"red: {tests}, as intended"), (logging.DEBUG, self._gate_line(d))]
+        return logging.INFO, self._gate_line(d)
+
+    @staticmethod
+    def _gate_line(d: dict) -> str:
         counts = ""
         if d.get("tests") is not None:
             counts = f", {d['tests']} tests: {d.get('passed')} passed, {d.get('failed')} failed"
@@ -327,10 +346,7 @@ class ProgressTrace:
         expected = (
             " (expected: zero values must fail)" if d.get("name") in ZEROED_GATES and d.get("status") == "fail" else ""
         )
-        return (
-            logging.INFO,
-            f"gate {d.get('name')} {d.get('status')}{expected} (exit {d.get('exit_code')}{counts}){why}",
-        )
+        return f"gate {d.get('name')} {d.get('status')}{expected} (exit {d.get('exit_code')}{counts}){why}"
 
     def _red_ok(self, e: LedgerEvent) -> tuple[int, str]:
         n = len(e.data.get("tests") or [])

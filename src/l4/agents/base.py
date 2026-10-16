@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from l4.agents.activity import ActivityWatch
 from l4.config.schema import Profile
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.sandbox.base import WrappedCommand
@@ -168,6 +169,7 @@ class RunRequest:
     # The harness's own environment, for an adapter that must read a credential variable the sandbox never gets (it
     # lands in a 0600 file in the step's private directory instead). Never copied into `env`, never logged.
     host_env: Mapping[str, str] = field(default_factory=dict, repr=False)
+    watch: ActivityWatch | None = None  # the step's liveness record (L4-IMP-023); None: no heartbeat, no idle rule
 
 
 TRANSIENT_STATUSES = (529, 503)  # server-side overload: not a usage limit, a wait inside the run may cure it

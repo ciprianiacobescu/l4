@@ -505,7 +505,17 @@ class ImplementerCfg(_Strict):
     escalate_after: int = Field(default=2, ge=0)  # failed attempts of a phase on one profile before the next (0: off)
     result_repair_attempts: int = Field(default=1, ge=0)
     wip_snapshot_interval: Duration = "10m"
+    heartbeat: DurationOrZero = "2m"  # a progress line every interval while an agent step runs; 0: off (L4-IMP-023)
+    idle_timeout: DurationOrZero = "10m"  # stop an agent silent for this long with no tool call open; 0: off
     session_resume: Literal["same_runner_only", "artifact", "never"] = "same_runner_only"
+
+    @model_validator(mode="after")
+    def _liveness_minimums(self) -> "ImplementerCfg":
+        for key, minimum, text in (("heartbeat", 30, "30s"), ("idle_timeout", 60, "1m")):
+            seconds = duration_seconds(getattr(self, key))
+            if 0 < seconds < minimum:
+                raise ValueFree(f"implementer.{key} must be 0 (off) or at least {text}")
+        return self
 
 
 class ClarifierCfg(_Strict):

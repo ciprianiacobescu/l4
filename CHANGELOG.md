@@ -6,6 +6,48 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.5 (2026-10-16)
+
+### Added
+- A heartbeat line while an agent step runs: `task <k> <phase> attempt <n>: <profile> working 6m, 14 tool calls, last
+  activity 20s ago`, with `, <m> tool calls open for <t>` while a tool call is open. The key `implementer.heartbeat`
+  sets the interval (default `2m`, minimum `30s`, `0` turns it off). The line holds counts and times only, and no text
+  of the agent.
+- `implementer.idle_timeout` (default `10m`, minimum `1m`, `0` turns it off) and the ledger event `agent.idle`: an agent
+  that prints nothing for that time and has no open tool call is stopped, and the attempt fails with a reason that names
+  the key.
+- `l4 status` has the column `LAST`. `l4 status --unit` has the lines `Last activity:` and `Open run:` (with the CI link
+  of the run), and `--json` has `last_activity` and `open_run`. `l4 yolo status` shows `last activity` and `open run`
+  of the current unit. The event `run.started` records the CI link, as `run.started.ci_url`.
+- The red gate line `red: <n> new tests fail, as intended`, and `gate.finished.red_new_failing`.
+- The job summary of GitHub Actions lists each finished task.
+- The runbook procedure 4.6 `Is the job stuck?`.
+
+### Changed
+- An idle agent gets SIGINT and 5 seconds before the kill, and is not stopped while a claude-code, codex or kiro-cli
+  tool call is open.
+- The failure reasons of an idle stop and of the step time limit (30 minutes) name the cause.
+- The step start line is at INFO.
+- The new keys need the 0.4.5 pin before the config edit (the schema is strict).
+
+### Fixed
+- A person's answer can now open a pre-existing test that the task must change. Before, the test path freeze put such
+  a test back in every green attempt, even after a person accepted the harness's own question that named the file and
+  the edit (the unit halted on `green broke existing tests`, and no `task.unfrozen` was recorded). Now an answer
+  (`accepted` or `answered`, on the same conditions as for a red test or a support file) that names a tracked test file
+  that the red step did not touch opens it for that task's green. It is recorded in `task.unfrozen`, listed in the green
+  prompt, accepted by the verifier, and `l4 questions show` says that an accept unfreezes the pre-existing test. The
+  red tests of the task and the ignore files stay frozen.
+- A rejected verification hold of a kind the harness cannot derive a task from (for example `the diff is longer than
+  120000 characters`) whose reason ends with a sentence `WHEN … THEN …` is now a behaviour finding with a fix task, not
+  an escalation (`no finding of this round can be converted into a fix task`). Without the scenario the unit still
+  escalates, and the question of such a hold no longer promises a fix unit: it asks the reason to end with the scenario.
+  Scope and coverage holds are unchanged.
+- `l4 feedback add --unit U` no longer needs the unit's own branch checked out: a detached HEAD, or a local branch of
+  another name, at the head of `origin/<unit branch>` is accepted (L4's worktree cache may hold the branch). The command
+  says which branch the feedback goes to and prints `git push origin HEAD:<unit branch>`. From any other commit the
+  refusal says how to get there, including `git switch --detach origin/<unit branch>` and `git worktree list`.
+
 ## 0.4.4 (2026-10-16)
 
 ### Added

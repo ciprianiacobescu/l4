@@ -11,6 +11,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from l4.agents.activity import ActivityWatch, StreamReader
+
 POLL_S = 0.05
 INTERRUPT_GRACE_S = 5.0
 
@@ -43,6 +45,8 @@ class ProcRunner:
         interrupt: threading.Event | None = None,
         on_line: Callable[[str], bool | None] | None = None,
         stall_timeout_s: float | None = None,
+        watch: ActivityWatch | None = None,
+        reader: StreamReader | None = None,
     ) -> ProcOutcome:
         """stdout is copied line by line to `stdout_path`; `on_line` returning True aborts the run. `stdin` is written
         in full, then closed (EOF), from a thread, so a prompt larger than the pipe buffer cannot deadlock."""
@@ -55,13 +59,17 @@ class ProcRunner:
             )  # fmt: skip
             pgid = proc.pid
             state = {"last": time.monotonic(), "aborted": False}
-            threads = [threading.Thread(target=self._pump, args=(proc, stdout_path, on_line, state), daemon=True)]
+            if watch is not None:
+                watch.start(state["last"], reader)
+            threads = [
+                threading.Thread(target=self._pump, args=(proc, stdout_path, on_line, state, watch), daemon=True)
+            ]
             if stdin is not None:
                 threads.append(threading.Thread(target=self._feed, args=(proc, stdin), daemon=True))
             for thread in threads:
                 thread.start()
             try:
-                outcome = self._wait(proc, pgid, timeout_s, interrupt, stall_timeout_s, state)
+                outcome = self._wait(proc, pgid, timeout_s, interrupt, stall_timeout_s, state, watch)
             except BaseException:  # RunCancelled, KeyboardInterrupt: never leave the agent or the gate running
                 _signal_group(pgid, signal.SIGKILL)
                 with contextlib.suppress(Exception):
@@ -86,7 +94,11 @@ class ProcRunner:
 
     @staticmethod
     def _pump(
-        proc: subprocess.Popen[bytes], path: Path, on_line: Callable[[str], bool | None] | None, state: dict
+        proc: subprocess.Popen[bytes],
+        path: Path,
+        on_line: Callable[[str], bool | None] | None,
+        state: dict,
+        watch: ActivityWatch | None = None,
     ) -> None:
         assert proc.stdout is not None
         with path.open("wb") as sink:
@@ -94,7 +106,11 @@ class ProcRunner:
                 sink.write(raw)
                 sink.flush()
                 state["last"] = time.monotonic()
-                if on_line is not None and on_line(raw.decode("utf-8", "replace").rstrip("\r\n")):
+                text = raw.decode("utf-8", "replace").rstrip("\r\n")
+                if watch is not None:
+                    with contextlib.suppress(Exception):  # the watch never stops the pump: the pipe must drain
+                        watch.line(text)
+                if on_line is not None and on_line(text):
                     state["aborted"] = True
 
     def _wait(
@@ -105,16 +121,31 @@ class ProcRunner:
         interrupt: threading.Event | None,
         stall_timeout_s: float | None,
         state: dict,
+        watch: ActivityWatch | None = None,
     ) -> ProcOutcome:
         deadline = time.monotonic() + timeout_s
         flags = {"timed_out": False, "stalled": False, "interrupted": False, "aborted": False}
         interrupted_at: float | None = None
+        stalled_at: float | None = None  # a latch: once the rule fired, lines in the grace do not undo it
         while proc.poll() is None:
             now = time.monotonic()
+            if watch is not None:
+                with contextlib.suppress(Exception):
+                    watch.tick(now)
+            silent_s = now - state["last"]
+            idle = stalled_at is None and stall_timeout_s is not None and silent_s >= stall_timeout_s
+            if idle and (watch is None or not watch.has_open_call()):
+                stalled_at = now
+                if watch is not None:
+                    watch.stopped_idle_s = silent_s
+                _signal_group(pgid, signal.SIGINT)
             if now >= deadline:
                 flags["timed_out"] = True
-            elif stall_timeout_s is not None and now - state["last"] >= stall_timeout_s:
+            elif stalled_at is not None:
                 flags["stalled"] = True
+                if now - stalled_at < INTERRUPT_GRACE_S:
+                    time.sleep(POLL_S)
+                    continue
             elif state["aborted"]:
                 flags["aborted"] = True
             elif interrupt is not None and interrupt.is_set():

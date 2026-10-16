@@ -35,6 +35,7 @@ class Step:
     cost_usd: float | None = None  # reported as the run's usage, for tests of budget accounting
     credits: float | None = None  # plan credits (Kiro), a different unit from dollars
     credits_source: str | None = None
+    idle_s: float | None = None  # idle stop (L4-IMP-024): status timeout, sets watch.stopped_idle_s
     printed: str = ""  # text the "agent" prints to its event stream and to stderr, as a tool call's output would
     model: str | None = None  # the model the run reports as served (read only when the adapter reports one)
     permission_denials: list[dict[str, Any]] = field(default_factory=list)
@@ -97,8 +98,13 @@ class FakeAdapter:
             + "\n"
         )
         req.raw_events_path.with_suffix(".stderr").write_text(step.printed, encoding="utf-8")
+        status = step.status
+        if step.idle_s is not None:
+            if req.watch is not None:
+                req.watch.stopped_idle_s = step.idle_s
+            status = "timeout"
         return RunResult(
-            status=step.status, raw_events_path=req.raw_events_path, final_text=step.final_text,
+            status=status, raw_events_path=req.raw_events_path, final_text=step.final_text,
             structured=step.structured, session_id=step.session_id,
             exit_code=0 if step.status == "ok" else 1, limit=step.limit,
             usage=Usage(

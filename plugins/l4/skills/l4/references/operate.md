@@ -2,7 +2,9 @@
 
 ## Reading state
 
-- **`l4 status`** shows every unit: phase, tasks, open questions, the last verdict, and feedback counts. `l4 plan`
+- **`l4 status`** shows every unit: phase, tasks, open questions, the last verdict, the time of the last activity
+  (column `LAST`), and feedback counts. `l4 status --unit FW:NAME` also shows the last activity and the open run with
+  its CI link (`Last activity:`, `Open run:`). For a job that is silent, see runbook 4.6. `l4 plan`
   shows the next action of each unit.
 - **The PR's sticky note** (by the harness's bot) says what waits for a person: questions, *Your feedback*, a halt or
   an escalation, and what to do about it.

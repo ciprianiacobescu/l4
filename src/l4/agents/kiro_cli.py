@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
+from l4.agents.activity import kiro_signals
 from l4.agents.base import (
     AdapterError,
     AgentCaps,
@@ -131,6 +132,7 @@ class KiroCliAdapter:
                 cmd.argv, cmd.env, workdir, stdout_path=req.raw_events_path,
                 stderr_path=req.raw_events_path.with_suffix(".stderr"), stdin=None, timeout_s=req.timeout_s,
                 interrupt=req.interrupt, stall_timeout_s=req.stall_timeout_s,
+                watch=req.watch, reader=kiro_signals,
             )  # fmt: skip
         try:
             lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
