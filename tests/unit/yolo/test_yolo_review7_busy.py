@@ -15,7 +15,7 @@ A = unit_id("a")
 def test_a_busy_unit_of_the_plan_chains_no_run(world, run, monkeypatch):  # noqa: F811
     calls = []
 
-    def runner(app, cfg, git, chosen, *, adapters):
+    def runner(app, cfg, git, chosen, *, adapters, accepted=None):
         calls.append([ref.id for _, ref in chosen])
         out = UnitOutcome(
             unit=A, phase_before="none", phase_after="none", exit_reason="skipped: the unit is locked by another run"
