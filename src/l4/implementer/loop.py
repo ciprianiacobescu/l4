@@ -293,8 +293,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
                 answer = escalate(wb, request)
                 if isinstance(answer, str):
                     wb.emit(
-                        "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile}, reason=answer
-                    )
+                        "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile},
+                        failures=count, reason=answer,
+                    )  # fmt: skip
                 else:
                     wb.emit(
                         "implementer.escalated", task=task.key, phase=phase, **{"from": profile},

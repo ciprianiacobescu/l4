@@ -96,6 +96,7 @@ def test_a_returned_reason_is_asked_again_after_the_next_failure(make_bench):
     assert [(e["task"], e["phase"], e["from"], e["reason"]) for e in skipped] == [
         ("1.1", "red", "impl", "glm is cooling")
     ] * 2
+    assert [e["failures"] for e in skipped] == [2, 3]  # the progress line names the count
     assert not bench.events("implementer.escalated")
 
 
