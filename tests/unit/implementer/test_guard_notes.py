@@ -115,3 +115,11 @@ def test_the_note_is_redacted_with_the_rest_of_the_prompt(make_bench):
     assert run_task(bench.wb, TASK).status == "done"
     second = bench.adapter.requests[1].prompt
     assert secret not in second and ".json" in second  # the path is there, the secret in it is not
+
+
+def test_the_note_of_an_opened_file_says_what_the_file_may_become():
+    event = {"path": "conftest.py", "rule": "opened file", "phase": "green", "why": "rebinds client"}
+    note = guard_note_text([note_of("guard.violation", event)])
+    assert "`conftest.py` (opened file) restored: rebinds client" in note
+    assert "keep every existing statement" in note and "do not patch or assign the unit's code" in note
+    assert "_GENERIC" not in note and "CI files" not in note  # the rule has its own advice

@@ -36,6 +36,11 @@ _ADVICE = {
     "test path freeze": (
         "Tests belong in the red step: if a test is wrong or missing, ask a question that names its path."
     ),
+    "opened file": (
+        "A support file that the task names may only grow in green: keep every existing statement as it is, do not "
+        "rebind a name or a fixture, do not patch or assign the unit's code from it (set the environment instead), "
+        "and leave it a regular file. The harness put it back to its red version, so write the change again."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),
@@ -67,7 +72,7 @@ def note_of(event: str, data: Mapping[str, Any]) -> GuardNote | None:
     rule = str(data.get("rule") or ("frozen test" if event == "guard.test_tamper" else ""))
     if rule in _IGNORED_RULES or not data.get("path"):
         return None
-    detail = data.get("region") or data.get("where") or data.get("reason") or ""
+    detail = data.get("region") or data.get("where") or data.get("reason") or data.get("why") or ""
     if rule == "test path freeze" and not detail:
         who = "a fix chore" if data.get("phase") == "single" else "green"
         detail = (

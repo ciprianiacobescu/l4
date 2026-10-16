@@ -55,6 +55,7 @@ class PromptContext:
     e2e_dir: str | None = None  # where the browser tests of `gates.e2e` live; None when the project has no e2e gate
     e2e_base_url_env: str = "L4_E2E_BASE_URL"
     unfrozen: tuple[tuple[str, str], ...] = ()  # green only: (frozen test path, question id) that a human answer freed
+    named: tuple[str, ...] = ()  # green only: support files the task's own text opened
     adds_tests: bool = False  # single only: the chore adds tests (a coverage hold's task): `single_tests.md`
     task_links: tuple[str, ...] = ()  # a Kiro leaf's `_Requirements: 1.1, 2_` refs; () for OpenSpec (kiro-e2e K20)
     # How a test names the criteria it checks (`{trace_rule}` in the templates, L4-CRT-002). None: decided from
@@ -230,6 +231,14 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         parts.append(
             f"# Tests unfrozen by a human answer\nThe human answer to {by} names these frozen test files, so you may "
             "change them as the answer says; every other test stays frozen.\n" + data_block("unfrozen tests", listing)
+        )
+    if role == "green" and ctx.named:
+        parts.append(
+            "# Files this task names\nThe task's own text names these frozen support files, so you may change them as "
+            "the task says. Keep every existing statement of each one as it is: add new statements, never edit, move "
+            "or rebind an old one, and do not patch or assign the unit's code from them (setting the environment is "
+            "fine). Every other test and support file stays frozen.\n"
+            + data_block("files this task names", "\n".join(f"- {path}" for path in ctx.named))
         )
     if role == "red" and ctx.stale_tests:
         parts.append(_stale_section(ctx))
