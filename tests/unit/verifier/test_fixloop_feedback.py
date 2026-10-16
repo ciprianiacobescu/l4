@@ -130,7 +130,8 @@ def test_the_feedback_limit_escalates_with_exit_13_and_its_note(
     human_commit(tdd_repo, raw, {FEEDBACK: first_file})
     second = run_l4([CHORE, JUDGE_FB1])
     spawned = second.events("fix.spawned")
-    assert second.code == 0 and [(e.get("feedback_only"), e.get("lists_unconverted")) for e in spawned] == [(True, True)]
+    marks = [(e.get("feedback_only"), e.get("lists_unconverted")) for e in spawned]
+    assert second.code == 0 and marks == [(True, True)]
     taken_file = raw(tdd_repo.origin, "show", f"{BRANCH}:{FEEDBACK}")
     human_commit(tdd_repo, raw, {FEEDBACK: item_file(tmp_path, taken_file, "Name the constant")}, name="human2")
     third = run_l4([JUDGE])
