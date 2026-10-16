@@ -20,7 +20,7 @@ HANDLERS: dict[str, str] = {
     "probe": "l4.availability.fallback:run_probe",
     "verify": "l4.verifier.ladder:run_verify",
     "archive": "l4.archive:run_archive",
-    "questions": "l4.specs.questions:run_questions",
+    "questions": "l4.specs.questions_cli:run_questions",
     "feedback add": "l4.specs.feedback_cli:run_feedback_add",
     "feedback list": "l4.specs.feedback_cli:run_feedback_list",
     "feedback show": "l4.specs.feedback_cli:run_feedback_show",
@@ -69,7 +69,7 @@ OWNING_CHANGE: dict[str, str] = {
     "probe": "agent-factory",
     "verify": "verifier",
     "archive": "forge-and-ci",
-    "questions": "spec-providers",
+    "questions": "unfreeze-and-answer",
     "feedback add": "human-feedback",
     "feedback list": "human-feedback",
     "feedback show": "human-feedback",
@@ -111,6 +111,11 @@ OWNING_CHANGE: dict[str, str] = {
     "ci map-exit": "bootstrap-core",
     "eval": "m114-eval",
 }
+
+
+# the commands whose handler is still the "not yet implemented" stub (their module is absent, or the handler only
+# raises); `l4 <command> --help` says so. A command leaves this set when its handler does the work.
+STUBS = frozenset({"unlock", "ci render", "ci render-child"})
 
 
 def import_optional(module_name: str) -> ModuleType | None:

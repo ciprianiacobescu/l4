@@ -1,11 +1,13 @@
+import importlib.util
 import sys
 import types
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
 from l4 import commands
-from l4.cli import main
+from l4.cli import cli, main
 from l4.exitcodes import ExitCode
 
 SECTION_2_1 = {
@@ -89,10 +91,102 @@ def test_absent_handler_module_exits_2_not_yet_implemented(monkeypatch, capsys, 
 
 def test_every_command_without_a_module_is_a_stub_not_a_crash(capsys, repo):
     # the stubs of this part: modules that later parts deliver do not exist yet
-    for name in ("unlock", "questions", "ci render"):
+    assert {"unlock", "ci render", "ci render-child"} == commands.STUBS
+    for name in sorted(commands.STUBS):
         argv = [*ARGV[name], "--repo", str(repo)]
         assert main(argv, environ={}) == 2, name
         assert f"{name}: not yet implemented (M1: " in capsys.readouterr().err
+
+
+def test_questions_is_a_real_command_now(monkeypatch):
+    assert commands.HANDLERS["questions"] == "l4.specs.questions_cli:run_questions"
+    assert commands.OWNING_CHANGE["questions"] == "unfreeze-and-answer"
+    assert "questions" not in commands.STUBS
+
+
+def test_a_handler_module_that_does_not_exist_is_listed_as_a_stub():
+    missing = {
+        name for name, target in commands.HANDLERS.items() if importlib.util.find_spec(target.partition(":")[0]) is None
+    }
+    assert missing <= commands.STUBS, sorted(missing - commands.STUBS)
+
+
+def help_of(*words: str) -> str:
+    result = CliRunner().invoke(cli, [*words, "--help"])
+    assert result.exit_code == 0, result.output
+    return " ".join(result.output.split())
+
+
+def test_every_stub_command_says_so_in_its_help():
+    for name in sorted(commands.STUBS):
+        text = help_of(*name.split())
+        assert "(not yet implemented)" in text, name
+    group_listing = help_of("ci")
+    assert group_listing.count("(not yet implemented)") >= 2  # render and render-child, in the group's listing
+    for name in sorted(set(commands.HANDLERS) - commands.STUBS):
+        assert "(not yet implemented)" not in help_of(*name.split()).split("Options:")[0], name
+
+
+# option -> a value for it ("" for a flag); each is refused at once with "not yet implemented"
+OPTION_STUBS = {
+    "status": {"--rebuild": ""},
+    "resume": {"--extend-iterations": "2", "--extend-cost": "2"},
+    "run": {"--time-budget": "5m"},
+    "verify": {"--dry-run": ""},
+    "init": {"--dry-run": "", "--framework": "kiro"},
+}
+
+
+def option_help(command: str, option: str) -> str:
+    node = cli
+    for word in command.split():
+        node = node.commands[word]  # type: ignore[attr-defined]
+    return next(p.help or "" for p in node.params if option in p.opts)  # type: ignore[attr-defined]
+
+
+def test_every_stub_option_says_so_in_its_help_and_is_refused(capsys, repo):
+    for name, options in OPTION_STUBS.items():
+        for option, value in options.items():
+            assert "not yet implemented" in option_help(name, option), (name, option)
+            argv = [*ARGV[name], option, *([value] if value else []), "--repo", str(repo)]
+            if name == "init":
+                argv += ["--ci", "github", "--vendor"]
+            assert main(argv, environ={}) == 2, (name, option)
+            assert "not yet implemented" in capsys.readouterr().err, (name, option)
+    assert "kiro is not yet implemented" in option_help("init", "--framework")
+
+
+def test_an_option_that_works_is_not_marked(repo):
+    assert "not yet implemented" not in option_help("init", "--vendor")
+    assert "not yet implemented" not in option_help("resume", "--extend-fix-rounds")
+
+
+def test_l4_help_describes_questions_as_the_operator_command():
+    text = help_of()
+    assert "List and show open questions; accept or answer one on the unit branch (commits and pushes)" in text
+
+
+def test_questions_help_lists_the_four_forms_and_the_options():
+    text = help_of("questions")
+    for form in (
+        "l4 questions [list]",
+        "l4 questions show Q-NNN",
+        "l4 questions accept Q-NNN",
+        "l4 questions answer Q-NNN",
+    ):
+        assert form in text, form
+    for option in ("--unit", "--text", "--json", "--no-push"):
+        assert option in text, option
+    assert "clarifier.answer_by_agents" in text
+
+
+def test_questions_passes_its_options_to_the_handler(install_handler, repo):
+    calls = install_handler("questions", lambda app, **kw: ExitCode.OK)
+    argv = ["questions", "answer", "Q-002", "--unit", "openspec:a", "--text", "yes", "--json", "--no-push"]
+    assert main([*argv, "--repo", str(repo)], environ={}) == 0
+    assert calls[0]["kwargs"] == {
+        "words": ("answer", "Q-002"), "unit": "openspec:a", "text": "yes", "as_json": True, "no_push": True,
+    }  # fmt: skip
 
 
 @pytest.mark.parametrize("name", sorted(SECTION_2_1))

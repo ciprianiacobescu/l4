@@ -804,3 +804,16 @@ def test_r1_and_r2_an_unknown_unit_and_a_unit_without_a_branch(qworld, person):
         str(caught.value)
         == f"questions: {B} has no branch on origin: no question was asked yet\nFix: the next run creates it"
     )
+
+
+def test_the_command_line_reaches_the_handler(qworld, capsys, person):
+    from l4.cli import main
+
+    two_open(qworld)
+    common = ["--repo", str(qworld.app.repo), "--config", str(qworld.app.config_path)]
+    environ = dict(qworld.app.environ)
+    assert main(["questions", *common], environ=environ) == 0
+    assert f"{A} Q-001" in capsys.readouterr().out
+    argv = ["questions", "answer", "Q-002", "--unit", A, "--text", "Block login.", "--no-push", *common]
+    assert main(argv, environ=environ) == 0
+    assert capsys.readouterr().out.rstrip().endswith("nothing written (--no-push)")
