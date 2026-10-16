@@ -264,10 +264,7 @@ def test_a_hang_in_a_test_that_is_not_frozen_is_retried_with_the_test_named(make
     hanging_impl = IMPL + (
         "\n\ndef wait_forever():\n    import socket\n    a, b = socket.socketpair()\n    a.recv(1)\n"
     )
-    extra = (
-        "import pytest\n\nfrom pytdd.pricing import wait_forever\n\n\n"
-        "def test_extra_waits():\n    wait_forever()\n"
-    )
+    extra = "import pytest\n\nfrom pytdd.pricing import wait_forever\n\n\ndef test_extra_waits():\n    wait_forever()\n"
     writes = {"src/pytdd/pricing.py": hanging_impl, "tests/test_extra.py": extra}
     green = Step(writes=writes, structured=result("green"))
     bench = make_bench([red_step(), green, blocked_step()], test_timeout="2s")
@@ -276,3 +273,23 @@ def test_a_hang_in_a_test_that_is_not_frozen_is_retried_with_the_test_named(make
     second_prompt = bench.adapter.requests[2].prompt
     assert "hung" in second_prompt and "tests.test_extra::test_extra_waits" in second_prompt
     assert len(bench.events("gate.hung")) == 1
+
+
+def test_a_blocked_green_with_a_support_file_in_option_1_gets_the_note_that_offers_accepted(make_bench):
+    """SCN-IMP-170: 0.4.1 offered `accepted` for `conftest.py` and the code refused it; now it unfreezes it."""
+    question = {
+        "title": "The fixture in conftest.py hides the setting",
+        "context": "conftest.py sets the variable before the test runs.",
+        "kind": "technical",
+        "options": ["Edit `conftest.py`: remove the line", "Keep it"],
+    }
+    red = red_step()
+    red = replace(red, writes={**red.writes, "conftest.py": "import os\n\nos.environ['X'] = '1'\n"})
+    blocked = Step(structured=result("green", status="blocked", questions=[question]))
+    bench = make_bench([red, blocked])
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "blocked"
+    text = (bench.wb.ref.path / "questions.md").read_text()
+    assert "Harness note:" in text and "`conftest.py`" in text.split("Harness note:")[1]
+    assert "l4 questions accept Q-NNN --unit add-discount-codes" in text
+    assert "ignore file" in text

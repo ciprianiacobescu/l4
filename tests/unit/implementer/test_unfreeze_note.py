@@ -50,6 +50,40 @@ def test_at_most_three_files_are_named():
     assert note.count("`tests/test_") == 3
 
 
+def test_a_support_file_the_option_names_gets_the_accept_note_and_the_command():
+    """SCN-IMP-170: the live defect offered `accepted` for `conftest.py` while the code refused it."""
+    text = "the fixture is in conftest.py. Edit `conftest.py`: add the line"
+    note = unfreeze_note(text, ["conftest.py", *FROZEN], suggested=True, unit="my-unit")
+    assert "`conftest.py`" in note and "`accepted`" in note and "option 1" in note
+    assert "l4 questions accept Q-NNN --unit my-unit" in note
+    assert "ignore file" in note and "never" in note
+
+
+def test_the_command_has_a_placeholder_without_a_unit_and_is_left_out_without_the_hint():
+    text = "Edit `conftest.py`: add the line"
+    assert "--unit <unit>" in unfreeze_note(text, ["conftest.py"], suggested=True)
+    assert "l4 questions accept" not in unfreeze_note(text, ["conftest.py"], suggested=True, qid_hint=False)
+
+
+def test_a_question_that_names_an_ignore_file_never_offers_to_unfreeze_it():
+    text = "Edit `.gitignore`: add the line"
+    note = unfreeze_note(text, FROZEN, ignore=[".gitignore"], suggested=True, unit="u")
+    assert "`.gitignore`" in note and "never" in note
+    assert "`accepted`" not in note and "option 1" not in note and "l4 questions accept" not in note
+
+
+def test_an_ignore_file_beside_a_support_file_is_listed_apart_and_not_offered():
+    text = "Edit `conftest.py`: add the line; also .gitignore"
+    note = unfreeze_note(text, ["conftest.py"], ignore=[".gitignore"], suggested=True, unit="u")
+    head, _, tail = note.partition("never")
+    assert "`conftest.py`" in head and "`.gitignore`" in note and "`accepted`" in note
+
+
+def test_a_question_that_names_nothing_still_says_nothing_unfreezes():
+    note = unfreeze_note("rounding is unclear", FROZEN, ignore=[".gitignore"], suggested=False)
+    assert "names no frozen" in note and "cannot unfreeze anything" in note and "l4 questions accept" not in note
+
+
 def test_a_path_that_only_contains_a_frozen_one_is_not_named():
     note = unfreeze_note("see tests/test_discount.py.bak and tests/sub/tests/test_discount.py", FROZEN, suggested=False)
     assert "names no frozen test" in note
