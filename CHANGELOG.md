@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.5 (unreleased)
+## 0.4.5 (2026-10-16)
 
 ### Added
 - A heartbeat line while an agent step runs: `task <k> <phase> attempt <n>: <profile> working 6m, 14 tool calls, last
