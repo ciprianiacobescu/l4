@@ -71,8 +71,26 @@ def independence_constraint(cfg: L4Config, implementer_profiles: Sequence[str]) 
 
 def independence_keeper(cfg: L4Config, implementers: Sequence[str]) -> Constraint:
     """The veto an escalation applies to each next implementer profile: it must not take away the last independent
-    judge (escalate-and-note D6)."""
-    raise NotImplementedError("escalate-and-note 1.6")
+    judge (escalate-and-note D6). A profile P is refused when, for `roles.judges` and for a non-empty
+    `roles.verifier_agent`, no judge-capable profile of that chain is independent of `[*implementers, P]`."""
+    mode = cfg.verifier.independence
+
+    def check(name: str, profile: Profile) -> str | None:
+        if mode == "none":
+            return None
+        chain = [*implementers, name]
+        for role in ("judges", "verifier_agent"):
+            judges = [
+                n for n in getattr(cfg.roles, role) if n in cfg.profiles and cfg.profiles[n].adapter in JUDGE_ADAPTERS
+            ]
+            if not judges:
+                continue
+            veto = independence_constraint(cfg, chain)
+            if all(veto(n, cfg.profiles[n]) is not None for n in judges):
+                return f"no profile of roles.{role} would be independent of {name} (verifier.independence: {mode})"
+        return None
+
+    return check
 
 
 def select_judge(
