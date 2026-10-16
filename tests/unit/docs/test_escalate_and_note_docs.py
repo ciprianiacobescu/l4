@@ -37,7 +37,8 @@ def test_the_runbook_teaches_the_note_and_the_escalation() -> None:  # SCN-OPS-3
     ):
         assert needle in lines, needle
     commands = runbook[runbook.index("### 10.4 ") : runbook.index("### 10.5 ")]
-    assert "reason" in commands.split("| `l4 retry")[1].split("\n")[0] and "note" in commands.split("| `l4 retry")[1].split("\n")[0]
+    retry_row = commands.split("| `l4 retry")[1].split("\n")[0]
+    assert "reason" in retry_row and "note" in retry_row
     limits = _section(runbook, "## 11. ")
     for needle in ("fix unit", "max_cost_usd_per_unit", "between unit runs"):
         assert needle in limits, needle
