@@ -182,7 +182,8 @@ The fixtures:
     unchanged); SCN-IMP-197 at bench level; a native `Step(status="error", result_problem="invalid",
     rejected={...})` is normalized and goes to the checks, and `agent.finished` keeps `error`.
   - Change the tests that pinned today's behaviour: `tests/unit/implementer/test_result_retry.py` (the wrong-status
-    case now asserts `result.normalized` and an accepted step; the retry-prompt cases use `Step()`),
+    case now asserts `result.normalized` and an accepted step; the retry-prompt cases use `Step()`, and their asserted
+    text changes from the `ALLOWED` string to `no result was delivered` and the `result values:` line),
     `tests/unit/implementer/test_tdd_red.py:150-153` (`{"status": "great"}` goes to the checks and fails with `no
     tests added`; `Step()` still fails with `no result was delivered`), and
     `tests/unit/implementer/test_tdd_prompt_contract.py` (the request schema). `test_result_alias_step.py` and
@@ -260,7 +261,9 @@ The fixtures:
     delivery paragraph: "Missing/invalid → … repair prompts in the same session" becomes the rule of L4-IMP-021 with a
     pointer to L4-IMP-022; the delivery list gains kiro-cli and command;
   - L4-IMP-008 (§7.6): a `blocked` result with no question is a failed attempt (L4-IMP-021), not a stuck task; the
-    sentence on the retry after `result invalid` stays;
+    sentence on the retry after `result invalid` becomes "the retry prompt MUST carry the reason of L4-IMP-021 and the
+    `result values:` line" (after normalization no result failure carries a validation error or an allowed-values
+    list);
   - SCN-IMP-08: "Given the agent ends with prose and delivers no result object … Then the attempt fails; with
     `implementer.result_repair_attempts: 1`, one repair call first (L4-IMP-022, second wave)";
   - SCN-QMD-10: "Then the first three questions are raised and `result.normalized` records `questions cut 2`".
