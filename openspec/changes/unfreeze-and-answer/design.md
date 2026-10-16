@@ -483,6 +483,14 @@ has a `run.started` with no `run.finished`, the rule of `l4 restart`
 - **The agent rule is a speed bump** (D11).
 - **R6 and the live-run check** read the lock ref's pending ledger. A stale `run.started` of a dead runner blocks the
   command, as it blocks `l4 restart` today. The fix is the same.
+- **The content rules are a static best effort, not a proof.** Rules 1 to 3 read the opened file's syntax; they cannot
+  rule out every dynamic way to change what the tests report. The guard's purpose rests on four layers together:
+  only a file that a person-reviewed, activated task text names can open (or a base-branch text); the task's own red
+  tests stay frozen; the opened file is checked again by the verifier (`check_scan`, rule 3), whose result-manipulation
+  content scan and judge panel also read the diff; and the opened path is listed in `verification.md` for the person
+  who merges. A review on 2026-10-16 (bench probes) found every proof-path and untrusted-text probe it ran stopped,
+  and two false positives (an `os.environ[...]` assignment and a repeated `import pkg.mod`), both fixed with tests. It
+  did not finish the verifier-side probes; treat the dynamic-patch residual as open [I].
 
 ## 5. Not verified
 
