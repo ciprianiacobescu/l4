@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from .questions_world import qworld  # noqa: F401  (the fixture of the `l4 questions` tests)
+
 RECORDED = Path(__file__).resolve().parents[2] / "fixtures" / "recorded" / "openspec" / "1.14.0"
 
 # The 39-line grammar file of spikes/04 (setup.sh), without a trailing newline.
