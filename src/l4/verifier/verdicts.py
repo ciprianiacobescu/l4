@@ -158,12 +158,24 @@ def is_coverage_hold_finding(finding: Finding) -> bool:
     return deterministic and finding.detail.startswith(COVERAGE_FIX)
 
 
+WHEN_THEN = re.compile(r"\bWHEN\b(?P<when>.+?)\bTHEN\b(?P<then>.+)", re.S)
+
+
+def ends_with_scenario(reason: str) -> bool:
+    """A reason with a `WHEN ... THEN ...` sentence (both words in capitals, text between and after them): the
+    scenario a fix unit pins (`fixunit.when_then` builds it from the same pattern)."""
+    match = WHEN_THEN.search(reason)
+    return bool(match and match.group("when").strip() and match.group("then").strip())
+
+
 def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -> Finding:
     """What a rejected hold becomes. A hold of the two kinds a task can be derived from, rejected with a reason, is a
     deterministic major finding: the reject applies the `fail` policy of the check that raised the hold (the finding a
     `fail` mode would have raised), so the fix unit plans a chore for it (D8). Any other reject has nothing to act on:
     it is the human's finding, which the planner lists as not converted, and the round escalates (the answer of a
-    verdict that cannot be turned into a fix, never a new question)."""
+    verdict that cannot be turned into a fix, never a new question). A hold of any other kind, rejected with a reason
+    that holds a `WHEN ... THEN ...` sentence, is a behaviour finding like a rejected judge finding with no criterion:
+    the scenario is the task."""
     kind, subjects = hold_kind(hold), hold_subjects(hold)
     reason = verdict.reason.strip()
     context = " ".join(_quote(f) for f in quoted)
@@ -181,11 +193,14 @@ def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -
         title = "Changed code that no test runs"
     else:
         what, title = (
-            "A hold the human rejected without a fix the harness can derive.",
+            "A hold the human rejected without a fix the harness can derive."
+            if not ends_with_scenario(reason)
+            else "Change the behaviour the hold names as the human's reason says; the reason ends with the scenario "
+            "to pin.",
             f"Rejected hold: {_flat(hold, 90)}",
         )
     detail = f"{what} Hold: {_flat(hold, 400)} {context}".rstrip() + rejection_note(verdict)
-    usable = kind != "other" and bool(reason)
+    usable = bool(reason) and (kind != "other" or ends_with_scenario(reason))
     return Finding(Severity.MAJOR, title, detail, "deterministic" if usable else "human", id=hold_id(hold))
 
 
@@ -502,8 +517,14 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> 
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",
             *judged,
             "",
-            "Answer `accept` if the unit can go on as it stands, or `reject` and say why: a rejected hold is fixed by "
-            "a fix unit." + (" One answer settles both the hold and the judge's finding." if judged else ""),
+            "Answer `accept` if the unit can go on as it stands, "
+            + (
+                "or `reject` and say why: a rejected hold is fixed by a fix unit."
+                if hold_kind(hold) != "other"
+                else "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit "
+                "can be made."
+            )
+            + (" One answer settles both the hold and the judge's finding." if judged else ""),
         ]
     )
     return NewQuestion(

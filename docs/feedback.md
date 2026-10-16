@@ -115,8 +115,11 @@ l4 feedback add --kind behaviour --at src/inventory/reorder.py:7 \
   "never hard-code endpoints". The lesson is titled `Human feedback: <your text>`, and the same request on two units
   reinforces one lesson.
 - **`--unit kiro:add-reorder-quantity`** names the unit when the checked-out branch is not a unit branch. A unit that
-  is still open takes its feedback on its own branch: from another branch the command exits 2 and prints the
-  `git switch l4/<framework>/<name>` line. A unit that was already merged is the exception (see below).
+  is still open takes its feedback on its own branch, or on any checkout (detached, or a local branch of another
+  name) whose HEAD is the head of `origin/l4/<framework>/<name>`: the command then says which branch the feedback goes
+  to and prints `git push origin HEAD:l4/<framework>/<name>` in place of `git push`. From any other commit the command
+  exits 2 and prints `git switch l4/<framework>/<name>`, and, for a branch that is checked out elsewhere (`git worktree
+  list`, or L4's own cache under `~/.cache/l4/worktrees/`), `git switch --detach origin/l4/<framework>/<name>`. A unit that was already merged is the exception (see below).
 - **A follow-up unit or a fix unit takes no feedback of its own.** `add`, `submit` and `withdraw` on its folder exit 2
   and name the parent unit: give the feedback on the parent.
 - **`l4 feedback list`** and **`l4 feedback show FB-001`** show the items as the file holds them (id, status, kind,

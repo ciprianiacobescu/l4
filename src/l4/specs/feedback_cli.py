@@ -66,6 +66,7 @@ class FeedbackTarget:
     name: str
     dir: Path  # the unit folder that holds (or will hold) feedback.md
     merged: bool = False  # the unit is `merged`: the file goes to the base branch (L4-FBK-010)
+    push_to: str | None = None  # the unit branch, when HEAD is its head under another name or detached
 
     @property
     def id(self) -> str:
@@ -150,19 +151,30 @@ def _refuse_derived(target: FeedbackTarget) -> None:
         )
 
 
-def _require_unit_branch(app: AppContext, cfg: L4Config, target: FeedbackTarget) -> None:
+def _require_unit_branch(app: AppContext, cfg: L4Config, target: FeedbackTarget) -> FeedbackTarget:
     """Review #12: an open unit reads `feedback.md` from its own branch; a commit on the base is read only after the
-    merge, as a follow-up. A merged unit's file goes to the base branch (`_after_merge`)."""
+    merge, as a follow-up. A merged unit's file goes to the base branch (`_after_merge`). The checkout is the unit's
+    own branch, or any checkout (detached, or a local branch of another name) whose HEAD is the head of
+    `origin/<unit branch>`: L4's worktree cache can hold the branch, so it cannot always be checked out. The commit
+    then goes to the unit branch with `git push origin HEAD:<unit branch>`."""
     git = _git(app)
     if git is None or target.merged:
-        return
+        return target
     branch = git.run("symbolic-ref", "--short", "-q", "HEAD", check=False).stdout.strip()
     wanted = f"{cfg.forge.branch_prefix}{target.framework.value}/{target.name}"
-    if branch != wanted:
-        raise _usage(
-            f"{target.id} is not merged: its feedback goes on its own branch (now on {branch or 'no branch'}); "
-            f"run: git switch {wanted}"
-        )
+    if branch == wanted:
+        return target
+    head = git.run("rev-parse", "--verify", "-q", "HEAD^{commit}", check=False).stdout.strip()
+    remote = git.run("rev-parse", "--verify", "-q", f"refs/remotes/origin/{wanted}^{{commit}}", check=False)
+    if head and remote.returncode == 0 and remote.stdout.strip() == head:
+        return replace(target, push_to=wanted)
+    now = f"on {branch}" if branch else "detached"
+    raise _usage(
+        f"{target.id} is not merged: its feedback goes on the unit branch {wanted}, and HEAD ({now}) is not at the "
+        f"head of origin/{wanted}. Run: git fetch origin {wanted} && git switch {wanted}. If that branch is already "
+        "checked out elsewhere (`git worktree list` shows where; L4's own cache is ~/.cache/l4/worktrees/...), run: "
+        f"git switch --detach origin/{wanted}"
+    )
 
 
 def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None, *, write: bool = False) -> FeedbackTarget:
@@ -173,7 +185,7 @@ def resolve_feedback_dir(app: AppContext, cfg: L4Config, unit: str | None, *, wr
     target = _resolve(app, cfg, unit)
     if write:
         _refuse_derived(target)
-        _require_unit_branch(app, cfg, target)
+        target = _require_unit_branch(app, cfg, target)
     return target
 
 
@@ -299,7 +311,7 @@ def _git_lines(app: AppContext, cfg: L4Config, target: FeedbackTarget, message: 
         f"then get the commit onto {base} by your usual route (a pull request or a push); the next {base} run "
         "creates a follow-up unit for it"
         if target.merged
-        else "git push"
+        else (f"git push origin HEAD:{target.push_to}" if target.push_to else "git push")
     )
     return [rel, f"git add {rel}", f"git commit -m {_shell(f'feedback({target.name}): {message}')}", last]
 
@@ -332,6 +344,10 @@ def run_feedback_add(
     item = written.get(fid) if written is not None else None
     shown_title = item.title if item is not None else new.title
     status = FeedbackStatus.DRAFT if draft else FeedbackStatus.SUBMITTED
+    if target.push_to:
+        click.echo(
+            f"feedback goes to the unit branch {target.push_to} (HEAD is the head of origin/{target.push_to})", err=True
+        )
     _echo(app, [f"{fid} {status.value}", *_git_lines(app, cfg, target, f"{fid} {shown_title}")])
     return ExitCode.OK
 

@@ -1479,8 +1479,11 @@ are checked before anything is written (a failed check is exit 2 and writes noth
 `git commit -m "feedback(<name>): FB-NNN <title>"` and `git push` lines that send it. `--text -` reads standard input,
 `--draft` writes Status `draft`, and `submit` accepts only a valid draft. `list` and `show` accept `--json`
 (`l4/feedback@1`). `l4 feedback --help` and each subcommand's `--help` carry the kinds and one example per kind. An
-open unit takes its feedback on its own branch (off it the command is exit 2 with the `git switch
-l4/<framework>/<name>` line), and a follow-up's or a fix unit's folder takes none: `add|submit|withdraw` there is exit 2
+open unit takes its feedback on its own branch, or, with `--unit`, on any checkout (detached, or a local branch of
+another name) whose HEAD is the head of `origin/l4/<framework>/<name>` (the command says which branch the feedback goes
+to and prints `git push origin HEAD:l4/<framework>/<name>`); off it the command is exit 2 with the `git switch
+l4/<framework>/<name>` line, and the `git worktree list` / `git switch --detach origin/…` line when the branch is
+checked out elsewhere (L4's own worktree cache); and a follow-up's or a fix unit's folder takes none: `add|submit|withdraw` there is exit 2
 naming the parent, whose `feedback.md` is the one that is judged (L4-FBK-010).
 
 **L4-FBK-004** At step 0 of every verification round, each *takeable* item MUST become a deterministic blocking
@@ -3079,7 +3082,11 @@ gives a chore task to remove the change from this unit or relocate it to its own
 (`diff coverage: changed code not run by any test: …`) gives a chore task to add tests that run the functions it names.
 (A chore runs without a red step, D8: a test of code that already exists cannot be red.) A reject with no text, or of any
 other hold (not measured, unsafe path name, no scope declared, a UI criterion without an e2e test, a discarded judge
-reply), has nothing to act on: this is the unusable-answer path of a rejected finding with no criterion and no
+reply, a diff over the judge's limit), has nothing to act on unless its reason ends with a `WHEN … THEN …` sentence:
+then the hold becomes a **deterministic** major behaviour finding, and its fix task carries the reason and the scenario
+exactly as a rejected judge finding with no criterion does (the question of such a hold says "end the reason with a
+sentence WHEN … THEN … so that a fix unit can be made", and promises a fix unit only for scope and coverage holds).
+Without the scenario this is the unusable-answer path of a rejected finding with no criterion and no
 `WHEN … THEN …`. The finding is the human's, the fix planner lists it as not converted, no fix unit is written and the
 round ends in `verify_fail_exhausted` (exit 13); nothing is asked or spawned on a later run. The question of the hold is
 consumed by the fix unit (`fix.spawned{consumed}`); a hold that is still true in a later round after its fix unit is

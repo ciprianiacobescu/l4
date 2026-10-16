@@ -664,7 +664,10 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   escalates.
 - To tell the fix what is wrong, end the reason with a sentence `WHEN … THEN …`. Write `WHEN` and `THEN` in capital
   letters. Everything after `THEN` to the end of the answer is the THEN clause. The fix must make the scenario true.
-  The scenario is required only for a rejected finding that has no criterion.
+  The scenario is required for a rejected finding that has no criterion, and for a rejected hold of any kind other
+  than scope or coverage (for example `the diff is longer than 120000 characters`). That hold becomes a behaviour
+  finding with the scenario as its task. Without the scenario the unit escalates, and the question of such a hold
+  says so: it does not promise a fix unit.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which
   requirement each id is.
 - Answer all open verdict questions. The unit moves only when all of them have an answer. `l4 plan` then shows

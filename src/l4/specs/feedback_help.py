@@ -11,6 +11,9 @@ and checks that each item was addressed. These commands only edit feedback.md in
 push or call the forge. After `add`, run the three git lines it prints to send the request.
 
 The unit is --unit ID, else the one named by the checked-out branch l4/<framework>/<name>.
+With --unit, the checkout may also be detached, or on a branch of another name, when HEAD is the head of
+origin/l4/<framework>/<name>; the command says which branch the feedback goes to, and `git push origin
+HEAD:l4/<framework>/<name>` sends it.
 
 \b
 Kinds (--kind):

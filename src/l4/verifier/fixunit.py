@@ -28,7 +28,7 @@ from l4.specs.feedback import FeedbackItem
 from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
-from l4.verifier.verdicts import is_coverage_hold_finding, rejection_note
+from l4.verifier.verdicts import WHEN_THEN, is_coverage_hold_finding, rejection_note
 
 MAX_FIX_TASKS = 5
 MAX_TITLE_CHARS = 100
@@ -37,7 +37,6 @@ FEEDBACK_REQUIREMENT = "\N{EM DASH} feedback"
 REFACTOR_KINDS = ("refactor", "duplication")
 REGRESSION = "\N{EM DASH} regression"
 _SUFFIX = re.compile(r"\s+\N{EM DASH}\s+regression\s+\d+\s*$")
-_WHEN_THEN = re.compile(r"\bWHEN\b(?P<when>.+?)\bTHEN\b(?P<then>.+)", re.S)
 _SEVERITY_ORDER = {Severity.BLOCKER: 0, Severity.MAJOR: 1, Severity.MINOR: 2}
 # the title of a finding about tests: the word as a noun of its own, not `test-mode` or `latest` (M1.13, W-C1)
 _ABOUT_TESTS = re.compile(r"(?<![\w-])(?:tests?|assertions?|mocks?|fixtures?)(?![\w-])", re.I)
@@ -107,7 +106,7 @@ def _fit_detail(detail: str, decisions: Sequence[str], by: str, limit: int) -> s
 
 def when_then(text: str) -> str | None:
     """`- **WHEN** x\\n- **THEN** y` from a sentence that has both words in capitals and something between them."""
-    match = _WHEN_THEN.search(text)
+    match = WHEN_THEN.search(text)
     if not match:
         return None
     when, then = " ".join(match.group("when").split()), " ".join(match.group("then").split())
