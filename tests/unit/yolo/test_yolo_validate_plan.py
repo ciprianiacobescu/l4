@@ -1223,6 +1223,18 @@ def test_a_pattern_holds_every_unit_no_plan_lists(repo):
     assert run(repo)[0] == 0
 
 
+def test_a_star_hold_leaves_fix_and_follow_up_units_to_their_listed_parent(repo):
+    from l4.yolo.draft import derived_parents
+
+    for name in ("a", "a-fix-1", "a-followup-1", "z"):
+        change(repo, name)
+    config(repo, 'yolo:\n  hold:\n    - "*"\n')
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0  # covered by the parent, as the harness does not config-hold them
+    for unit in ("openspec:a-fix-1", "openspec:a-fix-2-fix-1", "kiro:a-followup-3", "openspec:a"):
+        assert vp.derived_parents(unit) == derived_parents(unit)
+
+
 def test_a_hold_in_flow_style_yolo_is_ignored_with_a_warning(repo):
     change(repo, "a")
     change(repo, "b")
