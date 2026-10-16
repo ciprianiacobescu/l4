@@ -79,13 +79,13 @@ def test_integrated_unit_is_never_eligible_and_all_done_gives_none():
 def test_serial_current_unit_is_the_only_candidate():
     plan = make_plan([{"id": "b1", "units": [{"id": "a"}, {"id": "b"}]}])
     got = next_eligible(plan, state(plan, current="b"), {"b": "in_review"})
-    assert got.unit == "b" and got.waiting == {"a": "waits for b (not integrated)"}
+    assert got.unit == "b" and got.waiting == {"a": "waits for its turn: b runs first (one unit at a time)"}
 
 
 def test_no_current_second_independent_unit_waits_for_the_first():
     plan = make_plan([{"id": "b1", "units": [{"id": "a"}, {"id": "b"}]}])
     got = next_eligible(plan, state(plan), {})
-    assert got.unit == "a" and got.waiting == {"b": "waits for a (not integrated)"}
+    assert got.unit == "a" and got.waiting == {"b": "waits for its turn: a runs first (one unit at a time)"}
 
 
 def test_a_current_unit_already_integrated_is_ignored():
