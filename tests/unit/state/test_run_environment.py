@@ -39,3 +39,47 @@ def test_a_failing_version_command_never_stops_the_run():
 
     facts = run_environment({}, which=lambda name, path=None: "/bin/" + name, run=boom)
     assert set(facts["tools"]) == {"python"}
+
+
+def _ci(env):
+    return run_environment(env, which=lambda name, path=None: None).get("ci_url")
+
+
+_GH = {
+    "GITHUB_ACTIONS": "true",
+    "GITHUB_SERVER_URL": "https://github.com",
+    "GITHUB_REPOSITORY": "owner/repo",
+    "GITHUB_RUN_ID": "123",
+}
+
+
+def test_github_run_url_without_an_attempt_or_with_the_first():
+    assert _ci(_GH) == "https://github.com/owner/repo/actions/runs/123"
+    assert _ci({**_GH, "GITHUB_RUN_ATTEMPT": "1"}) == "https://github.com/owner/repo/actions/runs/123"
+
+
+def test_github_run_url_with_an_attempt_above_one():
+    assert _ci({**_GH, "GITHUB_RUN_ATTEMPT": "2"}) == "https://github.com/owner/repo/actions/runs/123/attempts/2"
+
+
+def test_gitlab_job_url():
+    env = {"GITLAB_CI": "true", "CI_JOB_URL": "https://gitlab.example.com/g/p/-/jobs/9"}
+    assert _ci(env) == "https://gitlab.example.com/g/p/-/jobs/9"
+
+
+def test_no_ci_has_no_ci_url():
+    assert _ci({}) is None
+    assert _ci({"GITHUB_SERVER_URL": "https://github.com"}) is None
+
+
+def test_a_bad_part_leaves_the_key_out():
+    assert _ci({**_GH, "GITHUB_REPOSITORY": "../x"}) is None
+    assert _ci({**_GH, "GITHUB_RUN_ID": "12a"}) is None
+    assert _ci({**_GH, "GITHUB_RUN_ATTEMPT": "x"}) is None
+    assert _ci({**_GH, "GITHUB_SERVER_URL": "http://github.com"}) is None
+    assert _ci({"GITLAB_CI": "true", "CI_JOB_URL": "not a url"}) is None
+
+
+def test_a_server_url_with_a_user_part_leaves_the_key_out():
+    assert _ci({**_GH, "GITHUB_SERVER_URL": "https://user:pw@github.com"}) is None
+    assert _ci({"GITLAB_CI": "true", "CI_JOB_URL": "https://tok@gitlab.example.com/j/1"}) is None
