@@ -18,6 +18,7 @@ from typing import Any
 
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
+from l4.implementer.opened import check_opened, unit_modules
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
@@ -326,17 +327,21 @@ def _pytest_config(raw: bytes | None) -> Any:
     return {k: v for k, v in tool.items() if k in _PYTEST_TABLES}
 
 
-def _unfrozen_paths(ctx: IntegrityContext, red: LedgerEvent, red_sha: str) -> dict[str, str]:
-    """path -> question id, for the paths a `task.unfrozen` of this very red commit (same unit and task) freed: the
-    harness wrote it before green's attempt, from a human answer that names the file (M1.10 decision 6)."""
-    freed: dict[str, str] = {}
+def _unfrozen_paths(ctx: IntegrityContext, red: LedgerEvent, red_sha: str) -> dict[str, tuple[str, str]]:
+    """path -> (reason, source), for the paths a `task.unfrozen` of this very red commit (same unit and task) freed. The
+    harness wrote it before green's attempt. `reason` is `human_answer` (source: the question id; also the reading of
+    an old event without a reason) or `named_by_task` (source: `plan:<id>@<digest>` or `base:<sha>`)."""
+    freed: dict[str, tuple[str, str]] = {}
     for e in ctx.events:
         if (
             e.type == "task.unfrozen" and e.data.get("task") == red.data.get("task")
             and e.data.get("red_sha") == red_sha and _unit_of(ctx, e) == _unit_of(ctx, red)
         ):  # fmt: skip
+            named = e.data.get("reason") == "named_by_task"
+            reason = "named_by_task" if named else "human_answer"
+            source = str((e.data.get("source") if named else e.data.get("question")) or "a human answer")
             for path in e.data.get("paths") or []:
-                freed[str(path)] = str(e.data.get("question") or "a human answer")
+                freed[str(path)] = (reason, source)
     return freed
 
 
@@ -345,7 +350,7 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
     files, `task.red_ok.frozen`) are identical at both, and so are the `[tool.pytest*]`/`[tool.coverage*]` sections of
     `pyproject.toml` and the files `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`, `tox.ini` and
     `setup.cfg`."""
-    git, findings, checked, listed = ctx.git, [], 0, []
+    git, findings, checked, listed, opened = ctx.git, [], 0, [], 0
     for red in (e for e in ctx.events if e.type == "task.red_ok"):
         red_sha, green = _sha(ctx, red), _green_sha(ctx, red)
         frozen = [str(p) for p in red.data.get("frozen") or []]
@@ -356,9 +361,14 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
         changed = _changed(git, red_sha, green)
         freed = _unfrozen_paths(ctx, red, red_sha)
         moved = sorted(p for p in frozen if p in changed and p not in freed)
-        listed += [
-            f"{p} (task {task}, unfrozen by {freed[p]} (human))" for p in sorted(freed) if p in frozen and p in changed
-        ]
+        for p in sorted(freed):
+            if p in frozen and p in changed:
+                reason, source = freed[p]
+                if reason == "named_by_task":
+                    opened += 1
+                    listed.append(f"{p} (task {task}, opened by its text, {source})")
+                else:
+                    listed.append(f"{p} (task {task}, unfrozen by {source} (human))")
         runner = sorted(p for p in changed if p in _RUNNER_FILES)
         if "pyproject.toml" in changed and _pytest_config(_blob(git, red_sha, "pyproject.toml")) != _pytest_config(
             _blob(git, green, "pyproject.toml")
@@ -378,9 +388,11 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
             )
     if not checked:
         return Outcome(note="no task with a red and a green commit", skipped=True)
-    note = f"{checked} task(s): red and green compared" + (
-        f" (+{len(listed)} unfrozen by human answers)" if listed else ""
-    )
+    note = f"{checked} task(s): red and green compared"
+    if len(listed) > opened:
+        note += f" (+{len(listed) - opened} unfrozen by human answers)"
+    if opened:
+        note += f" (+{opened} opened by task text)"
     return Outcome(findings, note, unfrozen=listed)
 
 
@@ -476,6 +488,28 @@ def _unread_support(ctx: IntegrityContext, path: str) -> bool:
     )
 
 
+def _opened_patches(ctx: IntegrityContext, changed: Mapping[str, str]) -> list[str]:
+    """Rule 3 of `opened.check_opened` (design D5) on each changed `.py` path that a `task.unfrozen` of the unit names:
+    a new patch or assignment of a symbol of a production module that the unit changed. The red version is the one the
+    event records (`red_sha`), else the base."""
+    units = {ctx.unit_id, *(unit for unit, _ in ctx.tasks)}
+    named: dict[str, str] = {}
+    for e in ctx.events:
+        if e.type == "task.unfrozen" and _unit_of(ctx, e) in units:
+            for path in e.data.get("paths") or []:
+                named.setdefault(str(path), str(e.data.get("red_sha") or ctx.base_sha))
+    modules = unit_modules((p for p, s in changed.items() if s != "D"), ctx.cfg)
+    hits: list[str] = []
+    for path in sorted(p for p in named if p.endswith(".py") and changed.get(p, "D") != "D"):
+        red = named[path] if _blob(ctx.git, named[path], path) is not None else ctx.base_sha
+        why = check_opened(
+            _text(ctx.git, red, path), _text(ctx.git, ctx.head_sha, path), named_by_task=False, unit_modules=modules
+        )
+        if why:
+            hits.append(f"{path}: an opened support file patches the unit's code ({why})")
+    return hits
+
+
 def check_scan(ctx: IntegrityContext) -> Outcome:
     """Result-manipulating constructs in the unit's changed test-support and runner-config files, a mention of the
     coverage plugin or its output directory in any changed Python file (M1.6: such code can rewrite the diff-coverage
@@ -512,6 +546,7 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
             human += [f"{path}: {what} (added by {', '.join(r[SHA][:10] for r in who)})" for what in found]
         else:
             hits += [f"{path}: {what}" for what in found]
+    hits += _opened_patches(ctx, _changed(git, ctx.base_sha, ctx.head_sha))
     tree = git.run_bytes("ls-tree", "-r", "--name-only", "-z", ctx.head_sha).split(b"\0")
     names = [p.decode("utf-8", "replace") for p in tree if p]
     base_names = set(
