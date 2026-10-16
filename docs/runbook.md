@@ -281,6 +281,12 @@ The important log lines:
 | `[l4] <unit> phase <from> → <to> (<trigger>)` | A phase change. |
 | `[l4] <unit> task <k> <red\|green> attempt <n> failed: <reason>` | Why one attempt failed. The phase can also be `single`. For a fix unit, `[<fix unit>]` follows the unit id. The reason is cut. The full text is on the line `[l4] implementer: <k>: <phase> attempt <n> failed: …`. |
 | `[l4] <unit> halted: <code> (task <k>)` | The short code of the breaker. |
+| `[l4] <unit> task <k> <phase> attempt <n> failed on <profile>: <reason>` | The same as the attempt line above, with the profile that ran the attempt. Older ledgers have no profile. |
+| `[l4] <unit> task <k> <phase>: escalated from <from> to <to> after <n> failed attempts` | The step moved to the next profile of `roles.implementer` (`implementer.escalated`). |
+| `[l4] <unit> task <k> <phase>: <from> failed <n> attempts; no later profile can take it (<reason>); it stays on <from>` | A warning. No later profile could take the step, so it stays on its profile (`implementer.escalation_skipped`). |
+| `[l4] <unit> implementer: <profile> ok (…) → selected, escalated from <from>` | The selection of the new profile after an escalation. |
+| `[l4] <unit> halted: max_task_attempts (task <k>: <p1> <f1>, <p2> <f2>)` | The halt, with the failed attempts of each profile. |
+| `[l4] <unit> task <k> <phase>: the prompt holds the person's retry note of <ts>` | The prompt of the step carries the `--reason` of your `l4 retry` (`prompt.rendered`). |
 | `[l4] <unit> verdict <PASS\|FAIL\|NEEDS_HUMAN> (round <n>, …)` | The result of a verification round. |
 | `[l4] run: <unit>: waiting_capacity, retry_after <time>: <why>` | No agent is available, and when the harness tries again. With no recorded time, the line is `[l4] run: <why>`. |
 | `[l4] run: <unit> rejected: <reasons>` | The spec is not correct (exit 14). |
@@ -372,11 +378,13 @@ Do the steps of [section 5](#5-prepare-your-computer-for-l4-commands) first.
    Cause: task 1.1: max_task_attempts (3) reached in red; last failure: …
    Stopped in run: <run id>
    Or: add the label l4:retry
+   Retry note: the --reason of l4 retry goes to the implementer of task 1.1
    Next: l4 retry --unit <unit> --reason TEXT
    ```
 
    `Cause:` and `Stopped in run:` show only while the unit is stopped. `Or:` shows only for a unit that a label
-   moves. `Next:` is the bare command. For a unit that waits for an answer, it names the file and the question ids.
+   moves. `Retry note:` shows only for a unit halted on `max_task_attempts` that names a task. `--json` then has
+   `halt_task`. `Next:` is the bare command. For a unit that waits for an answer, it names the file and the question ids.
 
 4. Show the full state of one unit:
 
@@ -672,7 +680,7 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 
 | The cause starts with | Code | Cause | What to do before you retry |
 |---|---|---|---|
-| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. |
+| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` or, when two or more profiles ran the step, `task <k>: max_task_attempts (<n>) reached in <phase> on <p1> (<f1>), <p2> (<f2>); last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). With a chain of profiles, each profile has its own count, and the detail names the profiles in the order that they ran. | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. Write the `--reason` of `l4 retry` for the implementer of that task: it reads the reason as a note (see the NOTE on escalation below). |
 | ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | `unselectable_task` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
 | `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | `baseline_failed` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
 | `secret in the outgoing commits, push blocked: <path> (<kind>)` | `secret_in_push` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. |
@@ -693,6 +701,20 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > or with an answer that names the file. The next green step may change that file. An ignore file such as `.gitignore`
 > is never unfrozen. A task whose own reviewed text names a Python support file needs no answer.
 
+> **NOTE:** Escalation along the chain `roles.implementer`. When the chain has two or more profiles, a task phase that
+> one profile fails `implementer.escalate_after` times (default 2) goes to the next usable profile. The new profile
+> starts in a fresh session and reads the reasons of the earlier failures. Each profile has its own count of failed
+> attempts. A profile that has a later usable profile gets `escalate_after` failures. The last profile gets
+> `implementer.max_task_attempts`. The unit halts when the last profile has used them. A move goes by profile, not by
+> adapter or vendor: two OpenCode Go models, for example `opencode-go/deepseek-v4.1-flash` and
+> `opencode-go/glm-5.3-flash`, are two steps. The task keeps the new profile for its later phases. The next task starts
+> on the first profile again. A limit, a question and a `blocked` result do not count as failed attempts. The harness
+> does not move a task to a profile when no judge of another vendor would be left. Then the log has
+> `no later profile can take it (<reason>)` and the task stays on its profile. The tasks of a fix unit do not move.
+> Set `implementer.escalate_after: 0` to turn escalation off: each profile then keeps all its attempts and the unit
+> halts as in 0.4.3. `l4 doctor` (CFG-009) warns when the key is not below `max_task_attempts`, or when two profiles run
+> the same model. The key needs harness 0.4.4: move the pin first, because the config schema is strict.
+
 Retry the unit with the command or with the label. Both give the unit new task attempts.
 
 **The command: `l4 retry`**
@@ -712,8 +734,15 @@ Retry the unit with the command or with the label. Both give the unit new task a
    l4 retry --unit <unit> --reason "<why the unit can continue now>"
    ```
 
+   For a unit halted on `max_task_attempts`, the `--reason` is also the implementer's note. Write what the
+   implementer must do differently, in at most 300 characters. The implementer of that task reads it in every step,
+   until the task is done. A newer note replaces an older note.
 5. Make sure that the log has `[l4] retry: <unit> retried: now <phase>`. The phase is `implementing` or `fixing` for
-   a halted unit. It is `implementing` also when you changed the spec since the stop.
+   a halted unit. It is `implementing` also when you changed the spec since the stop. Read the line `note:` of the
+   output. `note: the reason goes to the next steps of task <k>` means that the implementer reads the reason.
+   `note: the stop names no task, so no implementer step reads the reason` means that it does not (the unit halted on
+   another cause). `retry: the reason is longer than 300 characters; the implementer reads the first 300` means that
+   the reason was cut. The label `l4:retry`, a spec push and `l4 restart` give no note.
 6. Read the last line of the output:
    - `run started on <base>`: a run works on the unit now.
    - `a run is already queued on <base>`: a run starts soon.
@@ -1320,13 +1349,13 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 
 | Command | What it does | Changes state |
 |---|---|---|
-| `l4 status [--unit <unit>] [--json]` | Shows the phase and the cause of each unit. With `--unit`, it shows `Cause:`, `Or:` and `Next:`. `--json` shows the full state. | No |
+| `l4 status [--unit <unit>] [--json]` | Shows the phase and the cause of each unit. With `--unit`, it shows `Cause:`, `Or:`, `Retry note:` (a unit halted on `max_task_attempts`) and `Next:`. `--json` shows the full state. | No |
 | `l4 plan [--unit <unit>] [--json]` | Shows the next action of each unit, and why. | No |
 | `l4 plan --sweep` | Records merges, archives, CI results, closed PRs and operator labels. CI runs it. | Yes |
 | `l4 doctor [--ci] [--live] [--fix]` | Examines the environment, the config and the agents. | `--fix` installs tools |
-| `l4 retry --unit <unit> --reason <text> [--rounds <n>] [--no-run]` | Continues a unit in `halted`, `escalated`, `waiting_capacity` or `in_review` at once, and starts a run. For a merged unit, it is the archive retry. | Yes |
+| `l4 retry --unit <unit> --reason <text> [--rounds <n>] [--no-run]` | Continues a unit in `halted`, `escalated`, `waiting_capacity` or `in_review` at once, and starts a run. For a merged unit, it is the archive retry. For a unit halted on `max_task_attempts`, the reason is also the implementer's note for that task (at most 300 characters) and the command prints a `note:` line. | Yes |
 | `l4 restart --unit <unit> --reason <text> [--no-run]` | Starts a unit over on a new branch, keeps the old head as a ref, closes the old PR, and starts a run. | Yes |
-| `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>]` | Resumes a halted or escalated unit at once. It starts no run. Use `l4 retry`. | Yes |
+| `l4 resume --unit <unit> --reason <text> [--extend-fix-rounds <n> \| --extend-feedback-rounds <n>]` | Resumes a halted or escalated unit at once. It starts no run. Use `l4 retry`. The reason is a note in the same way as for `l4 retry`. | Yes |
 | `l4 archive --unit <unit> [--retry]` | Runs the archive or the done-gate of a merged unit. | Yes |
 | `l4 feedback add\|list\|show\|submit\|withdraw` | Writes or shows feedback items. | Edits `feedback.md` only |
 | `l4 probe [<profile>] [--role <role>] [--no-cache]` | Examines the availability of agent profiles. With `--no-cache`, it clears the wait time of the profile on that runner when the probe passes. | See the description |
@@ -1386,6 +1415,12 @@ These limits make operation more difficult. Know them before you start.
   `l4 restart` while CI works on the same unit can fail with exit 1.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a
   clear message.
+- Escalation along the chain (`implementer.escalate_after`) does not apply to the tasks of a fix unit. They stay on
+  their profile and halt after `max_task_attempts`.
+- A retry note exists only for a unit halted on `max_task_attempts`. A stop with another cause, a label, a spec push and
+  `l4 restart` give no note.
+- `max_cost_usd_per_unit` is still not enforced. The `limits.max_cost_usd` of a plan is checked between unit runs only,
+  so one run can pass it, and an escalation to a dearer profile can raise the cost of that run.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and
   `budgets.same_error_repeats` are in the config, but no breaker uses them.
 - `l4 questions accept` and `answer` do not write ledger events. The next run records `question.answered`. An agent

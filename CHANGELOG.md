@@ -6,6 +6,29 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.4 (unreleased)
+
+### Added
+- Escalation along `roles.implementer`: `implementer.escalate_after` (default 2, `0` turns it off). After that many
+  failed attempts of one task phase on one profile, the next usable profile of the chain takes the phase, in a fresh
+  session, with the reasons of the earlier failures. The harness records `implementer.escalated` or
+  `implementer.escalation_skipped`. A move never parks a unit and never takes a profile that would leave no independent
+  judge. `task.attempt_failed` and `breaker.tripped` name the profiles; the halt detail lists them.
+- The retry note: the `--reason` of `l4 retry` and `l4 resume` on a unit halted on `max_task_attempts` reaches the
+  implementer of that task, as a capped and redacted data block, until the task is done. `prompt.rendered` records
+  `retry_note`. `l4 status --unit` prints a `Retry note:` line.
+- Doctor check CFG-009 (warn): an escalation that cannot act (`escalate_after` not below `max_task_attempts`, or two
+  profiles with the same adapter and model).
+- New progress lines for the escalation, the failed attempt with its profile, the halt with its profiles and the retry
+  note.
+- The runbook and the skill (`adopt.md`, `operate.md`) teach the cheap-first chain and the note.
+
+### Changed
+- A chain of two or more profiles moves a failing task phase to the next profile by default. Each profile has its own
+  attempts; the last one has `max_task_attempts`. Set `implementer.escalate_after: 0` for the old behaviour. The tasks
+  of a fix unit do not move.
+- The config key needs the 0.4.4 pin before the config edit (the schema is strict).
+
 ## 0.4.3 (2026-10-16)
 
 ### Fixed

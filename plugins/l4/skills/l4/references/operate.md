@@ -79,6 +79,11 @@ use a label. A command needs the forge token in the environment; the project com
   - If you changed the spec on the unit branch since the stop, the unit goes back to `implementing`.
   - It then starts a run on the base branch (`--no-run` skips that). A label starts none: the run that reads it
     continues the unit.
+  - **The `--reason` is the implementer's note.** For a unit halted on `max_task_attempts` (the cause names a task),
+    the reason of `l4 retry` goes to the implementer of that task, in every step, until the task is done. Write it for
+    that implementer: say what to do differently, in at most 300 characters (the implementer reads the first 300). The
+    command prints `note: the reason goes to the next steps of task <k>`. A stop that names no task gives no note.
+    A label, a spec push and `l4 restart` give no note.
   - `l4 resume` and `l4:resume` still work and mean the same for `halted` and `escalated`, but start no run.
 - **Start over: `l4 restart --unit FW:NAME --reason "…"`**, or the label `l4:restart`. It cuts a new branch from the
   base with the unit folder (spec, questions, feedback; task boxes as the base has them), keeps the old head as
