@@ -34,6 +34,7 @@ KIRO_VERSION=${KIRO_VERSION:-2.28.0}       # floor, not an exact pin: the instal
 # installs the same Laya for a `laya-local` profile, so a runner provisioned here downloads nothing again.
 LAYA_VERSION=${LAYA_VERSION:-0.3.24}
 LAYA_CHECKPOINT=${LAYA_CHECKPOINT:-typed-decisions}   # subfolder of convaiinnovations/laya that PRQ-18 prefetches
+LAYA_REVISION=${LAYA_REVISION:-7b928d828b7b0e022f929d9bd2e44165aa270148}   # the commit it is fetched at, never a branch
 GIT_MIN=${GIT_MIN:-2.34.0}
 APT_PACKAGES=${APT_PACKAGES:-"bubblewrap git curl jq ca-certificates xz-utils unzip"}
 
@@ -202,7 +203,7 @@ check_laya() { local v; v=$(as_runner "$LAYA_PY -c 'import importlib.metadata as
   DETAIL="$DETAIL, $LAYA_CHECKPOINT checkpoint not cached"; return 1; }
 apply_laya() {
   as_runner "uv tool install --force --torch-backend cpu 'laya[serve]==$LAYA_VERSION'" </dev/null || return 1
-  as_runner "$LAYA_PY -c 'from huggingface_hub import snapshot_download as s; s(\"convaiinnovations/laya\", allow_patterns=[\"$LAYA_CHECKPOINT/*\"])'" </dev/null; }
+  as_runner "$LAYA_PY -c 'from huggingface_hub import snapshot_download as s; s(\"convaiinnovations/laya\", revision=\"$LAYA_REVISION\", allow_patterns=[\"$LAYA_CHECKPOINT/*\"])'" </dev/null; }
 if [ "$WITH_LAYA" = 1 ]; then step PRQ-18 "Laya $LAYA_VERSION + $LAYA_CHECKPOINT" check_laya apply_laya; else report PRQ-18 SKIP "Laya" "pass --with-laya to install"; fi
 
 # PRQ-17 — Optional: adopt subscription logins that a human made as another user (e.g. the SSH admin) by MOVING the
