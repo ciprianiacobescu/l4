@@ -83,11 +83,12 @@ from l4.implementer.result import (
     trace_rules,
 )
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
+from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
-from l4.implementer.workbench import Workbench
+from l4.implementer.workbench import PreviousAttempt, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
@@ -516,12 +517,33 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
     return render_answer_blocks(file.questions, wb.redactor.redact_text, tasks=scope)
 
 
-def _previous_attempt_block(wb: Workbench, task: Task) -> tuple[tuple[str, str], ...]:
+MAX_REASON = 1000  # one failure headline of an escalation block, cut (escalate-and-note D9)
+
+
+def _escalation_block(previous: PreviousAttempt) -> tuple[tuple[str, str], ...]:
+    """The block for the profile that an escalation gave the step to: who failed, how often, and why, oldest first."""
+    clean = (re.sub(r"[^A-Za-z0-9._-]", "_", v) for v in (previous.profile, previous.phase or ""))
+    who, phase = clean
+    lines = [
+        f"The agent before you (profile {previous.profile}) failed the {previous.phase} step of this task "
+        f"{len(previous.failures)} times, so the harness gave the step to you. Its uncommitted changes were "
+        "discarded; the commits already on the branch are kept. You start from the checkout as it is now, in a new "
+        "session, with no transcript of those attempts. The harness rejected them for these reasons, oldest first:",
+        *(f"{n}. ({profile}) {reason[:MAX_REASON]}" for n, (profile, reason) in enumerate(previous.failures, 1)),
+    ]
+    attrs = f'kind="previous-attempt" profile="{who}" reason="escalation" phase="{phase}"'
+    return (("previous attempt", f"<l4:data {attrs}>\n{defuse(chr(10).join(lines))}\n</l4:data>"),)
+
+
+def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None) -> tuple[tuple[str, str], ...]:
     """After a mid-run fallback, the task's next step starts in a fresh session: say who ran before and why it
-    stopped (implementer-tdd-loop 2.25, reduced: no transcript)."""
+    stopped (implementer-tdd-loop 2.25, reduced: no transcript). After an escalation, only the steps of the phase
+    that failed are told (escalate-and-note D9)."""
     previous = wb.previous_attempt
     if previous is None or previous.task != task.key:
         return ()
+    if previous.why == "escalation":
+        return _escalation_block(previous) if previous.phase == phase else ()
     text = (
         f"The agent before you (profile {previous.profile}) stopped on a {previous.limit_kind} limit while working "
         "on this task. Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
@@ -567,6 +589,11 @@ def _lessons(wb: Workbench, task: Task) -> Injection:
     return injection
 
 
+def _note_sha(note: RetryNote, redact: Callable[[str], str]) -> str:
+    """The hash of the note block, of its redacted text (SCN-OPS-28)."""
+    return hashlib.sha256(note_block(note, redact=redact)[1].encode("utf-8")).hexdigest()
+
+
 def _prompt(
     wb: Workbench,
     role: Phase,
@@ -578,6 +605,8 @@ def _prompt(
 ) -> str:
     answers = _answers(wb, task)
     lessons = _lessons(wb, task)
+    redact = wb.redactor.redact_text
+    note = retry_note(_ledger_events(wb), task.key, wb.event_context.get("fix_unit"), redact=redact)  # D11
     ctx = PromptContext(
         unit_id=wb.ref.id, adapter=wb.selected.profile.adapter or "", task_key=task.key, task_title=task.title,
         task_links=task.links,
@@ -598,7 +627,8 @@ def _prompt(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
             *_accepted(wb),
-            *_previous_attempt_block(wb, task),
+            *_previous_attempt_block(wb, task, role),
+            *((note_block(note, redact=redact),) if note is not None else ()),
         ),
     )  # fmt: skip
     rendered = render_prompt(role, ctx)
@@ -608,6 +638,7 @@ def _prompt(
         template_version=rendered.template_version, sources=list(rendered.sources),
         answers=[{"id": qid, "answer_sha256": digest} for qid, digest in answers.consumed],  # L4-QMD-006
         lessons=list(lessons.ids),
+        **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),
     )  # fmt: skip
     return text
 
