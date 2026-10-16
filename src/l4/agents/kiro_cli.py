@@ -160,8 +160,12 @@ class KiroCliAdapter:
         result = RunResult(status="error", raw_events_path=raw_events_path, exit_code=exit_code)
         result.session_id, result.final_text = facts.get("session_id"), facts.get("final_text")
         run_error = facts.get("run_error")
-        if (credits := facts.get("credits")) is not None:  # the stream's own meter, in plan credits (not dollars)
-            result.usage = Usage(credits=credits, credits_source="kiro.stream")
+        result.last_message = facts.get("last_message")
+        credits, peak = facts.get("credits"), facts.get("context_peak_percent")
+        if credits is not None:  # the stream's own meter, in plan credits (not dollars)
+            result.usage = Usage(credits=credits, credits_source="kiro.stream", context_peak_percent=peak)
+        elif peak is not None:
+            result.usage = Usage(context_peak_percent=peak)
         if run_error and _CREDITS_WORDS.search(run_error[1]) and _EXHAUSTED_WORDS.search(run_error[1]):
             result.limit = LimitSignal("kiro-cli", None, "credits", None, "kiro.run_error", "")  # wording [U]
         throttled = run_error is not None and result.limit is None and _THROTTLE_WORDS.search(run_error[1])
@@ -230,10 +234,25 @@ def stream_events(text: str) -> list[dict[str, Any]]:
 
 def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """`session_id`, `final_text` and `status` (`runFinished`), `run_error` (`runError`: stage and message) and
-    `credits`: the sum of every `meteringUsage` value in credits (absent when the stream meters nothing)."""
+    `credits`: the sum of every `meteringUsage` value in credits (absent when the stream meters nothing),
+    `last_message`: the `agent_message_chunk` text after the last `tool_call` or `tool_call_update` (absent when there
+    is none; `finalText` holds all of the run's text) and `context_peak_percent`: the largest
+    `metadata.contextUsagePercentage`."""
     facts: dict[str, Any] = {}
+    chunks: list[str] = []
     for event in events:
         data = event["data"]
+        percent = data.get("contextUsagePercentage") if event["type"] == "metadata" else None
+        if isinstance(percent, int | float) and not isinstance(percent, bool):
+            facts["context_peak_percent"] = max(float(percent), facts.get("context_peak_percent", 0.0))
+        update = data.get("update") if event["type"] == "sessionUpdate" else None
+        if isinstance(update, dict):
+            kind = update.get("sessionUpdate")
+            content = update.get("content")
+            if kind in ("tool_call", "tool_call_update"):
+                chunks.clear()
+            elif kind == "agent_message_chunk" and isinstance(content, dict) and isinstance(content.get("text"), str):
+                chunks.append(content["text"])
         for meter in data.get("meteringUsage") or []:
             value = meter.get("value") if isinstance(meter, dict) else None
             if isinstance(value, int | float) and not isinstance(value, bool) and meter.get("unit") == "credit":
@@ -245,6 +264,8 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             facts["final_text"] = data.get("finalText") if isinstance(data.get("finalText"), str) else None
         elif event["type"] == "runError":
             facts["run_error"] = (str(data.get("stage", "")), str(data.get("message", "")))
+    if text := "".join(chunks):
+        facts["last_message"] = text
     return facts
 
 
