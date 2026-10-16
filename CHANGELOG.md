@@ -21,6 +21,10 @@ fix is a patch release. Release 0.4.1 added features and should have been 0.5.0 
   prints `accept: not available: <why> (<fix>)`.
 
 ### Changed
+- The green prompt template is version 5: it names the files of "Files this task names" and says how to change them.
+- Every command and option that is not implemented says `(not yet implemented)` in `l4 --help` (`l4 unlock`,
+  `l4 status --rebuild`, `l4 resume --extend-iterations`, `--extend-cost`, `l4 run --time-budget`,
+  `l4 verify --dry-run`). Each one still exits 2. The runbook lists the same set.
 - The `cache.seeded` ledger event records its digest as `digest` (it was `key`, which default secret scanners report
   as an API key in a consumer repository's archived ledgers). Readers accept both.
 - The note of a blocked green question never offers an edit that the harness refuses.
