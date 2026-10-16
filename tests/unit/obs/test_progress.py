@@ -215,3 +215,62 @@ def test_a_file_opened_by_the_task_text_has_its_own_line(console):
     assert out[0].endswith("task 2.1 opened by its text (plan:p1@abc123): conftest.py")
     assert out[1].endswith("task 2.2 opened by its text (base:0123456789): nothing; kept .gitignore (an ignore file)")
     assert out[2].endswith("task 1.1 unfrozen by Q-002: tests/t.py")
+
+
+def lines(console) -> list[str]:
+    return [ln.removeprefix("[l4] openspec:demo ") for ln in console.getvalue().splitlines()]
+
+
+def test_scn_imp_184_the_escalation_lines_name_the_profiles(console):
+    trace = ProgressTrace()
+    probes = {"binary": {"version": "1.0"}}
+    trace(event("task.attempt_failed", task="4.1", phase="red", attempt=2, profile="deepseek", reason="no tests"))
+    trace(
+        event("implementer.escalated", task="4.1", phase="red", **{"from": "deepseek"}, to="glm", failures=2, attempt=3)
+    )
+    trace(event("availability.selected", role="implementer", selected="glm", fallback_index=1, skipped=[],
+                probes=probes, escalated_from="deepseek"))  # fmt: skip
+    trace(event("task.attempt_failed", task="4.1", phase="red", attempt=5, profile="glm", reason="still red"))
+    trace(event("breaker.tripped", reason="max_task_attempts", task="4.1", phase="red", attempts=5,
+                profiles=[{"profile": "deepseek", "failures": 2}, {"profile": "glm", "failures": 3}]))  # fmt: skip
+    assert lines(console) == [
+        "task 4.1 red attempt 2 failed on deepseek: no tests",
+        "task 4.1 red: escalated from deepseek to glm after 2 failed attempts",
+        "implementer: glm ok (binary 1.0) → selected, escalated from deepseek",
+        "task 4.1 red attempt 5 failed on glm: still red",
+        "halted: max_task_attempts (task 4.1: deepseek 2, glm 3)",
+    ]
+
+
+def test_an_escalated_selection_does_not_also_print_a_fallback_number(console):
+    ProgressTrace()(event("availability.selected", role="implementer", selected="glm", fallback_index=1, skipped=[],
+                          probes={}, escalated_from="deepseek"))  # fmt: skip
+    assert "fallback" not in console.getvalue()
+
+
+def test_a_skipped_escalation_is_a_warning(console):
+    ProgressTrace()(event("implementer.escalation_skipped", task="4.1", phase="red", **{"from": "deepseek"},
+                          failures=2, reason="glm is cooling"))  # fmt: skip
+    assert lines(console) == [
+        "task 4.1 red: deepseek failed 2 attempts; no later profile can take it (glm is cooling); it stays on deepseek"
+    ]
+
+
+def test_a_retry_note_in_the_prompt_has_a_line_and_a_prompt_without_one_none(console):
+    trace = ProgressTrace()
+    trace(event("prompt.rendered", task="4.1", phase="red", sha256="x"))
+    trace(event("prompt.rendered", task="4.1", role="red", sha256="x",
+                retry_note={"event": "unit.retried", "ts": "2026-10-04T11:00:00Z", "sha256": "y"}))  # fmt: skip
+    assert lines(console) == ["task 4.1 red: the prompt holds the person's retry note of 2026-10-04T11:00:00Z"]
+
+
+def test_older_events_print_as_before(console):
+    trace = ProgressTrace()
+    trace(event("task.attempt_failed", task="1.1", phase="red", attempt=1, reason="no tests"))
+    trace(event("breaker.tripped", reason="max_task_attempts", task="1.1", profiles=[{"profile": "a", "failures": 3}]))
+    trace(event("availability.selected", role="implementer", selected="b", fallback_index=1, skipped=[], probes={}))
+    assert lines(console) == [
+        "task 1.1 red attempt 1 failed: no tests",
+        "halted: max_task_attempts (task 1.1)",
+        "implementer: b ok → selected, fallback #1",
+    ]
