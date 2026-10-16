@@ -724,3 +724,83 @@ def test_build_edit_changes_only_the_status_the_answer_and_the_row(qworld):
         (x.id, x.status) for x in old.questions if x.id != "Q-002"
     ]
     assert new.get("Q-002").answer_text == "Block login.\nUntil verified."
+
+
+# --- R1, R2, R6: the unit must exist, have a branch, and be waiting for an answer (unfreeze-and-answer 4.6) --------
+
+LIVE = "r-20261016T1100Z-bbbb"
+
+
+def publish_pending(world: QWorld, tmp_path, *events: tuple[str, dict]) -> None:
+    """A run on another machine: its ledger lines are on the lock ref of unit A (`ledger-pending/<run>.jsonl`)."""
+    from l4.state.pending import PendingLedger
+    from l4.vcs.names import lock_ref
+
+    lines = [
+        json.dumps(
+            {
+                "ts": f"2026-10-16T11:{n:02d}:00.000000Z",
+                "run_id": LIVE,
+                "unit": A,
+                "seq": n,
+                "type": kind,
+                **data,
+            }  # fmt: skip
+        )
+        for n, (kind, data) in enumerate(events, 1)
+    ]
+    path = tmp_path / f"{LIVE}.jsonl"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    PendingLedger(world.clone, lock_ref=lock_ref(A), unit=A, run_id=LIVE).publish(path)
+
+
+@pytest.mark.parametrize("phase", ["merged", "abandoned"])
+def test_a_finished_unit_does_not_wait_for_an_answer(qworld, person, phase):
+    two_open(qworld)
+    qworld.unit_branch(
+        "a",
+        ledger=ledger_file(A, ("phase.changed", {"from": "in_review", "to": phase, "trigger": "test"})),
+    )
+    head = qworld.origin_head("a")
+    for words, text in ((("accept", "Q-001"), None), (("answer", "Q-002"), "Block login.")):
+        with pytest.raises(L4Exit) as caught:
+            run_form(qworld, *words, text=text)
+        assert caught.value.code is ExitCode.USAGE_ERROR
+        assert (
+            str(caught.value)
+            == f"questions: {A} does not wait for an answer: it is {phase}\nFix: an answer changes nothing"
+        )
+    assert qworld.origin_head("a") == head
+
+
+def test_scn_qmd_20_a_live_run_refuses_the_write(qworld, person, tmp_path):
+    two_open(qworld)
+    publish_pending(qworld, tmp_path, ("run.started", {}))
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "accept", "Q-001")
+    assert caught.value.code is ExitCode.USAGE_ERROR
+    assert (
+        str(caught.value)
+        == f"questions: a run is working on {A} (run {LIVE})\nFix: try again when it ends: l4 ci watch"
+    )
+    assert qworld.origin_head("a") == head
+
+
+def test_a_finished_run_does_not_block_the_write(qworld, capsys, person, tmp_path):
+    two_open(qworld)
+    publish_pending(qworld, tmp_path, ("run.started", {}), ("run.finished", {}))
+    assert "pushed" in written(qworld, capsys, "accept", "Q-001")
+
+
+def test_r1_and_r2_an_unknown_unit_and_a_unit_without_a_branch(qworld, person):
+    two_open(qworld)
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "accept", "Q-001", unit="openspec:nope")
+    assert str(caught.value) == "questions: no unit openspec:nope\nFix: l4 status lists the units"
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "answer", "Q-001", unit=B, text="x")
+    assert (
+        str(caught.value)
+        == f"questions: {B} has no branch on origin: no question was asked yet\nFix: the next run creates it"
+    )

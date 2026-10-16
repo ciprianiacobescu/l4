@@ -57,7 +57,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, QuestionStatus
 from l4.state.environment import run_environment
 from l4.state.ledger import LedgerEvent, LedgerWriter
 from l4.state.lifecycle import Phase
-from l4.state.pending import UNPUBLISHED_DIR, read_pending
+from l4.state.pending import UNPUBLISHED_DIR, live_run, read_pending
 from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import TASK_PARSERS, load_snapshot, refresh_refs, select_runnable
 from l4.vcs.errors import GitError
@@ -260,8 +260,7 @@ def _refuse_live_run(ref: UnitRef, events: list[LedgerEvent]) -> None:
     """M6: a `run.started` in the lock ref's pending ledger with no `run.finished` is a run on another machine that is
     still working on the unit (or died without a line; its pending file then ends a run that never ends, and the
     operator waits or removes it by hand). Its next push would land on the new branch's history."""
-    finished = {e.run_id for e in events if e.type == "run.finished"}
-    live = next((e.run_id for e in events if e.type == "run.started" and e.run_id not in finished), None)
+    live = live_run(events)
     if live is not None:
         raise L4Exit(
             ExitCode.USAGE_ERROR, f"restart: a run is working on {ref.id} (run {live}); try again when it ends"

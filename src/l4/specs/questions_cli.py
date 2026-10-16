@@ -49,7 +49,8 @@ from l4.specs.questions import (
     unescape_text,
 )
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
-from l4.state.pending import merge_ledgers, read_pending
+from l4.state.lifecycle import Phase
+from l4.state.pending import live_run, merge_ledgers, read_pending
 from l4.state.retry import fetch_unit_refs
 from l4.state.status import discover
 from l4.vcs.errors import GitError
@@ -684,6 +685,23 @@ def build_edit(form: str, folder: Folder, qid: str, text: str | None, *, redacto
     return Edit(form, folder, question, status, text, folder.file, new)
 
 
+FINISHED = (Phase.MERGED, Phase.ARCHIVED, Phase.ABANDONED)
+
+
+def unit_refusal(git: Git, folder: Folder) -> Refusal | None:
+    """R6: the unit is finished (an answer changes nothing), or a run is working on it now (the lock ref's pending
+    ledger has a `run.started` with no `run.finished`, the rule of `l4 restart`). In every other phase the next run
+    takes the answer, also while the unit runs other tasks."""
+    if folder.phase in FINISHED:
+        return Refusal(
+            f"{folder.parent} does not wait for an answer: it is {folder.phase}", "an answer changes nothing"
+        )
+    live = live_run(read_pending(git, lock_ref(folder.parent)).events)
+    if live is not None:
+        return Refusal(f"a run is working on {folder.parent} (run {live})", "try again when it ends: l4 ci watch")
+    return None
+
+
 def _read_text(text: str | None) -> str | None:
     return sys.stdin.read() if text == "-" else text
 
@@ -696,6 +714,10 @@ def _prepare(
     app, cfg = load_app_config(app)
     git = Git(app.repo, environ=app.environ)
     folders, warnings = load_folders(app, cfg, git, unit)
+    if folders:
+        waits = unit_refusal(git, folders[0])
+        if waits is not None:
+            raise waits.exit()
     folder, _ = find_question(folders, unit, question, warnings)
     return app, cfg, git, build_edit(form, folder, question, text, redactor=app.redactor)
 
