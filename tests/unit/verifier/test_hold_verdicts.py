@@ -8,6 +8,7 @@ import pytest
 
 from l4.redact import Redactor
 from l4.specs.questions import QuestionsFile
+from l4.specs.questions import QuestionStatus
 from l4.state.ledger import LedgerEvent
 from l4.verifier.fixunit import plan_fix_unit
 from l4.verifier.types import Finding, HumanVerdict, Severity, Verdict, VerifyResult
@@ -353,3 +354,76 @@ def test_the_question_of_any_other_hold_asks_for_a_scenario_and_promises_nothing
         "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit can be made"
         in text
     )
+
+
+def _feedback_finding() -> Finding:
+    from l4.verifier.types import FeedbackRef
+
+    ref = FeedbackRef(
+        "FB-001", "behaviour", "Split the diff", "Please.", "Ana, 2026-10-12T15:04:00Z", (), None,
+        "the diff is longer than 120000 characters", "the judge SHALL see every file", "", "a" * 64,
+    )  # fmt: skip
+    return Finding(Severity.MAJOR, "Feedback FB-001 (behaviour): Split the diff", "Please.", "feedback", feedback=ref)
+
+
+def test_a_feedback_only_plan_consumes_the_rejects_it_could_not_convert():
+    """SCN-VER-66 (L4-VER-016): the human finding is listed as not converted and its question is consumed."""
+    v = verdict(LONG_DIFF, "reject", "split the unit in two")
+    [human] = settle_holds([], [LONG_DIFF], {v.target: v})
+    assert human.source == "human"
+    r = VerifyResult(UNIT, 3, Verdict.FAIL, "b", "h")
+    r.findings = [human, _feedback_finding()]
+    plan = plan_fix_unit([], r, [v], ordinal=1, fix_minor=False)
+    assert plan.feedback_only and len(plan.not_converted) == 1
+    assert plan.consumed == ["Q-004"]
+
+
+def test_a_plan_that_is_not_feedback_only_keeps_its_consumed_list():
+    v = verdict(LONG_DIFF, "reject", "split the unit in two")
+    [human] = settle_holds([], [LONG_DIFF], {v.target: v})
+    r = VerifyResult(UNIT, 3, Verdict.FAIL, "b", "h")
+    r.findings = [human]
+    plan = plan_fix_unit([], r, [v], ordinal=1, fix_minor=False)
+    assert plan.groups == [] and plan.consumed == []
+
+
+def test_a_hold_raised_again_after_a_feedback_only_spawn_is_asked_as_a_new_question(tmp_path):
+    """SCN-VER-67 (L4-VER-016): no verdict in force, no human finding, a new hold question; Q-004 is consumed."""
+    from l4.state.fold import fold
+    from l4.verifier.verdicts import effective_verdicts, finding_sha256
+
+    class Sink:
+        def __init__(self) -> None:
+            self.events: list[LedgerEvent] = []
+
+        def append(self, event_type: str, /, **data) -> None:
+            self.events.append(LedgerEvent(STAMP, "r-1", UNIT, len(self.events) + 1, event_type, data))
+
+    sink = Sink()
+    hid = hold_id(LONG_DIFF)
+    ask = dict(outcomes=[], criteria=[], trace=[], findings=[], ledger=sink, redactor=Redactor({}), holds=[LONG_DIFF])
+    assert raise_verdict_questions(tmp_path, "u", existing=None, consumed=(), round_no=3, **ask) == ["Q-001"]
+    path = tmp_path / "questions.md"
+    file = QuestionsFile.load(path)
+    text = file.data.decode().replace(
+        "<!-- write below this line -->", "<!-- write below this line -->\nreject too long"
+    )
+    file = QuestionsFile.parse(text).set_status("Q-001", QuestionStatus.ANSWERED)
+    file.save(path)
+    events = [
+        *sink.events,
+        LedgerEvent(STAMP, "r-1", UNIT, 10, "human.verdict", {
+            "question": "Q-001", "target": hid, "decision": "reject", "by": "human", "reason": "too long",
+            "text_sha256": finding_sha256(hid),
+        }),
+        LedgerEvent(STAMP, "r-1", UNIT, 11, "fix.spawned", {"fix_unit": "u-fix-1", "feedback_only": True, "consumed": []}),
+    ]  # fmt: skip
+    effective = effective_verdicts(events, {hid: finding_sha256(hid)})
+    assert effective == {}
+    assert settle_holds([], [LONG_DIFF], effective) == []
+    assert unresolved_holds([LONG_DIFF], effective) == [LONG_DIFF]
+    consumed = fold(events, UNIT).verdicts_consumed
+    again = raise_verdict_questions(
+        tmp_path, "u", existing=QuestionsFile.load(path), consumed=consumed, round_no=4, **ask
+    )
+    assert again == ["Q-002"]

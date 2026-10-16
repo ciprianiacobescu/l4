@@ -205,6 +205,41 @@ def test_a_reject_is_consumed_by_the_fix_unit_that_took_it():
     assert effective_verdicts([*events, spawned], {A: sha}) == {}
 
 
+def _spawn(seq: int, **data) -> LedgerEvent:
+    return LedgerEvent(STAMP, "r-1", UNIT, seq, "fix.spawned", {"parent": UNIT, "fix_unit": "u-fix-1", **data})
+
+
+def test_a_reject_before_a_feedback_only_spawn_is_consumed():
+    """SCN-VER-64 (L4-VER-016): 0.4.5 wrote `consumed: []` for such a spawn, so the order of the ledger decides."""
+    sha = text_sha256(crit(A))
+    reject = verdict_event(1, "Q-004", A, "reject", sha)
+    assert effective_verdicts([reject, _spawn(2, feedback_only=True, consumed=[])], {A: sha}) == {}
+    assert effective_verdicts([reject, _spawn(2, feedback_only=True, consumed=["Q-004"])], {A: sha}) == {}
+
+
+def test_a_reject_after_a_feedback_only_spawn_and_before_another_kind_of_spawn_stays():
+    """SCN-VER-65 (L4-VER-016)."""
+    sha = text_sha256(crit(A))
+    reject = verdict_event(2, "Q-004", A, "reject", sha)
+    after = [_spawn(1, feedback_only=True, consumed=[]), reject]
+    assert effective_verdicts(after, {A: sha})[A].decision == "reject"
+    plain = [verdict_event(1, "Q-004", A, "reject", sha), _spawn(2, consumed=[]), _spawn(3, adopted=True)]
+    assert effective_verdicts(plain, {A: sha})[A].decision == "reject"
+
+
+def test_a_feedback_only_spawn_leaves_an_accept_and_a_newer_reject_alone():
+    sha = text_sha256(crit(A))
+    accept = verdict_event(1, "Q-001", A, "accept", sha)
+    events = [accept, _spawn(2, feedback_only=True, consumed=[])]
+    assert effective_verdicts(events, {A: sha})[A].decision == "accept"
+    flipped = [
+        verdict_event(1, "Q-001", A, "reject", sha),
+        _spawn(2, feedback_only=True),
+        verdict_event(3, "Q-002", A, "accept", sha),
+    ]
+    assert effective_verdicts(flipped, {A: sha})[A].decision == "accept"
+
+
 def test_finding_verdicts_waive_or_confirm_judge_only_findings():
     finding = Finding(Severity.MAJOR, "Rounding", "d", "judge")
     other = Finding(Severity.BLOCKER, "Other", "d", "judge")
