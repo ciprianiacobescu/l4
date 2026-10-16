@@ -178,6 +178,28 @@ class Factory:
             request=SelectionRequest(role, unit, serves, tuple(constraints)),
         )  # fmt: skip
 
+    def next_profile(self, role: str, unit: str, after: str, *, constraints: Sequence[Constraint] = ()) -> Selected:
+        """The first usable profile of the role's chain after `after` (escalate-and-note D5): never parks the unit,
+        records no cool-down. Raises `RoleUnavailable` when there is none."""
+        if role not in RolesCfg.model_fields:
+            raise ValueError(f"{role!r} is not a role")
+        chain: list[str] = getattr(self._cfg.roles, role)
+        if after not in chain or after == chain[-1]:
+            why = "is the last profile of" if after in chain else "is not in"
+            raise RoleUnavailable(role, f"no profile is left after {after}: it {why} roles.{role}")
+        picked = self._selector().select(
+            role, chain, required=False, constraints=constraints, after=after, record_unavailable=False
+        )
+        if self._events is not None:
+            self._events.append("availability.selected", role=role, **to_event(picked, None, after))
+            self._note_adapter(role, picked.profile_name, picked.profile, picked.impl, picked.report)
+        return Selected(
+            picked.profile_name, picked.profile, self._gated(picked.profile, picked.impl), picked.fallback_index,
+            [s.to_event() for s in picked.skipped], picked.probes, picked.cached, None,
+            vendor=resolve_vendor(picked.profile)[0], provenance=resolve_vendor(picked.profile)[1],
+            request=SelectionRequest(role, unit, None, tuple(constraints)),
+        )  # fmt: skip
+
     def _note_adapter(
         self, role: str, name: str, profile: Profile, impl: AgentAdapter, report: LadderReport | None = None
     ) -> None:

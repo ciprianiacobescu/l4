@@ -20,6 +20,8 @@ unchanged; it keeps recording `unit.resumed` (compatibility), takes the `resumed
 
 import logging
 
+import click
+
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -35,7 +37,7 @@ from l4.state.budget import (
     fix_rounds_exhausted,
 )
 from l4.state.lifecycle import Phase
-from l4.state.status import load_snapshot, refresh_refs, select_runnable
+from l4.state.status import load_snapshot, note_binding, note_lines, refresh_refs, select_runnable
 from l4.vcs.git import Git
 
 log = logging.getLogger("l4.resume")
@@ -53,13 +55,15 @@ def resume_unit(
     by: str | None = None,
     extend_fix_rounds: int | None = None,
     extend_feedback_rounds: int | None = None,
+    note: bool = False,
 ) -> UnitRunResult:
     """The resume itself, for `l4 resume` and for the sweep's `l4:resume` label (SPEC L4-CI-004): the unit's lease and
     worktree, `budget.extended` when a fix-round extension is given, `unit.resumed{reason, by, signal}`, the lifecycle
     edge and the commit `chore(<unit>): resume [skip ci]` with its push. It runs no agent and no gate, so it needs no
     sandbox. A unit that is neither `halted` nor `escalated` is a usage error; an escalated unit with all its fix rounds
     used and no extension is refused, naming the budget (SCN-RES-02); an escalated unit at the feedback limit needs
-    `extend_feedback_rounds` (L4-FBK-006); an extension of a halted unit is refused."""
+    `extend_feedback_rounds` (L4-FBK-006); an extension of a halted unit is refused. `note=True` (the command, not
+    the sweep) binds the reason to the task of a unit halted with `max_task_attempts` (L4-OPS-018)."""
     state = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     phase = state.phase
     extra = extend_fix_rounds or 0
@@ -89,9 +93,11 @@ def resume_unit(
     elif extra or more_feedback:
         what = "fix rounds" if extra else "feedback rounds"
         raise L4Exit(ExitCode.USAGE_ERROR, f"resume: {ref.id} is halted, not escalated: it has no {what} to extend")
+    note_task, note_fix_unit = note_binding(state) if note else (None, None)
     return run_unit_in_worktree(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
         resume_extend_fix_rounds=extra or None, resume_extend_feedback_rounds=more_feedback or None,
+        note_task=note_task, note_fix_unit=note_fix_unit,
     )  # fmt: skip
 
 
@@ -113,6 +119,7 @@ def run_resume(
     git = Git(app.repo, environ=app.environ)
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
+    before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     result = resume_unit(
         app,
         cfg,
@@ -122,6 +129,9 @@ def run_resume(
         reason=reason,
         extend_fix_rounds=extend_fix_rounds,
         extend_feedback_rounds=extend_feedback_rounds,
+        note=True,
     )
     log.info("%s resumed: back in %s", unit, result.outcome.phase_after)
+    for line in note_lines("resume", before, reason):
+        click.echo(line)
     return CommandResult(result.exit_code, [result.outcome])

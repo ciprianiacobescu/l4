@@ -6,6 +6,49 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.4 (2026-10-16)
+
+### Added
+- Escalation along `roles.implementer`: `implementer.escalate_after` (default 2, `0` turns it off). After that many
+  failed attempts of one task phase on one profile, the next usable profile of the chain takes the phase, in a fresh
+  session, with the reasons of the earlier failures. The harness records `implementer.escalated` or
+  `implementer.escalation_skipped`. A move never parks a unit and never takes a profile that would leave no independent
+  judge. `task.attempt_failed` and `breaker.tripped` name the profiles; the halt detail lists them.
+- The retry note: the `--reason` of `l4 retry` and `l4 resume` on a unit halted on `max_task_attempts` reaches the
+  implementer of that task, as a capped and redacted data block, until the task is done. `prompt.rendered` records
+  `retry_note`. `l4 status --unit` prints a `Retry note:` line.
+- Doctor check CFG-009 (warn): an escalation that cannot act (`escalate_after` not below `max_task_attempts`, or two
+  profiles with the same adapter and model).
+- New progress lines for the escalation, the failed attempt with its profile, the halt with its profiles and the retry
+  note.
+- The runbook and the skill (`adopt.md`, `operate.md`) teach the cheap-first chain and the note.
+- `agent.finished` records `context_peak_tokens` (OpenCode, Claude Code: the largest input of one call, cache
+  included) or `context_peak_percent` (Kiro CLI), and the progress line ends with `, context peak <n>k tokens` or
+  `, context peak <p>%`. Codex and a command give none. `RunResult` has the new fields `last_message` and
+  `result_problem`.
+- The ledger event `result.normalized{task, phase, attempt, source, fixes}` and its progress line
+  `L4 repaired the result (…)`. The event holds no text of the agent.
+
+### Changed
+- A chain of two or more profiles moves a failing task phase to the next profile by default. Each profile has its own
+  attempts; the last one has `max_task_attempts`. Set `implementer.escalate_after: 0` for the old behaviour. The tasks
+  of a fix unit do not move.
+- The config key needs the 0.4.4 pin before the config edit (the schema is strict).
+- The `# Output` section of a prompt-contract step (OpenCode, Kiro CLI, command) is the locked template `output@1`
+  (`template_version` ends with `+output@1`). It asks for `status` and `summary` first, names `criteria_ids`,
+  `suppressions` and `notes_for_verifier` as optional, shows a smaller schema and no longer asks for the fields that the
+  harness derives (`phase`, `task_ids`, `files_changed`, `tests_added`). The prompt of Codex and Claude Code does not
+  change.
+- The harness repairs the result object of a step before it validates it (`result.normalized`): a missing `summary`, a
+  `status` that is not allowed, a text over its limit, a malformed question, suppression or criterion id, and the
+  fields that the harness derives. The harness never adds a question, never changes `blocked` and never adds a
+  suppression. It can take the object from the last JSON object in the agent's final message, never from a file of the
+  worktree.
+- An attempt fails for its result only when the agent delivered no result object
+  (`the agent's result is invalid: no result was delivered`). A `blocked` result with no question is not a failed
+  attempt: it keeps raising one question made from its summary.
+- The red check no longer reads the `tests_added` list of the agent. It uses the tests that the JUnit diff finds.
+
 ## 0.4.3 (2026-10-16)
 
 ### Fixed

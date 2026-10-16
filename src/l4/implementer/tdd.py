@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4.accepted import read_accepted
-from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts, read_result_file
+from l4.agents.base import PermissionPolicy, RunRequest, RunResult, denial_facts
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
     ChoreCiStep,
@@ -69,6 +69,7 @@ from l4.implementer.guards import (
     restore_frozen,
     restore_test_paths,
 )
+from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
@@ -83,11 +84,12 @@ from l4.implementer.result import (
     trace_rules,
 )
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
+from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
-from l4.implementer.workbench import Workbench
+from l4.implementer.workbench import PreviousAttempt, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
@@ -153,6 +155,15 @@ class StepOutcome:
     result: ImplementerResult | None = None
     reason: str = ""
     excerpt: str = ""  # harness text for the next prompt (the allowed result values after `result invalid`)
+    dropped_questions: int = 0  # malformed questions that the normalization dropped from a `blocked` result
+
+    @property
+    def blocked_summary(self) -> str:
+        """The summary that becomes the one question of a `blocked` step with none (L4-IMP-021)."""
+        summary = self.result.summary if self.result else ""
+        if not self.dropped_questions:
+            return summary
+        return f"{summary} ({self.dropped_questions} malformed questions were dropped)"
 
 
 @dataclass
@@ -516,12 +527,33 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
     return render_answer_blocks(file.questions, wb.redactor.redact_text, tasks=scope)
 
 
-def _previous_attempt_block(wb: Workbench, task: Task) -> tuple[tuple[str, str], ...]:
+MAX_REASON = 1000  # one failure headline of an escalation block, cut (escalate-and-note D9)
+
+
+def _escalation_block(previous: PreviousAttempt) -> tuple[tuple[str, str], ...]:
+    """The block for the profile that an escalation gave the step to: who failed, how often, and why, oldest first."""
+    clean = (re.sub(r"[^A-Za-z0-9._-]", "_", v) for v in (previous.profile, previous.phase or ""))
+    who, phase = clean
+    lines = [
+        f"The agent before you (profile {previous.profile}) failed the {previous.phase} step of this task "
+        f"{len(previous.failures)} times, so the harness gave the step to you. Its uncommitted changes were "
+        "discarded; the commits already on the branch are kept. You start from the checkout as it is now, in a new "
+        "session, with no transcript of those attempts. The harness rejected them for these reasons, oldest first:",
+        *(f"{n}. ({profile}) {reason[:MAX_REASON]}" for n, (profile, reason) in enumerate(previous.failures, 1)),
+    ]
+    attrs = f'kind="previous-attempt" profile="{who}" reason="escalation" phase="{phase}"'
+    return (("previous attempt", f"<l4:data {attrs}>\n{defuse(chr(10).join(lines))}\n</l4:data>"),)
+
+
+def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None) -> tuple[tuple[str, str], ...]:
     """After a mid-run fallback, the task's next step starts in a fresh session: say who ran before and why it
-    stopped (implementer-tdd-loop 2.25, reduced: no transcript)."""
+    stopped (implementer-tdd-loop 2.25, reduced: no transcript). After an escalation, only the steps of the phase
+    that failed are told (escalate-and-note D9)."""
     previous = wb.previous_attempt
     if previous is None or previous.task != task.key:
         return ()
+    if previous.why == "escalation":
+        return _escalation_block(previous) if previous.phase == phase else ()
     text = (
         f"The agent before you (profile {previous.profile}) stopped on a {previous.limit_kind} limit while working "
         "on this task. Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
@@ -567,6 +599,11 @@ def _lessons(wb: Workbench, task: Task) -> Injection:
     return injection
 
 
+def _note_sha(note: RetryNote, redact: Callable[[str], str]) -> str:
+    """The hash of the note block, of its redacted text (SCN-OPS-28)."""
+    return hashlib.sha256(note_block(note, redact=redact)[1].encode("utf-8")).hexdigest()
+
+
 def _prompt(
     wb: Workbench,
     role: Phase,
@@ -578,6 +615,8 @@ def _prompt(
 ) -> str:
     answers = _answers(wb, task)
     lessons = _lessons(wb, task)
+    redact = wb.redactor.redact_text
+    note = retry_note(_ledger_events(wb), task.key, wb.event_context.get("fix_unit"), redact=redact)  # D11
     ctx = PromptContext(
         unit_id=wb.ref.id, adapter=wb.selected.profile.adapter or "", task_key=task.key, task_title=task.title,
         task_links=task.links,
@@ -598,7 +637,8 @@ def _prompt(
             *((("answered questions", answers.text),) if answers.text else ()),
             *((("lessons", lessons.block),) if lessons.block else ()),
             *_accepted(wb),
-            *_previous_attempt_block(wb, task),
+            *_previous_attempt_block(wb, task, role),
+            *((note_block(note, redact=redact),) if note is not None else ()),
         ),
     )  # fmt: skip
     rendered = render_prompt(role, ctx)
@@ -608,6 +648,7 @@ def _prompt(
         template_version=rendered.template_version, sources=list(rendered.sources),
         answers=[{"id": qid, "answer_sha256": digest} for qid, digest in answers.consumed],  # L4-QMD-006
         lessons=list(lessons.ids),
+        **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),
     )  # fmt: skip
     return text
 
@@ -631,11 +672,13 @@ def agent_step(
     raw_events, published = wb.agent_log_paths(stem)
     prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale)
     wb.publish_prompt(published, prompt)
+    # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
+    prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
     env = build_agent_env(wb.host_env, spec, extra=extra)
     request = RunRequest(
         profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
         prompt=prompt, result_path=tmp / "result.json", raw_events_path=raw_events,
-        env=env, result_schema=RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
+        env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
         permission_policy=PermissionPolicy("implement", gate_prefix=wb.cfg.gates.test.command),
         wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
         stall_timeout_s=STALL_TIMEOUT_S, host_env=wb.host_env,
@@ -658,7 +701,7 @@ def agent_step(
     wb.emit(
         "agent.finished", task=task.key, phase=role, status=run.status, exit_code=run.exit_code, detail=run.detail,
         model=run.model_resolved, input_tokens=run.usage.input_tokens, output_tokens=run.usage.output_tokens,
-        **denial_facts(run),
+        **denial_facts(run), **context_peak_facts(run),
     )  # fmt: skip
     for rejected in run.tool_rejections:  # SPEC §8.3: a policy-rejected call the JSON stream omits
         wb.emit("agent.tool_rejected", task=task.key, phase=role, **rejected)
@@ -673,27 +716,46 @@ def agent_step(
         )  # fmt: skip
     if run.status in LIMIT_STATUSES:
         raise RoleLimit(run)
-    if run.status != "ok":
+    if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         # a prompt-contract adapter validated the result file (`agents/contract.py`): its detail names the paths
         invalid = (run.detail or "").startswith("result invalid")
         return StepOutcome("failed", reason=reason, excerpt=result_values_line(RESULT_SCHEMA, role) if invalid else "")
+    values = result_values_line(RESULT_SCHEMA, role)
+    found = find_result(run)
+    if found is None:  # D7: the only result failure
+        missing = "no result file and no result object in the final message"
+        if not prompt_contract:
+            missing = f"{run.detail + '; ' if run.detail else ''}no result object in the final message"
+        reason = f"the agent's result is invalid: no result was delivered ({missing})"
+        return StepOutcome("failed", reason=reason, excerpt=values)
+    changed = sorted(p for p in wb.changed_files() if p != wb.ledger_rel)
+    normalized = normalize(found, StepFacts(role, task.key, changed, run.last_message))
+    if normalized.fixes:
+        wb.emit(
+            "result.normalized", task=task.key, phase=role, attempt=attempt, source=found.source,
+            fixes=[fix.as_event() for fix in normalized.fixes],
+        )  # fmt: skip
     try:
-        result = parse_result(run.structured if run.structured is not None else _file_result(request))
-    except ResultInvalid as exc:
-        return StepOutcome(
-            "failed", reason=f"the agent's result is invalid: {exc}", excerpt=result_values_line(RESULT_SCHEMA, role)
-        )
+        result = parse_result(normalized.obj)
+    except ResultInvalid as exc:  # a defect of the normalizer: the attempt fails, the gates never see it
+        return StepOutcome("failed", reason=f"the agent's result is invalid: {exc}", excerpt=values)
     if result.status == "blocked":
-        return StepOutcome("blocked", result)
+        dropped = sum(f.count or 0 for f in normalized.fixes if f.field == "questions" and f.fix == "dropped")
+        return StepOutcome("blocked", result, dropped_questions=dropped)
     return StepOutcome("ok", result)
 
 
-def _file_result(request: RunRequest) -> str:
-    text = read_result_file(request.result_path)
-    if text is None:
-        raise ResultInvalid("no result was delivered")
-    return text
+def context_peak_facts(run: RunResult) -> dict[str, Any]:
+    """L4-FAC-011: the largest context the run reached, for the fields that the adapter reports."""
+    usage = run.usage
+    return {
+        key: value
+        for key, value in (
+            ("context_peak_tokens", usage.context_peak_tokens), ("context_peak_percent", usage.context_peak_percent),
+        )
+        if value is not None
+    }  # fmt: skip
 
 
 def _suppressions(result: ImplementerResult) -> list[dict[str, Any]]:
@@ -784,7 +846,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
     allowed = {t for tests in pre_satisfied.values() for t in tests}
     verdict = classify_red(
-        base_report, report, test_files_changed=test_files, tests_added=result.tests_added,
+        base_report, report, test_files_changed=test_files,
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
         rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
     )  # fmt: skip
@@ -983,7 +1045,7 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
 def _red_exit(step: StepOutcome) -> RedOutcome:
     if step.kind == "blocked":
         assert step.result is not None
-        return RedOutcome("blocked", questions=step.result.questions, summary=step.result.summary)
+        return RedOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
     return RedOutcome("failed", step.reason, excerpt=step.excerpt)
 
 
@@ -1044,7 +1106,7 @@ def run_green(
         wb.discard_changes()  # back to the red commit: it stays, the work of this attempt does not
         if step.kind == "blocked":
             assert step.result is not None
-            return GreenOutcome("blocked", questions=step.result.questions, summary=step.result.summary)
+            return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     _check_opened(wb, red, unfreeze, red.manifest)
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
@@ -1479,7 +1541,7 @@ def run_single(
         wb.discard_changes()
         if step.kind == "blocked":
             assert step.result is not None
-            return GreenOutcome("blocked", questions=step.result.questions, summary=step.result.summary)
+            return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     kept: list[str] = []
     if adds_tests:

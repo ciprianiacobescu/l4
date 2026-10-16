@@ -15,7 +15,7 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from l4.agents.base import AgentAdapter, McpServer
 from l4.agents.factory import Selected
@@ -113,8 +113,11 @@ class PreviousAttempt:
     """What the next profile is told after a limit cut a task short: who it was and which limit, never a transcript."""
 
     profile: str
-    limit_kind: str
+    limit_kind: str | None
     task: str | None = None
+    why: Literal["limit", "escalation"] = "limit"
+    phase: str | None = None
+    failures: tuple[tuple[str, str], ...] = ()  # (profile, reason) of the failed attempts, oldest first
 
 
 @dataclass

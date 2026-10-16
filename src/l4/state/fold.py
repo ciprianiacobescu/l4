@@ -134,6 +134,10 @@ class UnitState(_Model):
     resumed_signals: list[str] = Field(default_factory=list)  # `unit.resumed{signal}`: label events acted on (one each)
     refused_signals: dict[str, str] = Field(default_factory=dict)  # `resume.refused{signal, why}`: said once each
     halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
+    halt_task: str | None = (
+        None  # the `task` of the last `breaker.tripped{max_task_attempts}`; cleared by a retry/resume
+    )
+    halt_fix_unit: str | None = None  # its `fix_unit`, when a fix unit's task tripped
     halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
     restarts: int = 0  # `unit.restarted` events: how many times `l4 restart` began the unit again (L4-OPS-004)
     misdirected: Misdirected | None = None  # `pr.misdirected`, until the next phase change or a new MR (L4-YOLO-007)
@@ -269,7 +273,7 @@ def _availability_selected(state: UnitState, event: LedgerEvent) -> None:
             used.append(profile)
         if origin := _text(event, "fallback_from"):
             state.fallback_from[role] = origin
-        else:
+        elif not _text(event, "escalated_from"):  # an escalation is not a limit fallback: it leaves the origin as is
             state.fallback_from.pop(role, None)
 
 
@@ -390,9 +394,13 @@ def _pr_closed(state: UnitState, event: LedgerEvent) -> None:
 
 def _breaker_tripped(state: UnitState, event: LedgerEvent) -> None:
     state.breaker_trips += 1
+    if _text(event, "reason") == "max_task_attempts":  # L4-OPS-018: the task a retry note may bind to
+        state.halt_task = _text(event, "task") or None
+        state.halt_fix_unit = _text(event, "fix_unit") or None
 
 
 def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
+    state.halt_task = state.halt_fix_unit = None
     state.breaker_trips = 0  # M1: the other breaker counters (no_progress, same_error, oscillation) reset here too
     if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
         state.resumed_signals.append(signal)

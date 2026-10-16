@@ -21,7 +21,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.3   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.4   # or @<sha>
 l4 --version
 ```
 
@@ -30,9 +30,9 @@ l4 --version
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.3 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.4 [--dependabot] [--s1 laya|jev|none]
 # public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.3
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.4
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -41,7 +41,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.3`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.4`; that line
   is the only pin.
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -74,7 +74,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.3`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.4`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -139,6 +139,38 @@ say in the commit message that the plan only holds units and is never activated.
 completed does not run; `exclude` does not hold. Admission may refuse the plan, and the hold still applies. The plan
 fails open for every new spec, and a judge review is charged if admission ever accepts it. Move to `yolo.hold` once the
 pin is on a release that has it: the schema is strict, so release, pin move, then the config edit.
+
+## 4b. A cheap-first implementer chain
+
+A chain in `roles.implementer` moves a failing task to the next profile. Put the cheap profiles first and an optional
+stronger profile last. Two models of one provider are two steps, because the move goes by profile:
+
+```yaml
+profiles:
+  deepseek:      {adapter: opencode, auth: api_key, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}  # OPENCODE_API_KEY
+  glm:           {adapter: opencode, auth: api_key, model: opencode-go/glm-5.3-flash, vendor: zhipu}           # the same key
+  claude-sonnet: {adapter: claude-code, auth: subscription, vendor: anthropic}                                # optional, last
+  claude-judge:  {adapter: claude-code, auth: subscription, vendor: anthropic}
+  codex-judge:   {adapter: codex, auth: api_key, vendor: openai}                                              # CODEX_API_KEY
+roles:
+  implementer: [deepseek, glm, claude-sonnet]   # cheap first; a task moves after escalate_after failures
+  judges: [claude-judge, codex-judge]           # a judge must not share a vendor with an implementer that ran
+implementer:
+  escalate_after: 2                             # 0: never move
+  max_task_attempts: 3                          # the last profile's attempts
+```
+
+- Escalation moves by profile, cheap first. After `escalate_after` failed attempts of one phase, the next usable profile
+  takes the phase and reads the reasons of the earlier failures. The last profile gets `max_task_attempts`. The next
+  task starts on the first profile again.
+- Without `claude-sonnet` the chain needs no subscription.
+- A judge of every implementer vendor is vetoed. The harness does not move a task to a profile when no judge of another
+  vendor is left (the independence rule). With the judge `claude-judge` alone, a move to `claude-sonnet` is skipped.
+  Keep one judge of another vendor, here `codex-judge`.
+- `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
+  `max_task_attempts`, or when two profiles run the same model.
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.4`) before you
+  edit the config: the schema is strict.
 
 ## 5. Upgrades
 

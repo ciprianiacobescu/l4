@@ -186,3 +186,42 @@ def _cfg_008(ctx: DoctorContext) -> CheckResult:
 CFG_008 = register(
     Check("CFG-008", "The running harness is the base's pin", "warn", _cfg_008, scopes=frozenset({"ci"}))
 )
+
+
+def _cfg_009(ctx: DoctorContext) -> CheckResult:
+    """An escalation that cannot act (escalate-and-note L4-IMP-018): `escalate_after` that is neither 0 nor below
+    `max_task_attempts` on a chain of two or more profiles never moves a task, and two profiles with one adapter and one
+    model are one model under two names. A chain of one profile passes."""
+    chain = list(ctx.cfg.roles.implementer)
+    if len(chain) < 2:
+        return CheckResult("pass", "one implementer profile: a task that fails stays on it")
+    impl = ctx.cfg.implementer
+    problems: list[str] = []
+    if impl.escalate_after != 0 and impl.escalate_after >= impl.max_task_attempts:
+        problems.append(
+            f"implementer.escalate_after ({impl.escalate_after}) is not below implementer.max_task_attempts "
+            f"({impl.max_task_attempts}): no task moves to {chain[1]}"
+        )
+    seen: dict[tuple[str, str], str] = {}
+    for name in chain:
+        profile = ctx.cfg.profiles.get(name)
+        if profile is None or not profile.adapter or not profile.model:
+            continue
+        key = (profile.adapter, profile.model)
+        if key in seen:
+            problems.append(
+                f"profiles {seen[key]} and {name} run the same model ({profile.model}): "
+                f"a move from {seen[key]} to {name} changes nothing"
+            )
+        else:
+            seen[key] = name
+    if problems:
+        return CheckResult(
+            "fail",
+            "; ".join(problems),
+            "set implementer.escalate_after below max_task_attempts, or 0 when you do not want escalation",
+        )
+    return CheckResult("pass", "the implementer chain can escalate")
+
+
+CFG_009 = register(Check("CFG-009", "The implementer escalation can act", "warn", _cfg_009, scopes=CONFIG_SCOPES))

@@ -96,6 +96,7 @@ class ProgressTrace:
             "task.started": self._task_started,
             "step.started": self._step_started,
             "agent.finished": self._agent_finished,
+            "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
             "gate.finished": self._gate,
             "task.red_ok": self._red_ok,
@@ -103,6 +104,9 @@ class ProgressTrace:
             "task.done": self._done,
             "task.attempt_failed": self._attempt_failed,
             "breaker.tripped": self._breaker,
+            "implementer.escalated": self._escalated,
+            "implementer.escalation_skipped": self._escalation_skipped,
+            "prompt.rendered": self._prompt_rendered,
             "guard.violation": self._guard,
             "doctor.check": self._doctor_check,
             "base.merged": self._base_merged,
@@ -170,7 +174,11 @@ class ProgressTrace:
                 why = _clip(skipped.get("reason") or skipped.get("step") or "unavailable", 80)
                 out.append((logging.INFO, f"{role}: {skipped.get('profile')} skipped — {why}"))
         index = e.data.get("fallback_index")
-        tail = ", fallback #" + str(index) if isinstance(index, int) and index > 0 else ""
+        escalated_from = e.data.get("escalated_from")
+        if escalated_from:  # an escalation's index is absolute in the chain: say what it was, not "fallback #n"
+            tail = f", escalated from {escalated_from}"
+        else:
+            tail = ", fallback #" + str(index) if isinstance(index, int) and index > 0 else ""
         checks = f" ({' · '.join(parts)})" if parts else ""
         out.append((logging.INFO, f"{role}: {name} ok{checks} → selected{tail}"))
         return out
@@ -266,7 +274,41 @@ class ProgressTrace:
         took = self._seconds(self._steps.pop((d.get("fix_unit"), d.get("task"), d.get("phase")), None), e)
         model = f", {d['model']}" if d.get("model") else ""
         detail = f": {_clip(d['detail'], 100)}" if d.get("status") != "ok" and d.get("detail") else ""
-        return logging.INFO, f"agent {d.get('phase')} task {d.get('task')} {d.get('status')} ({took}{model}){detail}"
+        peak = ""
+        tokens, percent = _num(d.get("context_peak_tokens")), _num(d.get("context_peak_percent"))
+        if tokens is not None:
+            peak = f", context peak {tokens / 1000:.1f}k tokens"
+        elif percent is not None:
+            peak = f", context peak {percent:g}%"
+        return (
+            logging.INFO,
+            f"agent {d.get('phase')} task {d.get('task')} {d.get('status')} ({took}{model}){detail}{peak}",
+        )
+
+    @staticmethod
+    def _fix(f: dict) -> str:
+        """`<field> <fix>` and what the fix says: `to`, `from`, `length`, `count`, then `was`."""
+        out = f"{f.get('field')} {f.get('fix')}"
+        if f.get("to") is not None:
+            out += f" to {f['to']}"
+        if f.get("from") is not None:
+            out += f" from {f['from']}"
+        if f.get("length") is not None:
+            out += f" from {f['length']} characters"
+        if f.get("count") is not None:
+            out += f" {f['count']}"
+        if f.get("was") is not None:
+            out += f", was {f['was']}"
+        return out
+
+    def _result_normalized(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        fixes = d.get("fixes")
+        shown = "; ".join(self._fix(f) for f in fixes if isinstance(f, dict)) if isinstance(fixes, list) else ""
+        return (
+            logging.INFO,
+            f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: L4 repaired the result ({shown})",
+        )
 
     def _budget(self, e: LedgerEvent) -> tuple[int, str] | None:
         usd = _num(e.data.get("usd"))
@@ -309,13 +351,54 @@ class ProgressTrace:
 
     def _attempt_failed(self, e: LedgerEvent) -> tuple[int, str]:
         d = e.data
+        on = f" on {d['profile']}" if d.get("profile") else ""
         return (
             logging.WARNING,
-            f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')} failed: {_clip(d.get('reason'))}",
+            f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')} failed{on}: {_clip(d.get('reason'))}",
         )
 
     def _breaker(self, e: LedgerEvent) -> tuple[int, str]:
+        profiles = [p for p in e.data.get("profiles") or [] if isinstance(p, dict)]
+        if len(profiles) >= 2:
+            ran = ", ".join(f"{p.get('profile')} {p.get('failures')}" for p in profiles)
+            return logging.WARNING, f"halted: {e.data.get('reason')} (task {e.data.get('task')}: {ran})"
         return logging.WARNING, f"halted: {e.data.get('reason')} (task {e.data.get('task')})"
+
+    @staticmethod
+    def _count(value: object) -> str:
+        """`failures` is a number, or the list of the failed attempts; neither: say it without a number."""
+        if isinstance(value, list | tuple):
+            return str(len(value))
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else ""
+
+    def _escalated(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        n = self._count(d.get("failures"))
+        after = f" after {n} failed attempts" if n else ""
+        return (
+            logging.INFO,
+            f"task {d.get('task')} {d.get('phase')}: escalated from {d.get('from')} to {d.get('to')}{after}",
+        )
+
+    def _escalation_skipped(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        n = self._count(d.get("failures"))
+        failed = f"failed {n} attempts" if n else "failed its attempts"
+        return (
+            logging.WARNING,
+            f"task {d.get('task')} {d.get('phase')}: {d.get('from')} {failed}; no later profile can take it "
+            f"({_clip(d.get('reason'))}); it stays on {d.get('from')}",
+        )
+
+    def _prompt_rendered(self, e: LedgerEvent) -> tuple[int, str] | None:
+        note = e.data.get("retry_note")
+        if not isinstance(note, dict):
+            return None  # a prompt without a note stays silent, as before
+        step = e.data.get("phase") or e.data.get("role")  # the real event names the step by `role`
+        return (
+            logging.INFO,
+            f"task {e.data.get('task')} {step}: the prompt holds the person's retry note of {note.get('ts')}",
+        )
 
     def _doctor_check(self, e: LedgerEvent) -> tuple[int, str]:
         d = e.data

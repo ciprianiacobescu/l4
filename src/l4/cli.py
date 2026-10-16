@@ -42,6 +42,10 @@ def _common() -> list[click.Parameter]:
 
 
 NYI = "(not yet implemented) Exits 2."
+REASON_HELP = (
+    "Why the unit can continue. For a unit halted on a task, the implementer of that task also reads it "
+    "(at most 300 characters)."
+)
 QUESTIONS_SHORT = "List and show open questions; accept or answer one on the unit branch (commits and pushes)."
 QUESTIONS_HELP = (
     QUESTIONS_SHORT
@@ -228,7 +232,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "unlock": ("Release a lock.", lambda: [_unit(True), _flag("--force", "force")]),
     "resume": ("Leave halted/escalated and reset breaker counters (members only).", lambda: [
-        _unit(True), _opt("--reason", "reason", required=True),
+        _unit(True), _opt("--reason", "reason", required=True, help=REASON_HELP),
         _opt("--extend-iterations", "extend_iterations", type=int, help=NYI),
         _opt("--extend-cost", "extend_cost", type=float, help=NYI),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
@@ -236,7 +240,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "retry": ("Continue a stopped unit from where it stopped, then start a run.", lambda: [
         _unit(True),
-        _opt("--reason", "reason", required=True, help="Why the unit is tried again (kept in the ledger)."),
+        _opt("--reason", "reason", required=True, help=REASON_HELP),
         _opt("--rounds", "rounds", type=int,
              help="Escalated at its fix-round (or feedback) limit: how many rounds to add (default 1)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),

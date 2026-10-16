@@ -36,6 +36,8 @@ class Usage:
     cost_usd: float | None = None  # None where the CLI reports tokens only (codex)
     credits: float | None = None  # plan credits a CLI metered (Kiro): not dollars, never added to `cost_usd`
     credits_source: str | None = None  # where `credits` came from ("kiro.stream"); another source may disagree
+    context_peak_tokens: int | None = None  # the largest context a run reached, when the stream says (result-contract)
+    context_peak_percent: float | None = None  # the same as a share of the window, when the stream says
 
 
 @dataclass(frozen=True)
@@ -178,6 +180,8 @@ class RunResult:
     final_text: str | None = None
     structured: dict[str, Any] | None = None
     rejected: dict[str, Any] | None = None  # a structured reply the schema refused: for a repair, never a result
+    last_message: str | None = None  # the agent's last message after its last tool call (result-contract D3)
+    result_problem: Literal["missing", "not_json", "not_object", "invalid"] | None = None  # why no `structured`
     session_id: str | None = None
     exit_code: int | None = None
     usage: Usage = field(default_factory=Usage)

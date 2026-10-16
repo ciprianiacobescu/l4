@@ -122,6 +122,8 @@ def isolation_env(config_dir: Path, content: str) -> dict[str, str]:
 class _Stream:
     session: str | None = None
     texts: list[str] = field(default_factory=list)
+    after_tool: list[str] = field(default_factory=list)  # the text parts since the last `tool_use`
+    peak: int | None = None  # the largest input + cache read + cache write of one `step_finish`
     cost: float | None = None
     usage: Usage = field(default_factory=Usage)
     last_reason: str | None = None
@@ -145,21 +147,26 @@ def _scan(lines: Sequence[str]) -> _Stream:
         kind = event.get("type")
         if kind == "text" and isinstance(part.get("text"), str):
             out.texts.append(part["text"])
+            out.after_tool.append(part["text"])
         elif kind == "step_finish":
             out.last_reason = part.get("reason") if isinstance(part.get("reason"), str) else None
             if isinstance(part.get("cost"), int | float):
                 out.cost = (out.cost or 0.0) + float(part["cost"])
             raw = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
             cache = raw.get("cache") if isinstance(raw.get("cache"), dict) else {}
+            call = int(raw.get("input", 0)) + int(cache.get("read", 0)) + int(cache.get("write", 0))
+            if raw:
+                out.peak = max(out.peak or 0, call)
             tokens = [tokens[0] + int(raw.get("input", 0)), tokens[1] + int(raw.get("output", 0)),
                       tokens[2] + int(cache.get("read", 0))]  # fmt: skip
         elif kind == "tool_use":
+            out.after_tool.clear()
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             if state.get("status") == "error" and _REJECTED.search(str(state.get("error") or "")):
                 out.denials.append({"tool_name": part.get("tool"), "tool_input": state.get("input")})
         elif kind == "error" and isinstance(event.get("error"), dict):
             out.error = event
-    out.usage = Usage(tokens[0], tokens[1], tokens[2], out.cost)
+    out.usage = Usage(tokens[0], tokens[1], tokens[2], out.cost, context_peak_tokens=out.peak)
     return out
 
 
@@ -250,6 +257,7 @@ class OpenCodeAdapter:
         stream = _scan(lines)
         result = RunResult(
             status="error", raw_events_path=raw_events_path, final_text="\n".join(stream.texts) or None,
+            last_message="\n".join(stream.after_tool) or None,
             session_id=stream.session, exit_code=exit_code, usage=stream.usage,
             permission_denials=stream.denials,
         )  # fmt: skip

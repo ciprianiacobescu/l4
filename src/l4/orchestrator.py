@@ -65,7 +65,7 @@ from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
-from l4.implementer.loop import run_task
+from l4.implementer.loop import EscalationRequest, run_task
 from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
     open_blocking_questions,
@@ -109,6 +109,7 @@ from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
 from l4.verifier.fixloop import without_fix_units
 from l4.verifier.notes import verdict_section
+from l4.verifier.selection import independence_keeper
 from l4.verifier.verdicts import legacy_round, verdict_status
 from l4.yolo.cycle import PlanStep, failed_plan_step, fetch_cause, record_rejections, record_run_starts, yolo_step
 
@@ -261,6 +262,7 @@ class Orchestrator:
         if self._waits.began is None:
             self._waits.began = services.factory.now()
         self._previous_attempt: PreviousAttempt | None = None  # set when a limit moved the task to another profile
+        self._task_selected: Selected | None = None  # the profile an escalation gave the running task (D4)
         self._publish_unpublished()
         # what earlier runs wrote after their hand-off commit lives only in the lock ref: without it a unit in
         # review would fold as `verified` and be handed off again
@@ -429,6 +431,8 @@ class Orchestrator:
         event: str = "unit.resumed",
         trigger: Trigger = Trigger.RESUMED,
         what: str = "resume",
+        note_task: str | None = None,
+        note_fix_unit: str | None = None,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
@@ -448,12 +452,13 @@ class Orchestrator:
         before = self._refold().phase or "none"
         self._commit_what = what
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
+        binding = {k: v for k, v in (("note_task", note_task), ("note_fix_unit", note_fix_unit)) if v}  # L4-OPS-018
         if extend_fix_rounds or extend_feedback_rounds:
             rounds = {
                 k: v for k, v in (("fix_rounds", extend_fix_rounds), ("feedback_rounds", extend_feedback_rounds)) if v
             }
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
-        self.services.ledger.append(event, reason=reason[:300], **extra)
+        self.services.ledger.append(event, reason=reason[:300], **extra, **binding)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
         edit = self._spec_edit() if self._takes_spec_edit else None
         stop_edge = {
@@ -804,11 +809,11 @@ class Orchestrator:
             self._selected = self.services.factory.for_role("implementer", self.services.ref.id)
         return self._selected
 
-    def _workbench(self) -> Workbench:
+    def _workbench(self, selected: Selected | None = None) -> Workbench:
         s = self.services
         wb = make_workbench(
             cfg=self.cfg, app=s.app, ref=s.ref, provider=s.provider, worktree=s.worktree, git=s.git, ledger=s.ledger,
-            sandbox=s.sandbox, selected=self._select(), iteration=self.state.iteration, push=self.push,
+            sandbox=s.sandbox, selected=selected or self._select(), iteration=self.state.iteration, push=self.push,
         )  # fmt: skip
         wb.previous_attempt = self._previous_attempt
         if self._activated is not None:
@@ -896,13 +901,15 @@ class Orchestrator:
                 self._go(Trigger.ALL_LEAVES_DONE)
                 return None
             try:
-                outcome = run_task(wb, task)
+                outcome = run_task(wb, task, escalate=self._escalate)
             except BaselineFailed as exc:
                 ledger.append("breaker.tripped", reason="baseline_failed", detail=str(exc))
                 return self._halt("baseline_failed", str(exc))
             except RoleLimit as exc:
                 wb = self._fall_back(exc, wb, task.key)
                 continue
+            finally:
+                self._task_selected = None  # the task's own profile ends with the task (escalate-and-note D4)
             if outcome.status == "blocked":
                 rounds = self._rounds[task.key] = self._rounds.get(task.key, 0) + 1
                 if self._clarifier_available() and rounds <= MAX_CLARIFIER_ROUNDS_PER_TASK:
@@ -921,15 +928,18 @@ class Orchestrator:
         """The implementer hit a limit: cool it down and select the next profile. The one place `_selected` changes
         after the first selection, so a caller that saw the limit itself (M1.3's fix loop, the audit writer) goes
         through here and every later task and the outcome follow the new profile."""
-        previous = self._select()
+        task_profile, self._task_selected = self._task_selected, None
+        previous = task_profile or self._select()
         try:
-            self._selected = self.services.factory.on_limit(previous, limit)
+            chosen = self.services.factory.on_limit(previous, limit)
         except WaitingCapacity as exc:
-            self._selected = self._wait_in_run(exc)  # a short cool-down is waited out; else this raises `exc` again
+            chosen = self._wait_in_run(exc)  # a short cool-down is waited out; else this raises `exc` again
+        if task_profile is None or chosen.profile_name != self._select().profile_name:
+            self._selected = chosen  # the run's profile moves; a task's own profile that limited leaves it as it is
         signal = limit if isinstance(limit, LimitSignal) else limit.limit
         kind = signal.kind if signal else limit.status if isinstance(limit, RunResult) else "rate_limit"
         self._previous_attempt = PreviousAttempt(previous.profile_name, kind, task)
-        return self._selected
+        return self._select()
 
     def _job_remaining_s(self) -> float | None:
         """Seconds of the CI job left before the soft deadline; None when the budget is unknown (L4-IMP-012)."""
@@ -964,6 +974,29 @@ class Orchestrator:
                 return s.factory.for_role("implementer", s.ref.id)
             except WaitingCapacity as again:
                 exc = again
+
+    def _escalate(self, wb: Workbench, request: EscalationRequest) -> Workbench | str:
+        """The hook of `run_task` (escalate-and-note D4): a profile has failed `escalate_after` attempts of a phase, so
+        the next usable profile of the chain takes the phase. The workbench is rebuilt because the sandbox's login and
+        the trailers follow the profile; the baselines are gate results and carry over. A string is why there is no
+        move; the task stays on its profile. The run's profile (`_selected`) does not change."""
+        used = list(self._refold().profiles_used.get("implementer", ()))
+        if wb.selected.profile_name not in used:
+            used.append(wb.selected.profile_name)
+        keeper = independence_keeper(self.cfg, used)
+        try:
+            chosen = self.services.factory.next_profile(
+                "implementer", self.services.ref.id, request.profile, constraints=(keeper,)
+            )
+        except RoleUnavailable as exc:
+            return str(exc)
+        fresh = self._workbench(selected=chosen)
+        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
+        fresh.previous_attempt = PreviousAttempt(
+            request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
+        )
+        self._task_selected = chosen
+        return fresh
 
     def _fall_back(self, exc: RoleLimit, wb: Workbench, task: str | None = None) -> Workbench:
         """A limit in the middle of a task (agent-factory 1.25, implementer-tdd-loop 2.25): the cool-down is recorded
@@ -1348,6 +1381,8 @@ def run_unit_in_worktree(
     resume_event: str = "unit.resumed",
     resume_trigger: Trigger = Trigger.RESUMED,
     resume_what: str = "resume",
+    note_task: str | None = None,
+    note_fix_unit: str | None = None,
     take_spec_edit: bool = True,
     waits: RunWaits | None = None,
     accepted: tuple[str, tuple[Mapping[str, object], ...]] | None = None,
@@ -1356,7 +1391,8 @@ def run_unit_in_worktree(
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
     lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
-    `Orchestrator.resume`). `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
+    `Orchestrator.resume`). `note_task` and `note_fix_unit` bind a person's note to the halted task (L4-OPS-018).
+    `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
     `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011). `accepted`: the plan id and the accepted
     review items of this unit, from the plan step (L4-YOLO-028). `activated`: the plan id and the digest of the unit's
     folder as the plan froze it, from the plan step (a task text that matches it is a reviewed text)."""
@@ -1420,6 +1456,8 @@ def run_unit_in_worktree(
                 event=resume_event,
                 trigger=resume_trigger,
                 what=resume_what,
+                note_task=note_task,
+                note_fix_unit=note_fix_unit,
             )
         )
         code, failed = result.exit_code, False
