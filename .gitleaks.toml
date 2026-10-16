@@ -16,9 +16,9 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "uv cache keys in recorded cache.seeded events"
+description = "uv cache digests in recorded cache.seeded events (field `digest`; `key` before 0.4.2, kept for recorded evidence)"
 regexTarget = "line"
-regexes = ['''"type": "cache\.seeded", "cache": "[a-z]+", "key": "[0-9a-f]{64}"''']
+regexes = ['''"type": "cache\.seeded", "cache": "[a-z]+", "(digest|key)": "[0-9a-f]{64}"''']
 
 [[allowlists]]
 description = "credential-shaped fakes in tests and spec examples: obvious runs, a FAKE marker, an unsigned JWT"

@@ -3060,7 +3060,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `lock.acquired|lock.released|lock.stolen`, `budget.cost` (`{usd, profile, task}`; kiro-cli meters plan credits, not dollars: `{credits, credits_source: "kiro.stream", profile, task}`, the sum of the stream's `meteringUsage` values, never added to `usd` or to the unit's cost; the quota probe's `/usage` reading rides on `availability.selected.probes.<profile>` as `credits_used`, `credits_included` and `credits_source: "kiro.usage"`, because the two disagree on the FREE plan [V, 10.72 metered against 5.42 of `/usage`]), `breaker.tripped`,
 `availability.transient` (`{role, profile, status, attempt, wait_s}`), `unit.resumed` (`{reason, by, signal}`), `resume.refused`
 (`{signal, why}`), `resume.hint` (`{head}`), `task.tests_added` (`{task, files, tests}`), `verify.extra_proof`
-(`{round, criterion, tests, source, via, files}`) and `cache.seeded|cache.seed_failed` (`{cache, key, seconds, bytes, via}` |
+(`{round, criterion, tests, source, via, files}`) and `cache.seeded|cache.seed_failed` (`{cache, digest, seconds, bytes, via}`, `digest` being `key` before 0.4.2 |
 `{cache, reason}`),
 `run.finished` (exit code).
 

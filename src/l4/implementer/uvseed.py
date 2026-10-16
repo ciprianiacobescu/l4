@@ -57,6 +57,13 @@ def _locked(path: Path) -> Iterator[None]:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def seeded_digest(event: dict) -> str | None:
+    """The seed digest of a `cache.seeded` event's data: `digest`, or `key` in ledgers written before 0.4.2 (a field
+    named `key` holding 64 hex characters reads as a credential to default secret scanners)."""
+    value = event.get("digest", event.get("key"))
+    return value if isinstance(value, str) else None
+
+
 def ensure_uv_seed(wb: Workbench) -> None:
     """Copy the project's uv seed into this unit's uv cache when that cache is new, filling the seed first when it is
     absent or stale. Nothing happens without a read-write `UV_CACHE_DIR` mount, without `uv` as the first setup
@@ -91,7 +98,7 @@ def _seed_and_copy(wb: Workbench, mount: CacheMount, base: str, key: str, setup:
         started = time.monotonic()
         if copy_seed(seed, mount.path, key):
             wb.emit(
-                "cache.seeded", cache="uv", key=key, seconds=round(time.monotonic() - started, 1),
+                "cache.seeded", cache="uv", digest=key, seconds=round(time.monotonic() - started, 1),
                 bytes=tree_bytes(mount.path), via="copy",
             )  # fmt: skip
 
@@ -120,4 +127,4 @@ def _fill(wb: Workbench, seed: Path, key: str, base: str, setup: list[str]) -> N
     if not any(seed.iterdir()):
         raise SeedFailed("the setup left nothing in the uv cache")
     write_seed_record(seed, key, seconds=seconds)
-    wb.emit("cache.seeded", cache="uv", key=key, seconds=round(seconds, 1), bytes=tree_bytes(seed), via="setup")
+    wb.emit("cache.seeded", cache="uv", digest=key, seconds=round(seconds, 1), bytes=tree_bytes(seed), via="setup")

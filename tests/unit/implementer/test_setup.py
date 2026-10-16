@@ -204,8 +204,11 @@ def test_a_new_unit_cache_is_copied_from_the_seed(make_bench, tdd_repo, fake_uv)
     filled_event, copied_event = bench.events("cache.seeded")  # the fill, then this unit's copy of it
     assert (filled_event["cache"], filled_event["via"]) == ("uv", "setup") and filled_event["bytes"] > 0
     assert (
-        copied_event["via"] == "copy" and len(filled_event["key"]) == 64 and copied_event["key"] == filled_event["key"]
+        copied_event["via"] == "copy"
+        and len(filled_event["digest"]) == 64
+        and copied_event["digest"] == filled_event["digest"]
     )
+    assert all("key" not in e for e in (filled_event, copied_event))  # a default secret scanner flags `key` + hex
     assert list((uv_cache(bench) / "wheels").iterdir())  # the unit's own setup found wheels in its cache
     # a second unit: its cache is new, so it is a copy of the seed, and the seed is not filled again
     for child in list(uv_cache(bench).iterdir()):
@@ -266,3 +269,11 @@ def test_no_uv_lock_or_a_non_uv_setup_runs_no_seed(make_bench, tdd_repo, fake_uv
     bench = make_bench([], setup=[fake_uv.command])
     run_setup(bench.wb)
     assert [c["cache"] for c in fake_uv.calls()] == [str(uv_cache(bench))] and not (tdd_repo.cache / "seed").exists()
+
+
+def test_seeded_digest_reads_the_new_field_and_the_key_of_older_ledgers():
+    from l4.implementer.uvseed import seeded_digest
+
+    assert seeded_digest({"type": "cache.seeded", "cache": "uv", "digest": "ab" * 32}) == "ab" * 32
+    assert seeded_digest({"type": "cache.seeded", "cache": "uv", "key": "cd" * 32}) == "cd" * 32
+    assert seeded_digest({"type": "cache.seeded", "cache": "uv"}) is None
