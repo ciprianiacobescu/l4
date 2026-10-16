@@ -47,6 +47,6 @@ def test_the_limits_say_that_no_code_reads_the_repair_key() -> None:
 
 def test_the_changelog_names_the_result_contract() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    section = changelog[changelog.index("## 0.4.4 (unreleased)") : changelog.index("## 0.4.3 ")]
+    section = changelog[changelog.index("## 0.4.4 (") : changelog.index("## 0.4.3 ")]
     for needle in ("result.normalized", "output@1", "context_peak_tokens", "context_peak_percent", "no result object"):
         assert needle in section, needle

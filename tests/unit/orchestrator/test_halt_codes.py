@@ -33,7 +33,7 @@ def test_a_checkbox_the_harness_cannot_write_halts_as_unselectable_task(run_l4, 
 
 
 def test_a_baseline_that_fails_halts_as_baseline_failed(run_l4, monkeypatch):
-    def failing(wb, task):
+    def failing(wb, task, *, escalate=None):  # the orchestrator passes its escalation hook (L4-IMP-017)
         raise BaselineFailed("the test gate cannot run at the base: report missing")
 
     monkeypatch.setattr(orchestrator, "run_task", failing)
