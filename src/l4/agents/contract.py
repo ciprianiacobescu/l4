@@ -30,9 +30,12 @@ def phase_hint(parsed: Any, schema: dict[str, Any] | None) -> str | None:
 
 def attach_file_result(result: RunResult, text: str | None, schema: dict[str, Any] | None, who: str) -> None:
     """A finished run (exit 0, nothing wrong with the stream) becomes `ok` with `structured` from the result file.
-    Missing or invalid with a schema requested stays `error` with a one-line detail. `null` for an optional field is
+    Missing or invalid with a schema requested stays `error` with a one-line detail. `result_problem` says why there is
+    no `structured` (a missing file with no schema is still `ok`), and `rejected` holds the object a schema refused;
+    no status or detail changes with it (L4-FAC-010). `null` for an optional field is
     taken as absent, as the implementer prompt tells the model to write it."""
     if text is None:
+        result.result_problem = "missing"
         if schema is None:
             result.status = "ok"
         else:
@@ -42,6 +45,7 @@ def attach_file_result(result: RunResult, text: str | None, schema: dict[str, An
         parsed = drop_nulls(json.loads(text))
     except ValueError:
         result.detail = "result invalid: not JSON"
+        result.result_problem = "not_json"
         return
     problems = validate(parsed, schema) if schema is not None else []
     if not isinstance(parsed, dict) or problems:
@@ -49,6 +53,10 @@ def attach_file_result(result: RunResult, text: str | None, schema: dict[str, An
         result.detail = "result invalid: " + "; ".join(
             [*(problems[:3] or ["not an object"]), *([hint] if hint else [])]
         )
+        if isinstance(parsed, dict):
+            result.result_problem, result.rejected = "invalid", parsed
+        else:
+            result.result_problem = "not_object"
         return
     result.structured = parsed
     result.status = "ok"

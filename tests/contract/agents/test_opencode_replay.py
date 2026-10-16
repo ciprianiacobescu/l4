@@ -133,3 +133,67 @@ def test_judge_reply_without_json_or_with_the_wrong_shape_is_a_structured_output
     demanding = {"type": "object", "required": ["x"]}
     wrong = parse("judge-ok-openrouter-gpt-5.4-mini", tmp_path, judge=True, schema=demanding)
     assert wrong.status == "error" and (wrong.detail or "").startswith("structured output")
+
+
+def _events(name: str) -> list[dict]:
+    out = []
+    for line in lines(name):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # the adapter skips a line that is not JSON
+        if isinstance(event, dict):
+            out.append(event)
+    return out
+
+
+def _sum_tokens(part: dict) -> int:
+    tokens = part["tokens"]
+    return tokens["input"] + tokens["cache"]["read"] + tokens["cache"]["write"]
+
+
+def _text_after_last_tool(events: list[dict]) -> str | None:
+    last = max((i for i, e in enumerate(events) if e["type"] == "tool_use"), default=-1)
+    texts = [e["part"]["text"] for e in events[last + 1 :] if e["type"] == "text"]
+    return "\n".join(texts) or None
+
+
+@pytest.mark.parametrize("name", ["red-ok", "green-ok", "blocked", "red-already-satisfied-claimed"])
+def test_last_message_is_the_text_after_the_last_tool_use(tmp_path, name):  # SCN-FAC-17
+    events = _events(name)
+    assert any(e["type"] == "tool_use" for e in events)
+    out = parse(name, tmp_path)
+    assert out.last_message == _text_after_last_tool(events)
+    assert out.final_text == "\n".join(e["part"]["text"] for e in events if e["type"] == "text")
+
+
+def test_last_message_is_shorter_than_the_final_text_when_text_comes_before_a_tool_call(tmp_path):  # SCN-FAC-17
+    out = parse("red-ok", tmp_path)
+    assert out.final_text is not None and out.last_message != out.final_text
+    assert out.last_message is None or len(out.last_message) < len(out.final_text)
+
+
+@pytest.mark.parametrize("name", ["red-ok", "green-ok", "blocked"])
+def test_context_peak_is_the_largest_per_call_context(tmp_path, name):  # SCN-FAC-18
+    finishes = [e["part"] for e in _events(name) if e["type"] == "step_finish"]
+    out = parse(name, tmp_path)
+    assert out.usage.context_peak_tokens == max(_sum_tokens(p) for p in finishes)
+    assert out.usage.input_tokens == sum(p["tokens"]["input"] for p in finishes)  # unchanged
+    assert out.usage.context_peak_percent is None
+
+
+def _finish(inp: int, read: int, write: int) -> str:
+    part = {"reason": "stop", "tokens": {"input": inp, "output": 1, "cache": {"read": read, "write": write}}}
+    return json.dumps({"type": "step_finish", "part": part})
+
+
+def test_context_peak_of_three_calls(tmp_path):  # SCN-FAC-18
+    stream = [_finish(5000, 3000, 1000), _finish(1600, 20000, 0), _finish(15000, 0, 0)]
+    out = OpenCodeAdapter().parse(stream, exit_code=0, raw_events_path=tmp_path / "e", now=NOW)
+    assert out.usage.context_peak_tokens == 21600 and out.usage.input_tokens == 21600
+
+
+def test_no_tool_use_means_the_whole_text_is_the_last_message(tmp_path):
+    text = json.dumps({"type": "text", "part": {"text": "all of it"}})
+    out = OpenCodeAdapter().parse([text, _finish(1, 0, 0)], exit_code=0, raw_events_path=tmp_path / "e", now=NOW)
+    assert out.last_message == "all of it"
