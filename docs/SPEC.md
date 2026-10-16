@@ -799,6 +799,7 @@ implementer:
 clarifier:
   enabled: true
   auto_accept_kinds: [technical]
+  answer_by_agents: false          # true: an agent may accept or answer any question with `l4 questions` (L4-QMD-009)
   min_confidence: high             # high | medium
   max_open_questions: 3
   s1_router: true                  # Laya "is this a product decision?" + citation checks (L4-CLR-002)

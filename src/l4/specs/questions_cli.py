@@ -19,10 +19,10 @@ from pathlib import Path, PurePosixPath
 
 import click
 
+from l4.actor import actor
 from l4.config.defaults import cache_root
-from l4.config.loader import load_config
 from l4.config.redaction import load_app_config
-from l4.config.schema import ClarifierCfg, L4Config
+from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
@@ -59,7 +59,7 @@ from l4.vcs.names import lock_ref, unit_branch
 from l4.vcs.push import PushRejected
 from l4.vcs.tree import regular_blobs
 from l4.verifier.verdicts import _DECISION
-from l4.yolo.accept import actor
+from l4.yolo.accept import target_full_config
 
 SCHEMA = "l4/questions@1"
 REMOTE = "origin"
@@ -337,29 +337,11 @@ class ClarifierRules:
 
 def clarifier_rules(git: Git, base: str) -> ClarifierRules:
     """Both keys from `.l4/config.yaml` at `refs/remotes/origin/<base>`, never from the unit branch (an agent cannot
-    set them there). The defaults apply when the file is absent or is not a valid config."""
-    ref = f"refs/remotes/{REMOTE}/{base}"
-    try:
-        shown = git.run("show", f"{ref}:{CONFIG_PATH}", check=False)
-    except GitError as exc:
-        log.warning("questions: cannot read %s at %s (%s): the default clarifier rules apply", CONFIG_PATH, ref, exc)
+    set them there). The defaults apply when the file is absent or is not a valid config (the reason is logged)."""
+    full = target_full_config(git, f"refs/remotes/{REMOTE}/{base}")
+    if full is None:
         return ClarifierRules()
-    if shown.returncode != 0:
-        return ClarifierRules()
-    with tempfile.TemporaryDirectory(prefix="l4-questions-") as tmp:
-        path = Path(tmp) / "config.yaml"
-        path.write_text(shown.stdout, encoding="utf-8")
-        try:
-            cfg: ClarifierCfg = load_config(Path(tmp), config_path=path).clarifier
-        except L4Exit as exc:
-            log.warning(
-                "questions: %s at %s is not a valid config (%s): the default clarifier rules apply",
-                CONFIG_PATH,
-                ref,
-                exc,
-            )
-            return ClarifierRules()
-    return ClarifierRules(tuple(cfg.auto_accept_kinds), bool(getattr(cfg, "answer_by_agents", False)))
+    return ClarifierRules(tuple(full.clarifier.auto_accept_kinds), full.clarifier.answer_by_agents)
 
 
 AGENT_FIX = (
@@ -702,6 +684,20 @@ def unit_refusal(git: Git, folder: Folder) -> Refusal | None:
     return None
 
 
+def agent_refusal(app: AppContext, git: Git, cfg: L4Config, edit: Edit) -> Refusal | None:
+    """R11: a caller that is an agent (a marker is set, or standard input is no terminal) may write only what the
+    base branch's `clarifier` keys allow (design D11). The effective answer is the suggestion for `accept` and the
+    text for `answer`."""
+    who, _ = actor(app.environ, sys.stdin.isatty())
+    if who == "person":
+        return None
+    events, _warning = folder_events(git, edit.folder)
+    frozen = frozen_paths(events, edit.question.blocking_tasks, edit.folder.fix)
+    effective = unescape_text(edit.question.suggestion_text) if edit.form == "accept" else edit.text
+    rules = clarifier_rules(git, cfg.forge.base_branch)
+    return check_agent(edit.form, edit.question, effective, frozen, rules, cfg.forge.base_branch)
+
+
 def _read_text(text: str | None) -> str | None:
     return sys.stdin.read() if text == "-" else text
 
@@ -719,7 +715,11 @@ def _prepare(
         if waits is not None:
             raise waits.exit()
     folder, _ = find_question(folders, unit, question, warnings)
-    return app, cfg, git, build_edit(form, folder, question, text, redactor=app.redactor)
+    edit = build_edit(form, folder, question, text, redactor=app.redactor)
+    refused = agent_refusal(app, git, cfg, edit)
+    if refused is not None:
+        raise refused.exit()
+    return app, cfg, git, edit
 
 
 # --- the write: one commit by plumbing, one push without force (design D9 steps 5 and 6) ------------------------
