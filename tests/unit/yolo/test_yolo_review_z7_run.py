@@ -19,7 +19,7 @@ WHY = "cannot prepare the worktree: the unit branch is not usable"
 def test_the_first_run_that_never_starts_the_unit_chains_no_run(world, run, monkeypatch):  # noqa: F811
     calls = []
 
-    def runner(app, cfg, git, chosen, *, adapters):
+    def runner(app, cfg, git, chosen, *, adapters, accepted=None):
         ids = [ref.id for _, ref in chosen]
         calls.append(ids)
         out = UnitOutcome(unit=A, phase_before="none", phase_after="none", exit_reason=WHY)
@@ -39,7 +39,7 @@ def test_the_first_run_that_never_starts_the_unit_chains_no_run(world, run, monk
 
 
 def test_a_run_that_started_the_unit_still_chains_the_next_run(world, run, monkeypatch):  # noqa: F811
-    def runner(app, cfg, git, chosen, *, adapters):
+    def runner(app, cfg, git, chosen, *, adapters, accepted=None):
         out = UnitOutcome(unit=A, phase_before="none", phase_after="implementing")
         return CommandResult(ExitCode.OK, [out], began=[ref.id for _, ref in chosen])
 
@@ -67,7 +67,7 @@ def _calls(monkeypatch):
 def test_no_network_call_follows_a_normal_run_in_ci(world, run, monkeypatch):  # noqa: F811
     calls = _calls(monkeypatch)
 
-    def runner(app, cfg, git, chosen, *, adapters):
+    def runner(app, cfg, git, chosen, *, adapters, accepted=None):
         calls.append("|run|")
         out = UnitOutcome(unit=A, phase_before="none", phase_after="implementing")
         return CommandResult(ExitCode.OK, [out], began=[ref.id for _, ref in chosen])
@@ -81,11 +81,11 @@ def test_no_network_call_follows_a_normal_run_in_ci(world, run, monkeypatch):  #
 
 
 def test_a_pending_not_started_record_is_cleared_by_the_run_that_starts_the_unit(world, run, monkeypatch):  # noqa: F811
-    def failing(app, cfg, git, chosen, *, adapters):
+    def failing(app, cfg, git, chosen, *, adapters, accepted=None):
         out = UnitOutcome(unit=A, phase_before="none", phase_after="none", exit_reason=WHY)
         return CommandResult(ExitCode.INTERNAL_ERROR, [out], not_started={A: (1, WHY)}, began=[])
 
-    def starting(app, cfg, git, chosen, *, adapters):
+    def starting(app, cfg, git, chosen, *, adapters, accepted=None):
         out = UnitOutcome(unit=A, phase_before="none", phase_after="implementing")
         return CommandResult(ExitCode.OK, [out], began=[ref.id for _, ref in chosen])
 

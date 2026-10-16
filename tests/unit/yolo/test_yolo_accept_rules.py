@@ -9,7 +9,8 @@ from l4.config.schema import YoloReviewCfg
 from l4.vcs.git import Git
 from l4.yolo import accept, findings
 from l4.yolo.accept import Refusal, actor, check, holds, target_config
-from l4.yolo.model import PlanState
+from l4.yolo.model import PlanEvent, PlanState
+from l4.yolo.readiness import PROMPT_VERSION
 
 from .yolo_ledger_world import _env, sh
 
@@ -34,10 +35,21 @@ def state(status="reviewed", **extra):
     return PlanState(plan_id="p1", status=status, **extra)
 
 
-def run_check(*, st=None, history=None, latest=None, cfg=None, who=PERSON, subject=SUBJECT):
+def reviewed(subject, history, version=PROMPT_VERSION):
+    """One `plan.reviewed` event per entry of `history`, oldest first."""
+    out = []
+    for index, e in enumerate(history):
+        key = {"batches": {subject[len("batch:") :]: e}} if subject.startswith("batch:") else {"units": {subject: e}}
+        out.append(
+            PlanEvent("plan.reviewed", f"2026-10-15T{10 + index:02d}:00:00Z", {"prompt_version": version, **key})
+        )
+    return out
+
+
+def run_check(*, st=None, history=None, latest=None, cfg=None, who=PERSON, subject=SUBJECT, version=PROMPT_VERSION):
     return check(
         st or state(),
-        two_rounds() if history is None else history,
+        reviewed(subject, two_rounds() if history is None else history, version),
         subject,
         latest or entry(digest="d2"),
         cfg or YoloReviewCfg(),
@@ -189,10 +201,56 @@ def test_a_batch_version_is_the_list_of_its_units_digests():
     assert r is not None and "on 1 version;" in r.message
 
 
-def test_an_entry_without_a_digest_falls_back_to_its_material_key():
+def test_an_entry_without_a_digest_is_not_a_round():  # M1 case B: it cannot be told apart from another such entry
     old = [entry(digest=None, material="m1"), entry(digest=None, material="m2")]
     old = [{k: v for k, v in e.items() if k != "digest"} for e in old]
-    assert run_check(history=old, latest=old[1]) is None
+    r = run_check(history=old, latest=old[1])
+    assert r is not None and "on 0 versions;" in r.message
+
+
+def _harness(criterion, digest=None):
+    return {"verdict": "BLOCKED", "digest": digest, "findings": [f("blocking", criterion, f"{criterion}: x")]}
+
+
+def test_a_schema_blocked_entry_and_one_real_judgement_are_one_round():  # M1 case A
+    history = [_harness("schema", "d1"), entry(digest="d2")]
+    r = run_check(history=history, latest=history[1])
+    assert r is not None and "on 1 version;" in r.message
+
+
+def test_a_unit_missing_entry_and_one_real_judgement_are_one_round():  # M1 case B
+    history = [_harness("unit_missing"), entry(digest="d2", material="k2")]
+    r = run_check(history=history, latest=history[1])
+    assert r is not None and "on 1 version;" in r.message
+
+
+def test_a_batch_without_digests_changing_only_its_material_is_not_a_new_round():  # M1 case C
+    batch = [
+        {"verdict": "NEEDS_REVISION", "findings": [f()], "material": "bk1"},
+        {"verdict": "NEEDS_REVISION", "findings": [f()], "material": "bk2"},
+    ]
+    r = run_check(subject="batch:b1", history=batch, latest=batch[1])
+    assert r is not None and "on 0 versions;" in r.message
+
+
+def test_a_local_batch_entry_with_the_same_unit_digests_is_one_round():  # M1 case C, as old ledgers have it
+    a = {"verdict": "READY", "digest": "da", "findings": []}
+    batch = {"verdict": "NEEDS_REVISION", "findings": [f()]}
+    events = [
+        PlanEvent(
+            "plan.reviewed", f"2026-10-15T1{n}:00:00Z",
+            {"prompt_version": PROMPT_VERSION, "units": {"a": a}, "batches": {"b1": {**batch, "material": f"bk{n}"}}},
+        )
+        for n in (0, 1)
+    ]  # fmt: skip
+    r = check(state(), events, "batch:b1", events[1].data["batches"]["b1"], YoloReviewCfg(), PERSON)
+    assert r is not None and "on 1 version;" in r.message
+
+
+def test_rounds_of_an_older_prompt_version_count():  # M1 case D (design D7.1)
+    older = reviewed(SUBJECT, [entry(digest="d0")], version=PROMPT_VERSION - 1)
+    events = [*older, *reviewed(SUBJECT, [entry(digest="d2")])]
+    assert check(state(), events, SUBJECT, entry(digest="d2"), YoloReviewCfg(), PERSON) is None
 
 
 def test_an_agent_is_refused_unless_the_target_allows_it_scn_65():

@@ -136,10 +136,24 @@ def test_batch_acceptance_is_not_a_units_finding(world):  # SCN-YOLO-52
 
 
 def test_nothing_left_after_the_move_is_ready_not_a_finding_of_the_harness(world):
-    gap = {"criterion": "batch_acceptance", "severity": "blocking", "text": "no end-to-end check"}
+    gap = {"criterion": "batch_acceptance", "severity": "major", "text": "no end-to-end check"}
     verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("NEEDS_REVISION", [gap])))).units[A]
     assert verdict.verdict == "READY" and verdict.findings == ()
-    assert verdict.assumptions == ("batch_acceptance does not apply to a unit, blocking: no end-to-end check",)
+    assert verdict.assumptions == ("batch_acceptance does not apply to a unit, major: no end-to-end check",)
+
+
+@pytest.mark.parametrize("said", ["BLOCKED", "NEEDS_REVISION", "READY"])
+def test_a_blocking_batch_acceptance_finding_on_a_unit_stays_a_finding(world, said):  # D3: blocking is never moved
+    gap = {"criterion": "batch_acceptance", "severity": "blocking", "text": "the payment API it needs does not exist"}
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer(said, [gap])))).units[A]
+    assert verdict.verdict == ("BLOCKED" if said == "BLOCKED" else "NEEDS_REVISION")
+    assert verdict.findings == (gap,) and verdict.assumptions == ()
+
+
+def test_a_blocked_unit_with_only_a_movable_batch_acceptance_note_stays_blocked(world):
+    gap = {"criterion": "batch_acceptance", "severity": "major", "text": "no end-to-end check"}
+    verdict = review(world, plan_of({A: []}), judge(Step(structured=answer("BLOCKED", [gap])))).units[A]
+    assert verdict.verdict == "BLOCKED" and verdict.findings == ()
 
 
 def test_a_blocked_verdict_with_only_minor_findings_stays_blocked(world):
@@ -231,3 +245,17 @@ def test_the_cost_of_the_review_is_reported(world):
         git=world.git, rev=world.rev, adapters={"fake": fake},
     )  # fmt: skip
     assert set(result.units) == {A, B} and cost == pytest.approx(0.75)
+
+
+def test_the_material_key_covers_the_templates_and_the_schema(monkeypatch):  # a prompt change never reuses a verdict
+    from l4.yolo import readiness
+
+    base = readiness.material_key("unit", "text")
+    assert readiness.material_key("unit", "text") == base
+    monkeypatch.setattr(readiness, "SYSTEM_TEMPLATE", readiness.SYSTEM_TEMPLATE + " more")
+    system = readiness.material_key("unit", "text")
+    monkeypatch.setattr(readiness, "MATERIAL_TEMPLATE", readiness.MATERIAL_TEMPLATE + " more")
+    material = readiness.material_key("unit", "text")
+    monkeypatch.setattr(readiness, "READINESS_SCHEMA", {**readiness.READINESS_SCHEMA, "title": "changed"})
+    schema = readiness.material_key("unit", "text")
+    assert len({base, system, material, schema}) == 4

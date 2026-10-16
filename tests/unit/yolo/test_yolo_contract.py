@@ -102,7 +102,7 @@ def test_record_and_fresh_need_worktree(world, flags):  # noqa: F811
 def test_worktree_delegates_to_run_review_worktree(world, monkeypatch):  # noqa: F811
     seen = {}
 
-    def fake(app, *, plan, fresh, record, no_run):
+    def fake(app, *, plan, fresh, record, no_run, as_json=False):
         seen.update(plan=plan, fresh=fresh, record=record, no_run=no_run)
         return ExitCode.OK
 

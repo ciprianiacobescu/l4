@@ -1,7 +1,6 @@
 """`l4 yolo accept`: who is asking, what the target's configuration allows, and when an acceptance holds
 (review-resolution design D7, section 8). Pure rules; the command (yolo/commands.py) records the events."""
 
-import json
 import logging
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -14,7 +13,7 @@ from l4.config.schema import YoloReviewCfg
 from l4.exitcodes import L4Exit
 from l4.vcs.git import Git, GitError
 from l4.yolo import findings as findings_mod
-from l4.yolo.model import PlanState
+from l4.yolo.model import PlanEvent, PlanState
 
 log = logging.getLogger("l4.yolo.accept")
 
@@ -66,30 +65,9 @@ def target_config(git: Git, ref: str) -> YoloReviewCfg:
             return YoloReviewCfg()
 
 
-def _version(entry: Mapping[str, Any]) -> str | None:
-    """The version of a subject's own text an entry judged: a unit's digest, a batch's list of its units' digests."""
-    if entry.get("digest") is not None:
-        return f"digest:{entry['digest']}"
-    digests = entry.get("digests")
-    if isinstance(digests, Mapping) and digests:
-        return "digests:" + json.dumps(sorted(digests.items()), default=str)
-    if isinstance(digests, Sequence) and not isinstance(digests, str) and digests:
-        return "digests:" + json.dumps(list(digests), default=str)
-    return f"material:{entry['material']}" if entry.get("material") is not None else None
-
-
-def _rounds(judged_history: Sequence[Mapping[str, Any]]) -> int:
-    """Distinct versions of the subject's own text judged not READY (a reused or re-judged one is the same)."""
-    versions: set[str] = set()
-    for index, entry in enumerate(judged_history):
-        if entry.get("verdict") != "READY":
-            versions.add(_version(entry) or f"entry:{index}")
-    return len(versions)
-
-
 def check(
     state: PlanState,
-    judged_history: Sequence[Mapping[str, Any]],
+    events: Sequence[PlanEvent],
     subject: str,
     latest_entry: Mapping[str, Any],
     cfg_target: YoloReviewCfg,
@@ -97,7 +75,8 @@ def check(
     *,
     withdraw: bool = False,
 ) -> Refusal | None:
-    """The first rule `subject` breaks, in the order of design D7; None when it may be accepted. A withdrawal is
+    """The first rule `subject` breaks, in the order of design D7; None when it may be accepted. `events` are the plan's
+    ledger: the rounds are counted by `findings.rounds_not_ready`, the number `plan.accepted` records. A withdrawal is
     never refused: it removes an override and only makes the activation stricter."""
     if withdraw:
         return None
@@ -142,7 +121,7 @@ def check(
         )
     if latest_entry.get("verdict") == "READY":
         return Refusal(f"{subject} is READY: nothing to accept", f"l4 yolo activate {plan} --reason TEXT")
-    rounds, needed = _rounds(judged_history), cfg_target.accept_after_rounds
+    rounds, needed = findings_mod.rounds_not_ready(events, subject), cfg_target.accept_after_rounds
     if rounds < needed:
         return Refusal(
             f"{subject} was judged not READY on {rounds} version{'' if rounds == 1 else 's'}; {needed} are needed "

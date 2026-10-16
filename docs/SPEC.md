@@ -3555,7 +3555,7 @@ readiness prompt version MUST be 4.
 **L4-YOLO-026** A review of the working tree before the push. `l4 yolo review PLAN --worktree` SHALL review the working tree's plan file and unit folders with the same prompt,
 rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost (`--json`:
 the findings document of `l4 yolo findings --json`), write nothing to the plan ref, and exit 0 when every subject is READY or accepted, else 2. `--record` MUST record it like
-`--local`, for committed paths only. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
+`--local`, for committed paths only, reusing only what the ledger holds (never the local dry-run cache) and judging every other subject again, with `source`, the judge profile and the sandbox in its entry; `--record --fresh SUBJECT` MUST be refused (exit 2) when the ledger holds that subject's current material. Outside CI with no usable bwrap, the judge MUST run unsandboxed only when its
 adapter is tool-less, and say so.
 
 **L4-YOLO-027** A person can accept a subject's remaining findings on record. `l4 yolo accept PLAN SUBJECT --reason TEXT` SHALL record `plan.accepted` of the subject's latest verdict (key,

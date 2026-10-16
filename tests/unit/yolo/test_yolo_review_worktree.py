@@ -284,21 +284,88 @@ def test_record_writes_the_events_ci_would(world, monkeypatch, capsys):
     assert data["sandbox"] == "none" and data["judge"] and data["cost_usd"] == 0.75
     assert data["units"][A]["digest"] == unit_digest(world.clone, "HEAD", FOLDER_A) and data["units"][A]["material"]
     assert data["batches"]["b1"]["material"]
+    assert data["batches"]["b1"]["digests"] == {A: data["units"][A]["digest"], B: data["units"][B]["digest"]}  # as CI
     assert charged.data == {"unit": "plan:review", "attempt": 0, "cost_usd": 0.75, "runs": 0}
     assert "Next: git push; CI finds this review current and does not review again" in capsys.readouterr().out
 
 
-def test_record_after_a_dry_run_is_all_cache_hits_at_no_cost(world, monkeypatch, capsys):
+def test_record_after_a_dry_run_judges_again_what_is_not_on_the_ledger(world, monkeypatch, capsys):
+    """D5: a verdict is accepted or skipped from the ledger only; the dry-run cache is never recorded."""
     ready_world(world)
     commit_edit(world)
     judge(monkeypatch, answer(), answer(), answer())
     world.l4("review", "p1", "--worktree")
-    again = judge(monkeypatch)
+    again = judge(monkeypatch, answer(), answer(), answer())
     assert world.l4("review", "p1", "--worktree", "--record") == 0
-    assert again.requests == []
+    assert len(again.requests) == 3  # one judge call per subject that the ledger does not hold
+    assert world.kinds() == ["plan.admitted", "plan.reviewed", "plan.charged"]
     data = world.events()[1].data
-    assert data["cost_usd"] == 0 and data["sandbox"] == "none" and "reused_from" not in data["units"][A]
-    assert "plan.charged" not in world.kinds()  # nothing was spent
+    assert data["cost_usd"] == 0.75 and data["sandbox"] == "none" and "reused_from" not in data["units"][A]
+    for entry in (data["units"][A], data["units"][B], data["batches"]["b1"]):
+        assert entry["source"] == "worktree" and entry["judge"] and entry["sandbox"] == "none"
+
+
+def _forge_cache(world, verdict, subject=A):
+    """Append a cache line for the subject's current material that says `verdict` (what a person with a text editor
+    can do): the newest line of a material wins in the cache."""
+    line = {s["subject"]: s for s in cache_lines(world)}[subject]
+    forged = {**line, "entry": {**line["entry"], "verdict": verdict, "findings": []}, "at": "2026-10-16T00:00:00Z"}
+    (file,) = world.root.glob("**/yolo/p1/review/verdicts.jsonl")
+    with file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(forged) + "\n")
+
+
+def _reviews(world):
+    return [e for e in world.events() if e.type == "plan.reviewed"]
+
+
+def test_a_dry_rerolled_ready_is_not_recorded_without_a_judge_call(world, monkeypatch, capsys):  # attack 1
+    ready_world(world)
+    commit_edit(world)
+    judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
+    assert world.l4("review", "p1", "--worktree") == 2
+    judge(monkeypatch, answer())
+    assert world.l4("review", "p1", "--worktree", "--fresh", A) == 0  # re-rolled until READY (dry)
+    record = judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
+    assert world.l4("review", "p1", "--worktree", "--record") == 2
+    assert len(record.requests) == 3
+    assert _reviews(world)[-1].data["units"][A]["verdict"] == "NEEDS_REVISION"
+
+
+def test_record_fresh_does_not_replace_a_recorded_review_of_the_same_material(world, monkeypatch, capsys):  # attack 2
+    ready_world(world)
+    commit_edit(world)
+    judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
+    assert world.l4("review", "p1", "--worktree", "--record") == 2
+    capsys.readouterr()
+    again = judge(monkeypatch, answer())
+    assert world.l4("review", "p1", "--worktree", "--record", "--fresh", A) == 2
+    err = capsys.readouterr().err
+    assert "l4 yolo accept" in err and "change the material" in err and A in err
+    assert again.requests == [] and len(_reviews(world)) == 1
+    assert _reviews(world)[0].data["units"][A]["verdict"] == "NEEDS_REVISION"
+
+
+def test_record_fresh_of_material_the_ledger_does_not_hold_is_judged_once(world, monkeypatch, capsys):
+    ready_world(world)
+    commit_edit(world)
+    fake = judge(monkeypatch, answer(), answer(), answer())
+    assert world.l4("review", "p1", "--worktree", "--record", "--fresh", A) == 0
+    assert len(fake.requests) == 3 and len(_reviews(world)) == 1
+
+
+def test_a_forged_cache_line_is_not_recorded(world, monkeypatch, capsys):  # attack 3
+    ready_world(world)
+    commit_edit(world)
+    judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
+    assert world.l4("review", "p1", "--worktree") == 2
+    _forge_cache(world, "READY")
+    dry = judge(monkeypatch)  # the dry run still trusts its own cache
+    assert world.l4("review", "p1", "--worktree") == 0 and dry.requests == []
+    record = judge(monkeypatch, answer("NEEDS_REVISION", [GAP]), answer(), answer())
+    assert world.l4("review", "p1", "--worktree", "--record") == 2
+    assert len(record.requests) == 3
+    assert _reviews(world)[-1].data["units"][A]["verdict"] == "NEEDS_REVISION"
 
 
 def test_record_of_a_verdict_reused_from_the_ledger_keeps_reused_from(world, monkeypatch, capsys):
@@ -394,6 +461,9 @@ def test_a_second_local_review_of_unchanged_material_judges_nothing_and_costs_no
     again = local_judge()  # an empty script: any call fails the test
     assert world.l4("review", "p1", "--local") == 0
     reviewed = [e for e in world.events() if e.type == "plan.reviewed"]
+    # `--local` records the digests of the batch's units, as CI does (`accept` counts rounds by them)
+    first_data = reviewed[0].data
+    assert first_data["batches"]["b1"]["digests"] == {u: first_data["units"][u]["digest"] for u in (A, B)}
     assert again.requests == [] and len(reviewed) == 2 and reviewed[-1].data["cost_usd"] == 0
     assert all("reused_from" in v for v in reviewed[-1].data["units"].values())
     assert [e.type for e in world.events()].count("plan.charged") == 1

@@ -28,6 +28,28 @@ def test_scn_yolo_60_tool_less_judge_runs_unsandboxed_outside_ci(tmp_path: Path,
     assert label == "none"
 
 
+def test_an_opencode_free_model_judge_is_not_tool_less_outside_ci(tmp_path: Path) -> None:
+    """The free `opencode/` models leave read and bash at `ask` (agents/opencode.py), not at deny."""
+    cfg = make_cfg(
+        sandbox={"mode": "auto"},
+        profiles={"free": {"adapter": "opencode", "model": "opencode/big-pickle"}},
+        roles={"implementer": ["free"], "judges": ["free"]},
+    )
+    with pytest.raises(SandboxUnavailable) as err:
+        judge_sandbox.choose(cfg, env(tmp_path), tmp_path, adapter="opencode", profile="free", in_ci=False)
+    assert "opencode/" in str(err.value) and "claude-code" in str(err.value) and "api-key opencode" in str(err.value)
+
+
+def test_an_opencode_judge_with_its_tools_disabled_stays_tool_less(tmp_path: Path) -> None:
+    cfg = make_cfg(
+        sandbox={"mode": "auto"},
+        profiles={"paid": {"adapter": "opencode", "model": "opencode-go/deepseek-v4.1-flash"}},
+        roles={"implementer": ["paid"], "judges": ["paid"]},
+    )
+    sandbox, label = judge_sandbox.choose(cfg, env(tmp_path), tmp_path, adapter="opencode", profile="paid", in_ci=False)
+    assert isinstance(sandbox, NoSandbox) and label == "none"
+
+
 def test_the_reason_is_available_to_the_caller(tmp_path: Path) -> None:
     assert judge_sandbox.unsandboxed_reason(env(tmp_path), tmp_path) == "bwrap was not found on PATH"
 

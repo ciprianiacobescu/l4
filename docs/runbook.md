@@ -1439,11 +1439,14 @@ prerequisites as shown, its plan entry and the review prompt version.
 3. Run `l4 yolo review <plan-id> --worktree`. It reviews the working tree, uncommitted edits included, with the same
    prompt and rules as CI. It is a dry run: it writes nothing to the plan ledger and charges nothing to the plan. It
    prints the digests, the verdicts, the findings and the cost, and exits 0 when every subject is `READY` or accepted,
-   else 2. Repeat steps 1 to 3. `--fresh <subject>` (repeatable) judges a subject again even when its material is
-   known.
+   else 2. Repeat steps 1 to 3. `--fresh <subject>` (repeatable) is a dry-run tool: it judges a subject again even
+   when its material is known. A dry-run verdict lives in a local cache and is never recorded as it is.
 4. When every subject is `READY`: commit the plan file and the unit folders, then run
-   `l4 yolo review <plan-id> --worktree --record`. Every subject is a cache hit, so it costs nothing. It records the
-   review as `plan.reviewed` and refuses (exit 2) while a path of the plan has an uncommitted change.
+   `l4 yolo review <plan-id> --worktree --record`. It reuses only a review already on the ledger; every other subject is
+   judged again (one judge call each, charged to the plan), and its entry records `source: worktree`, the judge
+   profile and the sandbox. It records the review as `plan.reviewed` and refuses (exit 2) while a path of the plan has
+   an uncommitted change. `--record --fresh <subject>` is refused (exit 2) when the ledger already holds the current
+   material of that subject: agree with it (`l4 yolo accept`) or change the material.
 5. Push. CI finds the review current and does not judge again. Run `l4 yolo activate <plan-id> --reason "<why>"`.
 
 If a unit has a branch on `origin`, CI reads its folder on that branch. The review of the working tree is current for

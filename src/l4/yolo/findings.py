@@ -179,7 +179,8 @@ def rounds_not_ready(events: Sequence[PlanEvent], subject: str) -> int:
                         for unit, e in (event.data.get("units") or {}).items()
                         if isinstance(e, dict)
                     }
-                versions.add(tuple(sorted((str(u), str(d)) for u, d in digests.items())))
+                if digests:  # no digest at all: the version of the text cannot be told, so it is no round
+                    versions.add(tuple(sorted((str(u), str(d)) for u, d in digests.items())))
             elif entry.get("digest") is not None:
                 versions.add(str(entry["digest"]))
     return len(versions)

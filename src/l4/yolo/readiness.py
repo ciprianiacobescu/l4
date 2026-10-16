@@ -405,10 +405,21 @@ def _batch_subject(
     )
 
 
+class FreshRefused(Exception):
+    """`--fresh` named subjects whose current material is already on the ledger: they are not judged again."""
+
+    def __init__(self, names: tuple[str, ...]) -> None:
+        super().__init__(", ".join(names))
+        self.names = names
+
+
 def material_key(kind: str, key_text: str) -> str:
     """The material key of a subject (design D2): the prompt version, the kind and the user text without the delivered
-    block, so a verdict is reused exactly when the judge would be shown the same thing."""
-    return hashlib.sha256(f"{PROMPT_VERSION}\0{kind}\0{key_text}".encode()).hexdigest()[:16]
+    block, so a verdict is reused exactly when the judge would be shown the same thing. The templates and the response
+    schema are part of what it is shown: changing one of them without a `PROMPT_VERSION` bump never reuses a verdict."""
+    prompt = json.dumps([SYSTEM_TEMPLATE, MATERIAL_TEMPLATE, READINESS_SCHEMA], sort_keys=True, default=str)
+    fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
+    return hashlib.sha256(f"{PROMPT_VERSION}\0{fingerprint}\0{kind}\0{key_text}".encode()).hexdigest()[:16]
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------
@@ -446,7 +457,8 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
     """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
     the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
     are listed in `missing` and so is what a prerequisite's budget cut. Then the rules of L4-YOLO-023: a
-    `batch_acceptance` finding on a unit becomes an assumption; a NEEDS_REVISION with no finding gets the harness
+    minor or major `batch_acceptance` finding on a unit (any severity on a batch without a
+    profile) becomes an assumption; a NEEDS_REVISION with no finding gets the harness
     finding `verdict`; a NEEDS_REVISION whose findings are all minor is READY (the findings stay). The judge's own
     `blocking` and a BLOCKED are not touched."""
     findings, said, missing, assumptions = verdict.findings, verdict.verdict, verdict.missing, verdict.assumptions
@@ -458,17 +470,20 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         if subject.kind == "unit"
         else ""
     )
-    if why and any(f["criterion"] == NOT_APPLICABLE for f in findings):
+    # on a unit only a minor or major note can be moved: a blocking finding is the judge's own and stays (D3)
+    moved = tuple(
+        f
+        for f in findings
+        if f["criterion"] == NOT_APPLICABLE and (subject.groups_only or f["severity"] in ("minor", "major"))
+    )
+    if why and moved:
         # the plan file has nowhere to state a batch outcome: the finding cannot be fixed, so it is kept as a note
-        assumptions = (
-            *assumptions,
-            *(f"{why}, {f['severity']}: {f['text']}" for f in findings if f["criterion"] == NOT_APPLICABLE),
-        )
-        findings = tuple(f for f in findings if f["criterion"] != NOT_APPLICABLE)
+        assumptions = (*assumptions, *(f"{why}, {f['severity']}: {f['text']}" for f in moved))
+        findings = tuple(f for f in findings if f not in moved)
         if said == "NEEDS_REVISION" and not any(f["severity"] in ("blocking", "major") for f in findings):
             said = "READY"
-        if said == "BLOCKED" and not findings:  # nothing is left that a person could fix: the note was all there was
-            said = "READY"
+        if said == "BLOCKED" and not findings and subject.groups_only:
+            said = "READY"  # a subject that only groups units: the note was all there was
     if subject.left_out:
         text = " ".join(subject.left_out)
         findings = (*findings, {"criterion": "material", "severity": "blocking", "text": text})
@@ -610,6 +625,7 @@ def review_plan_costed(
     revs: Mapping[str, str] | None = None,
     budgets: Budgets | None = None,
     sandbox_for: Callable[[str, str], Sandbox] | None = None,
+    refuse_fresh_of_prior: bool = False,
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
@@ -621,7 +637,9 @@ def review_plan_costed(
     (`Subject.name`) is not in `fresh` gets that verdict again (`reused_from`), with no judge call and no cost, unless
     the entry is no review (a harness `schema`, `unit_missing` or `completeness` finding). `revs` replaces the revision
     every unit and prerequisite is read on (the working-tree snapshot). The judge and its sandbox are created only when
-    a subject is judged; `sandbox_for(adapter, profile)` then replaces `sandbox` and `select_sandbox`."""
+    a subject is judged; `sandbox_for(adapter, profile)` then replaces `sandbox` and `select_sandbox`. With
+    `refuse_fresh_of_prior`, a subject named in `fresh` whose material is already in `prior` raises `FreshRefused`
+    before any judge call (a recorded review is not re-rolled)."""
     revs = _unit_revs(git, cfg, plan, units, rev) if revs is None else _given_revs(plan, units, revs, rev)
     limits = budgets or Budgets.of(cfg)
     digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
@@ -687,13 +705,18 @@ def review_plan_costed(
             )
     cost = 0.0
     asked: list[tuple[Subject, str | None, str]] = []
+    refused: list[str] = []
     for subject, digest in subjects:
         key = material_key(subject.kind, subject.key_text)
         entry = prior.get(key)
+        if refuse_fresh_of_prior and subject.name in fresh and entry is not None and _reusable(entry):
+            refused.append(subject.name)
         if entry is not None and subject.name not in fresh and _reusable(entry):
             (result_units if subject.kind == "unit" else result_batches)[subject.id] = _reused(entry, key, digest)
         else:
             asked.append((subject, digest, key))
+    if refused:
+        raise FreshRefused(tuple(refused))
     if asked:
         factory = Factory(
             cfg,
@@ -749,6 +772,7 @@ __all__ = [
     "READINESS_SCHEMA",
     "Budgets",
     "FolderText",
+    "FreshRefused",
     "JudgeFailed",
     "Omission",
     "Subject",
