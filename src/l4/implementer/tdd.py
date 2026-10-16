@@ -790,6 +790,25 @@ def _red_commit_message(wb: Workbench, task: Task, *, already_satisfied: bool) -
     return f"test({wb.ref.name}): {what} [skip ci]"
 
 
+def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
+    """Design D9: the keys that `gate.finished` of a red test gate gets. `{"red_new_failing": n}` when at least one
+    test fails and every failing test is new and failed by assertion or `NotImplementedError` without the hang marker,
+    and the report has no collection error that the base report lacks; else `{}`. It changes no verdict."""
+
+    def note(report: TestReport) -> dict:
+        failing = sorted(i for i in report.tests if report.tests[i].status in ("failed", "error"))
+        if not failing or set(report.collection_errors) - set(base_report.collection_errors):
+            return {}
+        new = new_test_ids(base_report, report)
+        for i in failing:
+            case = report.tests[i]
+            if i not in new or case.failure_kind in (None, "other") or TIMEOUT_MARKER in case.message:
+                return {}
+        return {"red_new_failing": len(failing)}
+
+    return note
+
+
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
     stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
@@ -823,7 +842,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     run_setup(wb)  # an agent-edited environment must not decide the gate
     changed = wb.changed_files()
     test_files = any(_matches(tdd.test_globs, p) or _matches(tdd.test_support_globs, p) for p in changed)
-    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, note=red_note(base_report))
     if (out := tampered("test run")) is not None:
         return out
     if gate.report is None:

@@ -3,10 +3,13 @@ red note of the red gate (L4-OBS-004)."""
 
 import logging
 
+import pytest
+
 from l4.agents.activity import Beat
 from l4.agents.fake import Step
+from l4.gates.junit import TestCase, TestReport
 from l4.implementer.loop import run_task
-from l4.implementer.tdd import run_red
+from l4.implementer.tdd import red_note, run_red
 
 from .conftest import green_step, red_step
 from .test_tdd_red import TASK
@@ -107,3 +110,59 @@ def test_the_other_statuses_keep_their_text(make_bench):
     bench = make_bench([Step(status="error", final_text="")])
     outcome = run_red(bench.wb, TASK, attempt=1)
     assert outcome.reason.startswith("the agent step ended with status error")
+
+
+# --- the red note (design D9) ---
+
+
+def _case(i, status, kind=None, message=""):
+    return TestCase(i, status, message, failure_kind=kind)
+
+
+BASE = TestReport({k: TestCase(k, "passed") for k in "abcde"})
+
+
+def test_red_note_counts_new_failing_tests_by_assertion_or_not_implemented():
+    """SCN-OBS-03."""
+    tests = dict(BASE.tests)
+    for n in range(7):
+        tests[f"new{n}"] = _case(f"new{n}", "failed", "assertion" if n % 2 else "not_implemented")
+    assert red_note(BASE)(TestReport(tests)) == {"red_new_failing": 7}
+    one = dict(BASE.tests) | {"x": _case("x", "failed", "assertion")}
+    assert red_note(BASE)(TestReport(one)) == {"red_new_failing": 1}
+
+
+def test_red_note_is_empty_in_every_other_case():
+    """SCN-OBS-04: the five cases (a gate that is not red or has no report never reaches the note)."""
+    base = BASE.tests
+    other = TestReport(base | {"n": _case("n", "failed", "other")})
+    old_fails = TestReport(base | {"a": _case("a", "failed", "assertion"), "n": _case("n", "failed", "assertion")})
+    collection = TestReport(base | {"n": _case("n", "failed", "assertion")}, collection_errors=["tests.test_new"])
+    hung = TestReport(base | {"n": _case("n", "failed", "assertion", "Failed: l4-test-timeout: 5s")})
+    nothing_failing = TestReport(base | {"n": _case("n", "passed")})
+    note = red_note(BASE)
+    for report in (other, old_fails, collection, hung, nothing_failing):
+        assert note(report) == {}
+
+
+def test_a_collection_error_the_base_already_has_does_not_block_the_note():
+    base = TestReport(dict(BASE.tests), collection_errors=["tests.broken"])
+    head = TestReport(dict(BASE.tests) | {"n": _case("n", "failed", "assertion")}, collection_errors=["tests.broken"])
+    assert red_note(base)(head) == {"red_new_failing": 1}
+
+
+def test_a_red_step_records_red_new_failing_on_its_test_gate(make_bench):
+    bench = make_bench([red_step()])
+    assert run_red(bench.wb, TASK, attempt=1).status == "ok"
+    tests_gate = [e for e in bench.events("gate.finished") if e["name"] == "test"]
+    assert any(e.get("red_new_failing", 0) >= 1 for e in tests_gate)
+    assert all("red_new_failing" not in e for e in bench.events("gate.finished") if e["name"] != "test")
+
+
+@pytest.mark.parametrize("name", ["run_single", "run_green"])
+def test_green_and_single_pass_no_note(name):
+    import inspect
+
+    import l4.implementer.tdd as tdd
+
+    assert "note=" not in inspect.getsource(getattr(tdd, name))
