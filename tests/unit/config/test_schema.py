@@ -81,11 +81,18 @@ def test_version_2_is_rejected():
         {"clarifier": {"max_open_questions": 0}},
         {"clarifier": {"auto_accept_kinds": ["verdict"]}},
         {"clarifier": {"autoaccept": True}},
+        {"clarifier": {"answer_by_agents": "maybe"}},
+        {"clarifier": {"answer_by_agents": ["yes"]}},
     ],
 )
 def test_unknown_keys_and_bad_values_are_rejected(bad):
     with pytest.raises(ValidationError):
         L4Config.model_validate(bad)
+
+
+def test_answer_by_agents_is_off_by_default_and_a_boolean():
+    assert L4Config.model_validate({}).clarifier.answer_by_agents is False
+    assert L4Config.model_validate({"clarifier": {"answer_by_agents": True}}).clarifier.answer_by_agents is True
 
 
 def test_profile_accepts_both_adapter_and_backend():

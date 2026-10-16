@@ -10,7 +10,7 @@ from typing import Any
 import click
 
 from l4 import __version__, cancel
-from l4.commands import dispatch
+from l4.commands import STUBS, dispatch
 from l4.config.defaults import DEFAULT_REDACT_ENV, RUNNER_SECRET_ENV
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, classify_exception
@@ -41,6 +41,29 @@ def _common() -> list[click.Parameter]:
     ]  # fmt: skip
 
 
+NYI = "(not yet implemented) Exits 2."
+QUESTIONS_SHORT = "List and show open questions; accept or answer one on the unit branch (commits and pushes)."
+QUESTIONS_HELP = (
+    QUESTIONS_SHORT
+    + """
+
+Reads questions.md on the fetched unit branch on origin, never your work tree. accept and answer write one commit \
+to that branch and push it (no force), so the push starts the run that takes the answer.
+
+\b
+l4 questions [list] [--unit U] [--json]        the open questions of one unit, or of every unit with a branch
+l4 questions show Q-NNN --unit U [--json]      one question: what accept takes, the frozen paths it would unfreeze
+l4 questions accept Q-NNN --unit U [--no-push] take the clarifier's suggestion as the answer
+l4 questions answer Q-NNN --unit U --text TEXT [--no-push]
+                                               write your answer (--text - reads standard input)
+
+--no-push prints the diff and the commit message and writes nothing. A caller that is an agent (an agent marker \
+in the environment, or standard input that is not a terminal) may write only a question of a kind in \
+clarifier.auto_accept_kinds whose answer names no frozen path, unless clarifier.answer_by_agents is true on the \
+base branch."""
+)
+
+
 def _opt(*names: str, **kw: Any) -> click.Option:
     return click.Option(list(names), **kw)
 
@@ -68,8 +91,9 @@ def _unit(required: bool = False) -> click.Option:
 _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "init": ("Adopt the harness in a repo.", lambda: [
         _opt("--ci", "ci", type=click.Choice(["github", "gitlab", "both"])),
-        _opt("--framework", "framework", type=click.Choice(["openspec", "kiro"])),
-        _flag("--vendor", "vendor"), _flag("--dry-run", "dry_run"), _flag("--force", "force"),
+        _opt("--framework", "framework", type=click.Choice(["openspec", "kiro"]),
+             help="The spec framework (kiro is not yet implemented)."),
+        _flag("--vendor", "vendor"), _flag("--dry-run", "dry_run", help=NYI), _flag("--force", "force"),
         _flag("--no-ci-edit", "no_ci_edit", help="Print the .gitlab-ci.yml include instead of writing it."),
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
              help="Harness checkout to vendor (default: the one l4 runs from)."),
@@ -118,22 +142,25 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--detailed-exitcode", "detailed_exitcode"),
     ]),
     "run": ("Advance units through the lifecycle.", lambda: [
-        _units(), _opt("--max-units", "max_units", type=int), _opt("--time-budget", "time_budget"),
+        _units(), _opt("--max-units", "max_units", type=int), _opt("--time-budget", "time_budget", help=NYI),
         _flag("--dry-run", "dry_run"), _flag("--probe", "probe"),
     ]),
     "status": ("Show units, phases, open questions, last verdict and cool-downs.", lambda: [
-        _unit(), _flag("--json", "as_json"), _flag("--rebuild", "rebuild"),
+        _unit(), _flag("--json", "as_json"), _flag("--rebuild", "rebuild", help=NYI),
     ]),
     "probe": ("Run availability probes.", lambda: [
         click.Argument(["profiles"], nargs=-1), _opt("--role", "role"), _flag("--json", "as_json"),
         _flag("--no-cache", "no_cache"),
     ]),
-    "verify": ("Run only the verifier on a unit.", lambda: [_unit(True), _flag("--dry-run", "dry_run")]),
+    "verify": ("Run only the verifier on a unit.", lambda: [_unit(True), _flag("--dry-run", "dry_run", help=NYI)]),
     "archive": ("Run the done-gate and archive a unit.", lambda: [
         _unit(True), _flag("--retry", "retry", help="Try again an archive that failed on the same inputs."),
     ]),
-    "questions": ("List, show, answer or accept questions of a unit.", lambda: [
-        click.Argument(["words"], nargs=-1), _unit(), _opt("--text", "text"),
+    "questions": (QUESTIONS_HELP, lambda: [
+        click.Argument(["words"], nargs=-1), _unit(),
+        _opt("--text", "text", help="answer: the answer. - reads standard input."),
+        _flag("--json", "as_json", help="list, show: print l4/questions@1 JSON."),
+        _flag("--no-push", "no_push", help="accept, answer: print the diff and the commit message; write nothing."),
     ]),
     "feedback add": (feedback_help.ADD_HELP, lambda: [
         _opt("--kind", "kind", required=True,
@@ -199,8 +226,8 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "unlock": ("Release a lock.", lambda: [_unit(True), _flag("--force", "force")]),
     "resume": ("Leave halted/escalated and reset breaker counters (members only).", lambda: [
         _unit(True), _opt("--reason", "reason", required=True),
-        _opt("--extend-iterations", "extend_iterations", type=int),
-        _opt("--extend-cost", "extend_cost", type=float),
+        _opt("--extend-iterations", "extend_iterations", type=int, help=NYI),
+        _opt("--extend-cost", "extend_cost", type=float, help=NYI),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
         _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
@@ -377,6 +404,9 @@ def _build_app(options: Mapping[str, Any], environ: Mapping[str, str]) -> AppCon
 
 
 def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> click.Command:
+    short = QUESTIONS_SHORT if name == "questions" else None
+    if name in STUBS:
+        help_text = f"(not yet implemented) {help_text}"
     own_dests = {param.name for param in params}
 
     def callback(**kwargs: Any) -> int:
@@ -407,7 +437,9 @@ def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> c
     # directory is the checkout (the global meaning), anything else is the GitHub repository
     own = {opt for param in params for opt in param.opts}
     common = [param for param in _common() if not own & set(param.opts)]
-    return click.Command(name.split()[-1], params=[*common, *params], callback=callback, help=help_text)
+    return click.Command(
+        name.split()[-1], params=[*common, *params], callback=callback, help=help_text, short_help=short
+    )
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})

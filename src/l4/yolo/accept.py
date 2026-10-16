@@ -8,18 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from l4.actor import AGENT_MARKERS, actor
 from l4.config.loader import load_config
-from l4.config.schema import YoloReviewCfg
+from l4.config.schema import L4Config, YoloReviewCfg
 from l4.exitcodes import L4Exit
 from l4.vcs.git import Git, GitError
 from l4.yolo import findings as findings_mod
 from l4.yolo.model import PlanEvent, PlanState
 
 log = logging.getLogger("l4.yolo.accept")
+__all__ = ["AGENT_MARKERS", "Refusal", "actor", "check", "holds", "target_config", "target_full_config"]
 
-# The first one found is named. The harness cannot know who types a command: these keep honest agents from deciding
-# for a person; they are not a security boundary (design D7.2).
-AGENT_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "L4_RESULT_PATH")
 _RESTARTABLE_STOPS = ("inputs_changed", "unit_rejected")  # the stopped plans a review can still be made on
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
 _HARNESS_CRITERIA = ("schema", "unit_missing", "completeness")
@@ -34,35 +33,31 @@ class Refusal:
     fix: str
 
 
-def actor(environ: Mapping[str, str], stdin_tty: bool) -> tuple[str, str | None]:
-    """`("person", None)` or `("agent", <marker>)`: a person is a terminal on stdin and no marker; stdout is not
-    looked at, so `l4 yolo accept ... | tee log` stays a person's command."""
-    for marker in AGENT_MARKERS:
-        if environ.get(marker):
-            return "agent", marker
-    return ("person", None) if stdin_tty else ("agent", None)
-
-
-def target_config(git: Git, ref: str) -> YoloReviewCfg:
-    """`yolo.review` of `.l4/config.yaml` at `ref` (defaults when the file is absent or invalid)."""
+def target_full_config(git: Git, ref: str) -> L4Config | None:
+    """The whole `.l4/config.yaml` at `ref`, or None when the file is absent, the ref is unknown or the file is not a
+    valid config (the reason is logged). Never the working tree, and never the unit branch: a caller names the base."""
     try:
         shown = git.run("show", f"{ref}:{_CONFIG_PATH}", check=False)
     except GitError as exc:
-        log.warning("accept: cannot read %s at %s (%s): the default yolo.review applies", _CONFIG_PATH, ref, exc)
-        return YoloReviewCfg()
+        log.warning("accept: cannot read %s at %s (%s): the defaults apply", _CONFIG_PATH, ref, exc)
+        return None
     if shown.returncode != 0:
-        log.debug("accept: no %s at %s: the default yolo.review applies", _CONFIG_PATH, ref)
-        return YoloReviewCfg()
+        log.debug("accept: no %s at %s: the defaults apply", _CONFIG_PATH, ref)
+        return None
     with tempfile.TemporaryDirectory(prefix="l4-accept-") as tmp:
         path = Path(tmp) / "config.yaml"
         path.write_text(shown.stdout, encoding="utf-8")
         try:
-            return load_config(Path(tmp), config_path=path).yolo.review
+            return load_config(Path(tmp), config_path=path)
         except L4Exit as exc:  # ConfigSchemaError: the harness's own message names the position
-            log.warning(
-                "accept: %s at %s is not a valid config (%s): the default yolo.review applies", _CONFIG_PATH, ref, exc
-            )
-            return YoloReviewCfg()
+            log.warning("accept: %s at %s is not a valid config (%s): the defaults apply", _CONFIG_PATH, ref, exc)
+            return None
+
+
+def target_config(git: Git, ref: str) -> YoloReviewCfg:
+    """`yolo.review` of `.l4/config.yaml` at `ref` (defaults when the file is absent or invalid)."""
+    full = target_full_config(git, ref)
+    return full.yolo.review if full is not None else YoloReviewCfg()
 
 
 def check(

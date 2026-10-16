@@ -351,6 +351,14 @@ def test_the_findings_hash_is_computed_from_the_findings_when_the_entry_has_none
     assert got == {SUBJECT: True} and seen == [[f()]]
 
 
+def test_actor_lives_in_l4_actor_and_accept_re_exports_the_same_object():
+    import l4.actor
+    import l4.yolo.accept
+
+    assert l4.yolo.accept.actor is l4.actor.actor
+    assert l4.actor.AGENT_MARKERS is l4.yolo.accept.AGENT_MARKERS
+
+
 # --- target_config -----------------------------------------------------------------------------------------
 
 
@@ -379,6 +387,17 @@ def test_the_config_is_read_at_the_ref_not_the_working_tree(tmp_path):
 
 def test_an_absent_file_gives_the_defaults(tmp_path):
     assert target_config(repo(tmp_path, None), "HEAD") == YoloReviewCfg()
+
+
+def test_the_whole_config_is_read_at_the_ref(tmp_path):
+    from l4.yolo.accept import target_full_config
+
+    git = repo(tmp_path, "clarifier:\n  answer_by_agents: true\nyolo:\n  review:\n    accept_after_rounds: 3\n")
+    full = target_full_config(git, "HEAD")
+    assert full is not None and full.clarifier.answer_by_agents is True and full.yolo.review.accept_after_rounds == 3
+    (tmp_path / "x").mkdir()
+    assert target_full_config(repo(tmp_path / "x", None), "HEAD") is None
+    assert target_full_config(git, "origin/nope") is None
 
 
 def test_an_unknown_ref_gives_the_defaults(tmp_path):

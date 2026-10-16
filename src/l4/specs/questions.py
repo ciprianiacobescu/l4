@@ -15,7 +15,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file
 from l4.redact import Redactor
 from l4.specs.base import SAFE_NAME, Criterion, SpecError
@@ -185,11 +184,6 @@ def raise_questions(unit_dir: Path, unit_name: str, batch: Sequence[NewQuestion]
     if path.read_bytes() != data:
         raise SpecError(f"{path.name}: post-write verification failed")
     return ids
-
-
-def run_questions(app: object, **options: object) -> None:
-    """The `l4 questions` handler named in `commands.HANDLERS`; this module exists before the command does."""
-    raise L4Exit(ExitCode.USAGE_ERROR, "questions: not yet implemented (M1: spec-providers 5.9)")
 
 
 # --- reading: the tolerant parser (L4-QMD-002) -----------------------------------------------------------------

@@ -1,6 +1,7 @@
 """`l4 questions` reading, showing and editing (unfreeze-and-answer 4.2 to 4.4; L4-QMD-007, L4-QMD-008)."""
 
 import dataclasses
+import io
 import json
 
 import pytest
@@ -529,18 +530,170 @@ def test_the_writing_forms_refuse_with_exit_2_and_touch_nothing(qworld, words, t
     assert qworld.origin_head("a") == head and qworld.tracking("a") in (tracking, head)
 
 
-def test_a_valid_edit_is_built_and_the_write_is_not_yet_there(qworld):
-    two_open(qworld)
-    with pytest.raises(NotImplementedError, match="4.5"):
-        run_form(qworld, "answer", "Q-002", text="Block login until verified.")
-    with pytest.raises(NotImplementedError, match="4.5"):
-        run_form(qworld, "accept", "Q-001")
+def written(world: QWorld, capsys, *words: str, text: str | None = None, **options) -> str:
+    assert run_form(world, *words, text=text, **options) is ExitCode.OK
+    return capsys.readouterr().out
 
 
-def test_scn_qmd_21_a_reject_reason_is_accepted_for_a_verdict_question(qworld):
+def origin_commit(world: QWorld, name: str = "a") -> dict[str, str]:
+    fields = ("an", "ae", "cn", "ce", "P", "s", "b")
+    out = world.remote.run(
+        "log", "-1", f"--format={'%x01'.join('%' + f for f in fields)}", f"l4/openspec/{name}"
+    ).stdout
+    return dict(zip(fields, out.rstrip("\n").split("\x01"), strict=True))
+
+
+def diff_lines(world: QWorld, old: str, new: str) -> list[str]:
+    out = world.remote.run("diff", "--unified=0", old, new).stdout
+    return [ln for ln in out.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
+
+
+def test_scn_qmd_15_an_answer_is_committed_and_pushed_without_force(qworld, capsys, person):
     two_open(qworld)
-    with pytest.raises(NotImplementedError):
-        run_form(qworld, "answer", "Q-003", text="reject: WHEN a THEN b")
+    before = qworld.origin_head("a")
+    out = written(qworld, capsys, "answer", "Q-002", text="Block login until the address is verified.")
+    after = qworld.origin_head("a")
+    assert after != before and qworld.tracking("a") == after
+    commit = origin_commit(qworld)
+    assert commit["P"] == before  # one commit on the fetched head: a fast-forward
+    assert commit["s"] == "answer Q-002 (a): Allow it?"
+    assert (commit["an"], commit["ae"]) == ("alex", "alex@example.com") == (commit["cn"], commit["ce"])
+    assert commit["b"].strip().splitlines() == ["Status: answered", "By: alex (person)", "Via: l4 questions"]
+    assert "L4-" not in commit["b"] + commit["s"] and "[skip ci]" not in commit["b"] + commit["s"]
+    changed = diff_lines(qworld, before, after)
+    assert sorted(ln for ln in changed if ln.startswith("+")) == sorted(
+        [
+            "+- **Status:** answered",
+            "+Block login until the address is verified.",
+            next(ln for ln in changed if ln.startswith("+|") and "Q-002" in ln),
+        ]
+    )
+    assert len([ln for ln in changed if ln.startswith("-")]) <= 3  # the Status line, the row, the old Answer body
+    pushed = QuestionsFile.parse(qworld.remote.run_bytes("show", f"{after}:{FOLDER}/a/questions.md"))
+    assert pushed.get("Q-002").status is QuestionStatus.ANSWERED
+    assert pushed.get("Q-001").status is QuestionStatus.OPEN
+    assert f"pushed {after[:10]} to l4/openspec/a: the push starts a run" in out
+    assert out.splitlines()[-1] == f"Next: l4 status --unit {A}"
+
+
+def test_scn_qmd_16_accept_takes_the_clarifier_suggestion(qworld, capsys, person):
+    two_open(qworld)
+    before = qworld.origin_head("a")
+    written(qworld, capsys, "accept", "Q-001")
+    commit = origin_commit(qworld)
+    assert commit["s"] == "accept Q-001 (a): Which hash?" and "Status: accepted" in commit["b"]
+    pushed = QuestionsFile.parse(qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a/questions.md"))
+    q = pushed.get("Q-001")
+    assert q.status is QuestionStatus.ACCEPTED and q.answer_text == "" and effective_answer(q) == "Use argon2id."
+    assert commit["P"] == before and "| Q-001 | accepted |" in pushed.data.decode()
+
+
+def test_scn_qmd_17_a_dry_run_writes_nothing(qworld, capsys, person):
+    two_open(qworld)
+    head = qworld.origin_head("a")
+    qworld.clone.run("fetch", "--quiet", "origin")
+    local = qworld.clone.run("for-each-ref", "--format=%(refname) %(objectname)").stdout
+    objects = qworld.clone.run("count-objects", "-v").stdout
+    out = written(qworld, capsys, "answer", "Q-002", text="yes", no_push=True)
+    assert "+yes" in out and "answer Q-002 (a): Allow it?" in out and "Status: answered" in out
+    assert out.rstrip().endswith("nothing written (--no-push)")
+    assert qworld.origin_head("a") == head and qworld.tracking("a") == head  # the fetch set it; the command did not
+    assert qworld.clone.run("for-each-ref", "--format=%(refname) %(objectname)").stdout == local
+    assert qworld.clone.run("count-objects", "-v").stdout == objects
+    assert qworld.clone.run("status", "--porcelain").stdout == ""
+
+
+def test_the_message_title_is_cut_at_60_characters(qworld, capsys, person):
+    long = "T" * 90
+    qworld.unit_branch("a", questions_md("a", {"title": long, "tasks": ("2.1",), "suggestion": "Yes."}))
+    written(qworld, capsys, "accept", "Q-001")
+    assert origin_commit(qworld)["s"] == f"accept Q-001 (a): {'T' * 60}"
+
+
+def test_the_text_dash_reads_standard_input(qworld, capsys, person, monkeypatch):
+    two_open(qworld)
+
+    class Terminal(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", Terminal("from stdin\n"))
+    written(qworld, capsys, "answer", "Q-002", text="-")
+    pushed = qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a/questions.md")
+    assert QuestionsFile.parse(pushed).get("Q-002").answer_text == "from stdin"
+
+
+def move_branch_after_fetch(world: QWorld, monkeypatch) -> str:
+    """A person pushes to the unit branch after the command fetched it and before it pushed (SCN-QMD-19)."""
+    import l4.specs.questions_cli as module
+
+    real = module.fetch_unit_refs
+    moved: list[str] = []
+
+    def fetch_then_move(*args, **kwargs):
+        real(*args, **kwargs)
+        moved.append(world.branch("a", {f"{FOLDER}/a/notes.txt": "a person was here\n"}, "a person's commit"))
+
+    monkeypatch.setattr(module, "fetch_unit_refs", fetch_then_move)
+    return moved  # type: ignore[return-value]
+
+
+def test_scn_qmd_19_a_branch_that_moved_after_the_fetch_is_refused(qworld, person, monkeypatch):
+    two_open(qworld)
+    moved = move_branch_after_fetch(qworld, monkeypatch)
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "answer", "Q-002", text="Block login.")
+    assert caught.value.code is ExitCode.USAGE_ERROR
+    assert str(caught.value).startswith("questions: l4/openspec/a moved since the fetch (now ")
+    assert "\nFix: run the command again: it fetches first" in str(caught.value)
+    assert qworld.origin_head("a") == moved[0]  # the person's commit is the head, nothing of ours is on origin
+
+
+def test_a_push_rejected_as_not_a_fast_forward_is_the_same_refusal(qworld, person, monkeypatch):
+    import l4.specs.questions_cli as module
+
+    two_open(qworld)
+    monkeypatch.setattr(module, "remote_head", lambda *a, **k: qworld.origin_head("a"))  # the check sees no move
+    moved = move_branch_after_fetch(qworld, monkeypatch)
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "answer", "Q-002", text="Block login.")
+    assert caught.value.code is ExitCode.USAGE_ERROR and "moved since the fetch" in str(caught.value)
+    assert qworld.origin_head("a") == moved[0]
+
+
+def test_any_other_push_failure_exits_1_with_the_explained_text(qworld, person, monkeypatch):
+    import l4.specs.questions_cli as module
+
+    two_open(qworld)
+    real = module.fetch_unit_refs
+
+    def fetch_then_break_the_push_url(*args, **kwargs):
+        real(*args, **kwargs)
+        qworld.clone.run("remote", "set-url", "--push", "origin", str(qworld.root / "nowhere.git"))
+
+    monkeypatch.setattr(module, "fetch_unit_refs", fetch_then_break_the_push_url)
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "answer", "Q-002", text="Block login.")
+    assert caught.value.code is ExitCode.INTERNAL_ERROR
+    assert "push of l4/openspec/a to origin failed" in str(caught.value)
+    assert qworld.origin_head("a") == head
+
+
+def test_a_checked_out_unit_branch_is_told_to_pull(qworld, capsys, person):
+    two_open(qworld)
+    qworld.clone.run("fetch", "--quiet", "origin")
+    qworld.clone.run("checkout", "--quiet", "-b", "l4/openspec/a", "origin/l4/openspec/a")
+    out = written(qworld, capsys, "answer", "Q-002", text="Block login.")
+    assert "your checkout of l4/openspec/a is behind: git pull" in out
+    assert qworld.clone.run("status", "--porcelain").stdout == ""  # the work tree was not touched
+
+
+def test_scn_qmd_21_a_reject_reason_is_accepted_for_a_verdict_question(qworld, capsys, person):
+    two_open(qworld)
+    written(qworld, capsys, "answer", "Q-003", text="reject: WHEN a THEN b")
+    pushed = qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a/questions.md")
+    assert QuestionsFile.parse(pushed).get("Q-003").status is QuestionStatus.ANSWERED
 
 
 def test_build_edit_changes_only_the_status_the_answer_and_the_row(qworld):
@@ -571,3 +724,96 @@ def test_build_edit_changes_only_the_status_the_answer_and_the_row(qworld):
         (x.id, x.status) for x in old.questions if x.id != "Q-002"
     ]
     assert new.get("Q-002").answer_text == "Block login.\nUntil verified."
+
+
+# --- R1, R2, R6: the unit must exist, have a branch, and be waiting for an answer (unfreeze-and-answer 4.6) --------
+
+LIVE = "r-20261016T1100Z-bbbb"
+
+
+def publish_pending(world: QWorld, tmp_path, *events: tuple[str, dict]) -> None:
+    """A run on another machine: its ledger lines are on the lock ref of unit A (`ledger-pending/<run>.jsonl`)."""
+    from l4.state.pending import PendingLedger
+    from l4.vcs.names import lock_ref
+
+    lines = [
+        json.dumps(
+            {
+                "ts": f"2026-10-16T11:{n:02d}:00.000000Z",
+                "run_id": LIVE,
+                "unit": A,
+                "seq": n,
+                "type": kind,
+                **data,
+            }  # fmt: skip
+        )
+        for n, (kind, data) in enumerate(events, 1)
+    ]
+    path = tmp_path / f"{LIVE}.jsonl"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    PendingLedger(world.clone, lock_ref=lock_ref(A), unit=A, run_id=LIVE).publish(path)
+
+
+@pytest.mark.parametrize("phase", ["merged", "abandoned"])
+def test_a_finished_unit_does_not_wait_for_an_answer(qworld, person, phase):
+    two_open(qworld)
+    qworld.unit_branch(
+        "a",
+        ledger=ledger_file(A, ("phase.changed", {"from": "in_review", "to": phase, "trigger": "test"})),
+    )
+    head = qworld.origin_head("a")
+    for words, text in ((("accept", "Q-001"), None), (("answer", "Q-002"), "Block login.")):
+        with pytest.raises(L4Exit) as caught:
+            run_form(qworld, *words, text=text)
+        assert caught.value.code is ExitCode.USAGE_ERROR
+        assert (
+            str(caught.value)
+            == f"questions: {A} does not wait for an answer: it is {phase}\nFix: an answer changes nothing"
+        )
+    assert qworld.origin_head("a") == head
+
+
+def test_scn_qmd_20_a_live_run_refuses_the_write(qworld, person, tmp_path):
+    two_open(qworld)
+    publish_pending(qworld, tmp_path, ("run.started", {}))
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "accept", "Q-001")
+    assert caught.value.code is ExitCode.USAGE_ERROR
+    assert (
+        str(caught.value)
+        == f"questions: a run is working on {A} (run {LIVE})\nFix: try again when it ends: l4 ci watch"
+    )
+    assert qworld.origin_head("a") == head
+
+
+def test_a_finished_run_does_not_block_the_write(qworld, capsys, person, tmp_path):
+    two_open(qworld)
+    publish_pending(qworld, tmp_path, ("run.started", {}), ("run.finished", {}))
+    assert "pushed" in written(qworld, capsys, "accept", "Q-001")
+
+
+def test_r1_and_r2_an_unknown_unit_and_a_unit_without_a_branch(qworld, person):
+    two_open(qworld)
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "accept", "Q-001", unit="openspec:nope")
+    assert str(caught.value) == "questions: no unit openspec:nope\nFix: l4 status lists the units"
+    with pytest.raises(L4Exit) as caught:
+        run_form(qworld, "answer", "Q-001", unit=B, text="x")
+    assert (
+        str(caught.value)
+        == f"questions: {B} has no branch on origin: no question was asked yet\nFix: the next run creates it"
+    )
+
+
+def test_the_command_line_reaches_the_handler(qworld, capsys, person):
+    from l4.cli import main
+
+    two_open(qworld)
+    common = ["--repo", str(qworld.app.repo), "--config", str(qworld.app.config_path)]
+    environ = dict(qworld.app.environ)
+    assert main(["questions", *common], environ=environ) == 0
+    assert f"{A} Q-001" in capsys.readouterr().out
+    argv = ["questions", "answer", "Q-002", "--unit", A, "--text", "Block login.", "--no-push", *common]
+    assert main(argv, environ=environ) == 0
+    assert capsys.readouterr().out.rstrip().endswith("nothing written (--no-push)")

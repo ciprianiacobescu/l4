@@ -62,6 +62,14 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def live_run(events: Sequence[LedgerEvent]) -> str | None:
+    """The run id of a run that is working on the unit: a `run.started` with no `run.finished` in the lock ref's pending
+    ledger. It may be a run on another machine, or one that died without a line; its pending file then ends a run that
+    never ends, and the operator waits or removes it by hand. `l4 restart` and `l4 questions` both refuse on it."""
+    finished = {e.run_id for e in events if e.type == "run.finished"}
+    return next((e.run_id for e in events if e.type == "run.started" and e.run_id not in finished), None)
+
+
 def read_pending_files(git: Git, lock_ref: str) -> dict[str, bytes]:
     """`<run-id>.jsonl` -> bytes of the pending files in the local lock ref; none when the ref does not exist."""
     if git.rev_parse(lock_ref) is None:
