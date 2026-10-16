@@ -123,17 +123,17 @@ for, or replacing a valid `files_changed` or `tests_added` list, is not a fix. T
 - **WHEN** the result is found
 - **THEN** no object is found, the attempt fails (L4-IMP-021), and nothing of `agent-tmp` is committed
 
-### Requirement: L4-IMP-021 An attempt fails for its result only when there is no result object or a blocked result has no question
-An implementer attempt SHALL fail for its result only:
-- when no result object is found (L4-IMP-020), with the reason `the agent's result is invalid: no result was
-  delivered (<what was missing>)`;
-- when the normalized result is `blocked` with no question, with the reason `the agent's result is invalid: status
-  blocked needs at least one question in "questions"`, followed by ` (<n> malformed questions were dropped)` when the
-  normalization dropped any.
+### Requirement: L4-IMP-021 An attempt fails for its result only when there is no result object
+An implementer attempt SHALL fail for its result only when no result object is found (L4-IMP-020), with the reason
+`the agent's result is invalid: no result was delivered (<what was missing>)`. It SHALL count against
+`implementer.max_task_attempts`, and the retry prompt SHALL carry the reason and the `result values:` line
+(L4-IMP-008).
 
-Each is a failed attempt: it SHALL count against `implementer.max_task_attempts`, and the retry prompt SHALL carry the
-reason and the `result values:` line (L4-IMP-008). The harness MUST NOT make a question from the summary of a
-`blocked` result. A `blocked` result with at least one question SHALL raise its questions as today. A normalized
+A normalized `blocked` result SHALL reach a person as today: its well-formed questions are raised, and a `blocked`
+result left with no question (none given, or all dropped as malformed) SHALL raise the one ambiguous question made
+from its summary (`loop.py`, "Task <k> is blocked"), with ` (<n> malformed questions were dropped)` appended to that
+question's context when the normalization dropped any. It is not a failed attempt: an agent that says it cannot go on
+needs a person, not another attempt. A normalized
 object that still fails validation is a harness defect and SHALL fail the attempt with the validation error, as
 today.
 
@@ -142,10 +142,10 @@ today.
 - **WHEN** the attempt ends
 - **THEN** each attempt fails with `the agent's result is invalid: no result was delivered (no result file and no result object in the final message)`, `task.attempt_failed` records it, and the next prompt has the reason and the `result values:` line
 
-#### Scenario: SCN-IMP-196 (−) A blocked result with no question fails the attempt
-- **GIVEN** a red step whose result is `{"status": "blocked", "summary": "the tests fail"}`, and a red step whose result is `"status": "BLOCKED"` with one question that has no `title`
+#### Scenario: SCN-IMP-196 (+) A blocked result with no question still reaches a person
+- **GIVEN** a red step whose result is `{"status": "blocked", "summary": "the tests need a database URL"}`, and a red step whose result is `"status": "BLOCKED"` with one question that has no `title`
 - **WHEN** the attempts end
-- **THEN** both fail with `the agent's result is invalid: status blocked needs at least one question in "questions"`, the second with ` (1 malformed questions were dropped)`, no `question.raised` is recorded, and `questions.md` does not change
+- **THEN** neither attempt fails; each raises one ambiguous question titled `Task <k> is blocked` whose context is the summary, the second with ` (1 malformed questions were dropped)` in its context, and the unit goes to `awaiting_human` as today
 
 #### Scenario: SCN-IMP-197 (+) A missing status with a question raises the question; more than three keep the first three
 - **GIVEN** a green step whose result has no `status` and one well-formed question, and a red step whose `blocked` result has five well-formed questions

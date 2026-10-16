@@ -172,7 +172,7 @@ The fixtures:
     `result_problem` fails as today; else `find_result(run)`; `None` fails with the reason of D7 (the parenthesis
     from `run.detail` and the adapter's mode); else `normalize(found, StepFacts(role, task.key, changed, run.last_message))`
     where `changed` is `wb.changed_files()` without `wb.ledger_rel`, sorted; `result.normalized` is emitted when
-    there is a fix; `parse_result` validates; a `blocked` result with no question fails with the reason of D7; the
+    there is a fix; `parse_result` validates; a `blocked` result with no question keeps today's path (one question from the summary, L4-IMP-021); the
     `result values:` line is the excerpt of both failures;
   - `_file_result` is removed.
   - Test first, in the new file `tests/unit/implementer/test_result_contract_step.py` (bench): SCN-IMP-186 (the
@@ -209,7 +209,7 @@ The fixtures:
 - [ ] 3.1 One test in `test_result_contract_step.py` that runs `run_task` with `prompt_contract(bench)` over three
   attempts: a red object `{"status": "red", …}` that wrote the tests (accepted, red committed), a green step with no
   `summary` and a `notes` key (accepted, green committed, `task.done.notes` holds the notes), and in a second task a
-  `blocked` with no question (a failed attempt, no question raised).
+  `blocked` with no question (one question from the summary, as today; not a failed attempt).
   - Verify: `.venv/bin/python -m pytest -q --no-cov tests/unit/implementer tests/unit/orchestrator`.
   [L4-IMP-020] [L4-IMP-021]
 
@@ -231,7 +231,7 @@ The fixtures:
   - 4.5: `result.normalized{task, phase, attempt, source, fixes}` in the ledger;
   - 7.2: a NOTE under the table: a result with a missing summary, a wrong status, too long a text or a field that the
     harness derives no longer fails an attempt; an attempt fails for its result only when the agent delivered no
-    result object, or reported `blocked` without a question;
+    result object;
   - 11: `implementer.result_repair_attempts` is in the config, and no code reads it.
   - Test first, in the new file `tests/unit/docs/test_result_contract_docs.py`: the needles of each item.
   - Verify: `.venv/bin/python -m pytest -q --no-cov tests/unit/docs`.
@@ -260,7 +260,7 @@ The fixtures:
     (L4-IMP-020), is valid against `l4/implementer-result@1`"; a sentence on `l4/implementer-file-result@1`; the
     delivery paragraph: "Missing/invalid → … repair prompts in the same session" becomes the rule of L4-IMP-021 with a
     pointer to L4-IMP-022; the delivery list gains kiro-cli and command;
-  - L4-IMP-008 (§7.6): a `blocked` result with no question is a failed attempt (L4-IMP-021), not a stuck task; the
+  - L4-IMP-008 (§7.6): a `blocked` result with no question still raises one question from its summary (L4-IMP-021); the
     sentence on the retry after `result invalid` becomes "the retry prompt MUST carry the reason of L4-IMP-021 and the
     `result values:` line" (after normalization no result failure carries a validation error or an allowed-values
     list);

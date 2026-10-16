@@ -282,10 +282,10 @@ that the new tests trace (`result.py:186`); each still needs a new test that tra
   where the parenthesis is `no result file and no result object in the final message` for a prompt-contract adapter,
   or the adapter's detail and `no result object in the final message` for a native one. The phrase "no result was
   delivered" stays, so `test_result_alias_step.py:91, 109` and `test_tdd_red.py:153` keep their meaning.
-- **`blocked` with no well-formed question** (after rule 6): `the agent's result is invalid: status blocked needs at
-  least one question in "questions"` and, when rule 6 dropped some, ` (<n> malformed questions were dropped)`. The
-  question that `loop.py:62-71` would make from the summary is no longer made for an agent's result: a person gets
-  only questions that the agent wrote. That branch of `_questions` stays as a guard; no agent result reaches it [I].
+- **`blocked` with no well-formed question** (after rule 6) is NOT a failed attempt (owner's decision, 2026-10-16):
+  it keeps today's path, `loop.py:62-71` makes one ambiguous question from the summary, so a person sees why the
+  agent stopped; when rule 6 dropped malformed questions, ` (<n> malformed questions were dropped)` is appended to
+  that question's context. An agent that says it cannot go on needs a person, not another attempt.
 - Both keep "result is invalid", so the eval classes them as `schema` (`src/l4/eval/errors.py:23, 84-89`) [V], and
   both put the `result values:` line in the retry prompt (L4-IMP-008) [V, `tdd.py:711, 716`].
 - Both are failed attempts: they count against `max_task_attempts` and, with `escalate-and-note`, against the profile
