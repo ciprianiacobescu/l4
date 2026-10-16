@@ -69,6 +69,7 @@ from l4.implementer.guards import (
     restore_frozen,
     restore_test_paths,
 )
+from l4.implementer.opened import check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
@@ -84,18 +85,24 @@ from l4.implementer.result import (
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
-from l4.implementer.unfreeze import Unfreeze, unfrozen
+from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
-from l4.specs.base import Marker, Task
+from l4.specs.base import Framework, Marker, Task
 from l4.specs.criteria import trace_ids
 from l4.specs.fixmark import read_fix_marker
+from l4.specs.followup import read_follow_up_marker
+from l4.specs.kiro import parse_kiro_tasks
+from l4.specs.markers import MAX_TASKS_BYTES
+from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
+from l4.specs.tasks_text import task_text
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.verifier.scan import task_tags
+from l4.yolo.digest import RevisionMissing, unit_digest
 
 log = logging.getLogger("l4.implementer")
 Phase = Literal["red", "green", "single"]
@@ -581,7 +588,10 @@ def _prompt(
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
         e2e_dir=e2e_test_dir(wb.cfg.gates.e2e, wb.worktree) if e2e_configured(wb.cfg) else None,
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
-        unfrozen=tuple((p, g.question) for g in unfreeze.grants for p in g.paths) if unfreeze else (),
+        unfrozen=tuple((p, g.question) for g in unfreeze.grants if g.question for p in g.paths) if unfreeze else (),
+        named=tuple(sorted({p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}))
+        if unfreeze
+        else (),
         adds_tests=adds_tests,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
         data_blocks=(
@@ -1013,14 +1023,21 @@ def run_green(
     base = wb.head()
     run_setup(wb)
     static_baseline(wb, base)
-    unfreeze = unfreeze_for(wb, task, red.manifest)
+    human, named, source = _unfreeze_parts(wb, task, red.manifest)
+    unfreeze = _combine(human, named)
     manifest = red.manifest
-    if unfreeze.paths:  # a human answer named these frozen tests: for this attempt they are the task's to correct
+    if unfreeze.paths:  # these frozen files are named by a human answer or by the task's own text: the task's to change
         manifest = replace(manifest, files={p: f for p, f in manifest.files.items() if p not in unfreeze.paths})
+    if human.paths:
         wb.emit(
-            "task.unfrozen", task=task.key, paths=list(unfreeze.paths), question=unfreeze.question,
-            answer_sha256=unfreeze.answer_sha256, red_sha=red.manifest.red_sha,
-            kept=[{"path": p, "why": why} for p, why in unfreeze.kept],
+            "task.unfrozen", task=task.key, paths=list(human.paths), reason="human_answer", question=human.question,
+            answer_sha256=human.answer_sha256, red_sha=red.manifest.red_sha,
+            kept=[{"path": p, "why": why} for p, why in human.kept],
+        )  # fmt: skip
+    if named.paths or named.kept:  # `kept` is recorded even when nothing opens: it is the only place that says why
+        wb.emit(
+            "task.unfrozen", task=task.key, paths=list(named.paths), reason="named_by_task", source=source,
+            red_sha=red.manifest.red_sha, kept=[{"path": p, "why": why} for p, why in named.kept],
         )  # fmt: skip
     step = agent_step(wb, "green", task, attempt, previous_failure, unfreeze)
     if step.kind != "ok":
@@ -1029,6 +1046,7 @@ def run_green(
             assert step.result is not None
             return GreenOutcome("blocked", questions=step.result.questions, summary=step.result.summary)
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
+    _check_opened(wb, red, unfreeze, red.manifest)
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
     run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
@@ -1165,16 +1183,131 @@ def _undiscriminating(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze) -> str
     )
 
 
-def unfreeze_for(wb: Workbench, task: Task, manifest: FreezeManifest) -> Unfreeze:
-    """Decision 6: the frozen tests of `manifest` that a human answer to a question holding this task names."""
+def _regular_blob(wb: Workbench, rev: str, path: str) -> bytes | None:
+    """`path` at `rev` when it is a regular file (never a symlink or a submodule) of at most `MAX_TASKS_BYTES`."""
+    row = wb.git.run("ls-tree", rev, "--", path, check=False).stdout.split("\t")[0].split()
+    if len(row) != 3 or row[1] != "blob" or row[0] not in ("100644", "100755"):
+        return None
+    data = wb.git.run_bytes("cat-file", "blob", row[2], check=False)
+    return data if len(data) <= MAX_TASKS_BYTES else None
+
+
+def _block_of(data: bytes, key: str, framework: Framework) -> str | None:
+    """The text block of the one task `key` of a `tasks.md`, or None when the file has none or several of that key."""
+    tasks = parse_openspec_tasks(data) if framework is Framework.OPENSPEC else parse_kiro_tasks(data)
+    found = [t for t in tasks if t.key == key]
+    return task_text(data, found[0], framework) if len(found) == 1 else None
+
+
+def named_task_text(wb: Workbench, task: Task) -> tuple[str, str] | None:
+    """(source, text block) of a task whose text a person reviewed (D2 of unfreeze-and-answer), else None. The text is
+    read at HEAD. Source `plan:<id>@<digest>`: the unit folder at HEAD has the digest that an active plan froze at
+    activation. Source `base:<sha10>`: the same task key has the same text block on the fetched base branch. A fix unit
+    and a follow-up unit have neither: the harness wrote their text."""
+    unit_dir = wb.ref.path
+    if read_fix_marker(unit_dir) is not None or read_follow_up_marker(unit_dir) is not None:
+        return None
+    path = f"{wb.unit_rel}/tasks.md"
+    head = _regular_blob(wb, "HEAD", path)
+    if head is None or (text := _block_of(head, task.key, wb.ref.framework)) is None:
+        return None
+    if wb.activated_digest and wb.activated_plan:
+        try:
+            digest = unit_digest(wb.git, "HEAD", wb.unit_rel)
+        except RevisionMissing:  # FolderMissing is one
+            digest = None
+        if digest == wb.activated_digest:
+            return f"plan:{wb.activated_plan}@{digest}", text
+    ref = f"refs/remotes/origin/{wb.cfg.forge.base_branch}"
+    sha = wb.git.rev_parse(ref)
+    if sha is None or (base := _regular_blob(wb, ref, path)) is None:
+        return None
+    return (f"base:{sha[:10]}", text) if _block_of(base, task.key, wb.ref.framework) == text else None
+
+
+def task_source(wb: Workbench, task: Task) -> str | None:
+    """Whose reviewed text a task's own text block is (L4-IMP-014): `plan:<id>@<digest>`, `base:<sha10>` or None."""
+    named = named_task_text(wb, task)
+    return named[0] if named else None
+
+
+def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tuple[Unfreeze, Unfreeze, str | None]:
+    """(what human answers unfreeze, what the task's own text opens, that text's source)."""
+    human = Unfreeze()
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
-    if file is None:
-        return Unfreeze()
-    events = _ledger_events(wb)
-    if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
-        events = [*events, *own]  # a fix unit's answers are recorded where its own questions file is
-    scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-    return unfrozen(file.questions, events, scope, manifest)
+    if file is not None:
+        events = _ledger_events(wb)
+        if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
+            events = [*events, *own]  # a fix unit's answers are recorded where its own questions file is
+        scope = task_scope(wb.provider.tasks(wb.ref), task.key)
+        human = unfrozen(file.questions, events, scope, manifest)
+    named = named_task_text(wb, task)
+    if named is None:
+        return human, Unfreeze(), None
+    by_text = named_by_task(named[1], manifest, source=named[0])
+    taken = set(human.paths)  # a person's answer wins: the path is listed once, under the answer
+    grants = tuple(
+        replace(g, paths=paths) for g in by_text.grants if (paths := tuple(p for p in g.paths if p not in taken))
+    )
+    return human, Unfreeze(grants, tuple((p, w) for p, w in by_text.kept if p not in taken)), named[0]
+
+
+def _combine(human: Unfreeze, named: Unfreeze) -> Unfreeze:
+    return Unfreeze((*human.grants, *named.grants), (*human.kept, *named.kept))
+
+
+def unfreeze_for(wb: Workbench, task: Task, manifest: FreezeManifest) -> Unfreeze:
+    """The frozen files of `manifest` that this task's green may change: what a human answer to a question holding
+    this task names (decision 6; L4-IMP-015), and the support files its own reviewed text names (L4-IMP-014)."""
+    human, named, _ = _unfreeze_parts(wb, task, manifest)
+    return _combine(human, named)
+
+
+def _symlinked_part(wb: Workbench, path: str) -> str | None:
+    """The first component of `path` (a file or a parent folder) that is a symlink in the work tree."""
+    parts = path.split("/")
+    for i in range(len(parts)):
+        if (wb.worktree.joinpath(*parts[: i + 1])).is_symlink():
+            return "/".join(parts[: i + 1])
+    return None
+
+
+def _opened_problem(wb: Workbench, red_sha: str, path: str, *, by_text: bool, modules: Collection[str]) -> str | None:
+    """Why the opened file `path` cannot stay (L4-IMP-016), or None. A symlink in the path, a deletion and the three
+    rules of `check_opened`."""
+    if _symlinked_part(wb, path) is not None:
+        return "a symlink"
+    target = wb.worktree / path
+    if not target.exists():
+        return "deleted"
+    if not target.is_file():
+        return "not a regular file"
+    before = wb.git.run("show", f"{red_sha}:{path}", check=False).stdout
+    return check_opened(
+        before, target.read_text(encoding="utf-8", errors="replace"), named_by_task=by_text, unit_modules=modules
+    )
+
+
+def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: FreezeManifest) -> None:
+    """After the agent step and before the frozen files are put back: each opened `.py` file keeps the three rules
+    (all for a file the task's text opened, rule 3 for a support file a human answer unfroze). A file that breaks one is
+    put back to its red version and recorded as `guard.violation{rule: "opened file"}`."""
+    by_text = {p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}
+    checked = sorted(
+        p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or manifest.files[p].kind == "support")
+    )
+    if not checked:
+        return
+    modules = unit_modules({*wb.branch_changed_files(), *wb.changed_files()}, wb.cfg)
+    for path in checked:
+        why = _opened_problem(wb, manifest.red_sha, path, by_text=path in by_text, modules=modules)
+        if why is None:
+            continue
+        broken = _symlinked_part(wb, path)
+        if broken is not None:
+            wb.worktree.joinpath(broken).unlink()  # the link goes, and the red version of what it replaced comes back
+        wb.git.run("checkout", manifest.red_sha, "--", f":(literal){broken or path}")
+        wb.emit("guard.violation", rule="opened file", path=path, phase="green", why=why, action="restored")
 
 
 # Why a unit's own test file was put back (`appended_only`): the next attempt's guard note says what may be appended.
