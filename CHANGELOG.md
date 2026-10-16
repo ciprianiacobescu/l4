@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.2 (unreleased)
+## 0.4.2 (2026-10-16)
 
 ### Added
 - `l4 questions`: list the open questions of a unit, `show` one, `accept` the clarifier's suggestion or `answer` it
