@@ -6,6 +6,15 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.5 (unreleased)
+
+### Fixed
+- A rejected verification hold of a kind the harness cannot derive a task from (for example `the diff is longer than
+  120000 characters`) whose reason ends with a sentence `WHEN … THEN …` is now a behaviour finding with a fix task, not
+  an escalation (`no finding of this round can be converted into a fix task`). Without the scenario the unit still
+  escalates, and the question of such a hold no longer promises a fix unit: it asks the reason to end with the scenario.
+  Scope and coverage holds are unchanged.
+
 ## 0.4.4 (2026-10-16)
 
 ### Added

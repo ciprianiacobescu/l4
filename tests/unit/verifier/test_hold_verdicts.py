@@ -276,3 +276,80 @@ def test_a_file_is_named_as_a_whole_path_not_as_part_of_another(text, hit):
     hold = "scope: `app.py` changes module `app`, which the spec does not name"
     finding = judge("a bug", text)
     assert (subsumed_findings([finding], [hold]) != {}) is hit
+
+
+# -- a rejected hold of any kind with a WHEN ... THEN ... reason is a behaviour finding (live: a long diff)
+
+LONG_DIFF = "the diff is longer than 120000 characters: the judge saw only the start"
+SCENARIO_REASON = (
+    "Split the unit in two and raise judge.max_diff_chars. WHEN the diff is longer than 120000 characters "
+    "THEN the judge SHALL be shown every file, not only the start"
+)
+
+
+def _plan(hold: str, reason: str):
+    from l4.specs.base import Criterion, Framework
+
+    v = verdict(hold, "reject", reason)
+    [finding] = settle_holds([], [hold], {v.target: v})
+    family = [
+        Criterion(
+            "C-00000001", "greeting > Greet > Named", Framework.OPENSPEC, "greeting", "Greet", "Named", "WHEN x THEN y",
+            "specs/greeting/spec.md", 1,
+        )
+    ]  # fmt: skip
+    r = VerifyResult(UNIT, 2, Verdict.FAIL, "b", "h")
+    r.findings = [finding]
+    return finding, v, plan_fix_unit(family, r, [v], ordinal=1, fix_minor=False)
+
+
+def test_a_rejected_hold_of_another_kind_with_a_scenario_becomes_a_fix_task():
+    finding, v, plan = _plan(LONG_DIFF, SCENARIO_REASON)
+    assert finding.source == "deterministic" and finding.blocking and finding.id == hold_id(LONG_DIFF)
+    [group] = plan.groups
+    assert plan.consumed == [v.question] and plan.not_converted == [] and not group.chore
+    assert group.ids == (finding.id,) and "Decided by human in Q-004" in group.detail
+    assert plan.delta is not None
+    [scenario] = plan.delta.requirements[0].scenarios
+    assert scenario.text.startswith("- **WHEN** the diff is longer than 120000 characters\n- **THEN** the judge SHALL")
+
+
+def test_a_rejected_hold_of_another_kind_without_a_scenario_still_escalates():
+    finding, _, plan = _plan(LONG_DIFF, "split the unit in two")
+    assert finding.source == "human"
+    assert plan.groups == [] and plan.consumed == [] and len(plan.not_converted) == 1
+
+
+def test_a_rejected_scope_hold_is_unchanged_by_a_scenario_in_its_reason():
+    finding, _, plan = _plan(SCOPE, "inventory is not part of bulk discounts")
+    assert finding.source == "deterministic" and "Remove or relocate" in finding.detail
+    assert plan.groups[0].chore  # the harness's own fix
+    with_scenario, _, _ = _plan(SCOPE, SCENARIO_REASON)
+    assert with_scenario.source == "deterministic" and "Remove or relocate" in with_scenario.detail
+
+
+def _question_text(tmp_path, hold: str) -> str:
+    class Sink:
+        def append(self, event_type: str, /, **data) -> None:
+            pass
+
+    raise_verdict_questions(
+        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), ledger=Sink(),
+        round_no=1, redactor=Redactor({}), holds=[hold],
+    )  # fmt: skip
+    return " ".join((tmp_path / "questions.md").read_text().split())
+
+
+@pytest.mark.parametrize("hold", [SCOPE, COVERAGE])
+def test_the_question_of_a_scope_or_coverage_hold_promises_a_fix_unit(tmp_path, hold):
+    assert "a rejected hold is fixed by a fix unit" in _question_text(tmp_path, hold)
+
+
+@pytest.mark.parametrize("hold", [LONG_DIFF, NOT_MEASURED])
+def test_the_question_of_any_other_hold_asks_for_a_scenario_and_promises_nothing(tmp_path, hold):
+    text = _question_text(tmp_path, hold)
+    assert "fixed by a fix unit" not in text
+    assert (
+        "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit can be made"
+        in text
+    )
