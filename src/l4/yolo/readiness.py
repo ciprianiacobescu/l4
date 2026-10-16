@@ -415,8 +415,11 @@ class FreshRefused(Exception):
 
 def material_key(kind: str, key_text: str) -> str:
     """The material key of a subject (design D2): the prompt version, the kind and the user text without the delivered
-    block, so a verdict is reused exactly when the judge would be shown the same thing."""
-    return hashlib.sha256(f"{PROMPT_VERSION}\0{kind}\0{key_text}".encode()).hexdigest()[:16]
+    block, so a verdict is reused exactly when the judge would be shown the same thing. The templates and the response
+    schema are part of what it is shown: changing one of them without a `PROMPT_VERSION` bump never reuses a verdict."""
+    prompt = json.dumps([SYSTEM_TEMPLATE, MATERIAL_TEMPLATE, READINESS_SCHEMA], sort_keys=True, default=str)
+    fingerprint = hashlib.sha256(prompt.encode()).hexdigest()
+    return hashlib.sha256(f"{PROMPT_VERSION}\0{fingerprint}\0{kind}\0{key_text}".encode()).hexdigest()[:16]
 
 
 # --- the answer ----------------------------------------------------------------------------------------------------

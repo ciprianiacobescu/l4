@@ -245,3 +245,17 @@ def test_the_cost_of_the_review_is_reported(world):
         git=world.git, rev=world.rev, adapters={"fake": fake},
     )  # fmt: skip
     assert set(result.units) == {A, B} and cost == pytest.approx(0.75)
+
+
+def test_the_material_key_covers_the_templates_and_the_schema(monkeypatch):  # a prompt change never reuses a verdict
+    from l4.yolo import readiness
+
+    base = readiness.material_key("unit", "text")
+    assert readiness.material_key("unit", "text") == base
+    monkeypatch.setattr(readiness, "SYSTEM_TEMPLATE", readiness.SYSTEM_TEMPLATE + " more")
+    system = readiness.material_key("unit", "text")
+    monkeypatch.setattr(readiness, "MATERIAL_TEMPLATE", readiness.MATERIAL_TEMPLATE + " more")
+    material = readiness.material_key("unit", "text")
+    monkeypatch.setattr(readiness, "READINESS_SCHEMA", {**readiness.READINESS_SCHEMA, "title": "changed"})
+    schema = readiness.material_key("unit", "text")
+    assert len({base, system, material, schema}) == 4
