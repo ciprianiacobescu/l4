@@ -8,6 +8,7 @@ import pytest
 
 from l4.config.redaction import load_app_config
 from l4.exitcodes import ExitCode, L4Exit
+from l4.forge.local import LocalForge
 from l4.redact import Redactor
 from l4.specs.questions import QuestionsFile, QuestionStatus, effective_answer
 from l4.specs.questions_cli import (
@@ -485,8 +486,23 @@ def test_the_agent_rule_as_a_pure_function():
     assert "on main" in found.fix and check_agent("answer", technical, "ok", frozen, RULES, "main") is None
 
 
-def run_form(world: QWorld, *words: str, unit: str | None = A, text: str | None = None, no_push: bool = False):
-    return run_questions(world.app, words=words, unit=unit, text=text, as_json=False, no_push=no_push)
+def run_form(
+    world: QWorld,
+    *words: str,
+    unit: str | None = A,
+    text: str | None = None,
+    no_push: bool = False,
+    no_run: bool = False,
+):
+    return run_questions(world.app, words=words, unit=unit, text=text, as_json=False, no_push=no_push, no_run=no_run)
+
+
+@pytest.fixture(autouse=True)
+def forge(monkeypatch):
+    """The forge the command asks to start a run on the base branch (L4-OPS-002)."""
+    local = LocalForge()
+    monkeypatch.setattr("l4.state.retry.make_forge", lambda *a, **k: local)
+    return local
 
 
 def two_open(world: QWorld) -> None:
@@ -558,8 +574,10 @@ def test_scn_qmd_15_an_answer_is_committed_and_pushed_without_force(qworld, caps
     assert commit["P"] == before  # one commit on the fetched head: a fast-forward
     assert commit["s"] == "answer Q-002 (a): Allow it?"
     assert (commit["an"], commit["ae"]) == ("alex", "alex@example.com") == (commit["cn"], commit["ce"])
-    assert commit["b"].strip().splitlines() == ["Status: answered", "By: alex (person)", "Via: l4 questions"]
-    assert "L4-" not in commit["b"] + commit["s"] and "[skip ci]" not in commit["b"] + commit["s"]
+    assert commit["b"].strip().splitlines() == [
+        "Status: answered", "By: alex (person)", "Via: l4 questions", "[skip ci]",
+    ]  # fmt: skip
+    assert "L4-" not in commit["b"] + commit["s"] and "[skip ci]" in commit["b"]
     changed = diff_lines(qworld, before, after)
     assert sorted(ln for ln in changed if ln.startswith("+")) == sorted(
         [
@@ -572,8 +590,40 @@ def test_scn_qmd_15_an_answer_is_committed_and_pushed_without_force(qworld, caps
     pushed = QuestionsFile.parse(qworld.remote.run_bytes("show", f"{after}:{FOLDER}/a/questions.md"))
     assert pushed.get("Q-002").status is QuestionStatus.ANSWERED
     assert pushed.get("Q-001").status is QuestionStatus.OPEN
-    assert f"pushed {after[:10]} to l4/openspec/a: the push starts a run" in out
+    assert f"pushed {after[:10]} to l4/openspec/a: the push starts no run ([skip ci])" in out
     assert out.splitlines()[-1] == f"Next: l4 status --unit {A}"
+
+
+def test_the_push_is_followed_by_a_run_on_the_base_branch(qworld, capsys, person, forge):
+    two_open(qworld)
+    forge.script_start_run("started")
+    out = written(qworld, capsys, "answer", "Q-002", text="yes")
+    assert [c.args for c in forge.called("start_run")] == [("main",)]
+    assert "run started on main" in out
+    assert out.index("pushed ") < out.index("run started on main") < out.index("Next: l4 status")
+
+
+@pytest.mark.parametrize("form", ["accept", "answer"])
+def test_a_refused_start_prints_how_to_start_a_run_by_hand(qworld, capsys, person, forge, form):
+    two_open(qworld)
+    forge.script_start_run("refused")
+    code = run_form(qworld, form, "Q-001" if form == "accept" else "Q-002", text="yes" if form == "answer" else None)
+    out = capsys.readouterr().out
+    assert code is ExitCode.OK
+    assert "pushed " in out and "start a run with: " in out and "main" in out and "run started" not in out
+
+
+def test_no_run_starts_nothing(qworld, capsys, person, forge):
+    two_open(qworld)
+    out = written(qworld, capsys, "answer", "Q-002", text="yes", no_run=True)
+    assert forge.called("start_run") == []
+    assert "pushed " in out and "no run started (--no-run)" in out and "run started on" not in out
+
+
+def test_no_push_starts_no_run(qworld, capsys, person, forge):
+    two_open(qworld)
+    out = written(qworld, capsys, "answer", "Q-002", text="yes", no_push=True)
+    assert forge.called("start_run") == [] and "[skip ci]" in out and "run started" not in out
 
 
 def test_scn_qmd_16_accept_takes_the_clarifier_suggestion(qworld, capsys, person):

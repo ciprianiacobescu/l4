@@ -51,7 +51,7 @@ from l4.specs.questions import (
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
 from l4.state.lifecycle import Phase
 from l4.state.pending import live_run, merge_ledgers, read_pending
-from l4.state.retry import fetch_unit_refs
+from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
 from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
@@ -751,13 +751,15 @@ def author_name(git: Git) -> str:
 
 
 def commit_message(edit: Edit, name: str, who: str, marker: str | None) -> str:
-    """The message of design D9: no `L4-` trailer and no `[skip ci]`, so the push starts CI."""
+    """The message of design D9: no `L4-` trailer, and a `[skip ci]` line: the push starts neither the unit branch's
+    own workflow copy (it can pin an older harness) nor the repository's CI on a mid-TDD branch; the command starts
+    the run."""
     unit = edit.folder.unit.partition(":")[2] or edit.folder.unit
     title = " ".join(edit.question.title.split())[:60].rstrip()
     by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
     return (
         f"{edit.form} {edit.question.id} ({unit}): {title}\n\n"
-        f"Status: {edit.status.value}\nBy: {by}\nVia: l4 questions\n"
+        f"Status: {edit.status.value}\nBy: {by}\nVia: l4 questions\n[skip ci]\n"
     )
 
 
@@ -802,7 +804,9 @@ def _dry_run(edit: Edit, message: str) -> str:
     return f"{diff.rstrip(chr(10))}\n\n{message.rstrip(chr(10))}\n\nnothing written (--no-push)"
 
 
-def write_edit(app: AppContext, cfg: L4Config, git: Git, edit: Edit, *, no_push: bool) -> ExitCode:
+def write_edit(
+    app: AppContext, cfg: L4Config, git: Git, edit: Edit, *, no_push: bool, no_run: bool = False
+) -> ExitCode:
     """Make the commit and push it to the unit branch, or with `no_push` print what would be pushed. Nothing is made
     before every refusal has been checked."""
     folder, branch = edit.folder, edit.folder.branch
@@ -838,25 +842,35 @@ def write_edit(app: AppContext, cfg: L4Config, git: Git, edit: Edit, *, no_push:
     except GitError as exc:
         raise failed(exc) from None
     git.run("update-ref", f"refs/remotes/{REMOTE}/{branch}", sha)
-    out = [f"pushed {sha[:10]} to {branch}: the push starts a run", f"Next: l4 status --unit {folder.unit}"]
+    out = [f"pushed {sha[:10]} to {branch}: the push starts no run ([skip ci])"]
     if _checked_out(git, branch):
-        out.insert(1, f"your checkout of {branch} is behind: git pull")
+        out.append(f"your checkout of {branch} is behind: git pull")
+    if no_run:
+        base = cfg.forge.base_branch
+        out.append(f"no run started (--no-run): start one on {base} ({how_to_start(app, cfg, base)})")
+    else:
+        out.append(
+            start_run_line(app, cfg)
+        )  # a unit branch runs its own, possibly older, workflow copy: start on the base
+    out.append(f"Next: l4 status --unit {folder.unit}")
     _echo(app, "\n".join(out))
     return ExitCode.OK
 
 
-def run_accept(app: AppContext, *, question: str, unit: str | None, no_push: bool = False) -> ExitCode:
-    """`l4 questions accept Q-NNN --unit U [--no-push]`."""
+def run_accept(
+    app: AppContext, *, question: str, unit: str | None, no_push: bool = False, no_run: bool = False
+) -> ExitCode:
+    """`l4 questions accept Q-NNN --unit U [--no-push] [--no-run]`."""
     app, cfg, git, edit = _prepare(app, "accept", question, unit, None)
-    return write_edit(app, cfg, git, edit, no_push=no_push)
+    return write_edit(app, cfg, git, edit, no_push=no_push, no_run=no_run)
 
 
 def run_answer(
-    app: AppContext, *, question: str, unit: str | None, text: str | None, no_push: bool = False
+    app: AppContext, *, question: str, unit: str | None, text: str | None, no_push: bool = False, no_run: bool = False
 ) -> ExitCode:
     """`l4 questions answer Q-NNN --unit U --text T [--no-push]` (`--text -` reads standard input)."""
     app, cfg, git, edit = _prepare(app, "answer", question, unit, _read_text(text))
-    return write_edit(app, cfg, git, edit, no_push=no_push)
+    return write_edit(app, cfg, git, edit, no_push=no_push, no_run=no_run)
 
 
 # --- the handler ------------------------------------------------------------------------------------------------
@@ -870,15 +884,17 @@ def run_questions(
     text: str | None = None,
     as_json: bool = False,
     no_push: bool = False,
+    no_run: bool = False,
 ) -> ExitCode:
-    """`l4 questions [list] | show Q | accept Q | answer Q --text T`, with `--unit`, `--json` and `--no-push`."""
+    """`l4 questions [list] | show Q | accept Q | answer Q --text T`, with `--unit`, `--json`,
+    `--no-push` and `--no-run`."""
     form, rest = (words[0] if words else "list"), tuple(words[1:])
     if form == "list" and not rest:
         return run_list(app, unit=unit, as_json=as_json)
     if form == "show":
         return run_show(app, question=_qid(rest, form), unit=unit, as_json=as_json)
     if form == "accept":
-        return run_accept(app, question=_qid(rest, form), unit=unit, no_push=no_push)
+        return run_accept(app, question=_qid(rest, form), unit=unit, no_push=no_push, no_run=no_run)
     if form == "answer":
-        return run_answer(app, question=_qid(rest, form), unit=unit, text=text, no_push=no_push)
+        return run_answer(app, question=_qid(rest, form), unit=unit, text=text, no_push=no_push, no_run=no_run)
     raise _usage(f"unknown form: {' '.join(words)}")
