@@ -509,6 +509,14 @@ class ImplementerCfg(_Strict):
     idle_timeout: DurationOrZero = "10m"  # stop an agent silent for this long with no tool call open; 0: off
     session_resume: Literal["same_runner_only", "artifact", "never"] = "same_runner_only"
 
+    @model_validator(mode="after")
+    def _liveness_minimums(self) -> "ImplementerCfg":
+        for key, minimum, text in (("heartbeat", 30, "30s"), ("idle_timeout", 60, "1m")):
+            seconds = duration_seconds(getattr(self, key))
+            if 0 < seconds < minimum:
+                raise ValueFree(f"implementer.{key} must be 0 (off) or at least {text}")
+        return self
+
 
 class ClarifierCfg(_Strict):
     enabled: bool = True
