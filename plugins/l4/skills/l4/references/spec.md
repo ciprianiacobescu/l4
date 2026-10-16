@@ -10,6 +10,10 @@ design agree): a fix in one file often raises a consistency finding in another.
 - **interfaces.** Name every helper one unit gives another, with its signature, in the spec, not only in `tasks.md`.
 - **missing_dependency.** Add `depends_on` when two units edit one function or file section, or when a document
   describes what another unit creates.
+- **test-support files.** A task that must change a Python test-support file names it exactly, in code font:
+  `conftest.py`, not "the conftest". Only that task's green step may change it, and only from a reviewed text (an active
+  plan, or the base branch). A data fixture or an ignore file needs a person's answer. `[test-infra]` does not open a
+  support file in green.
 - **failure_cases.** Say what happens when a stage does not run, raises, or gets bad input.
 - **feasibility.** Use only tools the runner has. Say in prose what is already delivered; ticked tasks are done. When a
   spec relies on code already on the base branch, name it in the spec (module, function, values) instead of adding a

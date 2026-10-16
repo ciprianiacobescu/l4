@@ -548,7 +548,60 @@ A question of a fix unit does not move the unit to `awaiting_human`. The unit st
 labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you: a human answer (fix unit `<name>`)``.
 `l4 plan` says `fixing: fix unit questions open: …`.
 
-**Procedure:**
+**Procedure: the command**
+
+`l4 questions` reads `questions.md` on the unit branch on `origin`, not in your work tree. It needs the forge
+credentials of section 5 and push permission on the unit branch. `accept` and `answer` write one commit to the unit
+branch and push it, without force. The push starts the run that takes the answer. The command changes only the
+`- **Status:**` line, the `### Answer` text and the index row of the question.
+
+1. List the open questions of the unit:
+
+   ```sh
+   l4 questions --unit <unit>
+   ```
+
+   A question that has a draft answer shows `draft` in place of its kind. Without `--unit`, the command lists the
+   questions of every unit that has a branch on `origin`. Add `--json` for machine output.
+
+2. Read one question:
+
+   ```sh
+   l4 questions show Q-NNN --unit <unit>
+   ```
+
+   The output shows the section, what `accept` would take, each frozen test path that an accepted suggestion would
+   unfreeze, and the `Next:` commands. For a question of a fix unit, give the fix unit: `--unit <framework>:<name>-fix-<n>`.
+3. Give the answer in one of two ways:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "<your answer>"
+   l4 questions accept Q-NNN --unit <unit>
+   ```
+
+   `answer` writes your text and sets the Status `answered`. `--text -` reads the text from standard input. `accept`
+   sets the Status `accepted`: it takes the suggestion of the clarifier. Do not use `accept` for a verdict question.
+4. To see the change first, add `--no-push`. The command then prints the diff and the commit message, and writes
+   nothing.
+5. Make sure that the last line says that the commit was pushed. The run that the push starts moves the unit when your
+   answer frees a task. `l4 plan` then shows `answers submitted: Q-NNN`.
+
+The command stops with exit 2 and changes nothing when the answer cannot be taken. The output has `questions: <cause>`
+and a `Fix:` line. The causes are: the question is not `open` (use the hand edit to change an answer that a run
+already took), the question has a draft answer, the unit is finished or a run works on it now, a verdict answer does
+not start with `accept` or `reject`, the text has a line that the file reads as structure, or the branch moved since
+the fetch (run the command again).
+
+> **NOTE:** If the caller is an agent (an agent marker is set in the environment, or standard input is not a
+> terminal), the command writes only a question of a kind in `clarifier.auto_accept_kinds` (default `technical`), not
+> a verdict question, and only when the answer names no frozen test path of a task that the question holds. A person
+> runs every other write. Or set `clarifier.answer_by_agents: true` in `.l4/config.yaml` on `<base>`. The key on the
+> unit branch does not count.
+
+**Procedure: the hand edit**
+
+The hand edit is the other way. Use it to change a question that the command refuses, or when you cannot run the
+command.
 
 > **CAUTION:** Change only the answer and the `- **Status:**` line of the question. Do not change the index table at the
 > top, the ids or other sections.
@@ -589,7 +642,8 @@ The push starts a run. The unit moves when your answers free a task. `l4 plan` t
 - Set the Status to `answered`. Do not use `accepted` or `dismissed` for a verdict question. The harness reads
   `dismissed` as `open`. The note and `l4 plan` then say `Q-NNN: a verdict question cannot be dismissed: start the
   answer with accept or reject`.
-- Start the answer with the word `accept` or `reject`. Then give your reason. `accept` waives a criterion, a finding
+- Start the answer with the word `accept` or `reject`. Then give your reason. With the command, use
+  `l4 questions answer` and the same words in `--text`. `accept` waives a criterion, a finding
   or a hold.
 - A `reject` fails the criterion and starts a fix round, but only while fix rounds are left. Otherwise the unit
   escalates.
@@ -610,8 +664,6 @@ The push starts a run. The unit moves when your answers free a task. `l4 plan` t
 - An `answered` with no text, or an `accepted` with no suggestion.
 - A verdict answer that does not start with `accept` or `reject`.
 - Answers on `<base>`, and comments on the PR.
-
-> **NOTE:** `l4 questions` is not available in 0.4.1 (exit 2). Edit the file.
 
 ### 7.2 `halted`
 
@@ -635,6 +687,11 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
 > next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not
 > move the unit. The log then shows `halted; a person pushed after the halt: add the label l4:retry or run l4 retry`.
+
+> **NOTE:** A green step can stop on a frozen test-support file, for example `conftest.py`. The question then has the
+> first option ``Edit `conftest.py`: …``. Answer it with `l4 questions accept Q-NNN --unit <unit>` (Status `accepted`),
+> or with an answer that names the file. The next green step may change that file. An ignore file such as `.gitignore`
+> is never unfrozen. A task whose own reviewed text names a Python support file needs no answer.
 
 Retry the unit with the command or with the label. Both give the unit new task attempts.
 
@@ -1276,18 +1333,22 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 ci watch` | Follows a pipeline or a run to its end. It needs a token in `GITLAB_TOKEN` or `GH_TOKEN`, or `--auth-env <variable>`. | No |
 | `l4 run --dry-run` | Shows what a run would do. It starts no lease, worktree or agent, and it pushes nothing. It writes the prompts to `.l4-out/dry-run/`. The last line is `would exit <n>`. The exit code is 0. | No |
 | `l4 run [--unit <unit>]` | Runs units. CI runs it. On a halted or escalated unit, `--unit` exits 13 and changes nothing. | Yes |
+| `l4 questions [list] [--unit <unit>] [--json]` | Lists the open questions of a unit and its fix units, or of every unit that has a branch. It reads `origin`, not your work tree. | No |
+| `l4 questions show Q-NNN --unit <unit> [--json]` | Shows one question, what `accept` would take, and the frozen test paths it would unfreeze. | No |
+| `l4 questions accept Q-NNN --unit <unit> [--no-push]` | Takes the suggestion of the clarifier as the answer. It commits to the unit branch and pushes. `--no-push` shows the change and writes nothing. | Yes: `questions.md` on the unit branch |
+| `l4 questions answer Q-NNN --unit <unit> --text <text> [--no-push]` | Writes your answer. It commits to the unit branch and pushes. `--text -` reads standard input. | Yes: `questions.md` on the unit branch |
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.1. They stop with exit 2:
-`l4 unlock`, `l4 questions`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
+These commands and options are not available in 0.4.1. `l4 --help` marks each with `(not yet implemented)`. They stop
+with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
 ### 10.5 Files
 
 | File | Where | Can a person edit it? |
 |---|---|---|
-| `questions.md` | Unit folder, on `<branch>` | Yes: the `### Answer` and the `- **Status:**` line of a question. |
+| `questions.md` | Unit folder, on `<branch>` | Use `l4 questions` ([7.1](#71-awaiting_human-a-question-waits-for-you)). Or edit the `### Answer` and the `- **Status:**` line of a question. |
 | `feedback.md` | Unit folder, on `<branch>` | Use `l4 feedback`. |
 | Spec files and `tasks.md` | Unit folder | Yes. A change sends the unit to `implementing` ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). |
 | `verification.md` | Unit folder, on `<branch>` | **No.** The harness writes it at each round. |
@@ -1327,6 +1388,9 @@ These limits make operation more difficult. Know them before you start.
   clear message.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and
   `budgets.same_error_repeats` are in the config, but no breaker uses them.
+- `l4 questions accept` and `answer` do not write ledger events. The next run records `question.answered`. An agent
+  caller follows the agent rule of [7.1](#71-awaiting_human-a-question-waits-for-you). To see the change before
+  the push, use `--no-push`.
 - The commands and options of [10.4](#104-commands-for-operation) that are not available.
 
 ## 12. Delivery plans

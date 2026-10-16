@@ -17,8 +17,27 @@
 
 ## Answering `questions.md`
 
-`l4 questions answer` is not built yet: edit the file by hand on the unit branch, then commit and push. The harness
-reads only answers whose Status says they are submitted.
+Use the command first. It reads `questions.md` on the unit branch on `origin`, edits only the Status, the Answer and the
+index row, commits, and pushes. The push resumes the unit.
+
+```sh
+l4 questions --unit FW:NAME                        # open questions; "draft" has an answer but is still open
+l4 questions show Q-NNN --unit FW:NAME             # what accept takes, the frozen paths it unfreezes, Next: lines
+l4 questions answer Q-NNN --unit FW:NAME --text "…"   # --text - reads stdin
+l4 questions accept Q-NNN --unit FW:NAME           # take the clarifier's suggestion (not for a verdict question)
+```
+
+Add `--no-push` to print the diff and the commit message and write nothing. A refusal exits 2 with a `Fix:` line.
+
+**Agent rule.** If you are an agent (an agent marker in the environment, or stdin is not a terminal), you may write only
+a question whose kind is in `clarifier.auto_accept_kinds` (default `technical`), that is not a verdict question, and
+whose answer names no frozen test path of the task it holds. Give every other question to a person: a product or
+ambiguous question, a verdict question, or an answer that names a frozen path. Only a person, or
+`clarifier.answer_by_agents: true` in `.l4/config.yaml` on the base branch, changes that. The key on the unit branch does
+not count.
+
+The hand edit is the fallback, for a question the command refuses. Edit the file on the unit branch, then commit and
+push. The harness reads only answers whose Status says they are submitted.
 
 1. Find the section `## Q-NNN: …`, write your answer under `### Answer`, below the `<!-- write below this line -->`
    comment.
