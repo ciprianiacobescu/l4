@@ -14,7 +14,7 @@ from typing import Literal
 
 from l4.agents.credentials import profile_credential_variable
 from l4.config.schema import L4Config
-from l4.provision.catalog import adapters_in_use
+from l4.provision.catalog import adapters_in_use, laya_in_use
 
 WORKFLOW_RELPATH = ".github/workflows/l4.yml"
 HOSTED_RUNNER = "ubuntu-24.04"
@@ -34,9 +34,13 @@ CACHE_PATHS = (
 # npm's download cache `~/.cache/l4/npm` (353 MB, redundant once the installed copies under ~/.local/share/l4 are
 # cached; it made the CLI cache twice as big and 12 s to restore) and `~/.cache/l4/locks`.
 CLI_CACHE_PATHS = (
-    "~/.local/bin", "!~/.local/bin/uv", "!~/.local/bin/uvx", "!~/.local/bin/l4",
-    "~/.local/share/l4", "~/.local/share/claude", "~/.cache/l4/installers",
+    "~/.local/bin", "!~/.local/bin/uv", "!~/.local/bin/uvx", "!~/.local/bin/l4", "!~/.local/bin/laya-serve",
+    "~/.local/share/l4", "!~/.local/share/l4/laya", "~/.local/share/claude", "~/.cache/l4/installers",
 )  # fmt: skip
+# Laya (the System One engine, L4-ADO-019) has a cache of its own: the uv tool directory with its wheels, the link
+# into ~/.local/bin and the Hugging Face home with the checkpoint, under `l4 ci cache-key laya`. The CLI cache leaves
+# them out.
+LAYA_CACHE_PATHS = ("~/.local/share/l4/laya", "~/.cache/l4/laya", "~/.local/bin/laya-serve")
 # GitHub's published SSH host keys (api.github.com/meta, 2026-10-11), pinned for the fetched harness's deploy key
 # (L4-GHP-010): the clone checks the host against these and nothing else.
 HOST_KEYS = (
@@ -83,7 +87,8 @@ def doctor_command(cfg: L4Config, platform: Literal["github", "gitlab"]) -> str:
 
 def credential_secrets(cfg: L4Config) -> list[str]:
     """The secrets the job must name besides the forge token (L4-PRV-027, SCN-PRV-74): the credential variable of every
-    profile a role chain uses (L4-PRV-024) and an opencode provider's `api_key_env`. A GitHub secret reaches a job
+    profile a role chain uses (L4-PRV-024), an opencode provider's `api_key_env`, and the `api_key_env` of each
+    System One profile in `roles.s1_judge` or `verifier.s1.shadow` (L4-ADO-017). A GitHub secret reaches a job
     only through its `env`; an unset one maps to an empty value, which the harness treats as unset."""
     names: set[str] = set()
     for adapter, profiles in adapters_in_use(cfg).items():
@@ -95,6 +100,11 @@ def credential_secrets(cfg: L4Config) -> list[str]:
             options = profile.opencode_options() if adapter == "opencode" else None
             if options is not None and options.provider is not None:  # a free model has no options at all
                 names.add(options.provider.api_key_env)
+    # System One (L4-ADO-017): the key of every `system-one` profile that a judge list or the shadow list names
+    for s1_name in (*cfg.roles.s1_judge, *cfg.verifier.s1.shadow):
+        s1_profile = cfg.profiles.get(s1_name)
+        if s1_profile is not None and s1_profile.backend == "system-one" and s1_profile.api_key_env:
+            names.add(s1_profile.api_key_env)
     names.discard(cfg.forge.token_env)
     return sorted(names)
 
@@ -292,6 +302,21 @@ def _clis_save_step(hosted: bool) -> str:
           key: ${{{{ steps.l4.outputs.clis-cache-key }}}}"""
 
 
+def _laya_save_step(cfg: L4Config, hosted: bool) -> str:
+    """The save of the Laya cache, after `doctor --ci --fix` installed Laya; only with a `laya-local` profile."""
+    if not hosted or not laya_in_use(cfg):
+        return ""
+    return f"""\
+      - name: save Laya cache
+        if: >-
+          ${{{{ success() && github.ref_name == env.L4_BASE_BRANCH && steps.l4.outputs.laya-cache-hit != 'true'
+          && steps.l4.outputs.laya-cache-key != '' }}}}
+        uses: {CACHE_ACTION.format(op="save")}
+        with:
+          path: ${{{{ steps.l4.outputs.laya-cache-paths }}}}
+          key: ${{{{ steps.l4.outputs.laya-cache-key }}}}"""
+
+
 def render_github_action_ci(cfg: L4Config, pin: ActionPin) -> str:
     """The action form of the workflow (L4-ACT-004): the same job as `render_github_ci`, the harness from the setup
     action. `doctor --ci --fix` on a hosted runner, `doctor_command` on a self-hosted one, as in the other form."""
@@ -314,5 +339,6 @@ def render_github_action_ci(cfg: L4Config, pin: ActionPin) -> str:
             "CREDENTIAL_ENV": "\n".join(f"      {n}: ${{{{ secrets.{n} }}}}" for n in credential_secrets(cfg)),
             "ACTION_STEP": _action_step(cfg, pin, hosted=hosted),
             "CLIS_SAVE": _clis_save_step(hosted),
+            "LAYA_SAVE": _laya_save_step(cfg, hosted),
         },
     )

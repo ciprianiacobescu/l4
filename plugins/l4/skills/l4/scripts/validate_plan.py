@@ -5,10 +5,13 @@
                              [--openspec-root DIR] [--kiro-root DIR] [--json]
 
 It reads every `.l4/plans/*.json`, finds the specs the way the harness's providers do, and reports what `l4 yolo check`
-would report without git, a network or a model (yolo-mode design D15, requirement L4-YOLO-019). It never writes.
+would report without a network or a model (yolo-mode design D15, requirement L4-YOLO-019). It never writes. Git is
+optional: in a work tree it runs `git ls-files -co --exclude-standard` (read-only) to count only the files the review
+sees; without git every file counts.
 
-Exit 0: everything is valid. Exit 1: one line per problem, `<plan id>: <code>: <subject>: <text>`, or for the coverage
-problems `uncovered: <unit> (...)` and `covered_twice: <unit> (...)`. Exit 2: a usage or read error.
+Exit 0: everything is valid. Exit 1: one line per problem, `error: <plan id>: <code>: <subject>: <text>`, or for the
+coverage problems `error: uncovered: <unit> (...)` and `error: covered_twice: <unit> (...)`.
+Exit 2: a usage or read error.
 
 A planned unit whose OpenSpec change is archived is not an error here: the script has no plan state, so it cannot tell
 a unit that this plan already merged or integrated (which `l4 yolo check` accepts) from a fresh plan that lists an
@@ -22,11 +25,13 @@ from __future__ import annotations
 import argparse
 import datetime
 import decimal
+import fnmatch
 import heapq
 import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -43,6 +48,19 @@ DEFAULT_OPENSPEC_ROOT = "openspec"
 DEFAULT_KIRO_ROOT = ".kiro/specs"
 FRAMEWORKS = ("openspec", "kiro")
 SPEC_KEY = r"""^(?:spec|"spec"|'spec')\s*:"""  # the top-level key, plain or quoted like YAML allows
+# The readiness review's limits and file rules (`l4.yolo.readiness`, `l4.yolo.digest`); a test holds them equal.
+MAX_FILE_CHARS = 20_000
+MAX_FOLDER_CHARS = 80_000
+MAX_DEPENDENCY_CHARS = 20_000
+EXCLUDED_DIRS = frozenset({".l4"})
+EXCLUDED_FILES = frozenset({"verification.md", "questions.md", "feedback.md"})
+TASK_MARKER = re.compile(rb"(?m)^((?:\xef\xbb\xbf)?[ \t\xc2\xa0]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]*\[)[ xX\-~](\])")
+# The rules of `l4.specs.openspec` (`MIN_PURPOSE_CHARS`, `MAX_PURPOSE_BYTES`, `_purpose`); a test holds them equal.
+MIN_PURPOSE_CHARS = 50
+MAX_PURPOSE_BYTES = 256 * 1024
+PURPOSE_SECTION = re.compile(r"(?im)^##[ \t]+Purpose[ \t]*\n(.*?)(?=^##[ \t]|\Z)", re.S)
+HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
+DELTA_SECTION = re.compile(r"^##[ \t]+(MODIFIED|RENAMED|REMOVED)[ \t]+Requirements[ \t]*$", re.M)
 MAP_KEY = re.compile(r"""^(?:"([^"\\]+)"|'([^']+)'|([A-Za-z0-9_.-]+)):(?:\s+(.*))?$""")
 
 HELP_EPILOG = """\
@@ -50,7 +68,16 @@ What this script checks, with the codes of `l4 yolo check` where the check is th
   invalid (schema, file name, limits), duplicate_id, self_dependency, unknown_dependency, cycle, unknown_unit,
   excluded_and_planned, external_dependencies, empty_plan; across the plan files: uncovered (a spec no plan lists,
   planned or excluded, except a <parent>-fix-<n> or <parent>-followup-<n> unit whose parent is listed) and
-  covered_twice (a unit planned in two plan files).
+  covered_twice (a unit planned in two plan files); `yolo.hold` makes a spec it matches count as covered. For each
+  OpenSpec unit that a plan file plans:
+  spec_no_baseline (a MODIFIED, RENAMED or REMOVED section in a delta `specs/<capability>/spec.md` whose capability
+  has no openspec/specs/<capability>/spec.md in the working tree) and spec_no_purpose (the delta of such a capability
+  has no `## Purpose` of at least 50 characters); and material_over_budget: a file the readiness review would cut or
+  leave out, read the way the review reads it (a planned unit's folder at 80,000 characters, a unit named in a
+  depends_on at 20,000, each file at 20,000, or what `yolo.review.max_folder_chars`, `max_dependency_chars` and
+  `max_file_chars` of .l4/config.yaml say; harness files and binary files are not read). A cut of a planned unit's
+  own folder is a problem (exit 1). A dependency's cut is a line `warning: material_over_budget: ...` on standard
+  output that leaves the exit code alone: the review lists it as not shown in full without blocking.
 
 What only `l4 yolo check` can check (it needs git, the target head and the configuration): open questions, the intake
 checks of each spec, finished units, acceptance profiles, the target against forge.base_branch, and the merge policy.
@@ -62,7 +89,9 @@ unknown_unit).
 
 The frameworks and roots come from .l4/config.yaml (spec.frameworks, spec.openspec.root, spec.kiro.root) when it uses
 the block style `l4 init` writes (keys may be quoted, a byte order mark is ignored); anything else falls back to
-both frameworks, `openspec` and `.kiro/specs`, with a warning. The flags override the file.
+both frameworks, `openspec` and `.kiro/specs`, with a warning. The flags override the file. `yolo.hold` (unit ids
+and fnmatch patterns) is read the same way: a spec it matches counts as covered; a yolo block in another style is
+ignored, with a warning.
 Exit 0 valid, 1 problems, 2 usage or read error.
 """
 
@@ -179,6 +208,189 @@ def archived_units(repo: Path, root: str) -> set[str]:
     return out
 
 
+# --- the OpenSpec deltas of a planned unit ------------------------------------------------------------------------
+
+
+def _read_text(path: Path, limit: int = MAX_PURPOSE_BYTES) -> str | None:
+    """A regular file's text (UTF-8, `replace`), or None when it is missing, a symlink, too big or unreadable."""
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+            return None
+        return path.read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return None
+
+
+def normal_text(text: str) -> str:
+    """A leading BOM and CRLF or CR line endings removed, as OpenSpec reads a spec."""
+    return text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def purpose_ok(text: str) -> bool:
+    """`openspec._purpose`: the `## Purpose` section, on one line, has at least MIN_PURPOSE_CHARS characters."""
+    match = PURPOSE_SECTION.search(normal_text(text))
+    if not match:
+        return False
+    flat = " ".join(HTML_COMMENT.sub(" ", match.group(1)).split()).lstrip("#>*-+ ")
+    return len(flat[:1500]) >= MIN_PURPOSE_CHARS
+
+
+def purpose_problems(repo: Path, openspec_root: str, change: str) -> list[tuple[str, str, str]]:
+    """(code, delta file, text) for each delta of the change `<root>/changes/<change>` (L4-ADO-009)."""
+    root = Path(openspec_root)
+    parts = (*root.parts, "changes", change, "specs")
+    if _symlink_on_path(repo, parts):
+        return []
+    specs = repo.joinpath(*parts)
+    if not specs.is_dir():
+        return []
+    found: list[tuple[str, str, str]] = []
+    for entry in sorted(specs.iterdir(), key=lambda p: p.name):
+        if entry.is_symlink() or not entry.is_dir():
+            continue
+        text = _read_text(entry / "spec.md")
+        if text is None:
+            continue
+        delta_file = (entry / "spec.md").relative_to(repo).as_posix()
+        baseline = (root / "specs" / entry.name / "spec.md").as_posix()
+        if (repo / baseline).is_file():
+            continue
+        for kind in dict.fromkeys(m.group(1) for m in DELTA_SECTION.finditer(normal_text(text))):
+            found.append(
+                (
+                    "spec_no_baseline",
+                    delta_file,
+                    f"{kind} Requirements, and the working tree has no {baseline}: archive the change that creates "
+                    f"{entry.name} first, or write this delta as ## ADDED Requirements with a ## Purpose",
+                )
+            )
+        if not purpose_ok(text):
+            found.append(
+                (
+                    "spec_no_purpose",
+                    delta_file,
+                    f"{entry.name} is new to {(root / 'specs').as_posix()}/ and the delta has no ## Purpose of at "
+                    f"least {MIN_PURPOSE_CHARS} characters (archive would write TBD and fail strict validation)",
+                )
+            )
+    return found
+
+
+# --- the readiness review's reading of a unit folder (yolo-mode design D4, L4-ADO-010) ---------------------------
+
+
+class FolderRead:
+    """`readiness.FolderText` for the working tree: what the review would show, cut and leave out of a folder."""
+
+    def __init__(self) -> None:
+        self.shown: list[tuple[str, int]] = []  # (repository path, characters shown, the cut marker included)
+        self.cut: list[tuple[str, int]] = []  # (repository path, characters left out) of a file shown in part
+        self.omitted: list[tuple[str, int]] = []  # (repository path, characters) of a file the folder budget dropped
+        self.binary: list[str] = []
+
+
+def _git_files(repo: Path, folder: str) -> list[str] | None:
+    """What the review sees below `folder`: the tracked files and the untracked ones that git does not ignore
+    (`git ls-files -co --exclude-standard`), or None when git is missing or `repo` is not a work tree."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-z", "-co", "--exclude-standard", "--", folder],
+            capture_output=True, timeout=60, check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    names = [n.decode("utf-8", "surrogateescape") for n in done.stdout.split(b"\0") if n]
+    return sorted(set(names))
+
+
+def _folder_files(repo: Path, folder: str) -> list[str]:
+    """Every file below `folder` that the review reads (repository paths), a symlink as a file, in UTF-8 byte order of
+    the path: in a git work tree the tracked files and the untracked files that are not ignored (a file in
+    `.gitignore` is not in the review's material), else every file."""
+    found = _git_files(repo, folder.strip("/") or ".")
+    if found is None:
+        base = repo.joinpath(*Path(folder).parts)
+        found = []
+        for current, dirs, names in os.walk(base):
+            here = Path(current)
+            for name in [*names, *(d for d in dirs if (here / d).is_symlink())]:
+                found.append((here / name).relative_to(repo).as_posix())
+    return sorted(found, key=lambda path: path.encode("utf-8", "surrogateescape"))
+
+
+def _rank(rel: str) -> int:
+    """`readiness._rank`: the reading order of a prerequisite, what a dependent needs first and the task list last."""
+    parts = Path(rel).parts
+    if rel == "proposal.md":
+        return 0
+    if rel == "requirements.md":
+        return 1
+    if parts[0] == "specs" and parts[-1] == "spec.md":
+        return 2
+    return {"bugfix.md": 3, "design.md": 4, "tasks.md": 6}.get(rel, 5)
+
+
+def read_folder(
+    repo: Path, folder: str, *, budget: int, max_file: int = MAX_FILE_CHARS, order: str = "sorted"
+) -> FolderRead:
+    """`readiness.read_folder` on the working tree: skip the harness's files (`digest.is_excluded`), show a `tasks.md`
+    with every task marker as `[ ]`, leave out a binary file, show each file up to `max_file` and the folder up to
+    `budget`; a file the budget runs out in is cut (the `[cut: ...]` line counts), one after it is omitted. `order` is
+    `"sorted"` (a planned unit's own folder) or `"prerequisite"` (a dependency: proposal, requirements, specs, bugfix,
+    design, other files, `tasks.md` last)."""
+    root = folder.strip("/")
+    out = FolderRead()
+    left = budget
+    paths = _folder_files(repo, root)
+    if order == "prerequisite":
+        paths.sort(key=lambda p: _rank(Path(p).relative_to(root).as_posix()))  # stable: sorted within a rank
+    for path in paths:
+        parts = Path(path).relative_to(root).parts
+        if any(p in EXCLUDED_DIRS for p in parts[:-1]) or parts[-1] in EXCLUDED_FILES:
+            continue
+        full = repo / path
+        try:
+            data = os.readlink(full).encode("utf-8", "surrogateescape") if full.is_symlink() else full.read_bytes()
+        except OSError:
+            continue
+        if parts[-1] == "tasks.md":
+            data = TASK_MARKER.sub(rb"\1 \2", data)
+        if b"\0" in data:
+            out.binary.append(path)
+            continue
+        text = data.decode("utf-8", "replace")
+        shown = text[: min(max_file, max(left, 0))]
+        if len(shown) < len(text):
+            if left <= 0:
+                out.omitted.append((path, len(text)))
+                continue
+            out.cut.append((path, len(text) - len(shown)))
+            shown += f"\n[cut: {len(text) - len(shown)} characters omitted]"
+        left -= len(shown)
+        out.shown.append((path, len(shown)))
+    return out
+
+
+def unit_folder(unit_id: str, openspec_root: str, kiro_root: str) -> str:
+    framework, _, name = unit_id.partition(":")
+    return "/".join(
+        [
+            *Path(openspec_root if framework == "openspec" else kiro_root).parts,
+            *(["changes"] if framework == "openspec" else []),
+            name,
+        ]
+    )
+
+
+def budget_lines(read: FolderRead) -> list[tuple[str, str]]:
+    """(file, what the review does to it) for each cut and each omitted file."""
+    return [(path, f"{n} characters cut") for path, n in read.cut] + [
+        (path, f"omitted: the folder budget is spent ({size} characters)") for path, size in read.omitted
+    ]
+
+
 # --- the configuration: a small block-style reader -----------------------------------------------------------------
 
 
@@ -263,23 +475,25 @@ def _parse_map(lines: list[tuple[int, str]], i: int, indent: int) -> tuple[dict[
     return out, i
 
 
-def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
-    """(the `spec` mapping of .l4/config.yaml, warnings). {} when the file has no `spec` key."""
+def _config_rows(repo: Path) -> list[str] | str:
+    """The rows of .l4/config.yaml, or the warning that says why they cannot be read."""
     path = repo / ".l4" / "config.yaml"
     try:
-        text = path.read_text(encoding="utf-8-sig")  # a byte order mark is not part of the first key
+        return path.read_text(encoding="utf-8-sig").splitlines()  # a byte order mark is not part of the first key
     except FileNotFoundError:
-        return {}, [f"{path.relative_to(repo).as_posix()} not found: using the default frameworks and roots"]
+        return f"{path.relative_to(repo).as_posix()} not found: using the default frameworks and roots"
     except (OSError, UnicodeDecodeError) as exc:
-        return {}, [
-            f".l4/config.yaml cannot be read ({exc.__class__.__name__}): using the default frameworks and roots"
-        ]
-    rows = text.splitlines()
-    start = next((n for n, row in enumerate(rows) if re.match(SPEC_KEY + r"\s*(#.*)?$", row)), None)
+        return f".l4/config.yaml cannot be read ({exc.__class__.__name__}): using the default frameworks and roots"
+
+
+def _top_block(rows: list[str], key: str) -> tuple[dict[str, object], str | None]:
+    """(the mapping under the top-level `key`, why it cannot be read or None). {} when the file has no such key."""
+    key_row = r"""^(?:%s|"%s"|'%s')\s*:""" % ((re.escape(key),) * 3)
+    start = next((n for n, row in enumerate(rows) if re.match(key_row + r"\s*(#.*)?$", row)), None)
     if start is None:
-        if any(re.match(SPEC_KEY, row) for row in rows):
-            return {}, ["spec in .l4/config.yaml is not in block style: using the default frameworks and roots"]
-        return {}, []
+        if any(re.match(key_row, row) for row in rows):
+            return {}, "is not in block style"
+        return {}, None
     block = []
     for row in rows[start + 1 :]:
         if row.strip() and not row.startswith((" ", "\t", "#")):
@@ -287,10 +501,72 @@ def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
         block.append(row)
     try:
         lines = _logical_lines(block)
-        parsed = _parse_map(lines, 0, lines[0][0])[0] if lines else {}
+        return (_parse_map(lines, 0, lines[0][0])[0] if lines else {}), None
     except Unsupported as exc:
-        return {}, [f"spec in .l4/config.yaml is not block style ({exc}): using the default frameworks and roots"]
+        return {}, f"is not block style ({exc})"
+
+
+def read_spec_config(repo: Path) -> tuple[dict[str, object], list[str]]:
+    """(the `spec` mapping of .l4/config.yaml, warnings). {} when the file has no `spec` key."""
+    rows = _config_rows(repo)
+    if isinstance(rows, str):
+        return {}, [rows]
+    parsed, why = _top_block(rows, "spec")
+    if why is not None:
+        return {}, [f"spec in .l4/config.yaml {why}: using the default frameworks and roots"]
     return parsed, []
+
+
+def read_review_limits(repo: Path) -> tuple[tuple[int, int, int], list[str]]:
+    """((max_file_chars, max_folder_chars, max_dependency_chars), warnings) from `yolo.review` of .l4/config.yaml:
+    the module constants where a key is absent or invalid (not an integer, below 1000 for the file and folder
+    budgets, below 0 for the dependency budget), with one warning per invalid key."""
+    limits = {
+        "max_file_chars": MAX_FILE_CHARS,
+        "max_folder_chars": MAX_FOLDER_CHARS,
+        "max_dependency_chars": MAX_DEPENDENCY_CHARS,
+    }
+    defaults = (MAX_FILE_CHARS, MAX_FOLDER_CHARS, MAX_DEPENDENCY_CHARS)
+    rows = _config_rows(repo)
+    if isinstance(rows, str):
+        return defaults, []
+    parsed, why = _top_block(rows, "yolo")
+    if why is not None:
+        return defaults, []  # read_yolo_hold has said so
+    section = parsed.get("review")
+    warnings: list[str] = []
+    if section is not None and not isinstance(section, dict):
+        warnings.append("yolo.review in .l4/config.yaml is not a mapping: the default review budgets are used")
+        section = {}
+    for key, floor in (("max_file_chars", 1000), ("max_folder_chars", 1000), ("max_dependency_chars", 0)):
+        raw = (section or {}).get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, str) and re.fullmatch(r"-?[0-9]+(?:_[0-9]+)*", raw) and int(raw) >= floor:
+            limits[key] = int(raw)
+        else:
+            warnings.append(
+                f"yolo.review.{key} in .l4/config.yaml is not an integer of at least {floor}: "
+                f"the default {limits[key]} is used"
+            )
+    return (limits["max_file_chars"], limits["max_folder_chars"], limits["max_dependency_chars"]), warnings
+
+
+def read_yolo_hold(repo: Path) -> tuple[list[str], list[str]]:
+    """(`yolo.hold` of .l4/config.yaml, warnings): unit ids and fnmatch patterns (L4-ADO-011). A file that is missing
+    adds no warning here (`read_spec_config` has said so); one that this reader cannot read holds nothing."""
+    rows = _config_rows(repo)
+    if isinstance(rows, str):
+        return [], []
+    parsed, why = _top_block(rows, "yolo")
+    if why is not None:
+        return [], [f"yolo in .l4/config.yaml {why}: yolo.hold is ignored"]
+    hold = parsed.get("hold")
+    if hold is None:
+        return [], []
+    if not isinstance(hold, list) or not all(isinstance(h, str) and h for h in hold):
+        return [], ["yolo.hold in .l4/config.yaml is not a list of non-empty strings: yolo.hold is ignored"]
+    return [str(h) for h in hold], []
 
 
 def resolve_discovery(repo: Path, args: argparse.Namespace) -> tuple[object, str, str, list[str]]:
@@ -676,6 +952,7 @@ class PlanReport:
         self.planned: list[str] = []  # the unit ids the file names in its batches, whatever else is wrong
         self.excluded: list[str] = []
         self.finished: list[str] = []  # planned units whose OpenSpec change is archived
+        self.deps: dict[str, list[str]] | None = None  # unit -> depends_on, once the schema passed
 
     def add(self, code: str, subject: str, text: str) -> None:
         self.problems.append((code, subject, text))
@@ -726,6 +1003,7 @@ def check_plan(file_name: str, text: str, known: set[str], finished: set[str]) -
     unit_ids = {u["id"] for u in units}
     batch_ids = {b["id"] for b in batches}
     plan_id = raw["plan_id"]
+    report.deps = {u["id"]: list(u.get("depends_on", [])) for u in units}
     if not units:
         report.add("empty_plan", plan_id, "the plan has no unit")
     for dup in _duplicates([u["id"] for u in units]):
@@ -809,6 +1087,10 @@ def read_plan_files(repo: Path) -> list[tuple[str, str]]:
 def validate(repo: Path, args: argparse.Namespace) -> dict:
     units, archived, warnings = discover_units(repo, args)
     known = set(units)
+    hold, hold_warnings = read_yolo_hold(repo)
+    warnings += hold_warnings
+    limits, limit_warnings = read_review_limits(repo)
+    warnings += limit_warnings
     reports = [check_plan(name, text, known, archived) for name, text in read_plan_files(repo)]
     listed: set[str] = set()
     planned_in: dict[str, list[str]] = {}
@@ -818,11 +1100,20 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
             planned_in.setdefault(unit, []).append(report.plan_id)
     coverage: list[tuple[str, str, str]] = []
     for unit in sorted(known):
-        if unit not in listed and not any(p in listed for p in derived_parents(unit)):
+        if unit in listed or any(p in listed for p in derived_parents(unit)):
+            continue
+        if not any(fnmatch.fnmatchcase(unit, pattern) for pattern in hold):
             coverage.append(("uncovered", unit, "add it to a plan or to a plan's exclude with a reason"))
     for unit, plans in sorted(planned_in.items()):
         if len(plans) > 1:
             coverage.append(("covered_twice", unit, f"listed in plans {', '.join(plans)}"))
+    openspec_root = resolve_discovery(repo, args)[1]
+    for report in reports:
+        for unit in report.planned:
+            if unit in known and unit.startswith("openspec:"):
+                for code, delta_file, text in purpose_problems(repo, openspec_root, unit.partition(":")[2]):
+                    report.add(code, unit, f"{delta_file}: {text}")
+    warnings_budget = budget_problems(repo, args, reports, known, limits)
     problems = [
         {"plan": r.plan_id, "code": c, "subject": s, "text": t} for r in reports for (c, s, t) in r.problems
     ] + [{"plan": None, "code": c, "subject": s, "text": t} for (c, s, t) in coverage]
@@ -834,13 +1125,46 @@ def validate(repo: Path, args: argparse.Namespace) -> dict:
         "plans": {r.plan_id: {"order": r.order, "waves": r.waves} for r in reports if r.order is not None},
         "units": sorted(known),
         "warnings": warnings,
+        "budget_warnings": warnings_budget,
     }
+
+
+def budget_problems(
+    repo: Path, args: argparse.Namespace, reports: list[PlanReport], known: set[str], limits: tuple[int, int, int]
+) -> list[str]:
+    """Add `material_over_budget` to the plan reports for a planned unit's own folder (a problem) and return the
+    warning lines for dependencies (the review lists them as not shown in full without blocking)."""
+    _, openspec_root, kiro_root, _ = resolve_discovery(repo, args)
+    dependents: dict[str, list[str]] = {}
+    for report in reports:
+        if report.deps is None:
+            continue
+        for unit, deps in report.deps.items():
+            if unit in known:
+                for path, what in budget_lines(
+                    read_folder(repo, unit_folder(unit, openspec_root, kiro_root), budget=limits[1], max_file=limits[0])
+                ):
+                    report.add("material_over_budget", unit, f"{path}: {what}")
+            for dep in deps:
+                if unit != dep and unit not in dependents.setdefault(dep, []):
+                    dependents[dep].append(unit)
+    lines = []
+    for dep, by in dependents.items():
+        if dep in known:
+            folder = unit_folder(dep, openspec_root, kiro_root)
+            for path, what in budget_lines(
+                read_folder(repo, folder, budget=limits[2], max_file=limits[0], order="prerequisite")
+            ):
+                lines.append(
+                    f"warning: material_over_budget: {dep}: {path}: {what} (as a dependency of {', '.join(by)})"
+                )
+    return lines
 
 
 def problem_line(problem: dict) -> str:
     if problem["plan"] is None:
-        return f"{problem['code']}: {problem['subject']} ({problem['text']})"
-    return f"{problem['plan']}: {problem['code']}: {problem['subject']}: {problem['text']}"
+        return f"error: {problem['code']}: {problem['subject']} ({problem['text']})"
+    return f"error: {problem['plan']}: {problem['code']}: {problem['subject']}: {problem['text']}"
 
 
 def finished_line(unit: str) -> str:
@@ -851,7 +1175,7 @@ def finished_line(unit: str) -> str:
 
 
 def render(result: dict) -> str:
-    finished = [finished_line(unit) for unit in result["finished"]]
+    finished = [finished_line(unit) for unit in result["finished"]] + result["budget_warnings"]
     if result["problems"]:
         return "\n".join([*(problem_line(p) for p in result["problems"]), *finished])
     lines = []
@@ -866,7 +1190,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="validate_plan.py",
         description="Validate the delivery plans in .l4/plans of a working tree: schema, graph, order, waves and "
-        "coverage. Python standard library only; it never writes, runs git or uses the network.",
+        "coverage. Python standard library only; it never writes or uses the network; its only subprocess is a "
+        "read-only `git ls-files`, to count the files the review sees.",
         epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -234,6 +234,8 @@ class PlanState(BaseModel):
     used: Usage = Field(default_factory=Usage)
     extended: Usage = Field(default_factory=Usage)
     extended_deadline: datetime | None = None  # R3: the latest deadline a `l4 yolo resume --extend-deadline` set (UTC)
+    accepted: dict[str, dict[str, Any]] = Field(default_factory=dict)  # subject -> latest `plan.accepted` data
+    activated_accepted: dict[str, dict[str, Any]] = Field(default_factory=dict)  # frozen by `plan.activated{accepted}`
     activated_by: str | None = None
     completed_revision: str | None = None
 
@@ -248,6 +250,8 @@ class Verdict:
     assumptions: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
     digest: str | None = None  # the unit digest (units) the review was for
+    material: str | None = None  # the material key of the judgement (readiness.material_key)
+    reused_from: str | None = None  # the `at` of the event whose judgement was reused (no judge call)
 
 
 @dataclass(frozen=True)

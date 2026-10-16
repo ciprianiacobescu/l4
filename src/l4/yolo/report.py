@@ -11,6 +11,7 @@ The text depends only on its arguments, so the same ledger gives the same report
 from collections.abc import Mapping, Sequence
 
 from l4.state.fold import UnitState
+from l4.yolo.findings import finding_id
 from l4.yolo.model import Plan, PlanEvent, PlanState
 
 
@@ -40,6 +41,31 @@ def _charged(events: Sequence[PlanEvent], unit: str) -> tuple[float, int, int] |
     if not cost:
         return None
     return sum(cost.values()), sum(runs.values()), max(cost)
+
+
+def _accepted_lines(plan: Plan, state: PlanState, unit_id: str, batch_id: str, folded: UnitState | None) -> list[str]:
+    """The findings a person accepted for the unit (its own subject and its batch's), who accepted them, and the
+    verifier's answers: `addressed by the verifier`, `not addressed: <evidence>`, or `no answer recorded`
+    (L4-YOLO-028)."""
+    lines: list[str] = []
+    for subject in (unit_id, f"batch:{batch_id}"):
+        data = state.activated_accepted.get(subject)
+        if not data or not data.get("findings"):
+            continue
+        lines.append(
+            f"- Accepted review findings ({'' if subject == unit_id else subject + ', '}accepted by "
+            f"{data.get('by', '?')} ({data.get('actor', '?')}): {data.get('reason', '')}):"
+        )
+        for f in data["findings"]:
+            fid = finding_id(subject, f)
+            if folded is not None and fid in folded.accepted_addressed:
+                answer = "addressed by the verifier"
+            elif folded is not None and fid in folded.accepted_evidence:
+                answer = f"not addressed: {folded.accepted_evidence[fid]}"
+            else:
+                answer = "no answer recorded"
+            lines.append(f"  - {fid} [{f.get('criterion', '')}/{f.get('severity', '')}] {f.get('text', '')}: {answer}")
+    return lines
 
 
 def promotion_sentence(plan: Plan) -> str:
@@ -79,6 +105,7 @@ def render_report(
     if state.wait_reason:
         lines.append(f"- Waiting: {state.wait_reason}")
     lines += ["", "## Units", ""]
+    batch_of = {u.id: b.id for b in plan.batches for u in b.units}
     for unit in plan.units():
         merged = _last(events, "unit.merged", unit.id)
         post = _last(events, "unit.postcheck", unit.id)
@@ -101,6 +128,7 @@ def render_report(
             lines.append(
                 f"- Usage: {_usd(folded.cost_usd)}, {folded.iteration} run(s), {folded.restarts + 1} attempt(s)"
             )
+        lines += _accepted_lines(plan, state, unit.id, batch_of.get(unit.id, ""), folded)
         lines.append("")
     lines += ["## Batches", ""]
     for batch in plan.batches:

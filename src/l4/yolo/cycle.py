@@ -45,6 +45,8 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from fnmatch import fnmatchcase
+from typing import Any
 
 from l4.agents.base import AgentAdapter
 from l4.availability.errors import RoleUnavailable
@@ -53,9 +55,11 @@ from l4.context import AppContext
 from l4.exitcodes import L4Exit
 from l4.forge.base import Forge, ForgeError, ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.gitlab import push_auth_config
+from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.sandbox.base import Sandbox
+from l4.sandbox.select import select_sandbox
 from l4.specs.base import SpecProvider, UnitRef, parse_unit_id
 from l4.state.fold import UnitState
 from l4.state.status import UnitSnapshot
@@ -63,6 +67,8 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.draft import derived_parents
+from l4.yolo.findings import finding_id, prior_entries
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
 from l4.yolo.model import (
@@ -80,7 +86,7 @@ from l4.yolo.model import (
     Verdict,
     YoloStep,
 )
-from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_files_at, unit_infos
+from l4.yolo.plans import PlanFile, archived_at, holds_of, listed_ids, plan_files, plan_files_at, unit_infos
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
@@ -94,7 +100,11 @@ STOPPED_PHASES = ("halted", "escalated", "abandoned", "rejected")
 WAIT_PHASES = ("awaiting_human", "clarifying", "waiting_capacity")
 RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current unit whose last run never started it
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
+ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
+MAX_WAIT_DETAIL = 1_000
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+_REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
+_NEVER_HELD = frozenset({"merged", "archived"})  # phases `yolo.hold` leaves alone
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
 _USERINFO = re.compile(r"(?<=//)[^/@\s]+@")
 
@@ -106,6 +116,8 @@ class PlanStep(YoloStep):
 
     refusals: Mapping[str, str] = field(default_factory=dict)
     pending_starts: frozenset[str] = frozenset()  # current units of a plan with a `unit.not_started` record pending
+    # unit id -> the accepted review items that concern it: its own subject's and its batch's (L4-YOLO-028)
+    accepted: Mapping[str, tuple[dict[str, Any], ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -145,17 +157,34 @@ def live_plan(files: Sequence[PlanFile], states: Mapping[str, PlanState], target
     return None
 
 
+def config_holds(cfg: L4Config, unit_ids: Collection[str], listed: Collection[str]) -> dict[str, Hold]:
+    """The units `yolo.hold` holds (L4-ADO-011): an id or an `fnmatch` pattern of the setting matches the unit and no
+    plan file lists it (`listed`: the ids of every readable plan file, planned or excluded). A fix or follow-up unit
+    of a unit that a plan lists follows its parent, so `yolo.hold: ["*"]` does not hold it. No ledger, no model."""
+    patterns = cfg.yolo.hold
+    return {
+        unit: Hold("held by yolo.hold", "is held by yolo.hold")
+        for unit in unit_ids
+        if unit not in listed
+        and not any(parent in listed for parent in derived_parents(unit))
+        and any(fnmatchcase(unit, pattern) for pattern in patterns)
+    }
+
+
 def plan_holds(
     files: Sequence[PlanFile],
     states: Mapping[str, PlanState],
     phases: Mapping[str, str | None],
     target: str,
+    cfg: L4Config | None = None,
 ) -> dict[str, Hold]:
     """The units that get no new agent work from the plans, with the reason (design D10): a unit listed in a plan that
     is not final is held (`held by plan p1 (reviewed)`); in the active plan only the current or eligible unit is
     free and the others wait for what `next_eligible` says; while a plan is active a unit outside every plan is
     `not in the active plan p1`. A unit the plan has integrated is no hold. A cancelled plan still holds its units, and
-    a plan file that is not a plan holds the ids its JSON names, shown as `invalid` (R8)."""
+    a plan file that is not a plan holds the ids its JSON names, shown as `invalid` (R8). With `cfg`, a unit that
+    `yolo.hold` matches and no plan file lists is `held by yolo.hold`, whether or not a plan is active; a merged or
+    archived unit is never held by it (L4-ADO-011)."""
     invalid = {f.plan_id for f in files if f.plan is None}
     held = {
         unit: (pid, "invalid" if pid in invalid else status)
@@ -166,8 +195,15 @@ def plan_holds(
     if live is not None and live.plan is not None:
         eligibility = next_eligible(live.plan, states[live.plan_id], phases)
     holds: dict[str, Hold] = {}
+    from_config = (
+        config_holds(cfg, [u for u, p in phases.items() if p not in _NEVER_HELD], set().union(*map(listed_ids, files)))
+        if cfg is not None and cfg.yolo.hold
+        else {}
+    )
     for unit in phases:
-        if unit in held:
+        if unit in from_config:
+            holds[unit] = from_config[unit]
+        elif unit in held:
             plan_id, status = held[unit]
             if live is not None and plan_id == live.plan_id and eligibility is not None:
                 state = states[plan_id]
@@ -181,6 +217,20 @@ def plan_holds(
         elif live is not None:
             holds[unit] = Hold(f"not in the active plan {live.plan_id}", f"is not in the active plan {live.plan_id}")
     return holds
+
+
+def _entry(v: Verdict, **extra: Any) -> dict[str, Any]:
+    """A subject's entry of `plan.reviewed`: the verdict and its findings, what the judge assumed and could not see, the
+    material key of the judgement and, when it was reused, the `at` of the judgement it came from (L4-YOLO-022)."""
+    entry: dict[str, Any] = {
+        "verdict": v.verdict, "findings": list(v.findings), "assumptions": list(v.assumptions),
+        "missing": list(v.missing),
+    }  # fmt: skip
+    if v.material is not None:
+        entry["material"] = v.material
+    if v.reused_from is not None:
+        entry["reused_from"] = v.reused_from
+    return {**entry, **extra}
 
 
 def review_batches(plan: Plan, result: ReviewResult) -> dict[str, Verdict]:
@@ -291,6 +341,7 @@ def _store(app: AppContext, cfg: L4Config, git: Git, plan_id: str) -> PlanStore:
     return PlanStore(
         git, plan_id, fetch_auth_config(cfg, app.environ), push_config=push_auth_config(cfg, app.environ),
         token_env=cfg.forge.token_env, environ=app.environ, redact=app.redactor.redact_text,
+        platform=push_platform(cfg, app.environ, app.repo),
     )  # fmt: skip
 
 
@@ -352,15 +403,24 @@ def yolo_step(
         if unconfirmed is None:
             ledgers = _ledger_plans(app, cfg, git) if had else []
             if not ledgers:
-                return PlanStep(allow=None)
+                return _config_step(cfg, found)
         elif not had:
-            return PlanStep(allow=None)
+            return _config_step(cfg, found)
     named = frozenset(s.ref.id for _, s in found) if read_only else None  # the units `l4 run --unit` names
     if all_units is not None:
         found = all_units()
     step = _Step(app, cfg, git, found, files, forge, adapters, profiles, sandbox, now, confirm_wait_s)
     step.ledgers, step.sleep, step.named, step.unconfirmed = ledgers, sleep, named, unconfirmed
     return step.preview() if read_only else step.run()
+
+
+def _config_step(cfg: L4Config, found: Sequence[tuple[SpecProvider, UnitSnapshot]]) -> PlanStep:
+    """The step of a repository with no plan: every unit, but those `yolo.hold` holds (L4-ADO-011)."""
+    if not cfg.yolo.hold:
+        return PlanStep(allow=None)
+    holds = plan_holds([], {}, {s.ref.id: s.state.phase for _, s in found}, cfg.forge.base_branch, cfg)
+    allow = frozenset(s.ref.id for _, s in found if s.ref.id not in holds)
+    return PlanStep(allow=allow, refusals={u: h.refusal for u, h in holds.items()})
 
 
 def _had_plan_files(git: Git, rev: str = "HEAD") -> bool:
@@ -404,6 +464,7 @@ class _Step:
         self.named: frozenset[str] | None = None  # the units a `l4 run --unit` names (a read-only step)
         self.unconfirmed: str | None = None  # why the target could not be fetched: the plan files may be stale
         self._merge_not_ready: dict[str, str] = {}  # unit id -> why its merge was not ready in this step
+        self._merge_wait_reason: dict[str, str] = {}  # unit id -> the wait reason when it is not `merge_not_ready`
         self._merge_heads: dict[str, str | None] = {}  # unit id -> the head that merge was not ready for
         self._head_asked: set[str] = set()  # units whose PR head the forge was asked about in this run (LOW-1)
 
@@ -579,8 +640,11 @@ class _Step:
                 self._load()
                 self.actions = []
                 self._merge_not_ready, self._merge_heads, self._head_asked = {}, {}, set()
+                self._merge_wait_reason = {}
                 self._file_deleted()
                 if not self.files:  # every plan file is gone: the units are ordinary units again
+                    if self.cfg.yolo.hold:
+                        return self._result(None, start_next_run=False)
                     return PlanStep(allow=None, actions=tuple(self.actions))
                 self._rejected_fixed()
                 done = self._reviews()
@@ -608,7 +672,7 @@ class _Step:
     ) -> PlanStep:  # fmt: skip
         """`allow` None: every unit that no plan holds (and, while a plan is active, none unless the step names it)."""
         states = self._states()
-        holds = plan_holds(self.files, states, self._phases(), self.target)
+        holds = plan_holds(self.files, states, self._phases(), self.target, self.cfg)
         live = live_plan(self.files, states, self.target)
         if allow is None:
             allow = frozenset(u for u in self.snaps if u not in holds)
@@ -622,6 +686,7 @@ class _Step:
                 refusals[unit] = (
                     reason or f"waits for the plan step of this run (plan {live.plan_id if live else plan_id})"
                 )
+        accepted = self._accepted(plan_id or (live.plan_id if live else None), allow)
         pending = frozenset(
             ctx.state.current
             for ctx in self.ctxs.values()
@@ -630,7 +695,40 @@ class _Step:
         return PlanStep(
             allow=allow, actions=(*self.actions, *extra), start_next_run=start_next_run,
             plan_id=plan_id or (live.plan_id if live else None), refusals=refusals, pending_starts=pending,
+            accepted=accepted,
         )  # fmt: skip
+
+    def _accepted(self, plan_id: str | None, allow: frozenset[str]) -> dict[str, tuple[dict[str, Any], ...]]:
+        """The accepted review items each allowed unit of the plan carries to its run: the items of the activation
+        (`activated_accepted`) whose subject is the unit or its batch, each finding with its id (L4-YOLO-028)."""
+        ctx = self.ctxs.get(plan_id) if plan_id else None
+        if ctx is None or ctx.file.plan is None or not ctx.state.activated_accepted:
+            return {}
+        out: dict[str, tuple[dict[str, Any], ...]] = {}
+        for batch in ctx.file.plan.batches:
+            for unit in batch.units:
+                if unit.id not in allow:
+                    continue
+                items = tuple(
+                    {
+                        "subject": subject,
+                        "reason": data.get("reason", ""),
+                        "by": data.get("by", ""),
+                        "actor": data.get("actor", ""),
+                        "findings": [
+                            {
+                                "id": finding_id(subject, f),
+                                **{k: f.get(k, "") for k in ("criterion", "severity", "text")},
+                            }
+                            for f in data.get("findings") or ()
+                        ],
+                    }
+                    for subject in (unit.id, f"batch:{batch.id}")
+                    if (data := ctx.state.activated_accepted.get(subject)) is not None
+                )
+                if items:
+                    out[unit.id] = items
+        return out
 
     # --- writing ----------------------------------------------------------------------------------------------------
 
@@ -778,7 +876,7 @@ class _Step:
         current = {u: self._digest(u, i.folder) for u, i in folders.items()}
         if self._reviewed_current(state, digest, current):
             return None
-        infos = unit_infos(self.app.repo, self.found, plan.known_ids())
+        infos = unit_infos(self.app.repo, self.found, plan.known_ids(), target=plan.target)
         held = {unit: pid for unit, (pid, _) in holds_of(self._states(), self.files).held.items()}
         admission = admit(
             plan,
@@ -794,8 +892,14 @@ class _Step:
             if state.status == "refused" and last is not None and last.data.get("findings") == findings:
                 return None
             self._write(ctx, [self._event("plan.refused", plan_digest=digest, findings=findings)])
-            self._line(ctx.plan_id, f"refused: {len(findings)} finding(s): {findings[0]['text']}")
+            self._refusal_lines(ctx.plan_id, findings)
             return self._after_review(ctx)
+        judge: dict[str, str] = {}
+
+        def sandbox_for(adapter: str, profile: str) -> Sandbox:  # the step's own sandbox; the profile goes on the event
+            judge["profile"] = profile
+            return self.sandbox or select_sandbox(self.cfg.sandbox, self.app.environ, repo=self.app.repo)
+
         try:
             result, cost = review_plan_costed(
                 self.app,
@@ -806,6 +910,8 @@ class _Step:
                 rev=rev,
                 adapters=self.adapters,
                 sandbox=self.sandbox,
+                prior=prior_entries(ctx.read.events, PROMPT_VERSION),
+                sandbox_for=sandbox_for,
                 done=done_units(plan, state),
                 delivered=delivered_on_target(
                     archived_at(self.git, rev, self.cfg), {u: s.state.phase for u, s in self.snaps.items()}
@@ -820,16 +926,22 @@ class _Step:
         order = list(admission.order)
         if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
             events.append(self._event("plan.admitted", plan_digest=digest, order=order, merge=plan.merge))
-        units = {
-            uid: {"verdict": v.verdict, "digest": v.digest, "findings": list(v.findings)}
-            for uid, v in result.units.items()
-        }
+        batch_verdicts = review_batches(plan, result)
+        units = {uid: _entry(v, digest=v.digest) for uid, v in result.units.items()}
+        members = {b.id: [u.id for u in b.units] for b in plan.batches}
         batches = {
-            bid: {"verdict": v.verdict, "findings": list(v.findings)} for bid, v in review_batches(plan, result).items()
+            bid: _entry(v, digests={u: current[u] for u in members.get(bid, ()) if u in current})
+            for bid, v in batch_verdicts.items()
         }
+        extra = {"source": "ci", **({"judge": judge["profile"]} if "profile" in judge else {})}
         events.append(
             self._event(
-                "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, units=units, batches=batches
+                "plan.reviewed",
+                plan_digest=digest,
+                prompt_version=PROMPT_VERSION,
+                units=units,
+                batches=batches,
+                **extra,
             )
         )
         if cost > 0:
@@ -840,9 +952,24 @@ class _Step:
             )  # fmt: skip
             events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
         self._write_review(ctx, events, digest)
-        verdicts = ", ".join(f"{u}={v.verdict}" for u, v in result.units.items())
-        self._line(ctx.plan_id, f"reviewed ({verdicts})")
+        subjects = [*result.units.values(), *batch_verdicts.values()]
+        ready = sum(v.verdict == "READY" for v in subjects)
+        judged = sum(v.material is not None and v.reused_from is None for v in subjects)
+        reused = sum(v.reused_from is not None for v in subjects)
+        self._line(
+            ctx.plan_id,
+            f"reviewed: {ready} READY, {len(subjects) - ready} not READY, {judged} judged, {reused} reused "
+            f"(l4 yolo findings {ctx.plan_id})",
+        )
         return self._after_review(ctx)
+
+    def _refusal_lines(self, plan_id: str, findings: Sequence[Mapping[str, str]]) -> None:
+        """One line of the log per finding of a refused plan, in full, at most `_REFUSAL_LINES`; the rest by the command
+        that prints them all (L4-ADO-008). The ledger keeps every finding."""
+        for finding in findings[:_REFUSAL_LINES]:
+            self._line(plan_id, f"refused: {' '.join(str(finding['text']).split())}")
+        if len(findings) > _REFUSAL_LINES:
+            self._line(plan_id, f"… and {len(findings) - _REFUSAL_LINES} more: l4 yolo check {plan_id}")
 
     def _write_review(self, ctx: _Ctx, events: Sequence[PlanEvent], digest: str) -> None:
         """The review is paid for: when the lease is lost, the ref is read again and the same facts are appended once
@@ -1078,6 +1205,8 @@ class _Step:
         unit = state.current
         if state.wait_reason == MERGE_NOT_READY:
             return self._merge_wait_gone(ctx, unit)
+        if state.wait_reason == ACCEPTED_FINDING_OPEN:
+            return self._accepted_wait_gone(ctx, unit)
         if state.wait_reason == RUN_NOT_STARTED:
             # (`unit_not_started`, the wait of a unit with nothing to run, is not this one: it is read below, as ever)
             if unit is None or not_started_pending(ctx.read.events, unit) is None:
@@ -1146,9 +1275,10 @@ class _Step:
         branch, a PR head that differs from the branch tip, ...): nothing but a person changes that, so the plan waits
         with `merge_not_ready` and the detail on record, once. `_cause_gone` wakes it when the merge changes."""
         detail = self._merge_not_ready[unit]
-        head = self._merge_heads.get(unit)  # recorded: the next runs ask the forge about this head once, not again
-        self._write(ctx, [self._event("plan.waiting", reason=MERGE_NOT_READY, unit=unit, detail=detail, head=head)])
-        self._line(ctx.plan_id, f"waiting ({MERGE_NOT_READY}, {unit}): {detail}")
+        reason = self._merge_wait_reason.get(unit, MERGE_NOT_READY)
+        head = self._merge_heads.get(unit) if reason == MERGE_NOT_READY else None  # the next runs ask the forge once
+        self._write(ctx, [self._event("plan.waiting", reason=reason, unit=unit, detail=detail, head=head)])
+        self._line(ctx.plan_id, f"waiting ({reason}, {unit}): {detail}")
         return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
 
     def _merge_wait_gone(self, ctx: _Ctx, unit: str | None) -> str | None:
@@ -1176,6 +1306,53 @@ class _Step:
         if probe.status == "not_ready" and probe.detail != NO_LONGER_ALLOWED:
             return f"the cause is gone: the merge of {unit} is not ready for another reason ({probe.detail})"
         return f"the cause is gone: the merge of {unit} can go on"
+
+    def _accepted_open(self, ctx: _Ctx, snap: UnitSnapshot) -> str | None:
+        """Fail closed (D8.4): the accepted findings of the unit and its batch that no judge of the latest PASS round
+        answered `addressed: true`, as the wait detail (`<unit>: F-… not addressed: <evidence>; …`); None when none is
+        open. An id without an answer is open (`no answer recorded`)."""
+        unit = snap.ref.id
+        completes = self._completes_batch(ctx, unit)
+        ids = [
+            f["id"]
+            for item in self._accepted(ctx.plan_id, frozenset({unit})).get(unit, ())
+            if completes or not str(item["subject"]).startswith("batch:")
+            for f in item["findings"]
+        ]  # batch-level items travel to every unit, but only the unit that completes the batch must have them answered
+        held = [fid for fid in dict.fromkeys(ids) if fid not in snap.state.accepted_addressed]
+        if not held:
+            return None
+        why = (f"{fid} not addressed: {snap.state.accepted_evidence.get(fid) or 'no answer recorded'}" for fid in held)
+        return f"{unit}: {'; '.join(why)}"[:MAX_WAIT_DETAIL]
+
+    @staticmethod
+    def _completes_batch(ctx: _Ctx, unit: str) -> bool:
+        """True when every other unit of the unit's batch is integrated: this merge completes the batch."""
+        plan = ctx.file.plan
+        if plan is None:
+            return True
+        for batch in plan.batches:
+            if any(u.id == unit for u in batch.units):
+                return all(u.id == unit or u.id in ctx.state.integrated for u in batch.units)
+        return True
+
+    def _accepted_wait_gone(self, ctx: _Ctx, unit: str | None) -> str | None:
+        """Why a plan waiting with `accepted_finding_open` may go on, None while the same findings are open (the detail
+        on record). The unit leaves review or has work to do again, a later PASS round addressed the findings, or the
+        evidence changed (the wait is then recorded again with it): gone."""
+        snap = self.snaps.get(unit) if unit else None
+        if snap is None:
+            return f"the cause is gone: {unit or 'the current unit'} is not among the units of the target"
+        phase = snap.state.phase or ""
+        if phase != "in_review" or self._unit_action(snap) in _ACTIONABLE:
+            return f"the cause is gone: {unit} is {phase or 'not started'}"
+        now = self._accepted_open(ctx, snap)
+        if now is None:
+            return f"the cause is gone: the accepted findings of {unit} are addressed"
+        waiting = _last(ctx.read.events, "plan.waiting", unit)
+        if now != (str(waiting.data.get("detail") or "") if waiting is not None else ""):
+            return f"the cause is gone: the accepted findings of {unit} are open for another reason ({now})"
+        return None
 
     # --- the guarded merge, post-merge profile, batches, completion ------------------------------------------------
 
@@ -1210,6 +1387,10 @@ class _Step:
             forge = self._forge_for_merge()
         except ForgeUnavailable as exc:
             return self._stop(ctx, "merge_refused", f"no forge to ask: {exc}", unit)
+        if (held := self._accepted_open(ctx, snap)) is not None:  # D8.4: before anything is asked of the forge
+            self._line(ctx.plan_id, f"{unit} is not merged: an accepted finding is not addressed")
+            self._merge_not_ready[unit], self._merge_wait_reason[unit] = held, ACCEPTED_FINDING_OPEN
+            return None
         out = merge_guarded(
             self.app, self.cfg, self.git, forge, snap, sleep=self.sleep, **self._reread(ctx, unit),
             before_push=lambda to_be: self._merge_requested(ctx, unit, to_be),
@@ -1608,6 +1789,7 @@ __all__ = [
     "PlanStep",
     "REVIEW_KEY",
     "auto_plan_units",
+    "config_holds",
     "failed_plan_step",
     "fetch_cause",
     "live_plan",

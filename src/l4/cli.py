@@ -90,6 +90,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--forge-token-env", "forge_token_env",
              help="With --action: forge.token_env, the secret the job reads the forge token from "
                   "(default: GITHUB_TOKEN, the workflow's own)."),
+        _flag("--hold-existing", "hold_existing",
+              help="Write the ids of the units found now as yolo.hold: none of them runs until you remove it."),
+        _opt("--s1", "s1", type=click.Choice(["laya", "jev", "none"]), default="laya", show_default=True,
+             help="The System One profile to write: laya (local, no key), jev (TypeSafe, TYPESAFE_API_KEY) or none."),
     ]),
     "upgrade": ("Bring the vendored harness, the CI template and the shim up to the harness checkout.", lambda: [
         _opt("--harness", "harness", type=click.Path(exists=True, file_okay=False, path_type=Path),
@@ -221,17 +225,33 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
         click.Argument(["plan"]),
     ]),
-    "yolo review": ("Ask CI to review a delivery plan (--local: review it here).", lambda: [
+    "yolo review": ("Ask CI to review a plan (--local: here; --worktree: the working tree, before the push).", lambda: [
         click.Argument(["plan"]),
         _flag("--local", "local", help="Run the readiness review on this machine and record it."),
+        _flag("--worktree", "worktree", help="Review the working tree here, before the push (a dry run)."),
+        _flag("--record", "record", help="With --worktree: record the review in the plan ledger (clean tree only)."),
+        _opt("--fresh", "fresh", multiple=True, help="With --worktree: judge this subject again (repeatable)."),
+        _flag("--json", "as_json", help="With --worktree: print the findings as JSON (as l4 yolo findings --json)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch."),
+    ]),
+    "yolo findings": ("Show the findings of the latest review of a plan, with how to resolve each.", lambda: [
+        click.Argument(["plan"]), click.Argument(["subject"], required=False),
+        _flag("--all", "show_all", help="Also the READY subjects, minor findings, assumptions and missing."),
+        _flag("--json", "as_json"),
+        _flag("--worktree", "worktree", help="The latest dry run of review --worktree (local), not the ledger."),
+    ]),
+    "yolo accept": ("Accept a subject's review as it is, with a reason for the implementer (audited).", lambda: [
+        click.Argument(["plan"]), click.Argument(["subject"]),
+        _opt("--reason", "reason", required=True, help="What the implementer should do (kept in the plan ledger)."),
+        _flag("--withdraw", "withdraw", help="Withdraw an acceptance."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
     ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan is activated (kept in the plan ledger)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
-    "yolo status": ("Show a delivery plan (or all of them): units, usage, the stop or wait, and Next.", lambda: [
+    "yolo status": ("Show a plan (or all): units, review, acceptances, usage, the stop or wait, Next.", lambda: [
         click.Argument(["plan"], required=False), _flag("--json", "as_json"),
     ]),
     "yolo cancel": ("Cancel a delivery plan: nothing more is dispatched or merged.", lambda: [
@@ -297,7 +317,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "ci render-child": ("Print the GitLab child pipeline.", lambda: [
         _opt("--plan", "plan", required=True, type=click.Path(dir_okay=False, path_type=Path)),
     ]),
-    "ci cache-key": ("Print the key suffix of a CI cache (clis: catalog pins and config CLIs).", lambda: [
+    "ci cache-key": ("Print the key of a CI cache (clis: a suffix; laya: the whole key, or nothing).", lambda: [
         click.Argument(["cache"], type=str),
     ]),
     "ci render-setup": ("Print the runner setup script (l4-setup.sh) for bash.", lambda: []),

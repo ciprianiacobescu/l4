@@ -14,10 +14,12 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from l4.accepted import read_accepted
 from l4.implementer.prompt import data_block, defuse
 from l4.implementer.tdd import RoleLimit
 from l4.llm.agent_judge import LLMBackend, Msg, StructuredResult, render_prompt
@@ -29,7 +31,8 @@ from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    7  # 7: the feedback block, its rule and the reply's `feedback` array; 6: the round-outputs block and its rule;
+    8  # 8: the accepted review findings block, its rule and the reply's `accepted` array;
+    # 7: the feedback block, its rule and the reply's `feedback` array; 6: the round-outputs block and its rule;
     # 5: the Owner changes block; 4: the test conventions block; 3: a spec gap names its criterion
 )
 MAX_REPAIR_ECHO_CHARS = 8_000
@@ -100,12 +103,22 @@ class FeedbackAnswer(_Open):
     evidence: str
 
 
+class AcceptedAnswer(_Open):
+    """The judge's answer for one finding of the `accepted` block (L4-YOLO-028): the id is the finding's own
+    (`yolo.findings.finding_id`: `F-` and six hex digits)."""
+
+    id: str = Field(pattern=r"^F-[0-9a-f]{6}$")
+    addressed: bool
+    evidence: str
+
+
 class JudgeVerdict(_Open):
     criteria: list[CriterionVerdict]
     test_adequacy: list[TestAdequacy]
     findings: list[JudgeFinding]
     riskiest_assumptions: list[str] = Field(min_length=3, max_length=3)
     feedback: list[FeedbackAnswer] | None = None
+    accepted: list[AcceptedAnswer] | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +182,12 @@ change. Answer in the reply's `feedback: [{id, addressed, evidence}]`, one entry
 when the diff does what the item asks (and, for a config item, reads its variable); `evidence` is the file:line of the \
 diff that shows it, or what is still missing. The harness decides from your answers: say false when the diff does not \
 show it. Without such a block, leave `feedback` out.
+- When the prompt has a <l4:data kind="accepted"> block, each finding in it is a gap of the specification that a \
+person accepted, with the reason they gave for how the implementer should handle it. Answer in the reply's \
+`accepted: [{id, addressed, evidence}]`, one entry per finding id: `addressed` is true only when the diff handles \
+the gap as the reason says; `evidence` is the file:line of the diff that shows it, or what is still missing. Your \
+answers are evidence for the harness: they do not change any criterion verdict, and a gap is no reason to fail a \
+criterion the spec states. Without such a block, leave `accepted` out.
 - test_adequacy: one entry per test of the gate report you rely on (does it check the criterion's observable \
 outcome?); an empty list when you rely on none.
 - riskiest_assumptions: exactly three things that, if wrong, would make your verdicts wrong.
@@ -231,6 +250,37 @@ def _feedback_block(items: Sequence[FeedbackRef]) -> str:
 
 
 @dataclass(frozen=True)
+class AcceptedRef:
+    """One finding a person accepted, as the unit's `.l4/review-accepted.json` carries it, and its item's reason."""
+
+    id: str
+    criterion: str
+    severity: str
+    text: str
+    reason: str
+
+
+def accepted_refs(unit_folder: Path) -> list[AcceptedRef]:
+    """The findings of the unit's carrier file (`l4.accepted.read_accepted`, the one reader and its rules), flat, each
+    with the reason of its item."""
+    return [
+        AcceptedRef(f["id"], f["criterion"], f["severity"], f["text"], item["reason"])
+        for item in read_accepted(unit_folder)
+        for f in item["findings"]
+    ]
+
+
+def _accepted_block(items: Sequence[AcceptedRef]) -> str:
+    """`<l4:data kind="accepted">`: each finding's id, criterion and text and the person's reason. Defused like every
+    other block (the harness redacts the whole prompt afterwards)."""
+    sections = [
+        f"### {i.id} [{i.criterion}, {i.severity}]\nFinding: {i.text.strip()}\nReason a person gave: {i.reason.strip()}"
+        for i in items
+    ]
+    return '<l4:data kind="accepted">\n' + defuse("\n\n".join(sections)) + "\n</l4:data>"
+
+
+@dataclass(frozen=True)
 class JudgePrompt:
     system: str
     user: str
@@ -252,13 +302,15 @@ def build_judge_prompt(
     owner_changes: Sequence[tuple[str, str]] = (),
     round_outputs: Sequence[RoundOutput] = (),
     feedback: Sequence[FeedbackRef] = (),
+    accepted: Sequence[AcceptedRef] = (),
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
     its test conventions (skip helpers and markers, read at the base: `l4.verifier.conventions`), and the files only the
     project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and what the
     harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests), and the
-    feedback items taken and not yet addressed (`feedback`, L4-FBK-007). `redact` runs
+    feedback items taken and not yet addressed (`feedback`, L4-FBK-007), and the review findings a person accepted
+    (`accepted`, L4-YOLO-028). `redact` runs
     over the whole text before it is hashed (L4-OBS-002), so `sha256` is the hash of the prompt document the judge was
     sent (`render_prompt`: system, blank line, user; the schema instruction a prompt-contract adapter appends is not
     part of it) and of the published `.prompt.md` (HB-5)."""
@@ -290,6 +342,11 @@ def build_judge_prompt(
         if feedback
         else []
     )
+    accepted_block = (
+        ["## Accepted review findings (answer each in the reply's accepted)\n" + _accepted_block(accepted)]
+        if accepted
+        else []
+    )
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
@@ -300,6 +357,7 @@ def build_judge_prompt(
         *owners,
         *written,
         *asked,
+        *accepted_block,
         "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
         + data_block("notes_for_verifier", notes_for_verifier or "(none)"),
     ]

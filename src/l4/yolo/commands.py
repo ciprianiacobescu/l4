@@ -28,6 +28,7 @@ import contextlib
 import json
 import logging
 import shutil
+import sys
 import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from typing import Any
 import click
 
 from l4.availability.errors import RoleUnavailable
+from l4.ci.detect import in_ci
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
@@ -45,6 +47,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
 from l4.forge.gitlab import push_auth_config
+from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.specs.providers import providers_for
@@ -52,6 +55,9 @@ from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
+from l4.yolo import accept as accepting
+from l4.yolo import findings as fnd
+from l4.yolo import judge_sandbox
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
@@ -78,6 +84,7 @@ from l4.yolo.model import (
     PlanInvalid,
     PlanMoved,
     PlanState,
+    ReviewResult,
     UnitInfo,
 )
 from l4.yolo.plans import (
@@ -86,12 +93,13 @@ from l4.yolo.plans import (
     active_on,
     archived_at,
     held_by,
+    holds_of,
     plan_files,
     plan_files_at,
     readable_unit_ids,
     unit_infos,
 )
-from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, Budgets, delivered_on_target, read_folder, review_plan_costed
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
 
@@ -138,6 +146,7 @@ class _Ctx:
         return PlanStore(
             self.git, plan_id, self.fetch_cfg, push_config=self.push_cfg, token_env=self.cfg.forge.token_env,
             environ=self.app.environ, redact=self.app.redactor.redact_text,
+            platform=push_platform(self.cfg, self.app.environ, self.app.repo),
         )  # fmt: skip
 
     def say(self, text: str = "") -> None:
@@ -230,7 +239,7 @@ def _workspace(ctx: _Ctx, rev: str) -> Iterator[tuple[Path, Git]]:
 def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> _Units:
     with _workspace(ctx, rev) as (path, git):
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
-        infos = unit_infos(path, found, wanted, check_intake=intake)
+        infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target)
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
     return _Units(infos, phases, costs)
@@ -276,6 +285,12 @@ class ReviewView:
     kind: str
     problems: tuple[str, ...] = ()
     prompt_changed: bool = False  # stale because the review prompt changed since the review was made
+    accepted: tuple[dict[str, Any], ...] = ()  # the acceptances of items that are not READY: subject, by, actor, ...
+
+    @property
+    def cleared(self) -> list[dict[str, Any]]:
+        """The acceptances that hold (`accept.holds`): their items no longer stop the activation."""
+        return [a for a in self.accepted if a["holds"]]
 
     @property
     def ready(self) -> bool:
@@ -296,12 +311,14 @@ def _rejected_at(events: Sequence[PlanEvent], state: PlanState) -> str | None:
 
 
 def _first_line(findings: Any) -> str:
+    """The most severe finding (`findings.most_severe`: blocking, then major, then minor; the judge's order within a
+    severity) as `<criterion>: <first line of its text>`."""
     rows = [f for f in findings or [] if isinstance(f, dict)]
-    rows.sort(key=lambda f: 0 if f.get("severity") == "blocking" else 1)
-    if not rows:
+    top = fnd.most_severe(rows)
+    if top is None:
         return "no finding recorded"
-    text = str(rows[0].get("text") or "").strip().splitlines()
-    criterion = rows[0].get("criterion")
+    text = str(top.get("text") or "").strip().splitlines()
+    criterion = top.get("criterion")
     head = text[0] if text else "no text"
     return f"{criterion}: {head}" if criterion else head
 
@@ -328,15 +345,31 @@ def _review_view(
         return ReviewView("stale")
     latest: dict[str, Any] = next((e.data for e in reversed(events) if e.type == "plan.reviewed"), {})
     problems = []
+    accepted: list[dict[str, Any]] = []
+    held = accepting.holds(state, latest)
     for name in wanted:
         verdict = state.review[name]
         if verdict == "READY":
             continue
+        given = state.accepted.get(name)
+        if given is not None:
+            holds = bool(held.get(name)) and verdict == "NEEDS_REVISION"
+            accepted.append(
+                {
+                    "subject": name, "by": given.get("by"), "actor": given.get("actor"),
+                    "reason": given.get("reason"), "findings": list(given.get("findings") or []), "holds": holds,
+                }
+            )  # fmt: skip
+            if holds:
+                continue
         group, _, ident = name.partition(":") if name.startswith("batch:") else ("units", "", name)
         entry = (latest.get("batches" if group == "batch" else "units") or {}).get(ident) or {}
         label = f"batch {ident}" if group == "batch" else name
-        problems.append(f"{label}: {verdict}: {_first_line(entry.get('findings'))}")
-    return ReviewView("current", tuple(problems))
+        line = f"{label}: {verdict}: {_first_line(entry.get('findings'))}"
+        if given is not None:
+            line += f" (the acceptance by {given.get('by')} was for other material)"
+        problems.append(line)
+    return ReviewView("current", tuple(problems), accepted=tuple(accepted))
 
 
 # --- limits -------------------------------------------------------------------------------------------------------
@@ -502,6 +535,44 @@ def _print_findings(ctx: _Ctx, lines: Sequence[str]) -> None:
         ctx.say(f"  {line}")
 
 
+def budget_overruns(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, UnitInfo], rev: str) -> list[str]:
+    """`material_over_budget` lines for the files the readiness review would cut or leave out (L4-ADO-010), read as the
+    review reads them (`read_folder`): a planned unit's own folder at the folder budget, a unit named in a `depends_on`
+    at the dependency budget, in the prerequisite order. A dependency's line starts with `warning: ` (the review lists
+    it as not shown in full without blocking). Units are read at `rev`, not on their branches."""
+    limits = Budgets.of(cfg)
+
+    def lines(folder: str, *, budget: int, order: str) -> list[tuple[str, str]]:
+        text = read_folder(git, rev, folder, budget=budget, file_budget=limits.file, order=order)
+        sizes = dict(text.sizes)
+        found = [(path, f"{n} characters cut") for path, n in text.cut]
+        found += [
+            (o.path, f"omitted: the folder budget is spent ({sizes.get(o.path, 0)} characters)")
+            for o in text.omitted
+            if o.size_limit
+        ]
+        return found
+
+    out: list[str] = []
+    dependents: dict[str, list[str]] = {}
+    for unit in plan.units():
+        if unit.id in units:
+            out += [
+                f"material_over_budget: {unit.id}: {path}: {what}"
+                for path, what in lines(units[unit.id].folder, budget=limits.folder, order="sorted")
+            ]
+        for dep in unit.depends_on:
+            if dep != unit.id and unit.id not in dependents.setdefault(dep, []):
+                dependents[dep].append(unit.id)
+    for dep, by in dependents.items():
+        if dep in units:
+            out += [
+                f"warning: material_over_budget: {dep}: {path}: {what} (as a dependency of {', '.join(by)})"
+                for path, what in lines(units[dep].folder, budget=limits.dependency, order="prerequisite")
+            ]
+    return out
+
+
 def run_check(app: AppContext, *, plan: str) -> ExitCode:
     """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write."""
     plan_id = _plan_id(plan)
@@ -530,6 +601,8 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
         return ExitCode.USAGE_ERROR
     ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
+    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, units.infos, rev):  # a warning: the exit code stays 0
+        ctx.say(line)
     return ExitCode.OK
 
 
@@ -620,18 +693,55 @@ def run_draft(
 
 
 def _verdict_json(verdict: Any) -> dict[str, Any]:
-    return {
+    out = {
         "verdict": verdict.verdict,
         "digest": verdict.digest,
         "findings": [dict(f) for f in verdict.findings],
         "assumptions": list(verdict.assumptions),
         "missing": list(verdict.missing),
     }
+    if getattr(verdict, "material", None) is not None:  # the key an acceptance is bound to (L4-YOLO-027)
+        out["material"] = verdict.material
+    if getattr(verdict, "reused_from", None) is not None:
+        out["reused_from"] = verdict.reused_from
+    return out
 
 
-def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool = False) -> ExitCode:
+def batch_entries(
+    plan: Plan, result: ReviewResult, batches: Mapping[str, Any], entry: Any = _verdict_json
+) -> dict[str, dict[str, Any]]:
+    """The ledger entries of the batches, each with the digests of its units' text as CI records them: `l4 yolo accept`
+    counts a batch's rounds by them."""
+    members = {b.id: [u.id for u in b.units] for b in plan.batches}
+    out: dict[str, dict[str, Any]] = {}
+    for bid, verdict in batches.items():
+        digests = {
+            u: result.units[u].digest for u in members.get(bid, ()) if u in result.units and result.units[u].digest
+        }
+        out[bid] = {**entry(verdict), **({"digests": digests} if digests else {})}
+    return out
+
+
+def run_review(
+    app: AppContext,
+    *,
+    plan: str,
+    local: bool = False,
+    no_run: bool = False,
+    worktree: bool = False,
+    record: bool = False,
+    fresh: Sequence[str] = (),
+    as_json: bool = False,
+) -> ExitCode:
     """Without `--local`: ask CI to review the plan (`start_run`); the review itself is the CI step's. With `--local`:
-    admit and review here, recording `plan.admitted` and `plan.reviewed` (or `plan.refused`) as the CI step would."""
+    admit and review here, recording `plan.admitted` and `plan.reviewed` (or `plan.refused`) as the CI step would.
+    With `--worktree`: review the working tree (`review_worktree`); `--record` and `--fresh` need it (exit 2)."""
+    if not worktree and (record or fresh or as_json):
+        raise L4Exit(ExitCode.USAGE_ERROR, "review: --record, --fresh and --json need --worktree")
+    if worktree:
+        from l4.yolo.review_worktree import run_review_worktree  # late: that module reads this one
+
+        return run_review_worktree(app, plan=plan, fresh=tuple(fresh), record=record, no_run=no_run, as_json=as_json)
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="review")
@@ -676,6 +786,8 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         if view.kind == "current":
             ctx.say(f"{plan_id}: already reviewed for these inputs ({'READY' if view.ready else 'not READY'})")
             _print_findings(ctx, view.problems)
+            if view.problems:
+                ctx.say(f"Next: l4 yolo findings {plan_id}")
             return ExitCode.OK
         if seen is not None:
             ctx.say(
@@ -687,6 +799,24 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         if not no_run:
             ctx.say(start_run_line(ctx.app, ctx.cfg))
         return ExitCode.OK
+    chosen: dict[str, str] = {}
+
+    def sandbox_for(adapter: str, profile: str) -> Any:
+        """The judge's sandbox (design D5): bwrap, or none for a tool-less judge outside CI, said out loud."""
+        sandbox, label = judge_sandbox.choose(
+            ctx.cfg,
+            ctx.app.environ,
+            ctx.app.repo,
+            adapter=adapter,
+            in_ci=in_ci(ctx.app.environ),
+            profile=profile,
+        )
+        chosen.update(sandbox=label, judge=profile)
+        if label == "none" and ctx.cfg.sandbox.mode != "none":
+            why = judge_sandbox.unsandboxed_reason(ctx.app.environ, ctx.app.repo)
+            ctx.say(f"judge unsandboxed ({why}): it has no tools and runs in an empty folder")
+        return sandbox
+
     try:
         result, cost = review_plan_costed(
             ctx.app,
@@ -697,6 +827,8 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
             rev=rev,
             done=done_units(parsed, state),
             delivered=delivered_on_target(archived_at(ctx.git, rev, ctx.cfg), units.phases),
+            prior=fnd.prior_entries(read.events, PROMPT_VERSION),
+            sandbox_for=sandbox_for,
         )
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None
@@ -710,8 +842,9 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
         _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
         _event(
             "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, cost_usd=cost, by=ctx.who(),
+            source="local", **chosen,
             units={u: _verdict_json(v) for u, v in result.units.items()},
-            batches={b: _verdict_json(v) for b, v in batches.items()},
+            batches=batch_entries(parsed, result, batches),
         ),
     ]  # fmt: skip
     if cost > 0:  # the judge's cost is the plan's (R1): the running total of `plan:review`, attempt 0
@@ -726,7 +859,10 @@ def run_review(app: AppContext, *, plan: str, local: bool = False, no_run: bool 
     for name, verdict in [*result.units.items(), *((f"batch {b}", v) for b, v in batches.items())]:
         line = f"  {name}: {verdict.verdict}"
         ctx.say(line if verdict.verdict == "READY" else f"{line}: {_first_line(verdict.findings)}")
-    ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
+    if any(v.verdict != "READY" for v in (*result.units.values(), *batches.values())):
+        ctx.say(f"Next: l4 yolo findings {plan_id}")
+    else:
+        ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
     return ExitCode.OK
 
 
@@ -803,6 +939,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
                 [
                     f"activate: the review is not READY for {len(view.problems)} item(s):",
                     *(f"  {p}" for p in view.problems),
+                    f"Next: l4 yolo findings {plan_id}",
                 ]
             ),
         )
@@ -820,11 +957,21 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     current = state.current
     if current is not None and (current not in admission.order or unit_blocker(parsed, state, current) is not None):
         current = None
+    # an acceptance that holds is frozen with the activation; an agent's come first (the person sees them first)
+    cleared = sorted(view.cleared, key=lambda a: a["actor"] != "agent")
+    accepted = {
+        a["subject"]: {"findings": a["findings"], "reason": a["reason"], "by": a["by"], "actor": a["actor"]}
+        for a in cleared
+    }
     event = _event(
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
         merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base, current=current,
+        accepted=accepted,
     )  # fmt: skip
     _append(store, [event], read.head)
+    for a in cleared:
+        mark = " (accepted by an agent)" if a["actor"] == "agent" else ""
+        ctx.say(f"accepted: {a['subject']} by {a['by']} ({a['actor']}): {a['reason']}{mark}")
     ctx.say(f"{plan_id}: activated on {parsed.target} ({len(parsed.unit_ids())} unit(s), merge: {parsed.merge})")
     if not no_run:
         ctx.say(start_run_line(ctx.app, ctx.cfg))
@@ -938,7 +1085,10 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
         if view is None or view.kind != "current":
             return f"l4 yolo review {plan_id}"
         if view.problems:
-            return f"fix the specs named above, push them, then l4 yolo review {plan_id}"
+            return (
+                f"l4 yolo findings {plan_id}: fix the specs it names and push them, or review the working tree "
+                f"first (l4 yolo review {plan_id} --worktree)"
+            )
         return f"l4 yolo activate {plan_id} --reason TEXT"
     if status == "waiting" and state.wait_reason == "run_not_started":
         return (
@@ -973,6 +1123,8 @@ def _describe(
         "plan_id": pid, "status": state.status, "target": plan.target if plan else None,
         "merge": plan.merge if plan else state.merge, "activated_by": state.activated_by,
     }  # fmt: skip
+    if file is not None and file.plan is not None and state.status not in (*FINAL, "active"):
+        out["holds"] = len(holds_of({pid: state}, [file]).held)  # units no run touches until the plan is fixed
     if file is not None and file.invalid is not None:
         held = readable_unit_ids(file.text)  # R8: an invalid plan file still holds the units its JSON names
         out["problems"] = [
@@ -1000,7 +1152,11 @@ def _describe(
         view = _review_view(
             plan, file.text, state, read.events, _digests(ctx, plan, units), prompt_matters=needs_review
         )
-        out["review"] = {"state": view.kind, "problems": list(view.problems)}
+        out["review"] = {
+            "state": view.kind,
+            "problems": list(view.problems),
+            "accepted": [{k: a[k] for k in ("subject", "by", "actor", "reason", "holds")} for a in view.accepted],
+        }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
         waiting = next_eligible(plan, state, units.phases).waiting
@@ -1050,12 +1206,22 @@ def _render(d: dict[str, Any]) -> str:
     if d.get("target"):
         head += f" (target {d['target']}, merge: {d['merge']})"
     lines = [head, *(f"  {p}" for p in d.get("problems", []))]
+    if d.get("holds"):
+        lines.append(
+            f"  holds {d['holds']} unit{'s' if d['holds'] != 1 else ''}; none of them runs until the plan is fixed, "
+            "completed or its file is removed"
+        )
     if d.get("activated_by"):
         lines.append(f"  activated by {d['activated_by']}")
     if "review" in d and d["status"] in (*_BEFORE_ACTIVATION, "stopped"):
         changed = " (the review prompt changed)" if d["review"].get("prompt_changed") else ""
         lines.append(f"  review: {d['review']['state']}{changed}")
         lines += [f"    {p}" for p in d["review"]["problems"]]
+        lines += [
+            f"    {a['subject']}: accepted by {a['by']} ({a['actor']}): {a['reason']}"
+            for a in d["review"].get("accepted", [])
+            if a["holds"]
+        ]
     if d.get("stop"):
         stop = d["stop"]
         unit = f" [{stop['unit']}]" if stop.get("unit") else ""
@@ -1143,8 +1309,10 @@ def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None], cfg: L4Co
     except GitError:
         return []
     lines = []
+    states = {pid: fold_plan(pid, events) for pid, events in ledgers.items()}
+    held = holds_of(states, list(files.values())).held
     for pid in sorted(ledgers):
-        state = fold_plan(pid, ledgers[pid])
+        state = states[pid]
         if state.status in FINAL:
             continue
         plan = files[pid].plan if pid in files else None
@@ -1152,8 +1320,15 @@ def plan_lines(repo: Path, git: Git, phases: Mapping[str, str | None], cfg: L4Co
         unit = f", unit {state.current} ({phases.get(state.current) or '-'})" if state.current else ""
         cost = effective_limits(state, plan.limits.model_dump(mode="json") if plan else None).cost_usd
         limit = "unlimited" if cost is None else f"${cost:.2f}"
+        holding = sum(1 for owner, _ in held.values() if owner == pid)
+        holds = (
+            f" (holds {holding} unit{'s' if holding != 1 else ''}; none of them runs until the plan is fixed, "
+            "completed or its file is removed)"
+            if state.status != "active" and holding
+            else ""
+        )
         lines.append(
-            f"plan {pid}: {state.status}{unit}, {len(state.integrated)}/{total} integrated, "
+            f"plan {pid}: {state.status}{holds}{unit}, {len(state.integrated)}/{total} integrated, "
             f"${state.used.cost_usd:.2f}/{limit}"
         )
     return lines
@@ -1183,6 +1358,213 @@ def auto_merge_plan_active(repo: Path, git: Git, cfg: L4Config | None = None) ->
     return False
 
 
+# --- l4 yolo findings ----------------------------------------------------------------------------------------------
+
+
+def _stdin_tty() -> bool:
+    return bool(sys.stdin is not None and sys.stdin.isatty())
+
+
+def _latest_review(events: Sequence[PlanEvent]) -> dict[str, Any] | None:
+    return next((dict(e.data) for e in reversed(events) if e.type == "plan.reviewed"), None)
+
+
+def _entry_of(review: Mapping[str, Any], subject: str) -> dict[str, Any] | None:
+    """The subject's entry (`<unit id>` or `batch:<id>`) in the data of a `plan.reviewed` event."""
+    if subject.startswith("batch:"):
+        entry = (review.get("batches") or {}).get(subject[len("batch:") :])
+    else:
+        entry = (review.get("units") or {}).get(subject)
+    return entry if isinstance(entry, dict) and entry.get("verdict") is not None else None
+
+
+def _subject_infos(plan: Plan | None, units: _Units | None) -> dict[str, fnd.UnitInfo]:
+    """What `findings.render` needs to write the `Resolve:` lines: the folder, the batch and the `depends_on` of each
+    unit, and the batch of a `batch:<id>` subject."""
+    infos: dict[str, fnd.UnitInfo] = {}
+    if plan is None:
+        return infos
+    for batch in plan.batches:
+        infos[f"batch:{batch.id}"] = fnd.UnitInfo(batch=batch.id)
+        for unit in batch.units:
+            known = units.infos.get(unit.id) if units else None
+            infos[unit.id] = fnd.UnitInfo(
+                folder=known.folder if known else None, batch=batch.id, depends_on=tuple(unit.depends_on)
+            )
+    return infos
+
+
+def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: Mapping[str, Any]) -> Any:
+    """`can_accept(subject)` for `findings.render`: would `accept.check` let this caller accept the subject now?"""
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
+    target = accepting.target_config(ctx.git, ctx.target_ref)
+
+    def can_accept(subject: str) -> bool:
+        entry = _entry_of(review, subject)
+        if entry is None:
+            return False
+        return accepting.check(state, events, subject, entry, target, who) is None
+
+    return can_accept
+
+
+def run_findings(
+    app: AppContext, *, plan: str, subject: str | None, show_all: bool, as_json: bool, worktree: bool = False
+) -> ExitCode:
+    """`l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]`: the findings of the latest review, each with
+    how to resolve it (L4-YOLO-021). Reads the ledger and the plan file; calls no model and writes nothing. With
+    `--worktree`, the latest `review --worktree` (dry run) from the local cache instead of the ledger. Exit 2 for an
+    unknown plan or subject, else 0 (a plan with no review included)."""
+    if worktree:
+        from l4.yolo.review_worktree import run_findings_worktree  # late: that module reads this one
+
+        return run_findings_worktree(app, plan=plan, subject=subject, show_all=show_all, as_json=as_json)
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    rev = _sync(ctx, who="findings")
+    file = next((f for f in plan_files_at(ctx.git, ctx.target_ref) if f.plan_id == plan_id), None)
+    read = ctx.store(plan_id).read()
+    if file is None and read.head is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"findings: no plan {plan_id} on origin/{ctx.target}")
+    state = fold_plan(plan_id, read.events)
+    review = _latest_review(read.events)
+    if review is None:
+        if as_json:
+            empty = {"schema": fnd.SCHEMA, "plan": plan_id, "base": ctx.target, "plan_digest": None, "subjects": []}
+            ctx.say(json.dumps(empty, indent=2))
+        else:
+            ctx.say(f"{plan_id}: no review yet (l4 yolo review {plan_id}, or --worktree before the push)")
+        return ExitCode.OK
+    if subject is not None and _entry_of(review, subject) is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"findings: {subject} is not in the latest review of {plan_id}")
+    parsed = file.plan if file is not None else None
+    units = _read_units(ctx, rev, parsed.known_ids(), intake=False) if parsed is not None else None
+    options: dict[str, Any] = {
+        "show_all": show_all,
+        "units": _subject_infos(parsed, units),
+        "accepted": state.accepted,
+        "holds": accepting.holds(state, review),
+        "can_accept": _acceptor(ctx, state, read.events, review),
+        "only": subject,
+    }
+
+    def history_of(name: str) -> list[dict[str, Any]]:
+        return fnd.history(read.events, name, PROMPT_VERSION)
+
+    if as_json:
+        ctx.say(json.dumps(fnd.render_json(plan_id, ctx.target, review, history_of, **options), indent=2))
+        return ExitCode.OK
+    lines = fnd.render(plan_id, ctx.target, review, history_of, **options)
+    if lines:
+        for line in lines:
+            ctx.say(line)
+    else:
+        ctx.say(f"{plan_id}: every subject of the latest review is READY (--all lists them)")
+    return ExitCode.OK
+
+
+MAX_REASON = 1000
+
+
+def _digests_of(entry: Mapping[str, Any]) -> dict[str, str]:
+    """The digests an entry judged: a batch's `digests`, else the unit's own."""
+    digests = entry.get("digests")
+    if isinstance(digests, Mapping):
+        return {str(k): str(v) for k, v in digests.items()}
+    return {}
+
+
+def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
+    """`l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]`: record that a person (or, when the target's
+    configuration allows it, an agent) accepts the latest verdict of one subject as it is (L4-YOLO-027, design D7).
+    Reads as `activate` does and writes one event with the lease. A person sees every finding of the subject and
+    types the plan id; `--yes` replaces that only for an agent that `yolo.review.accept_by_agents` lets accept.
+    Exit 2 for every refusal, with the cause and the fix; nothing is recorded then."""
+    text = reason.strip()
+    if not text:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: --reason must say why (what the implementer should do)")
+    if len(text) > MAX_REASON:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: --reason has {len(text)} characters; at most {MAX_REASON}")
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    _sync(ctx, who="accept")
+    _valid(ctx, _file(ctx, plan_id, "accept"), "accept")
+    store = ctx.store(plan_id)
+    read = store.read()
+    state = fold_plan(plan_id, read.events)
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
+    if withdraw:
+        if not (
+            state.status in _BEFORE_ACTIVATION
+            or (state.status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected"))
+        ):
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                f"accept: {plan_id} is {state.status}: the acceptances were frozen at its activation and the runs "
+                "read the frozen ones, so a withdrawal now would change nothing\n"
+                f"Fix: cancel the plan (l4 yolo cancel {plan_id}), or change the spec and review again "
+                f"(l4 yolo review {plan_id})",
+            )
+        if subject not in state.accepted:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} has no acceptance: nothing to withdraw")
+        event = _event("plan.acceptance_withdrawn", subject=subject, reason=text, by=ctx.who(), actor=who[0])
+        _append(store, [event], read.head)
+        ctx.say(f"{plan_id}: the acceptance of {subject} is withdrawn")
+        ctx.say(f"Next: l4 yolo review {plan_id}")
+        return ExitCode.OK
+    review = _latest_review(read.events)
+    if review is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {plan_id} has no review yet: run l4 yolo review {plan_id}")
+    latest = _entry_of(review, subject)
+    if latest is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} is not in the latest review of {plan_id}")
+    refusal = accepting.check(
+        state, read.events, subject, latest, accepting.target_config(ctx.git, ctx.target_ref), who
+    )
+    if refusal is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {refusal.message}\nFix: {refusal.fix}")
+    if latest.get("material") is None:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"accept: the review of {subject} predates material keys, so an acceptance could not be bound to it\n"
+            f"Fix: l4 yolo review {plan_id}",
+        )
+    if who[0] == "person":
+        _show_and_confirm(ctx, plan_id, subject, review, read.events, state)
+    elif not yes:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, "accept: no terminal to ask the plan id on: an agent that may accept passes --yes"
+        )
+    found = [dict(f) for f in latest.get("findings") or []]
+    event = _event(
+        "plan.accepted", subject=subject, material=latest["material"], prompt_version=PROMPT_VERSION,
+        plan_digest=review.get("plan_digest"), digests=_digests_of(latest) or ({subject: latest.get("digest")}),
+        verdict=latest["verdict"], findings=found, findings_sha=fnd.findings_sha(found), reason=text, by=ctx.who(),
+        actor=who[0], marker=who[1], rounds=fnd.rounds_not_ready(read.events, subject),
+    )  # fmt: skip
+    _append(store, [event], read.head)
+    ctx.say(f"accepted: {subject} by {event.data['by']} ({who[0]}): {text}")
+    ctx.say(f"Next: l4 yolo status {plan_id}")
+    return ExitCode.OK
+
+
+def _show_and_confirm(
+    ctx: _Ctx, plan_id: str, subject: str, review: Mapping[str, Any], events: Sequence[PlanEvent], state: PlanState
+) -> None:
+    """Print every finding of the subject, then ask for the plan id; any other answer exits 2 with nothing recorded."""
+    lines = fnd.render(
+        plan_id, ctx.target, review, lambda name: fnd.history(events, name, PROMPT_VERSION), show_all=True,
+        only=subject, accepted=state.accepted, holds=accepting.holds(state, review),
+    )  # fmt: skip
+    for line in lines:
+        ctx.say(line)
+    answer = click.prompt(
+        f"Type the plan id ({plan_id}) to accept the findings of {subject} as they are", default="", show_default=False
+    )
+    if str(answer).strip() != plan_id:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: the plan id was not typed: nothing was recorded")
+
+
 __all__ = [
     "Blocker",
     "Extend",
@@ -1195,7 +1577,9 @@ __all__ = [
     "run_activate",
     "run_cancel",
     "run_check",
+    "run_accept",
     "run_draft",
+    "run_findings",
     "run_report",
     "run_resume",
     "run_review",

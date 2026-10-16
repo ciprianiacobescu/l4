@@ -33,8 +33,10 @@ M1: implementer-tdd-loop 1.6 ODD intake (the rest of it), 1.22/1.23 step keys an
 """
 
 import contextlib
+import json
 import logging
 import math
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -42,11 +44,13 @@ from pathlib import Path
 
 from l4 import cancel
 from l4 import services as services_module
+from l4.accepted import ACCEPTED_FILE, ACCEPTED_SCHEMA
 from l4.agents.base import AgentAdapter, LimitSignal, RunResult
 from l4.agents.factory import RoleUnavailable, Selected
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
+from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.resume_label import halted_section
 from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarified_ids, commit_questions
 from l4.config.defaults import cache_root
@@ -57,8 +61,9 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit, classify_exception, most_severe
 from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
-from l4.forge.pushfail import PushFailed, explain_push_failure
+from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
+from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
 from l4.implementer.reopen import reopen_for_changed_requirements
@@ -77,9 +82,10 @@ from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
-from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit
+from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
 from l4.specs.detect import require_framework
+from l4.specs.openspec import intake_errors, purpose_issues
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, blocked_tasks, question_titles
 from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
@@ -111,9 +117,13 @@ MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many au
 
 log = logging.getLogger("l4.run")
 
+
 ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})
 # the phases in which the intake lint (L4-ODD-004) still matters: from then on the verifier is the judge
 _LINT_PHASES = frozenset({None, Phase.INTAKE, Phase.READY, Phase.IMPLEMENTING, Phase.AWAITING_HUMAN, Phase.CLARIFYING})
+# the phases a new unit passes before implementation starts: the only ones in which the strict OpenSpec validation and
+# the Purpose rule (L4-ADO-007) reject a unit; one already implementing, waiting for a person or clarifying is not
+_OPENSPEC_INTAKE_PHASES = frozenset({None, Phase.INTAKE, Phase.READY})
 # the phases after the hand-off commit H: the unit branch stays at H, so what a run writes from here on goes to the
 # pending ledger of the lock ref (L4-STA-004)
 _AFTER_HAND_OFF = frozenset({Phase.IN_REVIEW, Phase.ARCHIVED, Phase.MERGED})
@@ -212,10 +222,17 @@ class RunWaits:
 
 class Orchestrator:
     def __init__(
-        self, cfg: L4Config, services: Services, waits: RunWaits | None = None, *, take_spec_edit: bool = True
+        self,
+        cfg: L4Config,
+        services: Services,
+        waits: RunWaits | None = None,
+        *,
+        take_spec_edit: bool = True,
+        accepted: tuple[str, tuple[Mapping[str, object], ...]] | None = None,
     ) -> None:
         self.cfg = cfg
         self.services = services
+        self._accepted = accepted  # (plan id, the accepted review items of this unit) from the plan step, or None
         self._takes_spec_edit = take_spec_edit  # `l4 verify` leaves a spec edit for the next `l4 run` (review L3)
         self.state: UnitState = UnitState(unit=services.ref.id)
         self._selected: Selected | None = None
@@ -279,7 +296,7 @@ class Orchestrator:
             self._push_failed = True
             raise explain_push_failure(
                 exc, branch=s.names.branch, token_env=self.cfg.forge.token_env, environ=s.app.environ,
-                redact=s.app.redactor.redact_text,
+                redact=s.app.redactor.redact_text, platform=push_platform(self.cfg, s.app.environ, s.git.repo),
             ) from None  # fmt: skip
         if self._forge is not None:
             try:
@@ -351,12 +368,42 @@ class Orchestrator:
                 self._commit_questions("questions index")
             if self._reentry.answered:
                 self.answers_recorded()
+            if (refused := self._write_accepted()) is not None:
+                return UnitRunResult(self._outcome(before), refused)
             code = self._drive()
         except (RoleUnavailable, RoleLimit) as exc:
             code = self._park(exc)
         except SecretInPush as exc:
             code = self._block_secret(exc)
         return UnitRunResult(self._outcome(before), code)
+
+    def _write_accepted(self) -> ExitCode | None:
+        """The accepted review findings of this unit go into its folder before any agent step, in a checkpoint commit
+        of their own, and only when the bytes differ from the head: the agent step puts the protected `.l4/` paths back
+        to the step's base, which would remove a file that is not committed yet. After the hand-off commit the branch
+        stays at H: nothing is written. A carrier path that is a link, or a folder in the file's place, rejects the
+        unit with that reason (the code is returned); nothing is written."""
+        if self._accepted is None or (self.state.phase and Phase(self.state.phase) in _AFTER_HAND_OFF):
+            return None
+        s = self.services
+        plan_id, items = self._accepted
+        try:
+            if not write_accepted_carrier(s.ref.path, plan_id, items):
+                return None
+        except UnsafeFile as exc:
+            return self._reject([f"the accepted review findings cannot be written: {exc}"])
+        rel = (s.ref.path / ACCEPTED_FILE).resolve().relative_to(s.worktree.resolve()).as_posix()
+        s.git.run("add", "--", rel)
+        if s.git.run("diff", "--cached", "--quiet", check=False).returncode == 0:
+            return None
+        trailers = CommitTrailers(
+            unit=s.ref.id, run_id=s.app.run_id, iteration=max(self.state.iteration, 1),
+            phase=self.state.phase or "intake",
+        )  # fmt: skip
+        s.git.commit(f"docs({s.ref.name}): accepted review findings [skip ci]", trailers)
+        self._start = s.git.rev_parse("HEAD")  # this commit alone must not make the branch worth pushing
+        log.info("%s: %d accepted review item(s) committed in %s", s.ref.id, len(items), ACCEPTED_FILE)
+        return None
 
     def answers_recorded(self) -> None:
         """`question.answered` was just appended (for the unit or for its open fix unit): when that changed which
@@ -533,6 +580,30 @@ class Orchestrator:
         reasons = [
             f"{i.path}{f':{i.line}' if i.line else ''}: {i.message}" for i in report.issues if i.level == "ERROR"
         ]
+        return self._reject(reasons)
+
+    def _validate_openspec(self) -> ExitCode | None:
+        """L4-ADO-007, before any agent or probe and before the scenario lint: the provider's strict validation and
+        the Purpose of a capability new to `openspec/specs/` (L4-OSP-007), as a Kiro unit is validated. Every error
+        is a reason (each cut at 600 characters, an archive refusal with its hint: L4-ADO-008) and rejects the unit."""
+        s = self.services
+        if (Phase(self.state.phase) if self.state.phase else None) not in _OPENSPEC_INTAKE_PHASES:
+            return None
+        target = self.cfg.forge.base_branch
+        try:
+            report = s.provider.validate(s.ref, strict=True)
+        except OpenSpecUnavailable:
+            raise  # as before: the message says to run `l4 doctor`
+        except Exception as exc:  # noqa: BLE001 - a validation that cannot run is a rejection with a reason, not a crash
+            return self._reject([f"validation could not run: {type(exc).__name__}: {exc}"[:600]])
+        reasons = intake_errors(report, target)
+        reasons += intake_errors(
+            ValidationReport(False, tuple(purpose_issues(s.ref.path, s.worktree / "openspec" / "specs"))), target
+        )
+        return self._reject(reasons) if reasons else None
+
+    def _reject(self, reasons: list[str]) -> ExitCode:
+        s = self.services
         s.ledger.append("unit.rejected", reasons=reasons)
         log.error("%s rejected: %s", s.ref.id, "; ".join(reasons))
         self._exit_reason = f"rejected: {'; '.join(reasons)}"[:300]  # a delivery plan records it (L4-YOLO-013)
@@ -548,6 +619,8 @@ class Orchestrator:
             return None
         if s.ref.framework is not Framework.OPENSPEC:
             return self._validate_kiro()
+        if (rejected := self._validate_openspec()) is not None:
+            return rejected
         base = base_criteria(s.worktree / "openspec" / "specs") if s.ref.framework is Framework.OPENSPEC else []
         removed = replaced_requirements(s.ref.path) if s.ref.framework is Framework.OPENSPEC else frozenset()
         conflicts = scenario_conflicts(s.provider.criteria(s.ref), base, removed)
@@ -1146,7 +1219,7 @@ class Orchestrator:
         except GitError as exc:  # one explained error (exit 3 for a credential problem), never a git traceback
             error: Exception = explain_push_failure(
                 exc, branch=s.names.lock_ref, token_env=self.cfg.forge.token_env, environ=s.app.environ,
-                redact=s.app.redactor.redact_text,
+                redact=s.app.redactor.redact_text, platform=push_platform(self.cfg, s.app.environ, s.git.repo),
             )  # fmt: skip
         except Exception as exc:
             error = exc
@@ -1189,6 +1262,33 @@ class Orchestrator:
         )
         subject = f"chore({s.ref.name}): {self._commit_what} [skip ci]"
         s.git.commit(subject, trailers)  # a checkpoint: never the head of a review
+
+
+def write_accepted_carrier(unit_dir: Path, plan_id: str, items: Sequence[Mapping[str, object]]) -> bool:
+    """The carrier of accepted review findings (L4-YOLO-028, design D8): `<unit folder>/.l4/review-accepted.json`,
+    sorted keys and a final newline, so an unchanged payload is the same bytes. No items and no file: nothing is
+    written; no items and a file: it is rewritten as an empty `items` list (a later activation without
+    acceptances). True when the file was written."""
+    reject_symlinks(unit_dir, ".l4")  # UnsafeFile: a linked `.l4` would redirect the read, the mkdir and the write
+    # (a link in the file's own place is replaced below, never followed)
+    path = unit_dir / ACCEPTED_FILE
+    if not items and not (path.exists() or path.is_symlink()):
+        return False
+    payload = {"schema": ACCEPTED_SCHEMA, "plan": plan_id, "items": [dict(i) for i in items]}
+    data = (json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        if read_regular_file(path, limit=len(data) + 1) == data:
+            return False
+    except FileNotFoundError:
+        pass
+    except UnsafeFile:  # a symlink, a directory or an oversized file in its place: replaced, never followed
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        else:
+            raise
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(path, data)
+    return True
 
 
 def _busy(snapshot_phase: str | None, ref: UnitRef) -> UnitRunResult:
@@ -1244,12 +1344,14 @@ def run_unit_in_worktree(
     resume_what: str = "resume",
     take_spec_edit: bool = True,
     waits: RunWaits | None = None,
+    accepted: tuple[str, tuple[Mapping[str, object], ...]] | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
     lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
     `Orchestrator.resume`). `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
-    `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011)."""
+    `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011). `accepted`: the plan id and the accepted
+    review items of this unit, from the plan step (L4-YOLO-028)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
         ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo),
@@ -1295,7 +1397,7 @@ def run_unit_in_worktree(
             app, cfg, git=unit_git, names=names, worktree=opened["worktree"], ledger=writer,
             adapters=adapters, hooks=hooks, sandbox=resume_reason is None,  # a resume runs no agent and no gate
         )  # fmt: skip
-        orchestrator = Orchestrator(cfg, services, waits, take_spec_edit=take_spec_edit)
+        orchestrator = Orchestrator(cfg, services, waits, take_spec_edit=take_spec_edit, accepted=accepted)
         result = (
             orchestrator.run_unit()
             if resume_reason is None
@@ -1349,6 +1451,9 @@ def run_command(
 
         return run_dry(app, units=units, probe=probe)
     app, cfg = load_app_config(app)
+    if warning := stale_pin_stop(cfg, app.repo, app.environ):  # L4-ADO-005: the harness is not the base's pin
+        print(app.redactor.redact_text(warning), file=sys.stderr)
+        return CommandResult(ExitCode.OK)
     preflight_run_config(app, cfg)
     require_framework(cfg, app.repo)
     git = Git(app.repo, environ=app.environ)
@@ -1396,7 +1501,10 @@ def run_command(
         ref.framework is Framework.KIRO for _, ref in chosen
     ):
         log.info("spec.kiro.write_in_progress_marker and write_queued_marker are ignored: only `x` is ever written")
-    result = run_units(app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters)
+    result = run_units(
+        app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters,
+        accepted=(step.plan_id, step.accepted) if step.plan_id else None,
+    )  # fmt: skip
     result = replace(
         result,
         code=most_severe([result.code, failure, *refusal_codes]),
@@ -1511,6 +1619,7 @@ def run_units(
     chosen: Sequence[tuple[SpecProvider, UnitRef]],
     *,
     adapters: Mapping[str, AgentAdapter] | None,
+    accepted: tuple[str, Mapping[str, tuple[Mapping[str, object], ...]]] | None = None,
 ) -> CommandResult:
     """The units one after the other. One that raises (HB-7, L4-CLI-001) ends with its own exit code and an
     `exit_reason`, and the units after it still run: its siblings must not lose their turn to it, and `outcome.json`
@@ -1550,7 +1659,8 @@ def run_units(
         began = clock.now()
         before = _phase_of(cfg, git, provider, ref)
         try:
-            done = run_unit_in_worktree(app, cfg, git, provider, ref, adapters=adapters, waits=waits)
+            carrier = (accepted[0], tuple(accepted[1].get(ref.id, ()))) if accepted else None
+            done = run_unit_in_worktree(app, cfg, git, provider, ref, adapters=adapters, waits=waits, accepted=carrier)
         except Exception as exc:  # noqa: BLE001 - classified: the exit code and a redacted one-line reason
             done = _failed_unit(app, cfg, git, provider, ref, exc, before)
         longest = max(longest, (clock.now() - began).total_seconds())

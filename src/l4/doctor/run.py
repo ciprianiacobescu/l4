@@ -1,5 +1,7 @@
 """`l4 doctor`."""
 
+import dataclasses
+
 import click
 
 import l4.doctor.checks_ci  # noqa: F401  (registers CI-001)
@@ -45,7 +47,7 @@ def run_doctor(
         raise L4Exit(ExitCode.USAGE_ERROR, f"no such unit: {unit}")  # a typo must not look like a passing check
     cache = cache_root(app.environ, repo=app.repo)
     load_check_modules()
-    ctx = system_context(app.repo, cfg, app.environ)
+    ctx = dataclasses.replace(system_context(app.repo, cfg, app.environ), adoption=adoption)
     scopes = doctor_scopes(ci=ci, adoption=adoption, no_gates=no_gates)
     outcomes = run_checks(ctx, live=live, scopes=scopes, unit=unit)
     actions = None

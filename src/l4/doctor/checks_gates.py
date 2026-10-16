@@ -2,6 +2,7 @@
 pipeline `l4 setup gitlab` triggers (`L4_ADOPTION_CHECK`), where it runs on the runner and its platform (a laptop
 cannot see a failure that is Linux-only). Registered at import."""
 
+from l4.ci.detect import in_ci
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
 from l4.gates.dryrun import MAX_FAILING, GateDryRun, GateRun, dry_run_gates
@@ -9,11 +10,6 @@ from l4.gates.pyproject import read_pyproject
 from l4.gates.suggest import suggestions
 
 NOTE = "uncommitted changes are not included"
-
-
-def _in_ci(ctx: DoctorContext) -> bool:
-    env = ctx.env
-    return env.get("GITLAB_CI") == "true" or env.get("GITHUB_ACTIONS") == "true" or env.get("CI") == "true"
 
 
 def _failing(run: GateRun) -> str:
@@ -46,7 +42,7 @@ def render(result: GateDryRun) -> str:
 
 
 def _gate_001(ctx: DoctorContext) -> CheckResult:
-    result = dry_run_gates(ctx.cfg, ctx.repo, ctx.env, in_ci=_in_ci(ctx))
+    result = dry_run_gates(ctx.cfg, ctx.repo, ctx.env, in_ci=in_ci(ctx.env))
     if result.error:
         return CheckResult("fail", result.error, "commit, then run `l4 doctor --adoption` again")
     if not result.runs:

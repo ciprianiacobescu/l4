@@ -16,6 +16,9 @@ from l4.verifier.playwright import playwright_enabled
 from l4.versions import parse_version
 
 MAX_LISTED = 5
+# on a CI runner the install is `l4 doctor --ci --fix` (adoption-lessons L4-ADO-015); prereqs.sh is the laptop's way
+LAYA_FIX = "prereqs.sh --with-laya (on CI runners: `l4 doctor --ci --fix`)"
+SERENA_FIX = "prereqs.sh --with-serena (on CI runners: `l4 doctor --ci --fix`)"
 
 
 def _where(problem: Problem) -> str:
@@ -54,18 +57,16 @@ def _env_006(ctx: DoctorContext) -> CheckResult:
         return CheckResult("skip", "no roles.s1_judge profile uses engine laya-local")
     if not ctx.which("laya-serve"):
         message = "laya-serve not found on PATH: step 8 is recorded unavailable"
-        return CheckResult("fail", message, "prereqs.sh --with-laya")
+        return CheckResult("fail", message, LAYA_FIX)
     missing = [c for c in checkpoints if not laya_checkpoint_present(ctx.env, c)]
     if missing:
-        return CheckResult(
-            "fail", f"the Laya checkpoint {missing[0]} is not in the Hugging Face cache", "prereqs.sh --with-laya"
-        )
+        return CheckResult("fail", f"the Laya checkpoint {missing[0]} is not in the Hugging Face cache", LAYA_FIX)
     found = laya_version(ctx.which("laya-serve") or "", ctx.env)
     if not found:
         return CheckResult("fail", f"could not read the installed laya version (the pin is {LAYA_VERSION})")
     if found != LAYA_VERSION:
         message = f"laya {found} is installed, the pin is {LAYA_VERSION}: calibration rows would mix versions"
-        return CheckResult("fail", message, "prereqs.sh --with-laya")
+        return CheckResult("fail", message, LAYA_FIX)
     return CheckResult("pass", f"laya {found}, checkpoint {checkpoints[0]} cached")
 
 
@@ -123,15 +124,13 @@ def _env_008(ctx: DoctorContext) -> CheckResult:
     pin = memory.serena.version
     if not binary:
         message = f"serena not found on PATH (pin {pin}): lessons still reach the prompt"
-        return CheckResult("fail", message, "prereqs.sh --with-serena")
+        return CheckResult("fail", message, SERENA_FIX)
     out = ctx.run([binary, "--version"], timeout=60.0)
     found = parse_version(out.stdout) if out.returncode == 0 else None
     if found is None:
         return CheckResult("fail", "could not read the output of `serena --version`")
     if found != parse_version(pin):
-        return CheckResult(
-            "fail", f"serena {'.'.join(map(str, found))} is installed, the pin is {pin}", "prereqs.sh --with-serena"
-        )
+        return CheckResult("fail", f"serena {'.'.join(map(str, found))} is installed, the pin is {pin}", SERENA_FIX)
     return CheckResult("pass", f"serena {pin}")
 
 

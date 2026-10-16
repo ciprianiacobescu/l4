@@ -21,8 +21,10 @@ import httpx
 from l4.config.defaults import cache_root, l4_home, openspec_entrypoint, openspec_env
 from l4.config.schema import L4Config
 from l4.doctor.context import CmdResult
+from l4.llm.system_one import laya_checkpoint_present, laya_version
 from l4.proc import Runner as CommandRunner
 from l4.provision.catalog import (
+    LAYA_CHECKPOINT,
     ROOT_PREREQS,
     ToolSpec,
     distro_command,
@@ -58,6 +60,22 @@ class Paths:
     @property
     def npm_prefix(self) -> Path:
         return self.l4_home / "npm"
+
+    @property
+    def laya_tools(self) -> Path:
+        """Laya's own uv tool directory, apart from the harness's (L4-ADO-019, design D9)."""
+        return self.l4_home / "laya"
+
+    @property
+    def laya_hf_home(self) -> Path:
+        return self.l4_cache / "laya" / "hf"
+
+
+def laya_checkpoint_cached(paths: Paths, env: Mapping[str, str]) -> bool:
+    """The checkpoint is in the Hugging Face cache of the environment (`HF_HOME`, else the default) or in ours."""
+    return laya_checkpoint_present(env, LAYA_CHECKPOINT) or laya_checkpoint_present(
+        {"HF_HOME": str(paths.laya_hf_home)}, LAYA_CHECKPOINT
+    )
 
 
 def harness_path(paths: Paths, inherited: str = "", *, forbid: Sequence[Path] = ()) -> str:
@@ -251,6 +269,9 @@ def installed_version(tool: ToolSpec, paths: Paths, env: Mapping[str, str], run:
     """The version a present tool reports, or None when it is missing or does not report one. OpenSpec is asked the way
     the provider runs it (L4-OSP-001): the harness node on the file, never the shim."""
     clean = scrub_env(env, paths)
+    if tool.kind == "laya":  # the version of the `laya` package that the `laya-serve` on PATH belongs to
+        exe = find_tool(tool.binary, paths, env)
+        return (laya_version(str(exe), clean) or None) if exe is not None else None
     if tool.kind == "openspec":
         entry, node = openspec_entrypoint(env), find_tool("node", paths, env)
         if not entry.is_file() or node is None:
@@ -268,7 +289,7 @@ def installed_version(tool: ToolSpec, paths: Paths, env: Mapping[str, str], run:
 def is_satisfied(tool: ToolSpec, found: str | None) -> bool:
     if found is None:
         return False
-    if tool.kind == "openspec":
+    if tool.kind in ("openspec", "laya"):
         return tool.version is not None and parse_version(found) == parse_version(tool.version)
     return tool.min_version is None or version_at_least(found, tool.min_version) is True
 
@@ -313,7 +334,12 @@ def plan_fixes(
     for tool in required_tools(cfg, openspec_active=openspec_active):
         found = installed_version(tool, paths, env, run)
         command = manual_command(tool, platform, str(paths.l4_home))
-        if is_satisfied(tool, found):
+        if tool.kind == "laya" and is_satisfied(tool, found) and not laya_checkpoint_cached(paths, env):
+            reason = f"laya {found} without the {LAYA_CHECKPOINT} checkpoint"
+            status: Status = "planned" if allow_install else "skipped"
+            message = "" if allow_install else "ci.self_provision resolves to false"
+            actions.append(FixAction(tool.name, reason, "", (command,), False, status, message))
+        elif is_satisfied(tool, found):
             actions.append(FixAction(tool.name, "needed", str(find_tool(tool.binary, paths, env)), (), False,
                                      "already present", f"{tool.name} {found}"))  # fmt: skip
         elif _floor_above_pin(tool):

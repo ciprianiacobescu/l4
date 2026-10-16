@@ -1,5 +1,7 @@
 """CFG-006 and CFG-007 (adoption-kit L4-ACT-004): the pin of an action-form workflow, and the local `l4`.
 
+CFG-008 (adoption-lessons L4-ADO-005): the harness running in CI is the pin of the base's workflow.
+
 CFG-004: `gates.test.command` is set. The run rejects every unit without it (no test oracle), so nothing else in
 the configuration matters until it is.
 
@@ -11,7 +13,9 @@ when the first agent is selected (`Factory.for_role` exits 12)."""
 
 import re
 
+from l4.buildinfo import harness_commit
 from l4.ci.github import ACTION_PATH, WORKFLOW_RELPATH
+from l4.ci.pin_guard import FIX, pin_check
 from l4.config import defaults as d
 from l4.config.schema import effective_delivery
 from l4.doctor.context import DoctorContext
@@ -166,3 +170,19 @@ def _cfg_007(ctx: DoctorContext) -> CheckResult:
 
 
 CFG_007 = register(Check("CFG-007", "A local l4 is on PATH (action adoption)", "info", _cfg_007, scopes=CONFIG_SCOPES))
+
+
+def _cfg_008(ctx: DoctorContext) -> CheckResult:
+    """In a CI job with `harness.delivery: action`, the harness that is running (`L4_HARNESS_COMMIT`, or the commit it
+    was installed from) is the pin of `.github/workflows/l4.yml` on the checked-out base. A schedule runs the default
+    branch's copy, so a base that moved on leaves a cron run on the old harness (L4-ADO-005); `l4 plan --sweep` and
+    `l4 run` then do no work (`l4.ci.pin_guard`). A warning: the pin itself is CFG-006's."""
+    check = pin_check(ctx.cfg, ctx.repo, ctx.env, harness_commit())
+    if check.status == "mismatch":
+        return CheckResult("fail", check.problem, FIX)
+    return CheckResult(check.status, check.reason)
+
+
+CFG_008 = register(
+    Check("CFG-008", "The running harness is the base's pin", "warn", _cfg_008, scopes=frozenset({"ci"}))
+)

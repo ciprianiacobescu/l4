@@ -19,11 +19,12 @@ from typing import Any
 
 import click
 
+from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.sweeper import sweep as run_sweep
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
-from l4.exitcodes import plan_exit_code
+from l4.exitcodes import ExitCode, plan_exit_code
 from l4.forge.urls import ForgeUrls, app_forge_urls
 from l4.implementer.tasks import answers_unblock, open_blocking_questions, questions_hold
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
@@ -229,16 +230,17 @@ def with_plan_holds(
     app: AppContext, cfg: L4Config, rows: Sequence[UnitSnapshot], entries: list[PlanEntry]
 ) -> list[PlanEntry]:
     """Delivery plans (yolo-mode L4-YOLO-010, SCN-YOLO-30): a unit a plan holds is not actionable and shows why
-    (`held by plan p1 (reviewed)`, `waits for openspec:a (not integrated)`, `not in the active plan p1`). Read-only: the
-    plan state is the local `refs/l4/plans/*` the run's refresh fetched. No plan file, no change."""
+    (`held by plan p1 (reviewed)`, `waits for openspec:a (not integrated)`, `not in the active plan p1`), and so is a
+    unit that `yolo.hold` matches and no plan lists (`held by yolo.hold`, L4-ADO-011). Read-only: the plan state is the
+    local `refs/l4/plans/*` the run's refresh fetched. No plan file and no `yolo.hold`, no change."""
     from l4.yolo.cycle import local_states, plan_holds, target_plan_files  # the plan step imports this module
 
     git = Git(app.repo, environ=app.environ)
     files = target_plan_files(app, cfg, git)  # the files the plan step reads, so a laptop and CI agree
-    if not files:
+    if not files and not cfg.yolo.hold:
         return entries
     states = local_states(git, files)
-    holds = plan_holds(files, states, {s.ref.id: s.state.phase for s in rows}, cfg.forge.base_branch)
+    holds = plan_holds(files, states, {s.ref.id: s.state.phase for s in rows}, cfg.forge.base_branch, cfg)
     shown = []
     for entry in entries:
         hold = holds.get(entry.unit)
@@ -378,6 +380,9 @@ def run_plan(
     app: AppContext, *, units: tuple[str, ...], as_json: bool, probe: bool, sweep: bool, detailed_exitcode: bool
 ) -> CommandResult:
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
+    if sweep and (warning := stale_pin_stop(cfg, app.repo, app.environ)):  # L4-ADO-005: no work, exit 0
+        click.echo(app.redactor.redact_text(warning), err=True)
+        return CommandResult(ExitCode.OK)
     rows = snapshots(app, cfg, units)
     if sweep and (done := run_sweep(app, cfg, Git(app.repo, environ=app.environ), rows, ci=True)):
         for action in done:

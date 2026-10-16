@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from l4.config.defaults import OPENSPEC_PACKAGE, OPENSPEC_VERSION
+from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
 from l4.config.schema import L4Config
 from l4.versions import parse_version
 
@@ -20,6 +20,14 @@ OPENSPEC_DEFAULT = OPENSPEC_VERSION
 CLAUDE_VERSION = "2.1.288"
 CODEX_VERSION = "0.160.0"
 OPENCODE_VERSION = "1.18.34"
+# Laya (System One, L4-ADO-019): the pin is `defaults.LAYA_VERSION` (the doctor compares against it); the checkpoint
+# is the folder of `LAYA_REPO` that `laya-serve` loads. `scripts/runner/prereqs.sh` carries the same two defaults.
+LAYA_CHECKPOINT = "typed-decisions"
+LAYA_REPO = "convaiinnovations/laya"
+# The commit of `LAYA_REPO` the checkpoint is fetched at: a branch moves, a commit does not. Inferred, not re-checked
+# against the network: the only snapshot in the development machine's Hugging Face cache that holds `typed-decisions`
+# (the `refs/main` it had at the time). Move it only with a test run against the new weights.
+LAYA_REVISION = "7b928d828b7b0e022f929d9bd2e44165aa270148"
 # Kiro's installer takes no version argument and ships no changelog we can pin to [U]: it is installed as released.
 
 NPM_PACKAGES = {"codex": "@openai/codex", "opencode": "opencode-ai"}
@@ -67,7 +75,7 @@ def clis_cache_hash(cfg: L4Config | None) -> str:
 @dataclass(frozen=True)
 class ToolSpec:
     name: str  # the tool's own name: uv, node, openspec, claude, codex, opencode, kiro-cli
-    kind: Literal["uv", "node", "openspec", "agent"]
+    kind: Literal["uv", "node", "openspec", "agent", "laya"]
     binary: str
     version: str | None  # the pinned version that gets installed; None: installed as released
     min_version: str | None  # a present tool at least this new is left alone
@@ -119,9 +127,19 @@ def adapters_in_use(cfg: L4Config) -> dict[str, list[str]]:
     return used
 
 
+def laya_in_use(cfg: L4Config) -> bool:
+    """A `laya-local` profile is in `roles.s1_judge` or `verifier.s1.shadow` (L4-ADO-019)."""
+    for name in (*cfg.roles.s1_judge, *cfg.verifier.s1.shadow):
+        profile = cfg.profiles.get(name)
+        if profile is not None and profile.backend == "system-one" and profile.engine == "laya-local":
+            return True
+    return False
+
+
 def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
     """uv always; Node and OpenSpec when OpenSpec is active (Node also when an npm-installed agent is needed); an agent
-    CLI only when a profile of its adapter is in some role chain."""
+    CLI only when a profile of its adapter is in some role chain; Laya (with its checkpoint) only when a `laya-local`
+    profile is in a System One list."""
     agents = adapters_in_use(cfg)
     tools = [ToolSpec("uv", "uv", "uv", UV_VERSION, None)]
     if openspec_active or any(a in NPM_PACKAGES for a in agents):
@@ -138,6 +156,8 @@ def required_tools(cfg: L4Config, *, openspec_active: bool) -> list[ToolSpec]:
                 max(minimums, key=lambda v: parse_version(v) or (0, 0, 0)) if minimums else None, adapter,
             )
         )  # fmt: skip
+    if laya_in_use(cfg):
+        tools.append(ToolSpec("laya", "laya", "laya-serve", LAYA_VERSION, None))
     return tools
 
 
@@ -188,6 +208,12 @@ def manual_command(tool: ToolSpec, platform: str, l4_home: str) -> str:
         return f"download {url} and extract it to {l4_home}/node"
     if tool.kind == "openspec":
         return f"npm install --prefix {l4_home}/npm --save-exact {OPENSPEC_PACKAGE}{pin}"
+    if tool.kind == "laya":
+        return (
+            f"UV_TOOL_DIR={l4_home}/laya UV_TOOL_BIN_DIR={l4_home}/laya/bin uv tool install --torch-backend cpu "
+            f"'laya[serve]=={tool.version}', link laya-serve into ~/.local/bin, then fetch the {LAYA_CHECKPOINT} "
+            f"checkpoint of {LAYA_REPO} with huggingface_hub (HF_HOME=~/.cache/l4/laya/hf)"
+        )
     assert tool.adapter is not None
     if tool.adapter in NPM_PACKAGES:
         return f"npm install --prefix {l4_home}/npm --save-exact {NPM_PACKAGES[tool.adapter]}{pin}"

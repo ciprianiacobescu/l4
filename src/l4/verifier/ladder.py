@@ -119,6 +119,7 @@ from l4.verifier.judge import (
     JudgeRun,
     JudgeVerdict,
     RoundOutput,
+    accepted_refs,
     build_judge_prompt,
     reply_counts,
     run_judge,
@@ -983,6 +984,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         return
     ids = {c.id for c in criteria}
     asked = _asked_feedback(wb)
+    accepted = accepted_refs(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
 
     def judge_body() -> tuple[bool, str]:
         diff, truncated = _git_diff(wb, base_sha, result.head_sha)
@@ -991,7 +993,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             diff_truncated=truncated, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
             redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
             owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
-            round_outputs=_round_outputs(wb, result), feedback=asked,
+            round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted,
         )  # fmt: skip
         result.prompt_sha256 = prompt.sha256
         result.prompt_template = prompt.version
@@ -1018,6 +1020,12 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         result.findings.extend(inadequate_findings(result.trace))
         if asked:
             _judge_feedback(vc, result, asked, judged.verdict, base_sha)
+        for item in accepted:  # evidence only: the harness's merge guard reads these (L4-YOLO-028)
+            answer = next((a for a in judged.verdict.accepted or [] if a.id == item.id), None)
+            wb.emit(
+                "review.accepted_judged", id=item.id, round=vc.round, addressed=answer.addressed if answer else False,
+                evidence=answer.evidence if answer else "not answered", profile=vc.judge_profile,
+            )  # fmt: skip
         return True, f"{judged.calls} call(s)"
 
     _step(vc, run, "9", "judge", judge_body)

@@ -34,9 +34,10 @@ plan still runs one unit at a time, in the printed order.
    not evidence: when you cannot point to a line, add no dependency.
 4. Use a batch to group units that share an acceptance check (`acceptance_profile`, a profile of `yolo.profiles`).
    Do not invent profiles.
-5. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters). An
-   excluded unit is not held by the plan: it runs as without a plan while no plan is active on the target, and gets no
-   new agent work while one is active, like every unit outside the plan.
+5. Put a spec that must stay outside the plan in `exclude` with a reason that a person can check (200 characters). A
+   spec meant to run alone goes there too, with that reason. An excluded unit is not held by the plan: it runs as
+   without a plan while no plan is active on the target, and gets no new agent work while one is active, like every unit
+   outside the plan. A spec that `yolo.hold` matches is held and counts as covered, so it needs no entry.
 6. Set `limits.max_runs` and `limits.max_cost_usd`. They stop a plan whose unit makes no progress; without them only
    the attempts limit does. Allow about five runs per unit.
 7. Leave `merge` as `human`. Set `merge: auto` only when the person asks for it **and** `forge.merge_policy` is `auto`.
@@ -93,6 +94,43 @@ admission and the review. Fix its findings the same way.
   merged or integrated it.
 - `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
   against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
+- Errors (exit 1): a planned unit's own folder over the budget; a delta with no baseline or no `## Purpose`. A
+  dependency's folder over the budget is only a `warning:` line (exit 0).
+
+## Check and fix the review
+
+Before the person reviews the plan, run the same review yourself and fix what it finds. Do not push first.
+
+1. `openspec validate <change> --strict` (or `--all --strict`) and `python3 <skill dir>/scripts/validate_plan.py`, both clean.
+2. `l4 yolo review <id> --worktree`. It reads the working tree, writes nothing and charges the plan nothing. Only changed
+   units are judged again, so repeat it after each fix. Exit 0 means every subject is READY.
+3. `l4 yolo findings <id> --worktree --json` (the dry run records nothing, so without `--worktree` it is empty). For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
+   and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
+   wording.
+4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
+5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record` (anything not already on the
+   ledger is judged again, and that verdict is the one recorded: one more judging pass, cheap but not free), then push. CI then does not judge again. `--fresh
+   <subject>` is a dry-run tool only; `--record --fresh` is refused when the ledger holds that material. Hand off as below.
+
+`--worktree` needs no sandbox for a `claude-code` or `opencode` judge: outside CI it runs unsandboxed and prints the
+line that says so (the judge has no tools and runs in an empty folder). In CI it fails closed. Minor findings show
+with `findings --all`. After `--worktree`, `findings <id> --worktree` (add `--json`) shows its results, and
+`review <id> --worktree --json` prints the same document.
+
+A person may need an `l4 yolo accept` when the judge keeps finding more after real fixes. It is not your tool:
+- Never run it unless `yolo.review.accept_by_agents` is true in `.l4/config.yaml` on the base branch **and** the
+  subject was judged not READY on two versions of its text. Then give a `--reason` that tells the implementer what to do.
+- Never for a BLOCKED subject, a blocking finding, or a `material_cut` of the unit's own folder: those are fixed.
+- Otherwise stop and ask the person. Print the exact command for them:
+  `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
+
+Stop and ask the person when: two rounds repeat the same criterion on the same unit; the fix needs a spec cut that
+drops required behaviour; `--worktree` exits 3 (a judge with a shell and no sandbox: ask for a `claude-code` or
+`opencode` judge profile). Do not shorten a spec only to fit a budget. Move background to `docs/`, or ask for a larger
+`yolo.review` budget.
+
+When a finding needs a product decision, ask the person. Working unattended, decide, and record the decision and its
+reason in the change's `design.md` (create one) under `## Decisions`, so a person can review it.
 
 ## Hand off
 
@@ -111,7 +149,7 @@ git push
 l4 yolo check <id>
 ```
 
-Then stop. A person reads the review (`l4 yolo review <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
+Then stop. A person reads the review (`l4 yolo findings <id>`) and activates (`l4 yolo activate <id> --reason "…"`).
 
 ## Update
 
@@ -129,5 +167,6 @@ active file alone. Only one plan is active on a target, so a person activates th
 - Activate, resume or cancel a plan for a person. Those are their decisions.
 - Write `refs/l4/plans/*`. It is the harness's ledger.
 - Set `merge: auto` unless the person asked and `forge.merge_policy` is `auto`.
-- Edit a unit's spec to make a plan valid. Change the plan, or ask.
+- Weaken or delete a requirement or scenario to silence a check or fit a budget. Fix a spec when the validator or the
+  review finds a real gap in it; change the plan for a plan problem.
 - Add a dependency you cannot support with a line of a spec.

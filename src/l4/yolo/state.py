@@ -138,6 +138,9 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             for base_unit, refs in (data.get("attempt_base") or {}).items():  # R13: the first record of a unit stands
                 state.attempt_base.setdefault(str(base_unit), int(_number(refs)))
             state.activated_by = _text(data.get("by"))
+            state.activated_accepted = {  # frozen for the unit run (D7, D8); a re-activation replaces
+                str(k): dict(v) for k, v in (data.get("accepted") or {}).items() if isinstance(v, dict)
+            }
             state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
             if data.get("merge") in MERGE:
                 state.merge = data["merge"]
@@ -147,6 +150,12 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 state.current = _text(data["current"])
             elif state.current is not None and state.order and state.current not in state.order:
                 state.current = None  # a unit the activated order does not hold is no longer the plan's (review #1)
+        elif kind == "plan.accepted":
+            subject = _text(data.get("subject"))
+            if subject and state.status not in _FINAL:
+                state.accepted[subject] = dict(data)
+        elif kind == "plan.acceptance_withdrawn":
+            state.accepted.pop(_text(data.get("subject")) or "", None)
         elif kind == "unit.dispatched" and unit:
             state.current = unit
             if state.used.attempts.get(unit, 0) > stale_at.get(unit, state.used.attempts.get(unit, 0)):

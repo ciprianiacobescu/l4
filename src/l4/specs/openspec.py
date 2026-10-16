@@ -365,8 +365,7 @@ class OpenSpecProvider:
             raw = read_regular_file(self.unit_dir(parent) / "specs" / capability / "spec.md", limit=MAX_PURPOSE_BYTES)
         except (FileNotFoundError, UnsafeFile, SpecError):
             raw = b""
-        match = re.search(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", raw.decode("utf-8", "replace"), re.M | re.S)
-        purpose = _flat(match.group(1), 1500) if match else ""
+        purpose = _purpose_of(raw)
         if len(purpose) >= MIN_PURPOSE_CHARS:
             return purpose
         return f"Regression scenarios for the {capability} capability, found by the verifier in {parent.name}."
@@ -407,6 +406,9 @@ class OpenSpecProvider:
 
 
 MAX_PURPOSE_BYTES = 256 * 1024
+_PURPOSE_RE = re.compile(r"(?im)^##[ \t]+Purpose[ \t]*\n(.*?)(?=^##[ \t]|\Z)", re.S)  # as OpenSpec reads it
+_HTML_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
+MAX_INTAKE_ERROR_CHARS = 600  # what intake keeps of each ERROR (L4-ADO-008): per issue, never of the whole
 MIN_PURPOSE_CHARS = 50
 MAX_TITLE_CHARS = 160
 MAX_DETAIL_CHARS = 600
@@ -476,3 +478,72 @@ def _issue(raw: Mapping[str, Any]) -> ValidationIssue:
         level = "ERROR"
     line = raw.get("line")
     return ValidationIssue(level, str(raw.get("path", "")), message, line if isinstance(line, int) else None)  # type: ignore[arg-type]
+
+
+def intake_hint(message: str, target: str) -> str:
+    """L4-ADO-008: the way out of an archive refusal for a capability that `openspec/specs/` lacks. "" for any other
+    message (OpenSpec's own MODIFIED-scenario error already says what to do)."""
+    if not message.startswith(ARCHIVE_REFUSAL):
+        return ""
+    capability, colon, rest = message[len(ARCHIVE_REFUSAL) :].strip().partition(":")
+    if not colon or not capability.strip() or "target spec does not exist" not in rest:
+        return ""
+    cap = capability.strip()
+    return (
+        f"`openspec/specs/{cap}/spec.md` is not on `{target}`: archive the change that creates `{cap}` first, or write "
+        "this delta as `## ADDED Requirements` (with a `## Purpose`). A unit cannot modify what another unit of the "
+        "same plan only adds: put that change into that unit."
+    )
+
+
+def intake_errors(report: ValidationReport, target: str) -> list[str]:
+    """Every ERROR of a strict validation as `path[:line]: message`, each cut at 600 characters, an archive refusal
+    followed by its hint (L4-ADO-008). The list is never cut as a whole."""
+    lines: list[str] = []
+    for i in report.issues:
+        if i.level != "ERROR":
+            continue
+        text = f"{i.path}{f':{i.line}' if i.line else ''}: {i.message[:MAX_INTAKE_ERROR_CHARS]}"
+        hint = intake_hint(i.message, target)
+        lines.append(f"{text} {hint}" if hint else text)
+    return lines
+
+
+def _purpose_of(raw: bytes) -> str:
+    """The text of a spec file's `## Purpose` section on one line (at most 1500 characters), or ""."""
+    text = raw.decode("utf-8", "replace").removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    match = _PURPOSE_RE.search(text)
+    return _flat(_HTML_COMMENT_RE.sub(" ", match.group(1)), 1500) if match else ""
+
+
+def purpose_issues(unit_dir: Path, specs_root: Path) -> list[ValidationIssue]:
+    """L4-OSP-007 for a unit that is not a fix unit: one ERROR per delta (`specs/<capability>/spec.md`) of a capability
+    that `specs_root` (`openspec/specs`) lacks, when its `## Purpose` has fewer than 50 characters. Without it the
+    archive writes a `TBD` that fails strict validation. A delta that cannot be read is left to `validate`."""
+    issues: list[ValidationIssue] = []
+    folder = unit_dir / "specs"
+    try:
+        capabilities = sorted(p.name for p in folder.iterdir() if p.is_dir())
+    except OSError:
+        return issues
+    for capability in capabilities:
+        if (specs_root / capability / "spec.md").is_file():
+            continue
+        try:
+            raw = read_regular_file(folder / capability / "spec.md", limit=MAX_PURPOSE_BYTES)
+        except (OSError, UnsafeFile, SpecError):
+            continue
+        found = len(_purpose_of(raw))
+        if found < MIN_PURPOSE_CHARS:
+            have = f"has {found}" if found else "has none"
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    f"specs/{capability}/spec.md",
+                    f"capability `{capability}` is new (it has no baseline spec), so its delta needs a "
+                    f"`## Purpose` of at least {MIN_PURPOSE_CHARS} characters (it {have}); without one the archive "
+                    "writes a placeholder that fails strict validation",
+                    None,
+                )
+            )
+    return issues

@@ -1,7 +1,10 @@
 """The environment that loads the `l4_trace` pytest plugin (M13-G2) into every gate run and agent run.
 
 The plugin directory is taken from the installed package, never from the repository under test, so that it also works
-from `.l4/vendor/.venv/.../site-packages` and a repository cannot shadow it.
+from `.l4/vendor/.venv/.../site-packages`. It does not stop a repository from shadowing the plugin: the gate runs
+`python -m pytest` from the worktree root, which comes first on `sys.path`, so a root `l4_trace` module wins over the
+harness's. `run_gate` refuses to start when it finds one (`shadowing_plugin`, L4-ADO-001); the gate environment has no
+`PYTHONSAFEPATH`, which would break sibling imports of `python scripts/x.py`.
 """
 
 from importlib import resources

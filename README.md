@@ -7,8 +7,9 @@ clarifying questions in `questions.md` next to the spec, verifies the result adv
 turns findings into new specs, archives verified specs and hands a merge-ready PR/MR with an evidence package to a
 human.
 
-Status: the harness runs end to end on GitLab with a self-hosted shell runner; GitHub Actions support is written by
-`l4 init --ci github`, but its forge setup (secret, runner) is manual.
+Status: the harness runs end to end on GitLab with a self-hosted shell runner, and on GitHub Actions with GitHub-hosted
+runners. `l4 init --ci github` writes the workflow, and `l4 setup github` does the forge setup (the environment, its
+secrets and branch rules, the workflow permissions, the labels and a first run).
 
 ## Getting started
 

@@ -1,16 +1,17 @@
-"""ENV-013 (the Ollama engine), S1-001, S1-002 and COV-001 (M1.6 plan line 39): the optional parts of the evidence
-work, all warnings (they degrade, never block a run). Registered at import."""
+"""ENV-013 (the Ollama engine), S1-001, S1-002, S1-003 and COV-001 (M1.6 plan line 39): the optional parts of the
+evidence work, all warnings (they degrade, never block a run). Registered at import."""
 
+import time
 from pathlib import Path
 
 import httpx
 
 from l4.availability.errors import RoleUnavailable
 from l4.doctor.context import DoctorContext
-from l4.doctor.registry import Check, CheckResult, register
+from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, register
 from l4.gates.coverage import is_python_gate, project_python
 from l4.llm.s1_checkpoint import checkpoint_problem, is_checkpoint_path
-from l4.llm.system_one import open_s1_profile
+from l4.llm.system_one import SystemOneUnavailable, _probe, open_s1_profile
 from l4.redact import Redactor
 
 MAX_LISTED = 5
@@ -120,6 +121,63 @@ def _env_013(ctx: DoctorContext) -> CheckResult:
     return CheckResult("pass", f"Ollama ready: {', '.join(ready)}")
 
 
+LAN_ENGINES = ("remote", "ollama")
+S1_PROFILE_LINES = (
+    "profiles.laya: {backend: system-one, engine: laya-local} and roles.s1_judge: [laya] "
+    "(laya-serve and its checkpoint: `l4 doctor --ci --fix` on a CI runner, prereqs.sh --with-laya elsewhere); or "
+    "profiles.jev: {backend: system-one, engine: jev, base_url: https://api.typesafe.ai, model: jev-1.13.0, "
+    "api_key_env: TYPESAFE_API_KEY, vendor: typesafe}, roles.s1_judge: [jev] and the TYPESAFE_API_KEY secret"
+)
+
+
+def _s1_003(ctx: DoctorContext) -> CheckResult:
+    """The first profile of `roles.s1_judge` that would open serves step 8 and the clarifier (design D7). `_probe`
+    starts nothing. `laya-local` under `l4 doctor --adoption` is started once and stopped, to report the seconds to
+    ready; under `--ci` it is only checked to be installed (L4-ADO-015). None would open: a warning that says why."""
+    cfg = ctx.cfg
+    if not cfg.verifier.s1.enabled:
+        return CheckResult("skip", "verifier.s1.enabled is false")
+    if not cfg.roles.s1_judge:
+        return CheckResult("skip", "roles.s1_judge names no profile")
+    hosted = ctx.env.get("RUNNER_ENVIRONMENT") == "github-hosted"
+    reasons: list[str] = []
+    for name in cfg.roles.s1_judge:
+        profile = cfg.profiles.get(name)
+        if profile is None or profile.backend != "system-one":
+            reasons.append(f"{name}: not a backend: system-one profile")
+        elif hosted and profile.engine in LAN_ENGINES:
+            reasons.append(
+                f"{name}: the {profile.engine} engine is on the local network: unreachable from a GitHub-hosted runner"
+            )
+        else:
+            backend, why = _probe(profile, ctx.env, _client(), {"log_path": None, "redactor": Redactor({})})
+            if backend is None:
+                reasons.append(f"{name}: {why}")
+                continue
+            what = f"System One: {backend.engine} ({backend.model}), profile {name}"
+            skipped = f" (earlier in roles.s1_judge, not used: {'; '.join(reasons)})" if reasons else ""
+            if backend.engine != "laya-local":
+                return CheckResult("pass", what + skipped)
+            if not ctx.adoption:
+                return CheckResult(
+                    "pass", f"{what}: laya-serve and the checkpoint are installed (not started){skipped}"
+                )
+            began = time.monotonic()
+            try:
+                backend.start()
+            except SystemOneUnavailable as exc:
+                return CheckResult("fail", f"{what}: laya-serve does not start: {exc}", S1_PROFILE_LINES)
+            finally:
+                backend.stop()  # always: no laya-serve is left running
+            return CheckResult("pass", f"{what}, ready in {time.monotonic() - began:.1f} s{skipped}")
+    return CheckResult(
+        "fail",
+        f"System One is off: {'; '.join(reasons)}. The clarifier then auto-accepts no answer, so every implementer "
+        "question goes to a person",
+        S1_PROFILE_LINES,
+    )
+
+
 for _id, _title, _run in (
     ("ENV-013", "Ollama System-One host reachable, model pulled", _env_013),
     ("S1-001", "S1 shadow engines usable", _s1_001),
@@ -127,3 +185,4 @@ for _id, _title, _run in (
     ("COV-001", "coverage.py in the project environment", _cov_001),
 ):
     register(Check(_id, _title, "warn", _run))
+S1_003 = register(Check("S1-003", "System One would serve step 8", "warn", _s1_003, CONFIG_SCOPES))
