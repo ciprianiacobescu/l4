@@ -74,13 +74,13 @@ fixed code. [V in `verdicts.py`]
 
 `next_step` is a pure function of `UnitFacts`. The planner's facts get `halt_reason` (the recorded code); for
 `escalated` with `halt_reason == "no_convertible_finding"` the step is
-`give the fix the human's finding asks for as feedback: l4 feedback add --unit U --kind behaviour --when ... --then ...
---text ... (then the git lines add prints), then l4 retry --unit U --reason TEXT; a retry alone repeats the same
-verdict`. The flags are those of `l4 feedback add` (`--text` is required there). The orchestrator's refusal of
-`l4 run --unit` and the sticky note section use the same sentence. The label `l4:retry` still moves the unit, and
-`label_for` is unchanged: the label is the retry, and the sticky note says that it helps after the feedback. Other
-causes keep their text. The code constant lives in `l4.state.next_step` (the verifier imports it), so `next_step.py`
-does not import the fix loop.
+`a retry alone repeats the same verdict; first give the fix the human's finding asks for as feedback: l4 feedback add
+--unit U --kind behaviour --when ... --then ... --text ... (then the git lines it prints), then l4 retry --unit U
+--reason TEXT`. The warning comes first because `exit_reason` is cut at 300 characters. The flags are those of
+`l4 feedback add` (`--text` is required there). The orchestrator's refusal of `l4 run --unit` and the sticky note
+section use the same sentence. The label `l4:retry` still moves the unit, and `label_for` is unchanged: the label is
+the retry, and the sticky note says that it helps after the feedback. Other causes keep their text. The code constant
+lives in `l4.state.next_step` (the fix loop imports it), so `next_step.py` does not import the fix loop.
 
 ### D5 `--replace` is for a verdict answer only
 
@@ -113,6 +113,12 @@ hold id, so it is not void. The reject-to-accept test runs the whole chain.
 
 ## 3. Risks
 
+- `plan_fix_unit` drops candidates past `MAX_FIX_TASKS`. If that many feedback items sort ahead of a convertible
+  reject candidate, the plan is feedback-only, that reject is neither in `consumed` nor in the not converted list, and
+  the read-time rule of D1 still consumes it. The person would have to reject again. This is rare, and the write-time
+  list cannot fix it without changing what `feedback_only` means for the round counting [I].
+- The comment of D6 holds the visible text of the old answer; a comment that a person typed inside the old answer is
+  not copied (git history keeps it).
 - D1 reads a ledger of 0.4.5 where a person's reject came before a feedback-only spawn that was caused by something
   else. By D1's argument every reject in force at such a spawn was non-convertible, so none was convertible and lost.
   The only loss is a non-convertible reject that the person wanted to keep; they can reject again, and the new reject

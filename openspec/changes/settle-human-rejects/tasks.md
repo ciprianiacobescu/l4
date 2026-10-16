@@ -1,14 +1,14 @@
 Every task follows these rules:
 - Write the named tests first and see them fail, then write the code.
 - Run only the named test files: `.venv/bin/python -m pytest -q -p no:cacheprovider <paths>`. Then `ruff check`,
-  `ruff format --check` and `mypy src`.
+  `ruff format --check` on the files that changed (the repo has no mypy in CI).
 - Never wait on a process with `while pgrep -f ...`. Stage explicit paths only.
 - Name a consumer "a consumer repository".
 
 ## 1. Verifier (L4-VER-016)
 
-- [x] 1.1 Tests: `tests/unit/verifier/test_verdicts.py` (SCN-VER-64, SCN-VER-65), `test_fixunit_feedback.py`
-  (SCN-VER-66, plan level), `test_hold_verdicts.py` (SCN-VER-67).
+- [x] 1.1 Tests: `tests/unit/verifier/test_verdicts.py` (SCN-VER-64, SCN-VER-65), `test_hold_verdicts.py`
+  (SCN-VER-66 at plan level, SCN-VER-67).
 - [x] 1.2 `effective_verdicts` (read time, D1) and `plan_fix_unit` / `_candidates` (write time, D2).
 
 ## 2. Operator commands (L4-OPS-022)
