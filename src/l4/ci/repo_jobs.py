@@ -1,9 +1,10 @@
 """The repository's own CI jobs and whether the gates mirror them (adoption-lessons L4-ADO-006, design D6).
 
 A heuristic for a warning, never a verdict: a job is *mirrored* when each of its commands is contained in a gate
-command (setup, lint, test, e2e, or a gate a `yolo.profiles` entry names), or contains one. GitHub: the workflows
-under `.github/workflows` except `l4.yml` that run on `push` or `pull_request`. GitLab: the jobs of `.gitlab-ci.yml`
-except the harness's `l4` job. A file that does not parse is named in `problems`, never raised.
+command (setup, lint, test, e2e, or a gate a `yolo.profiles` entry names), or contains one; a job with no `run:`
+command (only `uses:` steps or a reusable workflow) or with services is never mirrored. GitHub: the workflows under
+`.github/workflows` except `l4.yml` that run on `push` or `pull_request`. GitLab: the jobs of `.gitlab-ci.yml` except
+the harness's `l4` job. A file that does not parse is named in `problems`, never raised.
 """
 
 import re
@@ -175,6 +176,12 @@ def open_commands(job: RepoJob, cfg: L4Config) -> list[str]:
     return [c for c in job.commands if not _mirrored(c, gates)]
 
 
+def opaque(job: RepoJob) -> bool:
+    """A job the gates cannot mirror whatever they run: it has no `run:` command (only `uses:` steps such as docker or
+    helm, or a reusable workflow) or it starts services."""
+    return not job.commands or bool(job.services)
+
+
 def unmirrored(jobs: Iterable[RepoJob], cfg: L4Config) -> list[RepoJob]:
-    """The jobs with a command that no gate command contains (or is contained in)."""
-    return [j for j in jobs if open_commands(j, cfg)]
+    """The jobs with a command that no gate command contains (or is contained in), and the opaque ones."""
+    return [j for j in jobs if open_commands(j, cfg) or opaque(j)]

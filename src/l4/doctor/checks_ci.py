@@ -109,6 +109,7 @@ CI_002 = register(Check("CI-002", "Jobs carry the runner tags", "error", _ci_002
 
 
 MAX_JOB_COMMANDS = 3
+OPAQUE_REASON = "uses actions/services the gates do not run"
 
 
 def _job_line(job: RepoJob, wanted: list[str]) -> str:
@@ -118,6 +119,8 @@ def _job_line(job: RepoJob, wanted: list[str]) -> str:
         extras.append(f"services: {', '.join(job.services)}")
     if job.container:
         extras.append("container")
+    if not wanted:
+        return f"{where}{' (' + '; '.join(extras) + ')' if extras else ''} not mirrored ({OPAQUE_REASON})"
     shown = ", ".join(f"`{c}`" for c in wanted[:MAX_JOB_COMMANDS])
     more = f" (+{len(wanted) - MAX_JOB_COMMANDS} more)" if len(wanted) > MAX_JOB_COMMANDS else ""
     tail = f" ({'; '.join(extras)})" if extras else ""
