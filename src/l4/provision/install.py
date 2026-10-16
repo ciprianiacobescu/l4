@@ -23,6 +23,7 @@ from l4.provision.catalog import (
     INSTALLER_URLS,
     LAYA_CHECKPOINT,
     LAYA_REPO,
+    LAYA_REVISION,
     NODE_VERSION,
     NPM_PACKAGES,
     ToolSpec,
@@ -218,7 +219,7 @@ def _install_laya(ctx: _Ctx, tool: ToolSpec) -> None:
         python = (laya_interpreter(str(found)) if found else "") or str(laya / "laya" / "bin" / "python")
         code = (
             "from huggingface_hub import snapshot_download as s; "
-            f"s({LAYA_REPO!r}, allow_patterns=[{LAYA_CHECKPOINT + '/*'!r}])"
+            f"s({LAYA_REPO!r}, revision={LAYA_REVISION!r}, allow_patterns=[{LAYA_CHECKPOINT + '/*'!r}])"
         )
         hf_home = ctx.paths.laya_hf_home
         hf_home.mkdir(parents=True, exist_ok=True)

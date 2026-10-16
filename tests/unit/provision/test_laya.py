@@ -7,7 +7,7 @@ from pathlib import Path
 
 from l4.config.schema import L4Config
 from l4.doctor.context import CmdResult
-from l4.provision.catalog import LAYA_CHECKPOINT, LAYA_VERSION, required_tools
+from l4.provision.catalog import LAYA_CHECKPOINT, LAYA_REVISION, LAYA_VERSION, required_tools
 from l4.provision.install import install_planned
 from l4.provision.runner import Paths, plan_fixes
 
@@ -202,3 +202,18 @@ def test_the_backend_finds_the_checkpoint_the_provisioner_fetched(tmp_path):
     assert "HF_HOME" not in laya_hf_environ(environ, LAYA_CHECKPOINT)
     explicit = {**environ, "HF_HOME": str(tmp_path / "x")}
     assert laya_hf_environ(explicit, LAYA_CHECKPOINT) == explicit
+
+
+def test_the_checkpoint_fetch_is_pinned_to_a_revision_and_prereqs_sh_agrees():
+    assert re.fullmatch(r"[0-9a-f]{40}", LAYA_REVISION)  # a commit, never a moving branch such as `main`
+    assert re.search(rf"^LAYA_REVISION=\$\{{LAYA_REVISION:-{LAYA_REVISION}\}}", PREREQS.read_text(), re.M)
+    assert 'revision=\\"$LAYA_REVISION\\"' in PREREQS.read_text()
+
+
+def test_the_install_passes_the_revision_to_the_download(paths, env, install_fake):
+    install_fake("uv")
+    fake_laya(paths.local_bin, LAYA_VERSION)
+    runner = LayaRunner(paths)
+    run_install(paths, env, runner)
+    [fetch] = [c[-1] for c in runner.calls if "snapshot_download" in c[-1]]
+    assert f"revision={LAYA_REVISION!r}" in fetch

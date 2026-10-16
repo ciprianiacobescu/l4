@@ -1,9 +1,10 @@
 """L4-ADO-007: a single OpenSpec unit is validated strictly before any agent runs (SCN-ADO-20, -21, -22)."""
 
 from l4.agents.fake import Step
-from l4.specs.openspec import ARCHIVE_REFUSAL, intake_hint
+from l4.specs.base import OpenSpecCommandError
+from l4.specs.openspec import ARCHIVE_REFUSAL, OpenSpecCli, intake_hint
 
-from ..implementer.conftest import green_step, red_step
+from ..implementer.conftest import blocked_step, green_step, red_step
 from ..specs.fixcli import patch_openspec
 from .conftest import UNIT_DIR, new_origin_main
 
@@ -49,3 +50,23 @@ def test_a_valid_change_starts_as_before(run_l4, monkeypatch):  # SCN-ADO-22
     run = run_l4([red_step(), green_step()])
     assert run.code == 0 and run.local_events("unit.rejected") == []
     assert run.local_events("task.started")
+
+
+def test_a_unit_already_awaiting_a_person_is_not_rejected_by_the_new_check(run_l4, monkeypatch, tdd_repo, raw):
+    first = run_l4([blocked_step()])
+    assert first.code == 11
+    patch_openspec(monkeypatch, valid=False, message=MISSING)  # the spec went invalid while the unit waited
+    new_origin_main(tdd_repo, raw, {SPEC: NO_PURPOSE})
+    again = run_l4([red_step(), green_step()])
+    assert again.code != 14 and again.local_events("unit.rejected") == []
+
+
+def test_a_validation_that_raises_is_a_recorded_rejection_not_a_crash(run_l4, monkeypatch):
+    def boom(self, *args):
+        raise OpenSpecCommandError("`openspec validate x`: the CLI died")
+
+    monkeypatch.setattr(OpenSpecCli, "run_json", boom)
+    run = run_l4([red_step(), green_step()])
+    assert run.code == 14 and run.adapter.requests == []
+    (event,) = run.local_events("unit.rejected")
+    assert "the CLI died" in "\n".join(event["reasons"])

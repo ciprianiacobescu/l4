@@ -324,7 +324,23 @@ def command_option_problems(options: dict[str, Any]) -> list[str]:
 
 OpencodeTool = Literal["bash", "edit", "write", "read", "glob", "grep", "list", "patch"]
 OpencodeId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")]
-EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
+_SECRET_ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
+_RESERVED_ENV_NAMES = frozenset({"PATH", "HOME", "CI", "GITHUB_TOKEN"})
+_RESERVED_ENV_PREFIXES = ("GITHUB_", "RUNNER_")
+
+
+def _secret_env_name(value: str) -> str:
+    """The name of a variable that holds a credential. It is written into the `env:` of the rendered workflow
+    (`secrets.<NAME>`), so it must be a plain upper-case variable name (no `}}`, newline or space can reach the YAML)
+    and not one the runner or the job owns."""
+    if not _SECRET_ENV_NAME.match(value):
+        raise ValueFree("not an environment variable name (upper-case letters, digits and underscores, up to 64)")
+    if value in _RESERVED_ENV_NAMES or value.startswith(_RESERVED_ENV_PREFIXES):
+        raise ValueFree("a reserved environment variable name (PATH, HOME, CI, GITHUB_*, RUNNER_*)")
+    return value
+
+
+EnvName = Annotated[str, AfterValidator(_secret_env_name)]
 
 
 class OpencodeModelLimits(_Strict):
@@ -408,7 +424,7 @@ class Profile(_Strict):
     options: dict[str, Any] = Field(default_factory=dict)
     vendor: str | None = None
     base_url: str | None = None
-    api_key_env: str | None = None
+    api_key_env: Annotated[str, AfterValidator(_secret_env_name)] | None = None
     engine: str | None = None
 
     @model_validator(mode="after")
@@ -767,3 +783,15 @@ class L4Config(_Strict):
     budgets: BudgetsCfg = Field(default_factory=BudgetsCfg)
     observability: ObservabilityCfg = Field(default_factory=ObservabilityCfg)
     yolo: YoloCfg = Field(default_factory=YoloCfg)
+
+    @model_validator(mode="after")
+    def _no_credential_in_the_forge_token_variable(self) -> "L4Config":
+        """A profile's key variable is never the forge token's: the job env would carry one secret under two roles."""
+        token = self.forge.token_env
+        for name, profile in self.profiles.items():
+            if profile.api_key_env == token:
+                raise ValueFree(f"profiles.{name}.api_key_env must not be the forge token variable (forge.token_env)")
+            options = profile.opencode_options() if profile.adapter == "opencode" else None
+            if options is not None and options.provider is not None and options.provider.api_key_env == token:
+                raise ValueFree(f"profiles.{name}: the provider api_key_env must not be forge.token_env")
+        return self

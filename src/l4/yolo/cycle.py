@@ -67,6 +67,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
+from l4.yolo.draft import derived_parents
 from l4.yolo.findings import finding_id, prior_entries
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, remote_tip
@@ -158,12 +159,15 @@ def live_plan(files: Sequence[PlanFile], states: Mapping[str, PlanState], target
 
 def config_holds(cfg: L4Config, unit_ids: Collection[str], listed: Collection[str]) -> dict[str, Hold]:
     """The units `yolo.hold` holds (L4-ADO-011): an id or an `fnmatch` pattern of the setting matches the unit and no
-    plan file lists it (`listed`: the ids of every readable plan file, planned or excluded). No ledger, no model."""
+    plan file lists it (`listed`: the ids of every readable plan file, planned or excluded). A fix or follow-up unit
+    of a unit that a plan lists follows its parent, so `yolo.hold: ["*"]` does not hold it. No ledger, no model."""
     patterns = cfg.yolo.hold
     return {
         unit: Hold("held by yolo.hold", "is held by yolo.hold")
         for unit in unit_ids
-        if unit not in listed and any(fnmatchcase(unit, pattern) for pattern in patterns)
+        if unit not in listed
+        and not any(parent in listed for parent in derived_parents(unit))
+        and any(fnmatchcase(unit, pattern) for pattern in patterns)
     }
 
 

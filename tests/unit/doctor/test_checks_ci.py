@@ -176,6 +176,18 @@ def test_ci_003_passes_when_every_job_is_mirrored(make_ctx):
     assert ci.CI_003.run(ctx).status == "pass"
 
 
+def test_ci_003_names_a_uses_only_job_as_not_mirrored(make_ctx):
+    ctx, _ = make_ctx(cfg=gated())
+    put(
+        ctx.repo,
+        ".github/workflows/ci.yml",
+        "on: push\njobs:\n  docker:\n    steps:\n      - uses: docker/build-push-action@v6\n",
+    )
+    result = ci.CI_003.run(ctx)
+    assert result.status == "fail"
+    assert "ci.yml: docker not mirrored (uses actions/services the gates do not run)" in result.message
+
+
 def test_ci_003_is_skipped_without_a_ci_file(make_ctx):
     ctx, _ = make_ctx(cfg=gated())
     put(ctx.repo, ".github/workflows/l4.yml", "on: push\njobs: {}\n")

@@ -122,3 +122,35 @@ def test_gitlab_jobs_leave_out_the_harness_job(tmp_path: Path):
         (".gitlab-ci.yml", "test"), (".gitlab-ci.yml", "lint"),
     ]  # fmt: skip
     assert [j.name for j in unmirrored(found.jobs, cfg(test={"command": "pytest"}))] == ["lint"]
+
+
+USES_ONLY = """\
+on: [push, pull_request]
+jobs:
+  docker:
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v6
+  helm:
+    steps:
+      - uses: helm/chart-testing-action@v2
+  reusable:
+    uses: ./.github/workflows/pg.yml
+  pg:
+    services:
+      postgres: {image: postgres:16}
+    steps:
+      - run: uv run pytest -q
+  plain:
+    steps:
+      - uses: actions/checkout@v4
+      - run: uv run pytest -q
+"""
+
+
+def test_a_job_with_only_uses_steps_or_with_services_is_not_mirrored(tmp_path: Path):
+    put(tmp_path, ".github/workflows/ci.yml", USES_ONLY)
+    jobs = repo_ci_jobs(tmp_path).jobs
+    config = cfg(test={"command": "pytest -q"})
+    assert [j.name for j in unmirrored(jobs, config)] == ["docker", "helm", "reusable", "pg"]
+    assert [j.name for j in jobs if j.name == "plain"] == ["plain"]

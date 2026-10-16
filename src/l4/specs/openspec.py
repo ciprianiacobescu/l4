@@ -406,7 +406,8 @@ class OpenSpecProvider:
 
 
 MAX_PURPOSE_BYTES = 256 * 1024
-_PURPOSE_RE = re.compile(r"^## Purpose[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
+_PURPOSE_RE = re.compile(r"(?im)^##[ \t]+Purpose[ \t]*\n(.*?)(?=^##[ \t]|\Z)", re.S)  # as OpenSpec reads it
+_HTML_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 MAX_INTAKE_ERROR_CHARS = 600  # what intake keeps of each ERROR (L4-ADO-008): per issue, never of the whole
 MIN_PURPOSE_CHARS = 50
 MAX_TITLE_CHARS = 160
@@ -510,8 +511,9 @@ def intake_errors(report: ValidationReport, target: str) -> list[str]:
 
 def _purpose_of(raw: bytes) -> str:
     """The text of a spec file's `## Purpose` section on one line (at most 1500 characters), or ""."""
-    match = _PURPOSE_RE.search(raw.decode("utf-8", "replace"))
-    return _flat(match.group(1), 1500) if match else ""
+    text = raw.decode("utf-8", "replace").removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    match = _PURPOSE_RE.search(text)
+    return _flat(_HTML_COMMENT_RE.sub(" ", match.group(1)), 1500) if match else ""
 
 
 def purpose_issues(unit_dir: Path, specs_root: Path) -> list[ValidationIssue]:

@@ -96,3 +96,18 @@ def test_other_deliveries_and_an_unknown_running_commit_go_on(tmp_path, guarded,
     (tmp_path / "u").mkdir()
     with pytest.raises(Reached):
         orchestrator.run_command(app_for(make_repo(tmp_path / "u"), **CI))
+
+
+def test_a_run_on_a_unit_branch_names_the_branch_fix_not_the_default_branch_one(tmp_path, guarded, capsys):
+    env = {**CI, "GITHUB_REF_NAME": "l4/openspec/add-thing", "GITHUB_REF_TYPE": "branch"}
+    planner.run_plan(app_for(make_repo(tmp_path), **env), **PLAN)
+    err = capsys.readouterr().err
+    assert err.startswith("::warning::") and RUNNING in err and PINNED in err
+    assert "unit branch" in err and "merge the base branch" in err
+    assert "on the default branch to the base's copy" not in err
+
+
+def test_a_run_elsewhere_keeps_the_default_branch_fix(tmp_path, guarded, capsys):
+    env = {**CI, "GITHUB_REF_NAME": "main", "GITHUB_REF_TYPE": "branch"}
+    planner.run_plan(app_for(make_repo(tmp_path), **env), **PLAN)
+    assert "on the default branch to the base's copy" in capsys.readouterr().err

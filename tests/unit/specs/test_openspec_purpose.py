@@ -56,3 +56,27 @@ def test_one_error_per_delta_in_name_order_and_no_specs_folder_is_fine(tmp_path:
     delta(unit, "b-cap", BODY)
     delta(unit, "a-cap", BODY)
     assert [i.path for i in purpose_issues(unit, root)] == ["specs/a-cap/spec.md", "specs/b-cap/spec.md"]
+
+
+def _raw(tmp_path: Path, text: str) -> list:
+    unit, root = tmp_path / "change", tmp_path / "specs"
+    folder = unit / "specs" / "dreaming"
+    folder.mkdir(parents=True)
+    (folder / "spec.md").write_bytes(text.encode())
+    return purpose_issues(unit, root)
+
+
+def test_crlf_bom_and_lower_case_heading_read_like_openspec(tmp_path: Path):
+    body = f"## Purpose\n{LONG}\n\n{BODY}"
+    assert _raw(tmp_path / "a", body.replace("\n", "\r\n")) == []
+    assert _raw(tmp_path / "b", "﻿" + body) == []
+    assert _raw(tmp_path / "c", body.replace("## Purpose", "## purpose")) == []
+    assert _raw(tmp_path / "d", body.replace("## Purpose", "##  PURPOSE  ")) == []
+
+
+def test_a_purpose_that_is_only_a_comment_or_blank_is_empty(tmp_path: Path):
+    comment = "<!-- " + "x" * 80 + " -->"
+    assert len(_raw(tmp_path / "a", f"## Purpose\n{comment}\n\n{BODY}")) == 1
+    assert len(_raw(tmp_path / "b", f"## Purpose\n<!--\n{'x' * 80}\n-->\n\n{BODY}")) == 1
+    assert len(_raw(tmp_path / "c", f"## Purpose\n   \n\n{BODY}")) == 1
+    assert _raw(tmp_path / "d", f"## Purpose\n<!-- note -->\n{LONG}\n\n{BODY}") == []

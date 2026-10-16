@@ -105,6 +105,26 @@ def test_config_holds_leaves_a_listed_unit_to_its_plan():
     assert config_holds(cfg_with("*"), ["openspec:a", "openspec:b"], {"openspec:a"}) == {"openspec:b": HELD}
 
 
+def test_config_holds_leaves_the_fix_and_follow_up_units_of_a_listed_parent_to_it():
+    units = [
+        "openspec:a",
+        "openspec:a-fix-1",
+        "openspec:a-fix-1-fix-2",
+        "openspec:a-followup-1",
+        "kiro:k-fix-1",
+        "openspec:b-fix-1",
+    ]
+    held = config_holds(cfg_with("*"), units, {"openspec:a"})
+    assert sorted(held) == ["kiro:k-fix-1", "openspec:b-fix-1"]  # a-fix-*, a-followup-* follow their parent a
+
+
+def test_plan_holds_does_not_config_hold_a_fix_unit_of_a_planned_parent():
+    files = [file("p1", plan_text("p1", ["openspec:a"]))]
+    phases = {"openspec:a": "implementing", "openspec:a-fix-1": "implementing", "openspec:z": "implementing"}
+    holds = plan_holds(files, {}, phases, "main", cfg_with("*"))
+    assert holds["openspec:z"] == HELD and "openspec:a-fix-1" not in holds
+
+
 def test_config_holds_with_no_entry_holds_nothing():
     assert config_holds(cfg_with(), ["openspec:a"], set()) == {}
 

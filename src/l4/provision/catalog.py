@@ -24,6 +24,10 @@ OPENCODE_VERSION = "1.18.34"
 # is the folder of `LAYA_REPO` that `laya-serve` loads. `scripts/runner/prereqs.sh` carries the same two defaults.
 LAYA_CHECKPOINT = "typed-decisions"
 LAYA_REPO = "convaiinnovations/laya"
+# The commit of `LAYA_REPO` the checkpoint is fetched at: a branch moves, a commit does not. Inferred, not re-checked
+# against the network: the only snapshot in the development machine's Hugging Face cache that holds `typed-decisions`
+# (the `refs/main` it had at the time). Move it only with a test run against the new weights.
+LAYA_REVISION = "7b928d828b7b0e022f929d9bd2e44165aa270148"
 # Kiro's installer takes no version argument and ships no changelog we can pin to [U]: it is installed as released.
 
 NPM_PACKAGES = {"codex": "@openai/codex", "opencode": "opencode-ai"}

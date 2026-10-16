@@ -223,3 +223,57 @@ def test_yolo_hold_defaults_to_nothing_and_takes_ids_and_patterns():
 def test_yolo_hold_rejects_an_empty_entry():
     with pytest.raises(ValidationError):
         L4Config.model_validate({"yolo": {"hold": ["openspec:a", ""]}})
+
+
+# --- the env-var names that reach the rendered workflow's `env:` (adoption-lessons L2) --------------------------------
+
+S1 = {"backend": "system-one", "engine": "jev", "base_url": "https://api.typesafe.ai", "model": "jev-1.13.0"}
+
+
+def s1_cfg(name: str, **forge: Any) -> L4Config:
+    return L4Config.model_validate(
+        {"profiles": {"jev": {**S1, "api_key_env": name}}, "roles": {"s1_judge": ["jev"]}, "forge": forge}
+    )
+
+
+@pytest.mark.parametrize("name", ["TYPESAFE_API_KEY", "_K", "K1_2"])
+def test_a_plain_upper_case_api_key_env_is_accepted(name):
+    assert s1_cfg(name).profiles["jev"].api_key_env == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "TYPESAFE_API_KEY }}\n      INJECT: ${{ github.token",
+        "lower_case", "1ABC", "A B", "A:B", "", "A-B",
+        "PATH", "HOME", "CI", "GITHUB_TOKEN", "GITHUB_ENV", "RUNNER_TEMP", "RUNNER_X",
+    ],
+)  # fmt: skip
+def test_an_api_key_env_that_is_not_a_plain_variable_name_or_is_reserved_is_refused(name):
+    with pytest.raises(ValidationError) as caught:
+        s1_cfg(name)
+    assert "INJECT" not in str(caught.value)  # the message names the path, never the value
+
+
+def test_an_api_key_env_equal_to_the_forge_token_variable_is_refused():
+    with pytest.raises(ValidationError):
+        s1_cfg("L4_FORGE_TOKEN")
+    with pytest.raises(ValidationError):
+        s1_cfg("MY_TOKEN", token_env="MY_TOKEN")
+
+
+def test_the_opencode_provider_key_variable_is_held_to_the_same_rule():
+    provider = {"id": "m", "base_url": "http://192.0.2.10:1/v1", "models": {}}
+    for bad in ("PATH", "GITHUB_TOKEN", "x }}\n  y: z"):
+        with pytest.raises(ValidationError):
+            L4Config.model_validate(
+                {
+                    "profiles": {
+                        "o": {
+                            "adapter": "opencode",
+                            "model": "m/x",
+                            "options": {"provider": {**provider, "api_key_env": bad}},
+                        }
+                    }
+                }
+            )
