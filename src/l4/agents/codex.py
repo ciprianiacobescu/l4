@@ -282,7 +282,8 @@ class CodexAdapter:
         ]
         result = RunResult(
             status="error", raw_events_path=raw_events_path, final_text=messages[-1] if messages else None,
-            session_id=thread, exit_code=exit_code, usage=_usage(events),
+            last_message=messages[-1] if messages else None, session_id=thread, exit_code=exit_code,
+            usage=_usage(events),
         )  # fmt: skip
         if timed_out:
             result.status = "timeout"
@@ -324,6 +325,7 @@ class CodexAdapter:
         if result_text is None:
             if schema is not None:
                 result.detail = f"{label} missing: codex wrote no -o file"
+                result.result_problem = "missing"
                 return result
             result.status = "ok"
             return result
@@ -331,11 +333,13 @@ class CodexAdapter:
             parsed = drop_nulls(json.loads(result_text))
         except ValueError:
             result.detail = f"{label} invalid: not JSON"
+            result.result_problem = "not_json"
             return result
         problems = validate(parsed, schema) if schema is not None else []
         if not isinstance(parsed, dict) or problems:
             result.detail = f"{label} invalid: " + "; ".join(problems[:3] or ["not an object"])
             result.rejected = parsed if isinstance(parsed, dict) else None
+            result.result_problem = "invalid"
             return result
         result.structured = parsed
         result.status = "ok"

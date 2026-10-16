@@ -255,3 +255,36 @@ def test_a_judge_or_read_only_request_gets_no_mcp_flags_even_with_servers(tmp_pa
                       permission_policy=PermissionPolicy(mode))  # fmt: skip
         argv = CodexAdapter().build_command(req, exe="codex", schema_path=None)
         assert not any("mcp_servers" in a for a in argv), mode
+
+
+def test_result_problem_names_how_the_native_result_failed(tmp_path):  # SCN-FAC-16 native part, SCN-FAC-17
+    missing = parse("red-ok.jsonl", tmp_path, result_text=None)
+    assert missing.status == "error" and missing.result_problem == "missing"
+    broken = parse("red-ok.jsonl", tmp_path, result_text="not json")
+    assert broken.status == "error" and broken.detail == "result invalid: not JSON"
+    assert broken.result_problem == "not_json"
+    bad = {"status": "maybe"}
+    invalid = parse("red-ok.jsonl", tmp_path, result_text=json.dumps(bad))
+    assert invalid.status == "error" and invalid.result_problem == "invalid" and invalid.rejected == bad
+    assert "result invalid: " in (invalid.detail or "")
+    good = parse("red-ok.jsonl", tmp_path, result_text=(RECORDED / "red-ok.result.json").read_text())
+    assert good.status == "ok" and good.result_problem is None
+
+
+def test_last_message_is_the_last_agent_message_and_final_text_is_unchanged(tmp_path):  # SCN-FAC-17
+    def message(text):
+        return json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": text}})
+
+    stream = [
+        json.dumps({"type": "thread.started", "thread_id": "t"}), message("first"), message("second"),
+        json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}),
+    ]  # fmt: skip
+    out = parse(stream, tmp_path, schema=None)
+    assert out.last_message == "second" and out.final_text == "second"
+    none = parse([stream[0], stream[3]], tmp_path, schema=None)
+    assert none.last_message is None and none.final_text is None
+
+
+def test_codex_reports_no_context_peak(tmp_path):  # SCN-FAC-19
+    out = parse("red-ok.jsonl", tmp_path, result_text=(RECORDED / "red-ok.result.json").read_text())
+    assert out.usage.context_peak_tokens is None and out.usage.context_peak_percent is None

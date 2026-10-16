@@ -9,7 +9,8 @@ M1: sandbox-security 1.17 (`isolation_flags`), agent-factory 1.9 (rate-limit int
 
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,20 @@ STRUCTURED_DETAIL = "structured output"  # `RunResult.detail` of a reply that ha
 
 def _compact(schema: dict[str, Any]) -> str:
     return json.dumps(schema, separators=(",", ":"))
+
+
+def _context_peak(documents: Sequence[Mapping[str, Any]]) -> int | None:
+    """The largest per-call input of the `assistant` events: input + cache read + cache creation tokens."""
+    peak: int | None = None
+    for document in documents:
+        message = document.get("message") if document.get("type") == "assistant" else None
+        usage = message.get("usage") if isinstance(message, dict) else None
+        if not isinstance(usage, dict):
+            continue
+        parts = [usage.get(k) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")]
+        total = sum(v for v in parts if isinstance(v, int) and not isinstance(v, bool))
+        peak = total if peak is None else max(peak, total)
+    return peak
 
 
 def _documents(text: str) -> list[dict[str, Any]]:
@@ -195,6 +210,7 @@ class ClaudeCodeAdapter:
         result = RunResult(status="error", raw_events_path=raw_events_path, exit_code=exit_code)
         if final is not None:
             self._fill(result, final)
+            result.usage = replace(result.usage, context_peak_tokens=_context_peak(documents))
         if timed_out:
             result.status = "timeout"
             return result
@@ -250,6 +266,7 @@ class ClaudeCodeAdapter:
     def _fill(result: RunResult, final: Mapping[str, Any]) -> None:
         text = final.get("result")
         result.final_text = text if isinstance(text, str) else None
+        result.last_message = result.final_text
         session = final.get("session_id")
         result.session_id = session if isinstance(session, str) else None
         usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
@@ -272,15 +289,19 @@ class ClaudeCodeAdapter:
         structured = final.get("structured_output")
         if schema is None:
             result.structured = structured if isinstance(structured, dict) else None
+            if result.structured is None:
+                result.result_problem = "missing"
             result.status = "ok"
             return
         if not isinstance(structured, dict):
             result.detail = f"{STRUCTURED_DETAIL} missing although a schema was requested"
+            result.result_problem = "missing"
             return
         problems = validate(structured, schema)
         if problems:
             result.detail = f"{STRUCTURED_DETAIL} invalid: " + "; ".join(problems[:3])
             result.rejected = structured
+            result.result_problem = "invalid"
             return
         result.structured = structured
         result.status = "ok"
