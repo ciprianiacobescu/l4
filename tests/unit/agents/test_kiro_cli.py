@@ -245,3 +245,40 @@ def test_the_stream_metering_is_credits_with_its_source_never_dollars(tmp_path):
     silent = '{"type":"runFinished","data":{"status":"success","finalText":"x"}}'
     unmetered = adapter().parse([silent], exit_code=0, raw_events_path=tmp_path / "e")
     assert unmetered.usage.credits is None and unmetered.usage.credits_source is None  # v3 spec runs meter nothing
+
+
+def _parsed(name: str, tmp_path):
+    return adapter().parse((R28 / name).read_text().splitlines(), exit_code=0, raw_events_path=tmp_path / "e")
+
+
+def test_last_message_is_the_text_after_the_last_tool_call_and_final_text_is_unchanged(tmp_path):
+    """SCN-FAC-17 (kiro part): `finalText` holds all the text; `last_message` only what follows the last tool call."""
+    out = _parsed("red-tools.stream.jsonl", tmp_path)
+    assert out.final_text and out.last_message
+    assert len(out.last_message) < len(out.final_text) and out.final_text.endswith(out.last_message)
+    assert out.last_message.startswith("The RED") and not out.last_message.startswith("I'll start")
+    assert "Let me l" not in out.last_message
+    hello = _parsed("hello.stream.jsonl", tmp_path)  # no tool call: the whole text
+    assert hello.last_message == "L4-OK" == hello.final_text
+
+
+def test_no_agent_text_gives_no_last_message(tmp_path):
+    silent = '{"type":"runFinished","data":{"status":"success","finalText":"x"}}'
+    assert adapter().parse([silent], exit_code=0, raw_events_path=tmp_path / "e").last_message is None
+
+
+def test_the_context_peak_is_the_largest_context_usage_percentage(tmp_path):
+    """SCN-FAC-18 (kiro part): the largest `metadata.contextUsagePercentage`, with the credits kept."""
+    tools = _parsed("red-tools.stream.jsonl", tmp_path)
+    assert tools.usage.context_peak_percent == pytest.approx(14.687499046325684)
+    assert tools.usage.context_peak_tokens is None and tools.usage.credits is not None
+    assert _parsed("hello.stream.jsonl", tmp_path).usage.context_peak_percent == pytest.approx(8.037500381469727)
+    lines = [
+        '{"type":"metadata","data":{"contextUsagePercentage":1.1}}',
+        '{"type":"metadata","data":{"contextUsagePercentage":3.6}}',
+        '{"type":"metadata","data":{"contextUsagePercentage":2.0}}',
+    ]
+    out = adapter().parse(lines, exit_code=0, raw_events_path=tmp_path / "e")
+    assert out.usage.context_peak_percent == 3.6 and out.usage.credits is None
+    none = adapter().parse(['{"type":"runStarted","data":{}}'], exit_code=0, raw_events_path=tmp_path / "e")
+    assert none.usage.context_peak_percent is None
