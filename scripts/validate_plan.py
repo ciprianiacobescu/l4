@@ -9,8 +9,9 @@ would report without a network or a model (yolo-mode design D15, requirement L4-
 optional: in a work tree it runs `git ls-files -co --exclude-standard` (read-only) to count only the files the review
 sees; without git every file counts.
 
-Exit 0: everything is valid. Exit 1: one line per problem, `<plan id>: <code>: <subject>: <text>`, or for the coverage
-problems `uncovered: <unit> (...)` and `covered_twice: <unit> (...)`. Exit 2: a usage or read error.
+Exit 0: everything is valid. Exit 1: one line per problem, `error: <plan id>: <code>: <subject>: <text>`, or for the
+coverage problems `error: uncovered: <unit> (...)` and `error: covered_twice: <unit> (...)`.
+Exit 2: a usage or read error.
 
 A planned unit whose OpenSpec change is archived is not an error here: the script has no plan state, so it cannot tell
 a unit that this plan already merged or integrated (which `l4 yolo check` accepts) from a fresh plan that lists an
@@ -1162,8 +1163,8 @@ def budget_problems(
 
 def problem_line(problem: dict) -> str:
     if problem["plan"] is None:
-        return f"{problem['code']}: {problem['subject']} ({problem['text']})"
-    return f"{problem['plan']}: {problem['code']}: {problem['subject']}: {problem['text']}"
+        return f"error: {problem['code']}: {problem['subject']} ({problem['text']})"
+    return f"error: {problem['plan']}: {problem['code']}: {problem['subject']}: {problem['text']}"
 
 
 def finished_line(unit: str) -> str:

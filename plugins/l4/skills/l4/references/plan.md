@@ -101,7 +101,7 @@ admission and the review. Fix its findings the same way.
 
 Before the person reviews the plan, run the same review yourself and fix what it finds. Do not push first.
 
-1. `python3 <skill dir>/scripts/validate_plan.py` clean.
+1. `openspec validate <change> --strict` (or `--all --strict`) and `python3 <skill dir>/scripts/validate_plan.py`, both clean.
 2. `l4 yolo review <id> --worktree`. It reads the working tree, writes nothing and charges the plan nothing. Only changed
    units are judged again, so repeat it after each fix. Exit 0 means every subject is READY.
 3. `l4 yolo findings <id> --worktree --json` (the dry run records nothing, so without `--worktree` it is empty). For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
@@ -109,7 +109,7 @@ Before the person reviews the plan, run the same review yourself and fix what it
    wording.
 4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
 5. When every subject is READY, commit, run `l4 yolo review <id> --worktree --record` (anything not already on the
-   ledger is judged again, and that verdict is the one recorded), then push. CI then does not judge again. `--fresh
+   ledger is judged again, and that verdict is the one recorded: one more judging pass, cheap but not free), then push. CI then does not judge again. `--fresh
    <subject>` is a dry-run tool only; `--record --fresh` is refused when the ledger holds that material. Hand off as below.
 
 `--worktree` needs no sandbox for a `claude-code` or `opencode` judge: outside CI it runs unsandboxed and prints the

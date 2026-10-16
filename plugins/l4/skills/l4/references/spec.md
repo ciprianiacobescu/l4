@@ -1,7 +1,8 @@
 # Writing a spec that passes the readiness review
 
-The judge reads each unit's folder and the folders it depends on. Each rule below prevents one finding kind. Fix these
-before the first review.
+The judge reads each unit's folder and the folders it depends on, never the code. Each rule below prevents one finding
+kind. Fix these before the first review. On a finding, fix all of a unit's files together (spec, proposal, tasks,
+design agree): a fix in one file often raises a consistency finding in another.
 
 - **testability.** Every SHALL has a scenario, failure and "nothing to do" cases included. A scenario is decidable by a
   test that always runs: no wall-clock bound without a tolerance, no outcome that depends on a person.
@@ -10,7 +11,9 @@ before the first review.
 - **missing_dependency.** Add `depends_on` when two units edit one function or file section, or when a document
   describes what another unit creates.
 - **failure_cases.** Say what happens when a stage does not run, raises, or gets bad input.
-- **feasibility.** Use only tools the runner has. Say in prose what is already delivered; ticked tasks are done.
+- **feasibility.** Use only tools the runner has. Say in prose what is already delivered; ticked tasks are done. When a
+  spec relies on code already on the base branch, name it in the spec (module, function, values) instead of adding a
+  dependency.
 - **material_cut.** Stay inside the review budgets (`yolo.review.max_file_chars`, `max_folder_chars`,
   `max_dependency_chars`; `validate_plan.py` prints overruns: a unit's own folder over the budget is an error, a dependency's folder a
   warning). Move background to `docs/`.
