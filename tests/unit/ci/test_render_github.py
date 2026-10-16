@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from l4.ci.github import HOST_KEYS, JOB_TIMEOUT_MINUTES, doctor_command, expression_string, render_github_ci
 from l4.ci.lint import lint_github_yaml
@@ -495,9 +496,6 @@ def test_a_local_system_one_engine_adds_nothing():
     assert render_github_ci(laya) == render_github_ci(L4Config())
 
 
-def test_a_system_one_key_equal_to_the_forge_token_is_not_added_twice():
-    config = cfg(
-        profiles={"jev": {**JEV, "api_key_env": "L4_FORGE_TOKEN"}},
-        roles={"s1_judge": ["jev"]},
-    )
-    assert "L4_FORGE_TOKEN" not in _secret_names(config)
+def test_a_system_one_key_equal_to_the_forge_token_is_refused_at_load():
+    with pytest.raises(ValidationError):
+        cfg(profiles={"jev": {**JEV, "api_key_env": "L4_FORGE_TOKEN"}}, roles={"s1_judge": ["jev"]})
