@@ -143,3 +143,77 @@ def test_a_grandchild_holding_stdout_open_cannot_leave_the_file_unfinished(tmp_p
     done = run(tmp_path, code)
     assert done.returncode == 0 and time.monotonic() - started < 30
     assert (tmp_path / "out").read_text() == "done\n"
+
+
+class FakeWatch:
+    """A stand-in with the watch's methods (the real `ActivityWatch` is another unit)."""
+
+    def __init__(self, open_call: bool = False) -> None:
+        self.open_call = open_call
+        self.started: list[tuple[float, object]] = []
+        self.lines: list[str] = []
+        self.ticks = 0
+        self.stopped_idle_s: float | None = None
+
+    def start(self, now, reader) -> None:
+        self.started.append((now, reader))
+
+    def line(self, text: str) -> None:
+        self.lines.append(text)
+
+    def tick(self, now: float) -> None:
+        self.ticks += 1
+
+    def has_open_call(self) -> bool:
+        return self.open_call
+
+
+def test_a_watch_is_started_fed_each_line_and_ticked_while_the_child_runs(tmp_path):
+    watch = FakeWatch()
+    reader = object()
+    done = run(tmp_path, "import time; print('a', flush=True); time.sleep(0.5); print('b')", watch=watch, reader=reader)
+    assert done.returncode == 0
+    assert len(watch.started) == 1 and watch.started[0][1] is reader
+    assert watch.lines == ["a", "b"] and watch.ticks >= 3 and watch.stopped_idle_s is None
+
+
+def test_a_stall_sends_sigint_before_the_kill(tmp_path):
+    marker = tmp_path / "marker"
+    code = (
+        "import time\ntry:\n    print('hi', flush=True)\n    time.sleep(60)\n"
+        f"except KeyboardInterrupt:\n    open({str(marker)!r}, 'w').write('int')\n"
+    )
+    done = run(tmp_path, code, stall_timeout_s=4, timeout_s=300)
+    assert done.stalled and not done.timed_out and marker.read_text() == "int"
+
+
+def test_an_open_call_holds_the_stall_rule(tmp_path):
+    watch = FakeWatch(open_call=True)
+    started = time.monotonic()
+    done = run(tmp_path, "import time; print('start', flush=True); time.sleep(2.5)", stall_timeout_s=0.5, watch=watch)
+    assert done.returncode == 0 and not done.stalled and time.monotonic() - started >= 2.4
+    assert watch.stopped_idle_s is None
+
+
+def test_a_silent_child_with_no_open_call_is_stopped_and_the_silence_is_recorded(tmp_path):
+    watch = FakeWatch(open_call=False)
+    done = run(tmp_path, "import time; print('hi', flush=True); time.sleep(60)", stall_timeout_s=1, watch=watch)
+    assert done.stalled and watch.stopped_idle_s is not None and watch.stopped_idle_s >= 1
+
+
+def test_the_stall_kill_follows_after_the_grace_even_when_the_agent_prints_on_sigint(tmp_path, monkeypatch):
+    import l4.agents.proc as proc
+
+    monkeypatch.setattr(proc, "INTERRUPT_GRACE_S", 1.0)
+    code = (
+        "import signal, time\n"
+        "def h(*a):\n    print('late line', flush=True)\n"
+        "signal.signal(signal.SIGINT, h)\n"
+        "print('hi', flush=True)\n"
+        "while True:\n    time.sleep(0.1)\n"
+    )
+    watch = FakeWatch()
+    started = time.monotonic()
+    done = run(tmp_path, code, stall_timeout_s=4, watch=watch, timeout_s=300)
+    assert done.stalled and not done.timed_out and "late line" in (tmp_path / "out").read_text()
+    assert time.monotonic() - started < 60
