@@ -510,6 +510,7 @@ class ImplementerCfg(_Strict):
 class ClarifierCfg(_Strict):
     enabled: bool = True
     auto_accept_kinds: list[Literal["technical", "product", "ambiguous"]] = Field(default_factory=lambda: ["technical"])
+    answer_by_agents: bool = False  # an agent may accept or answer any question with `l4 questions` (L4-QMD-009)
     min_confidence: Literal["high", "medium"] = "high"
     max_open_questions: int = Field(default=3, ge=1)
     s1_router: bool = True

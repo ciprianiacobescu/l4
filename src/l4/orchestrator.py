@@ -229,10 +229,14 @@ class Orchestrator:
         *,
         take_spec_edit: bool = True,
         accepted: tuple[str, tuple[Mapping[str, object], ...]] | None = None,
+        activated: tuple[str, str] | None = None,
     ) -> None:
         self.cfg = cfg
         self.services = services
         self._accepted = accepted  # (plan id, the accepted review items of this unit) from the plan step, or None
+        self._activated = (
+            activated  # (plan id, the unit folder's digest frozen at activation) from the plan step, or None
+        )
         self._takes_spec_edit = take_spec_edit  # `l4 verify` leaves a spec edit for the next `l4 run` (review L3)
         self.state: UnitState = UnitState(unit=services.ref.id)
         self._selected: Selected | None = None
@@ -807,6 +811,8 @@ class Orchestrator:
             sandbox=s.sandbox, selected=self._select(), iteration=self.state.iteration, push=self.push,
         )  # fmt: skip
         wb.previous_attempt = self._previous_attempt
+        if self._activated is not None:
+            wb.activated_plan, wb.activated_digest = self._activated
         return wb
 
     def _clarifier_available(self) -> bool:
@@ -1345,13 +1351,15 @@ def run_unit_in_worktree(
     take_spec_edit: bool = True,
     waits: RunWaits | None = None,
     accepted: tuple[str, tuple[Mapping[str, object], ...]] | None = None,
+    activated: tuple[str, str] | None = None,
 ) -> UnitRunResult:
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
     lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
     `Orchestrator.resume`). `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
     `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011). `accepted`: the plan id and the accepted
-    review items of this unit, from the plan step (L4-YOLO-028)."""
+    review items of this unit, from the plan step (L4-YOLO-028). `activated`: the plan id and the digest of the unit's
+    folder as the plan froze it, from the plan step (a task text that matches it is a reviewed text)."""
     preflight_run_config(app, cfg)  # exit 2 before the lease, the worktree and any probe
     names = UnitNames.for_unit(
         ref.id, branch_prefix=cfg.forge.branch_prefix, cache=cache_root(app.environ, repo=app.repo),
@@ -1397,7 +1405,9 @@ def run_unit_in_worktree(
             app, cfg, git=unit_git, names=names, worktree=opened["worktree"], ledger=writer,
             adapters=adapters, hooks=hooks, sandbox=resume_reason is None,  # a resume runs no agent and no gate
         )  # fmt: skip
-        orchestrator = Orchestrator(cfg, services, waits, take_spec_edit=take_spec_edit, accepted=accepted)
+        orchestrator = Orchestrator(
+            cfg, services, waits, take_spec_edit=take_spec_edit, accepted=accepted, activated=activated
+        )
         result = (
             orchestrator.run_unit()
             if resume_reason is None
@@ -1504,6 +1514,7 @@ def run_command(
     result = run_units(
         app, cfg, git, chosen[: max_units if max_units is not None else None], adapters=adapters,
         accepted=(step.plan_id, step.accepted) if step.plan_id else None,
+        activated=(step.plan_id, step.activated) if step.plan_id else None,
     )  # fmt: skip
     result = replace(
         result,
@@ -1620,6 +1631,7 @@ def run_units(
     *,
     adapters: Mapping[str, AgentAdapter] | None,
     accepted: tuple[str, Mapping[str, tuple[Mapping[str, object], ...]]] | None = None,
+    activated: tuple[str, Mapping[str, str]] | None = None,
 ) -> CommandResult:
     """The units one after the other. One that raises (HB-7, L4-CLI-001) ends with its own exit code and an
     `exit_reason`, and the units after it still run: its siblings must not lose their turn to it, and `outcome.json`
@@ -1660,7 +1672,10 @@ def run_units(
         before = _phase_of(cfg, git, provider, ref)
         try:
             carrier = (accepted[0], tuple(accepted[1].get(ref.id, ()))) if accepted else None
-            done = run_unit_in_worktree(app, cfg, git, provider, ref, adapters=adapters, waits=waits, accepted=carrier)
+            frozen = (activated[0], activated[1][ref.id]) if activated and ref.id in activated[1] else None
+            done = run_unit_in_worktree(
+                app, cfg, git, provider, ref, adapters=adapters, waits=waits, accepted=carrier, activated=frozen
+            )
         except Exception as exc:  # noqa: BLE001 - classified: the exit code and a redacted one-line reason
             done = _failed_unit(app, cfg, git, provider, ref, exc, before)
         longest = max(longest, (clock.now() - began).total_seconds())

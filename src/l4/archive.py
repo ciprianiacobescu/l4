@@ -137,7 +137,8 @@ def render_pr_body(
             "- This merge request is a draft until verification passes; the harness then marks it ready.",
             "- Any merge method works: the harness detects the merge from the merge request and the tree. A merge "
             "commit keeps the commits' L4 trailers in the history; a squash drops them.",
-            "- The harness never merges it.",
+            "- Who merges it: a person, unless the unit is in an active delivery plan with `merge: auto`; then the "
+            "harness merges it after verification passes (see `l4 yolo status`).",
             "",
         ]
     )

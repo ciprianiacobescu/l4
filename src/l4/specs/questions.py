@@ -15,7 +15,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file
 from l4.redact import Redactor
 from l4.specs.base import SAFE_NAME, Criterion, SpecError
@@ -187,11 +186,6 @@ def raise_questions(unit_dir: Path, unit_name: str, batch: Sequence[NewQuestion]
     return ids
 
 
-def run_questions(app: object, **options: object) -> None:
-    """The `l4 questions` handler named in `commands.HANDLERS`; this module exists before the command does."""
-    raise L4Exit(ExitCode.USAGE_ERROR, "questions: not yet implemented (M1: spec-providers 5.9)")
-
-
 # --- reading: the tolerant parser (L4-QMD-002) -----------------------------------------------------------------
 
 
@@ -267,6 +261,7 @@ _RESTART_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+restart\b", re.IGNORECASE
 SUPERSEDED_BY_RESTART = "superseded by restart"  # `l4 restart` (L4-OPS-004): the question belongs to the old attempt
 _ROUND_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+round\s+(\d+)\b", re.IGNORECASE)
 _QUESTION_HEADING = re.compile(rb"^## Q-(\d+):")
+_ANSWER_MARK = b"<!-- write below this line -->"
 _ANSWERED = frozenset({QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED, QuestionStatus.ANSWERED_BY_CLARIFIER})
 
 
@@ -494,6 +489,26 @@ class QuestionsFile:
         at = question.section.end
         lead = b"" if self.data[:at].endswith(b"\n") else eol
         return _edited(self, [(Span(at, at), lead + eol + heading + body)])
+
+    def set_answer(self, qid: str, text: str) -> "QuestionsFile":
+        """Replace the body of the `### Answer` block with the comment line `<!-- write below this line -->` (kept when
+        the block has it), the text and one line end, or add the block at the end of the section. Spans only: the
+        text is the caller's (`questions_cli.check_text` has refused what the file would read as structure), and the
+        file's line endings are kept. The Status is `set_status`'s."""
+        question = _require(self, qid)
+        eol = _eol(self.data)
+        lines = re.split(r"\r\n|\r|\n", text.strip("\r\n"))
+        body = eol.join(line.encode() for line in lines) + eol
+        if question.answer is None:
+            at = question.section.end
+            lead = b"" if self.data[:at].endswith(b"\n") else eol
+            return _edited(self, [(Span(at, at), lead + eol + b"### Answer" + eol + body)])
+        span = question.answer.body
+        old = self.data[span.start : span.end]
+        marked = next((line.strip() for line in old.splitlines() if line.strip() == _ANSWER_MARK), None)
+        more = span.end != question.section.end  # another subsection follows: keep the blank line before it
+        head = marked + eol if marked is not None else b""
+        return _edited(self, [(span, head + body + (eol if more else b""))])
 
     def refresh_index(self) -> "QuestionsFile":
         """Rewrite the index rows whose Status no longer matches their section: a human changes the Status in the
