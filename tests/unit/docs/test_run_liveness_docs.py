@@ -41,7 +41,11 @@ def test_procedure_4_6_has_the_needles() -> None:  # SCN-OPS-37
 def test_sections_4_2_4_4_4_5_and_11_have_their_rows() -> None:  # SCN-OPS-37
     runbook = _runbook()
     logs = _flat(runbook[runbook.index("### 4.2 ") : runbook.index("### 4.3 ")])
-    for needle in ("last activity <t> ago", "no activity from <profile> for <t>", "red: <n> new tests fail, as intended"):
+    for needle in (
+        "last activity <t> ago",
+        "no activity from <profile> for <t>",
+        "red: <n> new tests fail, as intended",
+    ):
         assert needle in logs, needle
     status = _flat(runbook[runbook.index("### 4.4 ") : runbook.index("### 4.5 ")])
     for needle in ("`LAST`", "Last activity:", "Open run:", "open_run", "last_activity"):
@@ -62,7 +66,13 @@ def test_operate_names_the_last_activity() -> None:  # SCN-OPS-37
 def test_changelog_names_run_liveness_in_0_4_5() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     section = changelog[changelog.index("## 0.4.5 (") : changelog.index("## 0.4.4 (")]
-    for needle in ("implementer.idle_timeout", "implementer.heartbeat", "agent.idle", "Open run:", "run.started.ci_url"):
+    for needle in (
+        "implementer.idle_timeout",
+        "implementer.heartbeat",
+        "agent.idle",
+        "Open run:",
+        "run.started.ci_url",
+    ):
         assert needle in section, needle
     old = changelog[changelog.index("## 0.4.4 (") : changelog.index("## 0.4.3 ")]
     assert "agent.idle" not in old
