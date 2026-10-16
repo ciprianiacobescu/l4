@@ -925,15 +925,18 @@ class Orchestrator:
         """The implementer hit a limit: cool it down and select the next profile. The one place `_selected` changes
         after the first selection, so a caller that saw the limit itself (M1.3's fix loop, the audit writer) goes
         through here and every later task and the outcome follow the new profile."""
-        previous = self._select()
+        task_profile, self._task_selected = self._task_selected, None
+        previous = task_profile or self._select()
         try:
-            self._selected = self.services.factory.on_limit(previous, limit)
+            chosen = self.services.factory.on_limit(previous, limit)
         except WaitingCapacity as exc:
-            self._selected = self._wait_in_run(exc)  # a short cool-down is waited out; else this raises `exc` again
+            chosen = self._wait_in_run(exc)  # a short cool-down is waited out; else this raises `exc` again
+        if task_profile is None or chosen.profile_name != self._select().profile_name:
+            self._selected = chosen  # the run's profile moves; a task's own profile that limited leaves it as it is
         signal = limit if isinstance(limit, LimitSignal) else limit.limit
         kind = signal.kind if signal else limit.status if isinstance(limit, RunResult) else "rate_limit"
         self._previous_attempt = PreviousAttempt(previous.profile_name, kind, task)
-        return self._selected
+        return self._select()
 
     def _job_remaining_s(self) -> float | None:
         """Seconds of the CI job left before the soft deadline; None when the budget is unknown (L4-IMP-012)."""

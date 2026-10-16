@@ -5,13 +5,14 @@ from datetime import UTC, datetime
 
 import pytest
 
+from l4.agents.base import LimitSignal
 from l4.agents.fake import Step
 from l4.availability.cooldown import AvailabilityStore, cooldown_key
 from l4.config.schema import Profile
 
 from ..implementer.conftest import green_step, red_step, result
 from .conftest import BRANCH, UNIT
-from .test_fallback import TWO
+from .test_fallback import RESETS, TWO
 
 FAIL = Step(structured=result("red"))  # "no tests added": a failed red attempt
 INVALID = Step(structured={"status": "ok"})  # no `summary`: a failed attempt too
@@ -97,3 +98,14 @@ def test_a_blocked_step_raises_the_question_and_does_not_escalate(run_l4):  # SC
     run = run_l4([FAIL, blocked_step()], **TWO)
     assert run.events("implementer.escalated") == [] and run.events("implementer.escalation_skipped") == []
     assert len(run.adapter.requests) == 2
+
+
+def test_a_limit_on_the_moved_profile_cools_that_profile_and_the_task_goes_back(run_l4, fake_clock):  # SCN-IMP-182
+    limit = LimitSignal("fake", None, "usage_limit", RESETS, "test", "You have hit your usage limit")
+    run = run_l4([FAIL, FAIL, Step(status="quota", limit=limit), red_step(), green_step()], **TWO)
+    assert run.code == 0
+    (cooled,) = run.events("availability.cooldown")
+    assert cooled["profile"] == "impl-b"
+    assert vendors(run)[3:] == [vendors(run)[0]] * 2  # fresh counts, back on the run's profile
+    assert run.events("task.attempt_failed")[-1]["attempt"] == 2  # a limit is not an attempt
+    assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"
