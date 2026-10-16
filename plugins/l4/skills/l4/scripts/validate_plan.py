@@ -396,6 +396,8 @@ def budget_lines(read: FolderRead) -> list[tuple[str, str]]:
 
 def _strip_comment(value: str) -> str:
     value = value.strip()
+    if value.startswith("#"):  # `key:   # note` with its block below: the note is not the key's value
+        return ""
     if value[:1] in ("'", '"'):
         end = value.find(value[0], 1)
         while value[0] == '"' and end > 0 and value[end - 1] == "\\":

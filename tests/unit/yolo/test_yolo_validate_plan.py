@@ -254,6 +254,12 @@ def test_the_reader_reads_inline_lists_quotes_and_comments(repo):
     assert warnings == [] and parsed == {"frameworks": ["openspec", "kiro"], "kiro": {"root": ".kiro/s"}}
 
 
+def test_a_comment_after_a_nested_key_does_not_become_its_value(repo):
+    write_config(repo, "spec:\n  frameworks:  # both\n  - openspec\n  - kiro\n  kiro:  # the root\n    root: .kiro/s\n")
+    parsed, warnings = read_spec(repo)
+    assert warnings == [] and parsed == {"frameworks": ["openspec", "kiro"], "kiro": {"root": ".kiro/s"}}
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -1210,6 +1216,8 @@ def test_a_unit_no_hold_matches_is_still_uncovered(repo):
         "yolo:\n  hold:\n  - \"openspec:a\"\n  - 'openspec:b*'\n",
         "\ufeffversion: 1\nyolo:\n  mode: x\n  hold:\n    - openspec:a\n    - openspec:b*\n",
         '"yolo":\n  "hold":\n    - openspec:a\n    - openspec:b*\n',
+        "yolo:\n  hold:   # held until a plan lists them (see: docs)\n  - openspec:a\n  - openspec:b*\n",
+        "yolo:\n  hold: # held\n    - openspec:a\n    - openspec:b*\n",
     ],
 )
 def test_the_hold_reads_lists_patterns_and_quoted_keys(repo, cfg):
