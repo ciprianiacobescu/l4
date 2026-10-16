@@ -315,3 +315,28 @@ def test_a_404_or_401_is_not_transient(tmp_path, status):
 def test_a_429_stays_rate_limited(tmp_path):
     out = parse(recorded_result(is_error=True, api_error_status=429, structured_output=None), tmp_path, exit_code=1)
     assert out.status == "rate_limited" and out.transient is False and out.limit is not None
+
+
+def test_structured_output_problems_are_named(tmp_path):  # SCN-FAC-16 native part
+    body = json.loads((RECORDED / "judge-structured-output.json").read_text())
+    body = body[-1] if isinstance(body, list) else body
+    missing = parse(json.dumps({**body, "structured_output": None}), tmp_path, schema=SCHEMA)
+    assert missing.status == "error" and missing.result_problem == "missing"
+    assert missing.detail and "missing although a schema was requested" in missing.detail
+    bad = {"verdict": "maybe"}
+    invalid = parse(json.dumps({**body, "structured_output": bad}), tmp_path, schema=SCHEMA)
+    assert invalid.status == "error" and invalid.result_problem == "invalid" and invalid.rejected == bad
+    good = parse(json.dumps(body), tmp_path, schema=SCHEMA)
+    assert good.status == "ok" and good.result_problem is None
+
+
+def test_last_message_is_the_result_text(tmp_path):  # SCN-FAC-17
+    out = parse((RECORDED / "red-ok.jsonl").read_text(), tmp_path)
+    assert out.last_message is not None and out.last_message == out.final_text
+
+
+def test_context_peak_is_the_largest_per_call_sum_of_the_assistant_events(tmp_path):  # SCN-FAC-18
+    out = parse((RECORDED / "red-ok.jsonl").read_text(), tmp_path)
+    assert out.usage.context_peak_tokens == 2 + 1105 + 12051
+    assert out.usage.input_tokens == 10 and out.usage.context_peak_percent is None
+    assert parse((RECORDED / "judge-structured-output.json").read_text(), tmp_path).usage.context_peak_tokens is None
