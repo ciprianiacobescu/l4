@@ -423,6 +423,33 @@ def _table(rows: list[UnitSnapshot]) -> str:
     )
 
 
+NOTE_LIMIT = 300  # the reason that `Orchestrator.resume` records and the prompt block reads (L4-OPS-018)
+
+
+def note_binding(state: UnitState) -> tuple[str | None, str | None]:
+    """The task (and fix unit) that a person's note binds to: the one that tripped `max_task_attempts` on a `halted`
+    unit; `(None, None)` for every other stop, which names no task (L4-OPS-018, D11)."""
+    if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
+        return state.halt_task, state.halt_fix_unit
+    return None, None
+
+
+def note_lines(command: str, state: UnitState, reason: str) -> list[str]:
+    """The lines that `l4 retry` and `l4 resume` print about the note, from the state before they recorded: the cut
+    of a long reason, then where the reason goes (L4-OPS-018, D13)."""
+    lines = []
+    if len(reason) > NOTE_LIMIT:
+        cut = f"{command}: the reason is longer than {NOTE_LIMIT} characters"
+        lines.append(f"{cut}; the implementer reads the first {NOTE_LIMIT}")
+    task, _ = note_binding(state)
+    lines.append(
+        f"note: the reason goes to the next steps of task {task}"
+        if task
+        else "note: the stop names no task, so no implementer step reads the reason"
+    )
+    return lines
+
+
 def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
     """The `--unit` detail (L4-OPS-006): the phase, the whole cause of a stop, the run that stopped it, the label that
     does what the step does, and the step last."""
@@ -433,6 +460,10 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
     lines += [f"Cause: {cause}"] if cause else []
     lines += [f"Stopped in run: {snapshot.stopped_in}"] if snapshot.stopped_in else []
     lines += [f"Or: add the label {label}"] if label else []
+    state = snapshot.state
+    if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
+        of = f" of {state.halt_fix_unit}" if state.halt_fix_unit else ""
+        lines.append(f"Retry note: the --reason of l4 retry goes to the implementer of task {state.halt_task}{of}")
     return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}"])
 
 

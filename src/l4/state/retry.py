@@ -41,7 +41,14 @@ from l4.specs.providers import providers_for
 from l4.state.budget import feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.fold import UnitState
 from l4.state.lifecycle import Phase, Trigger
-from l4.state.status import load_snapshot, refresh_refs, select_runnable, snapshots
+from l4.state.status import (
+    load_snapshot,
+    note_binding,
+    note_lines,
+    refresh_refs,
+    select_runnable,
+    snapshots,
+)
 from l4.vcs.git import Git
 from l4.vcs.names import unit_branch
 from l4.vcs.refresh import unit_refspecs
@@ -92,11 +99,13 @@ def retry_unit(
     signal: str | None = None,
     by: str | None = None,
     rounds: int | None = None,
+    note: bool = False,
 ) -> UnitRunResult:
     """The retry of one unit (design D2), for `l4 retry` and the sweep's `l4:retry` label. It starts no run: the caller
     decides. A phase that a retry cannot move is `L4Exit(USAGE_ERROR)` that says what moves it, before the lease, the
     worktree and the ledger, so nothing is recorded. `rounds`: how many fix (or feedback) rounds an escalated unit at
-    its limit gets (default 1); a unit in another phase has no rounds to add."""
+    its limit gets (default 1); a unit in another phase has no rounds to add. `note=True` (the command, not the sweep or
+    a plan) binds the reason to the task of a unit halted with `max_task_attempts` (L4-OPS-018, D11)."""
     if rounds is not None and rounds < 1:
         raise L4Exit(ExitCode.USAGE_ERROR, "retry: --rounds must be at least 1")
     state = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
@@ -118,9 +127,11 @@ def retry_unit(
             fix = rounds or 1  # the fix-round limit, `same_failure` at the limit included
         elif rounds is not None:
             log.warning("%s has rounds left: --rounds %d is not used", ref.id, rounds)
+    note_task, note_fix_unit = note_binding(state) if note else (None, None)
     return run_unit_in_worktree(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
         resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,
+        note_task=note_task, note_fix_unit=note_fix_unit,
         resume_event="unit.retried", resume_trigger=_EDGE_OF.get(phase, Trigger.RESUMED), resume_what="retry",
     )  # fmt: skip
 
@@ -199,8 +210,12 @@ def run_retry(
     fetch_unit_refs(app, cfg, git)
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
-    result = retry_unit(app, cfg, git, provider, ref, reason=reason, rounds=rounds)
+    before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
+    result = retry_unit(app, cfg, git, provider, ref, reason=reason, rounds=rounds, note=True)
     log.info("%s retried: now %s", unit, result.outcome.phase_after)
     if not no_run and result.exit_code == ExitCode.OK:
         click.echo(app.redactor.redact_text(start_run_line(app, cfg)))
+    if before.phase != Phase.MERGED.value and result.exit_code == ExitCode.OK:  # a merged unit's retry is the archive
+        for line in note_lines("retry", before, reason):
+            click.echo(line)
     return CommandResult(result.exit_code, [result.outcome])

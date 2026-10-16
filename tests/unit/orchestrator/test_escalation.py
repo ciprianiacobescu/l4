@@ -122,7 +122,8 @@ def halted(run_l4):
 
 def resume_with(tdd_repo, monkeypatch, **note) -> list[dict]:
     real = resume_module.run_unit_in_worktree
-    monkeypatch.setattr(resume_module, "run_unit_in_worktree", lambda *a, **k: real(*a, **k, **note))
+    # the command binds a note itself; the test overrides it
+    monkeypatch.setattr(resume_module, "run_unit_in_worktree", lambda *a, **k: real(*a, **{**k, **note}))
     code = main(["resume", "--unit", UNIT, "--reason", "again", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ)
     assert code == 0
     return code
@@ -135,6 +136,38 @@ def test_a_resume_with_a_note_task_records_it(halted, tdd_repo, monkeypatch):  #
 
 
 def test_a_resume_without_records_neither_key(halted, tdd_repo, monkeypatch):  # 2.5
-    resume_with(tdd_repo, monkeypatch)
+    resume_with(tdd_repo, monkeypatch, note_task=None, note_fix_unit=None)  # `l4 resume` itself now binds
     (event,) = halted.local_events("unit.resumed")
     assert "note_task" not in event and "note_fix_unit" not in event
+
+
+# --- 4.1: both halves on one run (L4-IMP-017, L4-OPS-018) ---------------------------------------------------------
+
+
+NOTE = "add the keyword to the signature with a default; never call a keyword the function does not have"
+
+
+def test_a_halt_a_retry_with_a_note_and_the_next_run_carry_the_note_then_the_escalation(run_l4, tdd_repo, capsys):
+    first = run_l4([FAIL] * 5, **TWO)  # SCN-IMP-177: two failures on impl, three on impl-b, then the halt
+    assert first.code == 13
+    assert "A person's note" not in "".join(r.prompt for r in first.adapter.requests)
+    capsys.readouterr()
+    argv = ["retry", "--unit", UNIT, "--reason", NOTE, "--no-run", "--repo", str(tdd_repo.repo)]
+    assert main(argv, environ=tdd_repo.environ) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "note: the reason goes to the next steps of task 1.1"
+    (retried,) = first.events("unit.retried")
+    assert (retried["reason"], retried["note_task"]) == (NOTE, "1.1")
+
+    second = run_l4([FAIL, FAIL, red_step(), green_step()], **TWO)  # SCN-OPS-28 with the escalation after two failures
+    assert second.code == 0
+    prompts = [r.prompt for r in second.adapter.requests]
+    assert vendors(second)[0] == vendors(first)[0] and vendors(second)[2] != vendors(second)[0]
+    block = f"# A person's note\n<l4:data source=\"retry note\">\nA person's note on this retry: {NOTE}\n</l4:data>"
+    assert all(block in p for p in prompts)  # red and green, every attempt, both profiles
+    assert all(p.count('source="retry note"') == 1 for p in prompts)
+    assert not any('reason="escalation"' in p for p in prompts[:2])  # the first profile: the note only
+    assert all('reason="escalation"' in p for p in prompts[2:3])  # the second profile: the note and the escalation
+    assert prompts[2].index('reason="escalation"') < prompts[2].index("A person's note")  # the note is the last block
+    rendered = [e for e in second.events("prompt.rendered") if e.get("retry_note")]
+    assert len(rendered) == len(prompts)
+    assert rendered[0]["retry_note"]["event"] == "unit.retried" and rendered[0]["retry_note"]["ts"] == retried["ts"]

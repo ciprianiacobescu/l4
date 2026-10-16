@@ -231,3 +231,13 @@ def test_unknown_command_and_bad_option_are_usage_errors(capsys, repo):
 
 def test_repo_must_exist(capsys, tmp_path: Path):
     assert main(["doctor", "--repo", str(tmp_path / "missing")], environ={}) == 2
+
+
+@pytest.mark.parametrize("command", ["retry", "resume"])
+def test_reason_help_says_the_implementer_of_the_halted_task_reads_it(command):
+    """D13."""
+    help_text = " ".join(option_help(command, "--reason").split())
+    assert help_text == (
+        "Why the unit can continue. For a unit halted on a task, the implementer of that task also reads it "
+        "(at most 300 characters)."
+    )
