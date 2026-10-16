@@ -425,7 +425,7 @@ of the harness package.
 | `l4 verify --unit ID [--dry-run]` | Run only the verifier on a unit | evidence files, commits |
 | `l4 s1 export --out DIR [--source FILE]… [--seed N] [--allow-gaps]` \| `canary [--also-repo P]… [--target N] [--min-test N] [--max-variants N] [--test-command CMD] [--out FILE] [--allow-gaps]` \| `score --profile P --dataset FILE --out FILE [--max-requests N] [--gate GATE.json]` \| `report ANSWERS… --dataset FILE [--gate GATE.json] [--profile TUNED] [--out FILE]` \| `audit --dataset DIR [--sample N \| --import FILE]` | System-One data set (M1.6): export ground-truth items from the calibration files (the only door to training data: engine answers are never read), generate labelled canary items from committed units (the canary runs the unit gate command and no browser: a unit's e2e test files, `e2e/**` and the directory `gates.e2e.command` runs, are left out of the tests-ran check and counted as `e2e_skipped:<project>:<unit>`, so the unit's other items still count; running them through `gates.e2e` needs a sandbox and a server and is not done), score a data set with a `backend: system-one` profile, compare engines against the ground truth, audit the labels by hand. `export` and `canary` exit 2 when a split is empty or a quota is unmet; `score` and `report` exit 2 on a data set without or with a damaged `manifest.json`; `score` alone may load a tuned checkpoint whose gate ran and failed | files under `$L4_CACHE/s1` and the paths given; no engine for `export`, `canary`, `audit` |
 | `l4 archive --unit ID` | Run the done-gate and archive | commits |
-| `l4 questions [list] [--unit ID] [--json]` \| `show Q-NNN --unit ID [--json]` \| `accept Q-NNN --unit ID [--no-push] [--no-run]` \| `answer Q-NNN --unit ID --text TEXT [--no-push] [--no-run]` | List and show open questions (read from the fetched unit branch, never the work tree); accept or answer one: `accept` and `answer` commit (with `[skip ci]`) and push to the unit branch, then start the harness's CI on the base branch unless `--no-run`; `--no-push` shows the change and starts nothing (L4-QMD-007..009) | `questions.md` on the unit branch (commit and push), forge call |
+| `l4 questions [list] [--unit ID] [--json]` \| `show Q-NNN --unit ID [--json]` \| `accept Q-NNN --unit ID [--no-push] [--no-run]` \| `answer Q-NNN --unit ID --text TEXT [--replace] [--no-push] [--no-run]` | List and show open questions (read from the fetched unit branch, never the work tree); accept or answer one: `accept` and `answer` commit (with `[skip ci]`) and push to the unit branch, then start the harness's CI on the base branch unless `--no-run`; `--no-push` shows the change and starts nothing; `--replace` replaces the answer of an answered verdict question and keeps the old one in the section (L4-QMD-007..010) | `questions.md` on the unit branch (commit and push), forge call |
 | `l4 lessons [list\|lint\|promote ID [--from DIR] [--yes] [--no-commit]]` | Inspect and curate lessons. `promote ID` moves one inbox proposal into `memory.lessons_file` through the lessons writer with origin `human_edit`, prints the lesson and its scope first, asks on a terminal (`--yes` without one), refuses a draft with a `TODO(person):` line, HEAD on a unit branch, a staged file or an edited lessons file (exit 2), commits only the lessons paths as `chore(memory): lesson <id> promoted [skip ci]` unless `--no-commit`, and deletes the proposal (L4-KG-013) | edits lessons; one commit; deletes the inbox files |
 | `l4 kg build` | Build the derived index of the repository's unit history from committed git objects (base branch with the OpenSpec archive, unit branches, lock refs, local attempts refs); never fetches (L4-KG-003, L4-KG-004) | writes the index under the cache root only |
 | `l4 kg report [--out PATH] [--min-units N]` | Print the cross-unit report, *n* on every line; builds the index first when it is missing or stale; `--out` inside the repository must be git-ignored, else exit 2 (L4-KG-009) | the index under the cache root; `--out` file |
@@ -1386,6 +1386,20 @@ set, or when standard input is not a terminal. An agent MAY accept or answer a q
 Any other write by an agent MUST be refused unless `clarifier.answer_by_agents` is `true`. Both keys MUST be read
 from `.l4/config.yaml` on the base branch, never on the unit branch. `clarifier.answer_by_agents` SHALL default to
 `false`. The commit body SHALL name the actor: `person`, or `agent: <marker>`.
+
+**L4-QMD-010** A verdict answer can be replaced on purpose.
+
+`l4 questions answer Q-NNN --unit U --text TEXT --replace` SHALL be allowed only for a question of kind `verdict` whose
+Status is `answered`, with a text that starts with `accept` or `reject` and differs from the current answer. It SHALL
+write the new answer as `answer` does, keep the previous answer under it in an HTML comment
+(`<!-- l4 questions --replace by NAME on DATE; previous answer:` with the old lines quoted by `> `, one comment for each
+replacement), so that the answer text, its digest and the reason of `human.verdict` hold the new text only, and name the
+replacement in the commit (the subject ends with `(answer replaced)`, the body has `Replaced: yes`). The next
+verification round records the changed answer as a new `human.verdict` (the digest differs), and the latest verdict of a
+target is the one in force (L4-VER-013). Without `--replace`, the refusal of an answered verdict question stays and its
+`Fix:` line names `--replace`. With `--replace`, a question that is not a verdict question, or is not `answered`, is
+refused: L4-QMD-006 is unchanged (a clarification answer that a run used is changed by hand and becomes a fix unit).
+The agent rule of L4-QMD-009 applies: a verdict answer is a person's decision. The audit is the commit and the comment.
 
 ### 6.3 `feedback.md`
 
@@ -3112,6 +3126,20 @@ errors`, and a later run of the unit does not call the verifier again.
 | a judge call fails mid-request with a limit signal | treated as "no usable profile" for that judge (first row) |
 | a judge call times out (no answer within the backend timeout) | retried once; a second timeout discards that judge like a refused answer (third row) |
 
+**L4-VER-016 A feedback-only fix unit consumes the rejects its round could not convert.** A `reject` ends when the fix
+unit that took it is spawned (`fix.spawned.consumed`). A round whose only fix tasks are feedback tasks (`feedback_only`)
+takes no reject, because the planner lists a human reject that has no criterion and no `WHEN … THEN …` as not
+converted. `effective_verdicts` SHALL drop a `reject` whose `human.verdict` event is before (in ledger order) a
+`fix.spawned` event with `feedback_only: true`; this covers ledgers written by 0.4.5 and older. A `reject` recorded
+after that event stays in force. A `fix.spawned` without `feedback_only: true` keeps the rule that only the questions of
+its `consumed` list are consumed, and an `accept` is not changed. When the fix loop spawns a feedback-only fix unit, the
+`consumed` list of its `fix.spawned` event SHALL also hold the questions of the rejects in force that the round listed as
+not converted. A hold that is raised again in a later round has then no verdict in force: it is asked as a new hold
+question (the earlier question is consumed), so a person or an allowed agent decides on the fixed code, and the round
+does not fail on the old reject. Why this is right: a feedback-only plan exists only when no finding was convertible, so
+every reject in force was a non-convertible human one; the documented way out of that escalation is the feedback
+(L4-OPS-022); the feedback is the concrete form of the rejection, and `feedback.judged` checks that it was addressed.
+
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
 round's evidence directory and in the verifier worktree until the round ends, then are committed in one commit
@@ -3165,7 +3193,7 @@ Without the scenario this is the unusable-answer path of a rejected finding with
 `WHEN … THEN …`. The finding is the human's, the fix planner lists it as not converted, no fix unit is written and the
 round ends in `verify_fail_exhausted` (exit 13); nothing is asked or spawned on a later run. The question of the hold is
 consumed by the fix unit (`fix.spawned{consumed}`); a hold that is still true in a later round after its fix unit is
-judged afresh and asked again, as a rejected finding is.
+judged afresh and asked again, as a rejected finding is. A reject that no task could be derived from is consumed by a feedback-only fix unit that comes after it (L4-VER-016).
 
 **One question per subject.** A blocking judge-only finding whose title, detail or suggested fix names a subject of a
 hold is *about the hold*: it is not asked on its own. A scope hold's subject is its file; a coverage hold's subjects are
@@ -3833,6 +3861,15 @@ unit branch shows a run only from its first step commit, so the last activity ca
 have a row that leads to it. The rows of section 4.2 SHALL name the heartbeat, the `agent.idle` and the red gate
 lines; section 4.4 the `LAST` column and the two lines; section 4.5 `agent.idle` and `run.started.ci_url`. The
 skill's `references/operate.md` SHALL say that `l4 status --unit` shows the last activity and the open run.
+
+**L4-OPS-022** The escalation with no convertible finding names feedback as its way out.
+
+For a unit in phase `escalated` whose recorded cause is `no_convertible_finding`, the `Next:` line of
+`l4 status --unit` and the `next` of `--json`, the `Next:` line of the refusal of `l4 run --unit` (L4-OPS-010) and the
+sticky note section `Escalated` SHALL say: a retry alone repeats the same verdict; first give the fix that the human's
+finding asks for as feedback (`l4 feedback add --unit U --kind behaviour --when ... --then ... --text ...`, then the
+git lines that `add` prints), then `l4 retry --unit U --reason TEXT`. Every other cause keeps its text
+(`l4 retry --unit U --reason TEXT`). The label `l4:retry` is the retry and helps after the feedback is pushed.
 
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
 
@@ -5000,6 +5037,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 24 | `escalate-and-note` | a task phase that one implementer profile fails `implementer.escalate_after` times (default 2) moves to the next usable profile of `roles.implementer`, cheap first, with the earlier failure reasons; each profile has its own attempts and the last one `max_task_attempts`; the move never parks a unit and never breaks the independence of the judges; `implementer.escalated` and the profile in `task.attempt_failed`, `breaker.tripped` and the halt detail; doctor CFG-009; the `--reason` of `l4 retry` and `l4 resume` on a unit halted on `max_task_attempts` reaches the implementer of that task as a capped, redacted data block; the runbook and the skill teach the note and a cheap-first chain (L4-IMP-017, L4-IMP-018, L4-OPS-018, L4-OPS-019; `openspec/changes/escalate-and-note/`) | the live runs of tasks 7.3 on a dummy repository |
 | 25 | `result-contract` | an implementer step that did its work does not lose the attempt to a slip in its result object: the prompt of a prompt-contract step asks for `status` and `summary` first (template `output@1`), the harness repairs the object with fixed rules and records `result.normalized`, an attempt fails for its result only when no result object is found, and `agent.finished` records the peak context of one call (L4-IMP-019, L4-IMP-020, L4-IMP-021, L4-IMP-022 not built, L4-FAC-010, L4-FAC-011; `openspec/changes/result-contract/`) | the live check of task 7.3 on a dummy repository: a unit on a free OpenCode model that slipped, with `+output@1` in the prompt and the count of `result.normalized` events |
 | 26 | `run-liveness` | a person can tell a working run from a stuck one: a heartbeat log line every `implementer.heartbeat` (default 2m) with counts and times only, `implementer.idle_timeout` (default 10m) that stops an agent with no stdout line and no open tool call (SIGINT, 5 s, SIGKILL) with the `agent.idle` record and a reason that names the key, stream readers that see open tool calls of claude-code, codex and kiro-cli, `l4 status` and `l4 yolo status` with the last activity and the open run with its CI link (`run.started.ci_url`), the red gate line `red: <n> new tests fail, as intended`, the GitHub job summary, and the runbook procedure 4.6 (L4-IMP-023, L4-IMP-024, L4-FAC-012, L4-OPS-020, L4-OPS-021, L4-YOLO-030, L4-OBS-004, L4-OBS-005; `openspec/changes/run-liveness/`) | the live check of task 7.3 on a dummy repository: a unit of two tasks with heartbeat lines every 2 minutes, `Last activity:` and `Open run:` during the run, the OpenCode silent-call probe, and a re-run with `/attempts/2` |
+| 27 | `settle-human-rejects` | a human reject that no fix task could be derived from ends when a feedback-only fix unit takes the person's concrete feedback, so the next round judges the fixed code: `effective_verdicts` drops a reject recorded before a `fix.spawned{feedback_only}`, and the spawn lists those questions in `consumed` (L4-VER-016); an escalation with `no_convertible_finding` says to give the fix as feedback before the retry in `l4 status`, the refusal of `l4 run --unit` and the sticky note (L4-OPS-022); and `l4 questions answer Q-NNN --replace` replaces the answer of an answered verdict question and keeps the old one in a comment (L4-QMD-010; `openspec/changes/settle-human-rejects/`) | the live check on a dummy repository, not run in this change: a hold rejected in prose, the feedback, the fix unit and a round that passes |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6648,6 +6686,21 @@ scenario is a spec defect (§26).
 - **When** it runs `l4 questions answer Q-002 --unit A --text "Allow it."`
 - **Then** it exits 2 with the agent refusal, and nothing is pushed
 
+#### SCN-QMD-26 (+) A replaced answer keeps the old one in a comment · L4-QMD-010
+- **Given** Q-004 of kind verdict, `answered` with `reject too long`
+- **When** `l4 questions answer Q-004 --unit U --text "accept the fix is in" --replace` runs
+- **Then** the section has the new answer, the old text in a comment, Status `answered`, and the commit subject ends with `(answer replaced)`
+
+#### SCN-QMD-27 (−) Without the flag, or for another kind, it is refused · L4-QMD-010
+- **Given** an answered verdict question and an answered clarification question
+- **When** `answer` runs without `--replace` for the first, and with `--replace` for the second
+- **Then** both exit 2; the first `Fix:` names `--replace`, the second says a clarification answer is changed by hand
+
+#### SCN-QMD-28 (+) A replaced reject becomes an accept that clears the FAIL · L4-QMD-010
+- **Given** a hold with a recorded `reject` and a replaced answer `accept ...`
+- **When** `consume_verdicts` and `effective_verdicts` run
+- **Then** a second `human.verdict` is recorded, the accept is in force, and the hold raises no finding
+
 ### 23.9 Verifier (VER)
 
 #### SCN-VER-01 (+) Clean PASS · L4-VER-002…005, L4-ARC-001, L4-ARC-002
@@ -7041,6 +7094,26 @@ scenario is a spec defect (§26).
 - **When** the check runs
 - **Then** no finding is raised from the test path freeze (the red-green freeze check still lists the path as unfrozen by
   a human answer, as today); a `task.unfrozen` of another task does not allow it.
+
+#### SCN-VER-64 (+) A reject before a feedback-only spawn is consumed · L4-VER-016
+- **Given** a ledger with `human.verdict{question: Q-004, target: H-1234abcd, decision: reject}` then `fix.spawned{feedback_only: true, consumed: []}`
+- **When** `effective_verdicts` reads it
+- **Then** the reject is not in force
+
+#### SCN-VER-65 (−) A reject after the spawn, and a spawn that is not feedback-only, keep the reject · L4-VER-016
+- **Given** in turn: the reject recorded after a feedback-only `fix.spawned`; the reject before a `fix.spawned` with no `feedback_only` and `consumed: []`
+- **When** `effective_verdicts` reads each
+- **Then** the reject is in force in both
+
+#### SCN-VER-66 (+) The new spawn lists the rejects it could not convert · L4-VER-016
+- **Given** a FAIL round whose only blocking findings are a rejected hold with no scenario (question Q-004) and a feedback item
+- **When** the fix loop plans and spawns the fix unit
+- **Then** the plan is feedback-only and `fix.spawned.consumed` is `["Q-004"]`
+
+#### SCN-VER-67 (+) The hold is asked again after the fix · L4-VER-016
+- **Given** the ledger of SCN-VER-64, a later round that raises the same hold, and a `questions.md` whose Q-004 is answered
+- **When** the verdicts are resolved and `raise_verdict_questions` runs
+- **Then** the hold has no verdict in force, no human finding is added, and a new hold question is raised
 
 ### 23.9.1 Human feedback (FBK)
 
@@ -8232,6 +8305,16 @@ scenario is a spec defect (§26).
 - **When** a person looks for a silent job
 - **Then** section 2 has a row that leads to the procedure, and the procedure has `working <elapsed>, <c> tool calls, last activity <t> ago`, `implementer.idle_timeout`, `30 minutes`, `no activity from`, `Last activity:`, `Open run:` and `gh run list --workflow l4.yml --status in_progress`
 - **And** section 4.2 has the heartbeat, `agent.idle` and `red: <n> new tests fail, as intended` rows, section 4.4 has `LAST`, section 4.5 has `agent.idle`, and `operate.md` names the last activity
+
+#### SCN-OPS-38 (+) The status line names feedback first · L4-OPS-022
+- **Given** a unit `escalated` with `halt_reason: no_convertible_finding`
+- **When** `l4 status --unit U` and `l4 status --json` run
+- **Then** `Next:` and `next` say that a retry alone repeats the same verdict, name `l4 feedback add --unit U --kind behaviour --when`, then `l4 retry --unit U --reason TEXT`; the refusal of `l4 run --unit U` and the sticky note say the same
+
+#### SCN-OPS-39 (−) Other causes keep their text · L4-OPS-022
+- **Given** units `escalated` with `fix_rounds_exhausted` and with `same_failure`, and a unit `halted`
+- **When** `l4 status --unit U` runs for each
+- **Then** `Next:` is `l4 retry --unit U --reason TEXT`
 
 ### 23.20 Delivery plans (YOLO)
 

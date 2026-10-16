@@ -906,7 +906,7 @@ spec since the stop, a retry sends the unit to `implementing`.
 | Cause (code) | What the detail says | What to do |
 |---|---|---|
 | `fix_rounds_exhausted` | `fix rounds used <n>/<m>` | Read `## Findings` and `## Criteria`. Decide whether more fix rounds can help. If the spec is wrong, correct the spec on `<branch>`. The retry adds the rounds (one, or `--rounds <n>`). |
-| `no_convertible_finding` | `no finding of this round can be converted into a fix task` | Read the `not converted` lines. For example, a rejected verdict with no `WHEN … THEN …` needs a new answer with a scenario. A plain retry is enough. |
+| `no_convertible_finding` | `no finding of this round can be converted into a fix task` | Read the `not converted` lines. A retry alone repeats the same verdict. Give the fix as feedback first ([7.3.1](#731-escalated-with-no-convertible-finding)). |
 | `no_fix_units` | `<framework> has no fix units` | Report it as a harness defect. The framework cannot make fix units. |
 | `fix_unit_not_created` | `the fix unit could not be created: <error>` | Read the error. If it names a spec file that you can correct, correct the file on `<branch>`. If not, report a harness defect. A plain retry with no correction repeats the failure. |
 | `feedback_rounds_exhausted` | `feedback round limit reached (<n>)` | Feedback items used all rounds (`feedback.max_rounds`). The retry adds the rounds. |
@@ -938,6 +938,37 @@ spec since the stop, a retry sends the unit to `implementing`.
 command refuses a flag on a halted unit. It refuses a resume of a feedback-limit escalation without
 `--extend-feedback-rounds`. It refuses a resume of a fix-limit escalation without `--extend-fix-rounds`. The error
 message tells you the correct flag. A retry has no such rule.
+
+#### 7.3.1 Escalated with no convertible finding
+
+Cause `no_convertible_finding`. The round failed on a finding of a person that no fix task can be derived from: for
+example a rejected hold (`the diff is longer than 120000 characters`) whose reason has no `WHEN … THEN …`. `l4 status
+--unit <unit>` ends with `Next:` and names the way out. **A retry alone repeats the same verdict.**
+
+1. Read `verification.md` and the `not converted` lines. Decide what the rejection asks for in the code.
+2. Give that fix as feedback (L4-OPS-022). Use `--when` and `--then` for a change of behaviour:
+
+   ```sh
+   l4 feedback add --unit <unit> --kind behaviour --when "<condition>" --then "<result>" --text "<the request>"
+   ```
+
+   Then run the git lines that `add` prints (commit and push `feedback.md`).
+3. Retry the unit (section 7.2): `l4 retry --unit <unit> --reason "<why>"`, or the label `l4:retry`.
+4. The next run spawns a feedback fix unit. A feedback-only fix unit consumes the rejects of its round that could not be
+   converted (L4-VER-016), also in ledgers of 0.4.5 and older. The next round judges the fixed code and the feedback
+   (`feedback.judged`). A hold that is raised again is asked as a **new** question: answer it on the fixed code.
+5. If the old answer was a mistake and no code should change, replace it on purpose (the audited override):
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "accept <reason>" --replace
+   ```
+
+   The command works only on an answered verdict question (`accept …` or `reject …`). It writes the new answer, keeps
+   the previous one in an HTML comment under it, and names the replacement in the commit (`(answer replaced)`). The
+   next round records it as a new verdict, and the latest verdict of the target wins. Without `--replace`, the command
+   refuses an answered question (exit 2) and its `Fix:` line names the flag. A clarification answer cannot be replaced
+   this way (L4-QMD-006: change it by hand). An agent may not do it unless `clarifier.answer_by_agents` is true.
+   Then retry the unit (step 3).
 
 ### 7.4 `waiting_capacity`: no agent is available
 
@@ -1479,7 +1510,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 questions [list] [--unit <unit>] [--json]` | Lists the open questions of a unit and its fix units, or of every unit that has a branch. It reads `origin`, not your work tree. | No |
 | `l4 questions show Q-NNN --unit <unit> [--json]` | Shows one question, what `accept` would take, and the frozen test paths it would unfreeze. | No |
 | `l4 questions accept Q-NNN --unit <unit> [--no-push]` | Takes the suggestion of the clarifier as the answer. It commits to the unit branch and pushes. `--no-push` shows the change and writes nothing. | Yes: `questions.md` on the unit branch |
-| `l4 questions answer Q-NNN --unit <unit> --text <text> [--no-push]` | Writes your answer. It commits to the unit branch and pushes. `--text -` reads standard input. | Yes: `questions.md` on the unit branch |
+| `l4 questions answer Q-NNN --unit <unit> --text <text> [--replace] [--no-push]` | Writes your answer. It commits to the unit branch and pushes. `--text -` reads standard input. `--replace` replaces the answer of an answered verdict question and keeps the old one in a comment ([7.3.1](#731-escalated-with-no-convertible-finding)). | Yes: `questions.md` on the unit branch |
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
