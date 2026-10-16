@@ -3,10 +3,10 @@
 All releases of the L4 harness. Consumers pin a release tag `vX.Y.Z` (or the moving major tag `v0`). The source of a
 release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `release` holds only the shipped paths.
 
-The version numbers follow semantic versioning for 0.x: a new feature or a change of behaviour is a minor release, a
-fix is a patch release. Release 0.4.1 added features and should have been 0.5.0 (see its entry).
+The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
+consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.5.0 (unreleased)
+## 0.4.2 (unreleased)
 
 ### Added
 - `l4 questions`: list the open questions of a unit, `show` one, `accept` the clarifier's suggestion or `answer` it
@@ -28,6 +28,8 @@ fix is a patch release. Release 0.4.1 added features and should have been 0.5.0 
 - The `cache.seeded` ledger event records its digest as `digest` (it was `key`, which default secret scanners report
   as an API key in a consumer repository's archived ledgers). Readers accept both.
 - The note of a blocked green question never offers an edit that the harness refuses.
+- The text of a unit pull request and of an archive pull request says who merges it: a person, or the harness when the
+  unit is in an active delivery plan with `merge: auto` (it said the harness never merges it).
 
 ### Fixed
 - `validate_plan.py` read a comment after a key with a nested block (`hold:   # note`) as the key's value, so it
@@ -36,7 +38,7 @@ fix is a patch release. Release 0.4.1 added features and should have been 0.5.0 
 ## 0.4.1 (2026-10-16)
 
 Review resolution and the lessons of the first adoption on a real consumer repository. This release added features
-and changed the readiness review; by the rule above it should have been 0.5.0.
+and changed the readiness review.
 
 ### Added
 - `l4 yolo findings`: the findings of the latest review with a `Resolve:` line per criterion, and the criteria that come
