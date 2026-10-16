@@ -804,7 +804,12 @@ def run_review(
     def sandbox_for(adapter: str, profile: str) -> Any:
         """The judge's sandbox (design D5): bwrap, or none for a tool-less judge outside CI, said out loud."""
         sandbox, label = judge_sandbox.choose(
-            ctx.cfg, ctx.app.environ, ctx.app.repo, adapter=adapter, in_ci=in_ci(ctx.app.environ)
+            ctx.cfg,
+            ctx.app.environ,
+            ctx.app.repo,
+            adapter=adapter,
+            in_ci=in_ci(ctx.app.environ),
+            profile=profile,
         )
         chosen.update(sandbox=label, judge=profile)
         if label == "none" and ctx.cfg.sandbox.mode != "none":

@@ -461,7 +461,8 @@ def test_a_second_local_review_of_unchanged_material_judges_nothing_and_costs_no
     again = local_judge()  # an empty script: any call fails the test
     assert world.l4("review", "p1", "--local") == 0
     reviewed = [e for e in world.events() if e.type == "plan.reviewed"]
-    first_data = reviewed[0].data  # `--local` records the digests of the batch's units, as CI does (accept counts rounds)
+    # `--local` records the digests of the batch's units, as CI does (`accept` counts rounds by them)
+    first_data = reviewed[0].data
     assert first_data["batches"]["b1"]["digests"] == {u: first_data["units"][u]["digest"] for u in (A, B)}
     assert again.requests == [] and len(reviewed) == 2 and reviewed[-1].data["cost_usd"] == 0
     assert all("reused_from" in v for v in reviewed[-1].data["units"].values())

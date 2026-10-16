@@ -5,6 +5,7 @@ and a judge with a shell never do."""
 from collections.abc import Mapping
 from pathlib import Path
 
+from l4.agents.opencode import FREE_PREFIX
 from l4.config.schema import L4Config
 from l4.proc import run_process
 from l4.safepath import resolve_tool
@@ -31,8 +32,11 @@ def unsandboxed_reason(environ: Mapping[str, str], repo: Path) -> str:
     return _bwrap(environ, repo)[1]
 
 
-def choose(cfg: L4Config, environ: Mapping[str, str], repo: Path, *, adapter: str, in_ci: bool) -> tuple[Sandbox, str]:
-    """The sandbox and its label (`bwrap` or `none`); raises `SandboxUnavailable` for a refusal."""
+def choose(
+    cfg: L4Config, environ: Mapping[str, str], repo: Path, *, adapter: str, in_ci: bool, profile: str | None = None
+) -> tuple[Sandbox, str]:
+    """The sandbox and its label (`bwrap` or `none`); raises `SandboxUnavailable` for a refusal. `profile` names the
+    judge's profile: an opencode one on a free `opencode/` model is not tool-less (its tools stay at `ask`)."""
     mode = cfg.sandbox.mode
     if mode == "none":
         return NoSandbox(allow_none=cfg.sandbox.allow_none), "none"
@@ -43,6 +47,13 @@ def choose(cfg: L4Config, environ: Mapping[str, str], repo: Path, *, adapter: st
         return sandbox, "bwrap"
     if in_ci:
         raise SandboxUnavailable(f"{why}; {BWRAP_HINT}")
+    model = cfg.profiles[profile].model if profile in cfg.profiles else None
+    asks = adapter == "opencode" and bool(model) and str(model).startswith(FREE_PREFIX)
+    if asks:
+        raise SandboxUnavailable(
+            f"the opencode judge on the free model {model} leaves its tools at ask, so it is not tool-less; without "
+            "bwrap use a claude-code or an api-key opencode judge profile, or let CI review"
+        )
     if adapter in TOOL_LESS_ADAPTERS:
         return NoSandbox(allow_none=True), "none"
     raise SandboxUnavailable(

@@ -214,7 +214,9 @@ class _Sandboxes:
 
     def __call__(self, adapter: str, profile: str) -> Sandbox:
         app, cfg = self.ctx.app, self.ctx.cfg
-        sandbox, label = judge_sandbox.choose(cfg, app.environ, app.repo, adapter=adapter, in_ci=in_ci(app.environ))
+        sandbox, label = judge_sandbox.choose(
+            cfg, app.environ, app.repo, adapter=adapter, in_ci=in_ci(app.environ), profile=profile
+        )
         self.label, self.profile = label, profile
         if label == "none" and cfg.sandbox.mode == "auto":
             why = judge_sandbox.unsandboxed_reason(app.environ, app.repo)
