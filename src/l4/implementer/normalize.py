@@ -1,6 +1,6 @@
-"""Finding and normalizing the implementer's result object (result-contract D3, D4). Contract only: the functions
-raise `NotImplementedError` until wave 1."""
+"""Finding and normalizing the implementer's result object (result-contract D3, D4)."""
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -10,6 +10,7 @@ from l4.agents.base import RunResult
 CUT_MARKER = "[cut by L4: {n} characters removed]"
 NO_SUMMARY = "(no summary: the agent wrote none)"
 SCAN_CHARS = 200_000
+_SCAN_WORK = 4_000_000  # [G] characters that failed decodes may read in all: a text of nested openers is quadratic
 
 
 @dataclass(frozen=True)
@@ -55,11 +56,43 @@ class Normalized:
 
 
 def last_result_object(text: str) -> Found | None:
-    raise NotImplementedError("result-contract 1.1")
+    """The last result-like JSON object of the agent's text (D3): scan the last `SCAN_CHARS` characters from the
+    start, try a decode at each `{`, keep a decoded object with a top-level `status` or `summary` key and go on after
+    its end (so what it holds is never taken alone), else go on at the next character."""
+    text = text[-SCAN_CHARS:]
+    decoder = json.JSONDecoder()
+    last: Found | None = None
+    at = work = 0
+    while (start := text.find("{", at)) >= 0 and work <= _SCAN_WORK:
+        try:
+            obj, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError as exc:
+            work += exc.pos - start + 1
+            at = start + 1
+            continue
+        except RecursionError:
+            work += len(text) - start
+            at = start + 1
+            continue
+        if isinstance(obj, dict) and ("status" in obj or "summary" in obj):
+            last = Found(obj, "final_message", text[start:end])
+            at = end
+        else:
+            at = start + 1
+    return last
 
 
 def find_result(run: RunResult) -> Found | None:
-    raise NotImplementedError("result-contract 1.1")
+    """Where the result is (D3), in order: the delivered result, the object a native schema refused, the last
+    result-like object of the final text. Never a file of the worktree or any other path. A run that is not `ok` and
+    has no `result_problem` did not finish: not a caller's case."""
+    if run.status == "ok" and run.structured is not None:
+        return Found(run.structured, "result")
+    if run.status != "ok" and run.result_problem is None:
+        return None
+    if run.result_problem == "invalid" and run.rejected is not None:
+        return Found(run.rejected, "result")
+    return last_result_object(run.final_text or "")
 
 
 def normalize(found: Found, facts: StepFacts) -> Normalized:
