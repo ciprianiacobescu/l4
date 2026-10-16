@@ -244,7 +244,7 @@ def run(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "perform_follow_ups", lambda app, cfg, git, snaps: [])
     monkeypatch.setattr(orch, "log_artefacts", lambda *a: None)
 
-    def run_units(app, cfg, git, picked, *, adapters, accepted=None):
+    def run_units(app, cfg, git, picked, *, adapters, accepted=None, activated=None):
         chosen.append([ref.id for _, ref in picked])
         return CommandResult(ExitCode.OK, [])
 

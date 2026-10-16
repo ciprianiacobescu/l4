@@ -31,7 +31,7 @@ IGNORE_FILE_GLOBS = (".gitignore", "**/.gitignore")
 class FrozenFile:
     sha256: str | None  # None: the file is a symlink or unreadable at the red commit (it is restored regardless)
     kind: Kind
-    in_red: bool = False
+    in_red: bool = False  # the red step added or changed this path (it is in the red commit's diff)
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,7 @@ def build_manifest(
     support_globs = (*support_globs, *IGNORE_FILE_GLOBS)
     changed = _names(git.run_bytes("diff", "--name-only", "-z", "--no-renames", "--diff-filter=AM", base_sha, red_sha))
     tracked = _names(git.run_bytes("ls-tree", "-r", "--name-only", "-z", red_sha))
+    changed_set = set(changed)
     files: dict[str, FrozenFile] = {}
     for path in sorted({*changed, *tracked}):
         if _matches(support_globs, path):
@@ -71,7 +72,7 @@ def build_manifest(
             kind = "test"
         else:
             continue
-        files[path] = FrozenFile(_digest(git.repo, path), kind)
+        files[path] = FrozenFile(_digest(git.repo, path), kind, path in changed_set)
     return FreezeManifest(red_sha, files, tuple(support_globs))
 
 

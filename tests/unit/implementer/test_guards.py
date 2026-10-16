@@ -243,3 +243,17 @@ def test_plain_new_tests_stay_appended_only(added: str):
     from l4.implementer.guards import appended_only
 
     assert appended_only(PROOF_FILE, PROOF_FILE + "\n\n" + added) is True
+
+
+def test_a_support_file_that_red_changed_is_in_red_and_an_untouched_tracked_one_is_not(red_repo):
+    repo, git, base, red = red_repo
+    (repo / "tests" / "helpers.py").write_text("X = 1\n")
+    git.run("add", "-A")
+    git.run("-c", "user.name=t", "-c", "user.email=t@x.invalid", "commit", "-q", "-m", "more support")
+    later = git.rev_parse("HEAD")
+    # base = the commit before `later`: only helpers.py changed; conftest.py is tracked but untouched
+    manifest = build_manifest(git, later, red, test_globs=TDD.test_globs, support_globs=TDD.test_support_globs)
+    assert manifest.files["tests/helpers.py"].in_red is True
+    assert manifest.files["tests/conftest.py"].in_red is False
+    full = build_manifest(git, red, base, test_globs=TDD.test_globs, support_globs=TDD.test_support_globs)
+    assert full.files["tests/conftest.py"].in_red is True and full.files["tests/test_calc.py"].in_red is True
