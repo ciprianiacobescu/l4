@@ -232,9 +232,14 @@ def test_a_callback_that_raises_does_not_stop_tick(caplog):
 
     watch = ActivityWatch(10, on_beat)
     watch.start(0.0, None)
-    with caplog.at_level(logging.DEBUG):
-        watch.tick(10.0)
-        watch.tick(20.0)
+    logger = logging.getLogger("l4.agents.activity")  # its own handler: another test may stop `l4` propagating
+    logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="l4.agents.activity"):
+            watch.tick(10.0)
+            watch.tick(20.0)
+    finally:
+        logger.removeHandler(caplog.handler)
     assert calls == [10.0, 20.0]
     assert any(r.levelno == logging.DEBUG for r in caplog.records)
     assert not any(r.levelno > logging.DEBUG for r in caplog.records)
