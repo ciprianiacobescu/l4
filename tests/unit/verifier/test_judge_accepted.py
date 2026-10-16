@@ -4,11 +4,9 @@ one in the reply's `accepted: [{id, addressed, evidence}]`. It is evidence: no c
 import json
 from pathlib import Path
 
-import pytest
-
 from l4.state.ledger import read_ledger
 from l4.verifier import judge
-from l4.verifier.judge import AcceptedAnswer, AcceptedRef, build_judge_prompt, load_accepted, parse_judge_output
+from l4.verifier.judge import AcceptedAnswer, AcceptedRef, accepted_refs, build_judge_prompt, parse_judge_output
 from l4.verifier.ladder import VerifyContext, _finalize, _judge_step, _Run
 from l4.verifier.types import Verdict, VerifyResult
 
@@ -124,30 +122,21 @@ def test_a_finding_text_cannot_end_the_block():
 # --- the carrier file ----------------------------------------------------------------------------------------------
 
 
-def test_load_accepted_reads_each_finding_with_the_reason_of_its_item(tmp_path):
+def test_accepted_refs_reads_each_finding_with_the_reason_of_its_item(tmp_path):
     carry(tmp_path, items((ID1, "a"), (ID2, "b")))
-    assert load_accepted(tmp_path) == [
+    assert accepted_refs(tmp_path) == [
         AcceptedRef(ID1, "testability", "major", "a", "the spec is silent on it; use a plain path"),
         AcceptedRef(ID2, "testability", "major", "b", "the spec is silent on it; use a plain path"),
     ]
 
 
-@pytest.mark.parametrize("text", ["not json", "[]", '{"items": 3}', '{"items": [{"findings": [{"id": 1}]}]}', ""])
-def test_a_missing_or_invalid_file_is_no_items(tmp_path, text):
-    assert load_accepted(tmp_path) == []
-    carry(tmp_path, text)
-    assert load_accepted(tmp_path) == []
-
-
-def test_a_symlink_or_an_oversized_file_is_no_items(tmp_path):
-    (tmp_path / ".l4").mkdir()
-    real = tmp_path / "real.json"
-    real.write_text(json.dumps(items((ID1, "a"))))
-    (tmp_path / ".l4" / "review-accepted.json").symlink_to(real)
-    assert load_accepted(tmp_path) == []
-    (tmp_path / ".l4" / "review-accepted.json").unlink()
-    carry(tmp_path, items((ID1, "x" * 2_000_000)))
-    assert load_accepted(tmp_path) == []
+def test_accepted_refs_flattens_the_shared_reader_with_each_items_reason(tmp_path):
+    assert accepted_refs(tmp_path) == []
+    carry(tmp_path, items((ID1, "a"), (ID2, "b")))
+    assert accepted_refs(tmp_path) == [
+        AcceptedRef(ID1, "testability", "major", "a", "the spec is silent on it; use a plain path"),
+        AcceptedRef(ID2, "testability", "major", "b", "the spec is silent on it; use a plain path"),
+    ]
 
 
 # --- the reply -----------------------------------------------------------------------------------------------------

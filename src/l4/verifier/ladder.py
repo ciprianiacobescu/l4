@@ -119,8 +119,8 @@ from l4.verifier.judge import (
     JudgeRun,
     JudgeVerdict,
     RoundOutput,
+    accepted_refs,
     build_judge_prompt,
-    load_accepted,
     reply_counts,
     run_judge,
 )
@@ -984,7 +984,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         return
     ids = {c.id for c in criteria}
     asked = _asked_feedback(wb)
-    accepted = load_accepted(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
+    accepted = accepted_refs(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
 
     def judge_body() -> tuple[bool, str]:
         diff, truncated = _git_diff(wb, base_sha, result.head_sha)

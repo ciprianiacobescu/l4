@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from l4.fsutil import UnsafeFile, read_regular_file
+from l4.accepted import read_accepted
 from l4.implementer.prompt import data_block, defuse
 from l4.implementer.tdd import RoleLimit
 from l4.llm.agent_judge import LLMBackend, Msg, StructuredResult, render_prompt
@@ -260,30 +260,14 @@ class AcceptedRef:
     reason: str
 
 
-ACCEPTED_FILE = Path(".l4") / "review-accepted.json"
-MAX_ACCEPTED_BYTES = 1_000_000
-
-
-def load_accepted(unit_folder: Path) -> list[AcceptedRef]:
-    """The findings of `<unit folder>/.l4/review-accepted.json` (design section 8: `{"schema", "plan", "items":
-    [{"subject", "reason", "by", "actor", "findings": [{"id", "criterion", "severity", "text"}]}]}`). A missing,
-    oversized, non-regular or invalid file asks nothing: the harness then treats the unit's accepted findings as
-    unanswered."""
-    try:
-        data: Any = json.loads(read_regular_file(unit_folder / ACCEPTED_FILE, limit=MAX_ACCEPTED_BYTES))
-    except (OSError, UnsafeFile, ValueError):
-        return []
-    found: list[AcceptedRef] = []
-    for item in data.get("items") if isinstance(data, dict) and isinstance(data.get("items"), list) else ():
-        findings = item.get("findings") if isinstance(item, dict) else None
-        if not isinstance(findings, list):
-            continue
-        reason = item.get("reason")
-        for f in findings:
-            fields = [f.get(k) for k in ("id", "criterion", "severity", "text")] if isinstance(f, dict) else []
-            if fields and all(isinstance(v, str) for v in fields) and fields[0]:
-                found.append(AcceptedRef(*fields, reason if isinstance(reason, str) else ""))
-    return found
+def accepted_refs(unit_folder: Path) -> list[AcceptedRef]:
+    """The findings of the unit's carrier file (`l4.accepted.read_accepted`, the one reader and its rules), flat, each
+    with the reason of its item."""
+    return [
+        AcceptedRef(f["id"], f["criterion"], f["severity"], f["text"], item["reason"])
+        for item in read_accepted(unit_folder)
+        for f in item["findings"]
+    ]
 
 
 def _accepted_block(items: Sequence[AcceptedRef]) -> str:

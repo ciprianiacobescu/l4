@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from l4 import orchestrator
+from l4.exitcodes import ExitCode
+from l4.fsutil import UnsafeFile
 from l4.orchestrator import ACCEPTED_FILE, write_accepted_carrier
 from l4.vcs.git import Git
 from l4.yolo.cycle import PlanStep
@@ -70,6 +72,23 @@ def test_a_symlink_in_its_place_is_replaced_not_followed(tmp_path: Path):
     assert target.read_text() == "keep" and not (tmp_path / ACCEPTED_FILE).is_symlink()
 
 
+def test_a_symlinked_l4_folder_is_refused_and_nothing_is_written_through_it(tmp_path: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    unit = tmp_path / "unit"
+    unit.mkdir()
+    (unit / ".l4").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(UnsafeFile):
+        write_accepted_carrier(unit, "p1", (ITEM,))
+    assert list(outside.iterdir()) == []
+
+
+def test_a_directory_in_place_of_the_file_is_refused(tmp_path: Path):
+    (tmp_path / ACCEPTED_FILE).mkdir(parents=True)
+    with pytest.raises(UnsafeFile):
+        write_accepted_carrier(tmp_path, "p1", (ITEM,))
+
+
 @pytest.fixture
 def plan_step(monkeypatch: pytest.MonkeyPatch):
     def install(accepted: dict) -> None:
@@ -113,3 +132,15 @@ def test_a_unit_outside_the_plan_items_gets_no_file(run_l4, tdd_repo, raw, plan_
     assert run.code == 0
     listing = run.raw(tdd_repo.origin, "ls-tree", "--name-only", BRANCH, f"{UNIT_DIR}/.l4/")
     assert "review-accepted.json" not in listing
+
+
+def test_a_directory_in_place_of_the_file_rejects_the_unit_with_a_reason(run_l4, tdd_repo, raw, plan_step):
+    (tdd_repo.repo / UNIT_DIR / ".l4" / "review-accepted.json").mkdir(parents=True)
+    new_origin_main(
+        tdd_repo,
+        raw,
+        {f"{UNIT_DIR}/tasks.md": "- [ ] 1.1 Add `apply_discount`\n", f"{UNIT_DIR}/.l4/review-accepted.json/x": "x\n"},
+    )
+    plan_step({UNIT: (ITEM,)})
+    run = run_l4([red_step(), green_step()])
+    assert run.code == ExitCode.REJECTED
