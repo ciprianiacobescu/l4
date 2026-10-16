@@ -68,8 +68,8 @@ def test_one_accepted_unfreezes_exactly_the_named_file_and_nothing_else(tmp_path
 
 def test_green_md_asks_for_the_test_the_line_the_contradiction_and_the_exact_edit():
     template = load_template("green")
-    assert template.version == 4
+    assert template.version == 5
     for needle in ("Edit `<path>`: <the exact change>", "the test file and the line", "the contradiction"):
         assert needle in template.body, needle
     prompt = render_prompt("green", ctx())
-    assert "Edit `<path>`: <the exact change>" in prompt.text and prompt.template_version == "contract@10+green@4"
+    assert "Edit `<path>`: <the exact change>" in prompt.text and prompt.template_version == "contract@10+green@5"

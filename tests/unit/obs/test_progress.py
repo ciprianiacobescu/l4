@@ -195,3 +195,23 @@ def test_a_red_green_task_still_prints_red_ok_and_green_ok(console):
     out = console.getvalue()
     assert "task 1.1 red ok: 2 new test(s) failing as expected" in out
     assert "task 1.1 green ok: all tests passing" in out
+
+
+def test_a_file_opened_by_the_task_text_has_its_own_line(console):
+    trace = ProgressTrace()
+    trace(event("task.unfrozen", task="2.1", paths=["conftest.py"], reason="named_by_task", source="plan:p1@abc123"))
+    trace(
+        event(
+            "task.unfrozen",
+            task="2.2",
+            paths=[],
+            reason="named_by_task",
+            source="base:0123456789",
+            kept=[{"path": ".gitignore", "why": "an ignore file"}],
+        )
+    )
+    trace(event("task.unfrozen", task="1.1", paths=["tests/t.py"], reason="human_answer", question="Q-002"))
+    out = console.getvalue().splitlines()
+    assert out[0].endswith("task 2.1 opened by its text (plan:p1@abc123): conftest.py")
+    assert out[1].endswith("task 2.2 opened by its text (base:0123456789): nothing; kept .gitignore (an ignore file)")
+    assert out[2].endswith("task 1.1 unfrozen by Q-002: tests/t.py")

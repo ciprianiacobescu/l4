@@ -222,6 +222,12 @@ class ProgressTrace:
 
     def _unfrozen(self, e: LedgerEvent) -> tuple[int, str]:
         paths = ", ".join(str(p) for p in e.data.get("paths") or [])
+        if e.data.get("reason") == "named_by_task":  # an event without a reason is a human answer
+            kept = "; ".join(
+                f"{k.get('path')} ({k.get('why')})" for k in e.data.get("kept") or [] if isinstance(k, dict)
+            )
+            what = paths or ("nothing" + (f"; kept {kept}" if kept else ""))
+            return logging.INFO, f"task {e.data.get('task')} opened by its text ({e.data.get('source')}): {what}"
         return logging.INFO, f"task {e.data.get('task')} unfrozen by {e.data.get('question')}: {paths}"
 
     def _raised(self, e: LedgerEvent) -> tuple[int, str]:

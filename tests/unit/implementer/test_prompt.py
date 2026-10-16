@@ -44,7 +44,7 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@10+green@4"
+    assert rendered.template_version == "contract@10+green@5"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
     assert render_prompt("red", ctx()).template_version == "contract@10+red@9"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256
@@ -389,3 +389,21 @@ def test_the_accepted_review_findings_block_renders_after_the_criteria_and_is_ha
         render_prompt("red", ctx()).sha256
         != render_prompt("red", ctx(data_blocks=(("accepted review findings", block),))).sha256
     )
+
+
+def test_green_prompt_lists_the_files_the_task_names_in_a_data_block():
+    plain = render_prompt("green", ctx()).text
+    assert "# Files this task names" not in plain  # no section when nothing is opened by the text
+    listed = render_prompt("green", ctx(named=("conftest.py", "tests/conftest.py"))).text
+    section = listed.split("# Files this task names")[1].split("# Phase: GREEN")[0]
+    assert "- conftest.py" in section and "- tests/conftest.py" in section
+    assert '<l4:data source="files this task names">' in section
+    assert "Keep every existing statement" in section and "do not patch" in section
+    assert "Every other test and support file stays frozen" in section
+    assert "# Files this task names" not in render_prompt("red", ctx(named=("conftest.py",))).text
+    assert "# Tests unfrozen" not in listed  # a named file is no human answer
+
+
+def test_the_green_template_allows_a_listed_file_and_never_an_ignore_file():
+    body = load_template("green").body
+    assert "Files this task names" in body and "ignore file" in body and "never unfrozen" in body
