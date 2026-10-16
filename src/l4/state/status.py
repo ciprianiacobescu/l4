@@ -12,17 +12,19 @@ import json
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
 import click
 
+from l4.agents.activity import ago
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
-from l4.forge.urls import app_forge_urls
+from l4.forge.urls import ForgeUrls, app_forge_urls
 from l4.implementer.tasks import required
 from l4.specs.base import Framework, SpecProvider, Task, UnitRef, UnknownUnit, parse_unit_id
 from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile
@@ -47,6 +49,7 @@ from l4.state.followups import (
 )
 from l4.state.ledger import (
     MAX_LEDGER_FILE_BYTES,
+    TS_FORMAT,
     LedgerCorrupt,
     LedgerEvent,
     LedgerRead,
@@ -202,6 +205,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
     for name in read.torn:
         log.warning("%s: last line of %s was cut off mid-write and is ignored", ref.id, name)
     state = fold(read.events, ref.id)
+    last, open_run = _activity(read.events)
     children = child_snapshots(provider, git, ref, state.children, tracking_ref if on_branch else None)
     marker = read_fix_marker(provider.unit_dir(ref))
     follow = _read_follow_up_marker(git, tracking_ref, _relative(provider, ref, git)) if on_branch else None
@@ -226,7 +230,31 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         follow_up_of=follow,
         stopped_in=_stopped_in(read.events, state),
         spec_edit=edit,
+        last_activity=last,
+        open_run=open_run,
     )
+
+
+def _activity(events: Sequence[LedgerEvent]) -> tuple[Activity | None, OpenRun | None]:
+    """The newest event (the last read on a tie) and the newest `run.started` of `l4 run` with no `run.finished` of
+    the same run (L4-OPS-020, D7)."""
+    newest: LedgerEvent | None = None
+    started: LedgerEvent | None = None
+    finished = {e.run_id for e in events if e.type == "run.finished"}
+    for e in events:
+        if newest is None or e.ts >= newest.ts:
+            newest = e
+        if e.type == "run.started" and e.data.get("command") == "run" and (started is None or e.ts >= started.ts):
+            started = e
+    task = newest.data.get("task") if newest else None
+    last = Activity(newest.ts.strftime(TS_FORMAT), newest.type, task or None, newest.run_id) if newest else None
+    url = started.data.get("ci_url") if started else None
+    open_run = (
+        OpenRun(started.run_id, started.ts.strftime(TS_FORMAT), url if isinstance(url, str) and url else None)
+        if started and started.run_id not in finished
+        else None
+    )
+    return last, open_run
 
 
 def _stopped_in(events: Sequence[LedgerEvent], state: UnitState) -> str | None:
@@ -421,14 +449,18 @@ def _next(snapshot: UnitSnapshot, repo: Path, branch_prefix: str) -> str:
     return next_step(_facts(snapshot), branch=branch, questions_path=questions_path)
 
 
-def _table(rows: list[UnitSnapshot]) -> str:
-    header = ("UNIT", "PHASE", "REASON", "ITER", "TASKS", "OPEN-Q", "VERDICT", "SOURCE")
+def _since(ts: str, now: datetime) -> str:
+    return ago((now - datetime.strptime(ts, TS_FORMAT).replace(tzinfo=UTC)).total_seconds())
+
+
+def _table(rows: list[UnitSnapshot], now: datetime) -> str:
+    header = ("UNIT", "PHASE", "REASON", "ITER", "TASKS", "OPEN-Q", "VERDICT", "LAST", "SOURCE")
     body = [
         (
             s.ref.id, s.state.phase or "-", _cut(reason(_facts(s))), str(s.state.iteration),
             f"{s.tasks_done}/{s.tasks_total}",
             ",".join(s.state.questions.open) or "-", s.state.last_verdict.verdict if s.state.last_verdict else "-",
-            s.source,
+            f"{_since(s.last_activity.ts, now)} ago" if s.last_activity else "-", s.source,
         )
         for s in rows
     ]  # fmt: skip
@@ -471,7 +503,7 @@ def note_lines(command: str, state: UnitState, reason: str) -> list[str]:
     return lines
 
 
-def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
+def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, urls: ForgeUrls) -> str:
     """The `--unit` detail (L4-OPS-006): the phase, the whole cause of a stop, the run that stopped it, the label that
     does what the step does, and the step last."""
     facts = _facts(snapshot)
@@ -480,6 +512,14 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
     lines = [f"Phase: {snapshot.state.phase or '-'}"]
     lines += [f"Cause: {cause}"] if cause else []
     lines += [f"Stopped in run: {snapshot.stopped_in}"] if snapshot.stopped_in else []
+    if (last := snapshot.last_activity) is not None:
+        what = ", ".join(
+            [last.type, *([f"task {last.task}"] if last.task else []), *([f"run {last.run_id}"] if last.run_id else [])]
+        )
+        lines.append(f"Last activity: {_since(last.ts, now)} ago ({what})")
+    if (run := snapshot.open_run) is not None:
+        link = f": {urls.expand(run.ci_url)}" if run.ci_url else ""
+        lines.append(f"Open run: {run.run_id} started {_since(run.started, now)} ago, no end recorded{link}")
     lines += [f"Or: add the label {label}"] if label else []
     state = snapshot.state
     if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
@@ -488,12 +528,31 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
     return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}"])
 
 
-def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: bool) -> ExitCode:
+def _activity_json(last: Activity | None) -> dict[str, str] | None:
+    if last is None:
+        return None
+    return {"ts": last.ts, "type": last.type, **({"task": last.task} if last.task else {}), "run_id": last.run_id or ""}
+
+
+def _open_run_json(run: OpenRun | None, urls: ForgeUrls) -> dict[str, str] | None:
+    if run is None:
+        return None
+    return {"run_id": run.run_id, "started": run.started, **({"ci_url": urls.expand(run.ci_url)} if run.ci_url else {})}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def run_status(
+    app: AppContext, *, unit: str | None, as_json: bool, rebuild: bool, clock: Callable[[], datetime] = _utcnow
+) -> ExitCode:
     if rebuild:
         raise L4Exit(ExitCode.USAGE_ERROR, "status: --rebuild not yet implemented (M1: state-vcs-locks 1.19)")
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     rows = snapshots(app, cfg, (unit,) if unit else (), tolerate_denied=True)
     urls = app_forge_urls(app, cfg)
+    now = clock()
     from l4.yolo.commands import plan_lines  # here: the plan commands import this module
 
     plans = plan_lines(app.repo, Git(app.repo, environ=app.environ), {s.ref.id: s.state.phase for s in rows}, cfg)
@@ -508,6 +567,8 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
                 "next": _next(s, app.repo, cfg.forge.branch_prefix),
                 **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
+                "last_activity": _activity_json(s.last_activity),
+                "open_run": _open_run_json(s.open_run, urls),
             }
             for s in rows
         ]
@@ -516,9 +577,9 @@ def run_status(app: AppContext, *, unit: str | None, as_json: bool, rebuild: boo
             payload["plans"] = plans  # only with a plan: the shape of a repository without one is unchanged
         text = json.dumps(payload, indent=2, ensure_ascii=False)
     else:
-        text = _table(rows) if rows else "no units"
+        text = _table(rows, now) if rows else "no units"
         text = "\n".join([*plans, text])  # one line per plan above the table (L4-YOLO-015)
         if unit and rows:
-            text = "\n\n".join([text, *(_block(s, app.repo, cfg) for s in rows)])
+            text = "\n\n".join([text, *(_block(s, app.repo, cfg, now, urls) for s in rows)])
     click.echo(app.redactor.redact_text(text))
     return ExitCode.OK
