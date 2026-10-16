@@ -241,6 +241,36 @@ def test_show_keeps_an_ignore_file_and_an_unasked_file_frozen(qworld, capsys, pe
     assert "an accepted suggestion leaves tests/test_x.py frozen for 2.1 (the question does not name it)" in out
 
 
+def test_show_says_an_accept_would_unfreeze_a_pre_existing_test(qworld, capsys, person):
+    old = "packages/api/tests/test_health.py"
+    qworld.unit_branch(
+        "a",
+        questions_md(
+            "a",
+            {"title": "One?"},
+            {"title": "Two?"},
+            q003(
+                suggestion=f"Edit `{old}`: assert on `_inner`.",
+                options=(f"Edit `{old}`: assert", "Leave it"),
+                context=f"`{old}` asserts the old type.",
+            ),
+        ),
+        ledger=ledger_file(A, RED),
+        extra={old: "def test_health():\n    assert 1\n"},
+    )
+    _, out = shown(qworld, capsys, "Q-003")
+    assert f"an accepted suggestion unfreezes the pre-existing test {old} for the next green of 2.1" in out
+    unasked = f"Edit `{old}`: assert on `_inner`."
+    qworld.unit_branch(
+        "a",
+        questions_md("a", {"title": "One?"}, {"title": "Two?"}, q003(suggestion=unasked, context="It is wrong.")),
+        ledger=ledger_file(A, RED),
+        extra={old: "def test_health():\n    assert 1\n"},
+    )
+    _, out = shown(qworld, capsys, "Q-003")
+    assert f"leaves {old} frozen for 2.1 (the question does not name it)" in out
+
+
 def test_show_reads_the_latest_red_of_a_task_and_no_ledger_is_no_frozen_path(qworld, capsys, person):
     later = ("task.red_ok", {"task": "2.1", "base": "def", "frozen": ["other.py"]})
     with_q003(qworld, ledger=ledger_file(A, RED, later))

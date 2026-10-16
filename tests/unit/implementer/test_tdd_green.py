@@ -169,7 +169,9 @@ def two_test_red() -> Step:
     )
 
 
-def answer_naming(bench, raw, text: str, status: str = "accepted") -> None:
+def answer_naming(
+    bench, raw, text: str, status: str = "accepted", context: str = "tests/test_discount.py:9 expects 45.0 for 50.0"
+) -> None:
     """A human accepted a clarifier suggestion that names `text`, and the re-entry recorded it (as `l4 run` does)."""
     from l4.redact import Redactor
     from l4.specs.questions import (
@@ -185,7 +187,7 @@ def answer_naming(bench, raw, text: str, status: str = "accepted") -> None:
     raise_questions(
         unit, "add-discount-codes",
         [NewQuestion("The test freezes a wrong value", QuestionKind.TECHNICAL, ("1.1",),
-                     "tests/test_discount.py:9 expects 45.0 for 50.0", "now", ("a", "b"))],
+                     context, "now", ("a", "b"))],
         redactor=Redactor({}),
     )  # fmt: skip
     file = QuestionsFile.load(unit / "questions.md")

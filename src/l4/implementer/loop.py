@@ -139,8 +139,11 @@ def _is_ignore(path: str) -> bool:
 
 
 def _frozen_paths(red: RedOutcome) -> list[str]:
-    """The test and support files a person's answer can unfreeze: every manifest file but an ignore file."""
-    return [p for p in red.manifest.files if not _is_ignore(p)] if red.manifest else []
+    """The test and support files a person's answer can unfreeze: every manifest file but an ignore file, and the
+    pre-existing tracked test files, which an answer that names one opens too."""
+    if not red.manifest:
+        return []
+    return [*(p for p in red.manifest.files if not _is_ignore(p)), *red.manifest.preexisting]
 
 
 def _frozen_ignore(red: RedOutcome) -> list[str]:
