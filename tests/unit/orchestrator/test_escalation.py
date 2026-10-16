@@ -8,7 +8,9 @@ import pytest
 from l4.agents.base import LimitSignal
 from l4.agents.fake import Step
 from l4.availability.cooldown import AvailabilityStore, cooldown_key
+from l4.cli import main
 from l4.config.schema import Profile
+from l4.state import resume as resume_module
 
 from ..implementer.conftest import green_step, red_step, result
 from .conftest import BRANCH, UNIT
@@ -109,3 +111,30 @@ def test_a_limit_on_the_moved_profile_cools_that_profile_and_the_task_goes_back(
     assert vendors(run)[3:] == [vendors(run)[0]] * 2  # fresh counts, back on the run's profile
     assert run.events("task.attempt_failed")[-1]["attempt"] == 2  # a limit is not an attempt
     assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"
+
+
+@pytest.fixture
+def halted(run_l4):
+    run = run_l4([FAIL], implementer={"max_task_attempts": 1})
+    assert run.code == 13
+    return run
+
+
+def resume_with(tdd_repo, monkeypatch, **note) -> list[dict]:
+    real = resume_module.run_unit_in_worktree
+    monkeypatch.setattr(resume_module, "run_unit_in_worktree", lambda *a, **k: real(*a, **k, **note))
+    code = main(["resume", "--unit", UNIT, "--reason", "again", "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ)
+    assert code == 0
+    return code
+
+
+def test_a_resume_with_a_note_task_records_it(halted, tdd_repo, monkeypatch):  # 2.5
+    resume_with(tdd_repo, monkeypatch, note_task="1.1", note_fix_unit="fx-1")
+    (event,) = halted.local_events("unit.resumed")
+    assert (event["note_task"], event["note_fix_unit"]) == ("1.1", "fx-1")
+
+
+def test_a_resume_without_records_neither_key(halted, tdd_repo, monkeypatch):  # 2.5
+    resume_with(tdd_repo, monkeypatch)
+    (event,) = halted.local_events("unit.resumed")
+    assert "note_task" not in event and "note_fix_unit" not in event
