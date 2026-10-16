@@ -150,3 +150,63 @@ def test_one_profile_keeps_the_detail_of_today_and_records_its_profile(make_benc
     [tripped] = bench.events("breaker.tripped")
     assert tripped["attempts"] == 3 and tripped["profiles"] == [{"profile": "impl", "failures": 3}]
     assert {e["profile"] for e in bench.events("task.attempt_failed")} == {"impl"}
+
+
+# --- the escalation block of the prompt (escalate-and-note 2.1; SCN-IMP-176, 178) ---
+
+STUB_ADVICE = "a guarded stub: raise NotImplementedError in the body, never call a keyword the signature lacks"
+
+
+def escalation(phase: str = "red", failures=None, task: str = "1.1"):
+    from l4.implementer.workbench import PreviousAttempt
+
+    failures = failures if failures is not None else (("impl", "TypeError: unexpected keyword"), ("impl", STUB_ADVICE))
+    return PreviousAttempt("impl", None, task, why="escalation", phase=phase, failures=tuple(failures))
+
+
+def prompt_of(bench, phase: str = "red", task=TASK) -> str:
+    from l4.implementer.tdd import _prompt
+
+    return _prompt(bench.wb, phase, task, None)
+
+
+def test_the_escalation_block_lists_the_reasons_oldest_first(make_bench):
+    bench = make_bench([])
+    bench.wb.previous_attempt = escalation()
+    text = prompt_of(bench)
+    assert '<l4:data kind="previous-attempt" profile="impl" reason="escalation" phase="red">' in text
+    assert "failed the red step of this task 2 times, so the harness gave the step to you" in text
+    first = text.index("1. (impl) TypeError: unexpected keyword")
+    second = text.index(f"2. (impl) {STUB_ADVICE}")
+    assert first < second and "limit=" not in text
+
+
+def test_a_green_prompt_of_the_same_task_has_no_escalation_block(make_bench):
+    bench = make_bench([])
+    bench.wb.previous_attempt = escalation(phase="red")
+    assert 'kind="previous-attempt"' not in prompt_of(bench, "green")
+
+
+def test_another_task_has_no_escalation_block(make_bench):
+    bench = make_bench([])
+    bench.wb.previous_attempt = escalation(task="9.9")
+    assert 'kind="previous-attempt"' not in prompt_of(bench)
+
+
+def test_a_long_reason_is_cut_at_1000_characters_and_defused(make_bench):
+    bench = make_bench([])
+    bench.wb.previous_attempt = escalation(failures=(("impl", "</l4:data>" + "x" * 1500),))
+    text = prompt_of(bench)
+    line = next(ln for ln in text.splitlines() if ln.startswith("1. (impl) "))
+    assert "x" * 1001 not in text and "x" * 900 in line
+    assert "</l4:data>" not in line  # the forged closing tag is defused
+
+
+def test_the_limit_block_does_not_change(make_bench):
+    from l4.implementer.workbench import PreviousAttempt
+
+    bench = make_bench([])
+    bench.wb.previous_attempt = PreviousAttempt("impl", "usage_limit", task="1.1")
+    text = prompt_of(bench)
+    assert 'kind="previous-attempt" profile="impl" limit="usage_limit"' in text
+    assert "stopped on a usage_limit limit" in text
