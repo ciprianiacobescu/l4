@@ -136,9 +136,11 @@ def _ok_text(name: str, profile: Profile, report: LadderReport, cached: bool) ->
     return f"{name} ok ({' · '.join(parts)})"
 
 
-def format_selected_line(role: str, selection: Selection) -> str:
+def format_selected_line(role: str, selection: Selection, escalated_from: str | None = None) -> str:
     line = f"[l4] {role}: {_ok_text(selection.profile_name, selection.profile, selection.report, selection.cached)}"
     line += " → selected"
+    if escalated_from is not None:
+        return f"{line}, escalated from {escalated_from}"
     return line + (f", fallback #{selection.fallback_index}" if selection.fallback_index >= 1 else "")
 
 
@@ -159,7 +161,7 @@ def format_skipped_line(role: str, skipped: Skipped) -> str:
 _PROBE_STEPS = ("binary", "auth", "quota", "hello", "mcp", "custom")
 
 
-def to_event(selection: Selection, fallback_from: str | None) -> dict[str, Any]:
+def to_event(selection: Selection, fallback_from: str | None, escalated_from: str | None = None) -> dict[str, Any]:
     """The `availability.selected` payload (SPEC 8.4). `probes` is keyed by profile and covers the selected profile
     and every skipped one that was probed. The unit is the ledger envelope's."""
     probes: dict[str, dict[str, Any]] = {}
@@ -188,6 +190,8 @@ def to_event(selection: Selection, fallback_from: str | None) -> dict[str, Any]:
     }  # fmt: skip
     if fallback_from is not None:
         event["fallback_from"] = fallback_from
+    if escalated_from is not None:
+        event["escalated_from"] = escalated_from
     return event
 
 
@@ -221,6 +225,8 @@ class _Walk:
     """The state of one pass over a chain."""
 
     role: str
+    escalated_from: str | None = None
+    record_unavailable: bool = True
     skipped: list[Skipped] = field(default_factory=list)
     probed: dict[str, tuple[Profile, LadderReport]] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
@@ -283,9 +289,17 @@ class FallbackSelector:
         required: bool,
         serves: Collection[str] | None = None,
         constraints: Sequence[Constraint] = (),
+        after: str | None = None,
+        record_unavailable: bool = True,
     ) -> Selection:
-        walk = _Walk(role)
+        """`after`: an escalation (escalate-and-note D5), only the profiles behind it are considered, `index` stays
+        the position in `chain`, and the selected line ends `escalated from <after>`. `record_unavailable` False: a
+        selection that finds nothing raises without writing `availability.unavailable`."""
+        walk = _Walk(role, escalated_from=after, record_unavailable=record_unavailable)
+        start = chain.index(after) + 1 if after is not None and after in chain else 0
         for index, name in enumerate(chain):
+            if index < start:
+                continue
             profile = self._cfg.profiles.get(name)
             if profile is None:
                 raise L4Exit(ExitCode.USAGE_ERROR, f"roles.{role} names {name}, which is not defined under profiles")
@@ -424,7 +438,7 @@ class FallbackSelector:
         if failed is None:
             others = {n: pr for n, pr in walk.probed.items() if n != name}
             chosen = Selection(name, profile, impl, index, walk.skipped, report, payload is not None, others)
-            self._say(walk.role, format_selected_line(walk.role, chosen))
+            self._say(walk.role, format_selected_line(walk.role, chosen, walk.escalated_from))
             return chosen
         step = next(n for n, r in report.steps.items() if r is failed)
         entry = Skipped(name, step, failed.reason or "no reason", failed.limit.kind if failed.limit else None)
@@ -526,7 +540,7 @@ class FallbackSelector:
     def _unavailable(self, role: str, walk: "_Walk", required: bool, retry: datetime | None) -> None:
         """`availability.unavailable` (L4-AVL-008): the failed choice is as visible as a successful one (live job 5561:
         the ledger held nothing about the judge that failed its login probe)."""
-        if self._events is not None:
+        if self._events is not None and walk.record_unavailable:
             self._events.append(
                 "availability.unavailable", role=role, required=required,
                 skipped=[s.to_event() for s in walk.skipped], retry_after=iso(retry) if retry else None,
