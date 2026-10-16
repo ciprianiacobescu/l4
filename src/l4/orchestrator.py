@@ -82,7 +82,7 @@ from l4.planner import facts_of, next_action
 from l4.progress import ProgressTrace, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
-from l4.specs.base import Framework, SpecProvider, UnitRef, UnknownUnit, ValidationReport
+from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
 from l4.specs.criteria import base_criteria, replaced_requirements
 from l4.specs.detect import require_framework
 from l4.specs.openspec import intake_errors, purpose_issues
@@ -121,6 +121,9 @@ log = logging.getLogger("l4.run")
 ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})
 # the phases in which the intake lint (L4-ODD-004) still matters: from then on the verifier is the judge
 _LINT_PHASES = frozenset({None, Phase.INTAKE, Phase.READY, Phase.IMPLEMENTING, Phase.AWAITING_HUMAN, Phase.CLARIFYING})
+# the phases a new unit passes before implementation starts: the only ones in which the strict OpenSpec validation and
+# the Purpose rule (L4-ADO-007) reject a unit; one already implementing, waiting for a person or clarifying is not
+_OPENSPEC_INTAKE_PHASES = frozenset({None, Phase.INTAKE, Phase.READY})
 # the phases after the hand-off commit H: the unit branch stays at H, so what a run writes from here on goes to the
 # pending ledger of the lock ref (L4-STA-004)
 _AFTER_HAND_OFF = frozenset({Phase.IN_REVIEW, Phase.ARCHIVED, Phase.MERGED})
@@ -578,8 +581,16 @@ class Orchestrator:
         the Purpose of a capability new to `openspec/specs/` (L4-OSP-007), as a Kiro unit is validated. Every error
         is a reason (each cut at 600 characters, an archive refusal with its hint: L4-ADO-008) and rejects the unit."""
         s = self.services
+        if (Phase(self.state.phase) if self.state.phase else None) not in _OPENSPEC_INTAKE_PHASES:
+            return None
         target = self.cfg.forge.base_branch
-        reasons = intake_errors(s.provider.validate(s.ref, strict=True), target)
+        try:
+            report = s.provider.validate(s.ref, strict=True)
+        except OpenSpecUnavailable:
+            raise  # as before: the message says to run `l4 doctor`
+        except Exception as exc:  # noqa: BLE001 - a validation that cannot run is a rejection with a reason, not a crash
+            return self._reject([f"validation could not run: {type(exc).__name__}: {exc}"[:600]])
+        reasons = intake_errors(report, target)
         reasons += intake_errors(
             ValidationReport(False, tuple(purpose_issues(s.ref.path, s.worktree / "openspec" / "specs"))), target
         )
