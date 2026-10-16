@@ -140,6 +140,38 @@ completed does not run; `exclude` does not hold. Admission may refuse the plan, 
 fails open for every new spec, and a judge review is charged if admission ever accepts it. Move to `yolo.hold` once the
 pin is on a release that has it: the schema is strict, so release, pin move, then the config edit.
 
+## 4b. A cheap-first implementer chain
+
+A chain in `roles.implementer` moves a failing task to the next profile. Put the cheap profiles first and an optional
+stronger profile last. Two models of one provider are two steps, because the move goes by profile:
+
+```yaml
+profiles:
+  deepseek:      {adapter: opencode, auth: api_key, model: opencode-go/deepseek-v4.1-flash, vendor: deepseek}  # OPENCODE_API_KEY
+  glm:           {adapter: opencode, auth: api_key, model: opencode-go/glm-5.3-flash, vendor: zhipu}           # the same key
+  claude-sonnet: {adapter: claude-code, auth: subscription, vendor: anthropic}                                # optional, last
+  claude-judge:  {adapter: claude-code, auth: subscription, vendor: anthropic}
+  codex-judge:   {adapter: codex, auth: api_key, vendor: openai}                                              # CODEX_API_KEY
+roles:
+  implementer: [deepseek, glm, claude-sonnet]   # cheap first; a task moves after escalate_after failures
+  judges: [claude-judge, codex-judge]           # a judge must not share a vendor with an implementer that ran
+implementer:
+  escalate_after: 2                             # 0: never move
+  max_task_attempts: 3                          # the last profile's attempts
+```
+
+- Escalation moves by profile, cheap first. After `escalate_after` failed attempts of one phase, the next usable profile
+  takes the phase and reads the reasons of the earlier failures. The last profile gets `max_task_attempts`. The next
+  task starts on the first profile again.
+- Without `claude-sonnet` the chain needs no subscription.
+- A judge of every implementer vendor is vetoed. The harness does not move a task to a profile when no judge of another
+  vendor is left (the independence rule). With the judge `claude-judge` alone, a move to `claude-sonnet` is skipped.
+  Keep one judge of another vendor, here `codex-judge`.
+- `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
+  `max_task_attempts`, or when two profiles run the same model.
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.4`) before you
+  edit the config: the schema is strict.
+
 ## 5. Upgrades
 
 ```sh

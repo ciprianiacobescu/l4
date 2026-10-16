@@ -52,8 +52,8 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
 - `references/feedback.md`: every kind and option, what happens after the push, the note's states, limits, and
   feedback on a merged unit.
 - `references/operate.md`: answering `questions.md` with `l4 questions` (the agent rule; verdict questions included),
-  reading state, and resuming an escalated or halted unit.
-- `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, and upgrades.
+  reading state, resuming an escalated or halted unit, and the `--reason` of `l4 retry` as the implementer's note.
+- `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, and upgrades.
 - `references/plan.md`: making and updating a delivery plan: `l4 yolo draft`, evidence for each dependency, the
   validator, `l4 yolo check`, and what to hand to a person.
 - `references/spec.md`: writing a spec for L4 so that it passes the readiness review on the first try.

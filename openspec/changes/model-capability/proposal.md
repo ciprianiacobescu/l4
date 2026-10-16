@@ -1,3 +1,5 @@
+> **Note (2026-10-16):** M2 escalation is delivered in a reduced form by the change `escalate-and-note` (L4-IMP-017: `implementer.escalate_after`, `implementer.escalated`, per-profile attempts, on by default). The fingerprint stop, the trail, demotion and the `escalation:` block stay proposed here.
+
 ## Why
 
 A model that is too weak for a task costs attempts, money and a person's time, and today nobody can see it happen.
