@@ -90,3 +90,43 @@ def test_plan_shows_the_recorded_detail(unit_repo, trailers, capsys):
     _, out, _ = run_cli(unit_repo, capsys, "plan", "--json")
     (unit,) = json.loads(out)["units"]
     assert unit["reason"] == f"halted: {DETAIL}"
+
+
+def halted_on(task: str, *, reason: str = "max_task_attempts", fix_unit: str | None = None):
+    tripped = {"reason": "max_task_attempts", "task": task, **({"fix_unit": fix_unit} if fix_unit else {})}
+    return [
+        *IMPLEMENTING,
+        ("breaker.tripped", tripped),
+        ("phase.changed", {"from": "implementing", "to": "halted", "reason": reason, "detail": DETAIL}),
+    ]
+
+
+def test_unit_shows_the_retry_note_line_before_next(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *halted_on("1.1")), trailers)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    lines = out.splitlines()
+    assert lines[-2] == "Retry note: the --reason of l4 retry goes to the implementer of task 1.1"
+    assert lines[-1].startswith("Next: ")
+
+
+def test_unit_names_the_fix_unit_of_the_note(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(
+        lambda repo: unit_repo.write_ledger(repo, *halted_on("1.1", fix_unit="add-x-fix-1")), trailers
+    )
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    assert "Retry note: the --reason of l4 retry goes to the implementer of task 1.1 of add-x-fix-1" in out
+
+
+def test_no_retry_note_line_for_a_stop_that_names_no_task(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(lambda repo: unit_repo.write_ledger(repo, *HALTED), trailers)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    assert "Retry note" not in out
+
+
+def test_json_carries_halt_task_and_halt_fix_unit(unit_repo, trailers, capsys):
+    unit_repo.push_unit_branch(
+        lambda repo: unit_repo.write_ledger(repo, *halted_on("1.1", fix_unit="add-x-fix-1")), trailers
+    )
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--json")
+    [unit] = json.loads(out)["units"]
+    assert (unit["halt_task"], unit["halt_fix_unit"]) == ("1.1", "add-x-fix-1")

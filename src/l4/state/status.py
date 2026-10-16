@@ -433,6 +433,10 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config) -> str:
     lines += [f"Cause: {cause}"] if cause else []
     lines += [f"Stopped in run: {snapshot.stopped_in}"] if snapshot.stopped_in else []
     lines += [f"Or: add the label {label}"] if label else []
+    state = snapshot.state
+    if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
+        of = f" of {state.halt_fix_unit}" if state.halt_fix_unit else ""
+        lines.append(f"Retry note: the --reason of l4 retry goes to the implementer of task {state.halt_task}{of}")
     return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}"])
 
 
