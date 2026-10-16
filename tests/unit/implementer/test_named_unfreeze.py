@@ -193,6 +193,22 @@ def test_a_red_test_the_task_names_stays_frozen(make_bench):
     assert {"path": "tests/test_otel.py", "why": "a red test of this task"} in event["kept"]
 
 
+def test_a_support_file_red_changed_stays_frozen_though_the_task_names_it(make_bench):
+    """SCN-IMP-163"""
+    red_conftest = OLD_CONFTEST + "\n\n@pytest.fixture\ndef red_fixture():\n    return 1\n"
+    red = red_env()
+    red.writes[CONFTEST] = red_conftest
+    bench = make_bench([red, green_writing(NEW_CONFTEST)])
+    task = prepare(bench, plan=True)
+    red_result = run_red(bench.wb, task, attempt=1)
+    assert red_result.status == "ok", red_result.reason
+    run_green(bench.wb, task, red_result, attempt=1)
+    assert (bench.wb.worktree / CONFTEST).read_text() == red_conftest
+    assert bench.events("task.unfrozen") == [] or all(CONFTEST not in e["paths"] for e in bench.events("task.unfrozen"))
+    kept = [k for e in bench.events("task.unfrozen") for k in e["kept"]]
+    assert {"path": CONFTEST, "why": "the red step of this task changed it"} in kept
+
+
 def test_a_symlink_an_ignore_file_and_a_data_file_stay_frozen(make_bench):
     """SCN-IMP-165"""
     text = "- [ ] 1.1 Add `apply_discount`; touch `conftest.py`, `.gitignore` and `tests/fixtures/expected.json`\n"

@@ -3069,7 +3069,8 @@ section for the items taken or judged in the round, and `l4 status` counts the i
 
 **L4-ARC-003** With `merge_policy: human` the harness MUST NOT merge. The PR body MUST say that any merge method works: the harness detects a
 merge from the merge request and the tree, a merge commit keeps the commits' L4 trailers in the history and a squash
-drops them (the history of truth is in the files either way). A merged PR is detected by the
+drops them (the history of truth is in the files either way). The body is static and also says who merges: a person,
+unless the unit is in an active delivery plan with `merge: auto`, where the harness merges it (L4-YOLO-008). A merged PR is detected by the
 sweeper → `merged`; WIP branch and lock ref are deleted. Whether the merged result is archived is decided from the
 **tree at the merge commit** (is the unit's change folder still under `openspec/changes/` / is the Kiro unit's ledger
 phase `archived`), never from the presence of an archive commit in history; a merged but unarchived unit gets the

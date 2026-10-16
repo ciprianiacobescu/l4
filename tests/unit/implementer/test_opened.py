@@ -132,3 +132,68 @@ def test_unit_modules_dotted_names_under_roots_and_plain_packages() -> None:
         "../evil.py",
     ]
     assert unit_modules(paths, CFG) == frozenset({"app.otel", "app", "pkg.mod", "solo"})
+
+
+def test_environment_subscript_assignment_is_no_rebinding() -> None:
+    assert run(BEFORE.replace("VALUE = 2\n", "VALUE = 2\nos.environ['APP_X'] = '1'\n")) is None
+    assert run(BEFORE + "\nos.environ['APP_X'] = '1'\nos.environ.update(B='2')\n") is None
+
+
+def test_attribute_assignment_does_not_bind_its_base() -> None:
+    assert run(BEFORE + "\nclient.flag = True\nVALUE2 = 1\nos.sep = '/'\n") is None
+
+
+def test_plain_name_target_still_rebinds() -> None:
+    assert run(BEFORE + "\nos = None\n") == "rebinds os"
+    assert run(BEFORE + "\nVALUE = 3\n") == "rebinds VALUE"
+    assert run(BEFORE + "\n(a, os) = (1, 2)\n") == "rebinds os"
+    assert run(BEFORE + "\nfor os in []:\n    pass\n") == "rebinds os"
+    assert run(BEFORE + "\nwith open('x') as os:\n    pass\n") == "rebinds os"
+    assert run(BEFORE + "\n(os := 1)\n") == "rebinds os"
+    assert run(BEFORE + "\n_ = [os := 1 for _ in []]\n") == "rebinds os"
+    assert run(BEFORE + "\n_ = [os for os in []]\n") is None  # a comprehension variable is local
+
+
+def test_unit_module_assignment_still_refused() -> None:
+    after = BEFORE + "\nimport app.otel\napp.otel.enabled = False\n"
+    assert run(after) == "patches app.otel.enabled, which the unit changed"
+
+
+PKG_BEFORE = "import app.a\n\nVALUE = 1\n"
+
+
+def test_two_new_imports_of_one_package_are_no_rebinding() -> None:
+    assert run(BEFORE + "\nimport app.a\nimport app.b\n") is None
+
+
+def test_new_import_of_a_package_the_file_already_imports_passes() -> None:
+    assert run(PKG_BEFORE + "import app.b\n", before=PKG_BEFORE) is None
+    assert run(PKG_BEFORE.replace("VALUE", "import app.b\nVALUE"), before=PKG_BEFORE) is None
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "import other as app\n",
+        "app = 1\n",
+        "def app():\n    pass\n",
+        "from x import app\n",
+        "import app.b as app\n",
+        "import app as app\n",
+    ],
+)
+def test_real_rebinding_of_an_imported_package_stays_refused(extra: str) -> None:
+    assert run(PKG_BEFORE + extra, before=PKG_BEFORE) == "rebinds app"
+
+
+@pytest.mark.parametrize(
+    "first", ["import other as app\n", "app = 1\n", "from x import app\n", "def app():\n    pass\n"]
+)
+def test_import_after_a_non_import_binding_stays_refused(first: str) -> None:
+    before = first + "VALUE = 1\n"
+    assert run(before + "import app.b\n", before=before) == "rebinds app"
+
+
+def test_new_import_after_a_new_non_import_binding_is_refused() -> None:
+    assert run(BEFORE + "\napp = 1\nimport app.b\n") == "rebinds app"
+    assert run(BEFORE + "\nimport app.a\napp = 1\n") == "rebinds app"

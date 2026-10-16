@@ -109,7 +109,8 @@ Archive of the merged unit `{unit}`, built by the L4 harness: the change folder 
 capability specs are updated.
 
 - Nothing else changes in this merge request.
-- Merge it with the merge-commit method. The harness never merges it.
+- Merge it with the merge-commit method. A person merges it, unless its unit is in an active delivery plan
+  with `merge: auto`; then the harness merges it.
 - It is built on the base branch as it was when the previous archive merge request merged: archive merge requests are
   opened one at a time.
 """
