@@ -14,7 +14,7 @@ from .conftest import blocked_step, green_step, red_step, result
 TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 TWO = {"roles": {"implementer": ["impl", "impl-b"]}, "profiles": {"impl-b": {"adapter": "fake", "vendor": "otherco"}}}
 BAD = Step(structured=result("red"))  # a failed red: "no tests added"
-INVALID = Step(structured={"status": "ok"})
+INVALID = Step()
 
 
 class Hook:
