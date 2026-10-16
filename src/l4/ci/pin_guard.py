@@ -20,6 +20,10 @@ FIX = (
     f"update {WORKFLOW_RELPATH} on the default branch to the base's copy (merge it, or `l4 upgrade` and copy the "
     "file there)"
 )
+UNIT_BRANCH_FIX = (
+    f"this run is on a unit branch, whose own copy of {WORKFLOW_RELPATH} is the one that ran: merge the base branch "
+    "into the unit branch (changing the default branch alone does not help)"
+)
 
 
 @dataclass(frozen=True)
@@ -63,4 +67,7 @@ def stale_pin_stop(cfg: L4Config, repo: Path, environ: Mapping[str, str]) -> str
     check = pin_check(cfg, repo, environ, harness_commit())
     if check.status != "mismatch":
         return None
+    branch = environ.get("GITHUB_REF_NAME", "") if environ.get("GITHUB_REF_TYPE", "branch") == "branch" else ""
+    if branch and branch.startswith(cfg.forge.branch_prefix):  # a push to a unit branch runs that branch's copy
+        return f"::warning::l4 does no work in this run: {check.problem}. To fix it, {UNIT_BRANCH_FIX}."
     return f"::warning::l4 does no work in this run: {check.problem}. To fix it, {FIX}."
