@@ -47,7 +47,8 @@ def beat_text(beat: Beat) -> str:
     text = f"working {ago(beat.elapsed_s)}"
     if not beat.counts:
         return text
-    text += f", {beat.tool_calls} tool calls, last activity {ago(beat.since_last_s)} ago"
+    calls = "tool call" if beat.tool_calls == 1 else "tool calls"
+    text += f", {beat.tool_calls} {calls}, last activity {ago(beat.since_last_s)} ago"
     if beat.open_calls:
         noun = "tool call" if beat.open_calls == 1 else "tool calls"
         text += f", {beat.open_calls} {noun} open for {ago(beat.open_for_s)}"

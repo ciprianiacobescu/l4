@@ -242,6 +242,7 @@ def test_a_callback_that_raises_does_not_stop_tick(caplog):
 
 def test_beat_text_forms():
     assert beat_text(Beat(360, 14, 20, 0, 0, True)) == "working 6m, 14 tool calls, last activity 20s ago"
+    assert beat_text(Beat(60, 1, 5, 0, 0, True)) == "working 1m, 1 tool call, last activity 5s ago"
     assert beat_text(Beat(480, 15, 240, 1, 240, True)) == (
         "working 8m, 15 tool calls, last activity 4m ago, 1 tool call open for 4m"
     )
