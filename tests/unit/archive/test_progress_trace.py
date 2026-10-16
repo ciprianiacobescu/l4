@@ -13,7 +13,7 @@ EXPECTED_IN_ORDER = [
     r"implementer: impl ok \(.*\) → selected$",
     r"task 1\.1 started: ",
     r"agent red task 1\.1 ok \(",
-    r"gate test fail \(exit 1, \d+ tests: \d+ passed, 2 failed\)",
+    r"red: 2 new tests fail, as intended$",  # the raw red gate line is at DEBUG (run-liveness D9)
     r"task 1\.1 red ok: \d+ new test\(s\) failing as expected$",
     r"MR \S+ \(draft\)$",
     r"agent green task 1\.1 ok \(",
