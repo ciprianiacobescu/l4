@@ -7,27 +7,48 @@ functions over `QuestionsFile` (`edit_accept`, `edit_answer`) and their checks (
 """
 
 import json
+import logging
 import re
-from collections.abc import Sequence
+import sys
+import tempfile
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import click
 
+from l4.config.loader import load_config
 from l4.config.redaction import load_app_config
-from l4.config.schema import L4Config
+from l4.config.schema import ClarifierCfg, L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
+from l4.implementer.guards import IGNORE_FILE_GLOBS
+from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, names_path
+from l4.security.protected import glob_match
 from l4.specs.providers import providers_for
-from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, Question, QuestionsFile, QuestionStatus
+from l4.specs.questions import (
+    MAX_QUESTIONS_BYTES,
+    QUESTIONS_FILENAME,
+    Question,
+    QuestionKind,
+    QuestionsFile,
+    QuestionStatus,
+    unescape_text,
+)
+from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
+from l4.state.pending import merge_ledgers, read_pending
 from l4.state.retry import fetch_unit_refs
 from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
-from l4.vcs.names import unit_branch
+from l4.vcs.names import lock_ref, unit_branch
+from l4.vcs.tree import regular_blobs
+from l4.yolo.accept import actor
 
 SCHEMA = "l4/questions@1"
 REMOTE = "origin"
+CONFIG_PATH = ".l4/config.yaml"
+log = logging.getLogger("l4.questions")
 _QID = re.compile(r"Q-\d+")
 _FIX_NAME = re.compile(r"(?P<parent>.+)-fix-\d+")
 
@@ -220,6 +241,270 @@ def run_list(app: AppContext, *, unit: str | None, as_json: bool) -> ExitCode:
     return ExitCode.OK
 
 
+# --- what the ledger and the project's rules say about a question -----------------------------------------------
+
+
+def folder_events(git: Git, folder: Folder) -> tuple[list[LedgerEvent], str | None]:
+    """The events of the unit's ledger at the folder's head, with the pending ledger of its lock ref (a fix unit's
+    events are in the parent's ledger). A ledger that does not read gives no events and a warning."""
+    try:
+        blobs = regular_blobs(git, folder.head, f"{folder.ledger_rel}/.l4/ledger/", MAX_LEDGER_FILE_BYTES)
+        files = {
+            blob.path.rsplit("/", 1)[-1]: git.run_bytes("cat-file", "blob", blob.oid)
+            for blob in blobs
+            if blob.path.endswith(".jsonl")
+        }
+        read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(folder.parent)))
+    except LedgerCorrupt as exc:
+        return [], f"{folder.unit}: the ledger cannot be read ({exc}): no frozen path is shown"
+    return list(read.events), None
+
+
+def frozen_paths(events: Sequence[LedgerEvent], tasks: Sequence[str], fix: str | None) -> dict[str, tuple[str, ...]]:
+    """Per held task, the `frozen` paths of its latest `task.red_ok` (of the fix unit's own context for a fix unit)."""
+    found: dict[str, tuple[str, ...]] = {}
+    for event in events:
+        task = event.data.get("task")
+        if event.type == "task.red_ok" and task in tasks and (event.data.get("fix_unit") or None) == fix:
+            found[str(task)] = tuple(str(f) for f in event.data.get("frozen") or [])
+    return found
+
+
+@dataclass(frozen=True)
+class PathEffect:
+    """What an accepted suggestion does to one frozen path of a held task (design D7)."""
+
+    task: str
+    path: str
+    unfreezes: bool
+    why: str  # when it stays frozen: the reason
+
+
+def _is_ignore_file(path: str) -> bool:
+    return any(glob_match(glob, path) for glob in IGNORE_FILE_GLOBS)
+
+
+def suggestion_effects(question: Question, frozen: Mapping[str, Sequence[str]]) -> list[PathEffect]:
+    """The frozen paths of the held tasks that the suggestion names, and whether an accepted suggestion unfreezes each
+    (the rule of `implementer.unfreeze.unfrozen` for an `accepted` question): a support or test file that the question
+    itself (title, Context, Options) names too opens, an ignore file stays frozen, at most
+    `MAX_PATHS_PER_QUESTION` per question. A verdict question unfreezes nothing."""
+    if question.kind is QuestionKind.VERDICT or not question.suggestion_text:
+        return []
+    text = unescape_text(question.suggestion_text)
+    asked = "\n".join((question.title, unescape_text(question.context_text), unescape_text(question.options_text)))
+    tasks = [t for t in question.blocking_tasks if t in frozen]
+    named = sorted({p for t in tasks for p in frozen[t] if names_path(text, p)})
+    verdict: dict[str, tuple[bool, str]] = {}
+    opened = 0
+    for path in named:
+        if _is_ignore_file(path):
+            verdict[path] = (False, "an ignore file")
+        elif not names_path(asked, path):
+            verdict[path] = (False, "the question does not name it")
+        elif opened >= MAX_PATHS_PER_QUESTION:
+            verdict[path] = (False, f"more than {MAX_PATHS_PER_QUESTION} paths named")
+        else:
+            opened += 1
+            verdict[path] = (True, "")
+    return [PathEffect(t, p, *verdict[p]) for t in tasks for p in sorted(frozen[t]) if p in verdict]
+
+
+@dataclass(frozen=True)
+class ClarifierRules:
+    """`clarifier.auto_accept_kinds` and `clarifier.answer_by_agents`, as the base branch has them (D11)."""
+
+    auto_accept_kinds: tuple[str, ...] = ("technical",)
+    answer_by_agents: bool = False
+
+
+def clarifier_rules(git: Git, base: str) -> ClarifierRules:
+    """Both keys from `.l4/config.yaml` at `refs/remotes/origin/<base>`, never from the unit branch (an agent cannot
+    set them there). The defaults apply when the file is absent or is not a valid config."""
+    ref = f"refs/remotes/{REMOTE}/{base}"
+    try:
+        shown = git.run("show", f"{ref}:{CONFIG_PATH}", check=False)
+    except GitError as exc:
+        log.warning("questions: cannot read %s at %s (%s): the default clarifier rules apply", CONFIG_PATH, ref, exc)
+        return ClarifierRules()
+    if shown.returncode != 0:
+        return ClarifierRules()
+    with tempfile.TemporaryDirectory(prefix="l4-questions-") as tmp:
+        path = Path(tmp) / "config.yaml"
+        path.write_text(shown.stdout, encoding="utf-8")
+        try:
+            cfg: ClarifierCfg = load_config(Path(tmp), config_path=path).clarifier
+        except L4Exit as exc:
+            log.warning(
+                "questions: %s at %s is not a valid config (%s): the default clarifier rules apply",
+                CONFIG_PATH,
+                ref,
+                exc,
+            )
+            return ClarifierRules()
+    return ClarifierRules(tuple(cfg.auto_accept_kinds), bool(getattr(cfg, "answer_by_agents", False)))
+
+
+AGENT_FIX = (
+    "a person runs the command, or set clarifier.answer_by_agents: true in .l4/config.yaml on {base} "
+    "(a pushed change a person can see)"
+)
+
+
+def agent_reason(
+    question: Question, effective: str | None, frozen: Mapping[str, Sequence[str]], rules: ClarifierRules
+) -> str | None:
+    """Why an agent may not write `question` (design D11, L4-QMD-009), or None. `effective` is the text it would
+    write: the suggestion for `accept`, the `--text` for `answer`; None skips the check of frozen paths."""
+    if rules.answer_by_agents:
+        return None
+    if question.kind is QuestionKind.VERDICT:
+        return "a verdict answer is a person's decision"
+    kind = question.kind.value if question.kind is not None else question.kind_text or "unknown"
+    if kind not in rules.auto_accept_kinds:
+        return f"its kind is {kind}, and clarifier.auto_accept_kinds is [{', '.join(rules.auto_accept_kinds)}]"
+    if effective is not None:
+        for task in question.blocking_tasks:
+            for path in frozen.get(task, ()):
+                if names_path(effective, path):
+                    noun = "suggestion" if effective == unescape_text(question.suggestion_text) else "text"
+                    return f"the {noun} names the frozen path {path} of task {task}"
+    return None
+
+
+def check_agent(
+    form: str,
+    question: Question,
+    effective: str | None,
+    frozen: Mapping[str, Sequence[str]],
+    rules: ClarifierRules,
+    base: str,
+) -> Refusal | None:
+    """R11: the agent rule as a refusal."""
+    why = agent_reason(question, effective, frozen, rules)
+    return Refusal(f"an agent may not {form} {question.id}: {why}", AGENT_FIX.format(base=base)) if why else None
+
+
+# --- show -------------------------------------------------------------------------------------------------------
+
+
+def _section(question: Question, file: QuestionsFile) -> str:
+    raw = file.data[question.section.start : question.section.end]
+    return raw.decode("utf-8", errors="replace").replace("\r\n", "\n").strip("\n")
+
+
+def find_question(folders: Sequence[Folder], unit: str, qid: str, warnings: Sequence[str]) -> tuple[Folder, Question]:
+    """The folder and the question to act on (R2, R3, R13), or the refusal that says why there is none."""
+    if not folders:
+        raise Refusal(
+            next((w for w in warnings if "has no branch" in w), f"{unit} has no branch on {REMOTE}"),
+            "the next run creates it",
+        ).exit()
+    folder = folders[0]
+    here = f"l4 questions --unit {folder.unit}"
+    if folder.problem:
+        raise Refusal(folder.problem, f"fix the file on {folder.branch} by hand").exit()
+    if folder.file is None:
+        raise Refusal(f"{folder.unit} has no {QUESTIONS_FILENAME} on {folder.branch}", here).exit()
+    question = folder.file.get(qid)
+    if question is None:
+        raise Refusal(f"no {qid} in {folder.path}", here).exit()
+    if qid in folder.file.unreadable_ids:
+        raise Refusal(f"the section of {qid} in {folder.path} cannot be read", here).exit()
+    return folder, question
+
+
+def _qid(words: Sequence[str], form: str) -> str:
+    if len(words) != 1:
+        raise _usage(f"{form} takes one question id (Q-NNN)")
+    if not _QID.fullmatch(words[0]):
+        raise _usage(f"{words[0]!r} is not a question id (Q-NNN)")
+    return words[0]
+
+
+def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool) -> ExitCode:
+    if unit is None:
+        raise _usage("show needs --unit", "l4 questions show Q-NNN --unit <unit>")
+    app, cfg = load_app_config(app)
+    git = Git(app.repo, environ=app.environ)
+    folders, warnings = load_folders(app, cfg, git, unit)
+    folder, q = find_question(folders, unit, question, warnings)
+    assert folder.file is not None
+    events, warning = folder_events(git, folder)
+    warnings += [warning] if warning else []
+    frozen = frozen_paths(events, q.blocking_tasks, folder.fix)
+    effects = suggestion_effects(q, frozen) if q.status is QuestionStatus.OPEN else []
+    takes = unescape_text(q.suggestion_text) or None
+    who, marker = actor(app.environ, sys.stdin.isatty())
+    rules = clarifier_rules(git, cfg.forge.base_branch)
+    accept_why = answer_why = None
+    if who == "agent":
+        accept_why = agent_reason(q, takes, frozen, rules)
+        answer_why = agent_reason(q, None, frozen, rules)
+    is_open = q.status is QuestionStatus.OPEN
+    verdict = q.kind is QuestionKind.VERDICT
+    commands: list[str] = []
+    if is_open and not q.answer_text:
+        if takes and not verdict:
+            commands.append(f"l4 questions accept {q.id} --unit {folder.unit}")
+        commands.append(f"l4 questions answer {q.id} --unit {folder.unit} --text TEXT")
+    else:
+        commands.append(f"l4 questions --unit {folder.unit}")
+    section = _section(q, folder.file)
+    if as_json:
+        document = {
+            "schema": SCHEMA, "unit": folder.unit, "id": q.id, "status": q.status.value, "kind": _kind(q),
+            "blocking": list(q.blocking_tasks), "title": q.title, "branch": folder.branch, "section": section,
+            "accept": {"takes": takes},
+            "frozen": [
+                {"task": e.task, "path": e.path, "unfreezes": e.unfreezes, "why": e.why} for e in effects
+            ],
+            "caller": {"actor": who, "marker": marker, "accept": accept_why, "answer": answer_why},
+            "warnings": warnings, "next": commands,
+        }  # fmt: skip
+        _echo(app, json.dumps(document, indent=2, ensure_ascii=False))
+        return ExitCode.OK
+    out = [f"warning: {w}" for w in warnings] + [section, ""]
+    if not is_open:
+        out.append(f"{q.id} is {q.status.value}: it takes no accept or answer")
+    elif q.answer_text:
+        out.append(f"{q.id} has a draft answer under Status open: submit it on {folder.branch} or remove it")
+    else:
+        if verdict:
+            out.append(
+                f'answer with: l4 questions answer {q.id} --unit {folder.unit} --text "accept <reason>"'
+                ' (or "reject <reason>")'
+            )
+        else:
+            out.append(
+                f"accept takes: {takes}" if takes else "accept takes: no clarifier suggestion: answer it with --text"
+            )
+        for e in effects:
+            out.append(
+                f"an accepted suggestion unfreezes {e.path} for the next green of {e.task}"
+                if e.unfreezes
+                else f"an accepted suggestion leaves {e.path} frozen for {e.task} ({e.why})"
+            )
+        if who == "person":
+            out.append("caller: person: may accept and answer")
+        else:
+            out.append(f"caller: agent ({marker or 'no terminal on stdin'})")
+            out.append("accept: " + (f"refused: {accept_why}" if accept_why else "may"))
+            out.append(
+                "answer: "
+                + (
+                    f"refused: {answer_why}"
+                    if answer_why
+                    else "may, when its text names no frozen path"
+                    if frozen
+                    else "may"
+                )
+            )
+    out += [f"Next: {c}" for c in commands]
+    _echo(app, "\n".join(out))
+    return ExitCode.OK
+
+
 # --- the handler ------------------------------------------------------------------------------------------------
 
 
@@ -236,4 +521,6 @@ def run_questions(
     form, rest = (words[0] if words else "list"), tuple(words[1:])
     if form == "list" and not rest:
         return run_list(app, unit=unit, as_json=as_json)
+    if form == "show":
+        return run_show(app, question=_qid(rest, form), unit=unit, as_json=as_json)
     raise _usage(f"unknown form: {' '.join(words)}")
