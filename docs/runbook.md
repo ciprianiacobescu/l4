@@ -1430,6 +1430,8 @@ prerequisites as shown, its plan entry and the review prompt version.
    that is not `READY` it prints every blocking and major finding in full, with an id `F-xxxxxx`, the criterion and a
    `Resolve:` line, the count of minor findings, and what changed since the previous judgement (`new`, `repeated`,
    `gone`, `persistent` criteria). `--all` adds `READY` subjects and minor findings; `--json` is for scripts.
+   When `l4 yolo accept` would refuse a subject, the text view prints `accept: not available: <why> (<fix>)` and
+   the JSON subject has `"accept_refusal": {"why", "fix"}` (`null` otherwise; `accept_available` stays).
    A `BLOCKED` item with a `schema`, `unit_missing` or `completeness` finding was not reviewed: run the review again,
    or push the missing folder or remove the unit from the plan.
 2. Do what each `Resolve:` line says: edit the specs of the unit, or the plan file (for example a `depends_on`).

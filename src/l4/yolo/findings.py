@@ -323,6 +323,7 @@ class _Facts:
     accepted: Mapping[str, Any] | None
     holds: bool
     accept_available: bool
+    accept_refusal: Any = None  # the `accept.Refusal` (message, fix) of a not-READY subject that cannot be accepted
 
 
 def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
@@ -340,7 +341,7 @@ def _facts(
     only: str | None,
     accepted: Mapping[str, Mapping[str, Any]] | None,
     holds: Mapping[str, bool] | None,
-    can_accept: Callable[[str], bool] | None,
+    can_accept: Callable[[str], Any] | None,
 ) -> list[_Facts]:
     out: list[_Facts] = []
     for subject, entry in _subjects(review):
@@ -358,12 +359,11 @@ def _facts(
         since = diff(earlier[-1].get("findings") or (), findings) if earlier else None
         accept = (accepted or {}).get(subject)
         accept_holds = bool((holds or {}).get(subject, False)) if accept else False
-        available = (
-            verdict != "READY"
-            and not (accept and accept_holds)
-            and can_accept is not None
-            and bool(can_accept(subject))
-        )
+        refusal = None
+        available = False
+        if verdict != "READY" and not (accept and accept_holds) and can_accept is not None:
+            refusal = can_accept(subject)
+            available = refusal is None
         out.append(
             _Facts(
                 subject=subject,
@@ -377,6 +377,7 @@ def _facts(
                 accepted=accept,
                 holds=accept_holds,
                 accept_available=available,
+                accept_refusal=refusal,
             )
         )
     return out
@@ -414,12 +415,12 @@ def render(
     units: Mapping[str, UnitInfo] | None = None,
     accepted: Mapping[str, Mapping[str, Any]] | None = None,
     holds: Mapping[str, bool] | None = None,
-    can_accept: Callable[[str], bool] | None = None,
+    can_accept: Callable[[str], Any] | None = None,
     only: str | None = None,
 ) -> list[str]:
     """The text of `l4 yolo findings` for the latest review (`review` is the data of its `plan.reviewed` event;
-    `history_of(subject)` is `history(...)` of the ledger). `can_accept(subject)` is the caller's `accept.check` made
-    boolean. `only` names one subject, shown whatever its verdict."""
+    `history_of(subject)` is `history(...)` of the ledger). `can_accept(subject)` is the caller's `accept.check`:
+    None when the subject may be accepted, else its `Refusal`. `only` names one subject, shown whatever its verdict."""
     resolver = _resolver(plan_id, base, units)
     lines: list[str] = []
     for fact in _facts(
@@ -452,6 +453,8 @@ def render(
             )
         if fact.accept_available:
             lines.append(f"  accept: l4 yolo accept {plan_id} {fact.subject} --reason TEXT")
+        elif fact.accept_refusal is not None:
+            lines.append(f"  accept: not available: {fact.accept_refusal.message} ({fact.accept_refusal.fix})")
     return lines
 
 
@@ -465,7 +468,7 @@ def render_json(
     units: Mapping[str, UnitInfo] | None = None,
     accepted: Mapping[str, Mapping[str, Any]] | None = None,
     holds: Mapping[str, bool] | None = None,
-    can_accept: Callable[[str], bool] | None = None,
+    can_accept: Callable[[str], Any] | None = None,
     only: str | None = None,
 ) -> dict[str, Any]:
     """The same facts as `render`, as a JSON-serialisable document (`schema: l4/yolo-findings@1`). Every finding of a
@@ -517,6 +520,11 @@ def render_json(
                     else None
                 ),
                 "accept_available": fact.accept_available,
+                "accept_refusal": (
+                    {"why": fact.accept_refusal.message, "fix": fact.accept_refusal.fix}
+                    if fact.accept_refusal is not None
+                    else None
+                ),
             }
         )
     return {

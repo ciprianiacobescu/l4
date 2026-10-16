@@ -5,6 +5,7 @@ import re
 from dataclasses import replace
 
 from l4.yolo import findings as fnd
+from l4.yolo.accept import Refusal
 
 from .yolo_ledger_world import ev
 
@@ -150,7 +151,7 @@ def test_the_accept_line_appears_only_when_accept_check_would_pass():
 
     def can(subject):
         asked.append(subject)
-        return subject == "openspec:a"
+        return None if subject == "openspec:a" else Refusal("b waits", "push more")
 
     events = [
         reviewed(
@@ -163,13 +164,15 @@ def test_the_accept_line_appears_only_when_accept_check_would_pass():
     assert not any("accept: l4 yolo accept p1 openspec:b" in line for line in lines)
     assert sorted(asked) == ["openspec:a", "openspec:b"]
     assert not any("accept: l4" in line for line in render(events))
+    assert "  accept: not available: b waits (push more)" in lines
+    assert not any("not available" in line for line in render(events))
 
 
 def test_a_ready_subject_and_an_accepted_one_get_no_accept_line():
     events = [reviewed("2026-10-14T10:00:00Z", {"openspec:a": entry("READY", material="k1")})]
-    assert not any("accept: l4" in line for line in render(events, show_all=True, can_accept=lambda s: True))
+    assert not any("accept: l4" in line for line in render(events, show_all=True, can_accept=lambda s: None))
     acc = {"openspec:a": {"by": "ana", "actor": "person", "reason": "r"}}
-    lines = render(one([T]), accepted=acc, holds={"openspec:a": True}, can_accept=lambda s: True)
+    lines = render(one([T]), accepted=acc, holds={"openspec:a": True}, can_accept=lambda s: None)
     assert not any("accept: l4" in line for line in lines)
 
 
@@ -219,7 +222,7 @@ def test_the_json_has_the_same_facts():
         units=UNITS,
         accepted=acc,
         holds={"openspec:a": True},
-        can_accept=lambda s: True,
+        can_accept=lambda s: None,
     )
     json.dumps(doc)  # serialisable as it is
     assert doc["schema"] == "l4/yolo-findings@1" and doc["plan"] == "p1" and doc["base"] == "staging"
@@ -254,5 +257,49 @@ def test_the_json_skips_ready_subjects_unless_all():
 def test_the_json_offers_accept_when_the_check_passes():
     events = one([T])
     h = lambda s: fnd.history(events, s, 4)  # noqa: E731
-    doc = fnd.render_json("p1", "staging", events[0].data, h, units=UNITS, can_accept=lambda s: True)
+    doc = fnd.render_json("p1", "staging", events[0].data, h, units=UNITS, can_accept=lambda s: None)
     assert doc["subjects"][0]["accept_available"] is True
+
+
+def test_the_json_carries_the_first_refusal_of_a_not_ready_subject():
+    ev = [
+        reviewed(
+            "2026-10-14T10:00:00Z",
+            {
+                "openspec:a": entry(findings=[T], material="k1"),
+                "openspec:b": entry(findings=[F], material="k2"),
+                "openspec:c": entry("READY", material="k3"),
+            },
+        )
+    ]
+    refused = {"openspec:b": Refusal("acceptance is a person's decision", "a person runs it")}
+    doc = fnd.render_json(
+        "p1",
+        "staging",
+        ev[0].data,
+        lambda s: fnd.history(ev, s, 4),
+        show_all=True,
+        units=UNITS,
+        can_accept=lambda s: refused.get(s),
+    )
+    by = {x["subject"]: x for x in doc["subjects"]}
+    assert by["openspec:a"]["accept_available"] is True and by["openspec:a"]["accept_refusal"] is None
+    assert by["openspec:b"]["accept_available"] is False
+    assert by["openspec:b"]["accept_refusal"] == {"why": "acceptance is a person's decision", "fix": "a person runs it"}
+    assert by["openspec:c"]["accept_refusal"] is None  # READY: nothing to accept, nothing refused
+
+
+def test_an_accepted_subject_that_holds_has_no_refusal():
+    acc = {"openspec:a": {"by": "ana", "actor": "person", "reason": "r"}}
+    ev = one([T])
+    doc = fnd.render_json(
+        "p1",
+        "staging",
+        ev[0].data,
+        lambda s: fnd.history(ev, s, 4),
+        units=UNITS,
+        accepted=acc,
+        holds={"openspec:a": True},
+        can_accept=lambda s: Refusal("x", "y"),
+    )
+    assert doc["subjects"][0]["accept_refusal"] is None

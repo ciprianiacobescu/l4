@@ -3530,7 +3530,10 @@ each subject that is not READY with every blocking and major finding in full, it
 the count of minor ones, and the change since the subject's previous judged material (new, repeated, gone, persistent
 criteria). `l4 yolo status`, `l4 yolo review` and the activation refusal MUST show an item's most severe finding and
 name `l4 yolo findings`. `--worktree` SHALL read the latest dry run of `l4 yolo review --worktree` from the local cache
-instead of the ledger, against the previous dry run.
+instead of the ledger, against the previous dry run. For a subject that is not READY, the text view SHALL print `accept: not
+available: <why> (<fix>)` when `l4 yolo accept` would refuse it, and each `--json` subject SHALL carry `accept_available`
+and `accept_refusal` (`{"why", "fix"}`, the first refusal of the accept rules; `null` when acceptance is available, the
+subject is READY, or an acceptance already holds).
 
 **L4-YOLO-022** Material already judged is not judged again. Each subject SHALL have a material key: a hash of the prompt version, the subject kind, and the exact text the judge
 would get, without the list of delivered units. A review MUST reuse, at no cost, the verdict of a recorded

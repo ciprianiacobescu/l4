@@ -117,3 +117,35 @@ def test_the_accept_line_appears_for_a_person_after_two_versions(world, capsys, 
     two_rounds(world, [TESTABILITY])
     assert world.l4("findings", "p1") == 0
     assert f"accept: l4 yolo accept p1 {A} --reason TEXT" in capsys.readouterr().out
+
+
+def test_an_agent_is_told_acceptance_is_a_persons_decision(world, capsys, monkeypatch):
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: False)
+    world.push_plan()
+    two_rounds(world, [TESTABILITY])  # the rounds condition is met
+    assert world.l4("findings", "p1", "--json") == 0
+    subj = json.loads(capsys.readouterr().out)["subjects"][0]
+    assert subj["accept_available"] is False
+    assert subj["accept_refusal"]["why"] == "acceptance is a person's decision"
+    assert "a person runs: l4 yolo accept p1" in subj["accept_refusal"]["fix"]
+    assert world.l4("findings", "p1") == 0
+    assert "accept: not available: acceptance is a person's decision (a person runs:" in capsys.readouterr().out
+
+
+def test_one_round_is_told_how_many_versions_are_needed(world, capsys, monkeypatch):
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)
+    seeded(world, {A: entry(world, A, "NEEDS_REVISION", [TESTABILITY], "ma1")})
+    assert world.l4("findings", "p1", "--json") == 0
+    subj = json.loads(capsys.readouterr().out)["subjects"][0]
+    assert subj["accept_available"] is False
+    assert "was judged not READY on 1 version; 2 are needed" in subj["accept_refusal"]["why"]
+
+
+def test_an_available_acceptance_has_no_refusal_and_a_ready_subject_has_none(world, capsys, monkeypatch):
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)
+    world.push_plan()
+    two_rounds(world, [TESTABILITY])
+    assert world.l4("findings", "p1", "--json", "--all") == 0
+    by = {s["subject"]: s for s in json.loads(capsys.readouterr().out)["subjects"]}
+    assert by[A]["accept_available"] is True and by[A]["accept_refusal"] is None
+    assert B not in by or by[B]["accept_refusal"] is None

@@ -1395,15 +1395,16 @@ def _subject_infos(plan: Plan | None, units: _Units | None) -> dict[str, fnd.Uni
 
 
 def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: Mapping[str, Any]) -> Any:
-    """`can_accept(subject)` for `findings.render`: would `accept.check` let this caller accept the subject now?"""
+    """`can_accept(subject)` for `findings.render`: None when `accept.check` lets this caller accept the subject now,
+    else its first `Refusal` (the findings show why)."""
     who = accepting.actor(ctx.app.environ, _stdin_tty())
     target = accepting.target_config(ctx.git, ctx.target_ref)
 
-    def can_accept(subject: str) -> bool:
+    def can_accept(subject: str) -> accepting.Refusal | None:
         entry = _entry_of(review, subject)
         if entry is None:
-            return False
-        return accepting.check(state, events, subject, entry, target, who) is None
+            return accepting.Refusal(f"{subject} is not in the latest review", "l4 yolo review")
+        return accepting.check(state, events, subject, entry, target, who)
 
     return can_accept
 
