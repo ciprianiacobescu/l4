@@ -1,5 +1,6 @@
 """What a human answer unfreezes for a task's green (M1.10 decision 6; L4-IMP-002, L4-QMD-005, L4-QMD-006)."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -259,3 +260,41 @@ def test_named_by_task_opens_at_most_three_in_sorted_order():
 def test_a_test_file_outside_the_manifest_is_neither_opened_nor_listed():
     got = named_by_task("fix tests/test_old.py and conftest.py", bench_manifest(), source="s")
     assert got.paths == ("conftest.py",) and got.kept == ()
+
+
+# --- a pre-existing tracked test file (0.4.5) ---
+
+OLD = "packages/api/tests/test_health.py"
+WITH_OLD = FreezeManifest("r" * 40, MANIFEST.files, MANIFEST.support_globs, (OLD, "packages/api/tests/test_more.py"))
+OLD_SUGGESTION = f"Edit `{OLD}`: assert on `captured[-1]._inner`."
+
+
+def test_an_accepted_answer_that_names_a_pre_existing_test_and_the_question_names_too_opens_it(tmp_path):
+    file = with_status(ask(tmp_path, context=f"`{OLD}` asserts the old type."), QuestionStatus.ACCEPTED,
+                       suggestion=OLD_SUGGESTION)  # fmt: skip
+    got = unfrozen(file.questions, recorded(file), SCOPE, WITH_OLD)
+    assert got.paths == (OLD,) and got.question == "Q-001" and got.grants[0].reason == "human_answer"
+    assert got.answer_sha256 == answer_sha256(file.get("Q-001"))
+
+
+def test_a_pre_existing_test_the_question_does_not_name_or_a_stale_answer_opens_nothing(tmp_path):
+    unasked = with_status(ask(tmp_path), QuestionStatus.ACCEPTED, suggestion=OLD_SUGGESTION)
+    got = unfrozen(unasked.questions, recorded(unasked), SCOPE, WITH_OLD)
+    assert got.paths == () and [p for p, _ in got.kept] == [OLD]  # recorded as kept, with the reason
+    named = with_status(ask(sub(tmp_path, "n"), context=f"`{OLD}` is wrong."), QuestionStatus.ACCEPTED,
+                        suggestion=OLD_SUGGESTION)  # fmt: skip
+    events = recorded(named)
+    edited = named.set_suggestion("Q-001", OLD_SUGGESTION + " Again.", redactor=Redactor({}))
+    assert unfrozen(edited.questions, events, SCOPE, WITH_OLD).paths == ()  # edited after it was recorded
+    assert (
+        unfrozen(named.questions, events, SCOPE, replace(WITH_OLD, preexisting=())).paths == ()
+    )  # not in the manifest
+    assert unfrozen(named.questions, [], SCOPE, WITH_OLD).paths == ()  # never recorded
+
+
+def test_a_person_s_own_answer_opens_a_pre_existing_test_it_names_and_a_red_test_is_not_one(tmp_path):
+    answered = with_status(ask(tmp_path), QuestionStatus.ANSWERED, suggestion="", answer=f"Yes, edit {OLD}.")
+    assert unfrozen(answered.questions, recorded(answered), SCOPE, WITH_OLD).paths == (OLD,)
+    both = with_status(ask(sub(tmp_path, "b")), QuestionStatus.ANSWERED, suggestion="", answer=f"Edit {OLD}.")
+    other = replace(WITH_OLD, preexisting=(TEST, OLD))  # a red test listed twice would still be one grant
+    assert unfrozen(both.questions, recorded(both), SCOPE, other).paths == (OLD,)

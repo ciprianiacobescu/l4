@@ -751,6 +751,31 @@ def test_a_path_a_task_unfrozen_event_names_is_allowed_in_green(tmp_path, git_en
     assert check_test_paths(ctx).findings
 
 
+def test_a_pre_existing_test_a_human_answer_unfroze_is_allowed_in_green_and_not_a_blocker(tmp_path, git_environ):
+    """0.4.5: the red step did not touch tests/test_a.py, so `task.red_ok.frozen` lacks it; the answer opened it"""
+    for index, with_event in enumerate((True, False)):
+        folder = tmp_path / str(index)
+        folder.mkdir()
+        repo, base = new_repo(folder, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+        repo.write({"tests/test_new.py": "def test_new():\n    assert 1\n"})
+        red = repo.commit("red", task="1.1", tdd="red")
+        repo.write({"tests/test_a.py": "def test_a():\n    assert 2\n", "src/a.py": "X = 1\n"})
+        green = repo.commit("green", task="1.1", tdd="green")
+        repo.events = [
+            event("task.red_ok", 1, task="1.1", sha=red, frozen=["tests/test_new.py"]),
+            *(
+                [event("task.unfrozen", 2, task="1.1", paths=["tests/test_a.py"], question="Q-002", red_sha=red,
+                       reason="human_answer", answer_sha256="a" * 64)]
+                if with_event
+                else []
+            ),
+            event("task.done", 3, task="1.1", sha=green),
+        ]  # fmt: skip
+        ctx = repo.context(base, green)
+        assert check_freeze(ctx).findings == []
+        assert (check_test_paths(ctx).findings == []) is with_event
+
+
 # --- W-D6: a suppression a person added is listed for information, not counted against the unit ---------
 
 

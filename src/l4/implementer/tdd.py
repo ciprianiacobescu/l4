@@ -1398,9 +1398,8 @@ def _check_opened(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, manifest: 
     (all for a file the task's text opened, rule 3 for a support file a human answer unfroze). A file that breaks one is
     put back to its red version and recorded as `guard.violation{rule: "opened file"}`."""
     by_text = {p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}
-    checked = sorted(
-        p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or manifest.files[p].kind == "support")
-    )
+    support = {p for p, f in manifest.files.items() if f.kind == "support"}
+    checked = sorted(p for p in unfreeze.paths if p.endswith(".py") and (p in by_text or p in support))
     if not checked:
         return
     modules = unit_modules({*wb.branch_changed_files(), *wb.changed_files()}, wb.cfg)

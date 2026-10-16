@@ -39,6 +39,9 @@ class FreezeManifest:
     red_sha: str
     files: dict[str, FrozenFile]
     support_globs: tuple[str, ...]
+    # tracked regular test files at the red commit that red did not touch: not frozen by the manifest (the test path
+    # freeze covers them), but a person's answer that names one opens it for green (L4-IMP-015)
+    preexisting: tuple[str, ...] = ()
 
 
 def _matches(globs: Sequence[str], path: str) -> bool:
@@ -47,6 +50,17 @@ def _matches(globs: Sequence[str], path: str) -> bool:
 
 def _names(raw: bytes) -> list[str]:
     return [os.fsdecode(part) for part in raw.split(b"\0") if part]
+
+
+def tracked_files(raw: bytes) -> list[tuple[str, bool]]:
+    """`(path, regular)` for the output of `git ls-tree -r -z`: a symlink or a submodule is not a regular file."""
+    found = []
+    for entry in raw.split(b"\0"):
+        meta, _, name = entry.partition(b"\t")
+        mode = meta.split(b" ", 1)[0]
+        if name:
+            found.append((os.fsdecode(name), mode in (b"100644", b"100755")))
+    return found
 
 
 def _digest(root: Path, relative: str) -> str | None:
@@ -62,7 +76,8 @@ def build_manifest(
     """`git` runs in the worktree, which is at `red_sha`."""
     support_globs = (*support_globs, *IGNORE_FILE_GLOBS)
     changed = _names(git.run_bytes("diff", "--name-only", "-z", "--no-renames", "--diff-filter=AM", base_sha, red_sha))
-    tracked = _names(git.run_bytes("ls-tree", "-r", "--name-only", "-z", red_sha))
+    listed = tracked_files(git.run_bytes("ls-tree", "-r", "-z", red_sha))
+    tracked = [path for path, _ in listed]
     changed_set = set(changed)
     files: dict[str, FrozenFile] = {}
     for path in sorted({*changed, *tracked}):
@@ -73,7 +88,8 @@ def build_manifest(
         else:
             continue
         files[path] = FrozenFile(_digest(git.repo, path), kind, path in changed_set)
-    return FreezeManifest(red_sha, files, tuple(support_globs))
+    existing = tuple(p for p, regular in listed if regular and p not in files and _matches(test_globs, p))
+    return FreezeManifest(red_sha, files, tuple(support_globs), existing)
 
 
 def manifest_at_head(git: Git, head: str, paths: Sequence[str], *, support_globs: Sequence[str]) -> FreezeManifest:

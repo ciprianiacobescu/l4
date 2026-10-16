@@ -62,6 +62,8 @@ def names_path(text: str, path: str, *, dot_slash: bool = False) -> bool:
     """`path` as a token of `text`: a repository-relative path, optionally followed by `:<line>` (or a line range) or
     by sentence punctuation. A longer path (`x.pyc`, `x.py.bak`, `dir/x.py`) is another token. `dot_slash`: one `./`
     that starts the token may come before the path (`./x.py`); the `./` of `../x.py` does not."""
+    if path not in text:
+        return False
     lead = r"(?:\./)?" if dot_slash else ""
     pattern = rf"(?<![\w./-]){lead}{re.escape(path)}(?::\d+(?:[-:]\d+)?)?(?![\w/-]|\.\w)"
     return re.search(pattern, text) is not None
@@ -164,7 +166,8 @@ def unfrozen(
     """The test files of `manifest` that the answers of `questions` unfreeze for a task whose own key and ancestors are
     `scope`. A question counts when its Status is `answered` or `accepted` by a human, the ledger recorded an answer
     with the digest of the text as it is now, its kind is not `verdict` and it blocks the task. The text must name the
-    file; a test or a support file it names opens, an ignore file stays frozen (`kept`). An `accepted` answer is the
+    file; a test or a support file it names opens, so does a pre-existing tracked test file of the manifest (one red
+    did not touch, which the task may have to change), an ignore file stays frozen (`kept`). An `accepted` answer is the
     clarifier's suggestion, so the question itself (title, Context, Options) must name the file too; a human's own
     answer may name any test or support file."""
     digests = _recorded_digests(events)
@@ -181,6 +184,8 @@ def unfrozen(
             continue
         named = [path for path in sorted(manifest.files) if names_path(answer, path)]
         tests = [p for p in named if not _is_ignore_file(p)]  # a test or a support file: the person decides
+        # a tracked test file that red did not touch (never a red test: those are in `manifest.files`)
+        tests += [p for p in manifest.preexisting if p not in manifest.files and names_path(answer, p)]
         kept.extend((p, "an ignore file") for p in named if _is_ignore_file(p))
         if question.status is QuestionStatus.ACCEPTED:  # the clarifier's text: it may not widen what was asked
             asked = "\n".join(

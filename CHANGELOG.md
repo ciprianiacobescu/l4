@@ -9,6 +9,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.5 (unreleased)
 
 ### Fixed
+- A person's answer can now open a pre-existing test that the task must change. Before, the test path freeze put such
+  a test back in every green attempt, even after a person accepted the harness's own question that named the file and
+  the edit (the unit halted on `green broke existing tests`, and no `task.unfrozen` was recorded). Now an answer
+  (`accepted` or `answered`, on the same conditions as for a red test or a support file) that names a tracked test file
+  that the red step did not touch opens it for that task's green. It is recorded in `task.unfrozen`, listed in the green
+  prompt, accepted by the verifier, and `l4 questions show` says that an accept unfreezes the pre-existing test. The
+  red tests of the task and the ignore files stay frozen.
 - A rejected verification hold of a kind the harness cannot derive a task from (for example `the diff is longer than
   120000 characters`) whose reason ends with a sentence `WHEN … THEN …` is now a behaviour finding with a fix task, not
   an escalation (`no finding of this round can be converted into a fix task`). Without the scenario the unit still

@@ -719,6 +719,13 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > first option ``Edit `conftest.py`: …``. Answer it with `l4 questions accept Q-NNN --unit <unit>` (Status `accepted`),
 > or with an answer that names the file. The next green step may change that file. An ignore file such as `.gitignore`
 > is never unfrozen. A task whose own reviewed text names a Python support file needs no answer.
+>
+> **NOTE:** A green step can also stop on an existing test that the red step did not touch, because the task changes
+> what that test asserts (for example `isinstance(captured[-1], Exporter)` must become `captured[-1]._inner`). The
+> harness puts such a file back (`guard.test_tamper`, rule `test path freeze`) unless a person's answer names it. A
+> technical question whose first option is ``Edit `<that test>`: …`` and whose text names the file is opened by
+> `l4 questions accept Q-NNN --unit <unit>` (`l4 questions show` says "unfreezes the pre-existing test"). The red tests of
+> the task stay frozen.
 
 > **NOTE:** Escalation along the chain `roles.implementer`. When the chain has two or more profiles, a task phase that
 > one profile fails `implementer.escalate_after` times (default 2) goes to the next usable profile. The new profile

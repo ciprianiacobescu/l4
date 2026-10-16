@@ -1715,7 +1715,7 @@ pending leaves of one parent into one step.
    file must still pass, and the corrected test must still fail against the red commit's production code (a
    `test-at-red` gate with the production files swapped back to their red content, where an id counts as failing only
    when the report lists it as failed); otherwise the attempt fails with `the corrected test no longer discriminates`.
-   Every later step freezes the file again. The text of a task can also open a Python support file that it names in green (L4-IMP-014), a person's answer can unfreeze one (L4-IMP-015), and an opened file is checked so that it cannot replace the code under test (L4-IMP-016).
+   Every later step freezes the file again. The text of a task can also open a Python support file that it names in green (L4-IMP-014), a person's answer can unfreeze one (L4-IMP-015) and can also open a pre-existing test file that the task must change and that red did not touch, and an opened file is checked so that it cannot replace the code under test (L4-IMP-016).
 
 **L4-IMP-014** A task's own reviewed text opens the support files it names. In the green step of a task, the harness SHALL open each path of the red manifest that meets all of these conditions:
 - its kind is `support`;
@@ -1766,6 +1766,14 @@ names, under the same conditions:
 - the recorded answer digest equals the digest of the answer;
 - the question is not a verdict question, and it holds the task;
 - at most 3 files per question.
+
+A human answer SHALL also open a pre-existing test file that it names: a tracked regular file at the red commit that
+matches `tdd.test_globs` and that no red step of the task added or changed (the task needs it to change, for example an
+old assertion on a type the task now wraps). It opens under the same conditions, goes into the `keep` set of the
+test-path freeze (L4-IMP-006 (7)) for that task's green, and is recorded in the same `task.unfrozen` event; the green
+prompt lists it like any unfrozen file, and `l4 questions show` says that an accept would unfreeze the pre-existing
+test. A red test of the task is not one, and stays frozen unless the rules above open it. A symlink or a path outside
+the repository never opens.
 
 An ignore file MUST stay frozen. The event MUST carry `reason: "human_answer"`. An event without `reason` SHALL read as
 `human_answer`.
