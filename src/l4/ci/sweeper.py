@@ -802,6 +802,7 @@ class Sweeper:
                 ref.id,
                 retry_label(f"{self.cfg.forge.labels_prefix}resume"),
                 feedback=feedback_rounds_exhausted(state),
+                reason_code=state.halt_reason,
             )  # the halting run's section stays: the note is rewritten whole
         elif state.phase == Phase.ABANDONED.value:
             stopped = abandoned_section(ref.id, f"{self.cfg.forge.labels_prefix}restart")

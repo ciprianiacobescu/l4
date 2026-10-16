@@ -130,9 +130,10 @@ def _synthetic(criterion: Criterion, reason: str) -> VerifierFinding:
 
 def _candidates(
     family: Sequence[Criterion], result: VerifyResult, rejects: dict[str, HumanVerdict], fix_minor: bool
-) -> tuple[list[_Candidate], list[str]]:
+) -> tuple[list[_Candidate], list[str], list[str]]:
     by_id = {c.id: c for c in family}
     skipped: list[str] = []
+    unconverted: list[str] = []  # the questions of the rejects whose human finding no task can be derived from
     picked: list[tuple[VerifierFinding, bool]] = []  # (finding, it is a minor on a PASS)
     synthetic: list[VerifierFinding] = []
     # satisfied: judged so, or accepted by a human, so the code is right (a finding about its tests asks for tests)
@@ -172,6 +173,8 @@ def _candidates(
                 else "rejected with no criterion and no WHEN ... THEN ...: answer again with a scenario"
             )
             skipped.append(f"{f.id}: {why}")
+            if verdict is not None and verdict.question not in unconverted:
+                unconverted.append(verdict.question)
             continue  # a chore runs without red, and only a deterministic finding may be exempted (D8)
         if minor and criterion is None and scenario is None:
             skipped.append(f"{f.id}: a minor finding with no criterion and no scenario")
@@ -203,7 +206,7 @@ def _candidates(
         for target in (f.id, criterion):
             if target and (v := rejects.get(target)) and v.question not in cand.consumed:
                 cand.consumed.append(v.question)
-    return list(grouped.values()), skipped
+    return list(grouped.values()), skipped, unconverted
 
 
 def feedback_scenarios(ref: FeedbackRef) -> list[str]:
@@ -274,7 +277,7 @@ def plan_fix_unit(
     """The tasks, the ADDED scenarios and the consumed rejects of fix unit `ordinal` (`<parent>-fix-<ordinal>`)."""
     rejects = {v.target: v for v in human if v.decision == "reject"}
     by_id = {c.id: c for c in family}
-    candidates, skipped = _candidates(family, result, rejects, fix_minor)
+    candidates, skipped, unconverted = _candidates(family, result, rejects, fix_minor)
     candidates.sort(key=lambda c: _SEVERITY_ORDER[c.severity])  # stable: the report's order within a severity
     waiting: list[str] = []
     for dropped in candidates[MAX_FIX_TASKS:]:
@@ -328,6 +331,8 @@ def plan_fix_unit(
         if requirements
         else None
     )
+    if groups and all(g.item for g in groups):  # feedback-only: the feedback is the concrete form of those rejects
+        consumed += [q for q in unconverted if q not in consumed]  # L4-VER-016
     return FixPlan(groups, delta, consumed, skipped, taken, waiting)
 
 

@@ -15,6 +15,7 @@ import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 import click
@@ -79,6 +80,9 @@ class Refusal:
 
     def exit(self) -> L4Exit:
         return L4Exit(ExitCode.USAGE_ERROR, f"questions: {self.message}\nFix: {self.fix}")
+
+
+_REPLACEABLE = (QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED)  # a verdict answer `answer --replace` may replace
 
 
 def _usage(message: str, fix: str = "l4 questions --help") -> L4Exit:
@@ -586,12 +590,17 @@ def check_question(
     unit: str,
     branch: str,
     redactor: Redactor | None = None,
+    replace: bool = False,
 ) -> Refusal | None:
     """R3 to R5 and R7 to R10 for `form` (`accept` or `answer`) on `qid`; None when the edit may be made. `text` is
-    the answer's text (None for `accept`)."""
+    the answer's text (None for `accept`). `replace` (L4-QMD-010): replace the answer of an answered verdict question;
+    every other question is refused."""
     question = file.get(qid)
     if question is None or qid in file.unreadable_ids:
         return Refusal(f"no {qid} in {QUESTIONS_FILENAME}", f"l4 questions --unit {unit}")
+    verdict = question.kind is QuestionKind.VERDICT
+    if replace and form != "answer":
+        return Refusal("--replace is for answer", f"l4 questions answer {qid} --unit {unit} --text TEXT --replace")
     if question.status is not QuestionStatus.OPEN:
         if question.status is QuestionStatus.SUPERSEDED and question.superseded_by:
             successor = question.superseded_by
@@ -599,12 +608,35 @@ def check_question(
                 f"{qid} is superseded by {successor}",
                 f"answer {successor}: l4 questions show {successor} --unit {unit}",
             )
+        if verdict and question.status in _REPLACEABLE and not replace:
+            return Refusal(
+                f"{qid} is answered",
+                f"to replace the answer on purpose: l4 questions answer {qid} --unit {unit} "
+                f'--text "accept <reason>" --replace (or "reject <reason>"); the previous answer stays in the section',
+            )
+        if not (replace and verdict and question.status in _REPLACEABLE):
+            if replace and not verdict:
+                return Refusal(
+                    f"{qid} is not a verdict question: --replace is for an answered verdict question",
+                    f"a clarification answer is changed by hand on {branch}; an answer a run already used becomes a "
+                    f'fix unit "apply clarification {qid}" (L4-QMD-006)',
+                )
+            return Refusal(
+                f"{qid} is {question.status.value}",
+                f"to change an answer, edit its section on {branch} by hand; an answer a run already used becomes a "
+                f'fix unit "apply clarification {qid}" (L4-QMD-006)',
+            )
+    elif replace:
+        if not verdict:
+            return Refusal(
+                f"{qid} is not a verdict question: --replace is for an answered verdict question",
+                f"a clarification answer is changed by hand on {branch} (L4-QMD-006); answer it without --replace",
+            )
         return Refusal(
-            f"{qid} is {question.status.value}",
-            f"to change an answer, edit its section on {branch} by hand; an answer a run already used becomes a fix "
-            f'unit "apply clarification {qid}" (L4-QMD-006)',
+            f"{qid} is open: there is no answer to replace",
+            f"answer it without --replace: l4 questions answer {qid} --unit {unit} --text TEXT",
         )
-    if question.answer_text:
+    if question.answer_text and not replace:
         return Refusal(
             f"{qid} has a draft answer under Status open",
             f"submit it on {branch} (set Status to answered) or remove it, then run the command again",
@@ -623,13 +655,21 @@ def check_question(
         return None
     if text is None:
         return Refusal("answer needs --text", f"l4 questions answer {qid} --unit {unit} --text TEXT")
-    return check_text(text, redactor or Redactor({})) or (
-        Refusal(
-            "a verdict answer starts with accept or reject",
-            'the same command with the first word fixed: --text "accept <reason>" (or "reject <reason>")',
+    return (
+        check_text(text, redactor or Redactor({}))
+        or (
+            Refusal(
+                "a verdict answer starts with accept or reject",
+                'the same command with the first word fixed: --text "accept <reason>" (or "reject <reason>")',
+            )
+            if verdict and not _DECISION.match(text)
+            else None
         )
-        if verdict and not _DECISION.match(text)
-        else None
+        or (
+            Refusal(f"the text is not different from the answer of {qid}", "give the answer that replaces it")
+            if replace and _flat(text) == _flat(question.answer_text)
+            else None
+        )
     )
 
 
@@ -690,25 +730,41 @@ class Edit:
     text: str | None
     old: QuestionsFile
     new: QuestionsFile
+    replaced: bool = False  # `answer --replace`: the previous answer is kept in a comment (L4-QMD-010)
 
 
-def build_edit(form: str, folder: Folder, qid: str, text: str | None, *, redactor: Redactor) -> Edit:
+def build_edit(
+    form: str,
+    folder: Folder,
+    qid: str,
+    text: str | None,
+    *,
+    redactor: Redactor,
+    replace: bool = False,
+    who: str = "",
+    on: str = "",
+) -> Edit:
     """The checks of D10 that need only the file (R3 to R5, R7 to R10), the edit, and its round trip. Raises the
     refusal (exit 2). The agent rule (R11), a finished unit or a live run (R6) and a moved branch (R12) are not here."""
     assert folder.file is not None
-    found = check_question(folder.file, qid, form, text, unit=folder.unit, branch=folder.branch, redactor=redactor)
+    found = check_question(
+        folder.file, qid, form, text, unit=folder.unit, branch=folder.branch, redactor=redactor, replace=replace
+    )
     if found is not None:
         raise found.exit()
     question = folder.file.get(qid)
     assert question is not None
     status = QuestionStatus.ACCEPTED if form == "accept" else QuestionStatus.ANSWERED
-    new = edit_accept(folder.file, qid) if form == "accept" else edit_answer(folder.file, qid, text or "")
+    if replace:
+        new = folder.file.replace_answer(qid, text or "", who=who, on=on)
+    else:
+        new = edit_accept(folder.file, qid) if form == "accept" else edit_answer(folder.file, qid, text or "")
     if (why := round_trip(folder.file, new, qid, status, text if form == "answer" else None)) is not None:
         raise Refusal(
             f"the edited {QUESTIONS_FILENAME} does not read back as asked: {why}",
             f"edit the section of {qid} on {folder.branch} by hand",
         ).exit()
-    return Edit(form, folder, question, status, text, folder.file, new)
+    return Edit(form, folder, question, status, text, folder.file, new, replace)
 
 
 FINISHED = (Phase.MERGED, Phase.ARCHIVED, Phase.ABANDONED)
@@ -749,7 +805,7 @@ def _read_text(text: str | None) -> str | None:
 
 
 def _prepare(
-    app: AppContext, form: str, question: str, unit: str | None, text: str | None
+    app: AppContext, form: str, question: str, unit: str | None, text: str | None, replace: bool = False
 ) -> tuple[AppContext, L4Config, Git, Edit]:
     if unit is None:
         raise _usage(f"{form} needs --unit", f"l4 questions {form} Q-NNN --unit <unit>")
@@ -761,7 +817,9 @@ def _prepare(
         if waits is not None:
             raise waits.exit()
     folder, _ = find_question(folders, unit, question, warnings)
-    edit = build_edit(form, folder, question, text, redactor=app.redactor)
+    who = author_name(git) if replace else ""
+    on = datetime.now(UTC).date().isoformat() if replace else ""
+    edit = build_edit(form, folder, question, text, redactor=app.redactor, replace=replace, who=who, on=on)
     refused = agent_refusal(app, git, cfg, edit)
     if refused is not None:
         raise refused.exit()
@@ -801,11 +859,12 @@ def commit_message(edit: Edit, name: str, who: str, marker: str | None) -> str:
     own workflow copy (it can pin an older harness) nor the repository's CI on a mid-TDD branch; the command starts
     the run."""
     unit = edit.folder.unit.partition(":")[2] or edit.folder.unit
-    title = " ".join(edit.question.title.split())[:60].rstrip()
+    title = " ".join(edit.question.title.split())[:60].rstrip() + (" (answer replaced)" if edit.replaced else "")
+    replaced = "Replaced: yes\n" if edit.replaced else ""
     by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
     return (
         f"{edit.form} {edit.question.id} ({unit}): {title}\n\n"
-        f"Status: {edit.status.value}\nBy: {by}\nVia: l4 questions\n[skip ci]\n"
+        f"Status: {edit.status.value}\n{replaced}By: {by}\nVia: l4 questions\n[skip ci]\n"
     )
 
 
@@ -912,10 +971,17 @@ def run_accept(
 
 
 def run_answer(
-    app: AppContext, *, question: str, unit: str | None, text: str | None, no_push: bool = False, no_run: bool = False
+    app: AppContext,
+    *,
+    question: str,
+    unit: str | None,
+    text: str | None,
+    no_push: bool = False,
+    no_run: bool = False,
+    replace: bool = False,
 ) -> ExitCode:
-    """`l4 questions answer Q-NNN --unit U --text T [--no-push]` (`--text -` reads standard input)."""
-    app, cfg, git, edit = _prepare(app, "answer", question, unit, _read_text(text))
+    """`l4 questions answer Q-NNN --unit U --text T [--replace] [--no-push]` (`--text -` reads standard input)."""
+    app, cfg, git, edit = _prepare(app, "answer", question, unit, _read_text(text), replace)
     return write_edit(app, cfg, git, edit, no_push=no_push, no_run=no_run)
 
 
@@ -931,9 +997,10 @@ def run_questions(
     as_json: bool = False,
     no_push: bool = False,
     no_run: bool = False,
+    replace: bool = False,
 ) -> ExitCode:
     """`l4 questions [list] | show Q | accept Q | answer Q --text T`, with `--unit`, `--json`,
-    `--no-push` and `--no-run`."""
+    `--no-push`, `--no-run` and `--replace`."""
     form, rest = (words[0] if words else "list"), tuple(words[1:])
     if form == "list" and not rest:
         return run_list(app, unit=unit, as_json=as_json)
@@ -942,5 +1009,9 @@ def run_questions(
     if form == "accept":
         return run_accept(app, question=_qid(rest, form), unit=unit, no_push=no_push, no_run=no_run)
     if form == "answer":
-        return run_answer(app, question=_qid(rest, form), unit=unit, text=text, no_push=no_push, no_run=no_run)
+        return run_answer(
+            app, question=_qid(rest, form), unit=unit, text=text, no_push=no_push, no_run=no_run, replace=replace
+        )
+    if replace:
+        raise _usage("--replace is for answer", "l4 questions answer Q-NNN --unit U --text TEXT --replace")
     raise _usage(f"unknown form: {' '.join(words)}")

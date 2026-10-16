@@ -96,6 +96,7 @@ from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
+from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
 from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
@@ -1034,11 +1035,15 @@ class Orchestrator:
     def _events(self) -> list[LedgerEvent]:
         return self._ledger().events
 
-    def _stopped_section(self, phase: str, reason: str, *, feedback: bool = False) -> str:
+    def _stopped_section(
+        self, phase: str, reason: str, *, feedback: bool = False, reason_code: str | None = None
+    ) -> str:
         """Redacted, like the capacity section: the reason can quote a test's error line, and the note goes to the
         forge as it is."""
         s = self.services
-        section = halted_section(phase, reason, s.ref.id, f"{self.cfg.forge.labels_prefix}resume", feedback=feedback)
+        section = halted_section(
+            phase, reason, s.ref.id, f"{self.cfg.forge.labels_prefix}resume", feedback=feedback, reason_code=reason_code
+        )
         return s.app.redactor.redact_text(section)
 
     def _halt(self, code: str, detail: str) -> ExitCode:
@@ -1088,7 +1093,8 @@ class Orchestrator:
         code, why = escalation if escalation else (None, "verification failed (see verification.md)")
         if trigger is Trigger.VERIFY_FAIL_EXHAUSTED:
             at_feedback = code == FEEDBACK_ROUNDS_EXHAUSTED
-            self._notes = (self._stopped_section("escalated", why, feedback=at_feedback), *(self._notes or ()))
+            stopped = self._stopped_section("escalated", why, feedback=at_feedback, reason_code=code)
+            self._notes = (stopped, *(self._notes or ()))
         edge = self._go(trigger, **({"reason": code, "detail": why[:300]} if escalation else {}))
         if edge.target is Phase.ESCALATED:
             log.error("%s escalated: %s", self.services.ref.id, why)
@@ -1354,7 +1360,11 @@ def _refuse_stopped(
         next_step = f"l4 restart --unit {ref.id} --reason TEXT"
     elif phase in (Phase.HALTED.value, Phase.ESCALATED.value) and edit is None:
         detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
-        next_step = f"l4 retry --unit {ref.id} --reason TEXT"
+        next_step = (
+            feedback_way_out(ref.id)
+            if phase == Phase.ESCALATED.value and state.halt_reason == NO_CONVERTIBLE_FINDING
+            else f"l4 retry --unit {ref.id} --reason TEXT"
+        )
     else:
         return None
     log.error("%s %s: %s", ref.id, phase, detail)

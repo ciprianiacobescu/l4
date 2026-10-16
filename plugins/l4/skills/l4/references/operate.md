@@ -67,6 +67,10 @@ push. The harness reads only answers whose Status says they are submitted.
 - Before rejecting, check that the criterion id in the question is the one you mean (`verification.md` maps ids to
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
+- To change a verdict answer on purpose (a person only, unless `clarifier.answer_by_agents` is true):
+  `l4 questions answer Q-NNN --unit FW:NAME --text "accept …" --replace`. It works only on an answered verdict question,
+  keeps the old answer in a comment under the new one and says `(answer replaced)` in the commit. Without `--replace`
+  the command refuses an answered question. A clarification answer is changed by hand (L4-QMD-006).
 
 ## Retry or restart a stuck unit
 
@@ -87,6 +91,11 @@ use a label. A command needs the forge token in the environment; the project com
     command prints `note: the reason goes to the next steps of task <k>`. A stop that names no task gives no note.
     A label, a spec push and `l4 restart` give no note.
   - `l4 resume` and `l4:resume` still work and mean the same for `halted` and `escalated`, but start no run.
+- **Escalated with `no finding of this round can be converted into a fix task`** (`no_convertible_finding`): a retry
+  alone repeats the same verdict. Give the fix that the person's rejected finding asks for as feedback first
+  (`l4 feedback add --unit FW:NAME --kind behaviour --when "…" --then "…" --text "…"`, then the git lines it prints),
+  then `l4 retry`. The feedback fix unit ends the reject it answers, and the next round judges the fixed code. If the
+  rejection was a mistake, replace the answer with `--replace` (above), then retry.
 - **Start over: `l4 restart --unit FW:NAME --reason "…"`**, or the label `l4:restart`. It cuts a new branch from the
   base with the unit folder (spec, questions, feedback; task boxes as the base has them), keeps the old head as
   `refs/l4/attempts/…`, closes the old PR and starts a run. Use it for a PR closed without a merge (`abandoned`), a

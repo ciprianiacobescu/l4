@@ -350,24 +350,46 @@ def consume_verdicts(
 
 def effective_verdicts(events: Sequence[LedgerEvent], current: Mapping[str, str]) -> dict[str, HumanVerdict]:
     """target -> the verdict that applies now. `current`: target -> its text hash today (a criterion's text, or a
-    finding's id hash); a target not in it is gone. The latest `human.verdict` per target wins."""
+    finding's id hash); a target not in it is gone. The latest `human.verdict` per target wins. A `reject` is consumed
+    by the fix unit that took it (its question in `fix.spawned.consumed`; a feedback-only fix unit lists there the
+    human rejects its round could not convert, L4-VER-016). A feedback-only spawn written before that list existed
+    (0.4.5 and older: no `lists_unconverted`) consumes every reject recorded before it: such a spawn happens only when
+    no finding of its round could be converted, so the rejects in force were human ones, and the feedback is their
+    concrete form."""
     voided = {str(e.data.get("question")) for e in events if e.type == "human.void"}
     consumed = {str(q) for e in events if e.type == "fix.spawned" for q in e.data.get("consumed") or []}
-    latest: dict[str, HumanVerdict] = {}
-    for e in events:
+    last_feedback_spawn = max(
+        (
+            i
+            for i, e in enumerate(events)
+            if e.type == "fix.spawned"
+            and e.data.get("feedback_only") is True
+            and e.data.get("lists_unconverted") is not True
+        ),
+        default=-1,
+    )
+    latest: dict[str, tuple[int, HumanVerdict]] = {}
+    for position, e in enumerate(events):
         if e.type != "human.verdict":
             continue
         d = e.data
         decision = d.get("decision")
         if decision not in ("accept", "reject"):
             continue
-        latest[str(d.get("target"))] = HumanVerdict(
-            str(d.get("question")), str(d.get("target")), decision, str(d.get("by", "human")),
-            str(d.get("reason", "")), str(d.get("text_sha256", "")),
-        )  # fmt: skip
+        latest[str(d.get("target"))] = (
+            position,
+            HumanVerdict(
+                str(d.get("question")),
+                str(d.get("target")),
+                decision,
+                str(d.get("by", "human")),
+                str(d.get("reason", "")),
+                str(d.get("text_sha256", "")),
+            ),  # fmt: skip
+        )
     keep = {}
-    for target, verdict in latest.items():
-        if verdict.question in consumed and verdict.decision == "reject":
+    for target, (position, verdict) in latest.items():
+        if verdict.decision == "reject" and (verdict.question in consumed or position < last_feedback_spawn):
             continue
         if verdict.decision == "accept" and (verdict.question in voided or current.get(target) != verdict.text_sha256):
             continue

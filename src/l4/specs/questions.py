@@ -262,6 +262,8 @@ SUPERSEDED_BY_RESTART = "superseded by restart"  # `l4 restart` (L4-OPS-004): th
 _ROUND_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+round\s+(\d+)\b", re.IGNORECASE)
 _QUESTION_HEADING = re.compile(rb"^## Q-(\d+):")
 _ANSWER_MARK = b"<!-- write below this line -->"
+_REPLACED_HEAD = "<!-- l4 questions --replace"
+_REPLACED = re.compile(re.escape(_REPLACED_HEAD.encode()) + rb".*?-->", re.DOTALL)
 _ANSWERED = frozenset({QuestionStatus.ANSWERED, QuestionStatus.ACCEPTED, QuestionStatus.ANSWERED_BY_CLARIFIER})
 
 
@@ -509,6 +511,34 @@ class QuestionsFile:
         more = span.end != question.section.end  # another subsection follows: keep the blank line before it
         head = marked + eol if marked is not None else b""
         return _edited(self, [(span, head + body + (eol if more else b""))])
+
+    def replace_answer(self, qid: str, text: str, *, who: str, on: str) -> "QuestionsFile":
+        """`answer --replace` (L4-QMD-010): the body of `### Answer` becomes `text` (as `set_answer` writes it), and the
+        previous answer stays under it in an HTML comment, one for each replacement, oldest first. `_visible` removes
+        comments, so the answer, its digest and the reason of the verdict hold the new text only. Each line of the
+        old answer is quoted with `> ` (no line reads as structure) and `<!--` and `-->` in it are defused. The
+        Status is `set_status`'s."""
+        question = _require(self, qid)
+        if question.answer is None:
+            raise SpecError(f"{qid} has no Answer block")
+        eol = _eol(self.data)
+        span = question.answer.body
+        old = self.data[span.start : span.end]
+        history = [m.group(0) for m in _REPLACED.finditer(old)]
+        previous = question.answer_text.replace("-->", "--&gt;").replace("<!--", "&lt;!--")
+        stamp = " ".join(f"{who} on {on}".replace("-->", "--&gt;").replace("<!--", "&lt;!--").split())
+        lines = [
+            f"{_REPLACED_HEAD} by {stamp}; previous answer:",
+            *(f"> {line}" for line in previous.splitlines()),
+            "-->",
+        ]
+        history.append(eol.join(line.encode() for line in lines))
+        marked = next((line.strip() for line in old.splitlines() if line.strip() == _ANSWER_MARK), None)
+        more = span.end != question.section.end
+        body = eol.join(line.encode() for line in re.split(r"\r\n|\r|\n", text.strip("\r\n"))) + eol
+        head = marked + eol if marked is not None else b""
+        trail = b"".join(entry + eol for entry in history)
+        return _edited(self, [(span, head + body + trail + (eol if more else b""))])
 
     def refresh_index(self) -> "QuestionsFile":
         """Rewrite the index rows whose Status no longer matches their section: a human changes the Status in the

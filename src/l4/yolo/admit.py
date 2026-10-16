@@ -348,7 +348,7 @@ def next_eligible(plan: Plan, state: PlanState, unit_phase: Mapping[str, str | N
             else:
                 chosen = unit_id
                 continue
-        if reason is None:
-            reason = f"waits for {chosen or current} (not integrated)"
+        if reason is None:  # no prerequisite of its own left: only the serial order holds it (L4-YOLO-010)
+            reason = f"waits for its turn: {chosen or current} runs first (one unit at a time)"
         waiting[unit_id] = reason
     return Eligibility(chosen, waiting)

@@ -56,6 +56,7 @@ from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, fee
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
+from l4.state.next_step import NO_CONVERTIBLE_FINDING
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -416,12 +417,10 @@ def _unfinished_fix(ctx: HookContext, provider: FamilyProvider) -> UnitRef | Non
 
 # --- a failure that repeats (L4-OPS-007) --------------------------------------------------------------------------
 
-FIX_ROUNDS_EXHAUSTED, NO_CONVERTIBLE_FINDING, NO_FIX_UNITS = (
-    "fix_rounds_exhausted",
-    "no_convertible_finding",
-    "no_fix_units",
-)
+FIX_ROUNDS_EXHAUSTED, NO_FIX_UNITS = "fix_rounds_exhausted", "no_fix_units"
 FIX_UNIT_NOT_CREATED, SAME_FAILURE = "fix_unit_not_created", "same_failure"  # `ctx.shared["escalation"]` codes (D5)
+# a feedback-only spawn: `consumed` names the human rejects its round could not convert (L4-VER-016)
+_FEEDBACK_ONLY = {"feedback_only": True, "lists_unconverted": True}
 MAX_SAME_DETAIL = 200  # characters of the failure set in the `same_failure` detail
 TEST_GATES = ("test", "e2e")
 _BLOCKING = (Severity.BLOCKER.value, Severity.MAJOR.value)
@@ -648,7 +647,7 @@ def after_verdict(ctx: HookContext, wb: Workbench, result: VerifyResult, trigger
     ledger = ctx.services.ledger
     ledger.append(
         "fix.spawned", parent=wb.ref.id, fix_unit=ref.name, round=fix.ordinal, verify_round=result.round,
-        findings=plan.finding_ids, consumed=plan.consumed, **({"feedback_only": True} if plan.feedback_only else {}),
+        findings=plan.finding_ids, consumed=plan.consumed, **(_FEEDBACK_ONLY if plan.feedback_only else {}),
     )  # fmt: skip
     for item in plan.taken:
         ledger.append(

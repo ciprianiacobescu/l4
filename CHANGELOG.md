@@ -6,6 +6,31 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.6 (2026-10-17)
+
+### Fixed
+- A unit no longer loops on a rejected verification hold after the fix was given as feedback. The round raised a hold
+  (for example `the diff is longer than 120000 characters`), a person rejected it in prose with no `WHEN … THEN …`, and
+  the round escalated with `no finding of this round can be converted into a fix task`. The person then gave the fix
+  with `l4 feedback`, the feedback fix unit finished and round 4 judged every item fixed, but the old reject stayed in
+  force: the same hold came back, the verdict was FAIL, and a retry repeated it. Now a feedback-only fix unit consumes
+  the rejects its round could not convert: the verifier drops a reject recorded before a `fix.spawned` with
+  `feedback_only: true` (so a ledger written by 0.4.5 and older needs no repair), and new ledgers list those
+  questions in `fix.spawned.consumed` and mark the event `lists_unconverted: true`, so that only the listed rejects end.
+  A hold that is raised again is asked as a new question on the fixed code.
+- The escalation `no_convertible_finding` now names its way out. `l4 status --unit`, `l4 status --json`, the refusal of
+  `l4 run --unit` and the note on the merge request say that a retry alone repeats the same verdict, and to give the fix
+  as feedback (`l4 feedback add --unit U --kind behaviour --when … --then … --text …`, then the git lines) before
+  `l4 retry`. Other causes keep their text. The runbook has the procedure (7.3.1).
+- `l4 questions answer Q-NNN --unit U --text TEXT --replace` replaces the answer of an answered verdict question on
+  purpose. Before, the command refused it and the only way was a hand edit that nothing explained. The new answer is
+  recorded as a new verdict (the latest per target wins); the previous answer stays in a comment under it, and the
+  commit says `(answer replaced)`. Without `--replace` the refusal stays and its `Fix:` line names the flag. A
+  clarification answer is still changed by hand (L4-QMD-006).
+- `l4 yolo status` no longer shows a dependency where there is none. A plan runs one unit at a time, and a unit with no
+  prerequisite left said `waits for <unit> (not integrated)`, the same words as a real dependency. It now says
+  `waits for its turn: <unit> runs first (one unit at a time)`.
+
 ## 0.4.5 (2026-10-16)
 
 ### Added
