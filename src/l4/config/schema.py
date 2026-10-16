@@ -502,6 +502,7 @@ class ImplementerCfg(_Strict):
     task_grouping: Literal["task", "parent"] = "task"
     context_budget_tokens: int = 24000
     max_task_attempts: int = Field(default=3, ge=1)
+    escalate_after: int = Field(default=2, ge=0)  # failed attempts of a phase on one profile before the next (0: off)
     result_repair_attempts: int = Field(default=1, ge=0)
     wip_snapshot_interval: Duration = "10m"
     session_resume: Literal["same_runner_only", "artifact", "never"] = "same_runner_only"

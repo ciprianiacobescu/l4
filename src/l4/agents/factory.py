@@ -178,6 +178,11 @@ class Factory:
             request=SelectionRequest(role, unit, serves, tuple(constraints)),
         )  # fmt: skip
 
+    def next_profile(self, role: str, unit: str, after: str, *, constraints: Sequence[Constraint] = ()) -> Selected:
+        """The first usable profile of the role's chain after `after` (escalate-and-note D5): never parks the unit,
+        records no cool-down. Raises `RoleUnavailable` when there is none."""
+        raise NotImplementedError("escalate-and-note 1.1")
+
     def _note_adapter(
         self, role: str, name: str, profile: Profile, impl: AgentAdapter, report: LadderReport | None = None
     ) -> None:

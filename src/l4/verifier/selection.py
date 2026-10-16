@@ -69,6 +69,12 @@ def independence_constraint(cfg: L4Config, implementer_profiles: Sequence[str]) 
     return check
 
 
+def independence_keeper(cfg: L4Config, implementers: Sequence[str]) -> Constraint:
+    """The veto an escalation applies to each next implementer profile: it must not take away the last independent
+    judge (escalate-and-note D6)."""
+    raise NotImplementedError("escalate-and-note 1.6")
+
+
 def select_judge(
     factory: Factory,
     cfg: L4Config,

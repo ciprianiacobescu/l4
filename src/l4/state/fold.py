@@ -134,6 +134,10 @@ class UnitState(_Model):
     resumed_signals: list[str] = Field(default_factory=list)  # `unit.resumed{signal}`: label events acted on (one each)
     refused_signals: dict[str, str] = Field(default_factory=dict)  # `resume.refused{signal, why}`: said once each
     halt_reason: str | None = None  # the `reason` (a code) of the edge into `halted` or `escalated`; else None
+    halt_task: str | None = (
+        None  # the `task` of the last `breaker.tripped{max_task_attempts}`; cleared by a retry/resume
+    )
+    halt_fix_unit: str | None = None  # its `fix_unit`, when a fix unit's task tripped
     halt_detail: str | None = None  # its `detail` (the person's text); an old ledger has none: the `reason` text
     restarts: int = 0  # `unit.restarted` events: how many times `l4 restart` began the unit again (L4-OPS-004)
     misdirected: Misdirected | None = None  # `pr.misdirected`, until the next phase change or a new MR (L4-YOLO-007)

@@ -11,7 +11,7 @@ and same-error detection, 1.24 (iteration cap), the "state your blocking questio
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -190,7 +190,21 @@ def _retry_reason(failure: str | None, wb: Workbench, excerpt: str = "") -> str 
     return "\n\n".join(part for part in (failure, excerpt, note) if part)
 
 
-def run_task(wb: Workbench, task: Task) -> TaskOutcome:
+@dataclass(frozen=True)
+class EscalationRequest:
+    """What `run_task` asks its hook when a profile has failed `implementer.escalate_after` attempts of a phase."""
+
+    task: str
+    phase: Literal["red", "green"]
+    profile: str  # the profile that failed
+    failures: tuple[tuple[str, str], ...]  # (profile, reason) of every failed attempt of this phase, oldest first
+    attempt: int  # the attempt number of the next step
+
+
+Escalate = Callable[[Workbench, EscalationRequest], Workbench | str]  # a new workbench, or why there is none
+
+
+def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
     wb.emit("task.started", task=task.key, title=task.title)
     limit = wb.cfg.implementer.max_task_attempts
     failures = {"red": 0, "green": 0, "single": 0}  # per phase, each against max_task_attempts
