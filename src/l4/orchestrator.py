@@ -52,6 +52,7 @@ from l4.availability.errors import WaitingCapacity
 from l4.availability.fallback import minute_stamp
 from l4.ci.pin_guard import stale_pin_stop
 from l4.ci.resume_label import halted_section
+from l4.ci.step_summary import step_summary_for
 from l4.clarifier.clarifier import Clarifier, Reentry, awaiting_section, clarified_ids, commit_questions
 from l4.config.defaults import cache_root
 from l4.config.preflight import preflight_run_config
@@ -1422,10 +1423,12 @@ def run_unit_in_worktree(
         if not unit_dir.is_dir():
             raise UnknownUnit(f"{ref.id} is not in {cfg.forge.base_branch} or on its unit branch")
         opened["worktree"] = tree.path
+        summary = step_summary_for(app.environ)  # the GitHub job summary: one line for each task that ends (L4-OBS-005)
         return LedgerWriter.open(
             unit_dir, ref.id, app.run_id, redactor=app.redactor, command="run", branch=names.branch,
             base=tree.head, source=tree.source, iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
-            observers=[trace], file_filter=app_forge_urls(app, cfg).scrub, **run_environment(app.environ),
+            observers=[trace, *([summary] if summary else [])], file_filter=app_forge_urls(app, cfg).scrub,
+            **run_environment(app.environ),
         )  # fmt: skip
 
     writer = acquire_for_run(lease, open_writer)
