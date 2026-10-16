@@ -796,6 +796,8 @@ implementer:
   task_grouping: task              # task | parent
   context_budget_tokens: 24000     # cap on unit context rendered into a prompt (L4-IMP-004)
   max_task_attempts: 3             # the last usable profile's attempts per phase
+  heartbeat: 2m                    # a log line while an agent step runs; 0 = off (L4-IMP-023)
+  idle_timeout: 10m                # stop an agent with no stdout line and no open tool call; 0 = off (L4-IMP-024)
   escalate_after: 2                # failed attempts of one phase on a profile before the next profile of roles.implementer takes it; 0 = never (L4-IMP-017)
   result_repair_attempts: 1        # read by no code until L4-IMP-022
   wip_snapshot_interval: 10m
@@ -2249,6 +2251,50 @@ push and the continuation dispatch.
 
 ---
 
+
+**L4-IMP-023** A heartbeat line shows that an implementer agent works.
+
+The configuration SHALL have the key `implementer.heartbeat` (a duration or `0`, default `2m`). A value other than `0`
+MUST be at least `30s`. `0` turns the heartbeat off.
+
+While an implementer agent step runs, the harness SHALL log one INFO line on the `l4` logger every
+`implementer.heartbeat`, starting one interval after the agent starts. The line SHALL have the form of the progress
+trace (`<unit> [<fix unit>] <message>`) with the message
+`task <k> <phase> attempt <n>: <profile> working <elapsed>, <c> tool calls, last activity <t> ago`, where `<c>` is the
+count of the stream reader (L4-FAC-012) and `<t>` the time since the agent's last stdout line. When the stream shows
+open tool calls, the line SHALL end with `, <m> tool call(s) open for <t>`, where `<t>` is the age of the oldest open
+call. For a profile whose adapter has no stream reader (`command`), the message SHALL be
+`task <k> <phase> attempt <n>: <profile> working <elapsed>`. Times SHALL be written as `<s>s` under one minute,
+`<m>m` under one hour, else `<h>h <m>m`.
+
+The heartbeat MUST NOT be a ledger event, and the line MUST NOT hold text from the agent's stream: only the task, the
+phase, the attempt, the profile name, counts and times. An error in the heartbeat MUST NOT end or change the agent
+step. The `step.started` progress line SHALL be printed at INFO.
+
+**L4-IMP-024** An idle agent is stopped with a clear reason, and a step that reaches its time limit says so.
+
+The configuration SHALL have the key `implementer.idle_timeout` (a duration or `0`, default `10m`). A value other than
+`0` MUST be at least `1m`. `0` turns the idle watchdog off. The key SHALL replace the fixed stall limit of the
+implementer step: the harness MUST NOT have a second idle threshold for it.
+
+An implementer agent is idle when its stdout has had no line for `implementer.idle_timeout` and its stream reader
+(L4-FAC-012) shows no open tool call. The harness SHALL then send SIGINT to the agent's process group, and SIGKILL to
+the group when it still runs 5 seconds later, also when the agent prints lines in those 5 seconds. The run's status
+stays `timeout`. The harness MUST NOT use the run's
+`interrupt` event for this, which is the soft deadline's and gives the status `cancelled`.
+
+The harness SHALL then record `agent.idle{task, phase, attempt, profile, silent_s, tool_calls}` before
+`agent.finished`, and the attempt SHALL fail with the reason `the agent showed no activity for <idle_timeout>
+(implementer.idle_timeout), so L4 stopped it`. An attempt that ends with status `timeout` without the idle mark SHALL
+fail with `the agent step reached its time limit (<limit>)`, where the limit is the step's wall-clock limit (30m).
+Both are failed attempts as before: they count against the profile for the escalation (L4-IMP-017) and against
+`implementer.max_task_attempts`, and they are not limits (no cool-down). The progress log SHALL print `agent.idle`
+at WARNING as `task <k> <phase> attempt <n>: no activity from <profile> for <idle_timeout>; L4 stopped it
+(implementer.idle_timeout)`.
+
+While a tool call is open in the stream, the idle clock MUST NOT stop the agent; the step's wall-clock limit still
+applies.
+
 ## 8. Agent and model factory
 
 ### 8.1 Interfaces
@@ -2272,6 +2318,8 @@ class RunRequest:
     mcp_servers: list[McpServer]; permission_policy: PermissionPolicy
     env: dict[str, str]                              # allowlisted; forge tokens are never passed (§18)
     timeout_s: int; max_turns: int | None; max_budget_usd: float | None
+    stall_timeout_s: float | None = None             # SIGINT, then SIGKILL after 5 s, for a run with no stdout line for this long and no open tool call; None: only timeout_s (L4-IMP-024)
+    watch: ActivityWatch | None = None               # the step's liveness record: heartbeat and tool-call state; None for a judge or a probe (L4-IMP-023, L4-FAC-012)
     interrupt: threading.Event                       # set at soft deadline → SIGINT / session/cancel
 
 @dataclass
@@ -2305,7 +2353,7 @@ adapter [spikes/00-summary §3.6]:
 | `error` (config, not retryable) | `is_error:true`, `api_error_status:404` (bad model) [V] | `turn.failed` 400 `invalid_json_schema` or "model is not supported" [V] | — |
 | `error` (retryable) | — | — | "[503]" / "overloaded" [V] |
 | `max_turns` / `budget` | `subtype` `error_max_turns` / `error_max_budget_usd`, `result: null` [V] | — | — |
-| `timeout` | harness clock | harness clock | harness clock; silent gaps of 30–183 s are normal while it retries [V] |
+| `timeout` | harness clock: the step's limit, or `implementer.idle_timeout` (L4-IMP-024) | harness clock: the same | harness clock: the same; silent gaps of 30–183 s are normal while it retries [V] |
 
 **L4-FAC-010** A finished run reports its final message and why its result is not usable.
 
@@ -2343,6 +2391,25 @@ codex, command and the fake adapter MUST NOT report a peak: codex reports one us
 `input_tokens`, `output_tokens` and `cached_input_tokens` MUST keep their meaning. The `agent.finished` progress line
 SHALL end with `, context peak <n>k tokens` or `, context peak <p>%` when the event has the field, and SHALL stay as
 before without it.
+
+**L4-FAC-012** Each adapter reads its own stream for tool calls, and keeps no text.
+
+The adapters `opencode`, `claude-code`, `codex` and `kiro-cli` SHALL each have a stream reader: a pure function that
+reads one stdout line of the agent and returns the tool-call signals in it, `start(id)`, `end(id)` or `call` (a call
+that ended with no start seen):
+- opencode: `call` for each `tool_use` event (the stream shows a call only when it ends);
+- claude-code: `start` for each `tool_use` block of an `assistant` event (its `id`), `end` for each `tool_result`
+  block of a `user` event (its `tool_use_id`);
+- codex: `start` for `item.started` and `end` for `item.completed` of an item of type `command_execution`,
+  `file_change`, `mcp_tool_call` or `web_search` (its `item.id`); no other item type is a tool call;
+- kiro-cli: `start` for a `sessionUpdate` `tool_call` and `end` for a `tool_call_update` with `status` `completed` or
+  `failed` (its `toolCallId`).
+The `command` adapter SHALL have no reader. A reader MUST return no signal, and MUST NOT raise, for a line that is not
+JSON, not an object or of an unknown shape. A reader MUST NOT keep or return any text of the line.
+
+Every adapter SHALL pass the request's activity watch and its reader to the process runner. The watch SHALL count
+each stdout line as activity, count `start` and `call` signals as tool calls (and an `end` with an unknown id), and
+keep the open calls by id. A request without a watch (a judge, a probe) SHALL run as before.
 
 **L4-FAC-003** LLM backends (no tools) MUST implement:
 
@@ -3442,6 +3509,8 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `{cache, reason}`),
 `run.finished` (exit code).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
+Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
+
 The result contract adds these records (L4-IMP-020, L4-FAC-011): `result.normalized` (`{task, phase, attempt, source, fixes}`, once for a step whose result object the harness repaired; it holds no text of the agent), `context_peak_tokens` and `context_peak_percent` on `agent.finished` (each only when the stream shows it), and, second wave and not built (L4-IMP-022), `result.repair` (`{task, phase, attempt, outcome, reason?}`).
 
 **L4-STA-004** Between the hand-off commit H and the next unit-branch commit, ledger events are written into the
@@ -3593,7 +3662,7 @@ person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are
 An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
 older ledger without `detail` folds as before.
 
-**L4-OPS-006** The `l4 status` table MUST have a `REASON` column after `PHASE`, cut to 60 characters: `detail` for
+**L4-OPS-006** The `l4 status` table MUST have a `REASON` column after `PHASE`, cut to 60 characters (it also has the column `LAST`, L4-OPS-020): `detail` for
 `halted` and `escalated`, the open question ids for `awaiting_human`, `until <time>` for `waiting_capacity`, and `-`
 otherwise. `l4 status --unit ID` MUST print the phase, `Cause:` (whole), `Stopped in run:` (the run id of the stop), an
 `Or: add the label <prefix>retry` (or `restart`) line for a unit that a label moves, and last `Next:` with the bare
@@ -3723,6 +3792,39 @@ The skill's `adopt.md` SHALL show how an owner configures a cheap-first chain: t
 optional stronger last profile (for example a Claude Code subscription profile), and judges whose vendor no implementer
 profile of the chain has. It SHALL say that escalation moves by profile, so two models of one provider are two steps.
 The skill's `operate.md` SHALL tell an agent to write the `--reason` of a retry for the implementer of the halted task.
+
+**L4-OPS-020** l4 status shows the last activity and the open run of a unit.
+
+`run.started` SHALL record `ci_url` when the run is in CI:
+- GitHub Actions (`GITHUB_ACTIONS=true`): `<GITHUB_SERVER_URL>/<GITHUB_REPOSITORY>/actions/runs/<GITHUB_RUN_ID>`, with
+  `/attempts/<GITHUB_RUN_ATTEMPT>` when the attempt is above 1;
+- GitLab CI (`GITLAB_CI=true`): `CI_JOB_URL`.
+Each part MUST match a plain pattern (an `https` URL with no user part, `owner/name`, digits), else the key is left
+out. The link is written with the forge filter of L4-OBS-002, and is never fetched.
+
+From the events that the unit's snapshot reads (the unit branch's ledger and the lock ref's pending ledger, as the
+last fetch left them), the snapshot SHALL have:
+- `last_activity`: the event with the newest `ts`, with its `ts`, `type`, `task` (when the event has one) and
+  `run_id`;
+- `open_run`: the newest `run.started` with `command: "run"` whose run has no `run.finished`, with its `run_id`, its
+  `ts` and its `ci_url` expanded to the forge's link.
+
+`l4 status` SHALL show a column `LAST` after `VERDICT` with `<t> ago`, or `-` when the unit has no event.
+`l4 status --unit` SHALL show, after `Stopped in run:`, the line `Last activity: <t> ago (<type>[, task <k>], run
+<run id>)`, and, when there is an open run, `Open run: <run id> started <t> ago, no end recorded[: <link>]`. `--json`
+SHALL have `last_activity{ts, type, task?, run_id}` and `open_run{run_id, started, ci_url?}`, each `null` when it does
+not apply. Times use the format of L4-IMP-023, from the clock of the computer that runs the command.
+
+**L4-OPS-021** The runbook tells a person how to see whether a job is stuck.
+
+`docs/runbook.md` SHALL have a procedure "Is the job stuck?" that gives, in order: the heartbeat line in the CI log
+and what each part means; the two limits of an agent step (`implementer.idle_timeout`, default 10m, and the 30-minute
+step limit) and the `agent.idle` line; `l4 status --unit` with `Last activity:` and `Open run:`, after the fetch of
+section 4.4; `gh run list --workflow l4.yml --status in_progress` for the live GitHub run; and the limit that the
+unit branch shows a run only from its first step commit, so the last activity can be one step old. Section 2 SHALL
+have a row that leads to it. The rows of section 4.2 SHALL name the heartbeat, the `agent.idle` and the red gate
+lines; section 4.4 the `LAST` column and the two lines; section 4.5 `agent.idle` and `run.started.ci_url`. The
+skill's `references/operate.md` SHALL say that `l4 status --unit` shows the last activity and the open run.
 
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
 
@@ -4006,6 +4108,15 @@ whose accepted finding has no `addressed: true` answer in its PASS round MUST NO
 `docs/yolo-mode.md` SHALL describe the review rules. The skill's `plan.md` MUST tell an agent to iterate with
 `--worktree` and never to accept a finding unless the target's configuration allows it.
 
+**L4-YOLO-030** l4 yolo status shows the last activity and the open run of a plan.
+
+For a plan that is `active`, `waiting` or `stopped`, `l4 yolo status` SHALL show, after the units, the line
+`  last activity: <t> ago (<what>)` for the newer of the current unit's `last_activity` (L4-OPS-020), shown as
+`<type>[, task <k>], unit <unit id>`, and the plan ledger's newest event, shown as `<type>`; and, when the current
+unit has an open run, the line `  open run: <run id> started <t> ago, no end recorded[: <link>]`. `--json` SHALL have
+`last_activity` and `open_run` for each plan, `null` when they do not apply. A plan in a final state SHALL show
+neither line. `plan_lines` of `l4 status` MUST NOT change.
+
 
 ---
 
@@ -4182,7 +4293,7 @@ dispatch tests MAY gain rows.
 
 **L4-OBS-001** Two log streams: human console (`[l4] <role|phase>: message`) and JSONL
 (`.l4-out/logs/<run-id>.jsonl`) with the event schema of §12.1 plus transient events (probe details, command lines
-with redacted env, durations). The durable subset is the ledger.
+with redacted env, durations, and the heartbeat line of an agent step, L4-IMP-023). The durable subset is the ledger.
 
 **L4-OBS-002** A redaction filter MUST replace the values of every env var listed in `observability.redact_env` and
 of every `*_env`-referenced variable, plus common token shapes (`sk-…`, `sk-ant-…`, `ghp_…`, `gho_…`, `ghu_…`, `ghs_…`, `github_pat_…`, `glpat-…`, `glptt-…`, `gldt-…`, JWTs,
@@ -4203,6 +4314,34 @@ remote), so `pr.updated{url}` holds `<forge>/group/project/-/merge_requests/7`. 
 **L4-OBS-003** Cost: per adapter run, `usage` (tokens; USD when reported — Claude reports USD, Codex reports tokens
 only [V]) is added to `budget.cost`; units without USD reporting are budgeted by tokens × configured price table
 (`budgets.price_table`, optional).
+
+**L4-OBS-004** A red test gate that fails only on new tests says that this is intended.
+
+For the test gate that `run_red` runs after the agent, `gate.finished` SHALL record `red_new_failing: <n>` when all of
+these hold, and SHALL not have the key otherwise:
+- the gate status is `fail`, and its report is readable;
+- at least one test fails or errors;
+- every failing or erroring test is new: its id is not in the base report that `run_red` took before the agent ran;
+- each of them failed by assertion or with `NotImplementedError` (the failure kinds that the red check accepts), and
+  none carries the hang marker;
+- the report has no collection error that the base report does not have.
+The progress log SHALL print an event with `red_new_failing` at INFO as `red: <n> new tests fail, as intended` (`red: 1
+new test fails, as intended` for one), and SHALL print the gate line of today for it at DEBUG. Every other gate SHALL
+print as today. The key MUST NOT change the verdict of the red step: the red check decides as before.
+
+**L4-OBS-005** In GitHub Actions each task that ends adds a line to the job summary.
+
+When `GITHUB_ACTIONS` is `true` and `GITHUB_STEP_SUMMARY` names a file, `l4 run` SHALL append one Markdown list line
+to that file for each task that ends in the run:
+- `task.done`: `- <unit> task <k>: done (<n> attempts, <profile>, <took>)`, where `<n>` is the number of agent steps
+  of the task in this run, `<profile>` the profile of the last one, and `<took>` the time since `task.started` in the
+  format of L4-IMP-023;
+- `task.red_ok` with `tdd: already-satisfied`: `- <unit> task <k>: already satisfied (no green step)`;
+- `task.done` with `tdd: already-done`: `- <unit> task <k>: done (closed with no open required task)`;
+- `breaker.tripped`: `- <unit> task <k>: halted (<reason code>)`.
+A task of a fix unit SHALL have `[<fix unit>]` after the unit. The line MUST NOT hold text of an agent or of a person
+(no notes, no failure reasons): only ids, codes, numbers and the profile name. A failed write SHALL be logged once at
+WARNING and MUST NOT stop the run. Outside GitHub Actions nothing SHALL be written.
 
 ---
 
@@ -4852,6 +4991,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 23 | `unfreeze-and-answer` | a task whose own reviewed text (and its enclosing headings) names a Python test-support file (for example `conftest.py`) may change it in green, and a person's answer may unfreeze a support file, never an ignore file; an opened file keeps its old statements, rebinds no name and patches no code of the unit; the note of a blocked green question says how to unfreeze; `l4 questions` lists, shows, accepts and answers on the unit branch with `--no-push` and an agent rule (`clarifier.answer_by_agents`); the runbook and the skill teach the command; every stub command says `(not yet implemented)` in `--help` (L4-IMP-014..016, L4-QMD-007..009, L4-OPS-017; `openspec/changes/unfreeze-and-answer/`) | the live runs of tasks 7.3 on a dummy repository |
 | 24 | `escalate-and-note` | a task phase that one implementer profile fails `implementer.escalate_after` times (default 2) moves to the next usable profile of `roles.implementer`, cheap first, with the earlier failure reasons; each profile has its own attempts and the last one `max_task_attempts`; the move never parks a unit and never breaks the independence of the judges; `implementer.escalated` and the profile in `task.attempt_failed`, `breaker.tripped` and the halt detail; doctor CFG-009; the `--reason` of `l4 retry` and `l4 resume` on a unit halted on `max_task_attempts` reaches the implementer of that task as a capped, redacted data block; the runbook and the skill teach the note and a cheap-first chain (L4-IMP-017, L4-IMP-018, L4-OPS-018, L4-OPS-019; `openspec/changes/escalate-and-note/`) | the live runs of tasks 7.3 on a dummy repository |
 | 25 | `result-contract` | an implementer step that did its work does not lose the attempt to a slip in its result object: the prompt of a prompt-contract step asks for `status` and `summary` first (template `output@1`), the harness repairs the object with fixed rules and records `result.normalized`, an attempt fails for its result only when no result object is found, and `agent.finished` records the peak context of one call (L4-IMP-019, L4-IMP-020, L4-IMP-021, L4-IMP-022 not built, L4-FAC-010, L4-FAC-011; `openspec/changes/result-contract/`) | the live check of task 7.3 on a dummy repository: a unit on a free OpenCode model that slipped, with `+output@1` in the prompt and the count of `result.normalized` events |
+| 26 | `run-liveness` | a person can tell a working run from a stuck one: a heartbeat log line every `implementer.heartbeat` (default 2m) with counts and times only, `implementer.idle_timeout` (default 10m) that stops an agent with no stdout line and no open tool call (SIGINT, 5 s, SIGKILL) with the `agent.idle` record and a reason that names the key, stream readers that see open tool calls of claude-code, codex and kiro-cli, `l4 status` and `l4 yolo status` with the last activity and the open run with its CI link (`run.started.ci_url`), the red gate line `red: <n> new tests fail, as intended`, the GitHub job summary, and the runbook procedure 4.6 (L4-IMP-023, L4-IMP-024, L4-FAC-012, L4-OPS-020, L4-OPS-021, L4-YOLO-030, L4-OBS-004, L4-OBS-005; `openspec/changes/run-liveness/`) | the live check of task 7.3 on a dummy repository: a unit of two tasks with heartbeat lines every 2 minutes, `Last activity:` and `Open run:` during the run, the OpenCode silent-call probe, and a re-run with `/attempts/2` |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -5525,6 +5665,18 @@ scenario is a spec defect (§26).
 - **Given** a codex run, a command run, and an `agent.finished` event of an older ledger
 - **When** the steps record `agent.finished` and the progress log reads the older event
 - **Then** no `context_peak_tokens` or `context_peak_percent` is recorded for codex and command, and the progress line of the older event is the line of today
+
+#### SCN-FAC-20 (+) The readers count the tool calls of the recorded streams · L4-FAC-012
+- **Given** the recorded streams `tests/fixtures/recorded/opencode/1.18.33/red-ok.jsonl`, `tests/fixtures/recorded/claude-code/2.1.288/red-ok.jsonl`, `tests/fixtures/recorded/codex/0.160.0/red-ok.jsonl` and `tests/fixtures/recorded/kiro-cli/2.28.0/red-tools.stream.jsonl`
+- **When** each stream is read line by line through its adapter's reader into a watch
+- **Then** the tool call count equals the count that the test computes from the stream (`tool_use` events; `tool_use` blocks; started `command_execution` and `file_change` items; `tool_call` session updates), and no call is open at the end
+- **And** the same stream cut just after a call's start has exactly one open call for claude-code, codex and kiro-cli, and none for opencode
+
+#### SCN-FAC-21 (−) A reader keeps no text and never fails on a line · L4-FAC-012
+- **Given** a line that is not JSON, a JSON array, an event of an unknown type, a codex `item.started` of a `todo_list` item, and an `end` whose id was never started
+- **When** each line goes through each reader and a watch
+- **Then** no reader raises; the first four give no signal and still count as activity; the `todo_list` item opens no call; the unknown `end` counts one call and opens none
+- **And** the watch's state holds only numbers, times and call ids
 
 ### 23.7 Implementer and TDD (IMP)
 
@@ -6257,6 +6409,40 @@ scenario is a spec defect (§26).
 - **Given** `implementer.result_repair_attempts: 1`, in turn: a repair reply with `"status": "blocked"` and one question; a kiro-cli step with no result object; the default `implementer.result_repair_attempts: 0`
 - **When** the attempts end
 - **Then** the first records `result.repair{outcome: "discarded"}` and the attempt fails with `no result was delivered`; the second and the third make no repair call and fail the same way
+
+#### SCN-IMP-200 (+) Heartbeat lines while an agent works · L4-IMP-023
+- **Given** `implementer.heartbeat: 2m`, a fixed clock, and an opencode red step of task 5.2 on the profile `deepseek` whose stream has 14 `tool_use` events in its first 6 minutes and its last line 20 seconds before the third beat
+- **When** the step runs for 7 minutes
+- **Then** the log has three INFO lines, the third `task 5.2 red attempt 1: deepseek working 6m, 14 tool calls, last activity 20s ago`, and the ledger has no event for them
+- **And** no line holds a word of the stream's text, and the `agent red step started (task 5.2, attempt 1, deepseek)` line is at INFO
+
+#### SCN-IMP-201 (−) No heartbeat when it is off or the step is short; elapsed time only for a command profile · L4-IMP-023
+- **Given** in turn: `implementer.heartbeat: 0` and a step of 5 minutes; `implementer.heartbeat: 2m` and a step that ends after 90 seconds; `implementer.heartbeat: 2m` and a `command` profile `my-script` that runs 5 minutes
+- **When** each step runs
+- **Then** the first and the second log no heartbeat line, and the third logs `task 1.1 red attempt 1: my-script working 2m` and `task 1.1 red attempt 1: my-script working 4m` with no count
+- **And** a heartbeat callback that raises is logged at DEBUG and the step ends as without it
+
+#### SCN-IMP-202 (+) An idle agent is stopped, recorded, and counts as a failed attempt · L4-IMP-024
+- **Given** `implementer.idle_timeout: 10m`, and a red step of task 2.1 on the profile `deepseek` whose agent prints three stream lines with no open call and then nothing
+- **When** 10 minutes pass with no line
+- **Then** the agent's process group gets SIGINT, and SIGKILL 5 seconds later if it still runs; the run's status is `timeout`; the ledger has `agent.idle{task: "2.1", phase: "red", attempt: 1, profile: "deepseek", silent_s: 600, tool_calls: …}` before `agent.finished`
+- **And** `task.attempt_failed` has the reason `the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it`, the next prompt carries it, and with `escalate_after: 2` and a second profile in `roles.implementer`, two idle attempts move the phase to the second profile
+
+#### SCN-IMP-203 (−) An open tool call is not idle; an OpenCode silence is · L4-IMP-024
+- **Given** `implementer.idle_timeout: 10m` and, in turn, a codex step whose stream shows `item.started` of a `command_execution` and then nothing for 12 minutes before its `item.completed`, a claude-code step with a `tool_use` block and no `tool_result` for 12 minutes, a kiro-cli step with a `tool_call` and no end for 12 minutes, and an opencode step with no line for 12 minutes
+- **When** the steps run
+- **Then** the codex, claude-code and kiro-cli agents are not stopped, and their heartbeat line ends with `1 tool call open for <t>`
+- **And** the opencode agent is stopped at 10 minutes as in SCN-IMP-202, because its stream shows a tool call only when the call ends
+
+#### SCN-IMP-204 (−) With the watchdog off, only the time limit stops the step, with its own reason · L4-IMP-024
+- **Given** `implementer.idle_timeout: 0` and an agent that prints nothing for 20 minutes, and with the default an agent that prints one line every minute for 30 minutes
+- **When** the steps run
+- **Then** the first is not stopped at 20 minutes and no `agent.idle` is recorded; the second is stopped at the step's limit and its attempt fails with `the agent step reached its time limit (30m)`, with no `agent.idle`
+
+#### SCN-IMP-205 (−) A heartbeat or idle value below its minimum is refused · L4-IMP-023, L4-IMP-024
+- **Given** a configuration with `implementer.idle_timeout: 30s`, then one with `implementer.heartbeat: 5s`, then one with both keys `0`, then one with `10m` and `2m`
+- **When** the configuration loads
+- **Then** the first two fail with a message that names the key and its minimum, and the last two load
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
@@ -7536,6 +7722,27 @@ scenario is a spec defect (§26).
 - **Then** `budget.cost` adds the computed USD; without a price entry the cost is `null`, a warning is logged and
   doctor reports that USD budgets cannot be enforced for that profile.
 
+#### SCN-OBS-03 (+) A red gate that fails only on new tests prints the red line · L4-OBS-004
+- **Given** a red step whose base report has 5 passing tests, and whose gate report after the agent has the same 5 passing and 7 new tests that fail by assertion or with `NotImplementedError`
+- **When** the gate ends and the progress log prints it
+- **Then** `gate.finished` has `red_new_failing: 7`, the INFO line is `red: 7 new tests fail, as intended`, and `gate test fail (exit 1, 12 tests: 5 passed, 7 failed)` is at DEBUG
+- **And** with one new failing test the INFO line is `red: 1 new test fails, as intended`
+
+#### SCN-OBS-04 (−) Every other failing gate prints as today · L4-OBS-004
+- **Given** in turn: a red gate where a new test fails with `TypeError`; a red gate where an old test fails too; a red gate with a new collection error; a green gate that fails; a red gate with no readable report
+- **When** each gate ends
+- **Then** no `gate.finished` has `red_new_failing`, each prints the gate line of today at INFO, and the red verdicts are the ones of today
+
+#### SCN-OBS-05 (+) The job summary lists the tasks that ended · L4-OBS-005
+- **Given** `GITHUB_ACTIONS=true`, `GITHUB_STEP_SUMMARY` naming a file, and a run of `openspec:add-x` where task 2.1 is done after two agent steps on `deepseek` in 11 minutes, task 2.2 is already satisfied, task 2.3 halts on `max_task_attempts`, and task 1.1 of the fix unit `add-x-fix-1` is done
+- **When** the run ends
+- **Then** the file ends with `- openspec:add-x task 2.1: done (2 attempts, deepseek, 11m)`, `- openspec:add-x task 2.2: already satisfied (no green step)`, `- openspec:add-x task 2.3: halted (max_task_attempts)` and `- openspec:add-x [add-x-fix-1] task 1.1: done (…)`
+
+#### SCN-OBS-06 (−) No summary outside GitHub, no agent text, and a failed write does not stop the run · L4-OBS-005
+- **Given** in turn: no `GITHUB_ACTIONS`; `GITLAB_CI=true`; a `task.done` whose `notes` hold a sentence of the agent; a `GITHUB_STEP_SUMMARY` that names a path that cannot be written
+- **When** the run ends
+- **Then** the first two write no file, the third's line holds no word of the notes, and the fourth logs one WARNING and the run ends with the exit code it would have without the summary
+
 #### SCN-SEC-06 (−) Gate code cannot read secrets or logins · L4-SEC-001, L4-SEC-005
 - **Given** a red-phase test that reads `os.environ`, `/proc/<ppid>/environ`, `/proc/<harness pid>/environ`,
   `.git/config`, `~/.codex/auth.json` and `~/.claude/.credentials.json`, and tries to send them out
@@ -7996,6 +8203,28 @@ scenario is a spec defect (§26).
 - **When** a person reads the `halted` procedure, the progress-line table, `adopt.md` and `operate.md`
 - **Then** the procedure names the `--reason` as the implementer's note and `escalate_after: 0` as the way back, the table has the escalation lines, `adopt.md` has `roles.implementer` with the two OpenCode Go profiles before a Claude Code profile, a judge of another vendor and `escalate_after`, and `operate.md` says what the `--reason` of a retry is for
 
+#### SCN-OPS-34 (+) The last activity and the open run, with its link · L4-OPS-020
+- **Given** a fixed clock, and a unit branch whose ledger has a finished run, then a run `r-20261016T1101Z-1a2b` with `run.started{command: "run", ci_url: "<forge>/owner/repo/actions/runs/123"}` 21 minutes ago and a last event `task.red_ok{task: "2.1"}` 6 minutes ago, and no `run.finished` for it; the origin is on github.com
+- **When** `l4 status` and `l4 status --unit <unit>` run
+- **Then** the `LAST` cell is `6m ago`, and the block has `Last activity: 6m ago (task.red_ok, task 2.1, run r-20261016T1101Z-1a2b)` and `Open run: r-20261016T1101Z-1a2b started 21m ago, no end recorded: https://github.com/owner/repo/actions/runs/123`
+
+#### SCN-OPS-35 (−) No open run when the newest run ended; no link without a recorded one; no time without events · L4-OPS-020
+- **Given** in turn: a unit whose newest run has `run.finished`; an older ledger whose open run has no `ci_url`; a lock ref whose pending ledger has a sweep run (`command: "plan --sweep"`) with no end; a unit with no ledger
+- **When** `l4 status --unit` runs for each
+- **Then** the first has `Last activity:` and no `Open run:` line; the second has `Open run: <id> started <t> ago, no end recorded` with no link; the third has no `Open run:` line; the fourth has `LAST` `-` and neither line
+
+#### SCN-OPS-36 (+) The run records its CI link, and --json shows both keys · L4-OPS-020
+- **Given** in turn the environments `GITHUB_ACTIONS=true` with `GITHUB_SERVER_URL=https://github.com`, `GITHUB_REPOSITORY=owner/repo`, `GITHUB_RUN_ID=123`, `GITHUB_RUN_ATTEMPT=2`; `GITLAB_CI=true` with `CI_JOB_URL`; no CI; and `GITHUB_REPOSITORY=../x`
+- **When** a run writes `run.started` and `l4 status --json` reads the unit
+- **Then** the committed `run.started` has `ci_url` `<forge>/owner/repo/actions/runs/123/attempts/2`, the GitLab one has the job link with `<forge>`, and the last two have no `ci_url`
+- **And** `--json` has `last_activity` and `open_run` with the expanded link for the first, and `open_run` without `ci_url` for the others
+
+#### SCN-OPS-37 (+) The runbook answers "is my job stuck?" · L4-OPS-021
+- **Given** `docs/runbook.md` and `plugins/l4/skills/l4/references/operate.md`
+- **When** a person looks for a silent job
+- **Then** section 2 has a row that leads to the procedure, and the procedure has `working <elapsed>, <c> tool calls, last activity <t> ago`, `implementer.idle_timeout`, `30 minutes`, `no activity from`, `Last activity:`, `Open run:` and `gh run list --workflow l4.yml --status in_progress`
+- **And** section 4.2 has the heartbeat, `agent.idle` and `red: <n> new tests fail, as intended` rows, section 4.4 has `LAST`, section 4.5 has `agent.idle`, and `operate.md` names the last activity
+
 ### 23.20 Delivery plans (YOLO)
 
 #### SCN-YOLO-01 (−) An unknown field refuses the plan · L4-YOLO-001
@@ -8360,6 +8589,11 @@ scenario is a spec defect (§26).
 - **Given** the runbook and the skill
 - **When** the docs check runs
 - **Then** the runbook names `l4 yolo findings`, `l4 yolo review <plan-id> --worktree`, `--record`, `l4 yolo accept`, `accept_after_rounds`, `accept_by_agents` and `accepted_finding_open`, and `plan.md` names `--worktree` and `accept_by_agents`
+
+#### SCN-YOLO-72 (+) A plan shows when its current unit last moved · L4-YOLO-030
+- **Given** a fixed clock, an `active` plan whose newest plan event is 40 minutes old and whose current unit `openspec:add-x` has an open run started 21 minutes ago and a last event `task.red_ok{task: "2.1"}` 6 minutes ago, and a `completed` plan
+- **When** `l4 yolo status` and `l4 yolo status --json` run
+- **Then** the active plan has `  last activity: 6m ago (task.red_ok, task 2.1, unit openspec:add-x)` and `  open run: <id> started 21m ago, no end recorded: <link>`, its JSON has both keys, and the completed plan has neither line and `null` for both keys
 
 ### 23.21 Experience graph (KG)
 
