@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from l4.implementer.guards import FreezeManifest, FrozenFile
-from l4.implementer.unfreeze import unfrozen
+from l4.implementer.unfreeze import Grant, named_by_task, names_path, unfrozen
 from l4.redact import Redactor
 from l4.specs.questions import (
     NewQuestion,
@@ -96,14 +96,34 @@ def test_an_answer_edited_after_it_was_recorded_does_not_count(tmp_path):
     assert unfrozen(file.questions, [], SCOPE, MANIFEST).paths == ()  # never recorded at a re-entry
 
 
-def test_a_named_support_file_stays_frozen(tmp_path):
-    text = (
-        "Update `tests/conftest.py` and tests/test_notices.py, plus tests/test_unknown.py and src/pricing/notices.py."
+def test_a_named_support_file_of_a_human_answer_is_unfrozen_and_an_ignore_file_is_not(tmp_path):
+    """SCN-IMP-168 and SCN-IMP-169 at function level (L4-IMP-015)"""
+    manifest = FreezeManifest(
+        "r" * 40, {**MANIFEST.files, ".gitignore": FrozenFile("d" * 64, "support")}, MANIFEST.support_globs
     )
+    text = "Update `tests/conftest.py` and tests/test_notices.py and .gitignore, plus tests/test_unknown.py."
+    asked = ask(tmp_path, context=f"{CONTEXT} `tests/conftest.py` and .gitignore are involved.")
+    file = with_status(asked, QuestionStatus.ACCEPTED, suggestion=text)
+    got = unfrozen(file.questions, recorded(file), SCOPE, manifest)
+    assert got.paths == ("tests/conftest.py", TEST)
+    assert got.kept == ((".gitignore", "an ignore file"),)
+    assert [g.reason for g in got.grants] == ["human_answer"] and got.grants[0].source is None
+
+
+def test_an_accepted_suggestion_that_the_question_does_not_name_keeps_a_support_file_frozen(tmp_path):
+    text = "Edit `tests/conftest.py`: add the setdefault line."
     file = with_status(ask(tmp_path), QuestionStatus.ACCEPTED, suggestion=text)
     got = unfrozen(file.questions, recorded(file), SCOPE, MANIFEST)
-    assert got.paths == (TEST,)
-    assert [p for p, _ in got.kept] == ["tests/conftest.py"] and "support" in got.kept[0][1]
+    assert got.paths == () and [p for p, _ in got.kept] == ["tests/conftest.py"]
+    named = ask(sub(tmp_path, "n"), context="`tests/conftest.py` lacks the line.")
+    named = with_status(named, QuestionStatus.ACCEPTED, suggestion=text)
+    assert unfrozen(named.questions, recorded(named), SCOPE, MANIFEST).paths == ("tests/conftest.py",)
+
+
+def test_an_old_task_unfrozen_event_without_a_reason_folds_as_before():
+    """0.1: the integrity fold reads only `paths`, `task`, `red_sha` and `question` (SCN-VER-63 has no `reason`)"""
+    grant = Grant("Q-001", "a" * 64, ("tests/conftest.py",))
+    assert grant.reason == "human_answer" and grant.source is None
 
 
 def test_a_question_of_another_task_or_a_verdict_does_not_count(tmp_path):
@@ -160,3 +180,82 @@ def test_an_accepted_suggestion_unfreezes_only_tests_the_question_names(tmp_path
     human = with_status(ask(sub(tmp_path, "h"), context="The constant is wrong."), QuestionStatus.ANSWERED,
                         suggestion="", answer=f"Edit {TEST} and tests/test_other.py.")  # fmt: skip
     assert unfrozen(human.questions, recorded(human), SCOPE, MANIFEST).paths == (TEST, "tests/test_other.py")
+
+
+# --- L4-IMP-014: the task text names a support file -----------------------------------------------------------------
+
+
+def test_names_path_dot_slash_allows_only_a_leading_dot_slash():
+    """SCN-IMP-164 at function level"""
+    for text, path, plain, dotted in [
+        ("the conftest", "conftest.py", False, False),
+        ("`**/conftest.py`", "conftest.py", False, False),
+        ("`../conftest.py`", "conftest.py", False, False),
+        ("`./conftest.py`", "conftest.py", False, True),
+        ("see ./conftest.py.", "conftest.py", False, True),
+        ("tests/conftest.py", "conftest.py", False, False),
+        ("tests/conftest.py", "tests/conftest.py", True, True),
+        ("./tests/conftest.py", "tests/conftest.py", False, True),
+        ("conftest.py:12", "conftest.py", True, True),
+        ("conftest.py.bak", "conftest.py", False, False),
+    ]:
+        assert names_path(text, path) is plain, (text, path)
+        assert names_path(text, path, dot_slash=True) is dotted, (text, path)
+
+
+def bench_manifest(**extra: FrozenFile) -> FreezeManifest:
+    files = {
+        "tests/test_otel.py": FrozenFile("a" * 64, "test"),
+        "conftest.py": FrozenFile("b" * 64, "support"),
+        "tests/conftest.py": FrozenFile("c" * 64, "support"),
+        **extra,
+    }
+    return FreezeManifest("r" * 40, files, ("**/conftest.py",))
+
+
+def test_named_by_task_opens_a_named_support_file_and_nothing_else():
+    got = named_by_task("Set APP_OTEL_ENABLED in `./conftest.py`.", bench_manifest(), source="plan:p1@abc")
+    assert got.paths == ("conftest.py",) and got.kept == ()
+    [grant] = got.grants
+    assert (grant.question, grant.reason, grant.source) == (None, "named_by_task", "plan:p1@abc")
+    assert got.question is None and got.answer_sha256 is None
+    none = named_by_task("the conftest, `**/conftest.py`, `../conftest.py`", bench_manifest(), source="s")
+    assert none.grants == () and none.kept == ()
+
+
+def test_named_by_task_lists_each_kept_reason():
+    """SCN-IMP-162, SCN-IMP-163, SCN-IMP-165"""
+    manifest = bench_manifest(
+        **{
+            ".gitignore": FrozenFile("d" * 64, "support"),
+            "tests/fixtures/expected.json": FrozenFile("e" * 64, "support"),
+            "tests/link_conftest.py": FrozenFile(None, "support"),
+            "tests/changed_conftest.py": FrozenFile("f" * 64, "support", in_red=True),
+        }
+    )
+    text = (
+        "tests/test_otel.py .gitignore tests/fixtures/expected.json tests/link_conftest.py "
+        "tests/changed_conftest.py tests/conftest.py"
+    )
+    got = named_by_task(text, manifest, source="s")
+    assert got.paths == ("tests/conftest.py",)
+    assert dict(got.kept) == {
+        "tests/test_otel.py": "a red test of this task",
+        ".gitignore": "an ignore file",
+        "tests/fixtures/expected.json": "not a Python file: a person decides",
+        "tests/link_conftest.py": "a symlink at the red commit",
+        "tests/changed_conftest.py": "the red step of this task changed it",
+    }
+
+
+def test_named_by_task_opens_at_most_three_in_sorted_order():
+    files = {f"tests/c{n}/conftest.py": FrozenFile("a" * 64, "support") for n in (4, 3, 2, 1)}
+    manifest = FreezeManifest("r" * 40, files, ("**/conftest.py",))
+    got = named_by_task(" ".join(sorted(files, reverse=True)), manifest, source="s")
+    assert got.paths == ("tests/c1/conftest.py", "tests/c2/conftest.py", "tests/c3/conftest.py")
+    assert got.kept == (("tests/c4/conftest.py", "more than 3 paths named"),)
+
+
+def test_a_test_file_outside_the_manifest_is_neither_opened_nor_listed():
+    got = named_by_task("fix tests/test_old.py and conftest.py", bench_manifest(), source="s")
+    assert got.paths == ("conftest.py",) and got.kept == ()
