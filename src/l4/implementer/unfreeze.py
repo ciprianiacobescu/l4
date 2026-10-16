@@ -103,29 +103,49 @@ def named_by_task(text: str, manifest: FreezeManifest, *, source: str) -> Unfree
 NOTE_PREFIX = "Harness note:"
 
 
-def unfreeze_note(text: str, frozen_tests: Sequence[str], *, suggested: bool) -> str:
-    """What the harness adds to the question of a blocked green step so that a human knows how a frozen test is
-    unfrozen (M1.13, W-C3): the rule of `unfrozen`, in words. It names only the frozen test files that `text` (the
-    agent's own title, context and options) already names, at most `MAX_PATHS_PER_QUESTION`: the question text is what
-    an `accepted` suggestion is held to (`names_path(asked, path)`), so a file the note named on its own would widen
-    it. `suggested`: the first option is an "Edit `<path>`: <change>" that is also the suggested answer, so `accepted`
-    takes it."""
-    named = [path for path in sorted(frozen_tests) if names_path(text, path)][:MAX_PATHS_PER_QUESTION]
+def unfreeze_note(
+    text: str,
+    frozen: Sequence[str],
+    *,
+    suggested: bool,
+    ignore: Sequence[str] = (),
+    unit: str | None = None,
+    qid_hint: bool = True,
+) -> str:
+    """What the harness adds to the question of a blocked green step so that a human knows how a frozen file is
+    unfrozen (M1.13, W-C3; D7 of unfreeze-and-answer): the rule of `unfrozen`, in words. `frozen` are the frozen test
+    and support files, `ignore` the ignore files of the manifest, which an answer never unfreezes. The note names only
+    the files that `text` (the agent's own title, context and options) already names, at most
+    `MAX_PATHS_PER_QUESTION`: the question text is what an `accepted` suggestion is held to (`names_path(asked,
+    path)`), so a file the note named on its own would widen it. It never offers an edit that the harness refuses: an
+    ignore file is never offered. `suggested`: the first option is an "Edit `<path>`: <change>" that is also the
+    suggested answer, so `accepted` takes it. `unit` and `qid_hint` shape the `l4 questions accept` line."""
+    named = [path for path in sorted(frozen) if names_path(text, path)][:MAX_PATHS_PER_QUESTION]
+    ignored = [path for path in sorted(ignore) if names_path(text, path)][:MAX_PATHS_PER_QUESTION]
+    ignore_rule = "An ignore file is never unfrozen by an answer, whatever it says."
+    if ignored:
+        listed = ", ".join(f"`{path}`" for path in ignored)
+        ignore_rule = f"{listed} is an ignore file: it is never unfrozen by an answer, whatever it says."
     if not named:
         return (
-            f"{NOTE_PREFIX} this task's red tests are frozen, and green may change one only when the answer names its "
-            "path. This question names no frozen test file, so an answer to it cannot unfreeze anything."
+            f"{NOTE_PREFIX} this task's red tests and test-support files are frozen, and green may change one only "
+            "when the answer names its path. This question names no frozen test or support file, so an answer to it "
+            f"cannot unfreeze anything. {ignore_rule}"
         )
     files = ", ".join(f"`{path}`" for path in named)
+    accept = "`accepted` or `answered`"
+    command = " or run `l4 questions accept Q-NNN --unit <unit>`" if qid_hint else ""
+    if command and unit:
+        command = command.replace("<unit>", unit)
     how = (
-        "set **Status** to `accepted` to take option 1, which names the file, or write an answer that names its path"
+        f"set **Status** to {accept} to take option 1, which names the file, or write an answer that names its path"
         if suggested
         else "write an answer that names its path exactly as written here"
     )
     return (
-        f"{NOTE_PREFIX} the red tests of this task are frozen. To let the next green change {files}, {how}, then "
-        "commit and push. An answer that does not name the file leaves it frozen, and an answer edited after a run has "
-        "used it counts as an override and unfreezes nothing."
+        f"{NOTE_PREFIX} the red tests and test-support files of this task are frozen. To let the next green change "
+        f"{files}, {how}{command}, then commit and push. {ignore_rule} An answer that does not name the file leaves "
+        "it frozen, and an answer edited after a run has used it counts as an override and unfreezes nothing."
     )
 
 

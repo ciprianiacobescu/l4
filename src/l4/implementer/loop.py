@@ -18,6 +18,7 @@ from typing import Literal
 
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
+from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.result import ResultQuestion
 from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
@@ -30,6 +31,7 @@ from l4.implementer.tdd import (
 )
 from l4.implementer.unfreeze import unfreeze_note
 from l4.implementer.workbench import Workbench
+from l4.security.protected import glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
 from l4.specs.questions import QUESTIONS_FILENAME, NewQuestion, QuestionKind, QuestionsFile, raise_questions
@@ -46,12 +48,17 @@ class TaskOutcome:
 
 
 def _questions(
-    task: Task, questions: Sequence[ResultQuestion], summary: str, asked: str, frozen: Sequence[str] | None = None
+    task: Task,
+    questions: Sequence[ResultQuestion],
+    summary: str,
+    asked: str,
+    red: RedOutcome | None = None,
+    unit: str | None = None,
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
-    `frozen` is set for a green step (the task's frozen test files): a technical question then ends with the harness's
-    note on how a frozen test is unfrozen (W-C3)."""
+    `red` is set for a green step: a technical question then ends with the harness's note on how a frozen test or
+    support file is unfrozen (W-C3, D7)."""
     if not questions:
         return [
             NewQuestion(
@@ -67,7 +74,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, frozen),
+            context=_with_note(q, red, unit),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -75,12 +82,12 @@ def _questions(
     ]
 
 
-def _with_note(question: ResultQuestion, frozen: Sequence[str] | None) -> str:
-    if frozen is None or question.kind != QuestionKind.TECHNICAL.value:
+def _with_note(question: ResultQuestion, red: RedOutcome | None, unit: str | None) -> str:
+    if red is None or question.kind != QuestionKind.TECHNICAL.value:
         return question.context
     suggested = bool(question.options) and _EDIT_OPTION.match(question.options[0]) is not None
     text = "\n".join((question.title, question.context, *question.options))
-    note = unfreeze_note(text, frozen, suggested=suggested)
+    note = unfreeze_note(text, _frozen_paths(red), ignore=_frozen_ignore(red), suggested=suggested, unit=unit)
     return f"{question.context}\n\n{note}" if question.context else note
 
 
@@ -106,11 +113,11 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
 
 def _raise_blocked(
     wb: Workbench, task: Task, questions: Sequence[ResultQuestion], summary: str, step: int,
-    frozen: Sequence[str] | None = None,
+    red: RedOutcome | None = None,
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    batch = _questions(task, questions, summary, asked, frozen)
+    batch = _questions(task, questions, summary, asked, red, wb.ref.name)
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
@@ -125,6 +132,19 @@ def _raise_blocked(
 
 def _frozen_tests(red: RedOutcome) -> list[str]:
     return [p for p, f in red.manifest.files.items() if f.kind == "test"] if red.manifest else []
+
+
+def _is_ignore(path: str) -> bool:
+    return any(glob_match(glob, path) for glob in IGNORE_FILE_GLOBS)
+
+
+def _frozen_paths(red: RedOutcome) -> list[str]:
+    """The test and support files a person's answer can unfreeze: every manifest file but an ignore file."""
+    return [p for p in red.manifest.files if not _is_ignore(p)] if red.manifest else []
+
+
+def _frozen_ignore(red: RedOutcome) -> list[str]:
+    return [p for p in red.manifest.files if _is_ignore(p)] if red.manifest else []
 
 
 def _hung_frozen(wb: Workbench, red: RedOutcome, done: GreenOutcome) -> list[str]:
@@ -217,14 +237,14 @@ def run_task(wb: Workbench, task: Task) -> TaskOutcome:
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
-                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], _frozen_tests(red))
+                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], red)
                 return TaskOutcome("blocked", "green", ids)
             phase, failure, excerpt = "green", done.reason, done.excerpt
             if hung_frozen := _hung_frozen(wb, red, done):
                 # a frozen test that hangs once the code works is the owner's to edit: no attempt can change it, and
                 # a halt would name nothing (W-D1). A test that is not frozen is retried with the frame in the prompt.
                 question = _hang_question(wb, hung_frozen, done)
-                ids = _raise_blocked(wb, task, [question], done.reason, attempts["green"], _frozen_tests(red))
+                ids = _raise_blocked(wb, task, [question], done.reason, attempts["green"], red)
                 return TaskOutcome("blocked", "green", ids)
         retry = _retry_reason(failure, wb, excerpt)
         failures[phase] += 1
