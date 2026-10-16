@@ -221,3 +221,34 @@ def test_the_feedback_extension_is_recorded_before_unit_resumed():
     orch.resume("again", by="member", signal="label:9", extend_feedback_rounds=1)
     assert [k for k, _ in appended] == ["budget.extended", "unit.resumed"]
     assert appended[0][1] == {"feedback_rounds": 1, "reason": "again", "by": "member", "signal": "label:9"}
+
+
+def test_resume_binds_the_reason_to_the_halted_task_and_says_so(world, capsys):
+    """SCN-OPS-28 for `l4 resume`: `unit.resumed{note_task}` and the `note:` line."""
+    app, remote, run = world
+    run(failing_reds())
+    [tripped] = [e for e in events(remote) if e["type"] == "breaker.tripped"]
+    run_resume(app, unit=UNIT, reason="x" * 301)
+    [resumed] = [e for e in events(remote) if e["type"] == "unit.resumed"]
+    assert resumed["note_task"] == tripped["task"] and "note_fix_unit" not in resumed
+    out = capsys.readouterr().out.splitlines()
+    assert "resume: the reason is longer than 300 characters; the implementer reads the first 300" in out
+    assert out[-1] == f"note: the reason goes to the next steps of task {tripped['task']}"
+
+
+def test_resume_without_note_carries_none(world):
+    """SCN-OPS-30: the sweep's `l4:resume` label calls `resume_unit` without `note`."""
+    from l4.config.redaction import load_app_config
+    from l4.specs.providers import providers_for
+    from l4.state.resume import resume_unit
+    from l4.state.status import refresh_refs, select_runnable
+
+    app, remote, run = world
+    run(failing_reds())
+    app, cfg = load_app_config(app)
+    git = Git(app.repo, environ=app.environ)
+    refresh_refs(app, cfg, git)
+    provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), UNIT)
+    resume_unit(app, cfg, git, provider, ref, reason="label", by="alex", signal="label:1")
+    [resumed] = [e for e in events(remote) if e["type"] == "unit.resumed"]
+    assert "note_task" not in resumed

@@ -349,3 +349,72 @@ def test_a_refusal_is_a_usage_error_before_any_run_start(world, forge):
     argv += ["--config", str(world.app.config_path)]
     assert main(argv, environ=dict(world.app.environ)) == int(ExitCode.USAGE_ERROR)
     assert forge.called("start_run") == []
+
+
+# --- L4-OPS-018: the reason reaches the implementer of the halted task ------------------------------------------------
+
+
+def tripped_task(world):
+    [tripped] = [e for e in events(world.remote) if e["type"] == "breaker.tripped"]
+    return tripped["task"]
+
+
+def test_a_retry_with_a_note_binds_the_reason_to_the_halted_task(world):
+    """SCN-OPS-28: the event carries `note_task`, no `note_fix_unit` for the unit's own task."""
+    world.run(failing_reds())
+    task = tripped_task(world)
+    retry(world, reason="add the keyword with a default", note=True)
+    [retried] = [e for e in events(world.remote) if e["type"] == "unit.retried"]
+    assert retried["note_task"] == task and "note_fix_unit" not in retried
+
+
+def test_a_retry_that_is_not_the_command_carries_no_note(world):
+    """SCN-OPS-30: a label retry, a plan's retry and the sweep call `retry_unit` without `note`."""
+    world.run(failing_reds())
+    retry(world, reason="a member added the label", by="alex", signal="label:7")
+    [retried] = [e for e in events(world.remote) if e["type"] == "unit.retried"]
+    assert "note_task" not in retried and "note_fix_unit" not in retried
+
+
+def test_the_command_prints_the_note_line(world, forge, capsys):
+    world.run(failing_reds())
+    task = tripped_task(world)
+    forge.script_start_run("started")
+    assert command(world) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1] == f"note: the reason goes to the next steps of task {task}"
+    assert out.index("run started on main") < len(out) - 1  # after the retry line (start_run_line)
+
+
+def test_a_stop_that_names_no_task_gives_no_binding_and_the_line(world, forge, capsys):
+    """SCN-OPS-31: `baseline_failed` and `escalated` carry no `halt_task`."""
+    world.run(failing_reds())
+    stamp(
+        world,
+        ("phase.changed", {"from": "implementing", "to": "halted", "reason": "baseline_failed", "detail": "x"}),
+    )
+    forge.script_start_run("started")
+    assert command(world) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "note: the stop names no task, so no implementer step reads the reason"
+    )
+    assert all("note_task" not in e for e in events(world.remote) if e["type"] == "unit.retried")
+
+
+def test_an_escalated_unit_gets_no_binding(world):
+    world.run(failing_reds())
+    escalate(world, spawned=3)
+    retry(world, note=True)
+    [retried] = [e for e in events(world.remote) if e["type"] == "unit.retried"]
+    assert "note_task" not in retried
+
+
+def test_a_reason_over_300_characters_is_said_to_be_cut(world, forge, capsys):
+    world.run(failing_reds())
+    forge.script_start_run("started")
+    argv = ["retry", "--unit", UNIT, "--reason", "x" * 301, "--repo", str(world.app.repo)]
+    assert main([*argv, "--config", str(world.app.config_path)], environ=dict(world.app.environ)) == 0
+    out = capsys.readouterr().out
+    assert "retry: the reason is longer than 300 characters; the implementer reads the first 300" in out
+    [retried] = [e for e in events(world.remote) if e["type"] == "unit.retried"]
+    assert len(retried["reason"]) == 300

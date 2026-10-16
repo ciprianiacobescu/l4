@@ -47,6 +47,7 @@ from l4.vcs.names import unit_branch
 from l4.vcs.refresh import unit_refspecs
 
 log = logging.getLogger("l4.retry")
+NOTE_LIMIT = 300  # the reason that `Orchestrator.resume` records and the prompt block reads
 
 _CONTINUES = frozenset(
     {Phase.INTAKE, Phase.READY, Phase.CLARIFYING, Phase.IMPLEMENTING, Phase.IMPLEMENTED, Phase.VERIFYING,
@@ -81,6 +82,30 @@ def refuse(ref: UnitRef, state: UnitState, cfg: L4Config, relative: str) -> L4Ex
     return L4Exit(ExitCode.USAGE_ERROR, text)
 
 
+def note_binding(state: UnitState) -> tuple[str | None, str | None]:
+    """The task (and fix unit) that a person's note binds to: the one that tripped `max_task_attempts` on a `halted`
+    unit; `(None, None)` for every other stop, which names no task (L4-OPS-018, D11)."""
+    if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
+        return state.halt_task, state.halt_fix_unit
+    return None, None
+
+
+def note_lines(command: str, state: UnitState, reason: str) -> list[str]:
+    """The lines that `l4 retry` and `l4 resume` print about the note, from the state before they recorded: the cut
+    of a long reason, then where the reason goes (L4-OPS-018, D13)."""
+    lines = []
+    if len(reason) > NOTE_LIMIT:
+        cut = f"{command}: the reason is longer than {NOTE_LIMIT} characters"
+        lines.append(f"{cut}; the implementer reads the first {NOTE_LIMIT}")
+    task, _ = note_binding(state)
+    lines.append(
+        f"note: the reason goes to the next steps of task {task}"
+        if task
+        else "note: the stop names no task, so no implementer step reads the reason"
+    )
+    return lines
+
+
 def retry_unit(
     app: AppContext,
     cfg: L4Config,
@@ -92,11 +117,13 @@ def retry_unit(
     signal: str | None = None,
     by: str | None = None,
     rounds: int | None = None,
+    note: bool = False,
 ) -> UnitRunResult:
     """The retry of one unit (design D2), for `l4 retry` and the sweep's `l4:retry` label. It starts no run: the caller
     decides. A phase that a retry cannot move is `L4Exit(USAGE_ERROR)` that says what moves it, before the lease, the
     worktree and the ledger, so nothing is recorded. `rounds`: how many fix (or feedback) rounds an escalated unit at
-    its limit gets (default 1); a unit in another phase has no rounds to add."""
+    its limit gets (default 1); a unit in another phase has no rounds to add. `note=True` (the command, not the sweep or
+    a plan) binds the reason to the task of a unit halted with `max_task_attempts` (L4-OPS-018, D11)."""
     if rounds is not None and rounds < 1:
         raise L4Exit(ExitCode.USAGE_ERROR, "retry: --rounds must be at least 1")
     state = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
@@ -118,9 +145,11 @@ def retry_unit(
             fix = rounds or 1  # the fix-round limit, `same_failure` at the limit included
         elif rounds is not None:
             log.warning("%s has rounds left: --rounds %d is not used", ref.id, rounds)
+    note_task, note_fix_unit = note_binding(state) if note else (None, None)
     return run_unit_in_worktree(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
         resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,
+        note_task=note_task, note_fix_unit=note_fix_unit,
         resume_event="unit.retried", resume_trigger=_EDGE_OF.get(phase, Trigger.RESUMED), resume_what="retry",
     )  # fmt: skip
 
@@ -199,8 +228,12 @@ def run_retry(
     fetch_unit_refs(app, cfg, git)
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
-    result = retry_unit(app, cfg, git, provider, ref, reason=reason, rounds=rounds)
+    before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
+    result = retry_unit(app, cfg, git, provider, ref, reason=reason, rounds=rounds, note=True)
     log.info("%s retried: now %s", unit, result.outcome.phase_after)
     if not no_run and result.exit_code == ExitCode.OK:
         click.echo(app.redactor.redact_text(start_run_line(app, cfg)))
+    if before.phase != Phase.MERGED.value and result.exit_code == ExitCode.OK:  # a merged unit's retry is the archive
+        for line in note_lines("retry", before, reason):
+            click.echo(line)
     return CommandResult(result.exit_code, [result.outcome])
