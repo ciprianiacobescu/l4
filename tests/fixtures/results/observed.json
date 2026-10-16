@@ -1,0 +1,653 @@
+{
+ "version": 1,
+ "comment": "Result objects as the agents wrote them (docs/live write-tool inputs) and six synthetic ones; last_message is the text after the agent's last tool call; expected_fixes are the result.normalized fixes as events. delivered:false = the file was at a wrong path (kept for the normalization test only).",
+ "entries": [
+  {
+   "id": "bigpickle-red-1",
+   "source": "docs/live/artifacts/job-5465/l4-out/agent/r-20261004T1653Z-6780/1.1-red-1",
+   "model": "opencode/big-pickle",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-f9d3de63",
+     "C-380cc1c1",
+     "C-def5ffbb",
+     "C-9179b0c9",
+     "C-e48840fe"
+    ],
+    "tests_added": [
+     "tests/test_split.py::test_split_amount_splits_ten_into_three",
+     "tests/test_split.py::test_split_amount_splits_evenly",
+     "tests/test_split.py::test_split_amount_splits_one_cent_into_two_parts",
+     "tests/test_split.py::test_split_amount_rejects_zero_parts",
+     "tests/test_split.py::test_split_amount_rejects_negative_amount"
+    ],
+    "files_changed": [
+     "src/pricing/split.py",
+     "src/pricing/__init__.py",
+     "tests/test_split.py"
+    ]
+   },
+   "last_message": "Now writing the result object:\nRED phase complete.\n\n- `src/pricing/split.py`: signature-only stub `split_amount(amount, parts) -> list[Decimal]` whose body is exactly `raise NotImplementedError`; re-exported from `pricing` (`__init__.py`, `__all__`).\n- `tests/test_split.py`: one test per scenario, all importing via `from pricing import split_amount`.\n- Gate: 5 new tests fail with `NotImplementedError`, 15 pre-existing tests pass; `ruff check --extend-exclude .l4 .` clean.\n- Result JSON written to `/home/gitlab-runner/.cache/l4/units/openspec/add-split-amount/agent-tmp/result.json`.",
+   "changed_files": [
+    "src/pricing/__init__.py",
+    "src/pricing/split.py",
+    "tests/test_split.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "status",
+     "fix": "set",
+     "to": "done"
+    },
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "bigpickle-red-2",
+   "source": "docs/live/artifacts/job-5465/l4-out/agent/r-20261004T1653Z-6780/1.1-red-2",
+   "model": "opencode/big-pickle",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-f9d3de63",
+     "C-380cc1c1",
+     "C-def5ffbb",
+     "C-9179b0c9",
+     "C-e48840fe"
+    ],
+    "tests_added": [
+     "tests/test_split.py::test_split_ten_into_three",
+     "tests/test_split.py::test_split_even",
+     "tests/test_split.py::test_split_one_cent_two_parts",
+     "tests/test_split.py::test_split_zero_parts_raises",
+     "tests/test_split.py::test_split_negative_amount_raises"
+    ],
+    "files_changed": [
+     {
+      "path": "tests/test_split.py",
+      "kind": "test"
+     },
+     {
+      "path": "src/pricing/split.py",
+      "kind": "source_stub"
+     },
+     {
+      "path": "src/pricing/__init__.py",
+      "kind": "source"
+     }
+    ]
+   },
+   "last_message": "Added red tests and minimal stubs for split amount; new tests fail as expected; existing tests still pass; ruff clean. Results written to result.json.",
+   "changed_files": [
+    "src/pricing/__init__.py",
+    "src/pricing/split.py",
+    "tests/test_split.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "files_changed",
+     "fix": "replaced"
+    },
+    {
+     "field": "status",
+     "fix": "set",
+     "to": "done"
+    },
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "bigpickle-red-3",
+   "source": "docs/live/artifacts/job-5465/l4-out/agent/r-20261004T1653Z-6780/1.1-red-3",
+   "model": "opencode/big-pickle",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-f9d3de63",
+     "C-380cc1c1",
+     "C-def5ffbb",
+     "C-9179b0c9",
+     "C-e48840fe"
+    ],
+    "tests_added": [
+     "tests/test_split.py::test_split_amount_of_ten_into_three_parts",
+     "tests/test_split.py::test_split_amount_even_split_has_two_decimal_parts",
+     "tests/test_split.py::test_split_amount_of_one_cent_into_two_parts",
+     "tests/test_split.py::test_split_amount_with_zero_parts_raises_value_error",
+     "tests/test_split.py::test_split_amount_with_negative_amount_raises_value_error"
+    ],
+    "files_changed": [
+     "tests/test_split.py",
+     "src/pricing/split.py",
+     "src/pricing/__init__.py"
+    ],
+    "notes": "All five criteria scenarios are mutually consistent and were checked against each other and against existing behaviour before writing tests; no contradictions, so nothing was left open. Tests fail with NotImplementedError from the signature-only stub in src/pricing/split.py; the 15 pre-existing tests still pass. src/pricing/__init__.py only re-exports the stub (import + __all__ entry) so the tests can import split_amount from the pricing package as the task requires. `uv run` and `rm -f` were not used; only .venv/bin/python -m pytest --junitxml=.l4-out/junit.xml and .venv/bin/ruff check --extend-exclude .l4 . were run."
+   },
+   "last_message": "RED phase complete.\n\n**Consistency check first:** all five scenarios agree with each other and with the requirement sentence (verified `10.00/3`, `9/3`, `0.01/2` arithmetic under ROUND_HALF_UP → `3.34/3.33/3.33`, `3.00×3`, `0.01/0.00`). No contradictions, and the change has no `design.md`, so no open questions to escalate.\n\n**Files changed:**\n- `tests/test_split.py` (new) — 5 tests, one per criterion, each calling `split_amount` and asserting on its result\n- `src/pricing/split.py` (new) — signature-only stub, body is exactly `raise NotImplementedError`\n- `src/pricing/__init__.py` — re-export of the stub (`split_amount` in the import block and `__all__`), so the tests import it from `pricing` as the task specifies\n\n**Gates:**\n- `.venv/bin/python -m pytest --junitxml=.l4-out/junit.xml` → **5 failed, 15 passed** — all new tests fail on the stub as required for RED; no pre-existing test regressed\n- `.venv/bin/ruff check --extend-exclude .l4 .` → All checks passed\n\nResult JSON written to `/home/gitlab-runner/.cache/l4/units/openspec/add-split-amount/agent-tmp/result.json` (valid JSON, all 5 criteria and 5 node ids).",
+   "changed_files": [
+    "src/pricing/__init__.py",
+    "src/pricing/split.py",
+    "tests/test_split.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "notes_for_verifier",
+     "fix": "renamed",
+     "from": "notes"
+    },
+    {
+     "field": "status",
+     "fix": "set",
+     "to": "done"
+    },
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "nemotron-red-1",
+   "source": "docs/live/artifacts/free-impl-nemotron-lightning-shelf/l4-out/agent/r-20261006T1943Z-0b38/1.1-red-1",
+   "model": "opencode/nemotron-3.5-lightning-free",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "status": "failed",
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-7dc9fae5",
+     "C-fa2e5d61"
+    ],
+    "tests_added": [
+     "tests.test_shelf.test_shelf_code_is_zero_padded",
+     "tests.test_shelf.test_shelf_code_raises_value_error_for_aisle_below_1"
+    ],
+    "suppressions": [],
+    "files_changed": [
+     "src/inventory/shelf.py",
+     "tests/test_shelf.py"
+    ]
+   },
+   "last_message": "**RED phase complete.** Summary of what was done:\n\n**Files created:**\n- `src/inventory/shelf.py` — stub `shelf_code(aisle, slot)` function whose body is `raise NotImplementedError`\n- `tests/test_shelf.py` — two pytest tests tagged with the unit criteria IDs\n\n**Tests verified:** Both tests fail with `NotImplementedError` from the stub, which is the expected RED-phase behavior. Ruff lint check passes with no issues.\n\n**Result JSON** written to `agent-tmp/result.json` with:\n- `status`: `failed` (implementation not yet complete)\n- `phase`: `red`\n- `task_ids`: `[\"1.1\"]`\n- `criteria_ids`: `[\"C-7dc9fae5\", \"C-fa2e5d61\"]`\n- `tests_added`: the two pytest node ids",
+   "changed_files": [
+    "src/inventory/shelf.py",
+    "tests/test_shelf.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "nemotron-red-3",
+   "source": "docs/live/artifacts/free-impl-nemotron-lightning-shelf/l4-out/agent/r-20261006T1943Z-0b38/1.1-red-3",
+   "model": "opencode/nemotron-3.5-lightning-free",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "status": "done",
+    "phase": "green",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-7dc9fae5",
+     "C-fa2e5d61"
+    ],
+    "tests_added": [
+     "tests/test_shelf.py::test_shelf_code_aisle_slot_return_zero_padded_code",
+     "tests/test_shelf.py::test_shelf_code_raises_when_aisle_below_1"
+    ],
+    "tdd_exemption": {
+     "reason": "already_satisfied by task 1.1"
+    },
+    "files_changed": [
+     "tests/test_shelf.py"
+    ],
+    "notes_for_verifier": "Added @pytest.mark.l4 tags to existing tests and fixed ruff B011 assert False patterns by using pytest.raises(ValueError). The shelf_code implementation already existed."
+   },
+   "last_message": "All checks pass. The result JSON has been written to the expected location.\n outputs done.",
+   "changed_files": [
+    "tests/test_shelf.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "phase",
+     "fix": "replaced"
+    },
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "magnitude-job5963-red-1",
+   "source": "docs/live/m113/a-job-5963-l4-out/agent/r-20261007T0601Z-17c1/1.1-red-1",
+   "model": "magnitude/qwen3.6-35b-a3b",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "status": "red",
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-97b5cb90",
+     "C-b2a1936c"
+    ],
+    "tests_added": [
+     "tests/test_pallets.py::test_units_fill_whole_pallets",
+     "tests/test_pallets.py::test_partly_filled_last_pallet"
+    ],
+    "suppressions": null,
+    "files_changed": [
+     "src/inventory/pallets.py",
+     "tests/test_pallets.py"
+    ],
+    "summary": "Phase RED complete. Created src/inventory/pallets.py with NotImplementedError stub and tests/test_pallets.py with 2 tests covering both criteria. Both tests fail with NotImplementedError as expected.",
+    "questions": null,
+    "lesson_proposals": null,
+    "notes_for_verifier": null,
+    "tdd_exemption": null
+   },
+   "last_message": "Phase RED complete:\n\n- **`src/inventory/pallets.py`** — stub module with `pallet_count(units, per_pallet)` raising `NotImplementedError`\n- **`tests/test_pallets.py`** — 2 tests tagged with `@pytest.mark.l4(\"C-97b5cb90\")` and `@pytest.mark.l4(\"C-b2a1936c\")`, both fail with `NotImplementedError`\n- Lint passes, tests fail as required",
+   "changed_files": [
+    "src/inventory/pallets.py",
+    "tests/test_pallets.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "status",
+     "fix": "set",
+     "to": "done",
+     "was": "red"
+    }
+   ]
+  },
+  {
+   "id": "magnitude-job5963-red-2",
+   "source": "docs/live/m113/a-job-5963-l4-out/agent/r-20261007T0601Z-17c1/1.1-red-2",
+   "model": "magnitude/qwen3.6-35b-a3b",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": true,
+   "synthetic": false,
+   "object": {
+    "status": "red",
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-97b5cb90",
+     "C-b2a1936c"
+    ],
+    "summary": "Phase RED complete. Created src/inventory/pallets.py with NotImplementedError stub and tests/test_pallets.py with 2 tests covering both criteria. Both tests fail with NotImplementedError as expected.",
+    "tests_added": [
+     "tests/test_pallets.py::test_units_fill_whole_pallets",
+     "tests/test_pallets.py::test_a_partly_filled_last_pallet"
+    ],
+    "suppressions": null,
+    "files_changed": [
+     "src/inventory/pallets.py",
+     "tests/test_pallets.py"
+    ],
+    "notes_for_verifier": "Tests fail with NotImplementedError as required for RED phase. Both criteria C-97b5cb90 and C-b2a1936c are covered. Ready for GREEN phase implementation."
+   },
+   "last_message": "Phase RED complete. Result written to `.l4-result/result.json`:\n\n- **status**: `red`\n- **phase**: `red`\n- **task_ids**: `[\"1.1\"]`\n- **criteria_ids**: `[\"C-97b5cb90\", \"C-b2a1936c\"]`\n- **tests_added**: `tests/test_pallets.py::test_units_fill_whole_pallets`, `tests/test_pallets.py::test_a_partly_filled_last_pallet`\n- **files_changed**: `src/inventory/pallets.py` (stub), `tests/test_pallets.py` (tests)\n- Both tests fail with `NotImplementedError` as expected",
+   "changed_files": [
+    "src/inventory/pallets.py",
+    "tests/test_pallets.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "status",
+     "fix": "set",
+     "to": "done",
+     "was": "red"
+    }
+   ]
+  },
+  {
+   "id": "magnitude-earlier-red-3",
+   "source": "docs/live/magnitude/agent/1.1-red-3",
+   "model": "magnitude/qwen3.6-35b-a3b",
+   "phase": "red",
+   "task": "1.1",
+   "delivered": false,
+   "synthetic": false,
+   "object": {
+    "status": "red",
+    "phase": "red",
+    "task_ids": [
+     "1.1"
+    ],
+    "criteria_ids": [
+     "C-97b5cb90",
+     "C-b2a1936c"
+    ],
+    "tests_added": [
+     "tests/test_pallets.py::test_units_fill_whole_pallets",
+     "tests/test_pallets.py::test_partly_filled_last_pallet"
+    ],
+    "suppressions": null,
+    "files_changed": [
+     "src/inventory/pallets.py",
+     "tests/test_pallets.py"
+    ],
+    "summary": "RED phase complete. Created stub src/inventory/pallets.py with NotImplementedError and tests/test_pallets.py with 2 tests covering both criteria. Both tests fail with NotImplementedError as expected.",
+    "notes_for_verifier": "2 tests added, both failing with NotImplementedError. Ready for GREEN phase implementation.",
+    "suppressions_list": null,
+    "lesson_proposals": null,
+    "questions": null,
+    "tdd_exemption": null
+   },
+   "last_message": "Phase RED complete for task 1.1:\n\n- Created `src/inventory/pallets.py` with `pallet_count()` stub (`raise NotImplementedError`)\n- Created `tests/test_pallets.py` with 2 tests:\n  - `test_units_fill_whole_pallets` — covers C-97b5cb90 (100 units / 50 per pallet = 2)\n  - `test_partly_filled_last_pallet` — covers C-b2a1936c (101 units / 50 per pallet = 3)\n- Both tests fail with `NotImplementedError` as required\n- Lint checks pass",
+   "changed_files": [
+    "src/inventory/pallets.py",
+    "tests/test_pallets.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "status",
+     "fix": "set",
+     "to": "done",
+     "was": "red"
+    }
+   ]
+  },
+  {
+   "id": "deepseek-no-summary-1",
+   "source": "synthetic: built from a result failure of opencode-go/deepseek-v4.1-flash on a public consumer repository (design section 1.6)",
+   "model": "opencode-go/deepseek-v4.1-flash",
+   "phase": "red",
+   "task": "3.1",
+   "delivered": true,
+   "synthetic": true,
+   "object": {
+    "status": "done",
+    "phase": "red",
+    "task_ids": [
+     "3.1"
+    ],
+    "criteria_ids": [
+     "C-5e6f7a8b"
+    ],
+    "tests_added": [
+     "tests/test_example.py::test_example"
+    ],
+    "files_changed": [
+     "src/example.py",
+     "tests/test_example.py"
+    ]
+   },
+   "last_message": "Added the tests for the new rule and a minimal stub; the new tests fail as expected and the others still pass.",
+   "changed_files": [
+    "src/example.py",
+    "tests/test_example.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "deepseek-no-summary-2",
+   "source": "synthetic: built from a result failure of opencode-go/deepseek-v4.1-flash on a public consumer repository (design section 1.6)",
+   "model": "opencode-go/deepseek-v4.1-flash",
+   "phase": "green",
+   "task": "3.1",
+   "delivered": true,
+   "synthetic": true,
+   "object": {
+    "status": "done",
+    "phase": "green",
+    "task_ids": [
+     "3.1"
+    ],
+    "criteria_ids": [
+     "C-5e6f7a8b"
+    ],
+    "tests_added": [
+     "tests/test_example.py::test_example"
+    ],
+    "files_changed": [
+     "src/example.py",
+     "tests/test_example.py"
+    ]
+   },
+   "last_message": "Added the tests for the new rule and a minimal stub; the new tests fail as expected and the others still pass.",
+   "changed_files": [
+    "src/example.py",
+    "tests/test_example.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "deepseek-no-summary-3",
+   "source": "synthetic: built from a result failure of opencode-go/deepseek-v4.1-flash on a public consumer repository (design section 1.6)",
+   "model": "opencode-go/deepseek-v4.1-flash",
+   "phase": "red",
+   "task": "3.1",
+   "delivered": true,
+   "synthetic": true,
+   "object": {
+    "status": "done",
+    "phase": "red",
+    "task_ids": [
+     "3.1"
+    ],
+    "criteria_ids": [
+     "C-5e6f7a8b"
+    ],
+    "tests_added": [
+     "tests/test_example.py::test_example"
+    ],
+    "files_changed": [
+     "src/example.py",
+     "tests/test_example.py"
+    ],
+    "notes_for_verifier": "The stub raises NotImplementedError."
+   },
+   "last_message": "Added the tests for the new rule and a minimal stub; the new tests fail as expected and the others still pass.",
+   "changed_files": [
+    "src/example.py",
+    "tests/test_example.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    }
+   ]
+  },
+  {
+   "id": "deepseek-notes-2417",
+   "source": "synthetic: built from a result failure of opencode-go/deepseek-v4.1-flash on a public consumer repository (design section 1.6)",
+   "model": "opencode-go/deepseek-v4.1-flash",
+   "phase": "red",
+   "task": "3.1",
+   "delivered": true,
+   "synthetic": true,
+   "object": {
+    "status": "done",
+    "phase": "red",
+    "task_ids": [
+     "3.1"
+    ],
+    "criteria_ids": [
+     "C-5e6f7a8b"
+    ],
+    "tests_added": [
+     "tests/test_example.py::test_example"
+    ],
+    "files_changed": [
+     "src/example.py",
+     "tests/test_example.py"
+    ],
+    "summary": "Added two tests and a stub.",
+    "notes_for_verifier": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+   },
+   "last_message": "Added the tests for the new rule and a minimal stub; the new tests fail as expected and the others still pass.",
+   "changed_files": [
+    "src/example.py",
+    "tests/test_example.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "notes_for_verifier",
+     "fix": "cut",
+     "length": 2417
+    }
+   ]
+  },
+  {
+   "id": "deepseek-no-summary-and-notes-2417",
+   "source": "synthetic: built from a result failure of opencode-go/deepseek-v4.1-flash on a public consumer repository (design section 1.6)",
+   "model": "opencode-go/deepseek-v4.1-flash",
+   "phase": "green",
+   "task": "3.1",
+   "delivered": true,
+   "synthetic": true,
+   "object": {
+    "status": "done",
+    "phase": "green",
+    "task_ids": [
+     "3.1"
+    ],
+    "criteria_ids": [
+     "C-5e6f7a8b"
+    ],
+    "tests_added": [
+     "tests/test_example.py::test_example"
+    ],
+    "files_changed": [
+     "src/example.py",
+     "tests/test_example.py"
+    ],
+    "notes_for_verifier": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+   },
+   "last_message": "Added the tests for the new rule and a minimal stub; the new tests fail as expected and the others still pass.",
+   "changed_files": [
+    "src/example.py",
+    "tests/test_example.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "summary",
+     "fix": "set",
+     "from": "final_message"
+    },
+    {
+     "field": "notes_for_verifier",
+     "fix": "cut",
+     "length": 2417
+    }
+   ]
+  },
+  {
+   "id": "deepseek-suppression-reason-350",
+   "source": "synthetic: built from a result failure of opencode-go/deepseek-v4.1-flash on a public consumer repository (design section 1.6)",
+   "model": "opencode-go/deepseek-v4.1-flash",
+   "phase": "red",
+   "task": "3.1",
+   "delivered": true,
+   "synthetic": true,
+   "object": {
+    "status": "done",
+    "phase": "red",
+    "task_ids": [
+     "3.1"
+    ],
+    "criteria_ids": [
+     "C-5e6f7a8b"
+    ],
+    "tests_added": [
+     "tests/test_example.py::test_example"
+    ],
+    "files_changed": [
+     "src/example.py",
+     "tests/test_example.py"
+    ],
+    "summary": "Added two tests and a stub.",
+    "suppressions": [
+     {
+      "file": "src/example.py",
+      "line": 12,
+      "rule": "E501",
+      "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     }
+    ]
+   },
+   "last_message": "Added the tests for the new rule and a minimal stub; the new tests fail as expected and the others still pass.",
+   "changed_files": [
+    "src/example.py",
+    "tests/test_example.py"
+   ],
+   "expected_fixes": [
+    {
+     "field": "suppressions.reason",
+     "fix": "cut",
+     "length": 350
+    }
+   ]
+  }
+ ]
+}

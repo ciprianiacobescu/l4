@@ -1,5 +1,3 @@
-import pytest
-
 from l4.agents.base import RunResult, Usage
 from l4.agents.fake import FakeAdapter, Step
 from l4.implementer import normalize as n
@@ -36,13 +34,9 @@ def test_fix_event_writes_from_and_leaves_out_none():
     }  # fmt: skip
 
 
-def test_constants_and_stubs():
+def test_constants():
     assert n.CUT_MARKER.format(n=5) == "[cut by L4: 5 characters removed]"
     assert n.SCAN_CHARS == 200_000 and n.NO_SUMMARY.startswith("(no summary")
-    with pytest.raises(NotImplementedError):
-        n.last_result_object("")
-    with pytest.raises(NotImplementedError):
-        n.normalize(n.Found({}, "result"), n.StepFacts("red", None, (), None))
 
 
 def test_fake_adapter_passes_the_new_fields(tmp_path):
