@@ -1,17 +1,25 @@
 """run-liveness wave 2 (Agent I): the heartbeat and the idle watchdog in `agent_step` (L4-IMP-023, L4-IMP-024) and the
 red note of the red gate (L4-OBS-004)."""
 
+import json
 import logging
+import os
+import re
+import sys
+from dataclasses import replace
 
 import pytest
 
-from l4.agents.activity import Beat
-from l4.agents.fake import Step
+from l4.agents.activity import Beat, codex_signals
+from l4.agents.base import RunRequest, RunResult
+from l4.agents.fake import FakeAdapter, Step
+from l4.agents.proc import ProcOutcome, ProcRunner
 from l4.gates.junit import TestCase, TestReport
 from l4.implementer.loop import run_task
 from l4.implementer.tdd import red_note, run_red
 
 from .conftest import green_step, red_step
+from .test_escalation import TWO, Hook
 from .test_tdd_red import TASK
 
 
@@ -166,3 +174,139 @@ def test_green_and_single_pass_no_note(name):
     import l4.implementer.tdd as tdd
 
     assert "note=" not in inspect.getsource(getattr(tdd, name))
+
+
+# --- end to end: a real ProcRunner under agent_step (run-liveness 3.1, 3.2) ---
+
+
+class ScriptAdapter(FakeAdapter):
+    """Runs a Python script through a real `ProcRunner` with `codex_signals` and maps a stall to `timeout`, as the
+    codex adapter does. It writes no result, so a run that is not stopped still fails the attempt."""
+
+    def __init__(self, scripts: list[str]) -> None:
+        super().__init__([])
+        self.scripts = scripts
+        self.reader = codex_signals  # `None`: a `command` profile, which has no stream reader
+        self.outcomes: list[ProcOutcome] = []
+
+    def run(self, req: RunRequest) -> RunResult:
+        self.requests.append(req)
+        req.raw_events_path.parent.mkdir(parents=True, exist_ok=True)
+        outcome = ProcRunner().run(
+            [sys.executable, "-c", self.scripts.pop(0)], dict(os.environ), req.cwd,
+            stdout_path=req.raw_events_path, timeout_s=req.timeout_s, stall_timeout_s=req.stall_timeout_s,
+            watch=req.watch, reader=self.reader,
+        )  # fmt: skip
+        self.outcomes.append(outcome)
+        status = "timeout" if outcome.timed_out or outcome.stalled else "ok"
+        return RunResult(status=status, raw_events_path=req.raw_events_path, exit_code=outcome.returncode)
+
+
+STARTED = json.dumps({"type": "item.started", "item": {"id": "i1", "type": "command_execution"}})
+OPEN_CALL = f"import time; print({STARTED!r}, flush=True); time.sleep(4)"
+SILENT = "import time; print('{}', flush=True); time.sleep(4)"
+
+
+def _fast(bench, adapter: ScriptAdapter) -> None:
+    """A 1s heartbeat and a 2s idle limit (the config minimums apply to a loaded config only)."""
+    impl = bench.wb.cfg.implementer.model_copy(update={"heartbeat": "1s", "idle_timeout": "2s"})
+    bench.wb.cfg = bench.wb.cfg.model_copy(update={"implementer": impl})
+    bench.wb.selected = replace(bench.wb.selected, impl=adapter)
+
+
+def test_an_open_call_is_not_idle_and_the_beats_are_logged(make_bench, caplog):
+    """SCN-IMP-203 end to end: the codex call is open for 4s, the limit is 2s."""
+    bench = make_bench([])
+    adapter = ScriptAdapter([OPEN_CALL])
+    _fast(bench, adapter)
+    with caplog.at_level(logging.INFO, logger="l4"):
+        outcome = run_red(bench.wb, TASK, attempt=1)
+    [proc] = adapter.outcomes
+    assert not proc.stalled and not proc.timed_out
+    assert not bench.events("agent.idle")
+    assert "no activity" not in outcome.reason
+    beats = [r.getMessage() for r in caplog.records if r.name == "l4" and "working" in r.getMessage()]
+    assert len(beats) >= 2
+    assert all("1 tool call" in b for b in beats)
+    assert any("1 tool call open for" in b for b in beats)
+
+
+def test_a_silent_agent_is_stopped_and_idle_is_recorded(make_bench):
+    """SCN-IMP-202 and SCN-IMP-203 end to end: one line, no open call, then silence."""
+    bench = make_bench([])
+    adapter = ScriptAdapter([SILENT])
+    _fast(bench, adapter)
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    [proc] = adapter.outcomes
+    assert proc.stalled
+    [idle] = bench.events("agent.idle")
+    assert (idle["task"], idle["phase"], idle["attempt"]) == ("1.1", "red", 1)
+    assert idle["silent_s"] >= 2
+    assert outcome.reason == "the agent showed no activity for 2s (implementer.idle_timeout), so L4 stopped it"
+    [finished] = bench.events("agent.finished")
+    assert finished["status"] == "timeout"
+
+
+def test_two_idle_attempts_move_the_phase_to_the_second_profile(make_bench):
+    """SCN-IMP-202, the escalation part: an idle attempt is a failed attempt and counts for `escalate_after`."""
+    bench = make_bench(
+        [Step(idle_s=600, status="timeout")] * 2 + [red_step(), green_step()],
+        implementer={"escalate_after": 2}, **TWO,
+    )  # fmt: skip
+    hook = Hook()
+    outcome = run_task(bench.wb, TASK, escalate=hook)
+    assert outcome.status == "done"
+    [request] = hook.requests
+    assert (request.task, request.phase, request.profile, request.attempt) == ("1.1", "red", "impl", 3)
+    assert len(bench.events("agent.idle")) == 2
+    assert not bench.events("role.limit") and not bench.events("limit.hit")
+    assert [(e["phase"], e["agent"], e["attempt"]) for e in bench.events("step.started")] == [
+        ("red", "impl", 1), ("red", "impl", 2), ("red", "impl-b", 3), ("green", "impl-b", 1),
+    ]  # fmt: skip
+
+
+# --- SCN-IMP-201 at the bench (run-liveness 4.1) ---
+
+STEP = "import time; print('output', flush=True); time.sleep(2.5)"
+
+
+def _beats(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "l4" and " working " in r.getMessage()]
+
+
+def test_no_heartbeat_when_it_is_off(make_bench, caplog):
+    bench = make_bench([])
+    adapter = ScriptAdapter([STEP])
+    _fast(bench, adapter)
+    bench.wb.cfg = bench.wb.cfg.model_copy(
+        update={"implementer": bench.wb.cfg.implementer.model_copy(update={"heartbeat": "0", "idle_timeout": "0"})}
+    )
+    with caplog.at_level(logging.INFO, logger="l4"):
+        run_red(bench.wb, TASK, attempt=1)
+    assert len(adapter.outcomes) == 1 and _beats(caplog) == []
+
+
+def test_no_heartbeat_when_the_step_ends_before_the_first_interval(make_bench, caplog):
+    bench = make_bench([])
+    adapter = ScriptAdapter(["print('output')"])
+    _fast(bench, adapter)
+    bench.wb.cfg = bench.wb.cfg.model_copy(
+        update={"implementer": bench.wb.cfg.implementer.model_copy(update={"heartbeat": "60s"})}
+    )
+    with caplog.at_level(logging.INFO, logger="l4"):
+        run_red(bench.wb, TASK, attempt=1)
+    assert len(adapter.outcomes) == 1 and _beats(caplog) == []
+
+
+def test_a_command_profile_shows_the_elapsed_time_and_no_count(make_bench, caplog):
+    bench = make_bench([])
+    adapter = ScriptAdapter([STEP])
+    adapter.reader = None
+    _fast(bench, adapter)
+    with caplog.at_level(logging.INFO, logger="l4"):
+        run_red(bench.wb, TASK, attempt=1)
+    beats = _beats(caplog)
+    profile = bench.wb.selected.profile_name
+    assert beats and all(b.startswith(f"{bench.wb.ref.id} task 1.1 red attempt 1: {profile} working ") for b in beats)
+    assert not any("tool call" in b or "last activity" in b for b in beats)
+    assert all(re.search(r"working \d+s$", b) for b in beats)
