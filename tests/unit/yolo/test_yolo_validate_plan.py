@@ -106,6 +106,7 @@ def test_the_script_needs_only_the_standard_library_and_loads_no_other_module():
         "os",
         "re",
         "stat",
+        "subprocess",
         "sys",
         "pathlib",
     }
@@ -123,7 +124,7 @@ def test_the_script_needs_only_the_standard_library_and_loads_no_other_module():
     assert done.stdout.strip() == "[] False False False"
 
 
-def test_it_writes_nothing_and_never_runs_git(repo):
+def test_it_writes_nothing_and_runs_only_a_read_only_git_ls_files(repo):
     for name in ("a", "b"):
         change(repo, name)
     put(repo, plan("p1", [units("openspec:a")]))
@@ -131,7 +132,8 @@ def test_it_writes_nothing_and_never_runs_git(repo):
     run(repo)
     assert sorted((p.relative_to(repo).as_posix(), p.stat().st_mtime_ns) for p in repo.rglob("*")) == before
     source = SCRIPT.read_text(encoding="utf-8")
-    assert "subprocess" not in source and "socket" not in source and "urllib" not in source
+    assert "socket" not in source and "urllib" not in source
+    assert source.count("subprocess.run(") == 1 and '"ls-files"' in source  # the one call: git ls-files
     assert "write_text" not in source and "open(" not in source
 
 
@@ -1267,3 +1269,47 @@ def test_a_crlf_delta_is_checked_for_baseline_and_purpose(repo):
     _, out, err = run(repo)
     assert "spec_no_baseline" in out + err
     assert "spec_no_purpose" not in out + err
+
+
+def git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=repo, check=True, capture_output=True
+    )
+
+
+def test_ignored_files_do_not_count_but_tracked_and_untracked_ones_do(repo):
+    change(repo, "a")
+    git(repo, "init", "-q")
+    touch(repo, ".gitignore", "ignored/\n*.log\n")
+    touch(repo, "openspec/changes/a/ignored/big.md", "x" * 90_000)
+    touch(repo, "openspec/changes/a/build.log", "x" * 90_000)
+    touch(repo, "openspec/changes/a/tracked.md", "t" * 10)
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "x")
+    touch(repo, "openspec/changes/a/untracked.md", "u" * 15_000)  # not ignored: the review sees it
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] == 0  # the ignored 180 000 characters are not counted
+    touch(repo, "openspec/changes/a/more.md", "m" * 19_000)
+    touch(repo, "openspec/changes/a/more2.md", "m" * 19_000)
+    touch(repo, "openspec/changes/a/more3.md", "m" * 19_000)
+    touch(repo, "openspec/changes/a/more4.md", "m" * 19_000)
+    code, out, _ = run(repo)
+    assert code == 1 and "material_over_budget" in out and "ignored" not in out and "build.log" not in out
+
+
+def test_a_tracked_file_that_was_deleted_is_skipped_not_a_crash(repo):
+    change(repo, "a")
+    git(repo, "init", "-q")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "x")
+    (repo / "openspec/changes/a/proposal.md").unlink()
+    put(repo, plan("p1", [units("openspec:a")]))
+    assert run(repo)[0] in (0, 1)
+
+
+def test_yaml_integers_with_underscores_are_accepted_in_yolo_review(repo):
+    config(repo, "yolo:\n  review:\n    max_file_chars: 30_000\n    max_folder_chars: 1_000_000\n")
+    limits, warnings = vp.read_review_limits(repo)
+    assert limits[0] == 30_000 and limits[1] == 1_000_000 and warnings == []
+    config(repo, "yolo:\n  review:\n    max_file_chars: 30__000\n    max_folder_chars: _30\n")
+    assert len(vp.read_review_limits(repo)[1]) == 2

@@ -5,7 +5,9 @@
                              [--openspec-root DIR] [--kiro-root DIR] [--json]
 
 It reads every `.l4/plans/*.json`, finds the specs the way the harness's providers do, and reports what `l4 yolo check`
-would report without git, a network or a model (yolo-mode design D15, requirement L4-YOLO-019). It never writes.
+would report without a network or a model (yolo-mode design D15, requirement L4-YOLO-019). It never writes. Git is
+optional: in a work tree it runs `git ls-files -co --exclude-standard` (read-only) to count only the files the review
+sees; without git every file counts.
 
 Exit 0: everything is valid. Exit 1: one line per problem, `<plan id>: <code>: <subject>: <text>`, or for the coverage
 problems `uncovered: <unit> (...)` and `covered_twice: <unit> (...)`. Exit 2: a usage or read error.
@@ -28,6 +30,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -285,14 +288,34 @@ class FolderRead:
         self.binary: list[str] = []
 
 
+def _git_files(repo: Path, folder: str) -> list[str] | None:
+    """What the review sees below `folder`: the tracked files and the untracked ones that git does not ignore
+    (`git ls-files -co --exclude-standard`), or None when git is missing or `repo` is not a work tree."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "-z", "-co", "--exclude-standard", "--", folder],
+            capture_output=True, timeout=60, check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    names = [n.decode("utf-8", "surrogateescape") for n in done.stdout.split(b"\0") if n]
+    return sorted(set(names))
+
+
 def _folder_files(repo: Path, folder: str) -> list[str]:
-    """Every file below `folder` (repository paths), a symlink as a file, in UTF-8 byte order of the path."""
-    base = repo.joinpath(*Path(folder).parts)
-    found: list[str] = []
-    for current, dirs, names in os.walk(base):
-        here = Path(current)
-        for name in [*names, *(d for d in dirs if (here / d).is_symlink())]:
-            found.append((here / name).relative_to(repo).as_posix())
+    """Every file below `folder` that the review reads (repository paths), a symlink as a file, in UTF-8 byte order of
+    the path: in a git work tree the tracked files and the untracked files that are not ignored (a file in
+    `.gitignore` is not in the review's material), else every file."""
+    found = _git_files(repo, folder.strip("/") or ".")
+    if found is None:
+        base = repo.joinpath(*Path(folder).parts)
+        found = []
+        for current, dirs, names in os.walk(base):
+            here = Path(current)
+            for name in [*names, *(d for d in dirs if (here / d).is_symlink())]:
+                found.append((here / name).relative_to(repo).as_posix())
     return sorted(found, key=lambda path: path.encode("utf-8", "surrogateescape"))
 
 
@@ -518,7 +541,7 @@ def read_review_limits(repo: Path) -> tuple[tuple[int, int, int], list[str]]:
         raw = (section or {}).get(key)
         if raw is None:
             continue
-        if isinstance(raw, str) and re.fullmatch(r"-?[0-9]+", raw) and int(raw) >= floor:
+        if isinstance(raw, str) and re.fullmatch(r"-?[0-9]+(?:_[0-9]+)*", raw) and int(raw) >= floor:
             limits[key] = int(raw)
         else:
             warnings.append(
@@ -1166,7 +1189,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="validate_plan.py",
         description="Validate the delivery plans in .l4/plans of a working tree: schema, graph, order, waves and "
-        "coverage. Python standard library only; it never writes, runs git or uses the network.",
+        "coverage. Python standard library only; it never writes or uses the network; its only subprocess is a "
+        "read-only `git ls-files`, to count the files the review sees.",
         epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
