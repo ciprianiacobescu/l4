@@ -44,6 +44,8 @@ class Step:
     last_message: str | None = None  # the text after the last tool call, as an adapter reports it
     rejected: dict[str, Any] | None = None  # a structured reply the schema refused
     result_problem: Literal["missing", "not_json", "not_object", "invalid"] | None = None
+    context_peak_tokens: int | None = None
+    context_peak_percent: float | None = None
 
 
 class FakeAdapter:
@@ -99,7 +101,10 @@ class FakeAdapter:
             status=step.status, raw_events_path=req.raw_events_path, final_text=step.final_text,
             structured=step.structured, session_id=step.session_id,
             exit_code=0 if step.status == "ok" else 1, limit=step.limit,
-            usage=Usage(cost_usd=step.cost_usd, credits=step.credits, credits_source=step.credits_source),
+            usage=Usage(
+                cost_usd=step.cost_usd, credits=step.credits, credits_source=step.credits_source,
+                context_peak_tokens=step.context_peak_tokens, context_peak_percent=step.context_peak_percent,
+            ),
             model_resolved=step.model if self._served_model else None,
             permission_denials=list(step.permission_denials), tool_rejections=list(step.tool_rejections),
             transient=step.transient, api_status=step.api_status,
