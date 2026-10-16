@@ -152,7 +152,7 @@ def test_a_native_schema_break_is_normalized_and_agent_finished_keeps_error(make
 def test_an_errored_run_with_no_result_problem_fails_as_before(make_bench):
     bench = make_bench([Step(status="timeout")])
     outcome = run_red(bench.wb, TASK, attempt=1)
-    assert outcome.status == "failed" and "status timeout" in outcome.reason
+    assert outcome.status == "failed" and "reached its time limit" in outcome.reason
 
 
 def test_the_agents_test_list_is_not_read_the_jUnit_diff_is(make_bench):

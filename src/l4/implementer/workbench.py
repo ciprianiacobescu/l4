@@ -278,11 +278,14 @@ class Workbench:
                       *revert_unsnapshotted(git, self.protected, excludes=self.excludes)]:  # fmt: skip
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
         self.restore_ledger()
+        readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
+        extra = note(result.report) if note is not None and readable else {}
         self.emit(
             "gate.finished", name=spec.name, status=result.status, exit_code=result.exit_code, reason=result.reason,
             log=os.path.relpath(log, self.out_dir.parent), tests=result.report.total if result.report else None,
             passed=len(result.report.ids_with("passed")) if result.report else None,
             failed=len(result.report.ids_with("failed") | result.report.ids_with("error")) if result.report else None,
+            **extra,
         )  # fmt: skip
         return result
 

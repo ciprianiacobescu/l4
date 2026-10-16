@@ -148,7 +148,7 @@ def test_protected_paths_are_reverted_and_recorded_but_do_not_fail_red(make_benc
 
 def test_an_agent_that_ends_in_error_or_returns_garbage_fails_the_attempt(make_bench):
     bench = make_bench([Step(status="timeout"), Step(structured={"status": "great"}), Step()])
-    assert "status timeout" in run_red(bench.wb, TASK, attempt=1).reason
+    assert "reached its time limit" in run_red(bench.wb, TASK, attempt=1).reason
     assert run_red(bench.wb, TASK, attempt=2).reason == "no tests added"  # normalized, then judged on the work
     assert "result is invalid: no result was delivered" in run_red(bench.wb, TASK, attempt=3).reason
 
@@ -237,11 +237,9 @@ def test_nothing_the_agent_printed_and_no_token_in_the_prompt_reaches_out_dir(ma
 
 
 def test_the_implementer_run_is_armed_with_the_stall_watchdog(make_bench):
-    from l4.implementer.tdd import STALL_TIMEOUT_S
-
     bench = make_bench([red_step()])
     run_red(bench.wb, TASK, attempt=1)
-    assert bench.adapter.requests[0].stall_timeout_s == STALL_TIMEOUT_S
+    assert bench.adapter.requests[0].stall_timeout_s == 600  # implementer.idle_timeout, default 10m
 
 
 def test_an_agent_that_crashes_leaves_nothing_protected_or_forged_behind(make_bench):
