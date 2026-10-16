@@ -38,3 +38,33 @@ def test_schema_problems_keep_the_headline_shape() -> None:
 def test_result_missing_is_untouched() -> None:
     assert attach(None).detail == "result missing: the command wrote no result file"
     assert attach(None, schema=None).status == "ok"
+
+
+# result-contract 1.5 (SCN-FAC-16, the attach part): why no `structured`, with no change to a status or a detail
+def test_no_schema_hands_over_the_object_as_written_and_flags_a_missing_file() -> None:
+    result = attach('{"status": "red"}', schema=None)
+    assert result.status == "ok" and result.structured == {"status": "red"} and result.result_problem is None
+    missing = attach(None, schema=None)
+    assert missing.status == "ok" and missing.structured is None and missing.result_problem == "missing"
+    broken = attach("not json", schema=None)
+    assert broken.status == "error" and broken.detail == "result invalid: not JSON"
+    assert broken.result_problem == "not_json"
+
+
+def test_a_schema_run_names_the_problem_and_keeps_the_refused_object() -> None:
+    assert attach(None).result_problem == "missing"
+    assert attach("{nope").result_problem == "not_json"
+    for text in ('"text"', "[1, 2]"):
+        out = attach(text)
+        assert out.result_problem == "not_object" and out.rejected is None and out.status == "error"
+    assert attach("[1, 2]", schema=None).result_problem == "not_object"
+    bad = {**GOOD, "status": "red"}
+    out = attach(json.dumps(bad))
+    assert out.status == "error" and out.result_problem == "invalid" and out.rejected == bad
+    assert out.detail is not None and out.detail.startswith("result invalid: status: not one of")
+    assert out.structured is None
+
+
+def test_a_valid_result_has_no_problem() -> None:
+    result = attach(json.dumps(GOOD))
+    assert result.result_problem is None and result.rejected is None
