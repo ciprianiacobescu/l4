@@ -31,8 +31,8 @@ def _item(raw: object) -> dict[str, Any] | None:
         return None
     findings = []
     for f in raw["findings"]:
-        if not isinstance(f, dict) or _text(f.get("id")) is None or _text(f.get("text")) is None:
-            return None
+        if not isinstance(f, dict) or not _text(f.get("id")) or _text(f.get("text")) is None:
+            return None  # a finding with no id cannot be answered
         findings.append({k: _text(f.get(k)) or "" for k in ("id", "criterion", "severity", "text")})
     if _text(raw.get("reason")) is None:
         return None
