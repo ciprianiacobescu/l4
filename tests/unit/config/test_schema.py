@@ -21,8 +21,7 @@ NOT_YET_MODELLED: set[tuple[str, str]] = set()  # `ci.self_provision` arrived wi
 # keys SPEC 3.2 does not have: forge.gitlab (M0, C2)
 ADDED_BEYOND_SPEC = {
     ("forge", "gitlab"),
-    ("implementer", "escalate_after"),
-}  # SPEC 3.2 gets the key in escalate-and-note 6.x
+}
 
 
 def reference_config() -> dict[str, Any]:
