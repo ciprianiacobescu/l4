@@ -96,6 +96,7 @@ class ProgressTrace:
             "task.started": self._task_started,
             "step.started": self._step_started,
             "agent.finished": self._agent_finished,
+            "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
             "gate.finished": self._gate,
             "task.red_ok": self._red_ok,
@@ -273,7 +274,41 @@ class ProgressTrace:
         took = self._seconds(self._steps.pop((d.get("fix_unit"), d.get("task"), d.get("phase")), None), e)
         model = f", {d['model']}" if d.get("model") else ""
         detail = f": {_clip(d['detail'], 100)}" if d.get("status") != "ok" and d.get("detail") else ""
-        return logging.INFO, f"agent {d.get('phase')} task {d.get('task')} {d.get('status')} ({took}{model}){detail}"
+        peak = ""
+        tokens, percent = _num(d.get("context_peak_tokens")), _num(d.get("context_peak_percent"))
+        if tokens is not None:
+            peak = f", context peak {tokens / 1000:.1f}k tokens"
+        elif percent is not None:
+            peak = f", context peak {percent:g}%"
+        return (
+            logging.INFO,
+            f"agent {d.get('phase')} task {d.get('task')} {d.get('status')} ({took}{model}){detail}{peak}",
+        )
+
+    @staticmethod
+    def _fix(f: dict) -> str:
+        """`<field> <fix>` and what the fix says: `to`, `from`, `length`, `count`, then `was`."""
+        out = f"{f.get('field')} {f.get('fix')}"
+        if f.get("to") is not None:
+            out += f" to {f['to']}"
+        if f.get("from") is not None:
+            out += f" from {f['from']}"
+        if f.get("length") is not None:
+            out += f" from {f['length']} characters"
+        if f.get("count") is not None:
+            out += f" {f['count']}"
+        if f.get("was") is not None:
+            out += f", was {f['was']}"
+        return out
+
+    def _result_normalized(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        fixes = d.get("fixes")
+        shown = "; ".join(self._fix(f) for f in fixes if isinstance(f, dict)) if isinstance(fixes, list) else ""
+        return (
+            logging.INFO,
+            f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: L4 repaired the result ({shown})",
+        )
 
     def _budget(self, e: LedgerEvent) -> tuple[int, str] | None:
         usd = _num(e.data.get("usd"))

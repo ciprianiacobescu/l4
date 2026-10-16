@@ -274,3 +274,51 @@ def test_older_events_print_as_before(console):
         "halted: max_task_attempts (task 1.1)",
         "implementer: b ok → selected, fallback #1",
     ]
+
+
+def _normalized(console, *fixes, **extra):
+    ProgressTrace()(event("result.normalized", task="1.1", phase="red", attempt=1, source="result",
+                          fixes=list(fixes), **extra))  # fmt: skip
+    return lines(console)
+
+
+def test_scn_imp_188_the_repaired_result_line(console):
+    assert _normalized(console, {"field": "status", "fix": "set", "to": "done", "was": "red"}) == [
+        "task 1.1 red attempt 1: L4 repaired the result (status set to done, was red)"
+    ]
+
+
+def test_scn_imp_188_every_fix_has_its_details(console):
+    fixes = [
+        {"field": "summary", "fix": "set", "from": "final_message"},
+        {"field": "notes_for_verifier", "fix": "cut", "length": 2417},
+        {"field": "notes_for_verifier", "fix": "renamed", "from": "notes"},
+        {"field": "questions", "fix": "dropped", "count": 2},
+        {"field": "suppressions", "fix": "cut", "count": 2},
+        {"field": "files_changed", "fix": "replaced"},
+    ]
+    assert _normalized(console, *fixes) == [
+        "task 1.1 red attempt 1: L4 repaired the result (summary set from final_message; "
+        "notes_for_verifier cut from 2417 characters; notes_for_verifier renamed from notes; "
+        "questions dropped 2; suppressions cut 2; files_changed replaced)"
+    ]
+
+
+def test_a_normalized_event_without_fixes_does_not_crash(console):
+    assert _normalized(console) == ["task 1.1 red attempt 1: L4 repaired the result ()"]
+
+
+def test_scn_fac_18_the_agent_line_ends_with_the_context_peak(console):
+    trace = ProgressTrace()
+    trace(event("agent.finished", task="1.1", phase="red", status="ok", context_peak_tokens=21600))
+    trace(event("agent.finished", task="1.2", phase="red", status="ok", context_peak_percent=3.6))
+    out = lines(console)
+    assert out[0].endswith(", context peak 21.6k tokens")
+    assert out[1].endswith(", context peak 3.6%")
+
+
+def test_scn_fac_19_an_older_agent_finished_prints_as_today(console):
+    ProgressTrace()(event("agent.finished", task="1.1", phase="red", status="ok"))
+    (line,) = lines(console)
+    assert line.startswith("agent red task 1.1 ok (") and line.endswith(")")
+    assert "context peak" not in line
