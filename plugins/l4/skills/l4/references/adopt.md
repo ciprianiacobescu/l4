@@ -21,7 +21,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.2   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.3   # or @<sha>
 l4 --version
 ```
 
@@ -30,9 +30,9 @@ l4 --version
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.2 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.3 [--dependabot] [--s1 laya|jev|none]
 # public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.2
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.3
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -41,7 +41,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.2`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.3`; that line
   is the only pin.
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -74,7 +74,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.2`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.3`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
