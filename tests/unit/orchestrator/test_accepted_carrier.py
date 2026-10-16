@@ -144,3 +144,33 @@ def test_a_directory_in_place_of_the_file_rejects_the_unit_with_a_reason(run_l4,
     plan_step({UNIT: (ITEM,)})
     run = run_l4([red_step(), green_step()])
     assert run.code == ExitCode.REJECTED
+
+
+def test_the_workbench_of_a_planned_run_has_the_activated_digest_and_the_plan_id(run_l4, tdd_repo, raw, monkeypatch):
+    new_origin_main(tdd_repo, raw, {f"{UNIT_DIR}/tasks.md": "- [ ] 1.1 Add `apply_discount`\n"})
+    step = PlanStep(allow=None, plan_id="p1", activated={UNIT: "d" * 64})
+    monkeypatch.setattr(orchestrator, "yolo_step", lambda *a, **k: step)
+    made = []
+    real = orchestrator.make_workbench
+
+    def spy(**kw):
+        made.append(wb := real(**kw))
+        return wb
+
+    monkeypatch.setattr(orchestrator, "make_workbench", spy)
+    assert run_l4([red_step(), green_step()]).code == 0
+    assert made and {(w.activated_plan, w.activated_digest) for w in made} == {("p1", "d" * 64)}
+
+
+def test_the_workbench_of_an_unplanned_run_has_no_activated_digest(run_l4, tdd_repo, raw, monkeypatch):
+    new_origin_main(tdd_repo, raw, {f"{UNIT_DIR}/tasks.md": "- [ ] 1.1 Add `apply_discount`\n"})
+    made = []
+    real = orchestrator.make_workbench
+
+    def spy(**kw):
+        made.append(wb := real(**kw))
+        return wb
+
+    monkeypatch.setattr(orchestrator, "make_workbench", spy)
+    assert run_l4([red_step(), green_step()]).code == 0
+    assert made and {(w.activated_plan, w.activated_digest) for w in made} == {(None, None)}

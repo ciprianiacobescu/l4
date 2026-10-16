@@ -23,9 +23,11 @@ class Runner:
 
     def __init__(self) -> None:
         self.chosen: list[list[str]] = []
+        self.activated: list[object] = []
 
-    def __call__(self, app, cfg, git, chosen, *, adapters, accepted=None):
+    def __call__(self, app, cfg, git, chosen, *, adapters, accepted=None, activated=None):
         self.chosen.append([ref.id for _, ref in chosen])
+        self.activated.append(activated)
         return CommandResult(ExitCode.OK, [])
 
 
@@ -202,3 +204,26 @@ def test_the_answer_of_start_run_is_logged(world, run, caplog):
     with caplog.at_level(logging.INFO):
         run()
     assert any("next run on main: started" in r.getMessage() for r in caplog.records)
+
+
+def test_an_allowed_unit_carries_its_frozen_digest_and_a_held_unit_does_not(world, run):
+    world.plan()
+    world.activate()
+    run()
+    assert run.runner.chosen == [[A]]
+    plan_id, digests = run.runner.activated[-1]
+    assert plan_id == "p1" and digests == {A: world.digests()[A]}  # B is held by the order: no digest
+
+
+def test_the_preview_of_a_named_run_carries_the_digest_of_the_current_unit(world, run):
+    world.plan()
+    world.activate()
+    world.seed(ev("unit.dispatched", unit=A, run="r0"))
+    run(units=(A,))
+    plan_id, digests = run.runner.activated[-1]
+    assert plan_id == "p1" and digests == {A: world.digests()[A]}
+
+
+def test_a_run_with_no_plan_carries_no_digest(world, run):
+    run()
+    assert run.runner.activated == [None]

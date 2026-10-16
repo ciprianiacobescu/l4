@@ -118,6 +118,9 @@ class PlanStep(YoloStep):
     pending_starts: frozenset[str] = frozenset()  # current units of a plan with a `unit.not_started` record pending
     # unit id -> the accepted review items that concern it: its own subject's and its batch's (L4-YOLO-028)
     accepted: Mapping[str, tuple[dict[str, Any], ...]] = field(default_factory=dict)
+    # unit id -> the digest of its folder frozen at activation, for every allowed unit of the plan (a task text that
+    # matches it is a reviewed text: unfreeze-and-answer D2a)
+    activated: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -687,6 +690,7 @@ class _Step:
                     reason or f"waits for the plan step of this run (plan {live.plan_id if live else plan_id})"
                 )
         accepted = self._accepted(plan_id or (live.plan_id if live else None), allow)
+        activated = self._activated(plan_id or (live.plan_id if live else None), allow)
         pending = frozenset(
             ctx.state.current
             for ctx in self.ctxs.values()
@@ -695,8 +699,17 @@ class _Step:
         return PlanStep(
             allow=allow, actions=(*self.actions, *extra), start_next_run=start_next_run,
             plan_id=plan_id or (live.plan_id if live else None), refusals=refusals, pending_starts=pending,
-            accepted=accepted,
+            accepted=accepted, activated=activated,
         )  # fmt: skip
+
+    def _activated(self, plan_id: str | None, allow: frozenset[str]) -> dict[str, str]:
+        """The digest each allowed unit of the plan was frozen at (`plan.activated`): the unit run compares it with the
+        folder it reads. A unit the plan does not list, or that has no frozen digest, has none."""
+        ctx = self.ctxs.get(plan_id) if plan_id else None
+        if ctx is None or ctx.file.plan is None:
+            return {}
+        listed = set(ctx.file.plan.unit_ids())
+        return {u: ctx.state.digests[u] for u in sorted(allow) if u in listed and ctx.state.digests.get(u)}
 
     def _accepted(self, plan_id: str | None, allow: frozenset[str]) -> dict[str, tuple[dict[str, Any], ...]]:
         """The accepted review items each allowed unit of the plan carries to its run: the items of the activation

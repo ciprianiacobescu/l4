@@ -158,6 +158,8 @@ class Workbench:
     coverage_checked: bool = False  # `check_coverage_after_setup` has answered once for this workbench
     seed_checked: bool = False  # `ensure_uv_seed` has looked at this workbench's uv cache once
     guard_notes: list[GuardNote] = field(default_factory=list)  # what the guards put back since `run_task` cleared it
+    activated_digest: str | None = None  # the unit folder's digest frozen at the plan's activation (plan step), if any
+    activated_plan: str | None = None  # the plan that froze it
 
     def __post_init__(self) -> None:
         for sub in ("agent-tmp", "gate-tmp"):
