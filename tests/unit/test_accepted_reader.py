@@ -62,3 +62,18 @@ def test_a_symlink_or_an_oversized_file_is_no_items(tmp_path):
     big["items"][0]["findings"][0]["text"] = "x" * (MAX_ACCEPTED_BYTES + 1)
     carry(tmp_path, big)
     assert read_accepted(tmp_path) == ()
+
+
+def test_a_symlinked_l4_folder_is_no_items(tmp_path):
+    outside = tmp_path / "outside"
+    (outside).mkdir()
+    (outside / "review-accepted.json").write_text(json.dumps(doc()))
+    unit = tmp_path / "unit"
+    unit.mkdir()
+    (unit / ".l4").symlink_to(outside, target_is_directory=True)
+    assert read_accepted(unit) == ()
+
+
+def test_a_directory_in_place_of_the_file_is_no_items(tmp_path):
+    (tmp_path / ".l4" / "review-accepted.json").mkdir(parents=True)
+    assert read_accepted(tmp_path) == ()

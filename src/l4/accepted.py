@@ -13,13 +13,20 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from l4.fsutil import UnsafeFile, read_regular_file
+from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 
 log = logging.getLogger("l4.accepted")
 
 ACCEPTED_FILE = ".l4/review-accepted.json"  # relative to the unit folder
 ACCEPTED_SCHEMA = "l4/review-accepted@1"
 MAX_ACCEPTED_BYTES = 256 * 1024
+
+
+def check_carrier_path(unit_dir: Path) -> None:
+    """The reader's check. Refuse (UnsafeFile) when `.l4` or the carrier file below the unit folder is a symlink: the
+    folder is repo content, and a link would send a read or a write out of the checkout. (The writer checks `.l4`
+    alone: a link in the file's own place is replaced.)"""
+    reject_symlinks(unit_dir, ".l4", "review-accepted.json")
 
 
 def _text(value: object) -> str | None:
@@ -50,6 +57,7 @@ def read_accepted(unit_dir: Path) -> tuple[dict[str, Any], ...]:
     warning)."""
     path = unit_dir / ACCEPTED_FILE
     try:
+        check_carrier_path(unit_dir)
         data = json.loads(read_regular_file(path, limit=MAX_ACCEPTED_BYTES))
     except FileNotFoundError:
         return ()

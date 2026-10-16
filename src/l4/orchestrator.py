@@ -63,7 +63,7 @@ from l4.follow_up import FollowUpMade, perform_follow_ups
 from l4.forge.base import ForgeUnavailable, fetch_auth_config, make_forge
 from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
-from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file
+from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.loop import run_task
 from l4.implementer.reopen import reopen_for_changed_requirements
@@ -365,7 +365,8 @@ class Orchestrator:
                 self._commit_questions("questions index")
             if self._reentry.answered:
                 self.answers_recorded()
-            self._write_accepted()
+            if (refused := self._write_accepted()) is not None:
+                return UnitRunResult(self._outcome(before), refused)
             code = self._drive()
         except (RoleUnavailable, RoleLimit) as exc:
             code = self._park(exc)
@@ -373,21 +374,25 @@ class Orchestrator:
             code = self._block_secret(exc)
         return UnitRunResult(self._outcome(before), code)
 
-    def _write_accepted(self) -> None:
+    def _write_accepted(self) -> ExitCode | None:
         """The accepted review findings of this unit go into its folder before any agent step, in a checkpoint commit
         of their own, and only when the bytes differ from the head: the agent step puts the protected `.l4/` paths back
         to the step's base, which would remove a file that is not committed yet. After the hand-off commit the branch
-        stays at H: nothing is written."""
+        stays at H: nothing is written. A carrier path that is a link, or a folder in the file's place, rejects the
+        unit with that reason (the code is returned); nothing is written."""
         if self._accepted is None or (self.state.phase and Phase(self.state.phase) in _AFTER_HAND_OFF):
-            return
+            return None
         s = self.services
         plan_id, items = self._accepted
-        if not write_accepted_carrier(s.ref.path, plan_id, items):
-            return
+        try:
+            if not write_accepted_carrier(s.ref.path, plan_id, items):
+                return None
+        except UnsafeFile as exc:
+            return self._reject([f"the accepted review findings cannot be written: {exc}"])
         rel = (s.ref.path / ACCEPTED_FILE).resolve().relative_to(s.worktree.resolve()).as_posix()
         s.git.run("add", "--", rel)
         if s.git.run("diff", "--cached", "--quiet", check=False).returncode == 0:
-            return
+            return None
         trailers = CommitTrailers(
             unit=s.ref.id, run_id=s.app.run_id, iteration=max(self.state.iteration, 1),
             phase=self.state.phase or "intake",
@@ -395,6 +400,7 @@ class Orchestrator:
         s.git.commit(f"docs({s.ref.name}): accepted review findings [skip ci]", trailers)
         self._start = s.git.rev_parse("HEAD")  # this commit alone must not make the branch worth pushing
         log.info("%s: %d accepted review item(s) committed in %s", s.ref.id, len(items), ACCEPTED_FILE)
+        return None
 
     def answers_recorded(self) -> None:
         """`question.answered` was just appended (for the unit or for its open fix unit): when that changed which
@@ -1252,6 +1258,8 @@ def write_accepted_carrier(unit_dir: Path, plan_id: str, items: Sequence[Mapping
     sorted keys and a final newline, so an unchanged payload is the same bytes. No items and no file: nothing is
     written; no items and a file: it is rewritten as an empty `items` list (a later activation without
     acceptances). True when the file was written."""
+    reject_symlinks(unit_dir, ".l4")  # UnsafeFile: a linked `.l4` would redirect the read, the mkdir and the write
+    # (a link in the file's own place is replaced below, never followed)
     path = unit_dir / ACCEPTED_FILE
     if not items and not (path.exists() or path.is_symlink()):
         return False
