@@ -797,7 +797,7 @@ implementer:
   context_budget_tokens: 24000     # cap on unit context rendered into a prompt (L4-IMP-004)
   max_task_attempts: 3             # the last usable profile's attempts per phase
   escalate_after: 2                # failed attempts of one phase on a profile before the next profile of roles.implementer takes it; 0 = never (L4-IMP-017)
-  result_repair_attempts: 1
+  result_repair_attempts: 1        # read by no code until L4-IMP-022
   wip_snapshot_interval: 10m
   session_resume: same_runner_only # same_runner_only | artifact | never
 
@@ -1822,7 +1822,7 @@ the tests that failed at the base, `via: base_run` and `base_sha`; `criterion.pr
 `.l4/prompts/`) with these sections, in order: harness contract (rules below); unit context (proposal/design/spec
 deltas or requirements/design, trimmed to `implementer.context_budget_tokens`); the task and its criteria with IDs;
 answered questions relevant to the task; selected lessons (§13); the previous attempt (a limit or an escalation, L4-IMP-017); the person's note on a retry (`# A person's note`, one data block, the last of the data blocks, L4-OPS-018; `prompt.rendered{retry_note: {event, ts, sha256}}`); gate commands; output contract and
-`$L4_RESULT_PATH`. The rendered prompt's sha256 and template version MUST be recorded in the ledger. The phase section MUST carry one `result values:` line, built from the result schema, that names the allowed `status` values and the step's `phase` (a model that has just read `# Phase: RED` otherwise writes `"status": "red"`). The Codex implementer's sandbox blocks sockets, loopback included (an all-outbound `network_access` switch is not taken, L4-SEC-001; verified on macOS seatbelt, where `network.enabled` without a proxy opens full egress and the seccomp profile of Linux denies every IP socket call): the contract says so, tells Codex to WRITE the real-server test a task or design asks for (port 0 in a thread, every read bounded), which the gate run executes with loopback, and to add in-process tests beside it, never instead of it and never a `socket.socketpair()` in place of a requested server (wave D W-D3: five units without a real-server test, because the earlier text recommended the in-process route). A loopback-only profile (`default_permissions` with `network.enabled`, `allow_local_binding` and the `network_proxy` feature, no `domains`) works on macOS and is NOT adopted until a Linux spike confirms it inside bwrap (the Linux seccomp ProxyRouted mode also denies AF_UNIX sockets). A blocked green step on a frozen test that contradicts the spec asks one technical question whose first option is "Edit `<path>`: <the exact change>", which is also written as its suggested answer, so one `accepted` unfreezes exactly that file (L4-IMP-002). The question ends with a harness note (`Harness note: ...`, M1.13) that names the frozen test files the question already names, at most three, and says how they are unfrozen: the answer, or `accepted` on the suggested edit, must name the path, and an answer edited after a run has used it counts as an override and unfreezes nothing; a question that names no frozen file says that it cannot unfreeze anything. The note never names a file the agent did not, so it cannot widen what an `accepted` suggestion unfreezes.
+`$L4_RESULT_PATH`. The rendered prompt's sha256 and template version MUST be recorded in the ledger. The output contract of a prompt-contract step comes from the template `output.md` (L4-IMP-019), and `template_version` names it (`+output@1`); the output contract of a native step does not change. The phase section MUST carry one `result values:` line, built from the result schema, that names the allowed `status` values and the step's `phase` (a model that has just read `# Phase: RED` otherwise writes `"status": "red"`). The Codex implementer's sandbox blocks sockets, loopback included (an all-outbound `network_access` switch is not taken, L4-SEC-001; verified on macOS seatbelt, where `network.enabled` without a proxy opens full egress and the seccomp profile of Linux denies every IP socket call): the contract says so, tells Codex to WRITE the real-server test a task or design asks for (port 0 in a thread, every read bounded), which the gate run executes with loopback, and to add in-process tests beside it, never instead of it and never a `socket.socketpair()` in place of a requested server (wave D W-D3: five units without a real-server test, because the earlier text recommended the in-process route). A loopback-only profile (`default_permissions` with `network.enabled`, `allow_local_binding` and the `network_proxy` feature, no `domains`) works on macOS and is NOT adopted until a Linux spike confirms it inside bwrap (the Linux seccomp ProxyRouted mode also denies AF_UNIX sockets). A blocked green step on a frozen test that contradicts the spec asks one technical question whose first option is "Edit `<path>`: <the exact change>", which is also written as its suggested answer, so one `accepted` unfreezes exactly that file (L4-IMP-002). The question ends with a harness note (`Harness note: ...`, M1.13) that names the frozen test files the question already names, at most three, and says how they are unfrozen: the answer, or `accepted` on the suggested edit, must name the path, and an answer edited after a run has used it counts as an override and unfreezes nothing; a question that names no frozen file says that it cannot unfreeze anything. The note never names a file the agent did not, so it cannot widen what an `accepted` suggestion unfreezes.
 The harness contract MUST name the run's own ledger file and say that `git status` shows it as modified, that this is
 expected, and that nothing under any `.l4/` directory, at any depth, may be edited, restored, checked out or
 overwritten; this holds for every step, a fix unit's included (it names its parent's ledger). For an adapter whose
@@ -1875,7 +1875,7 @@ Implementer contract additions (per-adapter lines are rendered only for that ada
 
 ### 7.4 Result contract
 
-**L4-IMP-005** Every implementer step MUST end with a result object valid against `l4/implementer-result@1`:
+**L4-IMP-005** Every implementer step MUST end with a result object that, after the harness's normalization (L4-IMP-020), is valid against `l4/implementer-result@1`:
 
 ```json
 {
@@ -1908,6 +1908,8 @@ Implementer contract additions (per-adapter lines are rendered only for that ada
 }
 ```
 
+The schema above is what a native CLI enforces. The prompt of a prompt-contract step shows the agent the subset `l4/implementer-file-result@1`: the same schema without the properties `phase`, `task_ids`, `files_changed` and `tests_added`, and with `required: ["status", "summary"]`, derived from the schema above in code (L4-IMP-019). The harness sets the dropped fields itself (L4-IMP-020).
+
 The criteria a red step cites must each be traced by a new test, and the instruction that says how to trace follows
 the project's test gate: for a gate whose command runs pytest the contract tells the agent to tag every test with
 `@pytest.mark.l4("C-xxxxxxxx")`; for any other gate (Vitest, Jest, `go test`) it tells the agent to put each criterion
@@ -1915,15 +1917,17 @@ id in the name of the test that checks it, and a retry message that says no new 
 form (L4-CRT-002).
 
 Delivery: native schema enforcement where the adapter supports it (§8.3), otherwise the agent writes the JSON to
-`$L4_RESULT_PATH` (outside the worktree). Missing/invalid → `implementer.result_repair_attempts` repair prompts in the
-same session → else the attempt fails. The repair turn is [U]: it never triggered in the spikes (0 of 46 results
-needed it; the result JSON was valid 17/17, 17/17 and 12/12 on the three CLIs [V, spikes/01–03]).
+`$L4_RESULT_PATH` (outside the worktree). No result object → the attempt fails (L4-IMP-021). An invalid or incomplete object is
+repaired by the harness (L4-IMP-020). An optional repair call for a step with no object is specified for a second wave
+(L4-IMP-022, not built: `implementer.result_repair_attempts` is read by no code). No spike result needed a repair turn
+(0 of 46 results; the result JSON was valid 17/17, 17/17 and 12/12 on the three CLIs [V, spikes/01–03]).
 
 `status` is advisory except `blocked`: harness checks alone accept red and green, and `partial` with passing checks is
 accepted [V, spikes/01: `partial` for complete work 4×]. Delivery per adapter:
 - claude-code: native `--json-schema` → `structured_output`, or the prompt contract with `Edit(//<dir>/**)`;
 - codex: `--output-schema <strictified>` + `-o` (L4-FAC-009);
-- opencode: the prompt contract with an `external_directory` allow for the result directory.
+- opencode: the prompt contract with an `external_directory` allow for the result directory;
+- kiro-cli and command: the prompt contract (`$L4_RESULT_PATH`, told to the agent as `.l4-result/result.json`).
 
 The result directory is the agent sandbox's private temp dir (L4-SEC-005).
 
@@ -1933,6 +1937,108 @@ worktree). `.l4-result` is a symlink the harness makes to the step's private dir
 just after; it is a protected path (L4-SEC-004) and excluded from git, so nothing written through it or in place of it can
 reach a commit. The result is read from the private directory only: a file at any other path, `<worktree>/agent-tmp/result.json`
 included, is never a result.
+
+**L4-IMP-019** The output section of a prompt-contract step asks for status and summary first and ends with the path.
+
+For a step of a prompt-contract adapter (opencode, kiro-cli, command), the `# Output` section of the prompt SHALL come
+from the versioned template `output.md`, and `prompt.rendered.template_version` SHALL end with `+output@<version>`.
+The template is pinned by the template lock.
+
+The section SHALL:
+- start with one sentence that asks for one JSON object with `status` and `summary`, where `status` is `done` when the
+  agent did the step, or `blocked` when it needs an answer from a person, and then `questions` holds at least one
+  question;
+- name `criteria_ids`, `suppressions` and `notes_for_verifier` as the fields to add when the agent has them;
+- show the agent's schema `l4/implementer-file-result@1`: the canonical schema without the properties `phase`,
+  `task_ids`, `files_changed` and `tests_added`, with `required: ["status", "summary"]`, derived from the canonical
+  schema in code;
+- end with the line ``Write your result object to `<path>`.``, where the path is the result alias
+  `.l4-result/result.json`.
+
+The section MUST NOT name `phase`, `task_ids`, `files_changed` or `tests_added`, and MUST NOT say that the final
+message is the result. The implementer request of a prompt-contract adapter SHALL carry no result schema, so that the
+adapter hands over the object as written and the harness validates it (L4-IMP-020).
+
+For a native adapter (codex, claude-code) the `# Output` section, the request's schema `l4/implementer-result@1` and
+the template version MUST NOT change. The `result values:` line of the phase section stays for every adapter
+(L4-IMP-004).
+
+**L4-IMP-020** The harness normalizes the result object before it validates it, and records each repair.
+
+After each implementer step, and before the guards and the gates, the harness SHALL find the result object and
+normalize it. It SHALL take, in this order: the result that the adapter delivered (a native result, or a
+prompt-contract file's JSON object as written); the object that a native adapter's schema refused (`rejected`); the
+last JSON object in the agent's own final text that has a top-level `status` or `summary` key. It MUST NOT take an
+object from a file in the worktree or from any other path.
+
+The normalization SHALL apply these rules, with the limits, enums and pattern read from `l4/implementer-result@1`:
+- `null` means absent; the alias `notes` becomes `notes_for_verifier` and `suppressions_list` becomes `suppressions`
+  when the real key is absent, else the alias is dropped;
+- `phase` is the step's phase and `task_ids` is `[<task key>]`;
+- `files_changed` is the step's changed paths from git, without the run's ledger;
+- `tests_added` is empty: the new tests of a red step are the JUnit diff that the harness computes and records in
+  `task.red_ok.tests`, and the red verdict MUST NOT read the agent's list;
+- a `questions` item that is not an object with a string `title`, a string `context` and an allowed `kind` is
+  dropped; an item's `options` or `blocking_tasks` that is not a list of strings is removed; after three items the
+  rest are dropped;
+- a `status` that is an allowed value in another letter case or with surrounding space becomes that value; a missing
+  status, a status that is not a string, a phase name or any other text becomes `blocked` when at least one question
+  is left, else `done`;
+- a `summary` that is not a non-empty string becomes the agent's final message (its text after the last tool call,
+  without the object's own JSON text, trimmed), else `notes_for_verifier`, else `(no summary: the agent wrote none)`;
+- a `notes_for_verifier` that is not a string is dropped; a `criteria_ids` entry that is not a string with the
+  pattern, a `suppressions` item without a string `file`, an integer `line`, a string `rule` and a string `reason`,
+  and a `tdd_exemption` or `lesson_proposals` of the wrong shape are dropped;
+- a `summary`, `notes_for_verifier` or suppression `reason` longer than its limit keeps its start and ends with
+  `[cut by L4: <n> characters removed]`, all within the limit.
+
+The normalization MUST NOT add or invent a question, change the text of a question, change a present allowed status,
+add a suppression, a criterion id or a TDD exemption, or read or change a file of the worktree. The harness SHALL then
+validate the object against `l4/implementer-result@1`; the guards, the gates and the verifier SHALL judge the step as
+before.
+
+When the normalization changed a value that the agent gave, or filled a required field that the agent left out, the
+harness SHALL record one `result.normalized{task, phase, attempt, source, fixes}` for the step, where `source` is
+`result` or `final_message` and each fix is `{field, fix, from?, to?, was?, count?, length?}` with `fix` one of `set`,
+`replaced`, `renamed`, `dropped`, `cut`. The event MUST NOT hold text of the agent: `was` only names a phase, `to` an
+allowed status, and `from` a source or a key. Setting a field that the agent left out and that the prompt does not ask
+for, or replacing a valid `files_changed` or `tests_added` list, is not a fix. The progress log SHALL print
+`task <k> <phase> attempt <n>: L4 repaired the result (<fix>; <fix>)`.
+
+**L4-IMP-021** An attempt fails for its result only when there is no result object.
+
+An implementer attempt SHALL fail for its result only when no result object is found (L4-IMP-020), with the reason
+`the agent's result is invalid: no result was delivered (<what was missing>)`. It SHALL count against
+`implementer.max_task_attempts`, and the retry prompt SHALL carry the reason and the `result values:` line
+(L4-IMP-008).
+
+A normalized `blocked` result SHALL reach a person as today: its well-formed questions are raised, and a `blocked`
+result left with no question (none given, or all dropped as malformed) SHALL raise the one ambiguous question made
+from its summary (`loop.py`, "Task <k> is blocked"), with ` (<n> malformed questions were dropped)` appended to that
+question's context when the normalization dropped any. It is not a failed attempt: an agent that says it cannot go on
+needs a person, not another attempt. A normalized
+object that still fails validation is a harness defect and SHALL fail the attempt with the validation error, as
+today.
+
+**L4-IMP-022** (Second wave, not built.) An optional repair call rebuilds a result object that the step did not deliver.
+
+This requirement is a second wave: it is built only after the live check of this change shows a step with no result
+object. When it is built, `implementer.result_repair_attempts` SHALL default to `0`.
+
+When `implementer.result_repair_attempts` is at least 1, no result object was found (L4-IMP-020), the run finished
+(no limit and no error other than a result problem), and the profile's adapter is one of `claude-code`, `codex` and
+`opencode`, the harness SHALL make one repair call before the attempt fails: on the same profile, in a new session,
+with no tools and an empty working directory, with the prompt of the locked template `repair.md`. The prompt SHALL
+hold, in data blocks, the agent's final message (redacted, defused, its last 4000 characters), the result file's text
+when there was one (its first 4000 characters), the problem and the `result values:` line, and SHALL ask for the
+object of `l4/implementer-file-result@1` only.
+
+The harness SHALL keep only `status` (`done`, `failed` or `partial`), `summary` and `notes_for_verifier` of the reply.
+A reply with `status` `blocked` or with any question MUST be discarded, and the attempt fails as without the call. The
+repair MUST NOT add a question, a suppression or a criterion id. A kept reply SHALL be normalized with `source:
+"repair"` and SHALL go to the checks. The harness SHALL record `result.repair{task, phase, attempt, outcome, reason?}`
+with `outcome` one of `accepted`, `discarded`, `failed`, and the call's cost as `budget.cost`. A limit in the call
+SHALL end the step as an agent limit does (L4-AVL-006). A kiro-cli or command step MUST NOT get a repair call.
 
 ### 7.5 Post-step guards, commits and trailers
 
@@ -2017,7 +2123,7 @@ worktree diff hash; the same normalised failure fingerprint (`test id + error cl
 with numbers/paths normalised) `budgets.same_error_repeats` times; `max_task_attempts` reached **in one phase on one profile**
 (red, green and the single phase of a chore task each have their own budget; `breaker.tripped` names the phase; with a later usable profile the phase moves first, L4-IMP-017). A stuck task without
 questions triggers one short "state your blocking questions" call; if that yields none, the unit goes to `halted`
-with a `breaker.tripped` event. After `result invalid` the retry prompt MUST carry the validation error with the allowed values (never the value the agent wrote) and the `result values:` line. When the harness checks of the step do not pass, a result `partial` or `failed` without
+with a `breaker.tripped` event. A `blocked` result with no question (none given, or all dropped as malformed) still raises one ambiguous question made from its summary (L4-IMP-021). After a result failure (L4-IMP-021) the retry prompt MUST carry the reason of L4-IMP-021 and the `result values:` line (after normalization no result failure carries a validation error or an allowed-values list). When the harness checks of the step do not pass, a result `partial` or `failed` without
 `questions` counts as a failed attempt and triggers the one-shot questions call [V 2×, spikes/03]; when they pass, the
 step is accepted whatever the status (L4-IMP-005). When green ends `blocked`, the harness snapshots the worktree
 to the WIP branch (L4-IMP-011) and resets the unit worktree to the red commit before recording the questions [I].
@@ -2026,7 +2132,7 @@ to the WIP branch (L4-IMP-011) and resets the unit worktree to the red commit be
 no task moves.
 
 A failed attempt is an attempt that the implementer loop counts against `max_task_attempts`: a harness check that does
-not pass, an invalid agent result, or an agent run that ends with a status that is not `ok` and not a limit. It SHALL
+not pass, a result failure of L4-IMP-021, or an agent run that ends with a status that is not `ok` and not a limit. It SHALL
 count against the profile that ran it. A limit (L4-AVL-006), a `blocked` result and the question about a frozen test
 that hangs MUST NOT count, and MUST NOT start an escalation.
 
@@ -2169,8 +2275,10 @@ class RunResult:
     status: Literal["ok", "max_turns", "budget", "permission_blocked", "auth", "quota",
                     "rate_limited", "error", "timeout", "cancelled"]
     final_text: str | None; structured: dict | None
+    last_message: str | None                          # the agent's text after its last tool call (L4-FAC-010)
+    result_problem: Literal["missing", "not_json", "not_object", "invalid"] | None   # why a finished run gave no usable result (L4-FAC-010)
     session_id: str | None; exit_code: int | None
-    usage: Usage                                      # tokens in/out/cached, cost_usd | None
+    usage: Usage                                      # tokens in/out/cached, cost_usd | None, context_peak_tokens | None, context_peak_percent | None (L4-FAC-011)
     limit: LimitSignal | None                          # §8.4
     model_resolved: str | None; raw_events_path: Path
     permission_denials: list[dict]                     # claude-code `permission_denials[]`; empty elsewhere
@@ -2194,6 +2302,43 @@ adapter [spikes/00-summary §3.6]:
 | `error` (retryable) | — | — | "[503]" / "overloaded" [V] |
 | `max_turns` / `budget` | `subtype` `error_max_turns` / `error_max_budget_usd`, `result: null` [V] | — | — |
 | `timeout` | harness clock | harness clock | harness clock; silent gaps of 30–183 s are normal while it retries [V] |
+
+**L4-FAC-010** A finished run reports its final message and why its result is not usable.
+
+`RunResult` SHALL have the fields `last_message` and `result_problem`.
+
+`last_message` SHALL be the agent's text after its last tool call, or `None` when the adapter cannot tell:
+- opencode: the `text` parts after the last `tool_use` event, joined;
+- kiro-cli: the `agent_message_chunk` text after the last `tool_call` update, joined (`runFinished.finalText` holds the
+  text of the whole run);
+- codex: the last `agent_message`;
+- claude-code: the `result` of the final result event;
+- command: `None`.
+`final_text` MUST keep its meaning (the opencode judge reads it).
+
+`result_problem` SHALL be set when the run finished but its result channel gave no usable object, and `None`
+otherwise:
+- `attach_file_result` (opencode, kiro-cli, command): `missing` when there is no file, `not_json` when the file is not
+  JSON, `not_object` when the JSON is not an object, and, for a request with a schema, `invalid` with the object in
+  `rejected` when the object breaks the schema; with no schema in the request a missing file keeps the status `ok`,
+  and every other problem keeps `error`;
+- codex `_attach_result`: `missing`, `not_json` or `invalid`; claude-code `_attach_structured`: `missing` or
+  `invalid`; both keep the status `error` and set `rejected` for an invalid object, as the judge path needs.
+The status and the detail that an adapter reports today MUST NOT change.
+
+**L4-FAC-011** agent.finished records the peak per-call context where the stream shows it.
+
+`Usage` SHALL have the fields `context_peak_tokens` and `context_peak_percent`, and `agent.finished` SHALL record each
+one when it is set:
+- opencode: `context_peak_tokens`, the largest `tokens.input + tokens.cache.read + tokens.cache.write` of the run's
+  `step_finish` events;
+- claude-code: `context_peak_tokens`, the largest `input_tokens + cache_read_input_tokens +
+  cache_creation_input_tokens` of the `message.usage` of the run's `assistant` events;
+- kiro-cli: `context_peak_percent`, the largest `metadata.contextUsagePercentage`.
+codex, command and the fake adapter MUST NOT report a peak: codex reports one usage total for the whole turn.
+`input_tokens`, `output_tokens` and `cached_input_tokens` MUST keep their meaning. The `agent.finished` progress line
+SHALL end with `, context peak <n>k tokens` or `, context peak <p>%` when the event has the field, and SHALL stay as
+before without it.
 
 **L4-FAC-003** LLM backends (no tools) MUST implement:
 
@@ -2254,8 +2399,8 @@ profile's own variable.
 |---|---|---|---|---|---|---|---|
 | `claude-code` | **auth `api_key`:** `claude -p --bare …` with `ANTHROPIC_API_KEY` (bare mode authenticates only with an API key or `apiKeyHelper` [V, research/02]; whether `--safe-mode` and `--bare` combine is untested, so `--bare` is used alone [I]). **auth `subscription`:** the implementer argv of §8.3.1 [V as one command, spikes/01, except `--mcp-config F`, I] — `claude -p` *without* `--bare`, under `env -i`, authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (1-year token from `claude setup-token`) or the runner's stored login [V auth precedence, research/02]; the runner's login is a `pro` subscription [V, runner]. Prompt on stdin, then EOF | last `type:result` event: `structured_output` [V 11/11], `permission_denials[]` (`tool_name`, `tool_use_id`, `tool_input`) [V], `session_id` = the preset id [V 8/8], `total_cost_usd` (session-cumulative on `--resume` [V]), `modelUsage` keys = the served model [V], `is_error` and `api_error_status` (status per L4-FAC-002, never from `subtype`) [V 2.1.288, spikes/01] | native `--json-schema` [V for a subset of `l4/implementer-result@1`; the full schema with `$id` and `type: [object, null]` is U — pinned by a contract test] | `--resume <id>` [V, spikes/01] | auth `subscription`, implementer: `--setting-sources "" --disable-slash-commands` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (HB-X1: no user, project or local settings, hooks, `CLAUDE.md`, `AGENTS.md`, skills or commands, no auto-memory, the `--mcp-config` server connected [V live, `l4-runner`, claude 2.1.288]; `--safe-mode` loads none of it either but silently drops `--mcp-config`, `init.mcp_servers == []` [V]; `--setting-sources local` still ran `.claude/settings.local.json` hooks and loaded the auto-memory [V]); judge and reader: `--safe-mode` (suppresses user plugin hooks, skills and auto-memory; keeps the stored login [V]); `--tools "Read,Edit,Write,Glob,Grep,Bash"`, and allow rules `Edit(./**)`, `Edit(//<result-dir>/**)`, `Bash(<gate prefix>:*)` generated from `gates.test`; repo-level agent configuration written by an agent step (`.claude/**`, `.mcp.json`) is reverted by the protected-path guard (L4-IMP-006, L4-SEC-004) and MCP servers are limited by `--strict-mcp-config`; a committed project `CLAUDE.md`, `.claude/settings.json` and `.claude/skills` are not loaded under the implementer flags [V live], and the sandbox also masks `<wt>/.claude` (L4-SEC-005); guidance files are protected paths and a judge-mode call starts in an empty directory (L4-SEC-002). Bare `Write`/`Edit` rules MUST NOT be emitted (they match paths outside the cwd [V]). The child env is built with `env -i` from the L4-SEC-001 allow-list (it also drops the inherited `CLAUDECODE`/`CLAUDE_CODE_*`). `RunResult` carries `permission_denials[]`. `Write(//abs)` and `--add-dir` grant nothing under `dontAsk` [V]; inside bubblewrap the gate prefix is `.venv/bin/python -m pytest` [I for Claude]. Both auth modes: `dontAsk`; `CLAUDE_CODE_MAX_RETRIES=1`; **never** `CLAUDE_CODE_RETRY_WATCHDOG` (waits out usage windows [V]); the default config dir is kept (a per-job `CLAUDE_CONFIG_DIR` would drop the stored login) | `--mcp-config` + `--strict-mcp-config` [V] | subscription: `rate_limit_event` (`status`, `resetsAt`, `unifiedWindows.{five_hour,seven_day}.utilization`) [V]; `api_retry{error: rate_limit}` → abort [V]; zero-cost `/usage` text, the only source of the per-model weekly window [V, spikes/05, Max plan; on the runner's `pro` plan U]. api_key: HTTP 429 → abort; cost reported in USD |
 | `codex` | `codex exec --json -m M -c model_reasoning_effort="E" -s workspace-write --ignore-user-config --ignore-rules -c project_doc_max_bytes=0 --output-schema <strict S> -o OUT -`, prompt on stdin [V as one command, spikes/03; env I]. Stderr is captured into `raw_events_path`, and `codex_core::tools::router … Rejected(…)` lines become `agent.tool_rejected`. The `--json` stream omits sandbox-denied and policy-rejected calls [V]. **auth `subscription`:** the default `CODEX_HOME` is kept so the stored ChatGPT login (`auth.json`) is used (a per-job `CODEX_HOME` would drop it [I]); **auth `api_key`:** `CODEX_API_KEY` | JSONL: `thread.started.thread_id`, last `item.completed` agent message, `turn.completed.usage` (tokens, no USD) [V 0.160.0]; the stream is not an audit trail — facts come from the worktree, git and harness-run tests [V, spikes/03] | native `--output-schema` with the strictified schema (L4-FAC-009); the verbatim canonical schema fails before any work with `turn.failed` `invalid_json_schema`, exit 1 [V, spikes/03] | `codex exec resume <id>` (use `-c` for sandbox) [V exists, research/02; across red/green phases U] | `-s workspace-write` (approvals forced never); `--full-auto` was **removed** in 0.160.0 [V]; `--ignore-user-config --ignore-rules` **and `-c project_doc_max_bytes=0`** (implementer and judge: the repository's `AGENTS.md` is injected as "# AGENTS.md instructions for <wt>" without it, and this is the only switch that removes it [V live, `l4-runner`, HB-X1]); no switch removes the repo skill roots `<wt>/.agents/skills` and `<wt>/.codex/skills` (`features list` has no skills feature; `-c skills.enabled=false` and `--enable skip_host_skill_discovery` had no effect [V]), so the sandbox masks them (L4-SEC-005); `$CODEX_HOME/AGENTS.md` is still injected [V] → doctor ENV-009 (not a per-job `CODEX_HOME`); the built-in policy rejects `rm -f` with or without `--ignore-rules` [V]; inside the sandbox `uv run` fails (`~/.cache/uv` not writable) and the network is off, so the gate runs as `.venv/bin/python -m pytest …` after a harness-run `uv sync --frozen` [V, spikes/03] | `-c mcp_servers.<n>.*`, `required=true` [V] | zero-token `codex app-server` (one session, about 1 s): `account/read` (auth and plan: keep `type`, `planType`; drop `email`, `chatgptAccountId`) and `account/rateLimits/read`; use the `rateLimitsByLimitId` bucket whose `normalModelSlug` equals the model, else `codex`, and evaluate both `primary` (300 min) and `secondary` (10080 min) with `usedPercent`, `resetsAt`; also exhausted when `ordinaryUsageAllowed:false`, `rateLimitReachedType != null` or `spendControlReached:true`; **never redeem `rateLimitResetCredits`** [V, spikes/05]; mid-run usage limit = `turn.failed` + exit 1, terminal [V research; the exact shape U, not reproduced in the spikes] |
-| `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts; cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down |
-| `kiro-cli` | `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] [--model M] --output-format stream-json --require-mcp-startup "<prompt>"`; an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}`, `runError{stage,message}` [V, 2.28.0]; the served model is never reported) → prompt contract | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so the judge uses `--trust-tools=read`; under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Still [U]: the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), a harness agent for the judge (K3, K13), `--resume-id` |
+| `opencode` | `opencode run --pure --format json -m <provider/model> --dir <worktree> --title "l4 <unit> <task> <phase>"` with the isolated env and `OPENCODE_CONFIG_CONTENT` of §8.3.1, prompt on stdin, then EOF; wall-clock timeout + stall watchdog [I as a combination: every element V separately, spikes/01, 02, 05] (or `opencode serve` + HTTP for long runs). `--title` saves a second request to another model [V] | NDJSON: `sessionID` from the first event; served model not reported [V] (log `availability.model_unverified`); the final text is the concatenated `text` parts (every `text` part of the run), and `last_message` is the text after the last `tool_use` event; `Usage.context_peak_tokens` is the largest `tokens.input + tokens.cache.read + tokens.cache.write` of a `step_finish` (`input_tokens` is unchanged); cost is the sum of `step_finish.part.cost`, a **nominal** price-table estimate [V, spikes/02] | prompt contract (`$L4_RESULT_PATH`, with an `external_directory` allow for the result directory); native `format: json_schema` only via serve/SDK [V src, field name U] | `-s <session>` [V] | allow/deny only, never `ask` (auto-reject ends the run with exit 0 [V]); `external_directory` `*: deny` then `<result-dir>/**: allow` (OpenCode applies the last matching rule, so the broad rule comes first; this depends on JSON key order and is I — pinned by a contract test). Isolation: `--pure` **and** an empty per-job `XDG_CONFIG_HOME` **and** `OPENCODE_DISABLE_PROJECT_CONFIG`, `_CLAUDE_CODE`, `_EXTERNAL_SKILLS`, `_AUTOUPDATE` **and** an explicit `OPENCODE_CONFIG_CONTENT` (L4-SEC-002); `XDG_DATA_HOME` is never redirected (`auth.json` lives there); `snapshot:false` (the user snapshot store was 947 MB [V]); `external_directory` is a per-command path heuristic, not confinement — the bubblewrap sandbox stays required [V] | `OPENCODE_CONFIG_CONTENT` `mcp{…}` (timeout ≥ 20000 ms for Serena cold start [V]) | 429: the reset appears only in the error body text for Google [V]; 402 credits has no reset; OpenRouter `/api/v1/key` + `/api/v1/credits` are zero-cost [V, spikes/05]; other providers: quota `skipped`. Without `limit.output` OpenCode requests 32 000 output tokens, which a low-credit OpenRouter key rejects with 402 [V], so metered providers get `provider.<p>.models.<m>.limit`. **429 retries honour `retry-after` up to ~24.8 days** [V src] and silent gaps of 30–183 s are normal while it retries [V] → the harness MUST enforce a wall-clock timeout, and in `serve` mode abort on `session.status {type: retry}` and record `next` as the cool-down |
+| `kiro-cli` | `kiro-cli chat --no-interactive --trust-tools=<allow-list> [--agent A] [--model M] --output-format stream-json --require-mcp-startup "<prompt>"`; an implementer step without `options.agent` runs `--agent l4-implement-<random> --trust-all-tools` instead, with `KIRO_HOME` set to a directory in the step's private directory that holds only that agent's file (K3: on the default agent kiro-cli 2.28.0 denied every write and shell call in 3 of 4 harness-spawned steps although the trust list named them [V]) | stream-json (events `runStarted`, `metadata`, `sessionUpdate`, `runFinished{status,stopReason,finalText}` (`finalText` holds the text of the whole run, so `last_message` is the `agent_message_chunk` text after the last `tool_call` update, and `Usage.context_peak_percent` is the largest `metadata.contextUsagePercentage`), `runError{stage,message}` [V, 2.28.0]; the served model is never reported) → prompt contract | prompt contract | `--resume-id <uuid>` [U with no-interactive] | agent config tool allow-list; workspace-trust behaviour headless is [U] (risk R2) | `.kiro/settings/mcp.json` / agent `mcpServers`; exit 3 = MCP startup failure [V doc] | `/usage` (monthly credits table) [D]; credits reset 00:00 UTC on the 1st [V doc]; auth `KIRO_API_KEY` (Pro tier+) [V doc]; an active browser login shadows `KIRO_API_KEY` [D] → doctor ENV-012. Verified on kiro-cli 2.28.0 (Mac, logged in): headless works with a browser login (no `KIRO_API_KEY`); exit 0 also when every tool call was denied; exit 4 = named `--agent` not found (a `runError` at stage `init`); `--trust-tools=` with an empty list trusts every tool, so the judge uses `--trust-tools=read`; under a custom agent only its `allowedTools` grants trust (a probe: `write` ran, `shell` was denied); headless `/usage` makes no model call; tool names are `read, write, shell, glob, grep` (`fs_read, fs_write, execute_bash` stay aliases on the default agent). The login lives in the CLI data store (`~/.local/share/kiro-cli`), which is a sandbox credential path (K2). FREE-tier throttling is a rate limit [V, dummy-agentic job 6146]: a `runError` (stage `prompt` or `turn`) whose message says the request was throttled ("The request was throttled by the service", `too many requests`, a 429) ends the step as `rate_limited` with a `rate_limit` limit (source `kiro.run_error`), never as a failed attempt: the profile cools until the message's own retry hint, else 2 minutes (not `default_cooldown`), the next implementer in the chain takes the task from its last checkpoint and `max_task_attempts` is not consumed; with no other profile the unit parks in `waiting_capacity` (exit 12). The step is not retried in place, because the throttle can follow a whole turn of work (that attempt had cost 1.45 credits); a throttled `hello` probe is the same limit. Still [U]: the wording of the out-of-credits error (the adapter maps a `runError` that names credits being used up to a credits limit), a harness agent for the judge (K3, K13), `--resume-id` |
 | `command` | user-defined argv template with `{prompt_file}`, `{result_path}`, `{model}`, `{session_id}` placeholders | exit code + `$L4_RESULT_PATH` | prompt contract | optional `resume_argv` | user responsibility; env allow-list applies | user responsibility | user-defined probe command |
 | `acp` (experimental) | spawn any ACP agent (`opencode acp`, `gemini --acp`, `kiro-cli acp`, `claude-agent-acp`, `codex-acp` …) and drive `initialize → session/new{cwd, mcpServers} → session/set_config_option(model) → session/prompt` [V probe, research/02] | `stopReason`, `usage_update.cost` | prompt contract (ACP has no schema) | `session/load` / `session/resume` | harness answers `session/request_permission` from one policy | uniform via `session/new.mcpServers` | none in protocol |
 | `fake` | scripted (simulation, tests) | scripted | native | scripted | — | — | scripted |
@@ -3289,6 +3434,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `{cache, reason}`),
 `run.finished` (exit code).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
+The result contract adds these records (L4-IMP-020, L4-FAC-011): `result.normalized` (`{task, phase, attempt, source, fixes}`, once for a step whose result object the harness repaired; it holds no text of the agent), `context_peak_tokens` and `context_peak_percent` on `agent.finished` (each only when the stream shows it), and, second wave and not built (L4-IMP-022), `result.repair` (`{task, phase, attempt, outcome, reason?}`).
 
 **L4-STA-004** Between the hand-off commit H and the next unit-branch commit, ledger events are written into the
 unit's lock-ref commits (a `ledger-pending/<run-id>.jsonl` file in the lock commit's tree; lock commits carry
@@ -4697,6 +4843,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 22 | `adoption-lessons` | the lessons of the first real consumer adoption as general fixes: a gate refuses a module that shadows an evidence plugin; `l4 setup github` covers the default branch of an integration base and checks its workflow; a laptop push keeps the person's git credentials and a refused push names the forge's own rules; a run with another pin than the base's does no work; `l4 doctor --adoption` names unmirrored CI jobs and the System One state; a single OpenSpec unit is validated strictly with every finding shown; `validate_plan.py` checks deltas and review budgets; `yolo.hold` and `l4 init --hold-existing` replace the backlog plan; Laya is the default System One and runners install it; the workflow names System One keys; a spec-writing reference in the skill (L4-ADO-001..019; `openspec/changes/adoption-lessons/`, `docs/plan/adoption-lessons.md`) | the live runs of tasks 9.3 on the consumer or the public dummy |
 | 23 | `unfreeze-and-answer` | a task whose own reviewed text (and its enclosing headings) names a Python test-support file (for example `conftest.py`) may change it in green, and a person's answer may unfreeze a support file, never an ignore file; an opened file keeps its old statements, rebinds no name and patches no code of the unit; the note of a blocked green question says how to unfreeze; `l4 questions` lists, shows, accepts and answers on the unit branch with `--no-push` and an agent rule (`clarifier.answer_by_agents`); the runbook and the skill teach the command; every stub command says `(not yet implemented)` in `--help` (L4-IMP-014..016, L4-QMD-007..009, L4-OPS-017; `openspec/changes/unfreeze-and-answer/`) | the live runs of tasks 7.3 on a dummy repository |
 | 24 | `escalate-and-note` | a task phase that one implementer profile fails `implementer.escalate_after` times (default 2) moves to the next usable profile of `roles.implementer`, cheap first, with the earlier failure reasons; each profile has its own attempts and the last one `max_task_attempts`; the move never parks a unit and never breaks the independence of the judges; `implementer.escalated` and the profile in `task.attempt_failed`, `breaker.tripped` and the halt detail; doctor CFG-009; the `--reason` of `l4 retry` and `l4 resume` on a unit halted on `max_task_attempts` reaches the implementer of that task as a capped, redacted data block; the runbook and the skill teach the note and a cheap-first chain (L4-IMP-017, L4-IMP-018, L4-OPS-018, L4-OPS-019; `openspec/changes/escalate-and-note/`) | the live runs of tasks 7.3 on a dummy repository |
+| 25 | `result-contract` | an implementer step that did its work does not lose the attempt to a slip in its result object: the prompt of a prompt-contract step asks for `status` and `summary` first (template `output@1`), the harness repairs the object with fixed rules and records `result.normalized`, an attempt fails for its result only when no result object is found, and `agent.finished` records the peak context of one call (L4-IMP-019, L4-IMP-020, L4-IMP-021, L4-IMP-022 not built, L4-FAC-010, L4-FAC-011; `openspec/changes/result-contract/`) | the live check of task 7.3 on a dummy repository: a unit on a free OpenCode model that slipped, with `+output@1` in the prompt and the count of `result.normalized` events |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -5350,6 +5497,27 @@ scenario is a spec defect (§26).
 - **Then** a `LIVE-005` warning `unrecorded version` names the profile and both versions; the profile is not refused and
   is selected when its probes pass.
 
+#### SCN-FAC-16 (+) A prompt-contract adapter hands over the object as written; a native one keeps its schema check · L4-FAC-010
+- **Given** an implementer request with no result schema to `attach_file_result`, and in turn a file `{"status": "red"}`, no file, and a file `not json`
+- **When** the result is attached
+- **Then** the first is `ok` with `structured == {"status": "red"}` and no `result_problem`, the second is `ok` with `result_problem: "missing"`, and the third is `error` with `result invalid: not JSON` and `result_problem: "not_json"`
+- **And** with the canonical schema, codex and claude-code still return `error` with the same detail as today, `rejected` holding the refused object and `result_problem: "invalid"`, and the recorded opencode replay of an invalid file with a schema is still `error`
+
+#### SCN-FAC-17 (+) Each adapter reports the text after the last tool call · L4-FAC-010
+- **Given** the recorded streams of each adapter: an opencode run with text before and after its last `tool_use`, a kiro-cli run whose `finalText` holds all of its text, a codex run with two `agent_message` items, a claude-code result event, and a command run
+- **When** they are parsed
+- **Then** `last_message` is the opencode text after the last tool call, the kiro-cli text after the last `tool_call` (shorter than `finalText`), the last codex message, the claude-code `result`, and `None` for the command run; `final_text` is unchanged for each
+
+#### SCN-FAC-18 (+) The peak per-call context of opencode, claude-code and kiro-cli · L4-FAC-011
+- **Given** an opencode stream with three `step_finish` events whose `input + cache.read + cache.write` are 9000, 21600 and 15000, the recorded claude-code stream `red-ok.jsonl`, and a kiro-cli stream with `contextUsagePercentage` 1.1 and 3.6
+- **When** each run is parsed and its step records `agent.finished`
+- **Then** opencode records `context_peak_tokens: 21600` with `input_tokens` unchanged, claude-code records the largest per-call sum of its `assistant` events, kiro-cli records `context_peak_percent: 3.6`, and the progress lines end with `, context peak 21.6k tokens` and `, context peak 3.6%`
+
+#### SCN-FAC-19 (−) No peak where the stream does not show one · L4-FAC-011
+- **Given** a codex run, a command run, and an `agent.finished` event of an older ledger
+- **When** the steps record `agent.finished` and the progress log reads the older event
+- **Then** no `context_peak_tokens` or `context_peak_percent` is recorded for codex and command, and the progress line of the older event is the line of today
+
 ### 23.7 Implementer and TDD (IMP)
 
 #### SCN-IMP-01 (+) Red then green · L4-IMP-002, L4-IMP-005, L4-IMP-007
@@ -5397,11 +5565,10 @@ scenario is a spec defect (§26).
 - **Then** the task is not marked done; the agent is re-prompted with the failure; after the same fingerprint 3 times
   the task is stuck (questions or `halted`).
 
-#### SCN-IMP-08 (+) Invalid result repaired once · L4-IMP-005
-- **Given** the agent ends with prose instead of the result JSON
-- **When** validation fails
-- **Then** one repair prompt is sent in the same session; a valid result continues the step; a second failure
-  counts as a failed attempt.
+#### SCN-IMP-08 (−) Prose with no result object fails the attempt · L4-IMP-005, L4-IMP-021, L4-IMP-022
+- **Given** the agent ends with prose and delivers no result object (no result file, and no JSON object in its final message)
+- **When** the attempt ends
+- **Then** the attempt fails with `no result was delivered` and counts against `max_task_attempts`; with `implementer.result_repair_attempts: 1`, one repair call is made first (L4-IMP-022, second wave, not built).
 
 #### SCN-IMP-09 (−) Agent commits on its own · L4-IMP-007
 - **Given** the agent ran `git commit`
@@ -5693,20 +5860,18 @@ scenario is a spec defect (§26).
 - **Given** a red, a green, a single and a single-with-tests prompt, for a native and a prompt-contract adapter
 - **When** the harness renders them
 - **Then** each has exactly one `result values:` line in its phase section naming `done | blocked | failed | partial`
-  and its own `phase`, taken from the result schema; the `# Output` section is unchanged.
+  and its own `phase`, taken from the result schema; the `# Output` section of a native prompt is unchanged, and that of a prompt-contract prompt is the template `output.md` (L4-IMP-019).
 
-#### SCN-IMP-52 (−) A result that breaks the enum is retried with the allowed values · L4-IMP-004, L4-IMP-008
-- **Given** a red step whose result has `status: "red"`, on a native and on a prompt-contract adapter
+#### SCN-IMP-52 (−) A result failure is retried with its reason and the allowed values · L4-IMP-004, L4-IMP-008, L4-IMP-021
+- **Given** a red step that delivers no result object, on a native and on a prompt-contract adapter
 - **When** the harness sends the second attempt
-- **Then** the "previous attempt" block holds `result invalid`, `status: not one of the allowed values (done, blocked,
-  failed, partial)` (never the written value) and the `result values:` line; the ledger's `task.attempt_failed.reason`
-  holds the headline only.
+- **Then** the "previous attempt" block holds `result invalid` and `no result was delivered`, and the `result values:` line; the ledger's `task.attempt_failed.reason`
+  holds the headline only. A red step whose result has `status: "red"` is not a failed attempt: the harness sets `done` (L4-IMP-020).
 
-#### SCN-IMP-53 (−) A status that is the phase name is told so · L4-IMP-008
+#### SCN-IMP-53 (−) A status that is the phase name is repaired, not retried · L4-IMP-008, L4-IMP-020
 - **Given** results whose `status` equals their `phase` (`red`, `green`, `single`), and one with another unknown status
-- **When** the result is validated
-- **Then** only the first kind gets the sentence that the status is the outcome of the step and the phase belongs in
-  `phase`.
+- **When** the result is normalized
+- **Then** each status becomes `done` (or `blocked` when a well-formed question is left), the first kind records `was` with the phase name in `result.normalized`, and no attempt fails for it (L4-IMP-020).
 
 #### SCN-IMP-54 (+) An already-satisfied task is traced as such · L4-IMP-003, L4-OBS-001
 - **Given** a task whose new test passes on the base and is confirmed pre-satisfied
@@ -5956,7 +6121,7 @@ scenario is a spec defect (§26).
 
 #### SCN-IMP-176 (+) The live case moves red from deepseek to glm · L4-IMP-017
 - **Given** `roles.implementer: [deepseek, glm]` (two OpenCode profiles with the same adapter and key, models `opencode-go/deepseek-v4.1-flash` and `opencode-go/glm-5.3-flash`), the defaults `escalate_after: 2` and `max_task_attempts: 3`, and judges of a third vendor
-- **And** deepseek's red attempt 1 of task 4.1 writes a test that calls a function with a keyword it does not have (`TypeError`), and attempt 2 returns a result without `summary`
+- **And** deepseek's red attempt 1 of task 4.1 writes a test that calls a function with a keyword it does not have (`TypeError`), and attempt 2 delivers no result object
 - **When** attempt 2 is counted
 - **Then** `implementer.escalated{task: "4.1", phase: "red", from: "deepseek", to: "glm", failures: 2, attempt: 3}` and `availability.selected{selected: "glm", escalated_from: "deepseek"}` are recorded, no cool-down is recorded for deepseek, and step `4.1/red/3` runs on glm
 - **And** glm's prompt has a previous-attempt block with `reason="escalation"` that lists both reasons, the guarded-stub advice included, and the section "Your previous attempt was rejected" with the result values line
@@ -6010,6 +6175,81 @@ scenario is a spec defect (§26).
 - **When** `l4 doctor` runs
 - **Then** CFG-009 fails with `implementer.escalate_after (2) is not below implementer.max_task_attempts (2): no task moves to glm`, then fails with `profiles oc-a and oc-b run the same model (opencode-go/deepseek-v4.1-flash): a move from oc-a to oc-b changes nothing`, then passes, and the doctor's exit code follows the `warn` severity
 
+#### SCN-IMP-186 (+) A prompt-contract prompt asks for status and summary first and ends with the path · L4-IMP-019
+- **Given** an opencode profile and the red step of task 1.1
+- **When** the prompt is rendered
+- **Then** the `# Output` section starts with the sentence about `status` and `summary`, holds the agent's schema with `"required":["status","summary"]` and without the keys `phase`, `task_ids`, `files_changed` and `tests_added`, and its last line is ``Write your result object to `.l4-result/result.json`.``
+- **And** the section does not contain `final message`, `prompt.rendered.template_version` ends with `+output@1`, and the request's `result_schema` is `None`
+
+#### SCN-IMP-187 (+) A native prompt and its schema do not change · L4-IMP-019
+- **Given** a codex profile and a claude-code profile, and the red step of task 1.1
+- **When** the prompts are rendered and the requests are built
+- **Then** each `# Output` section is the `(schema enforced)` section of today, `template_version` has no `+output`, and each request carries the canonical schema, whose strict copy for codex equals the recorded `implementer-result.strict.schema.json`
+
+#### SCN-IMP-188 (+) A missing summary and a phase-name status are repaired · L4-IMP-020
+- **Given** a red step of task 1.1 whose result file holds `{"status": "red", "phase": "red", "task_ids": ["1.1"], "criteria_ids": [...], "tests_added": [...], "files_changed": [...]}` (the observed `magnitude/qwen3.6-35b-a3b` object), and a red step whose object has `"status": "failed"` and no `summary` while its final message says what it did (the observed `nemotron-3.5-lightning-free` object)
+- **When** each step's object is normalized
+- **Then** the first gets `status` `done` and records `{field: "status", fix: "set", to: "done", was: "red"}`, the second gets the final message as `summary`, keeps `status` `failed`, and records `{field: "summary", fix: "set", from: "final_message"}`
+- **And** both steps go on to the red checks, and the progress log has `task 1.1 red attempt 1: L4 repaired the result (status set to done, was red)`
+
+#### SCN-IMP-189 (+) The harness owns the phase, the task, the changed files and the new tests · L4-IMP-020
+- **Given** a red step of task 1.1 whose object has `files_changed` as a list of objects and `tests_added` with dotted ids (the observed `big-pickle` red 2 object), and a codex red step whose valid result says `"phase": "green"`
+- **When** the objects are normalized and the red checks run
+- **Then** `files_changed` is the step's changed paths from git, `tests_added` is empty, the codex object's `phase` is `red`, and the fixes are `{field: "files_changed", fix: "replaced"}` and `{field: "phase", fix: "replaced"}`
+- **And** `classify_red` gets no agent list, and `task.red_ok.tests` lists the tests that the JUnit diff found
+
+#### SCN-IMP-190 (+) An over-long text is cut with a marker, and an alias key moves · L4-IMP-020
+- **Given** an object with `notes_for_verifier` of 2417 characters, a suppression whose `reason` has 350 characters, and an object with a `notes` key and no `notes_for_verifier`
+- **When** they are normalized
+- **Then** `notes_for_verifier` has 2000 characters and ends with `[cut by L4: <n> characters removed]`, the reason has 300 characters and ends the same way, the suppression is kept, the `notes` text is in `notes_for_verifier`, and the fixes record `cut` with `length: 2417`, `cut` with `length: 350` and `{field: "notes_for_verifier", fix: "renamed", from: "notes"}`
+
+#### SCN-IMP-191 (+) An object that the agent printed is taken when there is no file · L4-IMP-020
+- **Given** an opencode step that wrote no result file, whose final text ends with a fenced JSON object `{"status": "done", "summary": "added two tests"}` after a code sample `{"a": 1}`
+- **When** the result is found
+- **Then** the object with `status` is taken, `result.normalized` has `source: "final_message"`, and the step goes on to the checks
+
+#### SCN-IMP-192 (−) Normalization never adds a question, never changes blocked, never adds a suppression · L4-IMP-020
+- **Given** in turn: a `blocked` result with one question without `kind` and one well-formed question; a `done` result with a well-formed question; a result with a suppression without `line`
+- **When** they are normalized
+- **Then** the first keeps `blocked` and only the well-formed question, with `{field: "questions", fix: "dropped", count: 1}`; the second stays `done` and raises no question; the third has no suppression, so that the verifier reports the `# noqa` of the diff as undeclared
+- **And** no rule adds a question, a criterion id or a suppression, and no file of the worktree changes
+
+#### SCN-IMP-193 (+) The observed failing objects are accepted and still face the checks · L4-IMP-020
+- **Given** the eight invalid objects of `docs/live` (`big-pickle` red 1 to 3, `nemotron-3.5-lightning-free` red 1 and 3, `magnitude/qwen3.6-35b-a3b` red 1 to 3) with their final messages, and six objects built from the six result failures of `deepseek-v4.1-flash` on a public consumer repository
+- **When** each is normalized
+- **Then** each normalized object passes `l4/implementer-result@1`, and its fixes are the ones listed in the fixture for it
+- **And** in a bench red step that wrote no new test, the normalized object still ends the attempt with `no tests added`
+
+#### SCN-IMP-194 (−) A file in the worktree is never a result · L4-IMP-020, L4-IMP-021
+- **Given** a prompt-contract step that wrote a valid object to `agent-tmp/result.json` in the worktree, no result file, and a final message with no JSON object
+- **When** the result is found
+- **Then** no object is found, the attempt fails (L4-IMP-021), and nothing of `agent-tmp` is committed
+
+#### SCN-IMP-195 (−) No result object fails the attempt · L4-IMP-021
+- **Given** an opencode red step that wrote no result file and whose final message is prose with no JSON object (the observed wrong-path steps of `magnitude/qwen3.6-35b-a3b`), and a bench step with no object and no final text
+- **When** the attempt ends
+- **Then** each attempt fails with `the agent's result is invalid: no result was delivered (no result file and no result object in the final message)`, `task.attempt_failed` records it, and the next prompt has the reason and the `result values:` line
+
+#### SCN-IMP-196 (+) A blocked result with no question still reaches a person · L4-IMP-021, L4-IMP-008
+- **Given** a red step whose result is `{"status": "blocked", "summary": "the tests need a database URL"}`, and a red step whose result is `"status": "BLOCKED"` with one question that has no `title`
+- **When** the attempts end
+- **Then** neither attempt fails; each raises one ambiguous question titled `Task <k> is blocked` whose context is the summary, the second with ` (1 malformed questions were dropped)` in its context, and the unit goes to `awaiting_human` as today
+
+#### SCN-IMP-197 (+) A missing status with a question raises the question; more than three keep the first three · L4-IMP-020
+- **Given** a green step whose result has no `status` and one well-formed question, and a red step whose `blocked` result has five well-formed questions
+- **When** the results are normalized
+- **Then** the first becomes `blocked` with `{field: "status", fix: "set", to: "blocked"}` and its question is raised; the second raises its first three questions and records `{field: "questions", fix: "cut", count: 2}`
+
+#### SCN-IMP-198 (+) The repair call rebuilds an object from the final message · L4-IMP-022
+- **Given** `implementer.result_repair_attempts: 1`, an opencode red step that wrote no file and whose final message says what it did in prose
+- **When** the attempt ends
+- **Then** one tool-less call on the same profile returns `{"status": "done", "summary": "…"}`, `result.repair{outcome: "accepted"}` and `result.normalized{source: "repair"}` are recorded, and the step goes on to the red checks
+
+#### SCN-IMP-199 (−) A repair that adds a question is discarded, and some steps get no repair · L4-IMP-022
+- **Given** `implementer.result_repair_attempts: 1`, in turn: a repair reply with `"status": "blocked"` and one question; a kiro-cli step with no result object; the default `implementer.result_repair_attempts: 0`
+- **When** the attempts end
+- **Then** the first records `result.repair{outcome: "discarded"}` and the attempt fails with `no result was delivered`; the second and the third make no repair call and fail the same way
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -6062,10 +6302,10 @@ scenario is a spec defect (§26).
 - **Then** the token is replaced by `[REDACTED:gitlab-token]` in prompts, logs, ledger and comments; the sticky comment
   asks the human to rotate it.
 
-#### SCN-QMD-10 (−) More than three questions · L4-IMP-005, `clarifier.max_open_questions`
-- **Given** a result with five questions
-- **When** validated
-- **Then** the result is schema-invalid (`maxItems: 3`) → repair prompt asking for the three most blocking ones.
+#### SCN-QMD-10 (−) More than three questions · L4-IMP-005, L4-IMP-020, `clarifier.max_open_questions`
+- **Given** a `blocked` result with five questions
+- **When** the result is normalized
+- **Then** the first three questions are raised and `result.normalized` records `questions cut 2`.
 
 #### SCN-CLR-01 (+) Technical question auto-answered · L4-CLR-002, L4-CLR-003, L4-CLR-006
 - **Given** the implementer and the clarifier both label Q-001 `technical`, clarifier confidence `high`, two citations
