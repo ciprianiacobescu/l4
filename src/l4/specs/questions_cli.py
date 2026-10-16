@@ -3,12 +3,14 @@
 Reading never touches the work tree: `questions.md` is read from the fetched unit branch with `git ls-tree` and
 `cat-file`, to at most `MAX_QUESTIONS_BYTES`, and a symlink is not read. The edits of `accept` and `answer` are pure
 functions over `QuestionsFile` (`edit_accept`, `edit_answer`) and their checks (`check_question`, `check_text`,
-`round_trip`); the commit and the push are `unfreeze-and-answer` 4.5.
+`round_trip`); the commit and the push are `write_edit`.
 """
 
+import difflib
 import json
 import logging
 import re
+import shutil
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -17,11 +19,16 @@ from pathlib import Path, PurePosixPath
 
 import click
 
+from l4.config.defaults import cache_root
 from l4.config.loader import load_config
 from l4.config.redaction import load_app_config
 from l4.config.schema import ClarifierCfg, L4Config
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
+from l4.forge.base import fetch_auth_config
+from l4.forge.gitlab import push_auth_config
+from l4.forge.pushfail import explain_push_failure, push_platform
+from l4.forge.urls import origin_url
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, names_path
 from l4.redact import Redactor
@@ -48,6 +55,7 @@ from l4.state.status import discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
+from l4.vcs.push import PushRejected
 from l4.vcs.tree import regular_blobs
 from l4.verifier.verdicts import _DECISION
 from l4.yolo.accept import actor
@@ -692,18 +700,141 @@ def _prepare(
     return app, cfg, git, build_edit(form, folder, question, text, redactor=app.redactor)
 
 
+# --- the write: one commit by plumbing, one push without force (design D9 steps 5 and 6) ------------------------
+
+
+def remote_head(git: Git, config: Sequence[tuple[str, str]], branch: str) -> str | None:
+    """The sha of `refs/heads/<branch>` on `origin` now, or None when the branch is not there."""
+    out = git.run("ls-remote", REMOTE, f"refs/heads/{branch}", config=config).stdout
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1] == f"refs/heads/{branch}":
+            return fields[0]
+    return None
+
+
+_IDENT = re.compile(r"(?P<name>.*) <(?P<email>[^>]*)> \d+ [+-]\d{4}\s*")
+
+
+def author_name(git: Git) -> str:
+    """The operator's own git identity (what `commit-tree` will write), or the refusal to set one."""
+    done = git.run("var", "GIT_AUTHOR_IDENT", check=False)
+    found = _IDENT.fullmatch(done.stdout) if done.returncode == 0 else None
+    if found is None or not found.group("name").strip():
+        raise Refusal(
+            "git has no identity to author the commit with",
+            'git config user.name "Your Name"; git config user.email you@example',
+        ).exit()
+    return found.group("name").strip()
+
+
+def commit_message(edit: Edit, name: str, who: str, marker: str | None) -> str:
+    """The message of design D9: no `L4-` trailer and no `[skip ci]`, so the push starts CI."""
+    unit = edit.folder.unit.partition(":")[2] or edit.folder.unit
+    title = " ".join(edit.question.title.split())[:60].rstrip()
+    by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
+    return (
+        f"{edit.form} {edit.question.id} ({unit}): {title}\n\n"
+        f"Status: {edit.status.value}\nBy: {by}\nVia: l4 questions\n"
+    )
+
+
+def make_commit(git: Git, edit: Edit, message: str) -> str:
+    """The new `questions.md` on top of the head that was read, as a commit that no ref, index or work tree knows:
+    a private index file, `read-tree`, `update-index --cacheinfo` with the old mode, `write-tree`, `commit-tree`."""
+    head, path = edit.folder.head, edit.folder.path
+    listing = git.run("ls-tree", head, "--", path).stdout.split()
+    mode = listing[0] if listing else "100644"
+    base = cache_root(git.env, repo=git.repo) / "questions-index"
+    base.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix="idx-", dir=base))
+    try:
+        private = git.at(git.repo)
+        private.env = {**private.env, "GIT_INDEX_FILE": str(scratch / "index")}
+        (scratch / "questions.md").write_bytes(edit.new.data)
+        blob = private.run("hash-object", "-w", "--no-filters", str(scratch / "questions.md")).stdout.strip()
+        private.run("read-tree", head)
+        private.run("update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}")
+        tree = private.run("write-tree").stdout.strip()
+        sha = private.run("commit-tree", tree, "-p", head, "-m", message).stdout.strip()
+        git.history.extend(private.history)
+        return sha
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _moved(branch: str, now: str | None) -> L4Exit:
+    shown = now[:10] if now else "gone"
+    return Refusal(f"{branch} moved since the fetch (now {shown})", "run the command again: it fetches first").exit()
+
+
+def _checked_out(git: Git, branch: str) -> bool:
+    listing = git.run("worktree", "list", "--porcelain", check=False).stdout
+    return f"branch refs/heads/{branch}" in listing.splitlines()
+
+
+def _dry_run(edit: Edit, message: str) -> str:
+    old = edit.old.data.decode("utf-8", errors="replace").splitlines(keepends=True)
+    new = edit.new.data.decode("utf-8", errors="replace").splitlines(keepends=True)
+    diff = "".join(difflib.unified_diff(old, new, f"a/{edit.folder.path}", f"b/{edit.folder.path}", n=3))
+    return f"{diff.rstrip(chr(10))}\n\n{message.rstrip(chr(10))}\n\nnothing written (--no-push)"
+
+
+def write_edit(app: AppContext, cfg: L4Config, git: Git, edit: Edit, *, no_push: bool) -> ExitCode:
+    """Make the commit and push it to the unit branch, or with `no_push` print what would be pushed. Nothing is made
+    before every refusal has been checked."""
+    folder, branch = edit.folder, edit.folder.branch
+    who, marker = actor(app.environ, sys.stdin.isatty())
+    message = commit_message(edit, author_name(git), who, marker)
+    if no_push:
+        _echo(app, _dry_run(edit, message))
+        return ExitCode.OK
+    push_config = push_auth_config(cfg, app.environ, origin_url(app.repo, app.environ))
+    fetch_config = fetch_auth_config(cfg, app.environ, origin_url(app.repo, app.environ))
+
+    def failed(exc: GitError) -> L4Exit:
+        return explain_push_failure(
+            exc, branch=branch, token_env=cfg.forge.token_env, environ=app.environ,
+            redact=app.redactor.redact_text, platform=push_platform(cfg, app.environ, git.repo),
+        )  # fmt: skip
+
+    try:
+        now = remote_head(git, fetch_config, branch)
+    except GitError as exc:
+        raise failed(exc) from None
+    if now != folder.head:
+        raise _moved(branch, now)
+    sha = make_commit(git, edit, message)
+    try:
+        git.push(REMOTE, [f"{sha}:refs/heads/{branch}"], config=push_config)
+    except PushRejected:
+        try:
+            now = remote_head(git, fetch_config, branch)
+        except GitError:
+            now = None
+        raise _moved(branch, now) from None
+    except GitError as exc:
+        raise failed(exc) from None
+    git.run("update-ref", f"refs/remotes/{REMOTE}/{branch}", sha)
+    out = [f"pushed {sha[:10]} to {branch}: the push starts a run", f"Next: l4 status --unit {folder.unit}"]
+    if _checked_out(git, branch):
+        out.insert(1, f"your checkout of {branch} is behind: git pull")
+    _echo(app, "\n".join(out))
+    return ExitCode.OK
+
+
 def run_accept(app: AppContext, *, question: str, unit: str | None, no_push: bool = False) -> ExitCode:
-    """`l4 questions accept Q-NNN --unit U [--no-push]`: builds the checked edit; the write is task 4.5."""
-    _prepare(app, "accept", question, unit, None)
-    raise NotImplementedError("questions: the commit and the push are unfreeze-and-answer 4.5")
+    """`l4 questions accept Q-NNN --unit U [--no-push]`."""
+    app, cfg, git, edit = _prepare(app, "accept", question, unit, None)
+    return write_edit(app, cfg, git, edit, no_push=no_push)
 
 
 def run_answer(
     app: AppContext, *, question: str, unit: str | None, text: str | None, no_push: bool = False
 ) -> ExitCode:
-    """`l4 questions answer Q-NNN --unit U --text T [--no-push]`: builds the checked edit; the write is task 4.5."""
-    _prepare(app, "answer", question, unit, _read_text(text))
-    raise NotImplementedError("questions: the commit and the push are unfreeze-and-answer 4.5")
+    """`l4 questions answer Q-NNN --unit U --text T [--no-push]` (`--text -` reads standard input)."""
+    app, cfg, git, edit = _prepare(app, "answer", question, unit, _read_text(text))
+    return write_edit(app, cfg, git, edit, no_push=no_push)
 
 
 # --- the handler ------------------------------------------------------------------------------------------------
