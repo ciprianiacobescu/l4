@@ -85,7 +85,7 @@ def test_a_fix_units_task_with_the_parents_task_key_is_told_apart_and_nothing_cr
     lines = console.getvalue().splitlines()
     assert "[l4] openspec:demo task 1.1 started: parent task" in lines
     assert "[l4] openspec:demo [demo-fix-1] task 1.1 started: fix task" in lines
-    assert all("agent single task 1.1 ok" in line for line in lines if "agent single" in line)
+    assert all("agent single task 1.1 ok" in line for line in lines if "agent single task" in line)
 
 
 def test_base_merge_lines(console):
@@ -322,3 +322,49 @@ def test_scn_fac_19_an_older_agent_finished_prints_as_today(console):
     (line,) = lines(console)
     assert line.startswith("agent red task 1.1 ok (") and line.endswith(")")
     assert "context peak" not in line
+
+
+def _debug(console):
+    logging.getLogger("l4").setLevel(logging.DEBUG)
+
+
+def test_the_step_start_line_is_at_info(console):
+    ProgressTrace()(event("step.started", task="5.2", phase="green", attempt=1, agent="deepseek"))
+    assert lines(console) == ["agent green step started (task 5.2, attempt 1, deepseek)"]
+
+
+def test_the_idle_line_is_a_warning_naming_the_key(console):
+    ProgressTrace()(
+        event("agent.idle", task="2.1", phase="red", attempt=1, profile="deepseek", silent_s=600, tool_calls=3)
+    )
+    assert lines(console) == [
+        "task 2.1 red attempt 1: no activity from deepseek for 10m; L4 stopped it (implementer.idle_timeout)"
+    ]
+    logging.getLogger("l4").setLevel(logging.ERROR)
+    ProgressTrace()(event("agent.idle", task="2.1", phase="red", attempt=1, profile="d", silent_s=600))
+    logging.getLogger("l4").setLevel(logging.WARNING)
+    ProgressTrace()(event("agent.idle", task="2.1", phase="red", attempt=2, profile="d", silent_s=3720))
+    assert lines(console)[-1].endswith("for 1h 2m; L4 stopped it (implementer.idle_timeout)")
+
+
+def test_scn_obs_03_a_red_gate_with_new_failing_tests_prints_the_red_line(console):
+    _debug(console)
+    gate = {"name": "test", "status": "fail", "exit_code": 1, "tests": 12, "passed": 5, "failed": 7}
+    ProgressTrace()(event("gate.finished", red_new_failing=7, **gate))
+    ProgressTrace()(event("gate.finished", **{**gate, "tests": 6, "passed": 5, "failed": 1}, red_new_failing=1))
+    assert lines(console) == [
+        "red: 7 new tests fail, as intended",
+        "gate test fail (exit 1, 12 tests: 5 passed, 7 failed)",
+        "red: 1 new test fails, as intended",
+        "gate test fail (exit 1, 6 tests: 5 passed, 1 failed)",
+    ]
+
+
+def test_scn_obs_03_the_raw_gate_line_is_not_at_info(console):
+    ProgressTrace()(event("gate.finished", name="test", status="fail", exit_code=1, red_new_failing=2))
+    assert lines(console) == ["red: 2 new tests fail, as intended"]
+
+
+def test_scn_obs_04_a_gate_without_the_key_prints_as_today(console):
+    ProgressTrace()(event("gate.finished", name="test", status="fail", exit_code=1, tests=3, passed=2, failed=1))
+    assert lines(console) == ["gate test fail (exit 1, 3 tests: 2 passed, 1 failed)"]
