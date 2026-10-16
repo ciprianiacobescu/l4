@@ -37,7 +37,13 @@ def test_outcome():
 def test_testability_names_the_spec_files():
     line = resolve("testability")
     assert line.startswith("Give the scenario concrete inputs and outputs in openspec/changes/a/specs/*/spec.md")
-    assert "tolerance or an injected clock" in line
+    assert "failure and the empty case" in line
+    assert "clock" not in line
+
+
+def test_testability_mentions_a_clock_only_for_a_time_finding():
+    assert "tolerance or an injected clock" in resolve("testability", "the 5 second timeout has no tolerance")
+    assert "clock" not in resolve("testability", "the missing-data case has no scenario")
 
 
 def test_a_kiro_units_testability_line_names_requirements_md():
@@ -66,7 +72,9 @@ def test_duplicate_scope():
 
 
 def test_contradiction():
-    assert resolve("contradiction") == ("Make the two statements agree, in this folder or in a prerequisite's.")
+    line = resolve("contradiction")
+    assert line.startswith("Edit one of the two statements so both say the same;")
+    assert "if they live in two units, fix the one that is wrong and say which in the proposal" in line
 
 
 def test_missing_dependency_names_the_entry_to_add():

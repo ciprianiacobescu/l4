@@ -202,6 +202,9 @@ def _named_units(text: str, subject: str, depends_on: Collection[str], known_uni
     ]
 
 
+_TIME_WORDS = re.compile(r"\b(time|timeout|time-out|duration|clock|seconds?|milliseconds?|deadline|wall-clock)\b", re.I)
+
+
 def resolve(
     plan_id: str,
     base: str,
@@ -224,10 +227,10 @@ def resolve(
         return f"State the observable result in {target}, not only the work."
     if criterion == "testability":
         target = f"{where}/requirements.md" if kiro else f"{where}/specs/*/spec.md"
-        return (
-            f"Give the scenario concrete inputs and outputs in {target}; "
-            "a time bound needs a tolerance or an injected clock."
-        )
+        line = f"Give the scenario concrete inputs and outputs in {target}, including the failure and the empty case."
+        if _TIME_WORDS.search(finding.get("text", "")):
+            line += " A time bound needs a tolerance or an injected clock."
+        return line
     if criterion == "interfaces":
         return (
             "Fix names, signatures, data shapes and error values in the spec "
@@ -243,7 +246,10 @@ def resolve(
     if criterion == "duplicate_scope":
         return "Remove the overlap from one of the units the finding names."
     if criterion == "contradiction":
-        return "Make the two statements agree, in this folder or in a prerequisite's."
+        return (
+            "Edit one of the two statements so both say the same; if they live in two units, "
+            "fix the one that is wrong and say which in the proposal."
+        )
     if criterion == "missing_dependency":
         batch_note = f" (batch {batch})" if batch else ""
         named = _named_units(finding.get("text", ""), subject, depends_on, known_units)

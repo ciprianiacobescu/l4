@@ -200,12 +200,12 @@ for more scenarios in it. To review before pushing, the operator had to build a 
   | Criterion | Resolve |
   |---|---|
   | outcome | State the observable result in `<folder>/proposal.md` or the spec, not only the work. |
-  | testability | Give the scenario concrete inputs and outputs in `<folder>/specs/*/spec.md` (Kiro: `requirements.md`); a time bound needs a tolerance or an injected clock. |
+  | testability | Give the scenario concrete inputs and outputs in `<folder>/specs/*/spec.md` (Kiro: `requirements.md`), including the failure and the empty case; when the finding mentions time, a time bound needs a tolerance or an injected clock. |
   | interfaces | Fix names, signatures, data shapes and error values in the spec (the implementer and the dependent units read the spec, not only `tasks.md`). |
   | failure_cases | State what happens on bad input, absence, concurrency and a failing dependency. |
   | feasibility | Split the unit (a new change folder and a plan entry) or remove the part that needs a person, a secret or a service. |
   | duplicate_scope | Remove the overlap from one of the units the finding names. |
-  | contradiction | Make the two statements agree, in this folder or in a prerequisite's. |
+  | contradiction | Edit one of the two statements so both say the same; if they live in two units, fix the one that is wrong and say which in the proposal. |
   | missing_dependency | Add a `depends_on` to `<subject>` in `.l4/plans/<plan>.json` (batch `<b>`) only on a unit of the plan that introduces it; if the code already exists on the base branch, say so in the spec instead. When the text names a known unit id that is not in `depends_on`, the exact entry is suggested; nothing is parsed beyond known ids. |
   | batch_acceptance | State the batch outcome in a unit's proposal, or give batch `<b>` an acceptance profile that can show it. |
   | material (harness) | D4's message: file, size, budget, config key, the fix. |
