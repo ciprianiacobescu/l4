@@ -35,6 +35,7 @@ class Step:
     cost_usd: float | None = None  # reported as the run's usage, for tests of budget accounting
     credits: float | None = None  # plan credits (Kiro), a different unit from dollars
     credits_source: str | None = None
+    idle_s: float | None = None  # seconds the "agent" stays silent before it ends (L4-IMP-024); not used yet
     printed: str = ""  # text the "agent" prints to its event stream and to stderr, as a tool call's output would
     model: str | None = None  # the model the run reports as served (read only when the adapter reports one)
     permission_denials: list[dict[str, Any]] = field(default_factory=list)

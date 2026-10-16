@@ -11,6 +11,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from l4.agents.activity import ActivityWatch, StreamReader
+
 POLL_S = 0.05
 INTERRUPT_GRACE_S = 5.0
 
@@ -43,6 +45,8 @@ class ProcRunner:
         interrupt: threading.Event | None = None,
         on_line: Callable[[str], bool | None] | None = None,
         stall_timeout_s: float | None = None,
+        watch: ActivityWatch | None = None,
+        reader: StreamReader | None = None,
     ) -> ProcOutcome:
         """stdout is copied line by line to `stdout_path`; `on_line` returning True aborts the run. `stdin` is written
         in full, then closed (EOF), from a thread, so a prompt larger than the pipe buffer cannot deadlock."""

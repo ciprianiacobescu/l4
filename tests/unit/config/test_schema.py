@@ -21,6 +21,8 @@ NOT_YET_MODELLED: set[tuple[str, str]] = set()  # `ci.self_provision` arrived wi
 # keys SPEC 3.2 does not have: forge.gitlab (M0, C2)
 ADDED_BEYOND_SPEC = {
     ("forge", "gitlab"),
+    ("implementer", "heartbeat"),  # run-liveness 0.1; SPEC 3.2 gains them with the change
+    ("implementer", "idle_timeout"),
 }
 
 

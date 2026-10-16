@@ -91,6 +91,25 @@ class ChildSnapshot:
 
 
 @dataclass(frozen=True)
+class Activity:
+    """The newest ledger event of a unit (L4-OPS-020)."""
+
+    ts: str
+    type: str
+    task: str | None
+    run_id: str | None
+
+
+@dataclass(frozen=True)
+class OpenRun:
+    """A `run.started` of `l4 run` with no `run.finished` for the same run."""
+
+    run_id: str
+    started: str
+    ci_url: str | None
+
+
+@dataclass(frozen=True)
 class UnitSnapshot:
     ref: UnitRef
     state: UnitState
@@ -106,6 +125,8 @@ class UnitSnapshot:
     follow_up: FollowUpOffer | None = None  # a `merged` unit: the items a follow-up should take (L4-FBK-010)
     stopped_in: str | None = None  # a halted or escalated unit: the run whose edge stopped it (L4-OPS-006)
     spec_edit: SpecEdit | None = None  # a person's spec push after the harness's last commit (L4-OPS-014)
+    last_activity: Activity | None = None  # the newest ledger event (L4-OPS-020)
+    open_run: OpenRun | None = None  # a run that started and has no end recorded (L4-OPS-020)
 
     @property
     def feedback_counts(self) -> dict[str, int]:

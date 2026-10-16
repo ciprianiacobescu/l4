@@ -227,6 +227,7 @@ class Workbench:
         network: bool | None = None,
         must_contain: Collection[str] = (),
         extra_env: Mapping[str, str] | None = None,
+        note: Callable[[TestReport], dict] | None = None,
     ) -> GateResult:
         """`network` defaults to `gates.network`; the setup step passes True (it downloads the dependencies).
         `extra_env` (the coverage plugin's `cov_env`) is merged with the trace plugin's: `PYTEST_ADDOPTS` and
@@ -236,7 +237,7 @@ class Workbench:
             name, command, tuple(reports), self.cfg.gates.test.format, duration_seconds(self.cfg.gates.timeout),
             frozenset(must_contain),
         )  # fmt: skip
-        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env)
+        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note)
 
     def run_gate_spec(
         self,
@@ -246,6 +247,7 @@ class Workbench:
         tree: Path | None = None,
         extra_env: Mapping[str, str] | None = None,
         caches: tuple[CacheMount, ...] | None = None,
+        note: Callable[[TestReport], dict] | None = None,
     ) -> GateResult:
         """The one way a gate runs, in the unit's worktree or in another checkout of the repository (the merge base the
         verifier serves): bytecode purged before, the protected set put back after, the trace plugin loaded, the
