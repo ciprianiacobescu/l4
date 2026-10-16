@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from l4.agents import activity
 from l4.agents.activity import ActivityWatch, Beat, Signal, ago
 from l4.agents.base import RunRequest
 from l4.agents.fake import Step
@@ -53,18 +52,9 @@ def test_runner_and_gate_accept_the_new_arguments():
         assert inspect.signature(method).parameters["note"].default is None
 
 
-def test_watch_and_readers_are_contract_only():
+def test_watch_contract_attributes():
     watch = ActivityWatch(120, lambda beat: None)
     assert watch.stopped_idle_s is None
     assert isinstance(watch.clock, Callable)
-    calls = [
-        lambda: watch.start(0.0, None), lambda: watch.line("x"), lambda: watch.tick(0.0),
-        watch.has_open_call, lambda: watch.snapshot(0.0),
-    ]  # fmt: skip
-    readers = ("opencode_signals", "claude_code_signals", "codex_signals", "kiro_signals")
-    calls += [lambda name=name: getattr(activity, name)("x") for name in readers]
-    for call in calls:
-        with pytest.raises(NotImplementedError):
-            call()
     assert Signal("start").id is None
     assert Beat(1.0, 0, 1.0, 0, 0.0, False).counts is False
