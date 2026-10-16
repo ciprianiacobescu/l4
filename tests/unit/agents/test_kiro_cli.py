@@ -282,3 +282,15 @@ def test_the_context_peak_is_the_largest_context_usage_percentage(tmp_path):
     assert out.usage.context_peak_percent == 3.6 and out.usage.credits is None
     none = adapter().parse(['{"type":"runStarted","data":{}}'], exit_code=0, raw_events_path=tmp_path / "e")
     assert none.usage.context_peak_percent is None
+
+
+def test_the_runner_gets_the_requests_watch_and_the_kiro_reader(tmp_path):
+    from l4.agents.activity import ActivityWatch, kiro_signals
+
+    watch = ActivityWatch(0, lambda beat: None)
+    proc = FakeProc()
+    KiroCliAdapter(proc).run(request(tmp_path, watch=watch))
+    assert proc.calls[0]["kw"]["watch"] is watch and proc.calls[0]["kw"]["reader"] is kiro_signals
+    plain = FakeProc()
+    KiroCliAdapter(plain).run(request(tmp_path))
+    assert plain.calls[0]["kw"]["watch"] is None

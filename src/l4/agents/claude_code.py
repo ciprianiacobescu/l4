@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from l4.agents.activity import claude_code_signals
 from l4.agents.base import (
     TRANSIENT_STATUSES,
     AdapterError,
@@ -183,6 +184,7 @@ class ClaudeCodeAdapter:
                 interrupt=req.interrupt,
                 # the judge's `--output-format json` prints once, at the end: silence is normal there
                 stall_timeout_s=None if req.permission_policy.mode == "judge" else req.stall_timeout_s,
+                watch=req.watch, reader=claude_code_signals,
             )  # fmt: skip
         text = req.raw_events_path.read_text(encoding="utf-8", errors="replace")
         if windows := claude_windows_of(text):

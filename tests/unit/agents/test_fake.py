@@ -53,3 +53,15 @@ def test_probes_pass_by_default_and_can_be_scripted(tmp_path):
     out = fake.probe(Profile(adapter="fake"), "auth", ctx)
     assert not out.ok and out.reason == "logged out"
     assert fake.capabilities().schema_mode == "native"
+
+
+def test_a_step_with_idle_s_sets_the_watch_mark_and_returns_timeout(tmp_path):
+    from l4.agents.activity import ActivityWatch
+
+    watch = ActivityWatch(0, lambda beat: None)
+    fake = FakeAdapter([Step(idle_s=600), Step(idle_s=600), Step()])
+    result = fake.run(request(tmp_path, watch=watch))
+    assert result.status == "timeout" and watch.stopped_idle_s == 600
+    assert fake.run(request(tmp_path)).status == "timeout"  # no watch: no mark, no error
+    fresh = ActivityWatch(0, lambda beat: None)
+    assert fake.run(request(tmp_path, watch=fresh)).status == "ok" and fresh.stopped_idle_s is None

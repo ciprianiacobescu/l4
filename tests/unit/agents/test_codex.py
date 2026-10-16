@@ -288,3 +288,30 @@ def test_last_message_is_the_last_agent_message_and_final_text_is_unchanged(tmp_
 def test_codex_reports_no_context_peak(tmp_path):  # SCN-FAC-19
     out = parse("red-ok.jsonl", tmp_path, result_text=(RECORDED / "red-ok.result.json").read_text())
     assert out.usage.context_peak_tokens is None and out.usage.context_peak_percent is None
+
+
+def test_the_runner_gets_the_requests_watch_and_the_codex_reader(tmp_path):
+    from l4.agents.activity import ActivityWatch, codex_signals
+    from l4.agents.proc import ProcOutcome
+
+    seen: list[dict] = []
+
+    class Spy:
+        def run(self, argv, env, cwd, **kw):
+            seen.append(kw)
+            kw["stdout_path"].parent.mkdir(parents=True, exist_ok=True)
+            kw["stdout_path"].write_text("")
+            return ProcOutcome(0)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "codex").write_text("#!/bin/sh\n")
+    (bin_dir / "codex").chmod(0o755)
+    (tmp_path / "wt").mkdir(exist_ok=True)
+    watch = ActivityWatch(0, lambda beat: None)
+    for w in (watch, None):
+        req = request(tmp_path, watch=w)
+        req.env = {"PATH": str(bin_dir)}
+        CodexAdapter(Spy()).run(req)
+    assert seen[0]["watch"] is watch and seen[0]["reader"] is codex_signals
+    assert seen[1]["watch"] is None

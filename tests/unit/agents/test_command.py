@@ -35,7 +35,7 @@ class FakeProc:
         self.outcome, self.writes, self.calls = outcome or ProcOutcome(0), writes, []
 
     def run(self, argv, env, cwd, *, stdout_path, timeout_s, stdin=None, stderr_path=None, **kw):
-        self.calls.append({"argv": list(argv), "env": dict(env), "cwd": cwd, "stdin": stdin})
+        self.calls.append({"argv": list(argv), "env": dict(env), "cwd": cwd, "stdin": stdin, "kw": kw})
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text("")
         if self.writes is not None:  # the command writes where {result_path} told it to
@@ -140,3 +140,15 @@ def test_capabilities_and_declared_model():
     caps = CommandAdapter().capabilities()
     assert caps.schema_mode == "prompt_contract" and not caps.resume and not caps.served_model
     assert CommandAdapter.model_unverified is True
+
+
+def test_the_runner_gets_the_requests_watch_and_no_reader(tmp_path):
+    from l4.agents.activity import ActivityWatch
+
+    watch = ActivityWatch(0, lambda beat: None)
+    proc = FakeProc()
+    CommandAdapter(proc).run(request(tmp_path, watch=watch))
+    assert proc.calls[0]["kw"]["watch"] is watch and proc.calls[0]["kw"]["reader"] is None
+    plain = FakeProc()
+    CommandAdapter(plain).run(request(tmp_path))
+    assert plain.calls[0]["kw"]["watch"] is None

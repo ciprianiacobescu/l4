@@ -340,3 +340,35 @@ def test_context_peak_is_the_largest_per_call_sum_of_the_assistant_events(tmp_pa
     assert out.usage.context_peak_tokens == 2 + 1105 + 12051
     assert out.usage.input_tokens == 10 and out.usage.context_peak_percent is None
     assert parse((RECORDED / "judge-structured-output.json").read_text(), tmp_path).usage.context_peak_tokens is None
+
+
+def test_the_runner_gets_the_requests_watch_and_the_claude_code_reader(tmp_path):
+    from l4.agents.activity import ActivityWatch, claude_code_signals
+    from l4.agents.claude_code import ClaudeCodeAdapter
+    from l4.agents.proc import ProcOutcome
+
+    seen: list[dict] = []
+
+    class Spy:
+        def run(self, argv, env, cwd, **kw):
+            seen.append(kw)
+            kw["stdout_path"].parent.mkdir(parents=True, exist_ok=True)
+            kw["stdout_path"].write_text("")
+            return ProcOutcome(0)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "claude").write_text("#!/bin/sh\n")
+    (bin_dir / "claude").chmod(0o755)
+    (tmp_path / "wt").mkdir(exist_ok=True)
+    watch = ActivityWatch(0, lambda beat: None)
+    for w in (watch, None):
+        req = RunRequest(
+            profile=Profile(adapter="claude-code", model="sonnet", vendor="anthropic"), role="x", cwd=tmp_path / "wt",
+            prompt="p", result_path=tmp_path / "r.json", raw_events_path=tmp_path / str(bool(w)) / "e.jsonl",
+            env={}, permission_policy=PermissionPolicy("implement"), watch=w,
+        )  # fmt: skip
+        req.env = {"PATH": str(bin_dir)}
+        ClaudeCodeAdapter(Spy()).run(req)
+    assert seen[0]["watch"] is watch and seen[0]["reader"] is claude_code_signals
+    assert seen[1]["watch"] is None

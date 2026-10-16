@@ -35,7 +35,7 @@ class FakeProc:
         self.stdout, self.outcome, self.calls = stdout, outcome or ProcOutcome(0), []
 
     def run(self, argv, env, cwd, *, stdout_path, timeout_s, stdin=None, stderr_path=None, interrupt=None,
-            on_line=None, stall_timeout_s=None):  # fmt: skip
+            on_line=None, stall_timeout_s=None, watch=None, reader=None):  # fmt: skip
         self.calls.append({"argv": list(argv), "env": dict(env), "cwd": cwd, "stdin": stdin})
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text(self.stdout)

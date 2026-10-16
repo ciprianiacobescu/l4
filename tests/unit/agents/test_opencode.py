@@ -32,8 +32,9 @@ class FakeProc:
         self.stdout, self.outcome, self.calls = stdout, outcome or ProcOutcome(0), []
 
     def run(self, argv, env, cwd, *, stdout_path, timeout_s, stdin=None, stderr_path=None, interrupt=None,
-            on_line=None, stall_timeout_s=None):  # fmt: skip
-        self.calls.append({"argv": list(argv), "env": dict(env), "cwd": cwd, "stdin": stdin, "stall": stall_timeout_s})
+            on_line=None, stall_timeout_s=None, watch=None, reader=None):  # fmt: skip
+        self.calls.append({"argv": list(argv), "env": dict(env), "cwd": cwd, "stdin": stdin, "stall": stall_timeout_s,
+                           "watch": watch, "reader": reader})  # fmt: skip
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text(self.stdout)
         return self.outcome
@@ -187,3 +188,18 @@ def test_capabilities_are_prompt_contract_without_resume_or_served_model():
     caps = OpenCodeAdapter().capabilities()
     assert caps.schema_mode == "prompt_contract" and not caps.resume and not caps.served_model
     assert OpenCodeAdapter.model_unverified is True
+
+
+def test_the_runner_gets_the_requests_watch_and_the_opencode_reader(tmp_path):
+    from l4.agents.activity import ActivityWatch, opencode_signals
+
+    watch = ActivityWatch(0, lambda beat: None)
+    proc = FakeProc()
+    OpenCodeAdapter(proc).run(request(tmp_path, watch=watch))
+    assert proc.calls[0]["watch"] is watch and proc.calls[0]["reader"] is opencode_signals
+
+
+def test_a_judge_request_has_no_watch(tmp_path):
+    proc = FakeProc()
+    OpenCodeAdapter(proc).run(request(tmp_path))
+    assert proc.calls[0]["watch"] is None
