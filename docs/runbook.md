@@ -281,6 +281,8 @@ The important log lines:
 | `[l4] <unit> phase <from> → <to> (<trigger>)` | A phase change. |
 | `[l4] <unit> task <k> <red\|green> attempt <n> failed: <reason>` | Why one attempt failed. The phase can also be `single`. For a fix unit, `[<fix unit>]` follows the unit id. The reason is cut. The full text is on the line `[l4] implementer: <k>: <phase> attempt <n> failed: …`. |
 | `[l4] <unit> halted: <code> (task <k>)` | The short code of the breaker. |
+| `[l4] <unit> task <k> <phase> attempt <n>: L4 repaired the result (<fix>; <fix>)` | The result object of the agent broke the result contract, for example a missing `summary`, a `status` that names the phase, or a text that is too long. The harness repaired it with fixed rules (`result.normalized`), and the gates and the verifier still judge the work. Each `<fix>` is `<field> <fix>` with its details, for example `status set to done, was red`, `summary set from final_message` or `notes_for_verifier cut from 2417 characters`. The attempt did not fail for the result. |
+| `[l4] <unit> agent <phase> task <k> <status> (<time>, <model>), context peak <n>k tokens` | The end of an agent step. The last part is the largest context that the agent used in one call: `<n>k tokens` for OpenCode and Claude Code, `<p>%` for Kiro. Codex and a command give none, and an older ledger has none. |
 | `[l4] <unit> task <k> <phase> attempt <n> failed on <profile>: <reason>` | The same as the attempt line above, with the profile that ran the attempt. Older ledgers have no profile. |
 | `[l4] <unit> task <k> <phase>: escalated from <from> to <to> after <n> failed attempts` | The step moved to the next profile of `roles.implementer` (`implementer.escalated`). |
 | `[l4] <unit> task <k> <phase>: <from> failed <n> attempts; no later profile can take it (<reason>); it stays on <from>` | A warning. No later profile could take the step, so it stays on its profile (`implementer.escalation_skipped`). |
@@ -440,6 +442,11 @@ Use the ledger only when the other places do not give the cause. Do not change i
 A halt is a `breaker.tripped` event, then a `phase.changed` event with `"to": "halted"`. The event `phase.changed`
 has the code in `reason` and the text in `detail`. `breaker.tripped` has a short code in `reason` (for example
 `max_task_attempts`) and the details in `last_failure`, `detail` or `paths`.
+
+The event `result.normalized{task, phase, attempt, source, fixes}` says that the harness repaired the result object of
+an agent step. `source` is `result` or `final_message`. `fixes` lists `{field, fix, from?, to?, was?, count?, length?}`
+and holds no text of the agent. The event `agent.finished` has `context_peak_tokens` or `context_peak_percent` when the
+agent's stream shows the largest context of one call.
 
 ## 5. Prepare your computer for l4 commands
 
@@ -695,6 +702,15 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
 > next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not
 > move the unit. The log then shows `halted; a person pushed after the halt: add the label l4:retry or run l4 retry`.
+
+> **NOTE:** The harness repairs the result object of an agent step before it validates it. A result with a missing
+> `summary`, a wrong `status` (for example the name of the phase), a text that is too long or a field that the harness
+> derives (`phase`, `task_ids`, `files_changed`, `tests_added`) no longer fails an attempt. The log then has the line
+> `L4 repaired the result (…)` ([4.2](#42-read-the-ci-log-of-the-run-that-stopped-the-unit)). An attempt fails for its
+> result only when the agent delivered no result object: the reason is
+> `the agent's result is invalid: no result was delivered (…)`. A `blocked` result with no question is not a failed
+> attempt: it raises one question made from its summary, as before. The gates still judge the work, so a step that
+> changed nothing fails with its own reason, for example `no tests added`.
 
 > **NOTE:** A green step can stop on a frozen test-support file, for example `conftest.py`. The question then has the
 > first option ``Edit `conftest.py`: …``. Answer it with `l4 questions accept Q-NNN --unit <unit>` (Status `accepted`),
@@ -1421,6 +1437,8 @@ These limits make operation more difficult. Know them before you start.
   `l4 restart` give no note.
 - `max_cost_usd_per_unit` is still not enforced. The `limits.max_cost_usd` of a plan is checked between unit runs only,
   so one run can pass it, and an escalation to a dearer profile can raise the cost of that run.
+- `implementer.result_repair_attempts` is in the config, and no code reads it. A step with no result object fails its
+  attempt with no repair call.
 - `budgets.max_iterations_per_unit`, `budgets.max_cost_usd_per_unit`, `budgets.no_progress_iterations` and
   `budgets.same_error_repeats` are in the config, but no breaker uses them.
 - `l4 questions accept` and `answer` do not write ledger events. The next run records `question.answered`. An agent
