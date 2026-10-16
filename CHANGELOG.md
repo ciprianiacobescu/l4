@@ -14,6 +14,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   an escalation (`no finding of this round can be converted into a fix task`). Without the scenario the unit still
   escalates, and the question of such a hold no longer promises a fix unit: it asks the reason to end with the scenario.
   Scope and coverage holds are unchanged.
+- `l4 feedback add --unit U` no longer needs the unit's own branch checked out: a detached HEAD, or a local branch of
+  another name, at the head of `origin/<unit branch>` is accepted (L4's worktree cache may hold the branch). The command
+  says which branch the feedback goes to and prints `git push origin HEAD:<unit branch>`. From any other commit the
+  refusal says how to get there, including `git switch --detach origin/<unit branch>` and `git worktree list`.
 
 ## 0.4.4 (2026-10-16)
 

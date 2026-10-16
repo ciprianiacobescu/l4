@@ -1479,8 +1479,11 @@ are checked before anything is written (a failed check is exit 2 and writes noth
 `git commit -m "feedback(<name>): FB-NNN <title>"` and `git push` lines that send it. `--text -` reads standard input,
 `--draft` writes Status `draft`, and `submit` accepts only a valid draft. `list` and `show` accept `--json`
 (`l4/feedback@1`). `l4 feedback --help` and each subcommand's `--help` carry the kinds and one example per kind. An
-open unit takes its feedback on its own branch (off it the command is exit 2 with the `git switch
-l4/<framework>/<name>` line), and a follow-up's or a fix unit's folder takes none: `add|submit|withdraw` there is exit 2
+open unit takes its feedback on its own branch, or, with `--unit`, on any checkout (detached, or a local branch of
+another name) whose HEAD is the head of `origin/l4/<framework>/<name>` (the command says which branch the feedback goes
+to and prints `git push origin HEAD:l4/<framework>/<name>`); off it the command is exit 2 with the `git switch
+l4/<framework>/<name>` line, and the `git worktree list` / `git switch --detach origin/…` line when the branch is
+checked out elsewhere (L4's own worktree cache); and a follow-up's or a fix unit's folder takes none: `add|submit|withdraw` there is exit 2
 naming the parent, whose `feedback.md` is the one that is judged (L4-FBK-010).
 
 **L4-FBK-004** At step 0 of every verification round, each *takeable* item MUST become a deterministic blocking

@@ -87,6 +87,44 @@ def test_unit_flag_and_no_unit(ctx: Ctx):
     ctx.run("add", "--kind", "tests", "--text", "more", "--unit", "bogus", expect=2)
 
 
+def _origin_at_head(ctx: Ctx) -> str:
+    """The unit branch as the remote has it: a remote-tracking ref at the branch head (no remote is needed)."""
+    ctx.raw(ctx.repo, "update-ref", f"refs/remotes/origin/l4/openspec/{UNIT}", "HEAD")
+    return ctx.raw(ctx.repo, "rev-parse", "HEAD").strip()
+
+
+def test_unit_flag_accepts_a_detached_head_at_the_head_of_the_unit_branch(ctx: Ctx):
+    """A detached checkout of the branch head (the branch is held by L4's worktree cache) is the unit's branch."""
+    sha = _origin_at_head(ctx)
+    ctx.raw(ctx.repo, "checkout", "-q", "--detach", sha)
+    out = ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}")
+    assert ctx.feedback.exists()
+    assert out.splitlines()[-1] == f"git push origin HEAD:l4/openspec/{UNIT}"  # a bare `git push` fails when detached
+    assert f"feedback goes to the unit branch l4/openspec/{UNIT}" in ctx.err
+
+
+def test_unit_flag_accepts_another_local_branch_at_the_head_of_the_unit_branch(ctx: Ctx):
+    _origin_at_head(ctx)
+    ctx.raw(ctx.repo, "checkout", "-q", "-b", "my-work")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}")
+    assert ctx.feedback.exists()
+
+
+def test_unit_flag_refuses_a_head_elsewhere_and_says_how_to_get_there(ctx: Ctx):
+    _origin_at_head(ctx)
+    ctx.raw(ctx.repo, "checkout", "-q", "--detach", "main")  # main is the commit before the unit branch moved on
+    (ctx.repo / "other.txt").write_text("x\n")
+    ctx.raw(ctx.repo, "add", "other.txt")
+    ctx.raw(ctx.repo, "commit", "-q", "-m", "elsewhere")
+    ctx.run("add", "--kind", "tests", "--text", "more", "--unit", f"openspec:{UNIT}", expect=2)
+    assert not ctx.feedback.exists()
+    for word in (
+        f"git switch l4/openspec/{UNIT}", "git worktree list", "~/.cache/l4/worktrees", "detached",
+        f"git switch --detach origin/l4/openspec/{UNIT}",
+    ):  # fmt: skip
+        assert word in ctx.err
+
+
 def test_a_branch_that_is_not_a_unit_branch_is_no_unit(ctx: Ctx):
     ctx.raw(ctx.repo, "checkout", "-q", "-b", "feature/x")
     ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
@@ -341,7 +379,10 @@ def test_merged_unit_writes_to_the_archive_folder(ctx: Ctx):
     rel = f"openspec/changes/archive/2026-10-01-{UNIT}/feedback.md"
     lines = out.splitlines()
     assert lines[:4] == [
-        "FB-001 submitted", rel, f"git add {rel}", f'git commit -m "feedback({UNIT}): FB-001 extract it"',
+        "FB-001 submitted",
+        rel,
+        f"git add {rel}",
+        f'git commit -m "feedback({UNIT}): FB-001 extract it"',
     ]
     assert "git push" not in lines
     assert "main" in lines[4] and "follow-up unit" in lines[4]
@@ -396,6 +437,8 @@ def test_a_merged_unit_off_the_base_branch_is_refused(ctx: Ctx):
     _ledger(ctx.repo / FOLDER, f"openspec:{UNIT}", "in_review", "merged")  # on the unit branch
     ctx.run("add", "--kind", "tests", "--text", "more", expect=2)
     assert "check out main" in ctx.err and not ctx.feedback.exists()
+
+
 # --- a follow-up and a fix unit take no feedback of their own (review #5) -----------------------------------------
 
 
@@ -444,8 +487,6 @@ def test_at_refuses_the_protected_folders_whatever_their_case_review_11(ctx: Ctx
     (ctx.repo / "src" / ".l4" / "x").write_text("a\n")
     ctx.run("add", "--kind", "tests", "--text", "more", "--at", at, expect=2)
     assert not ctx.feedback.exists()
-
-
 
 
 # --- an open unit's feedback goes to its branch (review #12) ------------------------------------------------------
