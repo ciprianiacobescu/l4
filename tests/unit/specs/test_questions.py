@@ -586,3 +586,113 @@ def test_context_and_options_are_read_as_written(tmp_path: Path):
     assert parsed.options_text == "1. Block login until verified.\n2. Allow login, restrict features."
     bare = QuestionsFile.parse(b"## Q-001: t\n\n- **Status:** open\n- **Blocking tasks:** 1.1\n").get("Q-001")
     assert (bare.context_text, bare.options_text) == ("", "")
+
+
+# --- set_answer (unfreeze-and-answer 4.1, L4-QMD-008) ------------------------------------------------------------
+
+HEAD = (
+    f"# Questions {EM} t\n\n{INDEX_START}\n| ID | Status | Blocking | Kind | Question |\n"
+    "|----|--------|----------|------|----------|\n"
+)
+TWO = (
+    "# Questions " + EM + " t\n\n"
+    f"{INDEX_START}\n| ID | Status | Blocking | Kind | Question |\n|----|--------|----------|------|----------|\n"
+    "| Q-001 | open | 1.1 | technical | t |\n| Q-002 | open | 1.2 | product | u |\n"
+    f"{INDEX_END}\n\n---\n\n"
+    "## Q-001: t\n\n- **Status:** open\n- **Blocking tasks:** 1.1\n- **Kind:** technical\n\n"
+    "### Context\nWhich hash?\n\n### Answer\n<!-- write below this line -->\n\n---\n\n"
+    "## Q-002: u\n\n- **Status:** open\n- **Blocking tasks:** 1.2\n- **Kind:** product\n\n"
+    "### Answer\n<!-- write below this line -->\nold draft\n"
+)
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+@pytest.mark.parametrize("bom", [b"", b"\xef\xbb\xbf"])
+def test_set_answer_replaces_only_the_answer_body_and_keeps_line_endings_and_bom(eol: str, bom: bytes):
+    before = bom + TWO.replace("\n", eol).encode()
+    parsed = QuestionsFile.parse(before)
+    out = parsed.set_answer("Q-002", "Use argon2id.\nCost 3.")
+    assert out.get("Q-002").answer_text.replace("\r\n", "\n") == "Use argon2id.\nCost 3."
+    assert out.get("Q-001").answer_text == ""
+    assert out.data.startswith(bom)
+    assert out.data.count(b"\r\n") == (out.data.count(b"\n") if eol == "\r\n" else 0)
+    old = parsed.get("Q-002").answer
+    cut = old.body
+    assert out.data[: cut.start] == before[: cut.start]  # everything before the body, byte for byte
+    assert out.data[cut.start :].decode().replace("\r\n", "\n") == (
+        "<!-- write below this line -->\nUse argon2id.\nCost 3.\n"
+    )
+    assert out.data[cut.start :].count(b"\r\n") == (3 if eol == "\r\n" else 0)
+    assert b"old draft" not in out.data
+
+
+def test_set_answer_keeps_what_follows_the_block_and_the_other_questions():
+    out = QuestionsFile.parse(TWO).set_answer("Q-001", "Use argon2id.")
+    assert out.data.decode() == TWO.replace(
+        "### Answer\n<!-- write below this line -->\n\n---",
+        "### Answer\n<!-- write below this line -->\nUse argon2id.\n\n---",
+        1,
+    )
+    assert out.get("Q-001").answer_text == "Use argon2id."
+
+
+def test_set_answer_keeps_a_blank_line_before_a_later_subsection():
+    text = (
+        HEAD
+        + "| Q-001 | open | 1.1 |  | t |\n"
+        + INDEX_END
+        + "\n\n## Q-001: t\n\n- **Status:** open\n- **Blocking tasks:** 1.1\n\n"
+        "### Answer\n<!-- write below this line -->\n\n### Clarifier suggestion\nmaybe\n"
+    )
+    out = QuestionsFile.parse(text).set_answer("Q-001", "yes")
+    assert out.data.decode() == text.replace("line -->\n\n###", "line -->\nyes\n\n###")
+    assert out.get("Q-001").suggestion_text == "maybe" and out.get("Q-001").answer_text == "yes"
+
+
+def test_set_answer_adds_the_block_at_the_end_of_a_section_that_has_none():
+    before = TWO.replace("### Answer\n<!-- write below this line -->\n\n---", "---", 1)
+    out = QuestionsFile.parse(before).set_answer("Q-001", "Use argon2id.")
+    assert out.get("Q-001").answer_text == "Use argon2id."
+    assert out.get("Q-002").answer_text == "old draft"
+    assert out.data.decode() == before.replace(
+        "Which hash?\n\n---", "Which hash?\n\n### Answer\nUse argon2id.\n\n---", 1
+    )
+
+
+def test_set_answer_adds_the_block_to_a_last_section_without_a_final_line_end():
+    text = (
+        HEAD
+        + "| Q-001 | open | 1.1 |  | t |\n"
+        + INDEX_END
+        + "\n\n## Q-001: t\n\n- **Status:** open\n- **Blocking tasks:** 1.1"
+    )
+    out = QuestionsFile.parse(text).set_answer("Q-001", "yes")
+    assert out.data.decode() == text + "\n\n### Answer\nyes\n"
+    assert out.get("Q-001").answer_text == "yes"
+
+
+def test_set_answer_without_the_comment_line_writes_the_text_alone_and_an_unknown_id_is_refused():
+    text = (
+        HEAD
+        + "| Q-001 | open | 1.1 |  | t |\n"
+        + INDEX_END
+        + "\n\n## Q-001: t\n\n- **Status:** open\n- **Blocking tasks:** 1.1\n\n### Answer\nold\n"
+    )
+    out = QuestionsFile.parse(text).set_answer("Q-001", "new")
+    assert out.data.decode() == text.replace("old", "new")
+    with pytest.raises(SpecError, match="Q-077"):
+        QuestionsFile.parse(text).set_answer("Q-077", "x")
+
+
+def test_set_answer_then_set_status_changes_only_status_answer_and_row():
+    parsed = QuestionsFile.parse(TWO)
+    out = parsed.set_answer("Q-002", "Allow it.").set_status("Q-002", QuestionStatus.ANSWERED)
+    q2 = parsed.get("Q-002")
+    spans = [
+        (q2.status_value.start, q2.status_value.end),
+        (q2.answer.body.start, q2.answer.body.end),
+        (parsed.index.start, parsed.index.end),
+    ]
+    assert outside(TWO.encode(), out.data, spans)
+    assert b"| Q-002 | answered | 1.2 | product | u |" in out.data
+    assert effective_answer(out.get("Q-002")) == "Allow it."
