@@ -273,7 +273,7 @@ def _availability_selected(state: UnitState, event: LedgerEvent) -> None:
             used.append(profile)
         if origin := _text(event, "fallback_from"):
             state.fallback_from[role] = origin
-        else:
+        elif not _text(event, "escalated_from"):  # an escalation is not a limit fallback: it leaves the origin as is
             state.fallback_from.pop(role, None)
 
 
@@ -394,9 +394,13 @@ def _pr_closed(state: UnitState, event: LedgerEvent) -> None:
 
 def _breaker_tripped(state: UnitState, event: LedgerEvent) -> None:
     state.breaker_trips += 1
+    if _text(event, "reason") == "max_task_attempts":  # L4-OPS-018: the task a retry note may bind to
+        state.halt_task = _text(event, "task") or None
+        state.halt_fix_unit = _text(event, "fix_unit") or None
 
 
 def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
+    state.halt_task = state.halt_fix_unit = None
     state.breaker_trips = 0  # M1: the other breaker counters (no_progress, same_error, oscillation) reset here too
     if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
         state.resumed_signals.append(signal)
