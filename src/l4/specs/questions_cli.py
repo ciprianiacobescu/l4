@@ -24,15 +24,21 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, names_path
+from l4.redact import Redactor
 from l4.security.protected import glob_match
 from l4.specs.providers import providers_for
 from l4.specs.questions import (
+    _FENCE,
+    _FIELD,
+    _STRUCTURAL,
+    _SUBHEADING,
     MAX_QUESTIONS_BYTES,
     QUESTIONS_FILENAME,
     Question,
     QuestionKind,
     QuestionsFile,
     QuestionStatus,
+    effective_answer,
     unescape_text,
 )
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
@@ -43,6 +49,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.vcs.names import lock_ref, unit_branch
 from l4.vcs.tree import regular_blobs
+from l4.verifier.verdicts import _DECISION
 from l4.yolo.accept import actor
 
 SCHEMA = "l4/questions@1"
@@ -50,6 +57,7 @@ REMOTE = "origin"
 CONFIG_PATH = ".l4/config.yaml"
 log = logging.getLogger("l4.questions")
 _QID = re.compile(r"Q-\d+")
+MAX_TEXT_CHARS = 20_000  # [G] a chosen limit: an answer is read into the next prompt
 _FIX_NAME = re.compile(r"(?P<parent>.+)-fix-\d+")
 
 
@@ -505,6 +513,199 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
     return ExitCode.OK
 
 
+# --- the edit and its checks: pure (design D9 steps 3 and 4, D10) -----------------------------------------------
+
+
+def check_text(text: str, redactor: Redactor) -> Refusal | None:
+    """R10: a text the file would not hold as an answer. Empty, too long, a line that is structure (`_STRUCTURAL`, a
+    field, a subsection heading or a fence, named by its number: the parser would read it as part of the file's own
+    grammar), an HTML comment (it would hide text or forge a marker), or a value the redactor changes."""
+    if not text.strip():
+        return Refusal("the text is empty", "give the answer with --text TEXT")
+    if len(text) > MAX_TEXT_CHARS:
+        return Refusal(f"the text has {len(text)} characters: the limit is {MAX_TEXT_CHARS}", "shorten it")
+    for number, line in enumerate(re.split(r"\r\n|\r|\n", text), 1):
+        raw = line.encode("utf-8")
+        if _STRUCTURAL.match(line) or _FIELD.match(raw) or _SUBHEADING.match(raw) or _FENCE.match(raw):
+            shown = line if len(line) <= 60 else line[:57] + "..."
+            return Refusal(
+                f"line {number} would be read as structure of the file: {shown}", f"remove or reword line {number}"
+            )
+    if "<!--" in text:
+        return Refusal("the text holds an HTML comment", "remove the comment")
+    kinds = redactor.kinds_in(text)
+    if kinds or redactor.redact_text(text) != text:
+        return Refusal(
+            f"the text holds a secret-like value ({', '.join(kinds) or 'redacted'})",
+            "remove the secret; rotate it if it was real",
+        )
+    return None
+
+
+def check_question(
+    file: QuestionsFile,
+    qid: str,
+    form: str,
+    text: str | None,
+    *,
+    unit: str,
+    branch: str,
+    redactor: Redactor | None = None,
+) -> Refusal | None:
+    """R3 to R5 and R7 to R10 for `form` (`accept` or `answer`) on `qid`; None when the edit may be made. `text` is
+    the answer's text (None for `accept`)."""
+    question = file.get(qid)
+    if question is None or qid in file.unreadable_ids:
+        return Refusal(f"no {qid} in {QUESTIONS_FILENAME}", f"l4 questions --unit {unit}")
+    if question.status is not QuestionStatus.OPEN:
+        if question.status is QuestionStatus.SUPERSEDED and question.superseded_by:
+            successor = question.superseded_by
+            return Refusal(
+                f"{qid} is superseded by {successor}",
+                f"answer {successor}: l4 questions show {successor} --unit {unit}",
+            )
+        return Refusal(
+            f"{qid} is {question.status.value}",
+            f"to change an answer, edit its section on {branch} by hand; an answer a run already used becomes a fix "
+            f'unit "apply clarification {qid}" (L4-QMD-006)',
+        )
+    if question.answer_text:
+        return Refusal(
+            f"{qid} has a draft answer under Status open",
+            f"submit it on {branch} (set Status to answered) or remove it, then run the command again",
+        )
+    verdict = question.kind is QuestionKind.VERDICT
+    if form == "accept":
+        if verdict:
+            return Refusal(
+                f"{qid} is a verdict question: accept is not an answer to it",
+                f'l4 questions answer {qid} --unit {unit} --text "accept <reason>" (or "reject <reason>")',
+            )
+        if not question.suggestion_text:
+            return Refusal(
+                f"{qid} has no clarifier suggestion to accept", f"l4 questions answer {qid} --unit {unit} --text TEXT"
+            )
+        return None
+    if text is None:
+        return Refusal("answer needs --text", f"l4 questions answer {qid} --unit {unit} --text TEXT")
+    return check_text(text, redactor or Redactor({})) or (
+        Refusal(
+            "a verdict answer starts with accept or reject",
+            'the same command with the first word fixed: --text "accept <reason>" (or "reject <reason>")',
+        )
+        if verdict and not _DECISION.match(text)
+        else None
+    )
+
+
+def edit_accept(file: QuestionsFile, qid: str) -> QuestionsFile:
+    """`accept`: only the Status value and the index row change."""
+    return file.set_status(qid, QuestionStatus.ACCEPTED)
+
+
+def edit_answer(file: QuestionsFile, qid: str, text: str) -> QuestionsFile:
+    """`answer`: the Answer body, the Status value and the index row."""
+    return file.set_answer(qid, text).set_status(qid, QuestionStatus.ANSWERED)
+
+
+def _flat(text: str) -> str:
+    return text.replace("\r\n", "\n").strip()
+
+
+def round_trip(
+    before: QuestionsFile, after: QuestionsFile, qid: str, status: QuestionStatus, text: str | None
+) -> str | None:
+    """D9 step 4: what the edited bytes read back as, or None when it is what was asked. The question has the new
+    Status (and, for `answer`, an answer text equal to `text`, stripped); every other question has the same id, Status,
+    blocking tasks and effective answer as before; the parse has no issue that the old one did not have."""
+    mine = after.get(qid)
+    if mine is None:
+        return f"{qid} is no longer read from the edited file"
+    if mine.status is not status:
+        return f"the Status of {qid} reads {mine.status.value}, not {status.value}"
+    if text is not None and _flat(mine.answer_text) != _flat(text):
+        return f"the answer of {qid} reads back differently from the text given"
+    old = {q.id: q for q in before.questions if q.id != qid}
+    new = {q.id: q for q in after.questions if q.id != qid}
+    if list(old) != list(new):
+        lost = sorted(set(old) ^ set(new))
+        return f"the questions {', '.join(lost)} are not read as before"
+    for other, was in old.items():
+        now = new[other]
+        if (now.status, now.blocking_tasks, effective_answer(now)) != (
+            was.status, was.blocking_tasks, effective_answer(was),
+        ):  # fmt: skip
+            return f"{other} reads differently after the edit (Status, Blocking tasks or answer)"
+    known = {(i.kind, i.question_id, i.detail) for i in before.issues}
+    fresh = [i for i in after.issues if (i.kind, i.question_id, i.detail) not in known]
+    if fresh:
+        return f"the edit adds a parse issue: {fresh[0].kind} on {fresh[0].question_id}"
+    return None
+
+
+@dataclass(frozen=True)
+class Edit:
+    """A checked edit of one question: `new` is the whole file (the only change is in `question`'s spans and index
+    row), `status` the Status it writes. The commit and the push are the caller's (4.5)."""
+
+    form: str
+    folder: Folder
+    question: Question
+    status: QuestionStatus
+    text: str | None
+    old: QuestionsFile
+    new: QuestionsFile
+
+
+def build_edit(form: str, folder: Folder, qid: str, text: str | None, *, redactor: Redactor) -> Edit:
+    """The checks of D10 that need only the file (R3 to R5, R7 to R10), the edit, and its round trip. Raises the
+    refusal (exit 2). The agent rule (R11), a finished unit or a live run (R6) and a moved branch (R12) are not here."""
+    assert folder.file is not None
+    found = check_question(folder.file, qid, form, text, unit=folder.unit, branch=folder.branch, redactor=redactor)
+    if found is not None:
+        raise found.exit()
+    question = folder.file.get(qid)
+    assert question is not None
+    status = QuestionStatus.ACCEPTED if form == "accept" else QuestionStatus.ANSWERED
+    new = edit_accept(folder.file, qid) if form == "accept" else edit_answer(folder.file, qid, text or "")
+    if (why := round_trip(folder.file, new, qid, status, text if form == "answer" else None)) is not None:
+        raise Refusal(
+            f"the edited {QUESTIONS_FILENAME} does not read back as asked: {why}",
+            f"edit the section of {qid} on {folder.branch} by hand",
+        ).exit()
+    return Edit(form, folder, question, status, text, folder.file, new)
+
+
+def _read_text(text: str | None) -> str | None:
+    return sys.stdin.read() if text == "-" else text
+
+
+def _prepare(
+    app: AppContext, form: str, question: str, unit: str | None, text: str | None
+) -> tuple[AppContext, L4Config, Git, Edit]:
+    if unit is None:
+        raise _usage(f"{form} needs --unit", f"l4 questions {form} Q-NNN --unit <unit>")
+    app, cfg = load_app_config(app)
+    git = Git(app.repo, environ=app.environ)
+    folders, warnings = load_folders(app, cfg, git, unit)
+    folder, _ = find_question(folders, unit, question, warnings)
+    return app, cfg, git, build_edit(form, folder, question, text, redactor=app.redactor)
+
+
+def run_accept(app: AppContext, *, question: str, unit: str | None, no_push: bool = False) -> ExitCode:
+    """`l4 questions accept Q-NNN --unit U [--no-push]`: builds the checked edit; the write is task 4.5."""
+    _prepare(app, "accept", question, unit, None)
+    raise NotImplementedError("questions: the commit and the push are unfreeze-and-answer 4.5")
+
+
+def run_answer(
+    app: AppContext, *, question: str, unit: str | None, text: str | None, no_push: bool = False
+) -> ExitCode:
+    """`l4 questions answer Q-NNN --unit U --text T [--no-push]`: builds the checked edit; the write is task 4.5."""
+    _prepare(app, "answer", question, unit, _read_text(text))
+    raise NotImplementedError("questions: the commit and the push are unfreeze-and-answer 4.5")
+
+
 # --- the handler ------------------------------------------------------------------------------------------------
 
 
@@ -523,4 +724,8 @@ def run_questions(
         return run_list(app, unit=unit, as_json=as_json)
     if form == "show":
         return run_show(app, question=_qid(rest, form), unit=unit, as_json=as_json)
+    if form == "accept":
+        return run_accept(app, question=_qid(rest, form), unit=unit, no_push=no_push)
+    if form == "answer":
+        return run_answer(app, question=_qid(rest, form), unit=unit, text=text, no_push=no_push)
     raise _usage(f"unknown form: {' '.join(words)}")
