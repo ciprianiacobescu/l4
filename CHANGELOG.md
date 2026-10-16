@@ -16,7 +16,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   force: the same hold came back, the verdict was FAIL, and a retry repeated it. Now a feedback-only fix unit consumes
   the rejects its round could not convert: the verifier drops a reject recorded before a `fix.spawned` with
   `feedback_only: true` (so a ledger written by 0.4.5 and older needs no repair), and new ledgers list those
-  questions in `fix.spawned.consumed`. A hold that is raised again is asked as a new question on the fixed code.
+  questions in `fix.spawned.consumed` and mark the event `lists_unconverted: true`, so that only the listed rejects end.
+  A hold that is raised again is asked as a new question on the fixed code.
 - The escalation `no_convertible_finding` now names its way out. `l4 status --unit`, `l4 status --json`, the refusal of
   `l4 run --unit` and the note on the merge request say that a retry alone repeats the same verdict, and to give the fix
   as feedback (`l4 feedback add --unit U --kind behaviour --when … --then … --text …`, then the git lines) before
@@ -26,6 +27,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   recorded as a new verdict (the latest per target wins); the previous answer stays in a comment under it, and the
   commit says `(answer replaced)`. Without `--replace` the refusal stays and its `Fix:` line names the flag. A
   clarification answer is still changed by hand (L4-QMD-006).
+- `l4 yolo status` no longer shows a dependency where there is none. A plan runs one unit at a time, and a unit with no
+  prerequisite left said `waits for <unit> (not integrated)`, the same words as a real dependency. It now says
+  `waits for its turn: <unit> runs first (one unit at a time)`.
 
 ## 0.4.5 (2026-10-16)
 
