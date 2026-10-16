@@ -38,6 +38,7 @@ from typing import Any
 
 import click
 
+from l4.agents.activity import ago
 from l4.availability.errors import RoleUnavailable
 from l4.ci.detect import in_ci
 from l4.config.defaults import cache_root
@@ -52,7 +53,7 @@ from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.specs.providers import providers_for
 from l4.state.retry import fetch_unit_refs, start_run_line
-from l4.state.status import discover
+from l4.state.status import Activity, OpenRun, discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo import accept as accepting
@@ -214,6 +215,7 @@ class _Units:
     infos: dict[str, UnitInfo] = field(default_factory=dict)
     phases: dict[str, str | None] = field(default_factory=dict)
     costs: dict[str, float] = field(default_factory=dict)  # unit id -> the cost its own ledger shows (this attempt)
+    activity: dict[str, tuple[Activity | None, OpenRun | None]] = field(default_factory=dict)  # unit id -> (L4-OPS-020)
 
 
 @contextlib.contextmanager
@@ -242,7 +244,8 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
         infos = unit_infos(path, found, wanted, check_intake=intake, target=ctx.target)
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
-    return _Units(infos, phases, costs)
+        activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}
+    return _Units(infos, phases, costs, activity)
 
 
 def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
@@ -1198,7 +1201,42 @@ def _describe(
             live = _live_usage(ctx, state, read.events, units, state.stop_unit or state.current)
         blocker = resume_blocker(pid, state, read.events, plan, units.phases, Extend(), now=_now(), live=live)
     out["next"] = _next_line(pid, state, view, blocker)
+    out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
     return out
+
+
+def _activity_of(
+    state: PlanState, events: Sequence[PlanEvent], units: _Units
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """L4-YOLO-030: the newer of the current unit's last activity and the plan ledger's newest event, and the current
+    unit's open run; `(None, None)` for a plan that is not active, waiting or stopped."""
+    if state.status not in ("active", "waiting", "stopped"):
+        return None, None
+    unit_activity, unit_run = units.activity.get(state.current, (None, None)) if state.current else (None, None)
+    best: dict[str, Any] | None = None
+    best_at = None
+    newest = max(events, key=lambda e: parse_time(e.at) or datetime.min.replace(tzinfo=UTC), default=None)
+    if newest is not None and parse_time(newest.at) is not None:  # a plan event shows as its type
+        best, best_at = {"ts": newest.at, "type": newest.type}, parse_time(newest.at)
+    when = parse_time(unit_activity.ts) if unit_activity is not None else None
+    if unit_activity is not None and when is not None and (best_at is None or when >= best_at):  # a tie: the unit
+        best = {"ts": unit_activity.ts, "type": unit_activity.type}
+        if unit_activity.task is not None:
+            best["task"] = unit_activity.task
+        best["run_id"] = unit_activity.run_id
+        best["unit"] = state.current
+    run: dict[str, Any] | None = None
+    if unit_run is not None:
+        run = {"run_id": unit_run.run_id, "started": unit_run.started}
+        if unit_run.ci_url:
+            run["ci_url"] = unit_run.ci_url
+        run["unit"] = state.current
+    return best, run
+
+
+def _since(ts: str) -> str:
+    when = parse_time(ts)
+    return ago((_now() - when).total_seconds()) if when else "?"
 
 
 def _render(d: dict[str, Any]) -> str:
@@ -1254,6 +1292,18 @@ def _render(d: dict[str, Any]) -> str:
         f"attempts {attempts} (limit {use['attempts_limit']} each)"
         + (f"; deadline {use['deadline']}" if use["deadline"] else "")
     )
+    if d.get("last_activity"):
+        a = d["last_activity"]
+        what = (
+            a["type"]
+            + (f", task {a['task']}" if a.get("task") else "")
+            + (f", unit {a['unit']}" if a.get("unit") else "")
+        )
+        lines.append(f"  last activity: {_since(a['ts'])} ago ({what})")
+    if d.get("open_run"):
+        r = d["open_run"]
+        link = f": {r['ci_url']}" if r.get("ci_url") else ""
+        lines.append(f"  open run: {r['run_id']} started {_since(r['started'])} ago, no end recorded{link}")
     lines.append(f"Next: {d['next']}")
     return "\n".join(lines)
 
