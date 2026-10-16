@@ -603,7 +603,7 @@ def test_a_cycle_through_a_batch_is_found_and_named(repo):  # SCN-YOLO-39
     _, result = admission(json.dumps(plan("p1", batches)), ["openspec:a", "openspec:c"])
     cycle = next(f for f in result.findings if f.code == "cycle")
     assert code == 1
-    assert out.strip() == f"p1: cycle: {cycle.subject}: {cycle.text}"
+    assert out.strip() == f"error: p1: cycle: {cycle.subject}: {cycle.text}"
     assert "dependency cycle: openspec:a -> openspec:c -> b1 -> openspec:a" in out
 
 
@@ -614,7 +614,9 @@ def test_a_spec_no_plan_covers_is_found(repo):  # SCN-YOLO-40
     put(repo, plan("p2", [units("openspec:a")]), "p2")
     code, out, _ = run(repo)
     assert code == 1
-    assert "uncovered: kiro:new-report (add it to a plan or to a plan's exclude with a reason)" in out.splitlines()
+    assert (
+        "error: uncovered: kiro:new-report (add it to a plan or to a plan's exclude with a reason)" in out.splitlines()
+    )
 
 
 def test_a_valid_plan_prints_its_order_and_waves(repo):  # SCN-YOLO-41
@@ -661,7 +663,9 @@ def test_an_excluded_unit_is_covered_and_so_is_a_derived_unit_of_a_listed_parent
     put(repo, plan("p1", [units("openspec:a")], exclude=[{"id": "openspec:b", "reason": "in review"}]))
     code, out, _ = run(repo)
     assert code == 1
-    assert out.splitlines() == ["uncovered: kiro:k-followup-1 (add it to a plan or to a plan's exclude with a reason)"]
+    assert out.splitlines() == [
+        "error: uncovered: kiro:k-followup-1 (add it to a plan or to a plan's exclude with a reason)"
+    ]
 
 
 def test_a_unit_planned_in_two_plan_files_is_covered_twice(repo):
@@ -669,7 +673,7 @@ def test_a_unit_planned_in_two_plan_files_is_covered_twice(repo):
     put(repo, plan("p1", [units("openspec:a")]))
     put(repo, plan("p2", [units("openspec:a")]), "p2")
     code, out, _ = run(repo)
-    assert code == 1 and out.splitlines() == ["covered_twice: openspec:a (listed in plans p1, p2)"]
+    assert code == 1 and out.splitlines() == ["error: covered_twice: openspec:a (listed in plans p1, p2)"]
 
 
 def test_a_unit_planned_in_one_plan_and_excluded_in_another_is_fine(repo):
@@ -769,7 +773,7 @@ def test_problem_lines_are_plan_code_subject_text(repo):
     code, out, _ = run(repo)
     assert code == 1
     assert out.splitlines() == [
-        "p1: unknown_unit: openspec:ghost: unit openspec:ghost was not found by a spec provider"
+        "error: p1: unknown_unit: openspec:ghost: unit openspec:ghost was not found by a spec provider"
     ]
 
 
@@ -1196,7 +1200,7 @@ def test_a_unit_no_hold_matches_is_still_uncovered(repo):
     put(repo, plan("p1", [units("openspec:b")]))
     code, out, _ = run(repo)
     assert code == 1
-    assert "uncovered: openspec:c" in out and "openspec:a" not in out
+    assert "error: uncovered: openspec:c" in out and "openspec:a" not in out
 
 
 @pytest.mark.parametrize(
@@ -1243,7 +1247,7 @@ def test_a_hold_in_flow_style_yolo_is_ignored_with_a_warning(repo):
     config(repo, "yolo: {hold: [openspec:a]}\n")
     put(repo, plan("p1", [units("openspec:b")]))
     code, out, err = run(repo)
-    assert code == 1 and "uncovered: openspec:a" in out
+    assert code == 1 and "error: uncovered: openspec:a" in out
     assert "yolo" in err and "yolo.hold" in err
 
 
@@ -1313,3 +1317,10 @@ def test_yaml_integers_with_underscores_are_accepted_in_yolo_review(repo):
     assert limits[0] == 30_000 and limits[1] == 1_000_000 and warnings == []
     config(repo, "yolo:\n  review:\n    max_file_chars: 30__000\n    max_folder_chars: _30\n")
     assert len(vp.read_review_limits(repo)[1]) == 2
+
+
+def test_every_problem_line_starts_with_error_and_the_exit_code_stays_1(repo):
+    change(repo, "a")
+    put(repo, plan("p1", [units("openspec:a", "openspec:ghost")]))
+    code, out, _ = run(repo)
+    assert code == 1 and out.splitlines() and all(line.startswith("error: ") for line in out.splitlines())

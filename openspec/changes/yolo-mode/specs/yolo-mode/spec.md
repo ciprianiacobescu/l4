@@ -418,7 +418,7 @@ unknown_unit unless this plan already merged or integrated it)` and keep exit 0 
 quoted `"spec":` key and a leading byte order mark, and its verdict on a deadline MUST be that of `l4 yolo check`,
 including a deadline written as a Unix time.
 
-It exits 0 when everything is valid, 1 with one line per problem, and 2 on a usage or read error. On success it MUST
+It exits 0 when everything is valid, 1 with one line per problem (each starting with `error:`, as a warning starts with `warning:`), and 2 on a usage or read error. On success it MUST
 print, for each plan, its dispatch order (the same order as `l4 yolo check`) and its waves (design D15). `--json` MUST
 print the same as one JSON object. The script MUST NOT write anything, use the network or run git.
 
