@@ -8,6 +8,28 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
 ## 0.4.5 (unreleased)
 
+### Added
+- A heartbeat line while an agent step runs: `task <k> <phase> attempt <n>: <profile> working 6m, 14 tool calls, last
+  activity 20s ago`, with `, <m> tool calls open for <t>` while a tool call is open. The key `implementer.heartbeat`
+  sets the interval (default `2m`, minimum `30s`, `0` turns it off). The line holds counts and times only, and no text
+  of the agent.
+- `implementer.idle_timeout` (default `10m`, minimum `1m`, `0` turns it off) and the ledger event `agent.idle`: an agent
+  that prints nothing for that time and has no open tool call is stopped, and the attempt fails with a reason that names
+  the key.
+- `l4 status` has the column `LAST`. `l4 status --unit` has the lines `Last activity:` and `Open run:` (with the CI link
+  of the run), and `--json` has `last_activity` and `open_run`. `l4 yolo status` shows `last activity` and `open run`
+  of the current unit. The event `run.started` records the CI link, as `run.started.ci_url`.
+- The red gate line `red: <n> new tests fail, as intended`, and `gate.finished.red_new_failing`.
+- The job summary of GitHub Actions lists each finished task.
+- The runbook procedure 4.6 `Is the job stuck?`.
+
+### Changed
+- An idle agent gets SIGINT and 5 seconds before the kill, and is not stopped while a claude-code, codex or kiro-cli
+  tool call is open.
+- The failure reasons of an idle stop and of the step time limit (30 minutes) name the cause.
+- The step start line is at INFO.
+- The new keys need the 0.4.5 pin before the config edit (the schema is strict).
+
 ### Fixed
 - A rejected verification hold of a kind the harness cannot derive a task from (for example `the diff is longer than
   120000 characters`) whose reason ends with a sentence `WHEN … THEN …` is now a behaviour finding with a fix task, not
