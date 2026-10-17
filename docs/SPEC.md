@@ -9850,6 +9850,41 @@ scenario is a spec defect (§26).
 - **When** `l4 mcp install --client claude-code --project` runs
 - **Then** it exits 2 and the file outside is unchanged
 
+#### SCN-MCP-19 (−) A stopped call leaves no descendant running · L4-MCP-002
+- **Given** a command whose descendant ignores SIGTERM
+- **When** the call times out or is cancelled
+- **Then** after the grace period the whole process group is killed, also when the command itself already exited
+
+#### SCN-MCP-20 (+) The protocol is UTF-8 under a non-UTF-8 locale · L4-MCP-001
+- **Given** the server started with `LC_ALL=C` and Python's UTF-8 mode off
+- **When** a client sends `initialize` and `tools/list`
+- **Then** both are answered, as UTF-8, with the `…` of a description intact, and the server does not die
+
+#### SCN-MCP-21 (+) A write tool says what it writes · L4-MCP-003
+- **Given** the tool list
+- **When** a client reads the description of a write tool
+- **Then** it says what it writes, whether it pushes to origin and that CI may be running; `l4_plan_review`'s also says that it costs judge tokens and takes minutes
+
+#### SCN-MCP-22 (+) Progress rises with every notification · L4-MCP-001
+- **Given** a call that carries a progress token and runs long enough for several notifications
+- **When** the server sends them
+- **Then** each `progress` value is greater than the one before
+
+#### SCN-MCP-23 (−) A number that is not finite is refused · L4-MCP-003
+- **Given** the running server
+- **When** a client calls `l4_plan_resume` with `extend_cost` NaN or infinity
+- **Then** the call is an error and nothing runs; `l4 yolo resume --extend-cost=nan` itself exits 2
+
+#### SCN-MCP-24 (+) The printed Claude Code command is shell-quoted · L4-MCP-004
+- **Given** a repository whose path holds a space or a quote
+- **When** `l4 mcp install --client claude-code` prints its `claude mcp add` line
+- **Then** the line, split as a shell splits it, gives the exact `l4 mcp serve --repo <path>` arguments
+
+#### SCN-MCP-25 (+) Instances for different repositories can be told apart · L4-MCP-005
+- **Given** two servers, one per repository
+- **When** a client reads each `initialize` result and `tools/list`
+- **Then** `serverInfo.title`, `instructions` and every tool description name that server's repositories and no other
+
 ## 24. Definition of done
 
 ### 24.1 For each delivery change of this repository (§21)

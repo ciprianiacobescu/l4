@@ -5,10 +5,10 @@ Any MCP client can manage L4 plans and debug L4 units through typed tools, under
 ## ADDED Requirements
 
 ### Requirement: L4-MCP-001 l4 mcp serve is an MCP server over stdio
-`l4 mcp serve` SHALL speak MCP over stdio as newline-delimited JSON-RPC 2.0: `initialize` (with a pinned protocol
-revision and `capabilities.tools`), `ping`, `tools/list`, `tools/call` and `notifications/initialized`. An unknown method
-SHALL answer error -32601 and malformed input -32700 or -32600; only protocol messages SHALL go to stdout. It SHALL add no
-runtime dependency to the harness.
+`l4 mcp serve` SHALL speak MCP over stdio as newline-delimited JSON-RPC 2.0: `initialize`, `ping`, `tools/list`,
+`tools/call` and `notifications/initialized`. It SHALL answer -32601 for an unknown method and -32700 or -32600 for
+malformed input, put only protocol messages on stdout, add no runtime dependency, read and write UTF-8 under any
+locale, and send a rising `progress` value.
 
 #### Scenario: SCN-MCP-01 (+) A client connects and lists the tools
 - **GIVEN** `l4 mcp serve` started by an MCP client in a repository
@@ -21,15 +21,21 @@ runtime dependency to the harness.
 - **WHEN** a line that is not JSON, or a call of an unknown method, arrives
 - **THEN** it answers -32700 or -32601 and keeps serving
 
+#### Scenario: SCN-MCP-20 (+) The protocol is UTF-8 under a non-UTF-8 locale
+- **GIVEN** the server started with `LC_ALL=C` and Python's UTF-8 mode off
+- **WHEN** a client sends `initialize` and `tools/list`
+- **THEN** both are answered, as UTF-8, with the `…` of a description intact, and the server does not die
+
+#### Scenario: SCN-MCP-22 (+) Progress rises with every notification
+- **GIVEN** a call that carries a progress token and runs long enough for several notifications
+- **WHEN** the server sends them
+- **THEN** each `progress` value is greater than the one before
+
 ### Requirement: L4-MCP-005 An instance serves the repositories it was started for
-`l4 mcp serve` SHALL take `--repo PATH`, repeatable. Each PATH SHALL be resolved to the root of a git repository that has
-`.l4/config.yaml`, else the server SHALL exit 2 before it serves. With one `--repo`, every tool SHALL run in that
-repository and a tool's `repo` argument, when given, SHALL name it (its name or its path), else the call is refused. With
-several, every tool SHALL take a required `repo` argument that names one of them (the folder name, or the path), and any
-other value SHALL be refused, never resolved on its own. Without `--repo`, the server SHALL serve the repository of its
-working directory when that is a git repository with `.l4/config.yaml`, and SHALL otherwise answer every tool call with
-an error that names `--repo`. Every tool result SHALL name the repository it ran in. A tool SHALL NOT run in a
-repository the server was not started for.
+`l4 mcp serve` SHALL take `--repo PATH`, repeatable, each the root of a git repository with `.l4/config.yaml`, else exit
+2 before serving. A tool SHALL run only in a served repository: `repo` is optional with one, required with several, and
+any other value is refused. Without `--repo` the working directory serves when it qualifies, else every call errors,
+naming `--repo`. Results and `initialize` SHALL name the repositories.
 
 #### Scenario: SCN-MCP-10 (+) Two IDE entries serve two repositories
 - **GIVEN** two servers configured as `l4 mcp serve --repo /work/mint-mory` and `l4 mcp serve --repo /work/mintkey`
@@ -46,11 +52,16 @@ repository the server was not started for.
 - **WHEN** a client calls any tool
 - **THEN** the result is an error that says to start the server with `--repo PATH`
 
+#### Scenario: SCN-MCP-25 (+) Instances for different repositories can be told apart
+- **GIVEN** two servers, one per repository
+- **WHEN** a client reads each `initialize` result and `tools/list`
+- **THEN** `serverInfo.title`, `instructions` and every tool description name that server's repositories and no other
+
 ### Requirement: L4-MCP-002 Every tool runs the l4 command it names, as an agent
 Each tool SHALL run the `l4` command it names as a subprocess in the repository, with the caller's environment plus
-`AI_AGENT=l4-mcp` and no terminal on stdin, so that every rule the CLI applies to an agent caller holds. The server SHALL
-make no write of its own. A result SHALL carry the exit code, the redacted output cut at 64 KiB with the cut said, the
-parsed JSON when the command printed JSON, and `isError` for a non-zero exit.
+`AI_AGENT=l4-mcp` and no terminal on stdin, so that every CLI rule for agents holds. The server SHALL make no write of
+its own. A result SHALL carry the exit code, the redacted output cut at 64 KiB, the parsed JSON, and `isError`. A
+timeout or cancel SHALL stop the whole process group.
 
 #### Scenario: SCN-MCP-03 (+) A read tool returns the command's output
 - **GIVEN** a repository with a delivery plan `p`
@@ -62,13 +73,16 @@ parsed JSON when the command printed JSON, and `isError` for a non-zero exit.
 - **WHEN** a client calls `l4_question_answer` for it
 - **THEN** the CLI refuses it as for any agent, and the tool returns that refusal with `isError: true`
 
+#### Scenario: SCN-MCP-19 (−) A stopped call leaves no descendant running
+- **GIVEN** a command whose descendant ignores SIGTERM
+- **WHEN** the call times out or is cancelled
+- **THEN** after the grace period the whole process group is killed, also when the command itself already exited
+
 ### Requirement: L4-MCP-003 The tools manage plans and debug units
-The server SHALL offer the read tools `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check` (with `worktree`),
-`l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events` and `l4_verification`, and the
-write tools `l4_plan_draft`, `l4_plan_review` (with `worktree`), `l4_question_answer`, `l4_retry` and `l4_plan_resume`.
-A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running;
-`l4_plan_review`'s SHALL say that it costs judge tokens and takes minutes. It SHALL NOT offer `l4 yolo activate`,
-`l4 yolo cancel`, `l4 run`, or anything that starts an agent CLI; the descriptions SHALL name the command a person runs.
+The server SHALL offer the read tools `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check`, `l4_plan_findings`,
+`l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events`, `l4_verification` and the write tools `l4_plan_draft`,
+`l4_plan_review`, `l4_question_answer`, `l4_retry`, `l4_plan_resume`. It SHALL NOT offer `l4 yolo activate`,
+`l4 yolo cancel` or `l4 run`. A `number` argument SHALL be finite.
 
 #### Scenario: SCN-MCP-05 (+) A plan is checked before the push through the server
 - **GIVEN** a working tree with a new plan file `multitenancy` and its specs, not pushed
@@ -102,17 +116,23 @@ A write tool's description SHALL say what it writes, whether it pushes to origin
 - **THEN** the first result is an error because origin has no such file; the second prints the order and exits 0,
   recording nothing
 
+#### Scenario: SCN-MCP-21 (+) A write tool says what it writes
+- **GIVEN** the tool list
+- **WHEN** a client reads the description of a write tool
+- **THEN** it says what it writes, whether it pushes to origin and that CI may be running; `l4_plan_review`'s also says
+  that it costs judge tokens and takes minutes
+
+#### Scenario: SCN-MCP-23 (−) A number that is not finite is refused
+- **GIVEN** the running server
+- **WHEN** a client calls `l4_plan_resume` with `extend_cost` NaN or infinity
+- **THEN** the call is an error and nothing runs; `l4 yolo resume --extend-cost=nan` itself exits 2
+
 ### Requirement: L4-MCP-004 l4 mcp install configures a client in one command
 `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's
-documented MCP configuration with the server command `l4 mcp serve --repo <the repository's absolute path>` for the user scope, and `l4 mcp serve` with no path for
-`--project` (the file is committed, so each clone and worktree serves its own folder: `$CLAUDE_PROJECT_DIR` when it
-names an L4 repository, else the working directory's), under the entry NAME (default `l4` for `--project`,
-`l4-<repository folder name>` for the user scope, so that several repositories have one entry each), merging into an
-existing file and keeping every other server and the keys of the entry the user added, atomically; it SHALL refuse a
-file it cannot parse, an entry of that name that serves another repository (exit 2, nothing written, naming both
-paths and `--name`), and for `--project` a symlink on the file or on a folder above it inside the repository; it SHALL
-print what it wrote. Only clients whose configuration path and format were checked against the
-vendor's documentation SHALL be offered.
+documented MCP configuration with the server command, one entry per repository, merging into an existing file,
+keeping other servers and the user's keys, atomically. It SHALL refuse what it cannot parse, an entry that serves
+another repository and a symlink, writing nothing. Only clients checked against the vendor's documentation SHALL be
+offered.
 
 #### Scenario: SCN-MCP-08 (+) A client is configured and other servers stay
 - **GIVEN** a client user configuration file that already lists another MCP server and an entry `l4-mint-mory`
@@ -139,3 +159,8 @@ vendor's documentation SHALL be offered.
 - **GIVEN** a repository that commits `.mcp.json` as a symlink to a file outside it
 - **WHEN** `l4 mcp install --client claude-code --project` runs
 - **THEN** it exits 2 and the file outside is unchanged
+
+#### Scenario: SCN-MCP-24 (+) The printed Claude Code command is shell-quoted
+- **GIVEN** a repository whose path holds a space or a quote
+- **WHEN** `l4 mcp install --client claude-code` prints its `claude mcp add` line
+- **THEN** the line, split as a shell splits it, gives the exact `l4 mcp serve --repo <path>` arguments
