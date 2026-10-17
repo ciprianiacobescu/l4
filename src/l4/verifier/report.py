@@ -110,8 +110,9 @@ def _generated_rows(result: VerifyResult) -> list[str]:
         "|---|---|---|---|---|---|---|---|",
     ]
     for g in result.generated:
+        reason = f"{g.reason + '; ' if g.reason else ''}support: {g.support}" if g.support in ("base", "head") else ""
         cells = [
-            g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, g.reason or "-",
+            g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, reason or g.reason or "-",
             ", ".join(g.artifacts) or "-",
         ]  # fmt: skip
         rows.append(f"| {' | '.join(_cell(c) for c in cells)} |")
@@ -223,6 +224,12 @@ def render_verification_md(result: VerifyResult) -> str:
         if result.integrity.human_tests:
             lines += ["", "## Test changes made by humans (allowed, L4-SEC-004)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_tests]
+        if result.integrity.allowed_tests:
+            lines += ["", "## Pre-existing tests changed with an allowance (L4-VER-031)", ""]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.allowed_tests]
+        if result.integrity.mocked_support:
+            lines += ["", "## Fixtures that patch the unit's code when a test requests them (L4-VER-037)", ""]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.mocked_support]
         if result.integrity.human_suppressions:
             lines += ["", "## Suppressions added by humans (allowed, listed: SPEC 2.10)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_suppressions]
@@ -241,9 +248,10 @@ def render_verification_md(result: VerifyResult) -> str:
     if result.s1:
         lines += ["", "## S1 (recorded for calibration, never decides)", ""] + _s1_rows(result)
     if result.audit:
-        lines += ["", "## Audit", "", "| Criterion | Status | Test | Reason |", "|---|---|---|---|"]
+        lines += ["", "## Audit", "", "| Criterion | Status | Test | Support | Reason |", "|---|---|---|---|---|"]
         lines += [
-            f"| {_cell(a.criterion)} | {a.status} | {_cell(a.test_path or '-')} | {_cell(a.reason or '-')} |"
+            f"| {_cell(a.criterion)} | {a.status} | {_cell(a.test_path or '-')} | "
+            f"{a.support if a.support in ('base', 'head') else '-'} | {_cell(a.reason or '-')} |"
             for a in result.audit
         ]
         if rejected := [a for a in result.audit if a.status == "rejected"]:

@@ -20,7 +20,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from l4.gates.e2e import ServerNotReady, run_e2e
+from l4.gates.e2e import E2eRun, ServerNotReady, run_e2e
 from l4.gates.junit import TestReport
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.workbench import Workbench
@@ -29,6 +29,7 @@ from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import Criterion
 from l4.verifier.e2e_trace import e2e_coverage
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
+from l4.verifier.support_base import NO_SUPPORT, SupportPlan, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
 from l4.verifier.types import Finding, GeneratedOutcome, GenStatus, RunOutcome, Severity
 
@@ -102,6 +103,7 @@ class _Verdict:
     base: RunOutcome | None = None
     head: RunOutcome | None = None
     tests: tuple[str, ...] = ()
+    support: str = ""
 
 
 def _outcome(statuses: Collection[str]) -> RunOutcome:
@@ -110,7 +112,32 @@ def _outcome(statuses: Collection[str]) -> RunOutcome:
     return "pass" if "passed" in statuses and "failed" not in statuses else "fail"
 
 
-def _discriminates(wb: Workbench, base: Path, criterion: Criterion) -> _Verdict:
+def _head_run(
+    wb: Workbench, criterion: Criterion, cap: int, support: SupportPlan
+) -> tuple[E2eRun, dict[str, str], str, str]:
+    """The head run (L4-VER-035): with the unit's changed test-support files at their base versions, and with them in
+    place only when step 1's content scan read them. Returns (the run, the traced tests, how it ran, why not). With no
+    support change it is the plain run; `how` is "" when the run could not be made the way the rule says."""
+    if not support.changes:
+        run = run_e2e(wb, name="e2e-head")
+        return run, _traced(criterion, run.report, cap), "unchanged", ""
+    with support_at_base(wb, support.base_sha, support):
+        run = run_e2e(wb, name="e2e-head")
+        found = _traced(criterion, run.report, cap)
+    if found and "error" not in found.values():
+        return run, found, "base", ""
+    cause = "a test of the file errored" if found else "no test of the new file ran"
+    if not support.fallback:
+        why = (
+            f"it does not run with the unit's support files at the base ({cause}), and a run with them needs step "
+            f"1's content scan to have read them: {support.why_not}"
+        )
+        return run, found, "", why
+    run = run_e2e(wb, name="e2e-head-support")
+    return run, _traced(criterion, run.report, cap), "head", ""
+
+
+def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: SupportPlan = NO_SUPPORT) -> _Verdict:
     """Run the new test at the merge base, then at the head. `accepted` when it fails at the base and passes at the
     head. At the base only an assertion failure counts as failing: an error (a fixture, a browser that cannot launch)
     says nothing about the app, so it never lets a test through (`base_error`). A base that cannot be served
@@ -134,10 +161,11 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion) -> _Verdict:
         bad = sorted(i for i, status in found.items() if status == "error")
         reason = f"the test errors at the merge base, which proves nothing: {', '.join(bad[:3])}"
         return _Verdict("base_error", reason, base="error")
-    at_head = run_e2e(wb, name="e2e-head")
-    found = _traced(criterion, at_head.report, cap)
+    at_head, found, how, why = _head_run(wb, criterion, cap, support)
+    if not how:
+        return _Verdict("uncollectable", _short(why), base="fail")
     if not found:
-        return _Verdict("uncollectable", "no test of the new file ran at the head", base="fail")
+        return _Verdict("uncollectable", "no test of the new file ran at the head", base="fail", support=how)
     failing = sorted(i for i, status in found.items() if status != "passed")
     if failing:
         artifacts = tuple(
@@ -145,9 +173,9 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion) -> _Verdict:
         )
         return _Verdict(
             "fails_at_head", f"the test fails at the head: {', '.join(failing[:3])}", artifacts, "fail",
-            _outcome(found.values()),
+            _outcome(found.values()), support=how,
         )  # fmt: skip
-    return _Verdict("accepted", base="fail", head="pass", tests=tuple(sorted(found)))
+    return _Verdict("accepted", base="fail", head="pass", tests=tuple(sorted(found)), support=how)
 
 
 def generate_ui_test(
@@ -159,6 +187,7 @@ def generate_ui_test(
     ui_diff: str,
     snapshot: str,
     timeout_s: int = 600,
+    support: SupportPlan = NO_SUPPORT,
 ) -> GeneratedOutcome:
     """One criterion. `base` is the merge-base checkout of `base_checkout`, set up and ready to be served."""
     rel = test_path("e2e", criterion.id)
@@ -174,7 +203,7 @@ def generate_ui_test(
     def outcome(attempts: int, verdict: _Verdict) -> GeneratedOutcome:
         return GeneratedOutcome(
             criterion.id, verdict.status, rel if code else None, attempts, verdict.reason, code, verdict.artifacts,
-            cost, model, sha, verdict.base, verdict.head, verdict.tests, digest,
+            cost, model, sha, verdict.base, verdict.head, verdict.tests, digest, verdict.support,
         )  # fmt: skip
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -201,7 +230,7 @@ def generate_ui_test(
                 write_test_file(tree, rel, code)  # replaces only the harness's own marked file
                 written.append(tree)
             reason = _lint(wb)
-            last = _Verdict("lint_failed", reason) if reason else _discriminates(wb, base, criterion)
+            last = _Verdict("lint_failed", reason) if reason else _discriminates(wb, base, criterion, support)
         except FileExistsError:
             why = f"{rel} already exists and was never proved discriminating: step 5 never overwrites another's test"
             return outcome(attempt, _Verdict("writer_failed", why))
@@ -229,6 +258,7 @@ def generate_ui_tests(
     base_sha: str,
     ui_diff: str,
     snapshot: str,
+    support: SupportPlan = NO_SUPPORT,
 ) -> UiGeneration:
     """Step 5 over the UI criteria without an e2e test. The merge-base checkout is made once and removed in `finally`
     (also when a server never gets ready, which propagates as exit 1). No gaps: nothing is checked out or served."""
@@ -237,11 +267,11 @@ def generate_ui_tests(
         return out
     with base_checkout(wb, base_sha) as base:
         for criterion in gaps:
-            done = generate_ui_test(wb, judge, criterion, base, ui_diff=ui_diff, snapshot=snapshot)
+            done = generate_ui_test(wb, judge, criterion, base, ui_diff=ui_diff, snapshot=snapshot, support=support)
             wb.emit(
                 "verify.generated", criterion=criterion.id, test=done.path, base=done.base, head=done.head,
                 attempts=done.attempts, status=done.status, reason=done.reason, model=done.model,
-                tests=list(done.tests), sha256=done.sha256,
+                tests=list(done.tests), sha256=done.sha256, support=done.support,
             )  # fmt: skip
             out.outcomes.append(done)
     return out

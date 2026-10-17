@@ -142,6 +142,7 @@ from l4.verifier.selection import (
     seat_of,
     select_judge,
 )
+from l4.verifier.support_base import support_plan
 from l4.verifier.traceability import (
     PROOF_HUMAN,
     apply_adequacy,
@@ -816,9 +817,10 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
 
     def body() -> tuple[bool, str]:
         assert vc.audit_writer is not None
+        support = support_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity)
         out = run_audit(
             wb, vc.audit_writer(), {c.id: c for c in criteria}, chosen, skipped, base_sha=base_sha,
-            head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit,
+            head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit, support=support,
         )  # fmt: skip
         result.audit = out.records
         result.findings.extend(out.findings)
@@ -828,7 +830,10 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
             wb.emit("budget.cost", usd=out.cost_usd, profile="verifier_agent", role="audit")
         result.trace = _with_audit(result.trace, out.records)
         counts = {s: sum(a.status == s for a in out.records) for s in {a.status for a in out.records}}
-        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        if support.changes:
+            note += f"; support files at the base: {len(support.changes)}"
+        return True, note
 
     _step(vc, run, "4a", "audit sampling", body)
 
@@ -892,6 +897,7 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
         out = generate_ui_tests(
             wb, vc.ui_writer(), plan.gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
+            support=support_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
         )  # fmt: skip
         result.generated = out.outcomes
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)

@@ -32,6 +32,8 @@ from pathlib import Path
 
 from l4.agents.factory import RoleUnavailable
 from l4.gates.dryrun import narrow_ruff_paths
+from l4.gates.junit import TestReport
+from l4.gates.runner import GateResult
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
 from l4.implementer.prompt import collect_sources
@@ -41,6 +43,7 @@ from l4.llm.agent_judge import LLMBackend
 from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.verifier.conventions import base_test_header, test_conventions
+from l4.verifier.support_base import NO_SUPPORT, SupportPlan, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
 from l4.verifier.types import AuditRecord, CriterionEvidence, Finding, Severity
 
@@ -52,6 +55,7 @@ SPEC_FILES = ("design.md", "proposal.md")
 PRE_SATISFIED = "pre_satisfied"
 LINT_REJECTED = "lint:"  # the start of the reason of an audit test rejected for failing the project's lint
 MAX_LINT_REASON_CHARS = 200
+BASE_RUN_ENV = {"PYTEST_ADDOPTS": "--continue-on-collection-errors"}  # a unit file that needs the unit's helpers
 
 
 def choose(
@@ -156,6 +160,7 @@ def run_audit(
     round_no: int,
     timeout_s: int,
     emit: Callable[..., None],
+    support: SupportPlan = NO_SUPPORT,
 ) -> AuditOutcome:
     """Write, run and judge the audit tests of `chosen`. `RoleLimit` (a usage limit) and `RoleUnavailable` (the writer
     cannot run) propagate: the unit waits for capacity. `emit(type, **data)` records `verify.audit`."""
@@ -194,15 +199,34 @@ def run_audit(
             out.findings.append(_minor("an audit test could not be written", f"{status}: {reason[:200]}", cid))
     if written:
         collected: dict[str, tuple[str, str]] = {}
-        _judge_written(wb, written, round_no, out, collected)
+        _judge_written(wb, written, round_no, out, collected, support=support)
         if collected:
             _retry_collected(
-                wb, writer, criteria, collected, out, round_no=round_no, timeout_s=timeout_s, blocks=sources
+                wb,
+                writer,
+                criteria,
+                collected,
+                out,
+                round_no=round_no,
+                timeout_s=timeout_s,
+                blocks=sources,
+                support=support,
             )
-        _lint_accepted(wb, writer, criteria, out, round_no=round_no, timeout_s=timeout_s, blocks=sources, emit=emit)
+        _lint_accepted(
+            wb,
+            writer,
+            criteria,
+            out,
+            round_no=round_no,
+            timeout_s=timeout_s,
+            blocks=sources,
+            emit=emit,
+            support=support,
+        )
     for record in out.records:
         emit("verify.audit", round=round_no, criterion=record.criterion, status=record.status,
-             path=record.test_path, tests=list(record.tests), reason=record.reason)  # fmt: skip
+             path=record.test_path, tests=list(record.tests), reason=record.reason, support=record.support,
+             support_files=list(record.support_files))  # fmt: skip
     return out
 
 
@@ -212,19 +236,92 @@ def _judge_written(
     round_no: int,
     out: AuditOutcome,
     collected: dict[str, tuple[str, str]] | None = None,
+    *,
+    support: SupportPlan = NO_SUPPORT,
 ) -> None:
-    """Runs the round's audit tests in one gate run and records each file's fate. With `collected`, a file that failed
-    to import when the tests were collected is not rejected yet: it is removed and `collected[cid] = (the error, the
-    code)` is left for the writer's one retry (`_retry_collected`)."""
-    gate = wb.run_gate("audit", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    """Runs the round's audit tests and records each file's fate (L4-VER-033, L4-VER-034). With no support change in
+    the unit, one gate run, as before (`support="unchanged"`). Otherwise the run is made with the unit's test-support
+    files at their base versions, past other files' collection errors, and the zero-value run of each candidate is made
+    in the same block (`support="base"`); a file that did not run that way (no test of it ran, a setup error, a
+    collection error of its own) runs with the support files in place only when step 1's content scan read them and
+    found nothing (`support="head"`), else it is rejected. With `collected`, a file that failed to import when the
+    tests were collected is not rejected yet: it is removed and `collected[cid] = (the error, the code)` is left for
+    the writer's one retry (`_retry_collected`)."""
+    if not support.changes:
+        _judge_run(wb, written, round_no, out, collected, "unchanged", (), None)
+        return
+    rest: dict[str, str] = {}
+    log_path: Path | None = None
+    with support_at_base(wb, support.base_sha, support) as reverted:
+        gate = wb.run_gate("audit-base-support", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports,
+                           extra_env=BASE_RUN_ENV)  # fmt: skip
+        log_path = gate.log_path
+        report = gate.report
+        ran: dict[str, str] = {}
+        for cid, rel in written.items():
+            stem = _stem(cid, round_no)
+            ids = _ids_of(report.tests, stem) if report is not None else []
+            broken = report is None or any(stem in e for e in report.collection_errors)
+            if ids and not broken and not {report.tests[i].status for i in ids} & {"error"}:  # type: ignore[union-attr]
+                ran[cid] = rel
+            else:
+                rest[cid] = rel
+        if ran:
+            _judge_run(wb, ran, round_no, out, None, "base", tuple(reverted), BASE_RUN_ENV, gate)
+    if not rest:
+        return
+    if support.fallback:
+        _judge_run(wb, rest, round_no, out, collected, "head", tuple(p for p, _ in support.changes), None)
+        return
+    for cid, rel in rest.items():
+        cause = _why_not_ran(gate.report, log_path, _stem(cid, round_no))
+        why = (
+            f"it does not run with the unit's support files at the base ({cause}), and a run with them needs step 1's "
+            f"content scan to have read them: {support.why_not}"
+        )
+        _reject(wb, out, cid, rel, "rejected", why)
+
+
+def _stem(cid: str, round_no: int) -> str:
+    return f"test_l4_audit_c_{cid.removeprefix('C-')}_r{round_no}"
+
+
+def _why_not_ran(report: TestReport | None, log_path: Path | None, stem: str) -> str:
+    """The first line of why an audit file had no run at the base support: its collection error, the first test of it
+    that errored, or the plain fact."""
+    if report is None:
+        return "no report"
+    if any(stem in e for e in report.collection_errors) and log_path is not None:
+        return _collection_error(log_path, stem).splitlines()[0][:200]
+    if erroring := [i for i in _ids_of(report.tests, stem) if report.tests[i].status == "error"]:
+        return f"{erroring[0]} errored"
+    return "no test of the file ran"
+
+
+def _judge_run(
+    wb: Workbench,
+    written: Mapping[str, str],
+    round_no: int,
+    out: AuditOutcome,
+    collected: dict[str, tuple[str, str]] | None,
+    label: str,
+    files: tuple[str, ...],
+    env: Mapping[str, str] | None,
+    gate: GateResult | None = None,
+) -> None:
+    """One judged run of `written` (the body of the audit judgement; `label` and `files` go on each record)."""
+    if gate is None:
+        gate = wb.run_gate("audit", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=env)
     report = gate.report
     candidates: dict[str, list[str]] = {}
     deferred: dict[str, str] = {}  # files only the collection error of another file kept from running
-    interrupted = report is not None and any(
-        f"test_l4_audit_c_{c.removeprefix('C-')}_r{round_no}" in e for c in written for e in report.collection_errors
-    )
+    interrupted = report is not None and any(_stem(c, round_no) in e for c in written for e in report.collection_errors)
+
+    def record(cid: str, status: str, rel: str, ids: tuple[str, ...], reason: str = "") -> None:
+        out.records.append(AuditRecord(cid, status, rel, ids, reason, label, files))
+
     for cid, rel in written.items():
-        stem = f"test_l4_audit_c_{cid.removeprefix('C-')}_r{round_no}"
+        stem = _stem(cid, round_no)
         ids = _ids_of(report.tests, stem) if report is not None else []
         broken = report is None or any(stem in e for e in report.collection_errors)
         statuses = {report.tests[i].status for i in ids} if report is not None else set()
@@ -236,28 +333,30 @@ def _judge_written(
             deferred[cid] = rel  # pytest stops at a collection error: this file never ran, so it runs again below
         elif broken or not ids:
             why = "the audit test could not be collected" if report is not None else f"no report ({gate.reason})"
-            _reject(wb, out, cid, rel, "rejected", why)
+            _reject(wb, out, cid, rel, "rejected", why, label=label, files=files)
         elif statuses & {"failed", "error"}:
             failing = next(i for i in ids if report.tests[i].status in ("failed", "error"))  # type: ignore[union-attr]
-            out.records.append(AuditRecord(cid, "failed", rel, tuple(ids), f"{failing} fails at head"))
+            record(cid, "failed", rel, tuple(ids), f"{failing} fails at head")
             (wb.worktree / rel).unlink(missing_ok=True)
         elif statuses != {"passed"}:
-            _reject(wb, out, cid, rel, "rejected", "the audit test was skipped")
+            _reject(wb, out, cid, rel, "rejected", "the audit test was skipped", label=label, files=files)
         else:
             candidates[cid] = ids
-    if deferred:
-        _judge_written(wb, deferred, round_no, out)  # the broken file is gone: a plain run of the others
+    if deferred:  # the broken file is gone: a plain run of the others
+        _judge_run(wb, deferred, round_no, out, None, label, files, env)
     if not candidates:
         return
-    confirmation = confirm_pre_satisfied(wb, candidates)
+    confirmation = (
+        confirm_pre_satisfied(wb, candidates, extra_env=env) if env else confirm_pre_satisfied(wb, candidates)
+    )
     for cid, ids in candidates.items():
         rel = written[cid]
         if cid in confirmation.confirmed:
-            out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids)))
+            record(cid, "accepted", rel, tuple(ids))
             out.accepted.append(wb.worktree / rel)
         else:
             why = confirmation.reason or "it passes when the project's functions answer their zero value"
-            _reject(wb, out, cid, rel, "rejected", why, tuple(ids))
+            _reject(wb, out, cid, rel, "rejected", why, tuple(ids), label=label, files=files)
 
 
 _COLLECTION_LINE = re.compile(r"^(E\s+.+|\w*(?:Error|Exception)\b.*)$")
@@ -309,6 +408,7 @@ def _retry_collected(
     round_no: int,
     timeout_s: int,
     blocks: Sequence[tuple[str, str]],
+    support: SupportPlan = NO_SUPPORT,
 ) -> None:
     """The writer gets the collection error once (live wave D, W-D2). A test that still cannot be collected, or no
     test at all, is rejected: a minor finding, never a held criterion or a question."""
@@ -327,7 +427,7 @@ def _retry_collected(
             raise RoleUnavailable("verifier_agent", reply.detail or "the audit writer cannot answer")
         if reply.status == "ok" and reply.test is not None:
             write_test_file(wb.worktree, rel, reply.test.code)
-            _judge_written(wb, {cid: rel}, round_no, out)  # judged like a new one; a second break is rejected
+            _judge_written(wb, {cid: rel}, round_no, out, support=support)  # like a new one; a second break is rejected
             continue
         why = f"the audit test could not be collected ({error.splitlines()[0][:150]}); the retry gave {reply.status}"
         out.records.append(AuditRecord(cid, "rejected", rel, (), why))
@@ -335,9 +435,18 @@ def _retry_collected(
 
 
 def _reject(
-    wb: Workbench, out: AuditOutcome, cid: str, rel: str, status: str, why: str, tests: tuple[str, ...] = ()
+    wb: Workbench,
+    out: AuditOutcome,
+    cid: str,
+    rel: str,
+    status: str,
+    why: str,
+    tests: tuple[str, ...] = (),
+    *,
+    label: str = "",
+    files: tuple[str, ...] = (),
 ) -> None:
-    out.records.append(AuditRecord(cid, status, rel, tests, why))
+    out.records.append(AuditRecord(cid, status, rel, tests, why, label, files))
     out.findings.append(_minor("an audit test was rejected", why, cid))
     (wb.worktree / rel).unlink(missing_ok=True)
 
@@ -378,6 +487,7 @@ def _lint_accepted(
     timeout_s: int,
     blocks: Sequence[tuple[str, str]],
     emit: Callable[..., None],
+    support: SupportPlan = NO_SUPPORT,
 ) -> None:
     """Lints every accepted audit test (see the module docstring). Nothing to do without a lint or typecheck command."""
     if not (wb.cfg.gates.lint or wb.cfg.gates.typecheck):
@@ -405,7 +515,7 @@ def _lint_accepted(
             write_test_file(wb.worktree, rel, reply.test.code)
             out.records.remove(record)  # judged afresh: it must still pass at head and fail against the zero values
             out.accepted = [p for p in out.accepted if p != wb.worktree / rel]
-            _judge_written(wb, {cid: rel}, round_no, out)
+            _judge_written(wb, {cid: rel}, round_no, out, support=support)
             again = next((r for r in out.records if r.criterion == cid and r is not record), None)
             if again is None or again.status != "accepted":
                 emit(
@@ -421,4 +531,14 @@ def _lint_accepted(
         emit("verify.audit_lint", round=round_no, criterion=cid, outcome="rejected", attempt=2, reason=reason)
         out.records.remove(record)
         out.accepted = [p for p in out.accepted if p != wb.worktree / rel]
-        _reject(wb, out, cid, rel, "rejected", f"{LINT_REJECTED} {reason}", record.tests)
+        _reject(
+            wb,
+            out,
+            cid,
+            rel,
+            "rejected",
+            f"{LINT_REJECTED} {reason}",
+            record.tests,
+            label=record.support,
+            files=record.support_files,
+        )
