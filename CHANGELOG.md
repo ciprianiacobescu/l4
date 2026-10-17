@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.12 (unreleased)
+## 0.4.12 (2026-10-17)
 
 ### Changed
 - A delivery plan with `merge: auto` now squash-merges each verified unit by default, and deletes the merged branches.
