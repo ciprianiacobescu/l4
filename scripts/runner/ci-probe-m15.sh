@@ -340,11 +340,12 @@ m0_env() {  # private-dir [NAME=VALUE...] -> NAME=VALUE lines: l4.sandbox.env.bu
   printf '%s\n' "L4_RESULT_PATH=$tmp/result.json" "$@"
 }
 m0_gate_env() {  # private-dir [NAME=VALUE...] -> l4.sandbox.env.build_gate_env: the base, then the cache variables
-  local tmp=$1 arg   # (and UV_LINK_MODE=copy when a uv cache is mounted: the cache and the worktree are separate binds)
-  shift
+  local tmp=$1 arg   # (and UV_LINK_MODE=copy when a uv cache is mounted: the cache and the worktree are separate binds;
+  shift              # and npm_config_store_dir, read by pnpm 9 and 10, beside pnpm 11's pnpm_config_store_dir)
   m0_env "$tmp" | grep -v '^L4_RESULT_PATH='
   printf '%s\n' "$@"
   for arg in "$@"; do case $arg in UV_CACHE_DIR=*) printf '%s\n' "UV_LINK_MODE=copy";; esac; done
+  for arg in "$@"; do case $arg in pnpm_config_store_dir=*) printf '%s\n' "npm_config_store_dir=${arg#*=}";; esac; done
 }
 m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir [cache:DIR|rocache:DIR|hide:DIR|extra:FLAG...] NAME=VALUE... -- command...
   local adapter=$1 wt=$2 gd=$3 tmp=$4 other p
