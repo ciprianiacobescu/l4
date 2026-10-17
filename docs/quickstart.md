@@ -88,6 +88,21 @@ test gate leaves in a test folder is committed with the step and counts as a tes
 `.l4-out/` (the default `gates.test.reports` path, never committed), e.g. `dotnet test --results-directory .l4-out`,
 or ignore the folder (`TestResults/` in that project's `.gitignore`).
 
+### A polyglot repository
+
+The L4 job provides Python, uv and the agent CLIs only. For gates of Go or TypeScript code, set `ci.toolchains` and run
+`l4 upgrade`: the GitHub workflow then sets the toolchains up before L4, pinned and with their own caches off
+(`l4 init` proposes the entry from `go.work`/`go.mod`, `.nvmrc`/`engines.node` and `packageManager: pnpm@X`):
+
+```yaml
+ci:
+  toolchains: {go: {version_file: go.work}, node: {version: "22"}, pnpm: {version: "11"}}
+```
+
+Then add the gates of those languages (`gates.setup`, `lint`, `test`, e.g. `go test ./...`, `pnpm test`). With `go` set the
+gates run with `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`. `l4 doctor --adoption` names a gate command whose
+first word is not on the PATH (TOOL-001). On GitLab nothing is rendered: the runner image must provide the toolchains.
+
 ## 2. Commit and push
 
 Commit exactly what the adoption wrote: `--commit` does it for you (only the paths the adoption added or changed; your own

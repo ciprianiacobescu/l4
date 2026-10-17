@@ -674,6 +674,8 @@ sandbox:                           # isolation of agents AND gate commands from 
     pip: {path: "$L4_CACHE/units/{unit}/cache/pip", env: PIP_CACHE_DIR}
     npm: {path: "$L4_CACHE/units/{unit}/cache/npm", env: npm_config_cache}
     go: {path: "$L4_CACHE/units/{unit}/cache/go", env: GOMODCACHE}
+    gobuild: {path: "$L4_CACHE/units/{unit}/cache/gobuild", env: GOCACHE}
+    pnpm: {path: "$L4_CACHE/units/{unit}/cache/pnpm", env: pnpm_config_store_dir}   # pnpm 9-10 read npm_config_store_dir: set to the same path
     playwright: {path: "$L4_CACHE/shared/ms-playwright", env: PLAYWRIGHT_BROWSERS_PATH, read_only: true}
   credential_paths:                # per adapter, mounted read-write ONLY into that profile's agent sandbox and hidden
                                    # (tmpfs / /dev/null) from every other sandbox; a user entry replaces only that
@@ -899,6 +901,9 @@ ci:
                                    # schedule. `l4 upgrade` re-renders the workflow, so change it here (L4-ACT-004)
   upload_artifacts: true           # false: the generated GitHub workflows have no upload-artifact step (a public
                                    # repository: any signed-in user can download the `l4-out` artifact)
+  toolchains: {}                   # GitHub: setup steps before L4 for the gates' toolchains (L4-CI-005), each with exactly
+                                   # one of version / version_file (pnpm: version): {go: {version_file: go.work},
+                                   # node: {version: "22"}, pnpm: {version: "11"}}; GitLab: the image provides them
 
 yolo:
   profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's
@@ -4658,6 +4663,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | MEM-001 | warn | lessons lint (IDs unique, caps, scopes valid) | — |
 | MEM-002 | warn | memory on and `.serena/project.yml` or `.serena/memories/harness/lessons.md` ignored by git (`git check-ignore`): prints the `.gitignore` carve-out | — |
 | GATE-001 | error (scope `adoption`) | `gates.setup`, `build`, `lint`, `typecheck` and `gates.test.command` pass at HEAD, run in a detached worktree of HEAD in the gate sandbox (unsandboxed outside CI when bwrap is unusable, and said so; a failure in CI): lists the failing tests (ten, then a count), the first lint lines and suggestions (a missing module's extra, `ruff check --select F,E9`, the same on the source and test directories when `--select F,E9 .` still fails (path narrowing), deselect) | — |
+| TOOL-001 | error in a CI run, warn in `l4 doctor --adoption` | the first word of each configured gate command (`gates.setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) is on the gate PATH; builtins, paths and what `uv run` starts are skipped; the message names the tool and the gate and points at `ci.toolchains` (L4-CI-005) | — |
 | LIVE-001 | error | `hello` probe for the first profile of every required role chain | — |
 | LIVE-002 | warn | `hello` probe for fallback profiles; quota for all | — |
 | LIVE-003 | warn | MCP servers start (Serena, Playwright) per adapter | — |
@@ -4821,6 +4827,23 @@ has rounds left resumes with no extension. A refusal
 for now) has no event to refuse: the label is never honoured there, and nothing is said. A person's push on a halted branch gets one pointer line per branch head (`resume.hint{head}`): add
 the label, or run `l4 resume`. The halting run's last mirror sync writes the sticky-note section "Halted: <reason>" that
 says so, and a resume takes it away.
+
+**L4-CI-005** The L4 job MUST be able to provide the toolchains the gates need (a repository with Go modules or a
+TypeScript UI beside its Python code). `ci.toolchains` has the optional entries `go` and `node` (each with exactly one
+of `version` and `version_file`; neither or both is a load error naming `ci.toolchains.<entry>`) and `pnpm` (`version`).
+The GitHub workflow, in the action form, the copy form and the plain form, MUST contain before the L4 steps and in the
+order go, node, pnpm one step per configured entry: `actions/setup-go` (`go-version` or `go-version-file`, `cache:
+false`), `actions/setup-node` (`node-version` or `node-version-file`) and `pnpm/action-setup` (`version`), each pinned by
+the full commit sha of a release with the tag in a comment; the actions' own dependency caches are off, because L4's
+per-unit caches serve the gates. Without `ci.toolchains` the workflow is byte-for-byte what it was. GitLab renders
+nothing: the runner image provides the toolchains. The default caches include `gobuild` (`GOCACHE`) next to `go`
+(`GOMODCACHE`) and `pnpm` (the store directory: `pnpm_config_store_dir`, which pnpm 11 reads, and `npm_config_store_dir`
+with the same path, which pnpm 9 and 10 read). With a `go` entry in `ci.toolchains` every gate runs with `GOTOOLCHAIN=local` (no
+download of another Go outside `gates.setup`) and `GOFLAGS=-mod=readonly`, unless the gate environment sets them.
+Doctor row TOOL-001 names each gate command whose first word is not on the gate PATH and points at `ci.toolchains`.
+`l4 init` proposes `ci.toolchains` from `go.work` or `go.mod`, `.nvmrc` or `package.json` `engines.node`, and
+`packageManager: pnpm@X`. The toolchains are on the read-only host root of the gate sandbox: its guarantees and network
+rules are unchanged.
 
 ---
 
@@ -5190,6 +5213,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 32 | `multi-report-gates` | a test gate reads every report it lists: each must exist, and they are merged, a test in two reports keeping its worse result, so a repository that runs several suites is judged on all of them; the adoption docs and the `l4 init` note name the public harness first (L4-GAT-005; `openspec/changes/multi-report-gates/`) | the second consumer repository's adoption |
 | 33 | `zero-value-generators` | the zero-value variant of a context manager enters and yields the zero value, a generator yields nothing, and a function annotated to return a context manager or an iterator returns a null one, so a test of a context manager can fail by assertion instead of a `TypeError` on `with`; the `vacuous` message says how to test one (L4-IMP-026; `openspec/changes/zero-value-generators/`) | the consumer repository's halted unit, after the upgrade |
 | 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
+| 35 | `job-toolchains` | `ci.toolchains` (go, node, pnpm): the GitHub workflow sets them up before L4 with pinned shas and their caches off, the default caches `gobuild` and `pnpm`, `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` for Go gates, doctor TOOL-001 for a gate command that is not on the PATH, and `l4 init` proposals (L4-CI-005, SCN-CI-19..23; `openspec/changes/job-toolchains/`) | the second consumer repository's gates of its Go and TypeScript code |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7711,6 +7735,34 @@ scenario is a spec defect (§26).
 - **When** the harness writes those ledger events
 - **Then** they go to the lock-ref commit tree (`ledger-pending/…`), the unit branch head stays H, and required checks on
   H are unaffected.
+
+#### SCN-CI-19 (+) The workflow sets up the configured toolchains before L4 · L4-CI-005
+- **Given** `ci.toolchains: {go: {version_file: go.work}, node: {version: "22"}, pnpm: {version: "11"}}`
+- **When** `l4 upgrade` renders the GitHub workflow
+- **Then** the job has, before the L4 action, a pinned `actions/setup-go` step with `go-version-file: go.work`, a pinned
+  `actions/setup-node` step with `node-version: "22"` and a pinned `pnpm/action-setup` step with `version: "11"`, each
+  with its cache off.
+
+#### SCN-CI-20 (+) No toolchains, no steps · L4-CI-005
+- **Given** no `ci.toolchains`
+- **When** the workflow is rendered
+- **Then** it is byte-identical to the workflow rendered before this change.
+
+#### SCN-CI-21 (−) A toolchain entry needs exactly one of version and version_file · L4-CI-005
+- **Given** `ci.toolchains: {go: {}}` or `{go: {version: "1.26", version_file: go.work}}`
+- **When** the configuration loads
+- **Then** it is refused with a message naming the entry (`ci.toolchains`, `go`).
+
+#### SCN-CI-22 (+) Go gates run with the local toolchain and a read-only module graph · L4-CI-005
+- **Given** `ci.toolchains` with a `go` entry and a gate `go test ./...`
+- **When** the gate runs
+- **Then** its environment has `GOTOOLCHAIN=local`, `GOFLAGS=-mod=readonly`, and `GOMODCACHE` and `GOCACHE` under the
+  unit's cache.
+
+#### SCN-CI-23 (−) A gate command that is not on the PATH is named · L4-CI-005
+- **Given** a gate `golangci-lint run ./...` and no `golangci-lint` on the gate PATH
+- **When** `l4 doctor --adoption` runs
+- **Then** TOOL-001 warns that `golangci-lint` is not on the gate PATH and names `ci.toolchains`.
 
 #### SCN-ARC-21 (−) A failed strict re-validation after archiving escalates · L4-OSP-003, L4-ARC-001
 - **Given** (`archive.mode: on_approval`) an approved unit with deltas for `auth` and `discounts`, whose

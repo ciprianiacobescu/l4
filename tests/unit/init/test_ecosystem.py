@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-from l4.init.ecosystem import M0_GATES, detect_python, propose_gates
+import pytest
+
+from l4.init.ecosystem import M0_GATES, Proposal, detect_python, propose_gates
 
 
 def project(tmp_path: Path, pyproject: str | None, *, lock: bool = True) -> Path:
@@ -81,3 +83,64 @@ def test_no_pyproject_keeps_the_m0_gates_with_a_todo(tmp_path):
     proposal = propose_gates(detect_python(project(tmp_path, None, lock=False)))
     assert proposal.gates == M0_GATES
     assert any("pyproject.toml" in todo for todo in proposal.todos)
+
+
+# --- ci.toolchains proposals (L4-CI-005) ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+import yaml  # noqa: E402
+
+from l4.config.schema import L4Config  # noqa: E402
+from l4.init.ecosystem import detect_toolchains, toolchain_todos  # noqa: E402
+from l4.init.init import render_config  # noqa: E402
+
+
+def write(root: Path, name: str, text: str) -> None:
+    (root / name).write_text(text)
+
+
+def test_go_work_wins_over_go_mod_and_both_are_version_files(tmp_path):
+    write(tmp_path, "go.mod", "module x\n\ngo 1.26\n")
+    assert detect_toolchains(tmp_path) == {"go": {"version_file": "go.mod"}}
+    write(tmp_path, "go.work", "go 1.26\n")
+    assert detect_toolchains(tmp_path)["go"] == {"version_file": "go.work"}
+
+
+def test_node_from_nvmrc_or_engines_and_pnpm_from_package_manager(tmp_path):
+    write(
+        tmp_path,
+        "package.json",
+        json.dumps({"engines": {"node": ">=22 <23"}, "packageManager": "pnpm@11.0.9+sha512.ab"}),
+    )
+    assert detect_toolchains(tmp_path) == {"node": {"version": ">=22 <23"}, "pnpm": {"version": "11.0.9"}}
+    write(tmp_path, ".nvmrc", "v22.1.0\n")
+    assert detect_toolchains(tmp_path)["node"] == {"version_file": ".nvmrc"}
+
+
+@pytest.mark.parametrize(
+    "package",
+    ["not json", "[]", json.dumps({"engines": "node"}), json.dumps({"packageManager": "yarn@4.1.0"}), "{}"],
+)
+def test_a_package_json_that_names_nothing_proposes_nothing(tmp_path, package):
+    write(tmp_path, "package.json", package)
+    assert detect_toolchains(tmp_path) == {}
+
+
+def test_no_toolchain_files_no_proposal_and_no_todo(tmp_path):
+    assert detect_toolchains(tmp_path) == {} and toolchain_todos({}) == ()
+
+
+def test_the_proposal_is_written_to_ci_toolchains_and_loads(tmp_path):
+    found = {"go": {"version_file": "go.work"}, "node": {"version": ">=22"}, "pnpm": {"version": "11.0.9"}}
+    proposal = Proposal({}, toolchains=found)
+    text = render_config("0" * 40, "github", proposal=proposal)
+    assert yaml.safe_load(text)["ci"]["toolchains"] == found
+    cfg = L4Config.model_validate(yaml.safe_load(text))
+    assert cfg.ci.toolchains.go.version_file == "go.work" and cfg.ci.toolchains.node.version == ">=22"
+    assert "ci.toolchains" not in render_config("0" * 40, "github")
+
+
+def test_the_todo_names_the_toolchains_and_says_the_gates_are_the_python_ones():
+    (todo,) = toolchain_todos({"go": {"version_file": "go.work"}, "pnpm": {"version": "11"}})
+    assert "go, pnpm" in todo and "gates" in todo

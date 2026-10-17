@@ -42,6 +42,7 @@ from l4.sandbox.base import (
     runner_tmp_paths,
 )
 from l4.sandbox.caches import mount_caches
+from l4.sandbox.env import toolchain_env
 from l4.security.protected import ProtectedSet, restore_protected, revert_unsnapshotted, snapshot_protected
 from l4.specs.base import SpecProvider, UnitRef
 from l4.state.ledger import ledger_path
@@ -267,7 +268,9 @@ class Workbench:
                 ),
                 host_env=self.host_env, log_path=log,
                 redactor=self.redactor, runner=self.runner,
-                extra_env=merge_pytest_env(trace_env(self.cfg.gates.test_timeout_seconds()), extra_env or {}),
+                extra_env=merge_pytest_env(
+                    toolchain_env(self.cfg), trace_env(self.cfg.gates.test_timeout_seconds()), extra_env or {}
+                ),
             )  # fmt: skip
         finally:
             # agent-written test code ran with the tree writable: what it wrote into the unit directory (a forged

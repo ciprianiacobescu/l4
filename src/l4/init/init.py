@@ -15,7 +15,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import click
@@ -45,7 +45,7 @@ from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_
 from l4.init.action import packaged_action, remote_url, resolve_ref
 from l4.init.ciedit import merge_include
 from l4.init.dependabot import DEPENDABOT_RELPATH, merge_dependabot
-from l4.init.ecosystem import M0_GATES, Proposal, detect_python, propose_gates
+from l4.init.ecosystem import M0_GATES, Proposal, detect_python, detect_toolchains, propose_gates, toolchain_todos
 from l4.init.pytest_marker import MarkerEdit, MarkerRefusal, register_l4_marker
 from l4.init.vendor import VendorSource, collect_vendor_source, harness_root
 from l4.memory.ignore import carve_out_text, ignored_harness_paths
@@ -138,7 +138,11 @@ def render_config(
         "profiles": {**DEFAULT_PROFILES, **({s1: S1_PROFILES[s1]} if s1 in S1_PROFILES else {})},
         "roles": {**DEFAULT_ROLES, **({"s1_judge": [s1]} if s1 in S1_PROFILES else {})},
         "forge": {"type": platform, **({"token_env": token_env} if token_env else {})},
-        "ci": {"platform": platform, **({"runner_tags": list(runner_tags)} if runner_tags is not None else {})},
+        "ci": {
+            "platform": platform,
+            **({"runner_tags": list(runner_tags)} if runner_tags is not None else {}),
+            **({"toolchains": proposal.toolchains} if proposal and proposal.toolchains else {}),
+        },
         **({} if memory else {"memory": {"enabled": False}}),
         **({"yolo": {"hold": list(hold)}} if hold else {}),
     }
@@ -336,6 +340,9 @@ def plan_init(
         repository, commit = _fetched_pins(*fetched)
     ignored = ignored_harness_paths(repo, environ)  # `.serena/` in .gitignore: neither the seed nor lessons commit
     proposal = propose_gates(detect_python(repo))
+    toolchains = detect_toolchains(repo)
+    if toolchains:
+        proposal = replace(proposal, toolchains=toolchains, todos=(*proposal.todos, *toolchain_todos(toolchains)))
     held = existing_unit_ids(repo, environ) if hold_existing else ()
     login_todos = hosted_login_todos() if action is not None and not runner_tags else ()
     login_todos += (S1_NONE_TODO,) if s1 == "none" else ()
