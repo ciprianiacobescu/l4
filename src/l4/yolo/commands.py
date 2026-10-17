@@ -51,6 +51,7 @@ from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
+from l4.specs.detect import collect_units
 from l4.specs.providers import providers_for
 from l4.state.retry import fetch_unit_refs, start_run_line
 from l4.state.status import Activity, OpenRun, discover
@@ -60,6 +61,7 @@ from l4.yolo import accept as accepting
 from l4.yolo import findings as fnd
 from l4.yolo import judge_sandbox
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
+from l4.yolo.coverage import coverage_findings
 from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import Found, new_draft, update_draft
@@ -103,6 +105,7 @@ from l4.yolo.plans import (
 from l4.yolo.readiness import PROMPT_VERSION, Budgets, delivered_on_target, read_folder, review_plan_costed
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
+from l4.yolo.worktree import snapshot as worktree_snapshot
 
 log = logging.getLogger("l4.yolo.commands")
 
@@ -576,11 +579,65 @@ def budget_overruns(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, Uni
     return out
 
 
-def run_check(app: AppContext, *, plan: str) -> ExitCode:
-    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write."""
+@dataclass
+class _WorktreeAdmission:
+    found: list[tuple[Any, Any]]  # `discover`'s pairs, for the callers that need the phases
+    infos: dict[str, UnitInfo]
+    admission: Admission
+    archived: frozenset[str]
+
+
+def _admit_worktree(ctx: _Ctx, plan: Plan, plan_id: str, state: PlanState, rev: str) -> _WorktreeAdmission:
+    """The admission of a plan read from the WORKING TREE (`check --worktree`, `review --worktree`): the units are the
+    ones the providers find in the checkout, the other plans, the archived changes and the target are those of `rev`."""
+    found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
+    infos = unit_infos(ctx.app.repo, found, plan.known_ids(), check_intake=True)
+    archived = archived_at(ctx.git, rev, ctx.cfg)
+    admission = admit(
+        plan, known_units=infos, cfg=ctx.cfg, held=_held(ctx, plan_id, state), state=state, archived=archived
+    )
+    return _WorktreeAdmission(found, infos, admission, archived)
+
+
+def _check_worktree(ctx: _Ctx, plan_id: str, rev: str) -> ExitCode:
+    """`l4 yolo check PLAN --worktree` (L4-YOLO-034): the admission of the working tree's plan, then `uncovered` and
+    `covered_twice` across its plan files. Writes nothing and needs no push."""
+    files = plan_files(ctx.app.repo)
+    file = next((f for f in files if f.plan_id == plan_id), None)
+    if file is None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"check: no plan file {PLANS_DIR}/{plan_id}.json in the working tree")
+    if file.plan is None:
+        assert file.invalid is not None
+        for error in file.invalid.errors:
+            ctx.say(error)
+        ctx.say(f"{plan_id}: not admitted")
+        return ExitCode.USAGE_ERROR
+    state = fold_plan(plan_id, ctx.store(plan_id).read().events)
+    result = _admit_worktree(ctx, file.plan, plan_id, state, rev)
+    known = [u.id for u in collect_units(providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))]
+    coverage = coverage_findings(files, known, ctx.cfg.yolo.hold)
+    admission = result.admission
+    if not admission.ok or coverage:
+        ctx.say(f"{plan_id}: not admitted ({len(admission.findings) + len(coverage)} finding(s))")
+        _print_findings(ctx, [*_findings_text(admission, plan_id), *coverage])
+        return ExitCode.USAGE_ERROR
+    ctx.say(f"{plan_id}: admitted (working tree)")
+    ctx.say(f"order: {', '.join(admission.order)}")
+    paths = [file.path, *dict.fromkeys(i.folder for i in result.infos.values())]
+    snap = worktree_snapshot(ctx.git, paths)  # a commit that touches no ref: the budget reads files from a revision
+    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, result.infos, snap):
+        ctx.say(line)
+    return ExitCode.OK
+
+
+def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode:
+    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write. With
+    `worktree`, the plan files and the units are the working tree's (L4-YOLO-034), before the push."""
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="check")
+    if worktree:
+        return _check_worktree(ctx, plan_id, rev)
     file = _file(ctx, plan_id, "check")
     if file.plan is None:
         assert file.invalid is not None
@@ -686,9 +743,10 @@ def run_draft(
         f"  1. edit {PLANS_DIR}/{plan_id}.json: the dependencies, batches and exclusions (a dependency only on evidence"
     )
     say("     in the specs: the draft added none)")
-    say("  2. python3 scripts/validate_plan.py (the skill ships a copy), then commit and push the plan file")
+    say(f"  2. l4 yolo check {plan_id} --worktree (without the harness: python3 scripts/validate_plan.py),")
+    say("     then commit and push the plan file")
     say("     (new specs in the same commit, or after the plan file: one that lands without a plan runs at once)")
-    say(f"  3. l4 yolo check {plan_id}, then l4 yolo review {plan_id}")
+    say(f"  3. l4 yolo check {plan_id} (after the push), then l4 yolo review {plan_id}")
     return ExitCode.OK
 
 

@@ -7,9 +7,9 @@ Every task follows these rules:
 
 ## 1. Command (L4-YOLO-034)
 
-- [ ] 1.1 Tests: SCN-YOLO-86..89 in `tests/unit/yolo/`; a parity test that `uncovered`/`covered_twice` match
+- [x] 1.1 Tests: SCN-YOLO-86..89 in `tests/unit/yolo/`; a parity test that `uncovered`/`covered_twice` match
   `scripts/validate_plan.py` on the same fixture trees.
-- [ ] 1.2 `run_check(..., worktree=True)`, the coverage checks in the package, the `--worktree` flag in `cli.py`, the
+- [x] 1.2 `run_check(..., worktree=True)`, the coverage checks in the package, the `--worktree` flag in `cli.py`, the
   hints of `l4 yolo draft` and of the worktree review.
 
 ## 2. Docs

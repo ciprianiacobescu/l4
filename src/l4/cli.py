@@ -263,6 +263,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
         click.Argument(["plan"]),
+        _flag("--worktree", "worktree", help="check the working tree's plan before the push"),
     ]),
     "yolo review": ("Ask CI to review a plan (--local: here; --worktree: the working tree, before the push).", lambda: [
         click.Argument(["plan"]),
