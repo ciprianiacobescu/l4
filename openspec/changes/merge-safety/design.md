@@ -46,8 +46,8 @@ The new signature is `after_handoff(git, head, name, unit_rel, *, recorded: str 
 - When `recorded` is given and is an ancestor of `head` (`git merge-base --is-ancestor`): `handoff = recorded`. Every
   first-parent commit in `recorded..head` is a `ForeignCommit`, whatever its author, committer or trailers. With
   `archive.mode: post_merge_pr` (the only mode built) the harness pushes nothing to the unit branch while the PR is ready
-  (L4-ARC-007), and `l4 retry` changes the phase in the commit that it pushes. `spec_edit` is the diff of `recorded..head`
-  as today.
+  (L4-ARC-007), and `l4 retry` records `unit.retried` and its edge before its one commit, so that commit already shows
+  the unit out of review [verified: `Orchestrator.resume`]. `spec_edit` is the diff of `recorded..head` as today.
 - When `recorded` is given and is not an ancestor of `head`, or is unknown to the clone: the result is
   `AfterHandoff(recorded, head_sha, lost=True)`, which is rewritten history.
 - When `recorded` is None: today's subject-and-identity rule, unchanged. This is the fallback for a unit with no
@@ -139,7 +139,7 @@ text plus shas and job names, so it holds while nothing changes, and `_merge_wai
 
 `<keys>` is `", ".join(sorted(j.key for j in ci.failed))`. `MergeOutcome` gains `ci: str | None = None` and
 `ci_jobs: tuple[str, ...] = ()`. `merge_guarded` sets them on a `merged` outcome with `dataclasses.replace`, and
-`cycle._merge` writes them into `unit.merged`. `YoloMergeCfg` gains `require_ci: bool = True`. A wait chains no run
+`cycle._merge` writes them into `unit.merged`: `ci` always, `ci_jobs` only when it is not empty. `YoloMergeCfg` gains `require_ci: bool = True`. A wait chains no run
 (`_wait_merge`), so a plan waiting for CI goes on at the next trigger (the schedule, a push, a command).
 
 ### D6 GitHub check-run identity (`forge/github.py`, `forge/base.py`, `ci/repo_ci.py`)
@@ -155,7 +155,8 @@ text plus shas and job names, so it holds while nothing changes, and `_merge_wai
     for its `check_suite_id`;
   - the workflow file is `path` without `.github/workflows/` and without anything from `@` on;
   - a 403 or 404 on the listing gives `{}` and one warning (`the workflow runs of <sha10> could not be read: check runs
-    are told apart by check suite`); other errors propagate.
+    are told apart by check suite`); a 403 or 404 on an attempt read drops only that attempt's suite, whose check runs
+    then take the `suite-<id>` key (fail closed); other errors propagate.
 
   Each check run then gets its identity:
   - an Actions check run takes `suites[check_suite.id]`, or `(f"suite-{id}", "")` when the suite is not found;
@@ -231,6 +232,10 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
   each merge and each wait probe.
 - **An unforeseen harness push after H** (none is known in `post_merge_pr`) would cost one more verification round, not
   a wrong merge.
+- **Fold order is by `(ts, run_id, seq)`.** A hand-off run on a runner whose clock is far ahead leaves a `pr.ready` that
+  outranks a later hand-off's record, so the later H reads as a commit after the recorded H and the unit re-enters
+  review until its budgets stop it. The order was already clock-based; `ready_head` makes a skew a loop, not only a
+  stale display.
 
 ## Open questions (for the owner)
 
@@ -248,3 +253,5 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
    way)? What `path` does a reusable or dynamic workflow run have?
 8. **A forged commit after H** now re-enters review and is verified (D2), like a person's push. The alternative is a
    `merge_not_ready` wait that only a person ends.
+9. **Clock skew in the fold order** (see Risks): order `pr.ready` by the run's position in the lock-ref chain instead of
+   `ts`?

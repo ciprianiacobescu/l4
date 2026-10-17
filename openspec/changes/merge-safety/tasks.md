@@ -215,11 +215,12 @@ Every task follows these rules:
     - `test_unreadable_ci_is_not_green` (SCN-YOLO-117): `world.step(..., forge=...)` with a `LocalForge` subclass
       whose `list_pipeline_jobs` raises `ForgeError("HTTP 502", status=502)`. There is no `unit.merged`, and the
       detail contains `could not be read`.
-    - `test_require_ci_false_merges_on_record` (SCN-YOLO-118): `require_ci` false in `world.cfg` and `ci=None`. The
+    - `test_require_ci_false_merges_on_record` (SCN-YOLO-118): `world.cfg = make_cfg(forge={...}, yolo={"merge":
+      {"require_ci": False}})`, as `test_yolo_cycle_squash.py` sets `fast-forward`, and `ci=None`. The
       unit is merged with `ci == "not_run"`, and one of `step.actions` contains `head[:10]` and
       `yolo.merge.require_ci`.
-    - `test_a_fast_forward_merge_records_h_and_green_ci` (SCN-YOLO-105, plan side): `yolo.merge.method:
-      fast-forward` in `world.cfg`. `unit.merged` has `head == merge_commit == H` and `ci == "green"`, and
+    - `test_a_fast_forward_merge_records_h_and_green_ci` (SCN-YOLO-105, plan side): `fast-forward` set as
+      `test_yolo_cycle_squash.py::test_scn_yolo_78_fast_forward_stays_an_option` sets it. `unit.merged` has `head == merge_commit == H` and `ci == "green"`, and
       `world.tip() == H`.
     - In `test_the_squash_merge_is_pinned_to_the_recorded_h` (SCN-YOLO-106, task 2.1), add that `unit.merged` has
       `ci == "green"`.
@@ -228,7 +229,9 @@ Every task follows these rules:
   - `src/l4/yolo/model.py`: `MergeOutcome.ci` and `.ci_jobs`.
   - `src/l4/yolo/merge.py`: `_ci_gate` with the details of D5's table, called at D3 step 5, and the outcome set with
     `dataclasses.replace`.
-  - `src/l4/yolo/cycle.py` `_merge`: `unit.merged` gets `ci` and `ci_jobs`, plus the two warning lines of D5.
+  - `src/l4/yolo/cycle.py` `_merge`: `unit.merged` gets `ci` (always) and `ci_jobs` (only when not empty), plus the
+    two warning lines of D5. The tests that compare a whole `unit.merged` (for example
+    `test_yolo_cycle_squash.py::test_scn_yolo_78_fast_forward_stays_an_option`) gain `"ci": "green"`.
   - `src/l4/forge/local.py`: `script_jobs(replace=)`.
   - Run: the files of 6.1, `tests/unit/yolo`, `tests/unit/config/test_schema_yolo_merge.py`, `tests/unit/ci`,
     `tests/unit/orchestrator/test_accepted_carrier.py`.
