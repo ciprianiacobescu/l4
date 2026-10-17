@@ -293,8 +293,9 @@ them does no work (it runs that branch's older workflow copy) and that runs star
 `l4 questions` and the schedule do that).
 
 **L4-ADO-006** `l4 doctor --adoption` names CI jobs that the gates do not mirror. `l4 doctor --adoption` SHALL warn about each job of the repository's own CI that runs on `push` or `pull_request` and
-has a `run:` command that no gate command, setup command or `yolo.profiles` gate contains. The comparison ignores a
-leading `uv run `, `.venv/bin/` or `python -m `. The warning lists each such job with its `services:` or `container:`.
+has a `run:` command that no command of the gates every verification round runs (setup, build, lint, typecheck, test,
+e2e) or extra gate a `yolo.profiles` entry names contains. The comparison ignores a leading `uv run ` with its
+`--directory`, `--project`, `--package`, `--frozen`, `--locked` and `--no-sync` options, `.venv/bin/` or `python -m `. The warning lists each such job with its `services:` or `container:`.
 With `forge.token_env: GITHUB_TOKEN` and `forge.merge_policy: auto`, it SHALL also say that L4's pushes start no CI.
 The row never fails a run.
 
@@ -9195,6 +9196,12 @@ scenario is a spec defect (§26).
   service running `uv run pytest -m postgres`, and the gate `.venv/bin/pytest --junitxml=.l4-out/junit.xml`
 - **When** `l4 doctor --adoption` runs
 - **Then** the warning lists `tests.yml: conformance (services: postgres)` with its command, and does not list `test`
+
+#### SCN-ADO-55 (+) A typecheck gate run with `uv run --directory` mirrors a job · L4-ADO-006
+- **Given** a workflow job running `uv run mypy --strict src/`, the gate `gates.typecheck: ["uv run --frozen --directory
+  apps/api mypy --strict src/"]`, and no `yolo.profiles`
+- **When** `l4 doctor --adoption` runs
+- **Then** the warning does not list the job
 
 #### SCN-ADO-18 (−) The workflow token and automatic merges · L4-ADO-006
 - **Given** `forge.token_env: GITHUB_TOKEN` and `forge.merge_policy: auto`

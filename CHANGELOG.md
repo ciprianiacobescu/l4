@@ -14,6 +14,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   consumer repository with three Python projects, the 423 tests of two suites). Now every listed report must exist (else
   `report missing: <report>`), and the reports are merged; a test in two reports keeps its worse result.
 
+- Doctor's CI-003 no longer lists a job that a `typecheck` or `build` gate mirrors: verification runs those gates in
+  every round, but the row counted them only when a `yolo.profiles` entry named them. It also ignores `uv run`'s
+  `--directory`, `--project`, `--package`, `--frozen`, `--locked` and `--no-sync` options when it compares commands.
+
 ### Changed
 - The adoption docs and the `l4 init` note name the public harness first: the plain `--action` form needs no deploy
   key for any repository. The copy form and the deploy key are for a private harness.

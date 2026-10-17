@@ -30,6 +30,8 @@ HARNESS_WORKFLOW = "l4.yml"
 HARNESS_JOB = "l4"
 _TRIGGERS = ("push", "pull_request")
 _PREFIXES = ("uv run ", ".venv/bin/", "python -m ")
+# the options of `uv run` that choose the project or the lock, not the command: `--directory apps/api`, `--frozen`
+_UV_RUN_OPTION = re.compile(r"^(?:--(?:directory|project|package)(?:=|\s+)\S+|--frozen|--locked|--no-sync)\s+")
 _SPLIT = re.compile(r"\n|&&|;")
 
 
@@ -51,7 +53,8 @@ class RepoCi:
 
 def normalise(run: str) -> list[str]:
     """The commands of one `run:` string: split on newlines, `&&` and `;`; no empty line or comment; a leading
-    `uv run `, `.venv/bin/` and `python -m ` (repeatedly) stripped; whitespace collapsed."""
+    `uv run ` (with its `--directory`, `--project`, `--package`, `--frozen`, `--locked` and `--no-sync` options),
+    `.venv/bin/` and `python -m ` (repeatedly) stripped; whitespace collapsed."""
     found = []
     for part in _SPLIT.split(run):
         text = " ".join(part.split())
@@ -63,6 +66,8 @@ def normalise(run: str) -> list[str]:
             for prefix in _PREFIXES:
                 if text.startswith(prefix):
                     text, stripped = text[len(prefix) :].lstrip(), True
+                    while prefix == "uv run " and (option := _UV_RUN_OPTION.match(text)):
+                        text = text[option.end() :]
         if text:
             found.append(text)
     return found
@@ -156,12 +161,11 @@ def repo_ci_jobs(repo: Path) -> RepoCi:
 
 
 def _gate_commands(cfg: L4Config) -> list[str]:
-    gates, commands = cfg.gates, [*cfg.gates.setup, *cfg.gates.lint, cfg.gates.test.command, cfg.gates.e2e.command]
+    """The commands every verification round runs (setup, build, lint and typecheck in step 2, test and e2e in step
+    3), and the extra gates a `yolo.profiles` entry names."""
+    gates = cfg.gates
+    commands = [*gates.setup, *gates.build, *gates.lint, *gates.typecheck, gates.test.command, gates.e2e.command]
     named = {kind for kinds in cfg.yolo.profiles.values() for kind in kinds}
-    if "build" in named:
-        commands += gates.build
-    if "typecheck" in named:
-        commands += gates.typecheck
     commands += [g.command for g in gates.extra if f"extra:{g.name}" in named]
     return [c for command in commands for c in normalise(command)]
 
