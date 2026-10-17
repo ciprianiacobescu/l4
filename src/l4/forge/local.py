@@ -120,6 +120,7 @@ class LocalForge:
             title=raw["title"], draft=raw["draft"], state=raw["state"], labels=tuple(raw["labels"]),
             merge_commit_sha=raw.get("merge_commit_sha"),
             head_sha=raw.get("head_sha") if raw["state"] == "merged" else None,  # an open one is not reported
+            body=raw.get("body"),
         )  # fmt: skip
 
     def note(self, number: int) -> str | None:

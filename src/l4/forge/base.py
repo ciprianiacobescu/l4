@@ -90,6 +90,7 @@ class PullRequest:
     labels: tuple[str, ...]
     merge_commit_sha: str | None = None  # of a merged MR, when the merge method made a commit
     head_sha: str | None = None  # the head commit of the source branch as the forge shows it (None: not reported)
+    body: str | None = None  # the description as the forge holds it (None: not reported)
 
 
 PrState = Literal["open", "merged", "closed", "all"]

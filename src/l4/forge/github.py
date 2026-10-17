@@ -245,6 +245,7 @@ class GitHubForge:
             labels=tuple(str(x["name"]) for x in data.get("labels", ())),
             merge_commit_sha=str(data["merge_commit_sha"]) if merged and data.get("merge_commit_sha") else None,
             head_sha=str(data["head"]["sha"]) if data["head"].get("sha") else None,
+            body=data.get("body") if isinstance(data.get("body"), str) else None,
         )  # fmt: skip
 
     def project_url(self) -> str:

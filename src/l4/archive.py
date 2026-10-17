@@ -188,8 +188,9 @@ def _mr(ctx: HookContext) -> _Mr:
     return found
 
 
-def _pr_body(ctx: HookContext, mr: _Mr) -> str:
-    """The body of the unit's MR: the evidence linked at the unit's current head commit (squash-and-delete D9)."""
+def _pr_body(ctx: HookContext, mr: _Mr, *, at_head: bool = True) -> str:
+    """The body of the unit's MR: the evidence linked at the unit's current head commit (squash-and-delete D9), or
+    with `at_head` False at the branch, as the draft is opened before the evidence exists."""
     s = ctx.services
     try:
         project_url: str | None = mr.forge.project_url()
@@ -199,7 +200,24 @@ def _pr_body(ctx: HookContext, mr: _Mr) -> str:
         project_url = None  # the body then names the file without a link
     evidence = (s.ref.path / "verification.md").resolve().relative_to(s.worktree.resolve()).as_posix()
     platform = forge_platform(ctx.cfg, s.app.environ, origin_url(s.app.repo, s.app.environ))
-    return render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform, head=s.git.rev_parse("HEAD"))
+    head = s.git.rev_parse("HEAD") if at_head else None
+    return render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform, head=head)
+
+
+_SHA_LINK = re.compile(r"/blob/[0-9a-f]{40}/")
+
+
+def harness_body(current: str | None, *bodies: str) -> bool:
+    """Whether `current` is still the harness's own body (one of `bodies`, a link at any commit counting as the
+    same), so that the hand-off may refresh it; a body a person edited, or one the forge does not report, stays
+    (L4-ARC-003)."""
+    if current is None:
+        return False
+
+    def norm(text: str) -> str:
+        return _SHA_LINK.sub("/blob/<commit>/", text.replace("\r\n", "\n")).strip()
+
+    return norm(current) in {norm(b) for b in bodies}
 
 
 def _ensure_mr(ctx: HookContext, mr: _Mr) -> PullRequest:
@@ -375,7 +393,11 @@ def handoff_hook(ctx: HookContext) -> bool:
     ctx.push()
     ctx.shared[H_PUSHED] = True  # from here the unit branch stays at H, whatever the rest of the run does
     pr = _ensure_mr(ctx, mr)
-    mr.forge.update_pr(pr.number, body=_pr_body(ctx, mr), draft=False)  # the evidence link names H, which holds it
+    fresh = _pr_body(ctx, mr)  # the evidence link names H, which holds it after the branch is deleted
+    if harness_body(pr.body, fresh, _pr_body(ctx, mr, at_head=False)):
+        mr.forge.update_pr(pr.number, body=fresh, draft=False)
+    else:
+        mr.forge.update_pr(pr.number, draft=False)  # a person's edit of the body stays
     mr.draft = False
     s.ledger.append("pr.ready", url=pr.url, number=pr.number, head=s.git.rev_parse("HEAD"))
     return True

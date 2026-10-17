@@ -233,6 +233,7 @@ class GitLabForge:
                 str(data.get("merge_commit_sha") or data.get("squash_commit_sha") or "") or None
             ),  # a squash merge leaves `merge_commit_sha` empty and fills `squash_commit_sha`
             head_sha=str(data["sha"]) if data.get("sha") else None,  # the MR's `sha` is its source branch head
+            body=data.get("description") if isinstance(data.get("description"), str) else None,
         )  # fmt: skip
 
     @staticmethod

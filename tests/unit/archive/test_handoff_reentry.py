@@ -41,3 +41,22 @@ def test_the_evidence_link_of_the_mr_names_the_handoff_commit_so_it_survives_the
     (mr,) = gitlab.mrs.values()
     link = [line for line in mr["description"].splitlines() if "Verification:" in line][0]
     assert f"/blob/{h1}/" in link and f"/blob/{BRANCH}/" not in link
+
+
+def test_a_body_a_person_edited_is_not_rewritten_at_the_handoff(
+    run_l4, install_hooks, forge_env, use_fake_gitlab, tdd_repo, raw, gitlab
+):
+    """L4-ARC-003: the body is the harness's until a person edits it. The hand-off refreshes the evidence link only in
+    a body that is still exactly the harness's own (squash-and-delete D9)."""
+    edited = "Reviewed by the owner: merge after the release notes are written."
+
+    def verify(ctx):
+        for mr in gitlab.mrs.values():
+            mr["description"] = edited  # a person's edit between the draft and the hand-off
+        return Trigger.VERIFY_PASS
+
+    install_hooks(verify=verify)
+    assert run_l4([red_step(), green_step()]).code == 0
+    (mr,) = gitlab.mrs.values()
+    assert mr["description"] == edited
+    assert mr.get("draft") is False or not str(mr.get("title", "")).startswith("Draft:")  # still marked ready
