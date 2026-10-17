@@ -281,6 +281,8 @@ class VerifyResult:
     judge_replies: dict[str, int] = field(default_factory=dict)  # the judge profile's counts over the unit's ledger
     prompt_sha256: str = ""
     prompt_template: str = ""  # `judge@<version>` of the prompt the judge was sent
+    # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}`
+    judge_parts: list[dict[str, Any]] = field(default_factory=list)
     cost_usd: float | None = None
     tests: dict[str, str] = field(default_factory=dict)  # test id -> status, from the step 3 report
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it

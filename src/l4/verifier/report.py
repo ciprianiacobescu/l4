@@ -191,9 +191,14 @@ def render_verification_md(result: VerifyResult) -> str:
     ]
     judge = _flat(result.judge_profile or "-")
     model = f" ({_flat(result.judge_model)})" if result.judge_model else ""
-    lines.append(
-        f"- Judge: {judge}{model}, {result.judge_calls} call(s), prompt sha256 `{result.prompt_sha256 or '-'}`"
-    )
+    in_parts = f", judged in {len(result.judge_parts)} parts" if result.judge_parts else ""
+    sha = result.prompt_sha256 or "-"
+    lines.append(f"- Judge: {judge}{model}, {result.judge_calls} call(s){in_parts}, prompt sha256 `{sha}`")
+    lines += [
+        f"  - part {r['part']}: {r['files']} file(s), {r['chars']} characters, profile {_flat(str(r['profile']))}, "
+        f"reply {r['reply'] or '-'}"
+        for r in result.judge_parts
+    ]
     if result.judge_replies:
         counts = ", ".join(f"{name} {result.judge_replies.get(name, 0)}" for name in REPLY_OUTCOMES)
         lines.append(
@@ -332,6 +337,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "judge_calls": result.judge_calls,
         "judge_reply": result.judge_reply,
         "judge_replies": dict(result.judge_replies),
+        "judge_parts": [dict(row) for row in result.judge_parts],
         "profiles": {"judge": result.judge_profile, "implementer": list(result.implementer_profiles)},
         "judge_model": result.judge_model,
         "independence": result.independence.to_json() if result.independence else None,

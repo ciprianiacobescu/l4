@@ -70,7 +70,7 @@ Every task follows these rules:
 
 ## 5. The judge step in parts (L4-VER-041, L4-VER-042, L4-VER-043)
 
-- [ ] 5.1 Tests, `tests/unit/verifier/test_judge_step.py`, with the `judge_unit`-style bench, `Scripted` holding one
+- [x] 5.1 Tests, `tests/unit/verifier/test_judge_step.py`, with the `judge_unit`-style bench, `Scripted` holding one
   reply per part, and a lowered `MAX_PART_CHARS`: SCN-VER-131 (two parts: two judge calls, each user message holds
   `part K of 2` and the whole file list, two `verify.judge` events with `part` 1 and 2 and `parts` 2, no hold that
   starts with `judge view:` or `the diff is longer`, `result.judge_parts` has two rows, `result.prompt_sha256` is the
@@ -80,7 +80,7 @@ Every task follows these rules:
   `the judge's reply was discarded (part 2 of 2, schema_invalid: …)`, `run.judged is None`, no criterion verdict
   recorded); SCN-VER-137 (one file, `data/seed.json`, over the cap: the hold ``judge view: the diff of `data/seed.json` is longer than one part
   (<cap> characters): the judge saw only its start``); SCN-VER-141 (a `uv.lock` whose diff is far over the cap beside two small files: one call, the lock file's line in the prompt, no hold). A diff within the cap is one call with no part heading.
-- [ ] 5.2 Code: `src/l4/verifier/ladder.py`: `_judge_step` per design D4 and D5 (the two `judge view:` holds made from
+- [x] 5.2 Code: `src/l4/verifier/ladder.py`: `_judge_step` per design D4 and D5 (the two `judge view:` holds made from
   `DiffParts`; the old hold line removed); `_ask_judges(vc, prompt, result, *, part: tuple[int, int] | None = None)`
   adds `part`/`parts` to `verify.judge`; `src/l4/verifier/types.py`: `VerifyResult.judge_parts: list[dict[str, Any]]`
   (default empty); `src/l4/verifier/report.py`: `judge_parts` in `verdict.json`, `, judged in N parts` on the judge
@@ -126,8 +126,8 @@ Every task follows these rules:
 - [x] 7.2 Code: `src/l4/yolo/state.py`: `plan.extended` in `fold_plan` (design D7) and a line about it in the module
   docstring.
 - [ ] 7.3 Tests, `tests/unit/yolo/test_yolo_commands_manage.py`. First add
-  `monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)` to every existing test that passes an
-  `--extend-…` and expects it to work or to reach a limit message (`test_a_cost_limit_needs_more_money`,
+  `monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)` (the key is off in those worlds, L4-YOLO-051) to
+  every existing test that passes an `--extend-…` and expects it to work or to reach a limit message (`test_a_cost_limit_needs_more_money`,
   `test_an_extension_that_does_not_clear_the_usage_is_refused`, `test_the_runs_limit`,
   `test_the_attempts_limit_of_the_stopped_unit`, `test_the_deadline`, and in
   `tests/unit/yolo/test_yolo_commands_final_review.py` the test that runs `--extend-attempts 1`); keep
@@ -143,7 +143,12 @@ Every task follows these rules:
   person's decision`, a `Fix:` line with `l4 yolo resume p1 --reason`, nothing written); SCN-YOLO-136 (after the
   extension `l4 yolo status p1` shows `runs 82 of 110`, `extended: runs 90 -> 110 by`, `(person): three units left`,
   and the `Next:` line names `l4 yolo resume p1 --reason TEXT --extend-runs N`; `--json` has `extensions`).
-- [ ] 7.4 Code: `src/l4/yolo/commands.py`: `run_resume` (the active-plan path, the no-op refusals and the output of
+  Key tests (owner decision 1): an agent with `yolo.extend_by_agents: true` pushed to the base branch raises an active
+  plan's limit (`plan.extended` with `actor: agent`, `marker`, `agent_key: true`) and resumes a stopped plan with an
+  extension (`plan.resumed` with the same fields); a person's events say `agent_key: false`; the key `false` keeps the
+  refusal, whose `Fix:` names the key; `tests/unit/yolo/test_yolo_contract.py`: the key is `False` by default and a
+  bool (SCN-YOLO-141 is the key scenario).
+- [ ] 7.4 Code: `src/l4/config/schema.py`: `YoloCfg.extend_by_agents: bool = False`; `src/l4/yolo/commands.py`: `run_resume` (the active-plan path, the no-op refusals and the output of
   design D7; the person check of D8 after `_extend` and before `store.read()`), `_describe` (`extensions`), `_render`
   (the `extended:` lines), `_next_line` (the active text of D7); `src/l4/cli.py`: the help of `yolo resume` becomes
   `Resume a stopped or waiting delivery plan once the cause is gone, or raise a limit of an active one (--extend-…).`
@@ -171,16 +176,27 @@ Every task follows these rules:
   `units.answered`; `_next_line(..., unit_phase=..., answered=..., start=...)` with the two texts of design D10
   (`start` from `l4.state.retry.how_to_start(ctx.app, ctx.cfg, ctx.target)`).
 
+- [ ] 8.3 Tests (owner decisions 6 and 8), `tests/unit/yolo/test_yolo_commands_manage.py`, with a helper
+  `halted_for(monkeypatch, unit, reason)` that wraps `commands._read_units` and sets `units.halt_reasons[unit]`:
+  SCN-YOLO-143 (plan stopped with `unit_escalated`, the unit `escalated` with `judge_view_rejected`: the refusal and the
+  `Next:` line name `l4 restart --unit` and `--replace` before `l4 retry --unit`, and the line ends with `then l4 yolo
+  resume p1 --reason TEXT`; with `fix_rounds_exhausted` the refusal is still `run l4 retry --unit U first`); SCN-YOLO-142
+  (the status of the waiting plan whose wait detail is `(open: Q-003)` shows it while the question is open, and `waiting:
+  unit_awaiting_human: the answer is recorded and the next run reads it` in the text and in `--json` once the unit is
+  answered; an answer for another unit changes nothing).
+- [ ] 8.4 Code: `src/l4/yolo/commands.py`: `_Units.halt_reasons`, `resume_blocker(..., halt_reasons=...)` (design D11),
+  `ANSWER_RECORDED` and the `wait_detail` of `_describe` (design D12).
+
 ## 9. Docs
 
 - [ ] 9.1 `docs/SPEC.md`:
-  - the ten requirements as Part I paragraphs in SPEC's form (`**L4-VER-040 <title>.** <text>`), with the text of this
-    change's specs: L4-VER-040..045 after L4-VER-018, L4-YOLO-050..053 after L4-YOLO-035;
+  - the eleven requirements as Part I paragraphs in SPEC's form (`**L4-VER-040 <title>.** <text>`), with the text of this
+    change's specs: L4-VER-040..045 after L4-VER-018, L4-YOLO-050..055 after L4-YOLO-035;
   - the scenarios in Part II, in SPEC's form (`#### SCN-VER-130 (+) <title> · L4-VER-040`, then `- **Given**`,
-    `- **When**`, `- **Then**`), in id order: SCN-VER-130..144 after SCN-VER-77, SCN-YOLO-130..140 after SCN-YOLO-92.
+    `- **When**`, `- **Then**`), in id order: SCN-VER-130..144 after SCN-VER-77, SCN-YOLO-130..143 after SCN-YOLO-92.
     The `·` references: SCN-VER-130, 143 L4-VER-040; SCN-VER-140, 142, 144 L4-VER-045; SCN-VER-141 L4-VER-043, L4-VER-045; SCN-VER-131 L4-VER-041, L4-VER-042; SCN-VER-132..134 L4-VER-042;
     SCN-VER-135 L4-VER-041, L4-VER-043; SCN-VER-136 L4-VER-042; SCN-VER-137 L4-VER-043; SCN-VER-138 L4-VER-044;
-    SCN-VER-139 L4-VER-043, L4-VER-044; SCN-YOLO-130..133, 135, 136 L4-YOLO-050; SCN-YOLO-134 L4-YOLO-051;
+    SCN-VER-139 L4-VER-043, L4-VER-044; SCN-YOLO-130..133, 135, 136 L4-YOLO-050; SCN-YOLO-134, 141 L4-YOLO-051; SCN-YOLO-142 L4-YOLO-054; SCN-YOLO-143 L4-YOLO-055;
     SCN-YOLO-137, 138 L4-YOLO-052; SCN-YOLO-139, 140 L4-YOLO-053;
   - §10.2, row 9: one sentence that a diff over 120000 characters is judged in parts (L4-VER-041) whose replies are
     merged (L4-VER-042), and that what the judge cannot see is a `judge_view` hold (L4-VER-043, L4-VER-044);
@@ -193,6 +209,8 @@ Every task follows these rules:
     person: L4-YOLO-050, L4-YOLO-051)`;
   - §2.1, the row of `l4 yolo resume`: add `on an active plan, an --extend-… raises the limit and resumes nothing
     (plan.extended, L4-YOLO-050); an --extend-… is a person's (L4-YOLO-051)`, and `plan.extended` in its last column;
+  - the configuration listing of section 5 (`yolo:`): `extend_by_agents: false` with its comment (true: an agent may raise a
+    plan's limits with `l4 yolo resume --extend-…`; read from `.l4/config.yaml` at origin/<base>, L4-YOLO-051);
   - the change table: a new row after the last row present (row 40 when the last is 39 `capacity-loop`):
     `plan-run-lessons`, what it delivers in one sentence per lesson with the ids and
     `openspec/changes/plan-run-lessons/`, exit criteria `the consumer repository's next plan run: a unit over the cap

@@ -56,6 +56,7 @@ class DiffParts:
     parts: tuple[DiffPart, ...]  # at most MAX_JUDGE_PARTS
     unseen: tuple[str, ...]  # the paths of the entries packed after the last part judged
     total_chars: int
+    unseen_chars: tuple[int, ...] = ()  # the length of each unseen entry's text
 
 
 def group_key(path: str) -> str:
@@ -86,7 +87,8 @@ def pack(entries: Sequence[DiffEntry]) -> DiffParts:
     shown, rest = groups[:MAX_JUDGE_PARTS], groups[MAX_JUDGE_PARTS:]
     parts = tuple(DiffPart(i, tuple(g), cut=len(g) == 1 and len(g[0].text) > cap) for i, g in enumerate(shown, start=1))
     unseen = tuple(e.paths[-1] for g in rest for e in g)
-    return DiffParts(parts, unseen, sum(len(e.text) for e in ordered))
+    unseen_chars = tuple(len(e.text) for g in rest for e in g)
+    return DiffParts(parts, unseen, sum(len(e.text) for e in ordered), unseen_chars)
 
 
 def _lock_line(git: Git, base: str, head: str, paths: tuple[str, ...]) -> str:
