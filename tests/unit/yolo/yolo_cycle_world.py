@@ -79,7 +79,7 @@ class CycleWorld:
             **({"gates": gates} if gates else {}),
         )
         self.app: AppContext = make_app(path, root)
-        self.forge = MergingForge()
+        self.forge = MergingForge(origin=self.origin)
         self.commit({"README.md": "hello\n"}, "init")
         for name in self.units:
             self.commit(self.unit_files(name), f"add {name}")
@@ -127,6 +127,14 @@ class CycleWorld:
 
     def tip(self, branch: str | None = None) -> str:
         return sh(self.origin, "rev-parse", f"refs/heads/{branch or self.base}")
+
+    def landed(self, head: str) -> bool:
+        """The target holds the unit's work: its tip is the head (a fast-forward) or one commit with the head's tree (a
+        squash, the default method)."""
+        tip = self.tip()
+        return tip == head or sh(self.origin, "rev-parse", f"{tip}^{{tree}}") == sh(
+            self.origin, "rev-parse", f"{head}^{{tree}}"
+        )
 
     def person_moves_target(self) -> str:
         other = self.root / "other"

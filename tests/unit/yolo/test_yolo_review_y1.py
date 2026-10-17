@@ -109,7 +109,7 @@ def test_an_auto_plan_adopts_a_unit_in_review_and_merges_it_in_the_same_step(wor
     dispatched = next(e for e in world.events() if e.type == "unit.dispatched")
     assert dispatched.data["adopted"] is True and dispatched.data["attempt"] == 1 and dispatched.data["unit"] == A
     assert kinds.index("plan.charged") < kinds.index("unit.dispatched")  # the charge, as a normal dispatch
-    assert world.tip() == head and step.start_next_run
+    assert world.landed(head) and step.start_next_run
     assert st(world).integrated.keys() == {A} and st(world).used.runs == 1
 
 

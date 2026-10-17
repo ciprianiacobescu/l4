@@ -54,7 +54,8 @@ class World:
         raw(self.work, "fetch", "-q", "origin")
         self.head = self.handoff
         self.git = Git(self.work, environ=environ)
-        self.cfg = L4Config.model_validate({"version": 1})
+        # the push and its guard: the squash merge has its own tests (test_yolo_merge_squash.py)
+        self.cfg = L4Config.model_validate({"version": 1, "yolo": {"merge": {"method": "fast-forward"}}})
         self.app = AppContext(
             repo=self.work, config_path=None, log_format="human", verbosity=0, run_id="r-20261014T1000Z-aaaa",
             environ=environ, redactor=Redactor({}),

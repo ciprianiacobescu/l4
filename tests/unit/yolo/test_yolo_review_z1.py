@@ -414,7 +414,8 @@ def test_a_unit_that_lost_current_is_not_merged_with_a_head_that_lacks_the_new_d
     head_c = w.unit_branch("c")
     w.forge.create_pr("l4/openspec/c", "main", "[l4] c", "b", draft=False)
     w.step({"a": w.in_review("a", head_a), "c": w.in_review("c", head_c, pr="local://forge/pull/2")})
-    assert C in st(w).integrated and w.tip() == head_c
+    assert C in st(w).integrated and w.landed(head_c)
+    tip_c = w.tip()
     # a is eligible now: it is adopted, and the guarded merge refuses its head, which lacks the new target tip
     retried = []
 
@@ -428,7 +429,7 @@ def test_a_unit_that_lost_current_is_not_merged_with_a_head_that_lacks_the_new_d
     monkeypatch.setattr("l4.state.retry.retry_unit", retry)
     w.step({"a": w.in_review("a", head_a), "c": w.snapshot("c", "merged")})
     got = st(w)
-    assert w.tip() == head_c and A not in got.integrated and A not in got.merged
+    assert w.tip() == tip_c and A not in got.integrated and A not in got.merged
     assert [e.data["reason"] for e in w.events() if e.type == "unit.merge_refused"] == ["stale"]
     assert retried == [A]  # the existing stale path asks for a retry
 

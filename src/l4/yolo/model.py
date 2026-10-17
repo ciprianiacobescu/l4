@@ -271,6 +271,8 @@ class MergeOutcome:
     target_before: str | None = None
     pr: int | None = None
     detail: str = ""
+    landed: str | None = None  # the sha now on the target: the head for a fast-forward, the squash commit for a squash
+    raced: bool = False  # a squash whose parent is not the tip read before it, or whose tree is not the head's
 
 
 @dataclass(frozen=True)

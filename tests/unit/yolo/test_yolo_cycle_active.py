@@ -16,6 +16,7 @@ from l4.yolo.state import fold_plan
 from l4.yolo.store import PlanStore
 
 from .yolo_cycle_world import CycleWorld, ev, unit_id
+from .yolo_review_world import make_cfg
 
 A, B = unit_id("a"), unit_id("b")
 
@@ -116,6 +117,10 @@ def merge_ready(world):
 
 
 def test_scn_yolo_14_and_24_a_verified_unit_is_merged_integrated_and_the_next_run_is_started(world):
+    world.cfg = make_cfg(  # SCN-YOLO-14 is the fast-forward: the squash default has its own tests (SCN-YOLO-76)
+        forge={"type": "local", "base_branch": "main", "merge_policy": "auto"},
+        yolo={"merge": {"method": "fast-forward"}},
+    )
     head, snaps = merge_ready(world)
     step = world.step(snaps)
     assert world.tip() == head
@@ -126,7 +131,9 @@ def test_scn_yolo_14_and_24_a_verified_unit_is_merged_integrated_and_the_next_ru
         "unit.integrated",
         "plan.charged",
     ]
-    assert last(world, "unit.merged") == {"unit": A, "head": head, "pr": 1, "merge_commit": head}
+    assert last(world, "unit.merged") == {
+        "unit": A, "head": head, "pr": 1, "merge_commit": head, "method": "fast-forward", "raced": False,
+    }  # fmt: skip
     assert last(world, "unit.integrated") == {"unit": A, "revision": head}
     assert world.profile_calls == [(head, "all")]
     assert step.start_next_run is True and step.allow == frozenset()
@@ -182,6 +189,10 @@ def test_a_new_attempt_gets_its_own_stale_retry(world, monkeypatch):  # review #
 
 
 def test_scn_yolo_16_a_protected_target_stops_the_plan_with_the_forges_message(world):
+    world.cfg = make_cfg(  # the push of the fast-forward meets the hook; a squash goes through the forge's merge call
+        forge={"type": "local", "base_branch": "main", "merge_policy": "auto"},
+        yolo={"merge": {"method": "fast-forward"}},
+    )
     head, snaps = merge_ready(world)
     hook = world.origin / "hooks" / "pre-receive"
     hook.write_text(

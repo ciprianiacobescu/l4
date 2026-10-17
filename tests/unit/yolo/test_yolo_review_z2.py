@@ -96,7 +96,7 @@ def test_a_merge_that_becomes_ready_wakes_the_plan_and_merges_in_the_same_step(w
     assert [e.type for e in world.events()[n : n + 3]] == ["plan.resumed", "unit.merge_requested", "unit.merged"]
     resumed = world.events()[n].data
     assert resumed["by"] == "harness" and "the merge of openspec:a can go on" in resumed["reason"]
-    assert world.tip() == head and step.start_next_run is True
+    assert world.landed(head) and step.start_next_run is True
 
 
 def test_a_merge_that_is_not_ready_for_another_reason_is_recorded_again_once(world):

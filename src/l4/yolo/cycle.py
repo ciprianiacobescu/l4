@@ -1425,13 +1425,18 @@ class _Step:
         if out.status == "stale":
             return self._stale(ctx, snap, out.detail)
         assert out.head is not None and out.pr is not None
-        if not confirm_merged(forge, self.git, self.cfg, out.pr, out.head, wait_s=self.confirm_wait_s):
-            log.warning("%s: %s was pushed to %s, but the target does not show it as its tip", unit, out.head[:10],
+        landed = out.landed or out.head  # the squash commit, or the head a fast-forward pushed
+        if not confirm_merged(forge, self.git, self.cfg, out.pr, landed, wait_s=self.confirm_wait_s):
+            log.warning("%s: %s landed on %s, but the target does not show it as its tip", unit, landed[:10],
                         self.target)  # fmt: skip
-        merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=out.head)]
+        merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=landed,
+                              method=self.cfg.yolo.merge.method, raced=out.raced)]  # fmt: skip
         self._write(ctx, merged, facts=True)
-        self._line(ctx.plan_id, f"{unit} merged into {self.target} at {out.head[:10]}")
-        return self._integrate(ctx, unit, snap, via_merge=out.head)
+        self._line(ctx.plan_id, f"{unit} merged into {self.target} at {landed[:10]}")
+        if out.raced:
+            self._line(ctx.plan_id, f"warning: {unit}: the target moved while the forge merged; the post-merge check "
+                                    f"of {landed[:10]} decides")  # fmt: skip
+        return self._integrate(ctx, unit, snap, via_merge=landed, reviewed=out.head)
 
     def _merge_requested(self, ctx: _Ctx, unit: str, to_be: MergeOutcome) -> bool:
         """The `before_push` of the guarded merge (D8, R5): read the plan ref again and push only while the plan is
@@ -1471,10 +1476,13 @@ class _Step:
         self._line(ctx.plan_id, f"{unit}: the target moved, verifying again")
         return self._result(frozenset(), start_next_run=True, plan_id=ctx.plan_id)
 
-    def _integrate(self, ctx: _Ctx, unit: str, snap: UnitSnapshot, *, via_merge: str | None) -> PlanStep:
+    def _integrate(
+        self, ctx: _Ctx, unit: str, snap: UnitSnapshot, *, via_merge: str | None, reviewed: str | None = None
+    ) -> PlanStep:
         """The unit's acceptance profile on the merged target revision, then `unit.integrated` and its receipt (D9,
-        D12), or `plan.stopped{postcheck_failed}`. `via_merge`: the head this step pushed; None for a merge by a person
-        (the PR merge commit is not in the unit's state, so the target tip is checked)."""
+        D12), or `plan.stopped{postcheck_failed}`. `via_merge`: the commit this step landed on the target (the pushed
+        head, or the squash commit; `reviewed` is the verified head); None for a merge by a person (the PR merge commit
+        is not in the unit's state, so the target tip is checked)."""
         assert ctx.file.plan is not None
         plan, state = ctx.file.plan, ctx.state
         entry = next((u for u in plan.units() if u.id == unit), None)
@@ -1509,13 +1517,14 @@ class _Step:
         integrated_at = result.revision or revision or ""
         charged = self._charged(ctx, unit, snap)
         events = [*before, post, self._event("unit.integrated", unit=unit, revision=integrated_at), charged]
-        receipt = self._receipt(ctx, unit, snap, integrated_at, via_merge, result)
+        receipt = self._receipt(ctx, unit, snap, integrated_at, via_merge, result, reviewed)
         self._write(ctx, events, receipt=receipt, facts=True)
         self._line(ctx.plan_id, f"{unit} integrated at {integrated_at[:10]}")
         return self._result(frozenset(), start_next_run=True, plan_id=ctx.plan_id)
 
     def _receipt(
-        self, ctx: _Ctx, unit: str, snap: UnitSnapshot, revision: str, head: str | None, result: ProfileResult
+        self, ctx: _Ctx, unit: str, snap: UnitSnapshot, revision: str, head: str | None, result: ProfileResult,
+        reviewed: str | None = None,
     ) -> dict[str, object]:  # fmt: skip
         merged = _last(ctx.read.events, "unit.merged", unit)
         merge_commit = head or (str(merged.data.get("merge_commit")) if merged else None) or revision
@@ -1528,7 +1537,7 @@ class _Step:
             "plan_digest": ctx.state.plan_digest,
             "spec_digest": ctx.state.digests.get(unit),
             "pr": (merged.data.get("pr") if merged else None) or snap.state.pr,
-            "reviewed_head": snap.review.head if snap.review is not None else head,
+            "reviewed_head": snap.review.head if snap.review is not None else (reviewed or head),
             "merge_commit": merge_commit,
             "integrated_revision": revision,
             "postcheck": result.status,

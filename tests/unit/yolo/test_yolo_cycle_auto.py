@@ -139,7 +139,7 @@ def test_an_adopted_unit_with_a_pass_and_no_answer_waits(world):
 def test_an_addressed_finding_merges_as_before(world):
     head, snaps = in_review(world, accepted={A: accepted_item(F1)}, accepted_addressed=frozenset({ID1}))
     world.step(snaps)
-    assert world.tip() == head and "unit.merged" in world.kinds() and not waits(world)
+    assert world.landed(head) and "unit.merged" in world.kinds() and not waits(world)
 
 
 def test_one_open_finding_of_two_still_blocks(world):
@@ -152,13 +152,13 @@ def test_one_open_finding_of_two_still_blocks(world):
 def test_a_unit_with_no_accepted_item_merges_as_before(world):
     head, snaps = in_review(world)
     world.step(snaps)
-    assert world.tip() == head and "unit.merged" in world.kinds()
+    assert world.landed(head) and "unit.merged" in world.kinds()
 
 
 def test_an_item_of_another_unit_does_not_block(world):
     head, snaps = in_review(world, accepted={B: accepted_item(F1)})
     world.step(snaps)
-    assert world.tip() == head and "unit.merged" in world.kinds()
+    assert world.landed(head) and "unit.merged" in world.kinds()
 
 
 def _batch_item_plan(world, name, *, integrated=(), **state):
@@ -179,7 +179,7 @@ def _batch_item_plan(world, name, *, integrated=(), **state):
 def test_a_batch_item_does_not_hold_a_unit_that_does_not_complete_the_batch(world):
     head, snaps = _batch_item_plan(world, "a")
     world.step(snaps)
-    assert world.tip() == head and "unit.merged" in world.kinds() and not waits(world)
+    assert world.landed(head) and "unit.merged" in world.kinds() and not waits(world)
 
 
 def test_the_unit_that_completes_the_batch_waits_for_the_batch_item(world):
@@ -193,7 +193,7 @@ def test_the_unit_that_completes_the_batch_merges_once_the_batch_item_is_address
     bid = finding_id("batch:b1", F1)
     head, snaps = _batch_item_plan(world, "b", integrated=["a"], accepted_addressed=frozenset({bid}))
     world.step(snaps)
-    assert world.tip() == head and "unit.merged" in world.kinds() and not waits(world)
+    assert world.landed(head) and "unit.merged" in world.kinds() and not waits(world)
 
 
 def test_a_human_merge_plan_is_unchanged(world):
@@ -209,7 +209,7 @@ def test_the_wait_ends_when_a_later_round_addresses_the_findings(world):
     again = {"a": world.in_review("a", head, accepted_addressed=frozenset({ID1}))}
     world.step(again)
     kinds = world.kinds()
-    assert "plan.resumed" in kinds and world.tip() == head and "unit.merged" in kinds
+    assert "plan.resumed" in kinds and world.landed(head) and "unit.merged" in kinds
 
 
 def test_a_changed_evidence_is_recorded_as_a_new_wait(world):
@@ -274,7 +274,7 @@ def test_scn_yolo_73_a_waived_finding_lets_the_harness_merge_the_unit(world):
     waive(world, ID1)
     world.step(snaps)
     kinds = world.kinds()
-    assert "plan.resumed" in kinds and "unit.merged" in kinds and world.tip() == head
+    assert "plan.resumed" in kinds and "unit.merged" in kinds and world.landed(head)
 
 
 def test_a_waiver_covers_its_own_finding_only(world):

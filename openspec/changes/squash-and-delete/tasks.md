@@ -7,21 +7,21 @@ Every task follows these rules:
 
 ## 1. Configuration (L4-YOLO-032, L4-YOLO-033)
 
-- [ ] 1.1 Tests in `tests/unit/config/` for `yolo.merge`: defaults `squash` / `true`, `fast-forward` accepted, an
+- [x] 1.1 Tests in `tests/unit/config/` for `yolo.merge`: defaults `squash` / `true`, `fast-forward` accepted, an
   unknown method or key refused with the loader's message.
-- [ ] 1.2 `YoloMergeCfg` in `src/l4/config/schema.py`, `YoloCfg.merge`; SPEC §3.2 `yolo:` block lines.
+- [x] 1.2 `YoloMergeCfg` in `src/l4/config/schema.py`, `YoloCfg.merge`; SPEC §3.2 `yolo:` block lines.
 
 ## 2. Forge merge call (D2)
 
-- [ ] 2.1 Contract tests of the request shape and answer mapping for GitHub and GitLab (`merged`, `head_moved` on 409,
+- [x] 2.1 Contract tests of the request shape and answer mapping for GitHub and GitLab (`merged`, `head_moved` on 409,
   `refused` on 405/406/422 with the message), and `LocalForge.merge_pr` (squash commit with the head's tree on the target
   tip, PR merged with `merge_commit_sha`); GitLab `_pr` falls back to `squash_commit_sha`.
-- [ ] 2.2 `MergeCall`, `Forge.merge_pr` in `forge/base.py`; GitHub, GitLab and local implementations.
+- [x] 2.2 `MergeCall`, `Forge.merge_pr` in `forge/base.py`; GitHub, GitLab and local implementations.
 
 ## 3. Squash in the guarded merge (D3, D4, D5)
 
-- [ ] 3.1 Tests (SCN-YOLO-76, 77, 78, 79, 80, 81) in `tests/unit/yolo/` with `LocalForge`.
-- [ ] 3.2 `merge_guarded` takes the method; squash path, message, race check; `MergeOutcome.landed`/`raced`;
+- [x] 3.1 Tests (SCN-YOLO-76, 77, 78, 79, 80, 81) in `tests/unit/yolo/` with `LocalForge`.
+- [x] 3.2 `merge_guarded` takes the method; squash path, message, race check; `MergeOutcome.landed`/`raced`;
   `confirm_merged` on `landed`; `cycle._merge` records `merge_commit=landed`, `method`, `raced`; `_integrate` on
   `landed`; receipts and `report.py` read `merge_commit`.
 

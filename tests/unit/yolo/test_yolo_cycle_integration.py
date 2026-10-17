@@ -95,7 +95,7 @@ def test_the_request_to_merge_is_recorded_with_the_lease_before_the_push(world, 
 
     monkeypatch.setattr(cycle, "merge_guarded", watching)
     world.step(snaps)
-    assert seen["recorded"] is True and seen["tip_at_request"] != head and world.tip() == head
+    assert seen["recorded"] is True and seen["tip_at_request"] != head and world.landed(head)
     request = [e.data for e in world.events() if e.type == "unit.merge_requested"][0]
     assert request["unit"] == A and request["head"] == head and request["pr"] == 1 and request["target_before"]
 
@@ -255,7 +255,7 @@ def test_a_unit_that_is_no_longer_waiting_wakes_the_plan_and_a_merge_goes_on(wor
     world.forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
     step = world.step({"a": world.in_review("a", head)})
     assert last(world, "plan.resumed")["reason"] == "the cause is gone: openspec:a is in_review"
-    assert world.tip() == head and last(world, "unit.integrated")["unit"] == A
+    assert world.landed(head) and last(world, "unit.integrated")["unit"] == A
     assert step.start_next_run is True
 
 
