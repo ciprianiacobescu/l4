@@ -19,6 +19,7 @@ SECTION_2_1 = {
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
+EXTRA |= {"skills install", "skills status"}  # skills-install: L4-SKL-003
 YOLO_WORDS = ("draft", "check", "review", "findings", "accept", "waive", "activate", "status", "cancel", "resume")
 YOLO = {f"yolo {w}" for w in (*YOLO_WORDS, "report")}  # yolo-mode D6; waive: L4-YOLO-031
 EXTRA |= YOLO
@@ -69,6 +70,8 @@ ARGV = {
     "kg report": ["kg", "report"],
     "kg why": ["kg", "why", "openspec:a"],
     "kg propose": ["kg", "propose"],
+    "skills install": ["skills", "install", "--dry-run", "--agent", "kiro"],
+    "skills status": ["skills", "status"],
     "s1": ["s1", "export"],
     "eval": ["eval", "--dry-run", "--judge", "j"],
 }

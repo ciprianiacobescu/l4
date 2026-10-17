@@ -15,6 +15,17 @@ What changed in each release: [CHANGELOG.md](CHANGELOG.md).
 
 ## Getting started
 
+Install `l4` and give your coding agents the `l4` skill, in one line:
+
+```bash
+uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.13 && l4 skills install
+```
+
+`l4 skills install` copies the skill that ships inside the package, with no network, into the skill folder of every
+coding agent it finds on the machine (Claude Code, Codex, OpenCode, Kiro CLI); `--project` writes it into the
+repository to commit for a team, `--agent` names one, `l4 skills status` shows what is installed. Then adopt a
+repository:
+
 ```bash
 git clone https://github.com/ciprianiacobescu/l4.git ~/l4
 cd /path/to/your-project
@@ -27,9 +38,21 @@ gates, and prints the exact remaining steps. A second run is safe. The runner an
 
 ### The `l4` skill for coding agents
 
-The repository is also a Claude Code plugin marketplace with one skill, `l4`. It covers asking for changes with
-`l4 feedback`, answering questions, reading state, resuming a unit, and adopting L4. It needs read access to this
-repository:
+The `l4` skill covers asking for changes with `l4 feedback`, answering questions, reading state, resuming a unit, and
+adopting L4. It ships inside the `l4` package: `l4 skills install` (above) puts it where each agent looks:
+
+| Agent | User scope (default) | `--project` |
+|---|---|---|
+| Claude Code | `~/.claude/skills/l4` | `.claude/skills/l4` |
+| Codex | `~/.agents/skills/l4` (and `~/.codex/skills/l4` when that folder exists) | `.agents/skills/l4` |
+| OpenCode | `~/.config/opencode/skills/l4` | `.opencode/skills/l4` |
+| Kiro CLI | `~/.kiro/skills/l4` | `.kiro/skills/l4` |
+
+`--agent auto` (the default) takes the agents whose home folder or CLI is present. A rerun after installing a newer `l4`
+updates an untouched copy and refuses one you edited unless `--force`; `l4 doctor` warns (SKL-003) when an installed
+copy is older than `l4`.
+
+The repository is also a Claude Code plugin marketplace with the same skill. It needs read access to this repository:
 
 ```
 /plugin install l4 --marketplace ciprianiacobescu/l4
@@ -40,7 +63,6 @@ A workflow line `uses: <owner>/agent-supervisor/.github/actions/l4@…` does not
 `l4 upgrade --action-repo <owner>/l4` once to rewrite it.
 
 On older Claude Code, use `/plugin marketplace add ciprianiacobescu/l4`, then `/plugin install l4@l4-harness`.
-For Codex, copy `plugins/l4/skills/l4` to `~/.agents/skills/l4`.
 
 ## Reading the history (`l4 kg`)
 

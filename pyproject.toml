@@ -32,6 +32,14 @@ path = "src/l4/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/l4"]
 
+# the l4 skill ships inside the package (L4-SKL-003): `l4 skills install` reads it from l4/_skill/l4
+[tool.hatch.build.targets.wheel.force-include]
+"plugins/l4/skills/l4" = "l4/_skill/l4"
+
+# the sdist already holds the whole tree; name the skill so a wheel built from the sdist has it too
+[tool.hatch.build.targets.sdist.force-include]
+"plugins/l4/skills/l4" = "plugins/l4/skills/l4"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
