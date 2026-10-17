@@ -1695,7 +1695,8 @@ pending leaves of one parent into one step.
    fail red if, and only if, the harness confirms discrimination. Against a scratch copy in which every public function
    of the unit's source modules that those tests import is replaced by its zero value, at least one of the tests must
    fail by assertion [I: the scope "modules those tests import"; spikes/02 used "public functions of source files
-   changed since the unit base", V 2/2; the broader scope also covers preservation criteria on untouched code].
+   changed since the unit base", V 2/2; the broader scope also covers preservation criteria on untouched code]. The
+   imported modules are found under the import roots of L4-IMP-025.
    - Confirmed criteria are recorded as `criterion.pre_satisfied`, listed in `verification.md` and always included in
      audit sampling.
    - Unconfirmed ones fail red (`not discriminating`).
@@ -2334,6 +2335,20 @@ at WARNING as `task <k> <phase> attempt <n>: no activity from <profile> for <idl
 
 While a tool call is open in the stream, the idle clock MUST NOT stop the agent; the step's wall-clock limit still
 applies.
+
+**L4-IMP-025** The modules a test imports are found under every import root.
+
+The harness SHALL look up the modules a test imports under these import roots: the repository root, `src`, every
+directory named `src`, and every directory that holds a `pyproject.toml`, `setup.py` or `setup.cfg` together with that
+directory's `src`. The lookup serves the zero-value run of the pre-satisfied criteria (L4-IMP-002), the head stubs of
+run (b), the audit sampling (step 4a) and the proof of tests that people or a test chore wrote (step 4). The
+directories SHALL come from git's tracked files and its untracked files that are not ignored, so an ignored virtual
+environment is not searched. A dotted name SHALL resolve to `<root>/<dotted as path>.py` and
+`<root>/<dotted as path>/__init__.py` under every root where that file exists with the exact case. Every match SHALL
+be varied: Python takes the first one on its path, which the harness cannot know, and varying a copy the test does not
+import changes nothing. A match under the test globs SHALL NOT be varied. A repository whose modules sit under the root
+or `src` gets the same modules as before. [V: a consumer repository's uv workspace keeps each member's code under
+`packages/<name>/src/<namespace>/<name>/`, and before this rule no zero-value run there ever had a module to vary.]
 
 ## 8. Agent and model factory
 
@@ -5123,6 +5138,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 27 | `settle-human-rejects` | a human reject that no fix task could be derived from ends when a feedback-only fix unit takes the person's concrete feedback, so the next round judges the fixed code: `effective_verdicts` drops a reject recorded before a `fix.spawned{feedback_only}`, and the spawn lists those questions in `consumed` (L4-VER-016); an escalation with `no_convertible_finding` says to give the fix as feedback before the retry in `l4 status`, the refusal of `l4 run --unit` and the sticky note (L4-OPS-022); and `l4 questions answer Q-NNN --replace` replaces the answer of an answered verdict question and keeps the old one in a comment (L4-QMD-010; `openspec/changes/settle-human-rejects/`) | the live check on a dummy repository, not run in this change: a hold rejected in prose, the feedback, the fix unit and a round that passes |
 | 28 | `answer-accepted-findings` | a unit whose PASS came from an accepted hold merges by itself again: a round resumed at aggregation records the judge's answers to the accepted findings of the round it reuses (L4-VER-017); a valid judge reply that leaves out an asked accepted or feedback id gets one more call that names the ids, and a broken second reply keeps the first verdict (L4-VER-017); and `l4 yolo waive PLAN FINDING --reason TEXT` lets a person (or an allowed agent) waive an accepted finding on record, so the harness merges the unit through its guarded merge, with a `Next:` line that names retry, feedback and waive for `accepted_finding_open` (L4-YOLO-031; `openspec/changes/answer-accepted-findings/`) | the consumer repository's unit that waited with `accepted_finding_open`, after the upgrade |
 | 29 | `check-already-satisfied` | an already-satisfied task writes no copy of tests that exist: a red step that adds no test and reports `already_satisfied by <task>` with its `criteria_ids` is confirmed by the passing tests that already trace them, and earlier-red evidence holds for tests in a class (L4-IMP-003); the judge answers, for each task ticked as already satisfied, whether its own text is done, and a no is a major judge finding for a person (L4-VER-018); an implementer step that writes a token shape (a test fixture) loses the attempt with advice to build the value from parts, before any gate or commit, instead of halting the unit at the push (L4-SEC-008; `openspec/changes/check-already-satisfied/`) | the consumer repository's next units, after the upgrade |
+| 30 | `resolve-workspace-imports` | the modules a test imports are found under every import root: the repository root, `src`, every directory named `src`, and every directory with a `pyproject.toml`, `setup.py` or `setup.cfg` and its `src`, so the zero-value run, the head stubs of run (b), the audit sampling and the proof of tests people wrote can vary a uv workspace member's modules (L4-IMP-025; `openspec/changes/resolve-workspace-imports/`) | the consumer repository's next units, after the upgrade |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6599,6 +6615,31 @@ scenario is a spec defect (§26).
 - **Given** a red step that adds no test, reports `already_satisfied by 1.1`, and cites a criterion whose passing tests no earlier red saw fail, no zero-value run fails and no base run fails
 - **When** the red step is checked
 - **Then** it fails with the confirmation's `not discriminating` message, and nothing is committed
+
+#### SCN-IMP-211 (+) A workspace member's module is found · L4-IMP-025
+- **Given** a base branch with `packages/calc/pyproject.toml`, `packages/calc/src/acme/calc/ops.py` (`acme` has no `__init__.py`) and a test `packages/calc/tests/test_ops.py` that imports `acme.calc.ops`
+- **When** the harness looks up the modules that test imports
+- **Then** it finds `packages/calc/src/acme/calc/ops.py`
+
+#### SCN-IMP-212 (+) A flat member's package is found · L4-IMP-025
+- **Given** `packages/flat/setup.cfg`, `packages/flat/flatpkg/core.py` and a test that imports `flatpkg.core`
+- **When** the harness looks up the modules that test imports
+- **Then** it finds `packages/flat/flatpkg/core.py`
+
+#### SCN-IMP-213 (+) Existing behaviour in a workspace member is pre-satisfied · L4-IMP-002, L4-IMP-025
+- **Given** the member of SCN-IMP-211 on the base branch, unchanged by the unit, and a new test of `double` that passes in run (a)
+- **When** its criterion is confirmed
+- **Then** the zero-value run varies `ops.py`, the test fails by assertion, the criterion is confirmed, and `ops.py` holds its original bytes afterwards
+
+#### SCN-IMP-214 (−) A directory that is no import root is not searched · L4-IMP-025
+- **Given** `scripts/json.py`, in a directory with no project file and not named `src`, and a test that imports `json`
+- **When** the harness looks up the modules that test imports
+- **Then** it finds none
+
+#### SCN-IMP-215 (−) An ignored directory is not searched · L4-IMP-025
+- **Given** an ignored `.venv/` that holds a `pyproject.toml` and a package `vendored`, and a test that imports `vendored`
+- **When** the harness looks up the modules that test imports
+- **Then** it finds none
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
