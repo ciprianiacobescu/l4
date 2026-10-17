@@ -59,13 +59,13 @@ Every task follows these rules:
 
 ## 4. The part prompt (L4-VER-041)
 
-- [ ] 4.1 Tests, `tests/unit/verifier/test_prompt.py`: with `part=PartView(2, 3, listing)` the user text has
+- [x] 4.1 Tests, `tests/unit/verifier/test_prompt.py`: with `part=PartView(2, 3, listing)` the user text has
   `## Diff (base...head), part 2 of 3`, the three rules with `not in this part` outside every `<l4:data>` block, a
   `<l4:data kind="diff parts">` block that lists every file with its part and its length, and only the given diff;
   with `part=None` the user text for the arguments of this file's `build()` is the same string as before the change
   (run the builder once before editing `judge.py` and keep its output in the test as a literal); `SYSTEM` is
   unchanged; `prompt.version == "judge@10"`.
-- [ ] 4.2 Code: `src/l4/verifier/judge.py`: `PartView`, `build_judge_prompt(..., part: PartView | None = None)`,
+- [x] 4.2 Code: `src/l4/verifier/judge.py`: `PartView`, `build_judge_prompt(..., part: PartView | None = None)`,
   `PROMPT_VERSION = 10` with the comment `10: the diff in parts`.
 
 ## 5. The judge step in parts (L4-VER-041, L4-VER-042, L4-VER-043)
