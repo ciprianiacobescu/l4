@@ -44,9 +44,9 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@10+green@5"
+    assert rendered.template_version == "contract@11+green@5"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
-    assert render_prompt("red", ctx()).template_version == "contract@10+red@9"
+    assert render_prompt("red", ctx()).template_version == "contract@11+red@10"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256
 
 
@@ -101,8 +101,13 @@ def test_red_says_what_to_do_when_the_behaviour_already_exists():
     # SPEC 7.3 (red template line, spikes/02) and L4-IMP-002/003. Live M1.3 job 5478: a fix unit's regression scenario
     # pins what the code does now (D6), and without this line Codex blocked with "RED test for existing behavior".
     red = render_prompt("red", ctx()).text
-    spec_line = "If the behaviour already exists, write the tests and report `tdd_exemption: "
+    spec_line = (
+        "If the behaviour already exists but no test traces a cited criterion yet, "
+        "write NEW tests for it and report `tdd_exemption: "
+    )
     assert spec_line + '{reason: "already_satisfied by <task|commit>"}`.' in red
+    assert "add no test and change no file" in red and "Do not write copies of tests that exist" in red
+    assert "needs this task's own text to be true" in red
     assert "do not block" in red and "status `done`" in red
     assert red.index("If the behaviour already exists") > red.index("The new tests MUST fail")
     assert "already exists" not in render_prompt("green", ctx()).text
@@ -360,8 +365,8 @@ def test_a_test_chore_prompt_allows_new_tests_and_names_the_subjects():
     sources = (("proposal.md", f"## Why\nFinding F-aaaaaaaa: {hold}"),)
     plain = render_prompt("single", ctx(sources=sources))
     chore = render_prompt("single", ctx(sources=sources, adds_tests=True))
-    assert "Do not add tests" in plain.text and plain.template_version == "contract@10+single@3"
-    assert "Do not add tests" not in chore.text and chore.template_version == "contract@10+single_tests@5"
+    assert "Do not add tests" in plain.text and plain.template_version == "contract@11+single@3"
+    assert "Do not add tests" not in chore.text and chore.template_version == "contract@11+single_tests@5"
     assert "# Phase: SINGLE (add tests" in chore.text
     assert "new test files" in chore.text and "append new tests to this unit's own test files" in chore.text
     assert "no change to an existing test" in chore.text and "non-test code" in chore.text

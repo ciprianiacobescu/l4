@@ -4,10 +4,11 @@ path and the kind and never the value."""
 from pathlib import Path
 
 from l4.redact import Redactor
-from l4.vcs.secretscan import SecretHit, outgoing_secrets
+from l4.vcs.secretscan import SecretHit, outgoing_secrets, worktree_secrets
 
 ANTHROPIC = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0"
 GITLAB = "glpat-" + "x1y2z3w4v5u6t7s8r9q0"
+MINTKEY = "mk_" + "agent_" + "Q7w8E9r0T1y2U3i4O5p6"
 BASE = "refs/remotes/origin/main"
 BRANCH = "refs/remotes/origin/l4/x"
 
@@ -101,3 +102,52 @@ def test_a_path_is_reported_once_per_kind(make_repo, raw, git_for):
     repo = make_repo(remote=True)
     commit(repo, raw, "a.txt", f"{ANTHROPIC}\n{ANTHROPIC}\n{GITLAB}\n")
     assert scan(repo, git_for) == [SecretHit("a.txt", "anthropic-key"), SecretHit("a.txt", "gitlab-pat")]
+
+
+# L4-SEC-008: the worktree an implementer step leaves is read before any gate or commit
+
+
+def edit(repo: Path, name: str, text: str) -> None:
+    path = repo / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def step_scan(repo, git_for, paths, redactor=None):
+    return worktree_secrets(git_for(repo), redactor or Redactor({}), paths)
+
+
+def test_a_token_a_step_adds_to_a_tracked_file_or_writes_in_a_new_one_is_found(make_repo, raw, git_for):
+    """SCN-SEC-20: a fixture that spells a token whole."""
+    repo = make_repo(remote=True)
+    commit(repo, raw, "tests/test_redact.py", "def test_a():\n    assert True\n")
+    edit(repo, "tests/test_redact.py", f'def test_a():\n    assert True\n\n\nSECRET = "{MINTKEY}"\n')
+    edit(repo, "tests/new_fixture.py", f'TOKEN = "{GITLAB}"\n')
+    hits = step_scan(repo, git_for, ["tests/test_redact.py", "tests/new_fixture.py"])
+    assert hits == [SecretHit("tests/test_redact.py", "mintkey"), SecretHit("tests/new_fixture.py", "gitlab-pat")]
+    assert MINTKEY not in repr(hits)
+
+
+def test_a_token_already_at_head_and_one_built_from_parts_are_not_found(make_repo, raw, git_for):
+    """SCN-SEC-21: only the lines the step adds count, and a value built at run time holds no shape."""
+    repo = make_repo(remote=True)
+    commit(repo, raw, "tests/test_redact.py", f'OLD = "{MINTKEY}"\n')
+    edit(repo, "tests/test_redact.py", f'OLD = "{MINTKEY}"\nNEW = "mk_" + "agent_" + "A" * 24\n')
+    assert step_scan(repo, git_for, ["tests/test_redact.py"]) == []
+
+
+def test_a_known_value_a_binary_a_symlink_and_an_unlisted_path(make_repo, raw, git_for):
+    repo = make_repo(remote=True)
+    edit(repo, "notes.txt", "token is hunter2hunter2\n")
+    (repo / "blob.bin").write_bytes(b"\x00" + GITLAB.encode())
+    (repo / "link").symlink_to(repo / "notes.txt")
+    edit(repo, "unlisted.py", f'X = "{GITLAB}"\n')
+    hits = step_scan(repo, git_for, ["notes.txt", "blob.bin", "link"], Redactor({"L4_FORGE_TOKEN": "hunter2hunter2"}))
+    assert hits == [SecretHit("notes.txt", "value:L4_FORGE_TOKEN")]
+
+
+def test_a_deleted_file_and_no_path_give_no_hit(make_repo, raw, git_for):
+    repo = make_repo(remote=True)
+    commit(repo, raw, "old.py", f'X = "{GITLAB}"\n')
+    (repo / "old.py").unlink()
+    assert step_scan(repo, git_for, ["old.py"]) == [] and step_scan(repo, git_for, []) == []

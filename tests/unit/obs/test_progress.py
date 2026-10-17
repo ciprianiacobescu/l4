@@ -188,6 +188,14 @@ def test_an_already_satisfied_task_prints_the_truth_and_no_green_line(console):
     assert "red ok" not in out and "green ok" not in out and "failing as expected" not in out
 
 
+def test_an_already_satisfied_task_with_no_new_test_names_the_existing_tests(console):
+    trace = ProgressTrace()
+    trace(event("task.red_ok", task="2.1", tests=[], tdd="already-satisfied"))
+    out = console.getvalue()
+    assert "task 2.1 already satisfied by existing tests, no green step" in out
+    assert "0 new tests" not in out
+
+
 def test_a_red_green_task_still_prints_red_ok_and_green_ok(console):
     trace = ProgressTrace()
     trace(event("task.red_ok", task="1.1", tests=["t::a", "t::b"]))

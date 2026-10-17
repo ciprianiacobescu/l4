@@ -351,6 +351,8 @@ class ProgressTrace:
     def _red_ok(self, e: LedgerEvent) -> tuple[int, str]:
         n = len(e.data.get("tests") or [])
         if e.data.get("tdd") == "already-satisfied":  # the tests passed on the base: nothing failed, no green step runs
+            if not n:  # no test was added: the tests an earlier task wrote carry the criteria (L4-IMP-003)
+                return logging.INFO, f"task {e.data.get('task')} already satisfied by existing tests, no green step"
             tests = "1 new test passes" if n == 1 else f"{n} new tests pass"
             return logging.INFO, f"task {e.data.get('task')} already satisfied: {tests} on the base, no green step"
         return logging.INFO, f"task {e.data.get('task')} red ok: {n} new test(s) failing as expected"

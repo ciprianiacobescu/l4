@@ -72,4 +72,4 @@ def test_single_tests_tells_the_agent_to_tag_with_the_cited_criterion_and_to_use
     assert template.version == 5
     assert "cites a criterion" in template.body and "fail by assertion" in template.body
     assert "interface the design names" in template.body and "new names" in template.body
-    assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@10+single_tests@5"
+    assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@11+single_tests@5"

@@ -47,12 +47,16 @@ class _Evidence:
 
 
 def _test_file(wb: Workbench, sha: str, test_id: str) -> str | None:
-    """The repository path of a test id: the part before the first `::` (`services/x.test.ts`), or the dotted module
-    a pytest JUnit report names (`tests.test_x` -> `tests/test_x.py`); the one that exists in the red commit."""
+    """The repository path of a test id at the red commit: the part before the first `::` as it is
+    (`services/x.test.ts`), or, for a dotted pytest JUnit id, the longest dotted prefix that is a module there
+    (`tests.test_x.TestY::test_z` -> `tests/test_x.py`, the class dropped); the one that exists in the red commit."""
     head = test_id.split("::", 1)[0]
     candidates = [head]
     if "/" not in head and "." in head:
-        candidates.append(head.replace(".", "/") + ".py")
+        parts = head.split(".")
+        while parts:
+            candidates.append("/".join(parts) + ".py")
+            parts.pop()
     for path in candidates:
         if wb.git.run("cat-file", "-e", f"{sha}:{path}", check=False).returncode == 0:
             return path

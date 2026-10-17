@@ -3,6 +3,8 @@ recorded as `guard.secret {path, kind}` (never the value) and halts the unit (ex
 
 import json
 
+import pytest
+
 from l4.state.fold import fold
 from l4.state.ledger import TS_FORMAT, LedgerEvent
 from l4.vcs.git import Git
@@ -12,6 +14,13 @@ from ..implementer.conftest import IMPL, TESTS, green_step, red_step
 from .conftest import BRANCH, UNIT
 
 SECRET = "sk-ant-api03-" + "Zq9Xw8Vu7Ts6Rp5On4Ml3Kj2"
+
+
+@pytest.fixture(autouse=True)
+def _no_step_check(monkeypatch):
+    """The step check (L4-SEC-008, tests/unit/implementer/test_step_secrets.py) would fail the planted step's attempt
+    before any commit; it is switched off here so that the push scan, the last net, is what these tests reach."""
+    monkeypatch.setattr("l4.implementer.tdd.worktree_secrets", lambda *a, **k: [])
 
 
 def fold_events(rows: list[dict]):

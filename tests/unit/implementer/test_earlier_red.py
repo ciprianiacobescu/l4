@@ -96,6 +96,24 @@ def test_a_criterion_that_failed_at_an_earlier_red_is_confirmed_without_a_zero_v
     }  # fmt: skip
 
 
+def test_a_test_in_a_class_is_evidence_of_the_earlier_red_that_saw_it_fail(make_bench, spy):
+    """SCN-IMP-206: pytest names the class in the id (`tests.test_old.TestTotal::test_old_total`); the file is
+    `tests/test_old.py` at the red commit."""
+    in_class = (
+        'import pytest\n\nfrom pytdd import total\n\n\nclass TestTotal:\n    @pytest.mark.l4("' + KNOWN + '")\n'
+        "    def test_old_total(self):\n        assert total([1.0, 2.0]) == 3.0\n"
+    )
+    class_id = "tests.test_old.TestTotal::test_old_total"
+    bench: Bench = make_bench([new_step()])
+    base, sha = commit_old(bench, text=in_class)
+    record(bench, base, sha, test=class_id)
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "already_satisfied", outcome.reason
+    assert not any(spy)
+    proof = bench.events("task.red_ok")[-1]["criteria"][KNOWN]
+    assert (proof["via"], proof["discriminating"]) == ("earlier_red", [class_id])
+
+
 def test_the_task_finishes_as_already_satisfied(make_bench, monkeypatch):
     from l4.implementer.loop import run_task
 
