@@ -20,11 +20,11 @@ Every task follows these rules:
 
 ## 3. Doctor and init
 
-- [ ] 3.1 Tests: SCN-CI-23 (TOOL-001), `l4 init` proposes `ci.toolchains` from `go.work`/`go.mod`, `.nvmrc`,
+- [x] 3.1 Tests: SCN-CI-23 (TOOL-001), `l4 init` proposes `ci.toolchains` from `go.work`/`go.mod`, `.nvmrc`,
   `package.json` `engines.node` and `packageManager: pnpm@…`.
-- [ ] 3.2 Doctor row TOOL-001; the init proposals.
+- [x] 3.2 Doctor row TOOL-001; the init proposals.
 
 ## 4. Docs
 
-- [ ] 4.1 `docs/SPEC.md` (§3.2, L4-CI-005, SCN-CI-19..23, the change row), `docs/quickstart.md`, the skill's `adopt.md`
+- [x] 4.1 `docs/SPEC.md` (§3.2, L4-CI-005, SCN-CI-19..23, the change row), `docs/quickstart.md`, the skill's `adopt.md`
   (a polyglot repository), `CHANGELOG.md` under a new `## 0.4.13 (unreleased)`.

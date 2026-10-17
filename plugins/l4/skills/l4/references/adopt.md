@@ -173,6 +173,21 @@ implementer:
 - The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.11`) before you
   edit the config: the schema is strict.
 
+## 4c. A polyglot repository
+
+The L4 job installs Python, uv and the agent CLIs, nothing else. For Go or TypeScript gates set `ci.toolchains`
+(`l4 init` proposes it from `go.work`/`go.mod`, `.nvmrc`/`engines.node` and `packageManager: pnpm@X`), then run
+`l4 upgrade`, which puts pinned `actions/setup-go`, `actions/setup-node` and `pnpm/action-setup` steps before L4:
+
+```yaml
+ci:
+  toolchains: {go: {version_file: go.work}, node: {version: "22"}, pnpm: {version: "11"}}
+```
+
+Then write the gates for those languages (`go test ./...`, `pnpm test`). With `go` set, gates run with
+`GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. `l4 doctor --adoption` (TOOL-001)
+names a gate command whose tool is not on the PATH. On GitLab the runner image must provide the toolchains.
+
 ## 5. Upgrades
 
 ```sh
