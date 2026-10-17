@@ -86,6 +86,21 @@ A write tool's description SHALL say what it writes, whether it pushes to origin
 - **THEN** no tool runs `l4 yolo activate` or `l4 yolo cancel`, and `l4_plan_status`'s description names
   `l4 yolo activate <plan> --reason "…"` as a person's command
 
+#### Scenario: SCN-MCP-13 (+) A unit's ledger events are read, filtered and cut
+- **GIVEN** a unit whose ledger holds three events of type `task.attempt_failed` and others
+- **WHEN** `l4 status --unit U --events --type task.attempt_failed --last 2 --json` runs
+- **THEN** it prints `l4/events@1` with the newest two of them, `total: 3` and `shown: 2`, and writes nothing
+
+#### Scenario: SCN-MCP-14 (+) A unit's verification.md is read from its branch
+- **GIVEN** a unit branch on origin that holds `verification.md`
+- **WHEN** `l4 status --unit U --verification` runs
+- **THEN** it prints that file; for a unit without one it says `no verification.md`
+
+#### Scenario: SCN-MCP-15 (+) A plan that is not pushed is admitted from the working tree
+- **GIVEN** a plan file and its unit folders only in the working tree
+- **WHEN** `l4 yolo check <plan> --worktree` runs
+- **THEN** it prints the order and exits 0, recording nothing; without `--worktree` it exits 2
+
 ### Requirement: L4-MCP-004 l4 mcp install configures a client in one command
 `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's
 documented MCP configuration with the server command `l4 mcp serve --repo <the repository's absolute path>` (default: the

@@ -333,6 +333,26 @@ has one worked example for each kind and says what happens after the push.
 
 When a unit stops or does not move, use the [operations runbook](runbook.md).
 
+## Use L4 from your IDE
+
+Any MCP client can manage plans and debug units through L4's tools. One command per repository writes the client's
+configuration (it merges, keeps the other servers, and refuses a file it cannot parse):
+
+```
+l4 mcp install --client <claude-code|cursor|vscode|kiro|codex|opencode> [--project] [--repo PATH] [--name NAME] [--dry-run]
+```
+
+- Without `--project` the user's configuration is written, one entry per repository (`l4-<folder>`), so several
+  repositories at different places on disk each have their own server: the entry runs
+  `l4 mcp serve --repo <absolute path>` and that server runs commands in that repository only.
+- With `--project` the repository's own file is written (entry `l4`), for example `.cursor/mcp.json`.
+- `vscode` has no documented user file (use `--project`); `claude-code` keeps user servers in `~/.claude.json`, so
+  without `--project` the command prints the documented `claude mcp add --scope user …` line to run.
+- The IDE must find `l4` on its PATH. A server with several `--repo` takes a `repo` argument in every tool.
+
+The tools read (`l4_status`, `l4_unit_events`, `l4_plan_check`, ...) and write (`l4_retry`, `l4_plan_review`, ...);
+activating a plan (`l4 yolo activate`) is not a tool.
+
 ## Conditional extras
 
 | When | Extra step |

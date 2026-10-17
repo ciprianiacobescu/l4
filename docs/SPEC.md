@@ -421,7 +421,7 @@ of the harness package.
 | `l4 doctor [--ci] [--live] [--fix] [--unit ID] [--adoption [--no-gates]] [--json]` | Check environment, config, specs, git, forge, CI, state | none, unless `--fix` (safe fixes; on a self-provisioning shell runner also user-local tool installs, L4-DOC-002) |
 | `l4 plan [--unit ID]… [--json] [--probe] [--sweep] [--detailed-exitcode]` | Detect units and compute the next action for each (router); `--sweep` adds the sweeper duties of §16.4 | none (`--sweep` may dispatch continuations and repair mirrors) |
 | `l4 run [--unit ID]… [--max-units N] [--time-budget DUR] [--dry-run [--probe]]` | Advance units through the lifecycle (§12.0). The iteration number is always read from the ledger, never from arguments or CI variables | git, forge, agents; `--unit` on a `halted` or `escalated` unit exits 13 before the lease and changes nothing (L4-OPS-010) |
-| `l4 status [--unit ID] [--json] [--rebuild]` | Show units, phases, the cause of a stop (`REASON` column, cut to 60 characters), open questions, last verdict, cool-downs; `--unit ID` prints the phase, `Cause:`, `Stopped in run:`, an `Or:` line with the label that moves the unit and `Next:` with the command; `--json` carries `reason` and `next` (L4-OPS-006); `--rebuild` re-folds `state.json` from the ledger | none (`--rebuild` rewrites `state.json`) |
+| `l4 status [--unit ID] [--json] [--rebuild] [--events [--type T] [--last N]] [--verification]` | Show units, phases, the cause of a stop (`REASON` column, cut to 60 characters), open questions, last verdict, cool-downs; `--unit ID` prints the phase, `Cause:`, `Stopped in run:`, an `Or:` line with the label that moves the unit and `Next:` with the command; `--json` carries `reason` and `next` (L4-OPS-006); `--rebuild` re-folds `state.json` from the ledger; with `--unit`, `--events` prints that unit's ledger events (`--json`: `l4/events@1`, filtered by `--type`, the newest `--last N`) and `--verification` its `verification.md`, both read-only (L4-MCP-003) | none (`--rebuild` rewrites `state.json`) |
 | `l4 probe [PROFILE…] [--role ROLE] [--json] [--no-cache]` | Run availability probes | probe cache |
 | `l4 verify --unit ID [--dry-run]` | Run only the verifier on a unit | evidence files, commits |
 | `l4 s1 export --out DIR [--source FILE]… [--seed N] [--allow-gaps]` \| `canary [--also-repo P]… [--target N] [--min-test N] [--max-variants N] [--test-command CMD] [--out FILE] [--allow-gaps]` \| `score --profile P --dataset FILE --out FILE [--max-requests N] [--gate GATE.json]` \| `report ANSWERS… --dataset FILE [--gate GATE.json] [--profile TUNED] [--out FILE]` \| `audit --dataset DIR [--sample N \| --import FILE]` | System-One data set (M1.6): export ground-truth items from the calibration files (the only door to training data: engine answers are never read), generate labelled canary items from committed units (the canary runs the unit gate command and no browser: a unit's e2e test files, `e2e/**` and the directory `gates.e2e.command` runs, are left out of the tests-ran check and counted as `e2e_skipped:<project>:<unit>`, so the unit's other items still count; running them through `gates.e2e` needs a sandbox and a server and is not done), score a data set with a `backend: system-one` profile, compare engines against the ground truth, audit the labels by hand. `export` and `canary` exit 2 when a split is empty or a quota is unmet; `score` and `report` exit 2 on a data set without or with a damaged `manifest.json`; `score` alone may load a tuned checkpoint whose gate ran and failed | files under `$L4_CACHE/s1` and the paths given; no engine for `export`, `canary`, `audit` |
@@ -437,6 +437,8 @@ of the harness package.
 | `l4 feedback show FB-NNN [--unit ID] [--json]` | Show one item as the file holds it; `--json` adds its problems and its content sha256 | none |
 | `l4 feedback submit FB-NNN [--unit ID]` | Set a valid draft to `submitted` and print the git lines; exit 2 for any other status | edits `feedback.md` only |
 | `l4 feedback withdraw FB-NNN [--unit ID]` | Set an item to `withdrawn` (never taken, or no longer judged) and print the git lines; exit 2 for an `addressed` item | edits `feedback.md` only |
+| `l4 mcp serve [--repo PATH]…` | Serve L4 to an MCP client over stdio (L4-MCP-001): typed tools that run `l4` commands as an agent, in the repositories given with `--repo` (L4-MCP-005) | none of its own; the write tools run the commands they name |
+| `l4 mcp install --client claude-code\|cursor\|vscode\|kiro\|codex\|opencode [--project] [--repo PATH] [--name NAME] [--dry-run]` | Write the client's MCP configuration with the command `l4 mcp serve --repo <path>` (L4-MCP-004) | the client's configuration file (merged, atomic) |
 | `l4 simulate [SCENARIO…\|--all] [--with-repo-config] [--keep] [--json]` | Run the real state machine against fakes (§17) | temp dirs only |
 | `l4 unlock --unit ID [--force]` | Release a lock (expired, or forced by a human) | lock ref |
 | `l4 setup gitlab --project ID\|PATH [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--verify-base URL] [--rotate [--revoke-old]] [--secret NAME=ENVVAR]… [--cron EXPR] [--no-schedule] [--no-pipeline] [--watch] [--dry-run] [--token-command CMD]` | Make a GitLab project ready for the harness (L4-INS-006): read the project, check the runner and the include, make sure the `l4-bot` token and the masked `L4_FORGE_TOKEN` (environment scope `l4`) exist, set secrets, make sure the `l4 sweep` schedule exists, trigger one adoption-check pipeline. Rows `OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`; exit 0, 3 on a `FAIL` row, 2 usage, 1 HTTP error | GitLab (project variables, access tokens, pipeline schedules, one pipeline); `--dry-run` sends only reads |
@@ -451,7 +453,7 @@ of the harness package.
 | `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
-| `l4 yolo check PLAN` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings | none |
+| `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. With `--worktree` the plan file and the unit folders are those of the working tree, before the push (L4-MCP-003). Exit 0, or 2 with the findings | none |
 | `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
 | `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
@@ -4305,6 +4307,36 @@ fails SHALL keep the branch and record `unit.branch_kept{branch, reason}`; a del
 the unit and archive branches of the plan's integrated units whose PR is merged and whose tip is still the recorded
 head. The lock ref SHALL NOT be deleted at merge time. A branch of a PR the forge does not show merged SHALL NOT be
 deleted. The evidence link in the PR body names the unit head commit, so it opens after the branch is gone.
+### 12.6 L4 as an MCP server (MCP)
+
+Any MCP client (an IDE, an agent) manages delivery plans and debugs units through typed tools, under the same rules as the
+CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
+
+**L4-MCP-001** `l4 mcp serve` is an MCP server over stdio. It SHALL speak newline-delimited JSON-RPC 2.0: `initialize` (answering the client's protocol revision when the server knows it, else its pinned one, with `capabilities.tools` and `serverInfo {name: l4, version}`), `ping`, `tools/list`, `tools/call` and `notifications/initialized`.
+- An unknown method SHALL answer -32601, a line that is not JSON -32700, an invalid request -32600; the server keeps serving.
+- Only protocol messages SHALL go to stdout; logs go to stderr.
+- The harness SHALL add no runtime dependency for it (the official `mcp` package is a dev dependency of the interop test only).
+
+**L4-MCP-005** An instance serves the repositories it was started for. `l4 mcp serve` SHALL take `--repo PATH`, repeatable; each PATH SHALL resolve to the root of a git repository with `.l4/config.yaml`, else the server SHALL exit 2 before it serves.
+- One `--repo`: every tool runs there, and a tool's `repo` argument, when given, SHALL name it (folder name or path), else the call is refused.
+- Several: every tool SHALL take a required `repo` argument naming one of them (folder name, or path compared after resolving symlinks); any other value SHALL be refused, never resolved. Two repositories with the same folder name SHALL be refused at start.
+- No `--repo`: the working directory serves when it is such a repository; otherwise every tool call SHALL answer an error that names `--repo`.
+- Every tool result SHALL name the repository it ran in. A tool SHALL NOT run in a repository the server was not started for.
+
+**L4-MCP-002** Every tool runs the `l4` command it names, as an agent. A tool SHALL run `python -m l4 <command>` as a subprocess in the repository, with the caller's environment plus `AI_AGENT=l4-mcp` and no terminal on stdin, so that every rule the CLI applies to an agent caller holds (`clarifier.answer_by_agents` and the others). The server SHALL make no write of its own, and SHALL NOT pass the global `--repo` or `--config` options.
+- A value reaches the command as `--option=value` or after `--`, so it cannot be read as an option.
+- A result SHALL carry the exit code, the output redacted again and cut at 64 KiB with the cut said, the parsed JSON when the command printed JSON, and `isError` for a non-zero exit, a timeout or a cancel.
+
+**L4-MCP-003** The tools manage plans and debug units.
+- Read: `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check` (`worktree`: `l4 yolo check --worktree`), `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events` (`l4 status --unit U --events`), `l4_verification` (`l4 status --unit U --verification`).
+- Write: `l4_plan_draft`, `l4_plan_review` (`worktree`), `l4_question_answer`, `l4_retry`, `l4_plan_resume`. A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running; `l4_plan_review`'s SHALL say that it costs judge tokens and takes minutes.
+- Not offered: `l4 yolo activate`, `l4 yolo cancel`, `l4 run`, anything that starts an agent CLI. The descriptions name the command a person runs.
+- The read-only commands `l4 yolo check PLAN --worktree` (admission of the working tree's plan file and unit folders, no judge) and `l4 status --unit U --events|--verification` SHALL exist for them and SHALL write nothing to a ref, the index or a tracked file.
+
+**L4-MCP-004** `l4 mcp install` configures a client in one command. `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's documented MCP configuration with the command `l4 mcp serve --repo <absolute path>` under the entry NAME (default `l4` with `--project`, `l4-<repository folder>` otherwise), merging into an existing file, keeping every other server, atomically.
+- It SHALL refuse a file it cannot parse (exit 2, naming the file, nothing written) and print what it wrote.
+- Only clients whose path and format were checked against the vendor's documentation are offered: Claude Code (project `.mcp.json`; user scope prints `claude mcp add --scope user`), Cursor, VS Code (project only), Kiro, Codex (TOML, only the `[mcp_servers.NAME]` table is replaced), OpenCode. The vendor URLs are in `src/l4/mcp/install.py`.
+
 ---
 
 ## 13. Memory and lessons
@@ -5223,6 +5255,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 | 35 | `job-toolchains` | `ci.toolchains` (go, node, pnpm): the GitHub workflow sets them up before L4 with pinned shas and their caches off, the default caches `gobuild` and `pnpm`, `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` for Go gates, doctor TOOL-001 for a gate command that is not on the PATH, and `l4 init` proposals (L4-CI-005, SCN-CI-19..23; `openspec/changes/job-toolchains/`) | the second consumer repository's gates of its Go and TypeScript code |
 | 36 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
+| 37 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; the read-only `l4 yolo check --worktree` and `l4 status --events|--verification` back two tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9609,6 +9642,83 @@ scenario is a spec defect (§26).
 - **Given** a GitLab shell runner, a `laya` profile, and Laya already installed at the pin
 - **When** `l4 doctor --ci --fix` runs
 - **Then** it reports Laya present and installs nothing
+
+### 23.24 L4 as an MCP server (MCP)
+
+#### SCN-MCP-01 (+) A client connects and lists the tools · L4-MCP-001
+- **Given** `l4 mcp serve` started by an MCP client in a repository
+- **When** the client sends `initialize`, then `notifications/initialized`, then `tools/list`
+- **Then** the server answers with its name `l4`, its version and the tools capability, and lists every tool with a description and an input schema
+
+#### SCN-MCP-02 (−) A malformed request gets a protocol error · L4-MCP-001
+- **Given** the running server
+- **When** a line that is not JSON, or a call of an unknown method, arrives
+- **Then** it answers -32700 or -32601 and keeps serving
+
+#### SCN-MCP-03 (+) A read tool returns the command's output · L4-MCP-002
+- **Given** a repository with a delivery plan `p`
+- **When** a client calls `l4_plan_status` with `plan: p`
+- **Then** the server runs `l4 yolo status --json -- p` with `AI_AGENT=l4-mcp` and returns its output and exit code
+
+#### SCN-MCP-04 (−) An agent rule still refuses through the server · L4-MCP-002
+- **Given** a repository whose base config does not set `clarifier.answer_by_agents`, and an open verdict question
+- **When** a client calls `l4_question_answer` for it
+- **Then** the CLI refuses it as for any agent, and the tool returns that refusal with `isError: true`
+
+#### SCN-MCP-05 (+) A plan is checked before the push through the server · L4-MCP-003
+- **Given** a working tree with a new plan file `multitenancy` and its specs, not pushed
+- **When** a client calls `l4_plan_check` with `plan: multitenancy, worktree: true`
+- **Then** the server runs `l4 yolo check --worktree -- multitenancy` and returns its findings and order
+
+#### SCN-MCP-06 (+) A stopped unit is debugged through the server · L4-MCP-003
+- **Given** a unit that halted on a task
+- **When** a client calls `l4_status` with the unit, then `l4_unit_events` with `type: task.attempt_failed`
+- **Then** it gets the unit's cause and next step, and the failed attempts with their reasons
+
+#### SCN-MCP-07 (−) Activation is not a tool · L4-MCP-003
+- **Given** the running server
+- **When** a client lists the tools
+- **Then** no tool runs `l4 yolo activate` or `l4 yolo cancel`, and `l4_plan_status`'s description names `l4 yolo activate <plan> --reason "…"` as a person's command
+
+#### SCN-MCP-08 (+) A client is configured and other servers stay · L4-MCP-004
+- **Given** a client user configuration file that already lists another MCP server and an entry `l4-mint-mory`
+- **When** `l4 mcp install --client <that client> --repo /work/mintkey` runs
+- **Then** the file adds `l4-mintkey` with the command `l4 mcp serve --repo /work/mintkey`, and still lists the other server and `l4-mint-mory` unchanged
+
+#### SCN-MCP-09 (−) An unparseable configuration is not overwritten · L4-MCP-004
+- **Given** a client configuration file that is not valid JSON (or TOML)
+- **When** `l4 mcp install` runs for it
+- **Then** it exits 2 naming the file and writes nothing
+
+#### SCN-MCP-10 (+) Two IDE entries serve two repositories · L4-MCP-005
+- **Given** two servers configured as `l4 mcp serve --repo /work/mint-mory` and `l4 mcp serve --repo /work/mintkey`
+- **When** a client calls `l4_status` on each
+- **Then** each runs in its own repository and its result names that repository
+
+#### SCN-MCP-11 (−) A repository the instance does not serve is refused · L4-MCP-005
+- **Given** a server started with `--repo /work/mint-mory --repo /work/mintkey`
+- **When** a client calls `l4_plan_status` with `repo: /etc` or `repo: other`
+- **Then** the call is refused with the list of the repositories it serves, and nothing runs
+
+#### SCN-MCP-12 (−) No repository, no guess · L4-MCP-005
+- **Given** a server started without `--repo` in a folder that is not a git repository with `.l4/config.yaml`
+- **When** a client calls any tool
+- **Then** the result is an error that says to start the server with `--repo PATH`
+
+#### SCN-MCP-13 (+) A unit's ledger events are read, filtered and cut · L4-MCP-003
+- **Given** a unit whose ledger holds three events of type `task.attempt_failed` and others
+- **When** `l4 status --unit U --events --type task.attempt_failed --last 2 --json` runs
+- **Then** it prints `l4/events@1` with the newest two of them, `total: 3` and `shown: 2`, redacted, and writes nothing
+
+#### SCN-MCP-14 (+) A unit's verification.md is read from its branch · L4-MCP-003
+- **Given** a unit branch on origin that holds `verification.md`
+- **When** `l4 status --unit U --verification` runs
+- **Then** it prints that file; for a unit without one it says `no verification.md`
+
+#### SCN-MCP-15 (+) A plan that is not pushed is admitted from the working tree · L4-MCP-003
+- **Given** a plan file `.l4/plans/p1.json` and its unit folders only in the working tree
+- **When** `l4 yolo check p1 --worktree` runs
+- **Then** it prints `p1: admitted in the working tree` and the order, exits 0 and records nothing; without `--worktree` it exits 2 because origin has no such file
 
 ## 24. Definition of done
 

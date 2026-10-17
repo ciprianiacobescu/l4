@@ -6,6 +6,23 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.15 (unreleased)
+
+### Added
+- `l4 mcp serve [--repo PATH]...` makes L4 an MCP server over stdio (newline-delimited JSON-RPC 2.0, protocol revision
+  2025-11-25; no new runtime dependency). Its tools manage delivery plans and debug units: `l4_status`, `l4_doctor`,
+  `l4_plan_status`, `l4_plan_check`, `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`,
+  `l4_unit_events`, `l4_verification` (read) and `l4_plan_draft`, `l4_plan_review`, `l4_question_answer`, `l4_retry`,
+  `l4_plan_resume` (write). Each tool runs the `l4` command it names in a repository the instance was started for, as an
+  agent (`AI_AGENT=l4-mcp`), so every CLI rule for agents holds; `l4 yolo activate`, `cancel` and `l4 run` are not
+  tools. Several `--repo` give every tool a required `repo` argument; a repository that was not named is refused.
+- `l4 mcp install --client claude-code|cursor|vscode|kiro|codex|opencode [--project] [--repo PATH] [--name NAME]
+  [--dry-run]` writes the client's documented MCP configuration (one entry per repository, other servers kept, atomic,
+  an unparseable file refused).
+- `l4 yolo check PLAN --worktree` admits the plan file and unit folders of the working tree before the push;
+  `l4 status --unit U --events [--type T] [--last N] [--json]` and `--verification` read a unit's ledger events and
+  `verification.md`.
+
 ## 0.4.13 (2026-10-17)
 
 ### Added

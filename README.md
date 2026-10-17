@@ -50,6 +50,21 @@ promote ID` turns a reviewed draft from the inbox into a lesson. State: manual o
 graph, and nothing reaches an agent unless a person promotes a lesson. Today *n* is small (few units, one lesson), so
 every line of the report shows its *n*. See the [runbook](docs/runbook.md#13-reading-the-history-l4-kg).
 
+## Use L4 from your IDE (`l4 mcp`)
+
+`l4 mcp serve` makes L4 an MCP server, so an IDE or an agent manages delivery plans and debugs stopped units through
+typed tools (`l4_status`, `l4_plan_check`, `l4_unit_events`, `l4_retry`, ...) instead of shell commands. Each tool runs
+the `l4` command it names, as an agent, so the rules of the CLI hold; activating a plan stays a person's command.
+One server serves the repositories given with `--repo`, and an IDE holds one entry per repository:
+
+```
+l4 mcp install --client cursor --repo ~/work/my-repo      # entry l4-my-repo in ~/.cursor/mcp.json
+l4 mcp install --client claude-code --project             # .mcp.json of the repository, entry l4
+```
+
+Clients: `claude-code`, `cursor`, `vscode` (project only), `kiro`, `codex`, `opencode`. See the
+[quickstart](docs/quickstart.md#use-l4-from-your-ide).
+
 * [Quickstart](docs/quickstart.md)
 * [Operations runbook](docs/runbook.md): the states of a unit, why a unit stops, and how to resume or retry
 * [Delivery plans](docs/yolo-mode.md): order units by dependency and, with two opt-ins, merge them automatically into the integration branch
