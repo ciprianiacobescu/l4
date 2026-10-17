@@ -124,6 +124,11 @@ A person may need an `l4 yolo accept` when the judge keeps finding more after re
 - Otherwise stop and ask the person. Print the exact command for them:
   `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
 
+`l4 yolo waive <id> <F-id> --reason "..."` follows the same rule. It is for a plan that waits with
+`accepted_finding_open` on a finding the judge found not addressed. Never waive a finding the judge did not answer:
+run `l4 retry` for it. Never waive a finding whose fix the code needs: give it as feedback. Waive only after you have
+read the code for that finding, and only when `accept_by_agents` allows it. Otherwise print the command for the person.
+
 Stop and ask the person when: two rounds repeat the same criterion on the same unit; the fix needs a spec cut that
 drops required behaviour; `--worktree` exits 3 (a judge with a shell and no sandbox: ask for a `claude-code` or
 `opencode` judge profile). Do not shorten a spec only to fit a budget. Move background to `docs/`, or ask for a larger

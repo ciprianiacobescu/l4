@@ -228,6 +228,10 @@ The runbook has the procedure (section 12.2a). These are the rules.
   the findings and the reason. The verifier's judge answers for each finding whether the work addressed it. With
   `merge: auto`, a unit with a PASS whose accepted finding is not addressed is not merged: the plan waits with
   `accepted_finding_open`.
+- **The waiver.** `l4 yolo waive <plan> <F-id> --reason "<text>"` records, for an active plan, that a person decided an
+  accepted finding needs no handling. The merge guard then counts it as answered and the harness merges the unit
+  itself. The same rules as accept decide who may waive. The report shows who waived a finding and why. A new
+  activation clears the waivers.
 
 ## What runs in each CI run
 

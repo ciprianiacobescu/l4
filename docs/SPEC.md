@@ -454,6 +454,7 @@ of the harness package.
 | `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
 | `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
+| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive (L4-YOLO-031) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
 | `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
 | `l4 yolo cancel PLAN --reason TEXT` | Stop new dispatch and merges for good (L4-YOLO-013); a unit already running finishes its run and is not merged | `plan.cancelled` (push with a lease) |
@@ -3054,7 +3055,7 @@ applied, so a reply is never repaired into a `pass` it did not state. A repaired
 recorded as `judge.reply_repaired{round, profile, fields}` (schema paths, never values). A reply that is still invalid is
 asked for once more with the violated paths (at most 800 characters, never values) and its own rejected reply; a second
 break discards the judge (L4-VER-015). Every `verify.judge` event carries `reply`, one of `valid`, `repaired` (the repair
-alone), `retried` (a second call answered a schema break) or `discarded`, and `verification.md` and `verdict.json` count the
+alone), `retried` (a second call answered a schema break, or a reply that left out an asked id, L4-VER-017) or `discarded`, and `verification.md` and `verdict.json` count the
 four per judge profile over the unit's ledger (`judge_replies`) beside the round's own (`judge_reply`).
 
 ### 10.4 Aggregation (deterministic)
@@ -3140,6 +3141,17 @@ question (the earlier question is consumed), so a person or an allowed agent dec
 does not fail on the old reject. Why this is right: a feedback-only plan exists only when no finding was convertible, so
 every reject in force was a non-convertible human one; the documented way out of that escalation is the feedback
 (L4-OPS-022); the feedback is the concrete form of the rejection, and `feedback.judged` checks that it was addressed.
+
+**L4-VER-017 The judge's evidence answers survive a resumed round and a reply that leaves one out.** When a round
+resumes at aggregation (D4), the ladder SHALL record each `review.accepted_judged` row of the reused round again, with
+the new round's number and `reused_from` set to the reused round; a reused round with no such row carries none. The
+merge guard of L4-YOLO-028 reads the rows of the PASS round only, so a PASS that a person's accepted hold gave keeps
+the judge's answers of the round it reuses. When the judge prompt has an accepted block or a feedback block and a
+valid reply leaves out an id of a block, the judge run SHALL make one more call, within its at most two calls: the
+first prompt, the judge's own reply (redacted and cut as for a schema repair) and a message that names each missing
+id. A valid second reply SHALL be the verdict (`reply: retried`). A second reply that is not valid, a second call that
+times out or errs, and a second call served by another model SHALL keep the first verdict: a valid verdict is never
+dropped over an evidence answer. An id that no kept reply answers is recorded as not answered, as before.
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -4163,7 +4175,19 @@ unit has an open run, the line `  open run: <run id> started <t> ago, no end rec
 `last_activity` and `open_run` for each plan, `null` when they do not apply. A plan in a final state SHALL show
 neither line. `plan_lines` of `l4 status` MUST NOT change.
 
-
+**L4-YOLO-031** A person can waive an accepted finding, audited. `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw]
+[--yes] [--no-run]` SHALL record `plan.finding_waived{finding, subject, reason, by, actor, marker}` in the plan ledger,
+pushed with the lease, then start the harness's CI on the base branch unless `--no-run`. It MUST be refused, with
+nothing recorded, for a plan that is not `active`, `waiting` or `stopped` (before the activation the command is
+`l4 yolo accept`), for an id that is not a finding of the activation's accepted items, for an empty reason, and for an
+agent unless `yolo.review.accept_by_agents` is true at `origin/<base>` and `--yes` is given. A person MUST type the
+plan id after the finding and its acceptance are shown. `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
+reason, by, actor}` for a waived id. A new activation clears the waivers. With `merge: auto`, the merge guard of
+L4-YOLO-028 SHALL count a waived finding as answered, so the harness merges the unit through its guarded merge. The
+report SHALL show `waived by <by> (<actor>): <reason>` for a waived finding the verifier did not answer
+`addressed: true`, and `l4 yolo status` SHALL list the waivers. For a plan waiting with `accepted_finding_open`, the
+`Next:` line SHALL name `l4 retry --unit U` (the verifier gave no answer), `l4 feedback add --unit U` (the code must
+change) and `l4 yolo waive` (the finding needs no handling).
 ---
 
 ## 13. Memory and lessons
@@ -5039,6 +5063,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 25 | `result-contract` | an implementer step that did its work does not lose the attempt to a slip in its result object: the prompt of a prompt-contract step asks for `status` and `summary` first (template `output@1`), the harness repairs the object with fixed rules and records `result.normalized`, an attempt fails for its result only when no result object is found, and `agent.finished` records the peak context of one call (L4-IMP-019, L4-IMP-020, L4-IMP-021, L4-IMP-022 not built, L4-FAC-010, L4-FAC-011; `openspec/changes/result-contract/`) | the live check of task 7.3 on a dummy repository: a unit on a free OpenCode model that slipped, with `+output@1` in the prompt and the count of `result.normalized` events |
 | 26 | `run-liveness` | a person can tell a working run from a stuck one: a heartbeat log line every `implementer.heartbeat` (default 2m) with counts and times only, `implementer.idle_timeout` (default 10m) that stops an agent with no stdout line and no open tool call (SIGINT, 5 s, SIGKILL) with the `agent.idle` record and a reason that names the key, stream readers that see open tool calls of claude-code, codex and kiro-cli, `l4 status` and `l4 yolo status` with the last activity and the open run with its CI link (`run.started.ci_url`), the red gate line `red: <n> new tests fail, as intended`, the GitHub job summary, and the runbook procedure 4.6 (L4-IMP-023, L4-IMP-024, L4-FAC-012, L4-OPS-020, L4-OPS-021, L4-YOLO-030, L4-OBS-004, L4-OBS-005; `openspec/changes/run-liveness/`) | the live check of task 7.3 on a dummy repository: a unit of two tasks with heartbeat lines every 2 minutes, `Last activity:` and `Open run:` during the run, the OpenCode silent-call probe, and a re-run with `/attempts/2` |
 | 27 | `settle-human-rejects` | a human reject that no fix task could be derived from ends when a feedback-only fix unit takes the person's concrete feedback, so the next round judges the fixed code: `effective_verdicts` drops a reject recorded before a `fix.spawned{feedback_only}`, and the spawn lists those questions in `consumed` (L4-VER-016); an escalation with `no_convertible_finding` says to give the fix as feedback before the retry in `l4 status`, the refusal of `l4 run --unit` and the sticky note (L4-OPS-022); and `l4 questions answer Q-NNN --replace` replaces the answer of an answered verdict question and keeps the old one in a comment (L4-QMD-010; `openspec/changes/settle-human-rejects/`) | the live check on a dummy repository, not run in this change: a hold rejected in prose, the feedback, the fix unit and a round that passes |
+| 28 | `answer-accepted-findings` | a unit whose PASS came from an accepted hold merges by itself again: a round resumed at aggregation records the judge's answers to the accepted findings of the round it reuses (L4-VER-017); a valid judge reply that leaves out an asked accepted or feedback id gets one more call that names the ids, and a broken second reply keeps the first verdict (L4-VER-017); and `l4 yolo waive PLAN FINDING --reason TEXT` lets a person (or an allowed agent) waive an accepted finding on record, so the harness merges the unit through its guarded merge, with a `Next:` line that names retry, feedback and waive for `accepted_finding_open` (L4-YOLO-031; `openspec/changes/answer-accepted-findings/`) | the consumer repository's unit that waited with `accepted_finding_open`, after the upgrade |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7116,6 +7141,26 @@ scenario is a spec defect (§26).
 - **When** the verdicts are resolved and `raise_verdict_questions` runs
 - **Then** the hold has no verdict in force, no human finding is added, and a new hold question is raised
 
+#### SCN-VER-68 (+) A resumed round carries the accepted answers · L4-VER-017
+- **Given** a unit whose round 1 ended NEEDS_HUMAN with `review.accepted_judged{id: F-0a1b2c, round: 1, addressed: true}`
+- **When** round 2 resumes at aggregation
+- **Then** the ledger holds `review.accepted_judged{id: F-0a1b2c, round: 2, addressed: true, reused_from: 1}` and the judge is not called
+
+#### SCN-VER-69 (+) A reply that leaves out an accepted id is asked once more · L4-VER-017
+- **Given** a judge prompt with the accepted ids F-0a1b2c and F-3d4e5f and a valid first reply that answers only F-0a1b2c
+- **When** the judge run goes on
+- **Then** a second call names F-3d4e5f, its valid reply is the verdict with `reply: retried`, and both ids are recorded with the second reply's answers
+
+#### SCN-VER-70 (−) A broken second reply keeps the first verdict · L4-VER-017
+- **Given** the first reply of SCN-VER-69 and a second reply that is not valid
+- **When** the judge run ends
+- **Then** the verdict is the first reply's, the run made two calls, and F-3d4e5f is recorded as not answered
+
+#### SCN-VER-71 (+) A feedback id left out is asked for too, and a complete reply is one call · L4-VER-017
+- **Given** a prompt with the feedback item FB-001, a first reply without `feedback`, and in turn a first reply that answers every asked id
+- **When** the judge runs
+- **Then** the first makes a second call that names FB-001; the second makes one call
+
 ### 23.9.1 Human feedback (FBK)
 
 #### SCN-FBK-01 (+) Harness edits leave the person's text alone · L4-FBK-001
@@ -8686,6 +8731,21 @@ scenario is a spec defect (§26).
 - **Given** a fixed clock, an `active` plan whose newest plan event is 40 minutes old and whose current unit `openspec:add-x` has an open run started 21 minutes ago and a last event `task.red_ok{task: "2.1"}` 6 minutes ago, and a `completed` plan
 - **When** `l4 yolo status` and `l4 yolo status --json` run
 - **Then** the active plan has `  last activity: 6m ago (task.red_ok, task 2.1, unit openspec:add-x)` and `  open run: <id> started 21m ago, no end recorded: <link>`, its JSON has both keys, and the completed plan has neither line and `null` for both keys
+
+#### SCN-YOLO-73 (+) A waived finding lets the harness merge the unit · L4-YOLO-031
+- **Given** an active `merge: auto` plan whose current unit is in review with a PASS and one accepted finding F-1 answered `addressed: false`, and the plan waits with `accepted_finding_open`
+- **When** a person waives F-1 with a reason and the next step runs
+- **Then** the plan ledger holds `plan.finding_waived{finding: F-1, reason, by, actor: person}`, the wait ends, and the unit is merged by the harness
+
+#### SCN-YOLO-74 (−) A waiver is refused where it does not apply · L4-YOLO-031
+- **Given** in turn: an id that is not an accepted finding of the activation; a plan not yet activated; an agent at a target without `accept_by_agents`; a person who types another answer than the plan id
+- **When** `l4 yolo waive` runs
+- **Then** it exits 2, says why, and records nothing
+
+#### SCN-YOLO-75 (+) The wait names its ways out · L4-YOLO-031
+- **Given** a plan waiting with `accepted_finding_open` on unit U
+- **When** `l4 yolo status` prints its `Next:` line
+- **Then** the line names `l4 retry --unit U`, `l4 feedback add --unit U` and `l4 yolo waive`
 
 ### 23.21 Experience graph (KG)
 
