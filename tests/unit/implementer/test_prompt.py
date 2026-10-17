@@ -299,7 +299,8 @@ def test_a_task_without_requirement_links_keeps_the_openspec_wording():
         "# Criteria of this unit\nOpenSpec does not link tasks to scenarios, so all of them are listed; cover those "
         "that this task's requirement names.\n" in text
     )
-    assert "_Requirements:" not in text
+    task_and_criteria = text[text.index("# Task 1.1") : text.index("# Phase")]
+    assert "_Requirements:" not in task_and_criteria  # red@11 names the line itself, in its own rules
 
 
 # -- live M1.5 P3 (job 5528): the red prompt must say where browser tests live (m1.x fix F5)
