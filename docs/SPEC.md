@@ -451,7 +451,7 @@ of the harness package.
 | `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
-| `l4 yolo check PLAN` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings | none |
+| `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings. `--worktree` reads the plan files and the units from the working tree, before the push, and adds `uncovered` and `covered_twice` (L4-YOLO-034) | none |
 | `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
 | `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
@@ -4305,6 +4305,15 @@ fails SHALL keep the branch and record `unit.branch_kept{branch, reason}`; a del
 the unit and archive branches of the plan's integrated units whose PR is merged and whose tip is still the recorded
 head. The lock ref SHALL NOT be deleted at merge time. A branch of a PR the forge does not show merged SHALL NOT be
 deleted. The evidence link in the PR body names the unit head commit, so it opens after the branch is gone.
+
+**L4-YOLO-034** A plan is checked in the working tree before the push. `l4 yolo check PLAN --worktree` SHALL read the
+plan files and the units from the working tree and run the admission of `l4 yolo check` on them, and SHALL also report,
+across all plan files of the working tree, `uncovered` (a unit no plan lists as planned or excluded, except a derived
+unit whose parent is listed, and except a unit `yolo.hold` matches) and `covered_twice` (a unit two plan files plan).
+It SHALL print every finding, then the order of the units and the budget warnings, write nothing, and exit 0 when the
+plan is admitted and nothing is uncovered or covered twice, else 2. A plan file that is not in the working tree SHALL be
+exit 2 naming the path. For the same tree, its coverage findings SHALL be the ones `scripts/validate_plan.py` prints.
+`l4 yolo draft` and the worktree review SHALL name this command in their hints.
 ---
 
 ## 13. Memory and lessons
@@ -5223,6 +5232,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 | 35 | `job-toolchains` | `ci.toolchains` (go, node, pnpm): the GitHub workflow sets them up before L4 with pinned shas and their caches off, the default caches `gobuild` and `pnpm`, `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` for Go gates, doctor TOOL-001 for a gate command that is not on the PATH, and `l4 init` proposals (L4-CI-005, SCN-CI-19..23; `openspec/changes/job-toolchains/`) | the second consumer repository's gates of its Go and TypeScript code |
 | 36 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
+| 37 | `check-worktree` | `l4 yolo check PLAN --worktree` admits the plan files and the units of the working tree before the push and reports `uncovered` and `covered_twice` as `validate_plan.py` does; the hints of `l4 yolo draft` and of the worktree review name it (L4-YOLO-034; `openspec/changes/check-worktree/`) | a plan author on a feature branch: run it before the push |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9133,6 +9143,26 @@ scenario is a spec defect (§26).
 - **Given** the merge of SCN-YOLO-76 and `yolo.merge.delete_branches: false`
 - **When** the merge and the archive merge complete
 - **Then** both branches stay and no `refs/l4/merged/…` ref is pushed
+
+#### SCN-YOLO-86 (+) A plan on a feature branch is checked before the push · L4-YOLO-034
+- **Given** a working tree with three new specs, a plan file `.l4/plans/multitenancy.json` that lists them with their dependencies and excludes the two held changes, none of it pushed
+- **When** `l4 yolo check multitenancy --worktree` runs
+- **Then** it prints `multitenancy: admitted (working tree)` and the order, writes nothing, and exits 0
+
+#### SCN-YOLO-87 (−) A spec no plan lists is uncovered · L4-YOLO-034
+- **Given** the working tree of SCN-YOLO-86 with one held change left out of `exclude`
+- **When** the check runs
+- **Then** it prints `uncovered: openspec:add-llm-vision-provider` and exits 2, as `validate_plan.py` does for that tree
+
+#### SCN-YOLO-88 (−) A dependency cycle and an unknown unit are refused before the push · L4-YOLO-034
+- **Given** a plan file whose units depend on each other in a cycle and name a unit that does not exist
+- **When** the check runs
+- **Then** it prints the `cycle` and `unknown_unit` findings, writes nothing, and exits 2
+
+#### SCN-YOLO-89 (+) The draft names the command · L4-YOLO-034
+- **Given** a working tree with specs that no plan lists
+- **When** `l4 yolo draft p` runs
+- **Then** its `Next:` lines name `l4 yolo check p --worktree`
 
 ### 23.21 Experience graph (KG)
 

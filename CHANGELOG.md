@@ -6,6 +6,15 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.14 (unreleased)
+
+### Added
+- `l4 yolo check <plan> --worktree` checks a delivery plan before the push, with the installed `l4`. It reads the plan
+  files and the units from the working tree, runs the admission of `l4 yolo check`, and adds the checks across all plan
+  files that only `scripts/validate_plan.py` ran (`uncovered`, `covered_twice`). It prints the findings, the order and the
+  budget warnings, writes nothing, and exits 0 or 2. `l4 yolo draft` and `l4 yolo review --worktree` name it in their
+  hints. The script stays for an agent or a CI step without the harness, and a parity test holds the two together.
+
 ## 0.4.13 (2026-10-17)
 
 ### Added

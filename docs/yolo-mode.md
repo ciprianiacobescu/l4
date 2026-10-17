@@ -107,16 +107,16 @@ Do not write the file from nothing. Let L4 list the specs, then add the order yo
    calls no model, and refuses an existing file. It never adds a dependency: an order is a claim about the specs, and you must make it.
 2. Edit the file: move units into batches, add `depends_on` only where a spec uses something that another spec
    introduces or changes, and give each exclusion a reason that a person can check.
-3. Run the validator. `l4 yolo check <plan-id>` reads the plan file and the units from the target, so it runs after the
-   push (step 4); before the push it exits 2 for a plan file that is not there yet. The validator is `scripts/validate_plan.py` (the same file is in
-   the skill, `plugins/l4/skills/l4/scripts/`). It needs only Python, reads every plan file of the working tree, checks
-   the schema, the graph and the coverage across all plans (`uncovered`, `covered_twice`), and prints the dispatch
-   order and the waves. A wave is what could run together; the plan still runs one unit at a time. `l4 yolo check`
-   also checks what the script cannot: open questions, intake, finished units, profiles, the target and the merge policy
-   (CI runs the same admission and the review).
+3. Run `l4 yolo check <plan-id> --worktree`. It reads the plan files and the units from the working tree, so it runs before
+   the push: the schema, the graph, open questions, intake, finished units, profiles, the target and the merge policy,
+   and the coverage across all plan files (`uncovered`, `covered_twice`). It prints the findings, the dispatch order and
+   the budget warnings, and writes nothing. Without the harness installed, the standalone validator does most of it:
+   `scripts/validate_plan.py` (the same file is in the skill, `plugins/l4/skills/l4/scripts/`); it needs only Python and
+   also prints the waves. A wave is what could run together; the plan still runs one unit at a time. CI runs the same
+   admission and the review.
 4. Commit and push the plan file. When the specs it lists are new (not on the target yet), commit them in the same
    commit as the plan file, or push the plan file first: a spec that lands without a plan that holds it runs at once.
-   Only an edit of an existing unit's spec stays out of the plan commit. Then run `l4 yolo check <plan-id>`, and review
+   Only an edit of an existing unit's spec stays out of the plan commit. Then run `l4 yolo check <plan-id>` (on the target now), and review
    and activate (below).
 5. To add a spec later, run `l4 yolo draft <plan-id> --update`. It appends the new specs to `unplanned` (or to `exclude`),
    keeps every other edit, and reports a unit that is gone as `gone: <id>` without removing it. It warns when the plan is
@@ -194,7 +194,7 @@ A plan with `merge: auto` while `forge.merge_policy` is `human` is refused at ad
 ## Review in CI, then activate
 
 1. Push the plan file to the base branch.
-2. `l4 yolo check <plan>` runs the deterministic checks and prints the order of the units. The checks are: unique ids, known
+2. `l4 yolo check <plan>` (before the push: `l4 yolo check <plan> --worktree`) runs the deterministic checks and prints the order of the units. The checks are: unique ids, known
    units, no cycle, known profiles, `target` equal to the base branch, no open question, the intake checks, and no unit
    that is already merged. It exits 0 or 2. It changes nothing.
 3. A CI run reviews the plan. Run `l4 yolo review <plan>` to ask for it now. A judge agent reads each unit, and each
@@ -231,7 +231,7 @@ The runbook has the procedure (section 12.2a). These are the rules.
   limit what the judge reads. A prerequisite folder is shown in this order: proposal, requirements, `specs/**/spec.md`,
   bugfix, design, other files, then `tasks.md`. A cut of a prerequisite does not block: it is listed in the unit's
   `missing`. A cut of the unit's own folder is a blocking `material` finding with the file, its size, the budget, the key
-  and the fix. `validate_plan.py` prints the same overruns before the push; `l4 yolo check` prints them after it, from the target.
+  and the fix. `l4 yolo check --worktree` and `validate_plan.py` print the same overruns before the push; `l4 yolo check` prints them after it, from the target.
 - **Check marks.** The judge sees `tasks.md` as the file has it. A ticked task is delivered, and is not a reason for a
   `feasibility` or `duplicate_scope` finding. The unit digest still ignores the marks.
 - **Verdict rules.** A NEEDS_REVISION with minor findings only is READY, with the findings kept. A NEEDS_REVISION with no
@@ -353,7 +353,7 @@ example with a PR. You can squash there. L4 never does it.
 | Command | What it does |
 |---|---|
 | `l4 yolo draft <plan> [--target B] [--merge human\|auto] [--update]` | Writes or updates the plan file in the working tree from the specs that no plan lists. Commits nothing. |
-| `l4 yolo check <plan>` | Checks the plan and prints the order. Changes nothing. |
+| `l4 yolo check <plan> [--worktree]` | Checks the plan and prints the order. `--worktree`: the working tree's plan, before the push. Changes nothing. |
 | `l4 yolo review <plan> [--local]` | Reviews the plan in CI now, or here with `--local`. |
 | `l4 yolo review <plan> --worktree [--record] [--fresh <subject>]` | Reviews the working tree before the push (a dry run); `--record` records a committed tree. |
 | `l4 yolo findings <plan> [<subject>] [--all] [--json]` | Shows the findings of the latest review with how to resolve each. Changes nothing. |

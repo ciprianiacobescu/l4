@@ -14,6 +14,6 @@ Every task follows these rules:
 
 ## 2. Docs
 
-- [ ] 2.1 `docs/SPEC.md` (L4-YOLO-034, SCN-YOLO-86..89, the command table row of `l4 yolo check`, the change row), the
+- [x] 2.1 `docs/SPEC.md` (L4-YOLO-034, SCN-YOLO-86..89, the command table row of `l4 yolo check`, the change row), the
   skill's `plan.md` (Validate: lead with `l4 yolo check <id> --worktree`; the script is the fallback without the
   harness), `docs/yolo-mode.md`, `docs/runbook.md` §12, `CHANGELOG.md` under `## 0.4.14 (unreleased)`.

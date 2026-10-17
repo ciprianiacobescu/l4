@@ -1647,7 +1647,7 @@ stateDiagram-v2
 ### 12.2 Procedure: review and activate a plan
 
 1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it. To make the file, use 12.8.
-2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing.
+2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing. Before the push, run `l4 yolo check <plan-id> --worktree`: it reads the plan files and the units from the working tree.
 3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.
 4. Run `l4 yolo review <plan-id>`. This starts a run on `<base>`. The run reviews the plan.
 5. Run `l4 yolo status <plan-id>`. Read the verdict of each unit and each batch.
@@ -1889,11 +1889,11 @@ Use this procedure to make a new plan file, or to change a plan after you add or
    commit, push or call a model. It refuses a file that exists.
 2. Edit the file. Move the units into batches. Add `depends_on` only where a spec uses something that another spec
    introduces or changes. Give each `exclude` entry a reason that a person can check.
-3. Run `python3 scripts/validate_plan.py` (the skill has the same file in `plugins/l4/skills/l4/scripts/`). Correct each
-   problem. The script prints the order and the waves. A wave shows what could run together. The plan runs one unit at a
-   time.
-4. Run `l4 yolo check <plan-id>`. Correct each finding.
-5. Commit and push the plan file. Write one line of evidence for each dependency in the commit message.
+3. Run `l4 yolo check <plan-id> --worktree`. Correct each finding. It prints the order. Without the harness installed,
+   run `python3 scripts/validate_plan.py` (the skill has the same file in `plugins/l4/skills/l4/scripts/`); it prints the
+   order and the waves. A wave shows what could run together. The plan runs one unit at a time.
+4. Commit and push the plan file. Write one line of evidence for each dependency in the commit message.
+5. Run `l4 yolo check <plan-id>`. It reads the pushed plan. Correct each finding.
 6. Run `l4 yolo review <plan-id>`, then read it (12.2).
 7. A person runs `l4 yolo activate <plan-id> --reason "<why>"`.
 
