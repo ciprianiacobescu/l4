@@ -1,12 +1,17 @@
 """`l4 mcp install` writes a client's documented MCP configuration (L4-MCP-004, SCN-MCP-08, SCN-MCP-09)."""
 
 import json
+import os
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
 
 from l4.cli import main
+
+from .conftest import make_repo
 
 ALL = ["claude-code", "cursor", "vscode", "kiro", "codex", "opencode"]
 
@@ -57,7 +62,7 @@ def test_project_scope_writes_the_documented_file_with_the_serve_command(client,
     root = repo_factory("mint-mory")
     assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
     entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")  # the project entry is named l4
-    assert command_of(client, entry) == ["l4", "mcp", "serve", "--repo", str(root)]
+    assert command_of(client, entry) == ["l4", "mcp", "serve"]  # no path: the file is committed (F1)
     assert not (home / ".mcp.json").exists()
 
 
@@ -116,7 +121,11 @@ def test_codex_replace_keeps_the_text_around_the_table(repo_factory, home):
     text = path.read_text()
     data = tomllib.loads(text)
     assert text.startswith("# my codex\n")
-    assert data["mcp_servers"]["l4-mint-mory"] == {"command": "l4", "args": ["mcp", "serve", "--repo", str(root)]}
+    assert data["mcp_servers"]["l4-mint-mory"] == {
+        "command": "l4",
+        "args": ["mcp", "serve", "--repo", str(root)],
+        "env": {"A": "1"},  # the user's own subtable stays (F2)
+    }
     assert data["mcp_servers"]["after"] == {"command": "after"} and data["profiles"]["p"] == {"model": "y"}
 
 
@@ -146,7 +155,9 @@ def test_the_default_repository_is_the_working_directorys(repo_factory, home, mo
     (root / "sub").mkdir()
     monkeypatch.chdir(root / "sub")
     assert install(home, "--client", "cursor", "--project") == 0
-    assert read(root / ".cursor/mcp.json")["mcpServers"]["l4"]["args"][-1] == str(root)
+    assert read(root / ".cursor/mcp.json")["mcpServers"]["l4"]["args"] == ["mcp", "serve"]
+    assert install(home, "--client", "cursor") == 0  # user scope: the working directory's repository, by path
+    assert read(home / ".cursor/mcp.json")["mcpServers"]["l4-here"]["args"][-1] == str(root)
 
 
 def test_a_repository_that_is_not_an_l4_repository_is_refused(tmp_path, repo_factory, home, capsys):
@@ -213,3 +224,145 @@ def test_claude_code_user_scope_prints_the_documented_command_and_writes_nothing
 
 def test_an_unknown_client_is_refused(repo_factory, home):
     assert install(home, "--client", "windsurf", "--repo", str(repo_factory("r"))) == 2
+
+
+# --- review findings F1, F2, F3 ------------------------------------------------------------------------------------
+
+
+def git(cwd: Path, *argv: str) -> str:
+    done = subprocess.run(["git", "-C", str(cwd), *argv], capture_output=True, text=True, check=True)
+    return done.stdout
+
+
+def serve_status(cwd: Path, args: list[str], env: dict[str, str] | None = None) -> str:
+    """Start `l4 mcp serve <args>` in `cwd`, call l4_status without a repo argument, return the result text."""
+    lines = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "l4_status", "arguments": {}}},
+    ]
+    done = subprocess.run(
+        [sys.executable, "-m", "l4", *args],
+        input="".join(json.dumps(m) + "\n" for m in lines),
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env={**os.environ, **(env or {})},
+        timeout=120,
+        check=False,
+    )
+    replies = [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
+    call = next(r for r in replies if r.get("id") == 2)
+    return call["result"]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("client", ALL)
+def test_f1_project_scope_writes_no_absolute_path(client, repo_factory, home):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
+    entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")
+    assert command_of(client, entry) == ["l4", "mcp", "serve"]
+    assert str(root) not in (root / PROJECT_FILE[client]).read_text()
+
+
+def test_f1_a_worktree_started_from_the_committed_file_serves_the_worktree(repo_factory, home, tmp_path):
+    root = repo_factory("mint-mory")
+    git(root, "config", "user.email", "t@example.com")
+    git(root, "config", "user.name", "t")
+    assert install(home, "--client", "claude-code", "--project", "--repo", str(root)) == 0
+    git(root, "add", ".mcp.json", ".l4/config.yaml")
+    git(root, "commit", "-q", "-m", "mcp")
+    tree = tmp_path / "wt" / "feature"
+    git(root, "worktree", "add", "-q", str(tree), "-b", "feature")
+    args = json.loads((tree / ".mcp.json").read_text())["mcpServers"]["l4"]["args"]
+    text = serve_status(tree, args)
+    assert text.splitlines()[0] == f"repo: {tree.resolve()}"
+
+
+def test_f1_claude_project_dir_wins_over_the_working_directory(repo_factory, tmp_path):
+    root = repo_factory("one")
+    other = repo_factory("two")
+    text = serve_status(root, ["mcp", "serve"], {"CLAUDE_PROJECT_DIR": str(other)})
+    assert text.splitlines()[0] == f"repo: {other}"
+
+
+def test_f2_two_repositories_with_the_same_folder_name_are_not_merged(tmp_path, home, capsys):
+    first = make_repo(tmp_path / "clones" / "work" / "app")
+    second = make_repo(tmp_path / "clones" / "oss" / "app")
+    for client in ("cursor", "codex"):
+        assert install(home, "--client", client, "--repo", str(first)) == 0
+        assert install(home, "--client", client, "--repo", str(second)) == 2
+        err = capsys.readouterr().err
+        assert str(first) in err and str(second) in err and "--name" in err
+        data = read(home / USER_FILE[client])
+        assert command_of(client, entry_of(client, data, "l4-app"))[-1] == str(first)
+        # an explicit name keeps both
+        assert install(home, "--client", client, "--repo", str(second), "--name", "l4-oss-app") == 0
+        data = read(home / USER_FILE[client])
+        assert command_of(client, entry_of(client, data, "l4-app"))[-1] == str(first)
+        assert command_of(client, entry_of(client, data, "l4-oss-app"))[-1] == str(second)
+
+
+def test_f2_a_reinstall_for_the_same_repository_keeps_the_users_other_keys(repo_factory, home):
+    root = repo_factory("app")
+    path = home / ".cursor/mcp.json"
+    path.parent.mkdir(parents=True)
+    old = {"command": "old", "args": ["mcp", "serve", "--repo", str(root)], "env": {"A": "1"}, "disabled": True}
+    path.write_text(json.dumps({"mcpServers": {"l4-app": old}}))
+    assert install(home, "--client", "cursor", "--repo", str(root)) == 0
+    entry = read(path)["mcpServers"]["l4-app"]
+    assert entry["command"] == "l4" and entry["env"] == {"A": "1"} and entry["disabled"] is True
+    codex = home / ".codex/config.toml"
+    codex.parent.mkdir(parents=True)
+    codex.write_text(
+        f'[mcp_servers.l4-app]\ncommand = "old"\nargs = ["mcp", "serve", "--repo", {json.dumps(str(root))}]\n'
+        'startup_timeout_sec = 30\n[mcp_servers.l4-app.env]\nA = "1"\n'
+    )
+    assert install(home, "--client", "codex", "--repo", str(root)) == 0
+    table = read(codex)["mcp_servers"]["l4-app"]
+    assert table["command"] == "l4" and table["env"] == {"A": "1"} and table["startup_timeout_sec"] == 30
+    assert table["args"] == ["mcp", "serve", "--repo", str(root)]
+
+
+def commit_symlink(root: Path, link: str, target: str) -> None:
+    (root / link).parent.mkdir(parents=True, exist_ok=True)
+    (root / link).symlink_to(target)
+    git(root, "add", link)
+
+
+def test_f3_project_install_refuses_a_committed_symlink_to_a_file_outside(repo_factory, home, capsys):
+    root = repo_factory("evil")
+    claude = home / ".claude.json"
+    claude.write_text('{"numStartups": 3, "projects": {}}')
+    commit_symlink(root, ".mcp.json", os.path.relpath(claude, root))
+    before = claude.read_text()
+    assert install(home, "--client", "claude-code", "--project", "--repo", str(root)) == 2
+    assert "symlink" in capsys.readouterr().err
+    assert claude.read_text() == before
+
+
+def test_f3_project_install_refuses_a_dangling_symlink_and_creates_nothing(repo_factory, home, tmp_path, capsys):
+    root = repo_factory("evil")
+    outside = tmp_path / "outside" / "planted" / "autostart.json"
+    commit_symlink(root, ".cursor/mcp.json", os.path.relpath(outside, root / ".cursor"))
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root)) == 2
+    assert not outside.parent.exists()
+
+
+def test_f3_project_install_refuses_a_symlinked_parent_folder(repo_factory, home, tmp_path, capsys):
+    root = repo_factory("evil")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (root / ".kiro").symlink_to(elsewhere)
+    assert install(home, "--client", "kiro", "--project", "--repo", str(root)) == 2
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_f3_user_scope_still_follows_a_dotfile_symlink(repo_factory, home, tmp_path):
+    root = repo_factory("app")
+    real = tmp_path / "dotfiles" / "mcp.json"
+    real.parent.mkdir()
+    real.write_text("{}")
+    (home / ".cursor").mkdir()
+    (home / ".cursor/mcp.json").symlink_to(real)
+    assert install(home, "--client", "cursor", "--repo", str(root)) == 0
+    assert (home / ".cursor/mcp.json").is_symlink() and "l4-app" in real.read_text()

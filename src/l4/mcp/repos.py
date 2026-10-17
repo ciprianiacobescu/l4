@@ -43,9 +43,10 @@ def resolve_root(path: Path) -> Path:
 class Repos:
     roots: tuple[Path, ...]  # resolved repository roots given with --repo (empty: the working directory decides)
     cwd: Path
+    project_dir: str | None = None  # CLAUDE_PROJECT_DIR: with no --repo it is looked at before the working directory
 
     @classmethod
-    def from_paths(cls, paths: list[Path], *, cwd: Path) -> "Repos":
+    def from_paths(cls, paths: list[Path], *, cwd: Path, project_dir: str | None = None) -> "Repos":
         roots: dict[Path, None] = {}
         for path in paths:
             roots[resolve_root(path)] = None
@@ -56,16 +57,21 @@ class Repos:
                     f"{names[root.name]} and {root}: the same folder name {root.name!r}; a call could not name one"
                 )
             names[root.name] = root
-        return cls(tuple(roots), cwd)
+        return cls(tuple(roots), cwd, project_dir or None)
 
     def _served(self) -> tuple[Path, ...]:
         if self.roots:
             return self.roots
+        if self.project_dir:
+            try:
+                return (resolve_root(Path(self.project_dir)),)
+            except RepoError:
+                pass  # a stale variable: the working directory still decides
         try:
             return (resolve_root(self.cwd),)
         except RepoError as exc:
             raise NoRepository(
-                f"this server was not started for a repository ({exc}); start it with --repo PATH "
+                f"this server was not started for a repository ({exc}); start it in one, or with --repo PATH "
                 "(`l4 mcp install --repo PATH` writes that)"
             ) from None
 

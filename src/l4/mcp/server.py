@@ -192,7 +192,9 @@ def run_serve(app: Any, *, repos: Sequence[Path] = ()) -> ExitCode:
 
     Each `--repo` must resolve to a git repository with `.l4/config.yaml` before anything is served (exit 2)."""
     try:
-        served = Repos.from_paths([Path(p) for p in repos], cwd=Path(app.repo))
+        served = Repos.from_paths(
+            [Path(p) for p in repos], cwd=Path(app.repo), project_dir=app.environ.get("CLAUDE_PROJECT_DIR")
+        )
     except RepoError as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, f"mcp serve: {exc}") from None
     protocol_out = sys.stdout

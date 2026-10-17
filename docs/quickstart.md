@@ -344,8 +344,12 @@ l4 mcp install --client <claude-code|cursor|vscode|kiro|codex|opencode> [--proje
 
 - Without `--project` the user's configuration is written, one entry per repository (`l4-<folder>`), so several
   repositories at different places on disk each have their own server: the entry runs
-  `l4 mcp serve --repo <absolute path>` and that server runs commands in that repository only.
-- With `--project` the repository's own file is written (entry `l4`), for example `.cursor/mcp.json`.
+  `l4 mcp serve --repo <absolute path>` and that server runs commands in that repository only. Two repositories
+  with the same folder name need `--name` for the second (install refuses to replace the entry of another repository).
+- With `--project` the repository's own file is written (entry `l4`), for example `.cursor/mcp.json`. It holds
+  `l4 mcp serve` with no path, so you can commit it: the server serves `$CLAUDE_PROJECT_DIR` when set, else the
+  repository of the folder it is started in (each clone and git worktree serves itself). Install refuses a symlink in
+  the repository (a cloned repository cannot redirect the write).
 - `vscode` has no documented user file (use `--project`); `claude-code` keeps user servers in `~/.claude.json`, so
   without `--project` the command prints the documented `claude mcp add --scope user …` line to run.
 - The IDE must find `l4` on its PATH. A server with several `--repo` takes a `repo` argument in every tool.

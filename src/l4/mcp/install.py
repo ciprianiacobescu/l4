@@ -1,5 +1,6 @@
 """`l4 mcp install` (L4-MCP-004): write the MCP configuration of a client so that it starts
-`l4 mcp serve --repo <repository>`.
+`l4 mcp serve --repo <repository>` (user scope) or `l4 mcp serve` (project scope: the file is committed, so it holds
+no path of this machine and every clone and worktree serves its own folder).
 
 Every path and shape below was checked against the vendor's documentation on 2026-10-17 (the URL is kept beside each
 client). The write merges into the file, keeps every other server, is atomic and refuses a file that does not parse.
@@ -27,24 +28,26 @@ import click
 
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
+from l4.fsutil import UnsafeFile, reject_symlinks
 from l4.mcp.repos import RepoError, resolve_root
 
 NAME = re.compile(r"[A-Za-z0-9_-]+")
 COMMAND = "l4"
 
 
-def server_args(repo: Path) -> list[str]:
-    return ["mcp", "serve", "--repo", str(repo)]
+def server_args(repo: Path | None) -> list[str]:
+    """`--repo` only for a user-scope entry: a project file is committed and must not name a path of this machine."""
+    return ["mcp", "serve", *(["--repo", str(repo)] if repo is not None else [])]
 
 
 # --- JSON clients --------------------------------------------------------------------------------------------------
 
 
-def _stdio(repo: Path, *, typed: bool) -> dict[str, Any]:
+def _stdio(repo: Path | None, *, typed: bool) -> dict[str, Any]:
     return {**({"type": "stdio"} if typed else {}), "command": COMMAND, "args": server_args(repo)}
 
 
-def _opencode(repo: Path, *, typed: bool = True) -> dict[str, Any]:
+def _opencode(repo: Path | None, *, typed: bool = True) -> dict[str, Any]:
     return {"type": "local", "command": [COMMAND, *server_args(repo)], "enabled": True}
 
 
@@ -112,8 +115,10 @@ class ConfigRefused(Exception):
 # --- writing -------------------------------------------------------------------------------------------------------
 
 
-def write_atomic(path: Path, text: str) -> None:
-    target = path.resolve() if path.is_symlink() else path
+def write_atomic(path: Path, text: str, *, follow_symlink: bool = True) -> None:
+    """Replace `path` atomically. A symlink is followed only for a user-scope file (dotfile setups); a file inside a
+    repository is never followed (the caller has refused symlinks there)."""
+    target = path.resolve() if follow_symlink and path.is_symlink() else path
     target.parent.mkdir(parents=True, exist_ok=True)
     handle, temp = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
     try:
@@ -127,7 +132,31 @@ def write_atomic(path: Path, text: str) -> None:
         raise
 
 
-def merge_json(path: Path, client: JsonClient, name: str, entry: dict[str, Any]) -> str:
+def repo_of(args: Any) -> str | None:
+    """The `--repo` value in an argv list, or None."""
+    if isinstance(args, list) and "--repo" in args:
+        at = args.index("--repo")
+        if at + 1 < len(args) and isinstance(args[at + 1], str):
+            return args[at + 1]
+    return None
+
+
+def check_same_repository(where: Path, name: str, existing: str | None, repo: Path) -> None:
+    """An entry of that name that serves another repository is never replaced (two folders can share a name)."""
+    if existing is None:
+        return
+    try:
+        same = Path(existing).expanduser().resolve() == repo.resolve()
+    except (OSError, RuntimeError):
+        same = False
+    if not same:
+        raise ConfigRefused(
+            f"{where}: the entry {name!r} already serves {existing}, not {repo}; nothing written "
+            f"(choose another entry with --name, e.g. --name {name}-2)"
+        )
+
+
+def merge_json(path: Path, client: JsonClient, name: str, entry: dict[str, Any], repo: Path) -> str:
     data: dict[str, Any] = {}
     if path.exists():
         raw = path.read_text(encoding="utf-8")
@@ -143,7 +172,14 @@ def merge_json(path: Path, client: JsonClient, name: str, entry: dict[str, Any])
     servers = data.setdefault(client.key, {})
     if not isinstance(servers, dict):
         raise ConfigRefused(f'{path}: "{client.key}" is not an object; nothing written')
-    servers[name] = entry
+    old = servers.get(name)
+    if isinstance(old, dict):
+        argv = old.get("command") if isinstance(old.get("command"), list) else old.get("args")
+        check_same_repository(path, name, repo_of(argv), repo)
+        kept = {k: v for k, v in old.items() if k not in entry or k == "enabled"}  # the user's own keys stay
+        servers[name] = {**entry, **kept}
+    else:
+        servers[name] = entry
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -167,7 +203,21 @@ def _header_path(line: str) -> tuple[str, ...] | None:
     return tuple(path)
 
 
-def merge_toml(path: Path, name: str, repo: Path) -> str:
+def _toml_value(value: Any, where: Path) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(v, where) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{json.dumps(str(k))} = {_toml_value(v, where)}" for k, v in value.items()) + " }"
+    raise ConfigRefused(f"{where}: a value of type {type(value).__name__} cannot be kept; nothing written")
+
+
+def merge_toml(path: Path, name: str, repo: Path, *, with_repo: bool) -> str:
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
         before = tomllib.loads(text)
@@ -175,18 +225,29 @@ def merge_toml(path: Path, name: str, repo: Path) -> str:
         raise ConfigRefused(f"{path}: not valid TOML ({exc}); nothing written") from None
     if not isinstance(before.get("mcp_servers", {}), dict):
         raise ConfigRefused(f"{path}: mcp_servers is not a table; nothing written")
+    old = before.get("mcp_servers", {}).get(name)
+    if old is not None and not isinstance(old, dict):
+        raise ConfigRefused(f"{path}: mcp_servers.{name} is not a table; nothing written")
+    old = old or {}
+    check_same_repository(path, name, repo_of(old.get("args")), repo)
     kept: list[str] = []
+    subtables: set[str] = set()
     skipping = False
     for line in text.splitlines(keepends=True):
         header = _header_path(line)
         if header is not None:
-            skipping = header[:2] == ("mcp_servers", name)
+            skipping = header == ("mcp_servers", name)  # only this table; its subtables ([...l4.env]) stay
+            if len(header) > 2 and header[:2] == ("mcp_servers", name):
+                subtables.add(header[2])
         if not skipping:
             kept.append(line)
+    argv = server_args(repo if with_repo else None)
+    extra = {k: v for k, v in old.items() if k not in ("command", "args") and k not in subtables}
     base = "".join(kept).rstrip("\n")
-    block = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(server_args(repo))}\n"
+    block = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(argv)}\n"
+    block += "".join(f"{json.dumps(str(k))} = {_toml_value(v, path)}\n" for k, v in extra.items())
     result = (base + "\n\n" if base else "") + block
-    expected = {"command": COMMAND, "args": server_args(repo)}
+    expected = {**{k: v for k, v in old.items() if k not in ("command", "args")}, "command": COMMAND, "args": argv}
     try:
         after = tomllib.loads(result)
     except tomllib.TOMLDecodeError as exc:
@@ -214,6 +275,12 @@ def entry_name(repo: Path, *, project: bool, name: str | None) -> str:
     return f"l4-{cleaned or 'repo'}"
 
 
+def _refuse_symlinks(repo: Path, relative: str) -> None:
+    """A file inside the repository is repository content, so it is untrusted: a committed symlink (on the file or on
+    a folder above it) would send the write, or the merge, outside the repository."""
+    reject_symlinks(repo, *Path(relative).parts)
+
+
 def _home(environ: Mapping[str, str]) -> Path:
     return Path(environ.get("HOME") or Path.home())
 
@@ -228,13 +295,16 @@ def run_install(
     name = entry_name(repo, project=project, name=entry)
     spec = CLIENTS[client]
     scope = "project" if project else "user"
+    served = None if project else repo  # a project file is committed: no path of this machine, the folder decides
     if client == "codex":
         path = repo / CODEX_PROJECT if project else _home(app.environ) / CODEX_USER
         try:
-            text = merge_toml(path, name, repo)
-        except ConfigRefused as exc:
+            if project:
+                _refuse_symlinks(repo, CODEX_PROJECT)
+            text = merge_toml(path, name, repo, with_repo=not project)
+        except (ConfigRefused, UnsafeFile) as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, f"mcp install: {exc}") from None
-        shown = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(server_args(repo))}"
+        shown = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(server_args(served))}"
     else:
         assert isinstance(spec, JsonClient)
         if not project and spec.user is None:
@@ -254,18 +324,20 @@ def run_install(
             )
         path = repo / spec.project if project else _home(app.environ) / str(spec.user)
         try:
-            text = merge_json(path, spec, name, spec.entry(repo, typed=spec.typed))
-        except ConfigRefused as exc:
+            if project:
+                _refuse_symlinks(repo, spec.project)
+            text = merge_json(path, spec, name, spec.entry(served, typed=spec.typed), repo)
+        except (ConfigRefused, UnsafeFile) as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, f"mcp install: {exc}") from None
-        shown = json.dumps({spec.key: {name: spec.entry(repo, typed=spec.typed)}}, indent=2)
+        shown = json.dumps({spec.key: {name: spec.entry(served, typed=spec.typed)}}, indent=2)
     if dry_run:
         click.echo(
             f"dry run: would write {path} ({client}, {scope} scope); nothing written.\n{shown}\n\nresult:\n{text}"
         )
         return ExitCode.OK
-    write_atomic(path, text)
+    write_atomic(path, text, follow_symlink=not project)
     click.echo(
         f"wrote {path} ({client}, {scope} scope): entry {name!r} runs "
-        f"`{COMMAND} {' '.join(server_args(repo))}`\n{shown}"
+        f"`{COMMAND} {' '.join(server_args(served))}`\n{shown}"
     )
     return ExitCode.OK

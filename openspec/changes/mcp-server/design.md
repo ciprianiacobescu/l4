@@ -41,8 +41,14 @@ other servers, is atomic, refuses an unparseable file, and with `--dry-run` prin
 `l4 mcp serve --repo PATH` (repeatable) fixes the repositories an instance serves; each must resolve to a git repository
 root with `.l4/config.yaml` at start, else exit 2. One repository: the tools run there, and a `repo` argument may only
 name it. Several: `repo` is required and must name one of them by folder name or path (a path is compared after
-resolving symlinks); nothing else is ever resolved, so a tool cannot be pointed at another folder. Without `--repo`, the
-working directory serves when it is such a repository; otherwise every call answers an error naming `--repo` (an IDE
-may start the server in the home folder). `l4 mcp install` writes `--repo <absolute path>` and names the entry
-`l4-<folder>` in a user configuration (one entry per repository) or `l4` in a project one. Every result names its
+resolving symlinks); nothing else is ever resolved, so a tool cannot be pointed at another folder. Without `--repo`,
+`$CLAUDE_PROJECT_DIR` serves when it is such a repository, else the working directory; otherwise every call answers an
+error naming `--repo` (an IDE may start the server in the home folder). `l4 mcp install` writes `--repo <absolute
+path>` only in a user configuration, where it names the entry `l4-<folder>` (one entry per repository); a project
+file (`l4` entry) is committed, so it holds `l4 mcp serve` with no path and every clone and worktree serves its own
+folder. Install never replaces an entry that serves another repository (two folders can share a name: exit 2, use
+`--name`), keeps the user's other keys of the entry, and for a project file refuses a symlink on the file or any folder
+above it (repository content is untrusted). Not done: asking the client for its MCP roots (`roots/list`), which would
+need D1's "the server sends no request" relaxed; a client that starts the server outside the workspace uses a user
+entry with `--repo`. Every result names its
 repository.

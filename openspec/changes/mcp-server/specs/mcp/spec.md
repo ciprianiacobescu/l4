@@ -103,10 +103,14 @@ A write tool's description SHALL say what it writes, whether it pushes to origin
 
 ### Requirement: L4-MCP-004 l4 mcp install configures a client in one command
 `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's
-documented MCP configuration with the server command `l4 mcp serve --repo <the repository's absolute path>` (default: the
-repository of the working directory) under the entry NAME (default `l4` for `--project`, `l4-<repository folder name>`
-for the user scope, so that several repositories have one entry each), merging into an existing file and keeping every other server, atomically; it SHALL refuse a
-file it cannot parse and print what it wrote. Only clients whose configuration path and format were checked against the
+documented MCP configuration with the server command `l4 mcp serve --repo <the repository's absolute path>` for the user scope, and `l4 mcp serve` with no path for
+`--project` (the file is committed, so each clone and worktree serves its own folder: `$CLAUDE_PROJECT_DIR` when it
+names an L4 repository, else the working directory's), under the entry NAME (default `l4` for `--project`,
+`l4-<repository folder name>` for the user scope, so that several repositories have one entry each), merging into an
+existing file and keeping every other server and the keys of the entry the user added, atomically; it SHALL refuse a
+file it cannot parse, an entry of that name that serves another repository (exit 2, nothing written, naming both
+paths and `--name`), and for `--project` a symlink on the file or on a folder above it inside the repository; it SHALL
+print what it wrote. Only clients whose configuration path and format were checked against the
 vendor's documentation SHALL be offered.
 
 #### Scenario: SCN-MCP-08 (+) A client is configured and other servers stay
@@ -119,3 +123,18 @@ vendor's documentation SHALL be offered.
 - **GIVEN** a client configuration file that is not valid JSON (or TOML)
 - **WHEN** `l4 mcp install` runs for it
 - **THEN** it exits 2 naming the file and writes nothing
+
+#### Scenario: SCN-MCP-16 (+) A committed project file serves each worktree
+- **GIVEN** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository
+- **WHEN** the server starts with that file's arguments in the worktree and a tool is called
+- **THEN** the file holds no absolute path and the result names the worktree
+
+#### Scenario: SCN-MCP-17 (−) An entry of another repository is not replaced
+- **GIVEN** the entry `l4-app` serves `/work/app`
+- **WHEN** `l4 mcp install --repo /oss/app` runs
+- **THEN** it exits 2 naming both paths and `--name`, and writes nothing
+
+#### Scenario: SCN-MCP-18 (−) A symlink in the repository is not followed
+- **GIVEN** a repository that commits `.mcp.json` as a symlink to a file outside it
+- **WHEN** `l4 mcp install --client claude-code --project` runs
+- **THEN** it exits 2 and the file outside is unchanged

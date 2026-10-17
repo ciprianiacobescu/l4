@@ -438,7 +438,7 @@ of the harness package.
 | `l4 feedback submit FB-NNN [--unit ID]` | Set a valid draft to `submitted` and print the git lines; exit 2 for any other status | edits `feedback.md` only |
 | `l4 feedback withdraw FB-NNN [--unit ID]` | Set an item to `withdrawn` (never taken, or no longer judged) and print the git lines; exit 2 for an `addressed` item | edits `feedback.md` only |
 | `l4 mcp serve [--repo PATH]…` | Serve L4 to an MCP client over stdio (L4-MCP-001): typed tools that run `l4` commands as an agent, in the repositories given with `--repo` (L4-MCP-005) | none of its own; the write tools run the commands they name |
-| `l4 mcp install --client claude-code\|cursor\|vscode\|kiro\|codex\|opencode [--project] [--repo PATH] [--name NAME] [--dry-run]` | Write the client's MCP configuration with the command `l4 mcp serve --repo <path>` (L4-MCP-004) | the client's configuration file (merged, atomic) |
+| `l4 mcp install --client claude-code\|cursor\|vscode\|kiro\|codex\|opencode [--project] [--repo PATH] [--name NAME] [--dry-run]` | Write the client's MCP configuration with the command `l4 mcp serve --repo <path>` (user scope) or `l4 mcp serve` (`--project`) (L4-MCP-004) | the client's configuration file (merged, atomic) |
 | `l4 simulate [SCENARIO…\|--all] [--with-repo-config] [--keep] [--json]` | Run the real state machine against fakes (§17) | temp dirs only |
 | `l4 unlock --unit ID [--force]` | Release a lock (expired, or forced by a human) | lock ref |
 | `l4 setup gitlab --project ID\|PATH [--api-base URL] [--auth-env VAR] [--auth-scheme private-token\|bearer] [--verify-base URL] [--rotate [--revoke-old]] [--secret NAME=ENVVAR]… [--cron EXPR] [--no-schedule] [--no-pipeline] [--watch] [--dry-run] [--token-command CMD]` | Make a GitLab project ready for the harness (L4-INS-006): read the project, check the runner and the include, make sure the `l4-bot` token and the masked `L4_FORGE_TOKEN` (environment scope `l4`) exist, set secrets, make sure the `l4 sweep` schedule exists, trigger one adoption-check pipeline. Rows `OK`, `NEW`, `SET`, `KEPT`, `WARN`, `FAIL`; exit 0, 3 on a `FAIL` row, 2 usage, 1 HTTP error | GitLab (project variables, access tokens, pipeline schedules, one pipeline); `--dry-run` sends only reads |
@@ -4333,8 +4333,9 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - Not offered: `l4 yolo activate`, `l4 yolo cancel`, `l4 run`, anything that starts an agent CLI. The descriptions name the command a person runs.
 - The read-only commands `l4 yolo check PLAN --worktree` (admission of the working tree's plan file and unit folders, no judge) and `l4 status --unit U --events|--verification` SHALL exist for them and SHALL write nothing to a ref, the index or a tracked file.
 
-**L4-MCP-004** `l4 mcp install` configures a client in one command. `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's documented MCP configuration with the command `l4 mcp serve --repo <absolute path>` under the entry NAME (default `l4` with `--project`, `l4-<repository folder>` otherwise), merging into an existing file, keeping every other server, atomically.
+**L4-MCP-004** `l4 mcp install` configures a client in one command. `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's documented MCP configuration with the command `l4 mcp serve --repo <absolute path>` (user scope) or `l4 mcp serve` with no path (`--project`: the file is committed, so each clone and worktree serves its own folder: `$CLAUDE_PROJECT_DIR` when it names an L4 repository, else the working directory's) under the entry NAME (default `l4` with `--project`, `l4-<repository folder>` otherwise), merging into an existing file, keeping every other server and the keys of the entry the user added, atomically.
 - It SHALL refuse a file it cannot parse (exit 2, naming the file, nothing written) and print what it wrote.
+- It SHALL refuse (exit 2, nothing written) an entry of that name that serves another repository, naming both paths and `--name`, and, for `--project`, a symlink on the file or on a folder above it inside the repository.
 - Only clients whose path and format were checked against the vendor's documentation are offered: Claude Code (project `.mcp.json`; user scope prints `claude mcp add --scope user`), Cursor, VS Code (project only), Kiro, Codex (TOML, only the `[mcp_servers.NAME]` table is replaced), OpenCode. The vendor URLs are in `src/l4/mcp/install.py`.
 
 ---
@@ -9719,6 +9720,21 @@ scenario is a spec defect (§26).
 - **Given** a plan file `.l4/plans/p1.json` and its unit folders only in the working tree
 - **When** `l4 yolo check p1 --worktree` runs
 - **Then** it prints `p1: admitted in the working tree` and the order, exits 0 and records nothing; without `--worktree` it exits 2 because origin has no such file
+
+#### SCN-MCP-16 (+) A committed project file serves each worktree · L4-MCP-004
+- **Given** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository
+- **When** the server starts with that file's arguments in the worktree and a tool is called
+- **Then** the file holds no absolute path and the result names the worktree
+
+#### SCN-MCP-17 (−) An entry of another repository is not replaced · L4-MCP-004
+- **Given** the entry `l4-app` serves `/work/app`
+- **When** `l4 mcp install --repo /oss/app` runs
+- **Then** it exits 2 naming both paths and `--name`, and writes nothing
+
+#### SCN-MCP-18 (−) A symlink in the repository is not followed · L4-MCP-004
+- **Given** a repository that commits `.mcp.json` as a symlink to a file outside it
+- **When** `l4 mcp install --client claude-code --project` runs
+- **Then** it exits 2 and the file outside is unchanged
 
 ## 24. Definition of done
 

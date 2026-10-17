@@ -83,8 +83,12 @@ MCP_SERVE_HELP = (
 
 MCP_CLIENTS = ("claude-code", "cursor", "vscode", "kiro", "codex", "opencode")
 MCP_INSTALL_HELP = (
-    "Write the MCP configuration of a client so it starts `l4 mcp serve --repo <repository>`.\n\n"
-    "Merges into the file, keeps every other server, writes atomically, refuses a file that does not parse. One "
+    "Write the MCP configuration of a client. A user configuration starts `l4 mcp serve --repo <repository>`; "
+    "--project (a file you commit) starts `l4 mcp serve` with no path, so each clone and worktree serves its own "
+    "folder.\n\n"
+    "Merges into the file, keeps every other server and the keys you added to the entry, writes atomically, refuses a "
+    "file that does not parse, an entry of that name that serves another repository (use --name) and, with --project, "
+    "a symlink in the repository. One "
     "entry per repository in a user configuration (l4-<folder>); --project writes the repository's own file. "
     "claude-code at user scope prints the documented `claude mcp add` command instead; vscode has --project only."
 )

@@ -96,3 +96,10 @@ def test_without_repo_a_folder_that_is_not_a_repository_answers_an_error_naming_
         repos.select(None)
     with pytest.raises(NoRepository, match="--repo PATH"):
         repos.select("anything")
+
+
+def test_without_repo_claude_project_dir_is_looked_at_before_the_working_directory(repo_factory, tmp_path):
+    here, there = repo_factory("here"), repo_factory("there")
+    assert Repos.from_paths([], cwd=here, project_dir=str(there)).select(None) == there
+    assert Repos.from_paths([], cwd=here, project_dir=str(tmp_path / "gone")).select(None) == here  # stale variable
+    assert Repos.from_paths([here], cwd=tmp_path, project_dir=str(there)).select(None) == here  # --repo wins
