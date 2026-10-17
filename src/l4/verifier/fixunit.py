@@ -34,6 +34,7 @@ MAX_FIX_TASKS = 5
 MAX_TITLE_CHARS = 100
 MAX_REQUEST_CHARS = 1200  # a feedback item's text, whole up to this (L4-FBK-005)
 FEEDBACK_REQUIREMENT = "\N{EM DASH} feedback"
+FINDING_REQUIREMENT = "\N{EM DASH} finding"
 REFACTOR_KINDS = ("refactor", "duplication")
 REGRESSION = "\N{EM DASH} regression"
 _SUFFIX = re.compile(r"\s+\N{EM DASH}\s+regression\s+\d+\s*$")
@@ -248,7 +249,10 @@ def _requirement_for(
     cand: _Candidate, by_id: dict[str, Criterion], family: Sequence[Criterion], n: int
 ) -> tuple[str, str] | None:
     """(capability, requirement title) for a scenario. The cited criterion's requirement, else the parent's when it has
-    exactly one; a requirement that is itself a regression of an earlier fix keeps the name of the original."""
+    exactly one; a requirement that is itself a regression of an earlier fix keeps the name of the original. With
+    several and no cited criterion, a finding a person rejected gets a requirement of its own, `<finding title> —
+    finding <id>`, in the parent's first capability by name, as a feedback item does (L4-VER-006): the person's
+    WHEN ... THEN ... is never left without a home. A judge's suggestion that no person asked for gets none."""
     if cand.criterion:
         c = by_id[cand.criterion]
         return c.capability, f"{_SUFFIX.sub('', c.requirement)} {REGRESSION} {n}"
@@ -256,7 +260,10 @@ def _requirement_for(
     if len(originals) == 1:
         capability, requirement = next(iter(originals))
         return capability, f"{requirement} {REGRESSION} {n}"
-    return None
+    capabilities = sorted({c.capability for c in family})
+    if not cand.consumed or not capabilities:
+        return None
+    return capabilities[0], f"{_flat(cand.title, 120)} {FINDING_REQUIREMENT} {cand.ids[0]}"
 
 
 def _feedback_requirement(ref: FeedbackRef, family: Sequence[Criterion]) -> tuple[str, str]:

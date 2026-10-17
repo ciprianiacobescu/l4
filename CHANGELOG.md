@@ -6,6 +6,17 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.10 (2026-10-17)
+
+### Fixed
+- A finding a person rejects with a `WHEN … THEN …` becomes a fix task even when it cites no criterion and the parent
+  has several requirements. The fix-unit planner put a scenario under the cited criterion's requirement, else the
+  parent's only one, and dropped it otherwise, so the unit escalated with `no finding of this round can be converted
+  into a fix task`. That is the path the 0.4.8 runbook gives for `task <key> is ticked as already satisfied, but its
+  text is not done`: on a consumer repository, the reject of that finding stopped the delivery plan. Now the scenario
+  goes under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by
+  name, as a feedback item's does. A judge's spec-gap suggestion that no person asked for is unchanged.
+
 ## 0.4.9 (2026-10-17)
 
 ### Fixed
