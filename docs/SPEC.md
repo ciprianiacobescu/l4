@@ -293,8 +293,9 @@ them does no work (it runs that branch's older workflow copy) and that runs star
 `l4 questions` and the schedule do that).
 
 **L4-ADO-006** `l4 doctor --adoption` names CI jobs that the gates do not mirror. `l4 doctor --adoption` SHALL warn about each job of the repository's own CI that runs on `push` or `pull_request` and
-has a `run:` command that no gate command, setup command or `yolo.profiles` gate contains. The comparison ignores a
-leading `uv run `, `.venv/bin/` or `python -m `. The warning lists each such job with its `services:` or `container:`.
+has a `run:` command that no command of the gates every verification round runs (setup, build, lint, typecheck, test,
+e2e) or extra gate a `yolo.profiles` entry names contains. The comparison ignores a leading `uv run ` with its
+`--directory`, `--project`, `--package`, `--frozen`, `--locked` and `--no-sync` options, `.venv/bin/` or `python -m `. The warning lists each such job with its `services:` or `container:`.
 With `forge.token_env: GITHUB_TOKEN` and `forge.merge_policy: auto`, it SHALL also say that L4's pushes start no CI.
 The row never fails a run.
 
@@ -1229,6 +1230,12 @@ when it is not frozen it is an implementation fault and the attempt is retried w
 
 **L4-GAT-002** A test gate MUST be **non-vacuous**: zero executed tests, a missing report file, or a report that
 does not contain the tests the step is about MUST be a failure, never a pass.
+
+**L4-GAT-005** A test gate MUST read every report it lists. Every report in `gates.test.reports` MUST exist after the
+gate's run, or the gate fails with `report missing: <the first missing report>`. The reports are merged into one: a test
+id that more than one report holds keeps the worse result (error, failed, passed, skipped), and the collection errors of
+every report are kept, each once. A gate with one report reads it as before. [V: a consumer repository's three pytest
+runs listed three reports, and only the first was read: the 423 tests of the other two suites were invisible.]
 
 **L4-GAT-003** `l4 init` MUST propose gate commands from ecosystem markers (`pyproject.toml`/`uv.lock` → uv +
 pytest with `--junitxml`; `package.json` scripts + lockfile → npm/pnpm/yarn/bun, vitest/jest junit reporters,
@@ -5143,6 +5150,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 29 | `check-already-satisfied` | an already-satisfied task writes no copy of tests that exist: a red step that adds no test and reports `already_satisfied by <task>` with its `criteria_ids` is confirmed by the passing tests that already trace them, and earlier-red evidence holds for tests in a class (L4-IMP-003); the judge answers, for each task ticked as already satisfied, whether its own text is done, and a no is a major judge finding for a person (L4-VER-018); an implementer step that writes a token shape (a test fixture) loses the attempt with advice to build the value from parts, before any gate or commit, instead of halting the unit at the push (L4-SEC-008; `openspec/changes/check-already-satisfied/`) | the consumer repository's next units, after the upgrade |
 | 30 | `resolve-workspace-imports` | the modules a test imports are found under every import root: the repository root, `src`, every directory named `src`, and every directory with a `pyproject.toml`, `setup.py` or `setup.cfg` and its `src`, so the zero-value run, the head stubs of run (b), the audit sampling and the proof of tests people wrote can vary a uv workspace member's modules (L4-IMP-025; `openspec/changes/resolve-workspace-imports/`) | the consumer repository's next units, after the upgrade |
 | 31 | `home-rejected-findings` | a finding a person rejected with a `WHEN … THEN …` and no criterion becomes a fix task even when the parent has several requirements: its scenario goes under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, so a rejected "ticked as already satisfied, but its text is not done" finding (L4-VER-018) no longer escalates the unit with `no_convertible_finding` (L4-VER-006; `openspec/changes/home-rejected-findings/`) | the consumer repository's escalated unit, after the upgrade |
+| 32 | `multi-report-gates` | a test gate reads every report it lists: each must exist, and they are merged, a test in two reports keeping its worse result, so a repository that runs several suites is judged on all of them; the adoption docs and the `l4 init` note name the public harness first (L4-GAT-005; `openspec/changes/multi-report-gates/`) | the second consumer repository's adoption |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -5524,6 +5532,21 @@ scenario is a spec defect (§26).
 - **Given** a test command that hangs
 - **When** `gates.timeout` (30 m) elapses
 - **Then** the process group is killed, the gate fails with `timeout`, the log is kept.
+
+#### SCN-GAT-05 (+) Two reports are read as one · L4-GAT-005
+- **Given** a test gate whose command writes `.l4-out/a.xml` and `.l4-out/b.xml`, one passing test each, and lists both
+- **When** the gate runs
+- **Then** it passes and its report holds both tests
+
+#### SCN-GAT-06 (−) A listed report that is missing fails the gate · L4-GAT-005
+- **Given** the gate of SCN-GAT-05 whose command writes only `.l4-out/a.xml`
+- **When** the gate runs
+- **Then** it fails with `report missing: .l4-out/b.xml`
+
+#### SCN-GAT-07 (−) A test in two reports keeps its worse result · L4-GAT-005
+- **Given** two reports that both hold `tests.test_a::test_one`, passed in one and failed in the other
+- **When** the gate runs
+- **Then** the merged report has that test `failed`
 
 #### SCN-GAT-04 (−) A frozen red test hangs once the code works · L4-GAT-004, L4-IMP-002
 - **Given** a frozen red test that drives a handler over a socketpair and waits for a reply the handler never closes
@@ -9176,6 +9199,12 @@ scenario is a spec defect (§26).
   service running `uv run pytest -m postgres`, and the gate `.venv/bin/pytest --junitxml=.l4-out/junit.xml`
 - **When** `l4 doctor --adoption` runs
 - **Then** the warning lists `tests.yml: conformance (services: postgres)` with its command, and does not list `test`
+
+#### SCN-ADO-55 (+) A typecheck gate run with `uv run --directory` mirrors a job · L4-ADO-006
+- **Given** a workflow job running `uv run mypy --strict src/`, the gate `gates.typecheck: ["uv run --frozen --directory
+  apps/api mypy --strict src/"]`, and no `yolo.profiles`
+- **When** `l4 doctor --adoption` runs
+- **Then** the warning does not list the job
 
 #### SCN-ADO-18 (−) The workflow token and automatic merges · L4-ADO-006
 - **Given** `forge.token_env: GITHUB_TOKEN` and `forge.merge_policy: auto`

@@ -548,8 +548,9 @@ def _action_notes(pin: ActionPin) -> tuple[str, ...]:
         f"the copy of the action in {ACTION_PATH}/ fetches the harness over ssh: add its read-only deploy key as the "
         "secret L4_HARNESS_SSH_KEY"
         if pin.copy
-        else f"{pin.repository} must let this repository use its action (Settings > Actions > Access), which a private "
-        "repository can do for its owner's other private repositories; anyone else needs --action-copy"
+        else f"this repository's Actions policy must allow actions from other repositories; when {pin.repository} is "
+        "private it must also let this repository use its action (Settings > Actions > Access), which it can do for "
+        "its owner's other private repositories, and anyone else needs --action-copy"
     )
     return (
         f"commit {WORKFLOW_RELPATH} and .l4/, push, then run `l4 setup github` (with an `l4` of your own, see the "

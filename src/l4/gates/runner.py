@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from l4.agents.proc import ProcRunner
-from l4.gates.junit import ReportError, TestReport, parse_junit
+from l4.gates.junit import ReportError, TestReport, merge_reports, parse_junit
 from l4.redact import Redactor
 from l4.sandbox.base import Sandbox, SandboxSpec
 from l4.sandbox.env import build_gate_env
@@ -169,13 +169,13 @@ def run_gate(
     if not files:
         ok, reason = outcome.returncode == 0, f"exit code {outcome.returncode}"
         return result("pass" if ok else "fail", "" if ok else reason, outcome.returncode)
-    found = next(((rel, path) for rel, path in files if path.is_file() or path.is_symlink()), None)
-    if found is None:
-        return result("fail", f"report missing: {spec.reports[0]}", outcome.returncode)
+    missing = next((rel for rel, path in files if not (path.is_file() or path.is_symlink())), None)
+    if missing is not None:  # every listed report is this run's (L4-GAT-005): one that is not there hides its tests
+        return result("fail", f"report missing: {missing}", outcome.returncode)
     if spec.format != "junit":
         return result("fail", f"report format {spec.format} is not supported in M0", outcome.returncode)
     try:
-        report = parse_junit(found[1])
+        report = merge_reports([parse_junit(path) for _, path in files])
     except ReportError as exc:
         return result("fail", f"report unreadable: {exc}", outcome.returncode)
     ok, reason = judge_test_gate(outcome.returncode, report, spec.must_contain)

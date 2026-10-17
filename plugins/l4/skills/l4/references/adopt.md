@@ -11,10 +11,11 @@ No harness code, no `.l4/bin/`.
 
 ## 1. Pick the form
 
-| The adopting repository | Form | Credential for the harness |
+| The harness / the adopting repository | Form | Credential for the harness |
 |---|---|---|
-| **Private, same owner** as the harness | `--action` | **None.** In the harness repository: Settings → Actions → General → Access → "Accessible from repositories owned by …". |
-| **Public**, or another owner | `--action-copy` (a copy of the action in `.github/actions/l4/`) | A **read-only deploy key**, one per adopting repository: the public half on the harness repository, the private half as the secret `L4_HARNESS_SSH_KEY` in the environment `l4`. |
+| **Public harness** (the published one), any repository | `--action` | **None.** The adopting repository's Actions policy must allow actions from other repositories ("Allow all actions", or an allow-list that names the harness). |
+| Private harness, **private adopting repository of the same owner** | `--action` | **None.** In the harness repository: Settings → Actions → General → Access → "Accessible from repositories owned by …". |
+| Private harness, **public** or another owner's adopting repository | `--action-copy` (a copy of the action in `.github/actions/l4/`) | A **read-only deploy key**, one per adopting repository: the public half on the harness repository, the private half as the secret `L4_HARNESS_SSH_KEY` in the environment `l4`. |
 
 A public repository can never use a private repository's action: GitHub fails it at "Set up job".
 
@@ -31,7 +32,7 @@ On the adopting repository's default branch, with a clean tree:
 
 ```sh
 l4 init --ci github --action --harness-ref v0.4.10 [--dependabot] [--s1 laya|jev|none]
-# public or other-owner repository:
+# a private harness, and a public or other-owner repository:
 l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.10
 ```
 

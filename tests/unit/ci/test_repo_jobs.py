@@ -88,14 +88,35 @@ def test_unmirrored_lists_only_the_job_with_a_command_no_gate_contains(tmp_path:
     assert [j.name for j in unmirrored(jobs, config)] == ["conformance"]
 
 
-def test_a_gate_named_by_a_yolo_profile_counts(tmp_path: Path):
+def test_a_typecheck_or_build_gate_counts_without_a_profile(tmp_path: Path):
+    """Step 2 of every verification round runs `build` and `typecheck` (L4-ADO-006): they mirror a job."""
     put(tmp_path, ".github/workflows/ci.yml", "on: push\njobs:\n  t:\n    steps:\n      - run: uv run mypy src\n")
     jobs = repo_ci_jobs(tmp_path).jobs
-    gates = {"typecheck": ["mypy src"]}
+    assert unmirrored(jobs, L4Config.model_validate({"gates": {"typecheck": ["mypy src"]}})) == []
+    assert unmirrored(jobs, L4Config.model_validate({"gates": {"build": ["mypy src"]}})) == []
+
+
+def test_an_extra_gate_counts_only_when_a_yolo_profile_names_it(tmp_path: Path):
+    put(tmp_path, ".github/workflows/ci.yml", "on: push\njobs:\n  t:\n    steps:\n      - run: make docs\n")
+    jobs = repo_ci_jobs(tmp_path).jobs
+    gates = {"extra": [{"name": "docs", "command": "make docs"}]}
     plain = L4Config.model_validate({"gates": gates})
-    named = L4Config.model_validate({"gates": gates, "yolo": {"profiles": {"types": ["typecheck"]}}})
-    assert unmirrored(jobs, plain) == list(jobs)  # no profile names the typecheck gate
+    named = L4Config.model_validate({"gates": gates, "yolo": {"profiles": {"docs": ["extra:docs"]}}})
+    assert unmirrored(jobs, plain) == list(jobs)  # no profile names the extra gate
     assert unmirrored(jobs, named) == []
+
+
+def test_uv_run_options_are_ignored_on_both_sides(tmp_path: Path):
+    """A workspace member's gate runs `uv run --directory <member> …`, its CI job `cd <member>` then `uv run …`."""
+    put(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        "on: push\njobs:\n  t:\n    steps:\n      - run: uv run mypy --strict src/\n",
+    )
+    jobs = repo_ci_jobs(tmp_path).jobs
+    gate = cfg(typecheck=["uv run --frozen --directory apps/api mypy --strict src/"])
+    assert unmirrored(jobs, gate) == []
+    assert normalise("uv run --project=apps/api --locked --package api pytest -q") == ["pytest -q"]
 
 
 def test_unparseable_file_is_named_not_a_crash(tmp_path: Path):
