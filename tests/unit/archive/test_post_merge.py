@@ -162,3 +162,19 @@ def test_a_refused_push_is_an_explained_forge_error_and_no_mr(world, gitlab):
         world.archiver().open_archive_pr(world.ref())
     assert caught.value.code is ExitCode.DOCTOR_FAILED and "protected branch or push rule" in str(caught.value)
     assert len(gitlab.mrs) == 1
+
+
+def test_a_unit_already_archived_on_the_base_builds_no_worktree(world, monkeypatch):
+    """squash-and-delete D8: once the archive branch is deleted, every sweep would build a worktree to find out that the
+    unit's folder is gone; the folder is looked up on the base first."""
+    world.merged_mr()
+    world.archiver().open_archive_pr(world.ref())
+    world.raw(world.origin, "update-ref", "refs/heads/main", f"refs/heads/{ARCHIVE_BRANCH}")  # the archive landed ...
+    world.raw(world.origin, "update-ref", "-d", f"refs/heads/{ARCHIVE_BRANCH}")  # ... and its branch was deleted
+    world.gitlab.mrs[2]["state"] = "merged"
+    archiver = world.archiver()
+    built = []
+    monkeypatch.setattr(archiver._worktrees, "ensure_from_base", lambda *a, **k: built.append(a))
+    result = archiver.open_archive_pr(world.ref())
+    assert result.status == "archived" and built == []
+    assert "no longer under" in result.detail

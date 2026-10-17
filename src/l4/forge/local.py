@@ -119,6 +119,7 @@ class LocalForge:
             number=number, url=f"{self._url}/pull/{number}", head_branch=raw["head"], base_branch=raw["base"],
             title=raw["title"], draft=raw["draft"], state=raw["state"], labels=tuple(raw["labels"]),
             merge_commit_sha=raw.get("merge_commit_sha"),
+            head_sha=raw.get("head_sha") if raw["state"] == "merged" else None,  # an open one is not reported
         )  # fmt: skip
 
     def note(self, number: int) -> str | None:
@@ -312,6 +313,8 @@ class LocalForge:
         self._log("merge", number)
         raw = self._prs[number]
         raw.update(state="merged", draft=False, merge_commit_sha=merge_commit_sha)
+        if self._origin is not None:  # the head the pull request merged, for a branch deleted later
+            raw["head_sha"] = self._git("rev-parse", "--verify", "-q", f"refs/heads/{raw['head']}") or None
         self._save()
         return self._view(number)
 
@@ -331,7 +334,7 @@ class LocalForge:
         tip = self._git("rev-parse", "--verify", target)
         commit = self._git("commit-tree", f"{sha}^{{tree}}", "-p", tip, "-m", f"{title}\n\n{message}")
         self._git("update-ref", target, commit, tip)
-        raw.update(state="merged", draft=False, merge_commit_sha=commit)
+        raw.update(state="merged", draft=False, merge_commit_sha=commit, head_sha=sha)
         self._save()
         return MergeCall("merged", commit, f"squash-merged as {commit}")
 

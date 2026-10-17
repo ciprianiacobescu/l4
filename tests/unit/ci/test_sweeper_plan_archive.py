@@ -9,6 +9,7 @@ import stat
 import pytest
 
 from l4.ci.sweeper import Sweeper
+from l4.forge.gitlab import GitLabForge
 from l4.postmerge import MergeDetector
 from l4.specs.openspec import OpenSpecProvider
 from l4.state.pending import read_pending
@@ -107,3 +108,74 @@ def test_an_archive_pr_to_the_base_still_blocks_one_at_a_time(world):
     world.forge().create_pr("l4/archive/openspec/old", "main", "[l4] archive old", "b", draft=False)
     actions = sweep(world, "r-20261005T1000Z-0001")
     assert [a.what for a in actions] == ["archive_pending"]
+
+
+class MergedWhenAsked(GitLabForge):
+    """A forge that has marked the archive MR merged by the time it is asked (GitHub and GitLab do within seconds of
+    the push); `lag` keeps it open."""
+
+    lag = False
+
+    def get_pr(self, number):
+        mr = self.gitlab_world.mrs[number]
+        if not self.lag and mr["state"] == "opened":
+            self.gitlab_world.merge(number, main_tip(self.world))
+        return super().get_pr(number)
+
+
+def sweep_with(world: MergedWorld, run_id: str, forge, *, cfg=None, auto=()):
+    world.cfg = cfg or world.cfg
+    app, archiver = world.app(run_id), world.archiver()
+    sweeper = Sweeper(
+        app, world.cfg, world.git, forge, archiver, MergeDetector(world.git, base_branch="main"), auto_units=auto
+    )
+    provider = OpenSpecProvider(world.repo, world.environ)
+    snaps = [load_snapshot(provider, world.git, ref, branch_prefix="l4/") for ref in provider.list_units()]
+    return sweeper.run(snaps)
+
+
+def merged_forge(world: MergedWorld, *, lag=False) -> MergedWhenAsked:
+    forge = MergedWhenAsked(API, PROJECT, TOKEN, transport=world.gitlab.transport(), sleep=lambda s: None)
+    forge.gitlab_world, forge.world, forge.lag = world.gitlab, world, lag
+    return forge
+
+
+def test_the_archive_branch_is_deleted_after_archive_merged(world):
+    world.merged_mr()
+    actions = sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), auto={UNIT})
+    assert [a.what for a in actions] == ["archive_merged"] and "archive.merged" in events(world)
+    assert ARCHIVE not in world.remote_branches()
+    assert world.git.rev_parse(f"refs/remotes/origin/{ARCHIVE}") is None
+    assert world.raw(world.origin, "for-each-ref", "refs/l4/locks/").strip()  # the lock ref is the sweeper's to retire
+
+
+def test_the_archive_branch_stays_when_branches_are_kept(world):
+    from l4.config.schema import L4Config
+
+    world.merged_mr()
+    cfg = L4Config.model_validate({"version": 1, "yolo": {"merge": {"delete_branches": False}}})
+    sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), cfg=cfg, auto={UNIT})
+    assert ARCHIVE in world.remote_branches()
+
+
+def test_the_archive_branch_stays_while_the_forge_does_not_show_its_pr_merged(world):
+    world.merged_mr()
+    sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world, lag=True), auto={UNIT})
+    assert "archive.merged" in events(world) and ARCHIVE in world.remote_branches()  # a later plan step deletes it
+
+
+def test_a_person_s_commit_on_the_archive_branch_after_the_merge_keeps_it(world, monkeypatch):
+    from l4.ci import sweeper as module
+
+    world.merged_mr()
+    real = module.tidy_archive_branch
+
+    def late(app, cfg, git, unit, branch, head):
+        tree = world.raw(world.origin, "rev-parse", f"{head}^{{tree}}").strip()
+        moved = world.raw(world.origin, "commit-tree", tree, "-p", head, "-m", "a person's commit").strip()
+        world.raw(world.origin, "update-ref", f"refs/heads/{branch}", moved, head)
+        return real(app, cfg, git, unit, branch, head)
+
+    monkeypatch.setattr(module, "tidy_archive_branch", late)
+    sweep_with(world, "r-20261005T1000Z-0001", merged_forge(world), auto={UNIT})
+    assert ARCHIVE in world.remote_branches()

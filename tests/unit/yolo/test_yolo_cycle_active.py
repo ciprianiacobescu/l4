@@ -124,9 +124,10 @@ def test_scn_yolo_14_and_24_a_verified_unit_is_merged_integrated_and_the_next_ru
     head, snaps = merge_ready(world)
     step = world.step(snaps)
     assert world.tip() == head
-    assert kinds(world)[-5:] == [
+    assert kinds(world)[-6:] == [
         "unit.merge_requested",
         "unit.merged",
+        "unit.branch_deleted",  # the merged branch goes (L4-YOLO-033, the default)
         "unit.postcheck",
         "unit.integrated",
         "plan.charged",

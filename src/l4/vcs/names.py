@@ -34,6 +34,13 @@ def unit_branch(unit_id: str, branch_prefix: str) -> str:
     return f"{branch_prefix}{framework.value}/{name}"
 
 
+def archive_branch(unit_id: str, branch_prefix: str) -> str:
+    """`<prefix>archive/<framework>/<name>`: the post-merge archive MR's branch (L4-ARC-007)."""
+    framework, name = parse_unit_id(unit_id)
+    check_branch_prefix(branch_prefix)
+    return f"{branch_prefix}archive/{framework.value}/{name}"
+
+
 def lock_ref(unit_id: str) -> str:
     """The unit's lock ref `refs/l4/locks/<framework>/<name>` (G7: custom refs are accepted on the reference server)."""
     framework, name = parse_unit_id(unit_id)
@@ -65,7 +72,7 @@ class UnitNames:
             wip_branch=f"l4-wip/{fw}/{name}",
             lock_ref=lock_ref(unit_id),
             lock_branch=f"l4-lock/{fw}/{name}",
-            archive_branch=f"{branch_prefix}archive/{fw}/{name}",
+            archive_branch=archive_branch(unit_id, branch_prefix),
             worktree=cache / "worktrees" / repo_key / fw / name,
             flock_path=cache / "locks" / repo_key / fw / f"{name}.lock",
             archive_worktree=cache / "worktrees" / repo_key / "archive" / fw / name,

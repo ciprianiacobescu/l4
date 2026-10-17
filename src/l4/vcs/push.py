@@ -7,8 +7,12 @@ M1: state-vcs-locks 1.7 (`Lease`) for the lock protocol of M2.
 
 import re
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal
 
 from l4.vcs.errors import GitError
+
+if TYPE_CHECKING:
+    from l4.vcs.git import Git
 
 
 class ForcedPushRefused(ValueError):
@@ -50,6 +54,9 @@ _OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 LOCK_REF_PREFIX = "refs/l4/locks/"
 ARCHIVED_REF_PREFIX = "refs/l4/archived/"
 ATTEMPT_REF_PREFIX = "refs/l4/attempts/"  # `l4 restart` keeps old heads here (L4-OPS-004)
+MERGED_REF_PREFIX = (
+    "refs/l4/merged/"  # the verified head of a merged unit, kept when its branch is deleted (L4-YOLO-033)
+)
 
 
 def _plain_ref(ref: str, prefix: str | tuple[str, ...]) -> bool:
@@ -128,3 +135,103 @@ def build_retire_args(remote: str, sha: str, ref: str, archived: str) -> list[st
         "push", "--atomic", f"--force-with-lease={ref}:{sha}", f"--force-with-lease={archived}:", "--", remote,
         f"{sha}:{archived}", f":{ref}",
     ]  # fmt: skip
+
+
+def merged_ref(unit_id: str) -> str:
+    """`refs/l4/merged/<framework>/<name>`: where the verified head of a merged unit stays reachable after its branch is
+    deleted (squash-and-delete D6)."""
+    framework, _, name = unit_id.partition(":")
+    ref = f"{MERGED_REF_PREFIX}{framework}/{name}"
+    if not framework or not name or not _plain_ref(ref, MERGED_REF_PREFIX):
+        raise ForcedPushRefused(f"not a unit id: {unit_id!r}")
+    return ref
+
+
+def build_delete_args(remote: str, branch: str, expect: str) -> list[str]:
+    """Delete `refs/heads/<branch>` on the remote only if it still holds `expect`: a person's commit pushed after the
+    harness read the tip makes the server refuse. The lease is never a `+` refspec and `expect` is never empty."""
+    if not remote or remote.startswith("-"):
+        raise ForcedPushRefused(f"not a remote name: {remote!r}")
+    if not _OBJECT_ID.match(expect):
+        raise ForcedPushRefused(f"not a commit id: {expect!r}")
+    ref = f"refs/heads/{branch}"
+    if not branch or branch.startswith("-") or not _plain_ref(ref, "refs/heads/"):
+        raise ForcedPushRefused(f"not a branch name: {branch!r}")
+    return ["push", f"--force-with-lease={ref}:{expect}", "--", remote, f":{ref}"]
+
+
+def build_keep_args(remote: str, sha: str, ref: str) -> list[str]:
+    """Push `sha` to a `refs/l4/merged/` ref that must not exist yet (the lease `ref:` with nothing expected)."""
+    if not remote or remote.startswith("-"):
+        raise ForcedPushRefused(f"not a remote name: {remote!r}")
+    if not _OBJECT_ID.match(sha):
+        raise ForcedPushRefused(f"not a commit id: {sha!r}")
+    if not _plain_ref(ref, MERGED_REF_PREFIX):
+        raise ForcedPushRefused(f"not a merged ref: {ref!r}")
+    return ["push", f"--force-with-lease={ref}:", "--", remote, f"{sha}:{ref}"]
+
+
+def remote_ref_tip(
+    git: "Git", ref: str, *, remote: str = "origin", config: Sequence[tuple[str, str]] = ()
+) -> str | None:
+    """The sha of `ref` on the remote (one `ls-remote`), None when it is not there."""
+    for line in git.run("ls-remote", remote, ref, config=config).stdout.splitlines():
+        sha, _, name = line.partition("\t")
+        if name.strip() == ref and sha:
+            return sha
+    return None
+
+
+def remote_branch_tip(
+    git: "Git", branch: str, *, remote: str = "origin", config: Sequence[tuple[str, str]] = ()
+) -> str | None:
+    return remote_ref_tip(git, f"refs/heads/{branch}", remote=remote, config=config)
+
+
+def delete_branch(
+    git: "Git",
+    branch: str,
+    expect: str,
+    *,
+    remote: str = "origin",
+    config: Sequence[tuple[str, str]] = (),
+    read_config: Sequence[tuple[str, str]] | None = None,
+) -> Literal["deleted", "kept", "gone"]:
+    """Delete a merged branch under a lease on `expect` (squash-and-delete D6): `deleted` (git then also removes the
+    local remote-tracking ref), `kept` (the tip is not `expect`: a person pushed to it, or the server refused the
+    lease), `gone` (it is not there: nothing to do). Any other refusal (a protected branch) is the `GitError`."""
+    build_delete_args(remote, branch, expect)  # validates before anything runs
+    read = config if read_config is None else read_config
+    tip = remote_branch_tip(git, branch, remote=remote, config=read)
+    if tip is None:
+        return "gone"
+    if tip != expect:
+        return "kept"
+    try:
+        git.push_delete(remote, branch, expect, config=config)
+    except PushRejected:
+        return "gone" if remote_branch_tip(git, branch, remote=remote, config=read) is None else "kept"
+    return "deleted"
+
+
+def keep_ref(
+    git: "Git",
+    ref: str,
+    sha: str,
+    *,
+    remote: str = "origin",
+    config: Sequence[tuple[str, str]] = (),
+    read_config: Sequence[tuple[str, str]] | None = None,
+) -> Literal["created", "present", "differs"]:
+    """Make `ref` hold `sha` on the remote without ever moving it: `created`, `present` (already `sha`: fine) or
+    `differs` (it holds another commit, which is left alone)."""
+    build_keep_args(remote, sha, ref)
+    read = config if read_config is None else read_config
+    tip = remote_ref_tip(git, ref, remote=remote, config=read)
+    if tip is None:
+        try:
+            git.push_keep(remote, sha, ref, config=config)
+            return "created"
+        except PushRejected:
+            tip = remote_ref_tip(git, ref, remote=remote, config=read)
+    return "present" if tip == sha else "differs"
