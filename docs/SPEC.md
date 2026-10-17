@@ -9799,9 +9799,9 @@ scenario is a spec defect (§26).
 - **Then** no tool runs `l4 yolo activate` or `l4 yolo cancel`, and `l4_plan_status`'s description names `l4 yolo activate <plan> --reason "…"` as a person's command
 
 #### SCN-MCP-08 (+) A client is configured and other servers stay · L4-MCP-004
-- **Given** a client user configuration file that already lists another MCP server and an entry `l4-mint-mory`
-- **When** `l4 mcp install --client <that client> --repo /work/mintkey` runs
-- **Then** the file adds `l4-mintkey` with the command `l4 mcp serve --repo /work/mintkey`, and still lists the other server and `l4-mint-mory` unchanged
+- **Given** a client user configuration file that already lists another MCP server and an entry `l4-shop`
+- **When** `l4 mcp install --client <that client> --repo /work/billing` runs
+- **Then** the file adds `l4-billing` with the command `l4 mcp serve --repo /work/billing`, and still lists the other server and `l4-shop` unchanged
 
 #### SCN-MCP-09 (−) An unparseable configuration is not overwritten · L4-MCP-004
 - **Given** a client configuration file that is not valid JSON (or TOML)
@@ -9809,12 +9809,12 @@ scenario is a spec defect (§26).
 - **Then** it exits 2 naming the file and writes nothing
 
 #### SCN-MCP-10 (+) Two IDE entries serve two repositories · L4-MCP-005
-- **Given** two servers configured as `l4 mcp serve --repo /work/mint-mory` and `l4 mcp serve --repo /work/mintkey`
+- **Given** two servers configured as `l4 mcp serve --repo /work/shop` and `l4 mcp serve --repo /work/billing`
 - **When** a client calls `l4_status` on each
 - **Then** each runs in its own repository and its result names that repository
 
 #### SCN-MCP-11 (−) A repository the instance does not serve is refused · L4-MCP-005
-- **Given** a server started with `--repo /work/mint-mory --repo /work/mintkey`
+- **Given** a server started with `--repo /work/shop --repo /work/billing`
 - **When** a client calls `l4_plan_status` with `repo: /etc` or `repo: other`
 - **Then** the call is refused with the list of the repositories it serves, and nothing runs
 

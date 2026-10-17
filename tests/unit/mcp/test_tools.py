@@ -36,7 +36,7 @@ def box(repos: Repos, recorder: Recorder, environ=None) -> Toolbox:
 
 @pytest.fixture
 def one(repo_factory):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     return root, Repos.from_paths([root], cwd=Path("/"))
 
 
@@ -253,7 +253,7 @@ def test_tools_cannot_pass_the_global_repo_or_config_options(one):
 
 
 def test_two_instances_run_each_in_its_own_repository(repo_factory):  # SCN-MCP-10
-    a, b = repo_factory("mint-mory"), repo_factory("mintkey")
+    a, b = repo_factory("shop"), repo_factory("billing")
     ra, rb = Recorder("{}"), Recorder("{}")
     res_a = call(box(Repos.from_paths([a], cwd=Path("/")), ra), "l4_status")
     res_b = call(box(Repos.from_paths([b], cwd=Path("/")), rb), "l4_status")
@@ -262,17 +262,17 @@ def test_two_instances_run_each_in_its_own_repository(repo_factory):  # SCN-MCP-
 
 
 def test_with_several_repositories_the_repo_argument_picks_one(repo_factory):
-    a, b = repo_factory("mint-mory"), repo_factory("mintkey")
+    a, b = repo_factory("shop"), repo_factory("billing")
     recorder = Recorder("{}")
     toolbox = box(Repos.from_paths([a, b], cwd=Path("/")), recorder)
-    call(toolbox, "l4_status", {"repo": "mintkey"})
+    call(toolbox, "l4_status", {"repo": "billing"})
     call(toolbox, "l4_status", {"repo": str(a)})
     assert [r["cwd"] for r in recorder.runs] == [b, a]
     assert all("--repo" not in r["argv"] for r in recorder.runs)  # the repo argument is not passed to the CLI
 
 
 def test_the_schema_requires_repo_only_with_several_repositories(repo_factory):
-    a, b = repo_factory("mint-mory"), repo_factory("mintkey")
+    a, b = repo_factory("shop"), repo_factory("billing")
     several = box(Repos.from_paths([a, b], cwd=Path("/")), Recorder()).specs()
     single = box(Repos.from_paths([a], cwd=Path("/")), Recorder()).specs()
     assert all("repo" in t["inputSchema"]["required"] and "repo" in t["inputSchema"]["properties"] for t in several)
@@ -282,7 +282,7 @@ def test_the_schema_requires_repo_only_with_several_repositories(repo_factory):
 
 
 def test_a_repository_not_served_is_refused_with_the_list_and_nothing_runs(repo_factory):  # SCN-MCP-11
-    a, b = repo_factory("mint-mory"), repo_factory("mintkey")
+    a, b = repo_factory("shop"), repo_factory("billing")
     recorder = Recorder()
     toolbox = box(Repos.from_paths([a, b], cwd=Path("/")), recorder)
     for bad in ("/etc", "other", None):

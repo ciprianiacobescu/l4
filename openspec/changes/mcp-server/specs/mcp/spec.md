@@ -43,12 +43,12 @@ any other value is refused. Without `--repo` the working directory serves when i
 naming `--repo`. Results and `initialize` SHALL name the repositories.
 
 #### Scenario: SCN-MCP-10 (+) Two IDE entries serve two repositories
-- **GIVEN** two servers configured as `l4 mcp serve --repo /work/mint-mory` and `l4 mcp serve --repo /work/mintkey`
+- **GIVEN** two servers configured as `l4 mcp serve --repo /work/shop` and `l4 mcp serve --repo /work/billing`
 - **WHEN** a client calls `l4_status` on each
 - **THEN** each runs in its own repository and its result names that repository
 
 #### Scenario: SCN-MCP-11 (−) A repository the instance does not serve is refused
-- **GIVEN** a server started with `--repo /work/mint-mory --repo /work/mintkey`
+- **GIVEN** a server started with `--repo /work/shop --repo /work/billing`
 - **WHEN** a client calls `l4_plan_status` with `repo: /etc` or `repo: other`
 - **THEN** the call is refused with the list of the repositories it serves, and nothing runs
 
@@ -150,10 +150,10 @@ another repository, a symlink and a client project entry that could not find its
 SHALL be offered.
 
 #### Scenario: SCN-MCP-08 (+) A client is configured and other servers stay
-- **GIVEN** a client user configuration file that already lists another MCP server and an entry `l4-mint-mory`
-- **WHEN** `l4 mcp install --client <that client> --repo /work/mintkey` runs
-- **THEN** the file adds `l4-mintkey` with the command `l4 mcp serve --repo /work/mintkey`, and still lists the other
-  server and `l4-mint-mory` unchanged
+- **GIVEN** a client user configuration file that already lists another MCP server and an entry `l4-shop`
+- **WHEN** `l4 mcp install --client <that client> --repo /work/billing` runs
+- **THEN** the file adds `l4-billing` with the command `l4 mcp serve --repo /work/billing`, and still lists the other
+  server and `l4-shop` unchanged
 
 #### Scenario: SCN-MCP-09 (−) An unparseable configuration is not overwritten
 - **GIVEN** a client configuration file that is not valid JSON (or TOML)

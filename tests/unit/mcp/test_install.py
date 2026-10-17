@@ -64,7 +64,7 @@ PROJECT_ARGS = {"cursor": ["mcp", "serve", "--repo", "${workspaceFolder}"]}  # M
 
 @pytest.mark.parametrize("client", [c for c in ALL if c != "kiro"])
 def test_project_scope_writes_the_documented_file_with_the_serve_command(client, repo_factory, home):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
     entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")  # the project entry is named l4
     # no path of this machine: the file is committed (F1)
@@ -74,15 +74,15 @@ def test_project_scope_writes_the_documented_file_with_the_serve_command(client,
 
 @pytest.mark.parametrize("client", sorted(USER_FILE))
 def test_user_scope_names_the_entry_after_the_repository(client, repo_factory, home):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", client, "--repo", str(root)) == 0
-    entry = entry_of(client, read(home / USER_FILE[client]), "l4-mint-mory")
+    entry = entry_of(client, read(home / USER_FILE[client]), "l4-shop")
     assert command_of(client, entry) == ["l4", "mcp", "serve", "--repo", str(root)]
 
 
 @pytest.mark.parametrize("client", sorted(USER_FILE))
 def test_a_second_repository_adds_an_entry_and_keeps_the_others(client, repo_factory, home):  # SCN-MCP-08
-    first, second = repo_factory("mint-mory"), repo_factory("mintkey")
+    first, second = repo_factory("shop"), repo_factory("billing")
     path = home / USER_FILE[client]
     path.parent.mkdir(parents=True)
     if client == "codex":
@@ -94,8 +94,8 @@ def test_a_second_repository_adds_an_entry_and_keeps_the_others(client, repo_fac
     before = read(path)
     assert install(home, "--client", client, "--repo", str(second)) == 0
     after = read(path)
-    assert command_of(client, entry_of(client, after, "l4-mintkey"))[-1] == str(second)
-    assert entry_of(client, after, "l4-mint-mory") == entry_of(client, before, "l4-mint-mory")
+    assert command_of(client, entry_of(client, after, "l4-billing"))[-1] == str(second)
+    assert entry_of(client, after, "l4-shop") == entry_of(client, before, "l4-shop")
     assert entry_of(client, after, "other") == entry_of(client, before, "other")
     if client == "codex":
         assert after["model"] == "x" and "# keep me" in path.read_text()
@@ -104,30 +104,30 @@ def test_a_second_repository_adds_an_entry_and_keeps_the_others(client, repo_fac
 
 
 def test_the_same_name_is_replaced_not_duplicated(repo_factory, home):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     for _ in range(2):
         assert install(home, "--client", "cursor", "--repo", str(root)) == 0
-    assert list(read(home / ".cursor/mcp.json")["mcpServers"]) == ["l4-mint-mory"]
+    assert list(read(home / ".cursor/mcp.json")["mcpServers"]) == ["l4-shop"]
     path = home / ".codex/config.toml"
     for _ in range(2):
         assert install(home, "--client", "codex", "--repo", str(root)) == 0
-    assert path.read_text().count("[mcp_servers.l4-mint-mory]") == 1
+    assert path.read_text().count("[mcp_servers.l4-shop]") == 1
 
 
 def test_codex_replace_keeps_the_text_around_the_table(repo_factory, home):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     path = home / ".codex/config.toml"
     path.parent.mkdir(parents=True)
     path.write_text(
-        '# my codex\nmodel = "x"\n\n[mcp_servers.l4-mint-mory]\ncommand = "old"\n'
-        '[mcp_servers.l4-mint-mory.env]\nA = "1"\n'
+        '# my codex\nmodel = "x"\n\n[mcp_servers.l4-shop]\ncommand = "old"\n'
+        '[mcp_servers.l4-shop.env]\nA = "1"\n'
         '\n[mcp_servers.after]\ncommand = "after"\n\n[profiles.p]\nmodel = "y"\n'
     )
     assert install(home, "--client", "codex", "--repo", str(root)) == 0
     text = path.read_text()
     data = tomllib.loads(text)
     assert text.startswith("# my codex\n")
-    assert data["mcp_servers"]["l4-mint-mory"] == {
+    assert data["mcp_servers"]["l4-shop"] == {
         "command": "l4",
         "args": ["mcp", "serve", "--repo", str(root)],
         "env": {"A": "1"},  # the user's own subtable stays (F2)
@@ -137,7 +137,7 @@ def test_codex_replace_keeps_the_text_around_the_table(repo_factory, home):
 
 
 def test_name_overrides_the_default(repo_factory, home):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", "kiro", "--repo", str(root), "--name", "memory") == 0
     assert list(read(home / ".kiro/settings/mcp.json")["mcpServers"]) == ["memory"]
     assert install(home, "--client", "cursor", "--project", "--repo", str(root), "--name", "mm") == 0
@@ -195,15 +195,15 @@ def test_a_container_of_the_wrong_type_is_refused_untouched(repo_factory, home, 
 
 
 def test_dry_run_prints_the_result_and_writes_nothing(repo_factory, home, capsys):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", "cursor", "--repo", str(root), "--dry-run") == 0
     out = capsys.readouterr().out
-    assert str(home / ".cursor/mcp.json") in out and '"l4-mint-mory"' in out
+    assert str(home / ".cursor/mcp.json") in out and '"l4-shop"' in out
     assert not (home / ".cursor").exists()
 
 
 def test_the_output_says_what_was_written(repo_factory, home, capsys):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", "codex", "--project", "--repo", str(root)) == 0
     out = capsys.readouterr().out
     assert str(root / ".codex/config.toml") in out and "[mcp_servers.l4]" in out
@@ -222,10 +222,10 @@ def test_vscode_has_no_user_scope(repo_factory, home, capsys):
 
 
 def test_claude_code_user_scope_prints_the_documented_command_and_writes_nothing(repo_factory, home, capsys):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", "claude-code", "--repo", str(root)) == 0
     out = capsys.readouterr().out
-    assert f"claude mcp add --transport stdio --scope user l4-mint-mory -- l4 mcp serve --repo {root}" in out
+    assert f"claude mcp add --transport stdio --scope user l4-shop -- l4 mcp serve --repo {root}" in out
     assert list(home.iterdir()) == []
 
 
@@ -283,7 +283,7 @@ def serve_status(cwd: Path, args: list[str], env: dict[str, str] | None = None) 
 
 @pytest.mark.parametrize("client", [c for c in ALL if c != "kiro"])
 def test_f1_project_scope_writes_no_absolute_path(client, repo_factory, home):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
     entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")
     assert command_of(client, entry) == ["l4", *PROJECT_ARGS.get(client, ["mcp", "serve"])]
@@ -291,7 +291,7 @@ def test_f1_project_scope_writes_no_absolute_path(client, repo_factory, home):
 
 
 def test_f1_a_worktree_started_from_the_committed_file_serves_the_worktree(repo_factory, home, tmp_path):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
     assert install(home, "--client", "claude-code", "--project", "--repo", str(root)) == 0

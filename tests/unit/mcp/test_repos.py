@@ -8,7 +8,7 @@ from l4.mcp.repos import NoRepository, Refused, RepoError, Repos, resolve_root
 
 
 def test_a_path_resolves_to_the_git_root_with_an_l4_config(repo_factory):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     (root / "sub").mkdir()
     assert resolve_root(root) == root
     assert resolve_root(root / "sub") == root  # a folder inside resolves to the root
@@ -30,29 +30,29 @@ def test_a_missing_path_is_refused(tmp_path):
 
 
 def test_one_repository_serves_without_a_repo_argument_and_accepts_its_name_or_path(repo_factory):
-    root = repo_factory("mint-mory")
+    root = repo_factory("shop")
     repos = Repos.from_paths([root], cwd=Path("/"))
     assert not repos.needs_repo_argument
     assert repos.select(None) == root
-    assert repos.select("mint-mory") == root
+    assert repos.select("shop") == root
     assert repos.select(str(root)) == root
 
 
 def test_one_repository_refuses_a_repo_argument_that_names_another(repo_factory, tmp_path):
-    root = repo_factory("mint-mory")
-    other = repo_factory("mintkey")
+    root = repo_factory("shop")
+    other = repo_factory("billing")
     repos = Repos.from_paths([root], cwd=Path("/"))
-    for bad in ("mintkey", str(other), "/etc"):
+    for bad in ("billing", str(other), "/etc"):
         with pytest.raises(Refused) as exc:
             repos.select(bad)
         assert str(root) in str(exc.value)  # the refusal lists what is served
 
 
 def test_several_repositories_need_a_repo_argument(repo_factory):  # SCN-MCP-11
-    a, b = repo_factory("mint-mory"), repo_factory("mintkey")
+    a, b = repo_factory("shop"), repo_factory("billing")
     repos = Repos.from_paths([a, b], cwd=Path("/"))
     assert repos.needs_repo_argument
-    assert repos.select("mintkey") == b
+    assert repos.select("billing") == b
     assert repos.select(str(a)) == a
     with pytest.raises(Refused, match="repo"):
         repos.select(None)
@@ -63,7 +63,7 @@ def test_several_repositories_need_a_repo_argument(repo_factory):  # SCN-MCP-11
 
 
 def test_a_path_is_compared_after_resolving_symlinks(repo_factory, tmp_path):
-    a, b = repo_factory("mint-mory"), repo_factory("mintkey")
+    a, b = repo_factory("shop"), repo_factory("billing")
     link = tmp_path / "link"
     link.symlink_to(a)
     repos = Repos.from_paths([a, b], cwd=Path("/"))
@@ -71,7 +71,7 @@ def test_a_path_is_compared_after_resolving_symlinks(repo_factory, tmp_path):
 
 
 def test_a_symlink_to_a_served_repository_does_not_make_a_second_one(repo_factory, tmp_path):
-    a = repo_factory("mint-mory")
+    a = repo_factory("shop")
     link = tmp_path / "link"
     link.symlink_to(a)
     assert Repos.from_paths([a, link], cwd=Path("/")).roots == (a,)
