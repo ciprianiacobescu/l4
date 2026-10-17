@@ -62,6 +62,7 @@ from l4.implementer.discrimination import (
 )
 from l4.implementer.earlier_red import VIA, EarlierRed, confirmed_by_earlier_red
 from l4.implementer.excerpt import failure_excerpt, lint_excerpt
+from l4.implementer.gateconfig import config_files, revert_gate_config
 from l4.implementer.guards import (
     IGNORE_FILE_GLOBS,
     FreezeManifest,
@@ -89,7 +90,7 @@ from l4.implementer.resultalias import RESULT_ALIAS_PATH
 from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, escaping_links, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
-from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
+from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
@@ -708,6 +709,7 @@ def agent_step(
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
     base = wb.head()  # the revert resets to this commit: it must be taken before the agent runs
+    granted = config_grant(wb, task, role)  # what a person's answer opens, before the agent runs
     spec = wb.agent_spec()
     tmp = wb.reset_agent_tmp()
     trace = trace_env(wb.cfg.gates.test_timeout_seconds())
@@ -757,6 +759,7 @@ def agent_step(
             # also on an exception: whatever the agent left behind must not be committed or folded by a later step
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
+            revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt)
             wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
         wb.emit(
@@ -1445,6 +1448,25 @@ def _answer_events(wb: Workbench) -> list[LedgerEvent]:
     if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
         events = [*events, *own]
     return events
+
+
+def config_grant(wb: Workbench, task: Task, phase: str) -> Unfreeze:
+    """The gate and runner configuration files that a person's answer opens for this step (L4-IMP-041, D8), computed
+    before the agent runs and recorded as `task.config_opened{task, phase, paths, question, answer_sha256, kept}`. A tag
+    in the task title is read by `revert_gate_config` itself."""
+    file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
+    if file is None:
+        return Unfreeze()
+    scope = task_scope(wb.provider.tasks(wb.ref), task.key)
+    got = config_opened(
+        file.questions, _answer_events(wb), scope, config_files(wb.cfg, wb.worktree, wb.git), phase=phase
+    )
+    if got.paths or got.kept:
+        wb.emit(
+            "task.config_opened", task=task.key, phase=phase, paths=list(got.paths), question=got.question,
+            answer_sha256=got.answer_sha256, kept=[{"path": p, "why": why} for p, why in got.kept],
+        )  # fmt: skip
+    return got
 
 
 def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tuple[Unfreeze, Unfreeze, str | None]:

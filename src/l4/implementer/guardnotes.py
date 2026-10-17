@@ -55,6 +55,18 @@ _ADVICE = {
         "committed: the harness discarded the step. Keep the link out of the work, or point it at a path inside the "
         "repository."
     ),
+    "gate configuration": (
+        "Lint, type-check and other gate settings (ruff, mypy, eslint, tsconfig, and the gate sections of "
+        "pyproject.toml, setup.cfg, tox.ini and package.json) are the project's: the harness put the whole file back "
+        "to the step's base. Make the code meet them. A dependency you added in the same file must be written again "
+        "without touching those sections. If a setting is wrong, ask a question that names the file."
+    ),
+    "runner configuration": (
+        "Test-runner settings (the pytest and coverage sections, addopts and plugins, jest and the like) are not the "
+        "step's to change: the harness put the whole file back to the step's base. Write the change again without "
+        "them. A dependency you added in the same file must be written again too; a new pytest marker is allowed. If "
+        "the task needs one of these settings, ask a question that names the file."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),

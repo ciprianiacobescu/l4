@@ -132,6 +132,7 @@ class IntegrityReport:
     unfrozen: list[str] = field(default_factory=list)  # frozen tests a human answer unfroze for green (M1.10)
     human_suppressions: list[str] = field(default_factory=list)  # inline suppressions a person's commit wrote (W-D6)
     human_scan: list[str] = field(default_factory=list)  # content-scan hits only people's commits introduced (W-D6)
+    human_config: list[str] = field(default_factory=list)  # gate and runner configuration only people's commits changed
 
     @property
     def blocked(self) -> bool:

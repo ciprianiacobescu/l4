@@ -28,6 +28,7 @@ from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.gates.trace import trace_env
+from l4.implementer.gateconfig import restore_config, snapshot_config
 from l4.implementer.guardnotes import GuardNote, note_of
 from l4.memory.inject import branch_changed_files
 from l4.memory.serena import SerenaStatus, check_serena, mcp_server_for, serena_context
@@ -322,6 +323,7 @@ class Workbench:
         purge_bytecode(root, self._tracked_bytecode(git))
         self._report_links(root, spec)  # a link on a report path is removed and recorded: the gate writes a real one
         before = snapshot_protected(root, self.protected)
+        configs = snapshot_config(self.cfg, root, git, self.excludes)
         try:
             result = run_gate(
                 spec, worktree=root, sandbox=self.sandbox,
@@ -344,6 +346,9 @@ class Workbench:
             for v in [*restore_protected(root, self.protected, before),
                       *revert_unsnapshotted(git, self.protected, excludes=self.excludes)]:  # fmt: skip
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
+            # ... and the gate and runner configuration the gates read (L4-IMP-040): a test that loosens `ruff.toml`
+            # while it runs must not change what the lint gate that follows judges. No tag lifts this.
+            restore_config(self, root, git, configs, where=spec.name)
         self._report_links(root, spec)  # ... and one the gate planted: the restores that follow must find a real folder
         self.restore_ledger()
         readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
