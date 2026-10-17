@@ -123,3 +123,9 @@ def test_the_note_of_an_opened_file_says_what_the_file_may_become():
     assert "`conftest.py` (opened file) restored: rebinds client" in note
     assert "keep every existing statement" in note and "do not patch or assign the unit's code" in note
     assert "_GENERIC" not in note and "CI files" not in note  # the rule has its own advice
+
+
+def test_a_rejected_pre_existing_test_change_gives_no_note():  # L4-IMP-048: the attempt's reason and excerpt carry it
+    data = {"path": "tests/test_pricing.py", "phase": "red", "rule": "pre-existing test", "action": "rejected"}
+    assert note_of("guard.test_tamper", data) is None
+    assert note_of("guard.test_tamper", {**data, "action": "restored"}) is not None

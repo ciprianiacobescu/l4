@@ -69,6 +69,8 @@ def note_of(event: str, data: Mapping[str, Any]) -> GuardNote | None:
     """The note for one guard event, or None for an event the agent cannot act on."""
     if event not in GUARD_EVENTS:
         return None
+    if data.get("action") == "rejected":
+        return None  # the failed attempt's own reason and excerpt carry it (a note would say "put back")
     rule = str(data.get("rule") or ("frozen test" if event == "guard.test_tamper" else ""))
     if rule in _IGNORED_RULES or not data.get("path"):
         return None
