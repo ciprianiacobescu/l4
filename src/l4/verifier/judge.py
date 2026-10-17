@@ -12,7 +12,7 @@ M1: verifier 1.11 (served-model check, limit classification), 1.12 (citation re-
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 from typing import Any, Literal
@@ -286,6 +286,8 @@ class JudgePrompt:
     user: str
     sha256: str
     version: str
+    accepted_ids: tuple[str, ...] = ()  # the ids of the accepted block, each to be answered in `accepted` (L4-VER-017)
+    feedback_ids: tuple[str, ...] = ()  # the ids of the feedback block, each to be answered in `feedback`
 
 
 def build_judge_prompt(
@@ -363,7 +365,10 @@ def build_judge_prompt(
     ]
     user = redact("\n\n".join(parts) + "\n")
     digest = hashlib.sha256(render_prompt(SYSTEM, [Msg("user", user)]).encode("utf-8")).hexdigest()
-    return JudgePrompt(SYSTEM, user, digest, f"judge@{PROMPT_VERSION}")
+    return JudgePrompt(
+        SYSTEM, user, digest, f"judge@{PROMPT_VERSION}", accepted_ids=tuple(i.id for i in accepted),
+        feedback_ids=tuple(i.id for i in feedback),
+    )  # fmt: skip
 
 
 def reply_counts(events: Sequence[Any], profile: str) -> dict[str, int]:
@@ -401,6 +406,22 @@ def _repair(problems: str) -> Msg:
     )
 
 
+def _unanswered(prompt: JudgePrompt, verdict: JudgeVerdict) -> tuple[list[str], list[str]]:
+    """The accepted and the feedback ids the prompt asked for that the reply does not answer (L4-VER-017)."""
+    accepted = {a.id for a in verdict.accepted or ()}
+    feedback = {f.id for f in verdict.feedback or ()}
+    return [i for i in prompt.accepted_ids if i not in accepted], [i for i in prompt.feedback_ids if i not in feedback]
+
+
+def _ask_missing(accepted: Sequence[str], feedback: Sequence[str]) -> Msg:
+    named = [f"{kind} {', '.join(ids)}" for kind, ids in (("accepted", accepted), ("feedback", feedback)) if ids]
+    return Msg(
+        "user",
+        f"Your reply left out the answers for these ids: {'; '.join(named)}. Reply again with the complete JSON "
+        "object, with one entry per id in accepted and in feedback.",
+    )
+
+
 def _classify(result: StructuredResult) -> tuple[str, str, JudgeVerdict | None, tuple[str, ...]]:
     """(status, detail, verdict, repaired fields): the backend's own validation is not trusted, the verdict model has
     the last word. A reply that breaks the schema only trivially is repaired first (`judge_repair`) and kept."""
@@ -424,15 +445,18 @@ def run_judge(
     redact: Callable[[str], str],
     expect_model: str | None = None,
 ) -> JudgeRun:
-    """At most two calls: a schema break gets one repair prompt, a timeout one retry. A usage limit or a lost login
-    raises `RoleLimit` (the role is unavailable, exit 12); any other failure to answer is the returned status. The
-    repair prompt shows the model its own rejected reply, `redact`ed and cut to MAX_REPAIR_ECHO_CHARS.
+    """At most two calls: a schema break gets one repair prompt, a timeout one retry, and a valid reply that leaves out
+    an id the prompt asked for (`accepted_ids`, `feedback_ids`) one call that names the missing ids (L4-VER-017): a
+    valid second reply is the verdict, anything else keeps the first one. A usage limit or a lost login raises
+    `RoleLimit` (the role is unavailable, exit 12); any other failure to answer is the returned status. The repair
+    prompt shows the model its own rejected reply, `redact`ed and cut to MAX_REPAIR_ECHO_CHARS.
     `expect_model` is the full model id of the profile, for an adapter that reports the served model: an answer from
     another model is `model_mismatch` and its verdict is dropped (SPEC 8.1, SCN-AVL-15)."""
     first = [Msg("user", prompt.user)]
     messages = first
     out = JudgeRun("error")
-    retried = False  # a schema break was answered with a second call
+    retried = False  # a schema break, or a reply that left out an asked id, was answered with a second call
+    kept: JudgeRun | None = None  # the valid first reply while the judge is asked for the ids it left out
     for call in range(1, MAX_CALLS + 1):
         result = backend.complete_structured(
             prompt.system, messages, JUDGE_SCHEMA, effort=None, max_tokens=0, timeout_s=timeout_s
@@ -446,12 +470,25 @@ def run_judge(
         out.cost_usd = (out.cost_usd or 0.0) + (result.usage.cost_usd or 0.0)
         out.status = status  # type: ignore[assignment]
         if expect_model and result.model_resolved and not same_model(expect_model, result.model_resolved):
+            if kept is not None:  # the first reply came from the model the profile names: it stands
+                return replace(kept, calls=out.calls, cost_usd=out.cost_usd)
             out.status, out.verdict = "model_mismatch", None
             out.detail = f"requested {expect_model}, served {result.model_resolved}"
             return out
         if status == "ok":
             out.reply = "retried" if retried else ("repaired" if repaired else "valid")
-        if status in ("ok", "error"):
+            assert verdict is not None
+            accepted, feedback = _unanswered(prompt, verdict) if kept is None else ([], [])
+            if (accepted or feedback) and call < MAX_CALLS:
+                kept, retried = replace(out), True
+                answered = result.raw or result.parsed
+                echo = [Msg("assistant", redact(json.dumps(answered))[:MAX_REPAIR_ECHO_CHARS])] if answered else []
+                messages = [*first, *echo, _ask_missing(accepted, feedback)]
+                continue
+            return out
+        if kept is not None:  # the second reply is no answer: the first verdict stands, with both calls' cost
+            return replace(kept, calls=out.calls, cost_usd=out.cost_usd, model_resolved=out.model_resolved)
+        if status == "error":
             return out
         if status == "schema_invalid":
             retried = call < MAX_CALLS

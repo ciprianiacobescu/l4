@@ -54,7 +54,7 @@ def answer(fid: str, addressed: bool = True, evidence: str = "src/pytdd/pricing.
 def judged(wb, base, head, accepted=None):
     criteria = wb.provider.criteria(wb.ref)
     reply = judge_reply([c.id for c in criteria], **({"accepted": accepted} if accepted is not None else {}))
-    backend = Scripted(ok(reply))
+    backend = Scripted(ok(reply), ok(reply))  # a reply that leaves out an asked id is asked once more (L4-VER-017)
     result = VerifyResult(wb.ref.id, 1, Verdict.NEEDS_HUMAN, base, head)
     run = _Run(result)
     vc = VerifyContext(wb, backend, "judge", ["impl"], 1, 60)  # type: ignore[arg-type]
@@ -197,3 +197,48 @@ def test_an_empty_items_list_asks_nothing(make_bench):
     base = wb.git.run("rev-parse", "origin/main").stdout.strip()
     _, backend = judged(wb, base, wb.head())
     assert 'kind="accepted"' not in backend.calls[0][0].content
+
+
+# --- SCN-VER-68: a resumed round carries the answers it relies on (L4-VER-017) -------------------------------------
+
+
+def test_scn_ver_68_a_resumed_round_carries_the_accepted_answers(make_bench):
+    from l4.verifier.ladder import _resume
+    from l4.verifier.report import verdict_json
+
+    wb, base, head = world(make_bench)
+    first, _ = judged(wb, base, head, [answer(ID1), answer(ID2, False, "still inline")])
+    prev = json.loads(json.dumps(verdict_json(first)))
+    backend = Scripted()  # a resumed round calls no judge
+    vc = VerifyContext(wb, backend, "judge", ["impl"], 2, 60)  # type: ignore[arg-type]
+    _resume(vc, prev, wb.provider.criteria(wb.ref), read_ledger(wb.ref.path).events, head)
+    carried = {e["id"]: e for e in events_of(wb, "review.accepted_judged") if e["round"] == 2}
+    assert {k: (v["addressed"], v["evidence"], v["reused_from"], v["profile"]) for k, v in carried.items()} == {
+        ID1: (True, "src/pytdd/pricing.py:2 does it", 1, "judge"),
+        ID2: (False, "still inline", 1, "judge"),
+    }
+    assert backend.calls == []
+
+
+def test_a_resumed_round_whose_reused_round_has_no_answers_carries_none(make_bench):
+    from l4.verifier.ladder import _resume
+    from l4.verifier.report import verdict_json
+
+    wb = make_bench([]).wb
+    base = wb.git.run("rev-parse", "origin/main").stdout.strip()
+    first, _ = judged(wb, base, wb.head())
+    vc = VerifyContext(wb, Scripted(), "judge", ["impl"], 2, 60)  # type: ignore[arg-type]
+    prev = json.loads(json.dumps(verdict_json(first)))
+    _resume(vc, prev, wb.provider.criteria(wb.ref), read_ledger(wb.ref.path).events, wb.head())
+    assert events_of(wb, "review.accepted_judged") == []
+
+
+def test_the_carried_rows_settle_a_pass_of_the_resumed_round():
+    from ..state.test_fold_accepted import judged as row
+    from ..state.test_fold_accepted import state, verdict
+
+    carried = row(ID1, round_=2)
+    carried[1]["reused_from"] = 1
+    got = state(row(ID1), verdict("NEEDS_HUMAN"), carried, verdict(round_=2))
+    assert got.accepted_addressed == frozenset({ID1})
+    assert state(row(ID1), verdict("NEEDS_HUMAN"), verdict(round_=2)).accepted_addressed == frozenset()  # 0.4.6
