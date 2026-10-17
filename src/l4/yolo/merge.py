@@ -152,7 +152,7 @@ def squash_message(title: str, pr: int, unit: str, commits: int, head: str, run_
     the target's own CI should see the change."""
     cleaned = _SKIP_CI.sub(" ", title).strip() or unit
     body = (
-        f"Squash of {unit}: {commits} commits, verified head {head}.\n\n"
+        f"Squash of {unit}: {commits} commit{'' if commits == 1 else 's'}, verified head {head}.\n\n"
         f"L4-Unit: {unit}\nL4-Verified-Head: {head}\nL4-Run: {run_id}"
     )
     return f"{cleaned} (#{pr})", body
