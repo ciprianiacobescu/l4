@@ -88,7 +88,7 @@ Every task follows these rules:
 
 ## 6. Holds on the judge's view (L4-VER-043, L4-VER-044)
 
-- [ ] 6.1 Tests, `tests/unit/verifier/test_hold_verdicts.py`. First move the tests that use `LONG_DIFF` to test the
+- [x] 6.1 Tests, `tests/unit/verifier/test_hold_verdicts.py`. First move the tests that use `LONG_DIFF` to test the
   `other` kind to `NOT_MEASURED` (an `other` hold): `test_a_rejected_hold_of_another_kind_with_a_scenario_becomes_a_fix_task`
   (with a scenario reason about coverage), `test_a_rejected_hold_of_another_kind_without_a_scenario_still_escalates`,
   and the parametrize of `test_the_question_of_any_other_hold_asks_for_a_scenario_and_promises_nothing` (drop
@@ -101,18 +101,18 @@ Every task follows these rules:
   "judge_view_rejected")`, and for a finding of another title it is today's `no_convertible_finding` pair);
   SCN-VER-139 (the same with `LONG_DIFF`, the 0.4.14 text: `hold_kind` is `judge_view`, no task). The tests that use
   `LONG_DIFF` with a reason that has no scenario (SCN-VER-66 and the ones after it) must pass unchanged.
-- [ ] 6.2 Code: `src/l4/verifier/verdicts.py`: `HoldKind` with `judge_view`, `LEGACY_LENGTH_HOLD`,
+- [x] 6.2 Code: `src/l4/verifier/verdicts.py`: `HoldKind` with `judge_view`, `LEGACY_LENGTH_HOLD`,
   `JUDGE_VIEW_PREFIX = "judge view: "`, `JUDGE_VIEW_REJECTED_TITLE`, `hold_kind`, `hold_subjects`, `_hold_question`,
   `_hold_finding` (design D5); `src/l4/verifier/fixunit.py`: `_candidates` skips a finding with that title before the
   scenario logic and records its question in `unconverted`; `src/l4/verifier/fixloop.py`: pure
   `_no_task_cause(findings) -> tuple[str, str]` used by `decide_fix` where it chose `no_convertible_finding`.
-- [ ] 6.3 Tests for the way out (SCN-VER-138, the person's side): `tests/unit/state/test_next_step.py` (an escalated
+- [x] 6.3 Tests for the way out (SCN-VER-138, the person's side): `tests/unit/state/test_next_step.py` (an escalated
   unit with `halt_reason="judge_view_rejected"`: `next_step` names `l4 restart --unit`, `--replace` and
   `l4 retry --unit`, and not `l4 feedback add`; `way_out(unit, "no_convertible_finding")` is `feedback_way_out(unit)`;
   `way_out(unit, "fix_rounds_exhausted")` is `None`); `tests/unit/state/test_spec_edited.py` (`_refuse_stopped` of such
   a unit: its `exit_reason` names the same and not `l4 feedback add`); `tests/unit/ci/test_resume_label.py` (the
   escalated section with `reason_code="judge_view_rejected"` is `### Escalated: …` and `To go on: <judge_view_way_out>.`).
-- [ ] 6.4 Code: `src/l4/state/next_step.py`: `JUDGE_VIEW_REJECTED`, `judge_view_way_out`, `way_out` (design D6), used
+- [x] 6.4 Code: `src/l4/state/next_step.py`: `JUDGE_VIEW_REJECTED`, `judge_view_way_out`, `way_out` (design D6), used
   by `next_step`; `src/l4/orchestrator.py` (`_refuse_stopped`) and `src/l4/ci/resume_label.py` (the escalated section)
   call `way_out` instead of testing `NO_CONVERTIBLE_FINDING`; `fixloop.py` imports `JUDGE_VIEW_REJECTED`.
 
