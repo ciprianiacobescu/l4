@@ -14,7 +14,7 @@ One script, then a commit, a push and the forge and runner steps, on a project w
 Install `l4` and the `l4` skill for your coding agents (Claude Code, Codex, OpenCode, Kiro CLI) first:
 
 ```bash
-uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.14 && l4 skills install
+uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.15 && l4 skills install
 ```
 
 `l4 skills install` needs no network; `--project` writes the skill into the repository for the team, and
@@ -260,7 +260,7 @@ vendored code, no `harness.commit`. The `uses:` line of the workflow is the only
 repository:
 
 - **A public harness repository (the published one): no key, for any repository.** Adopt with
-  `l4 init --ci github --action --harness-ref v0.4.14`. The adopting repository's Actions policy must allow actions
+  `l4 init --ci github --action --harness-ref v0.4.15`. The adopting repository's Actions policy must allow actions
   from other repositories (Settings > Actions > General: "Allow all actions", or an allow-list that names the harness).
   The two forms below are for a harness repository that is private.
 - **A private repository of the same owner as the harness: no key.**
@@ -270,17 +270,17 @@ repository:
      job".
   2. Adopt with a version pin:
      ```bash
-     l4 init --ci github --action --harness-ref v0.4.14
+     l4 init --ci github --action --harness-ref v0.4.15
      ```
      `--harness-ref` (a `vX.Y.Z` tag, `v0` or a branch) is resolved once with `git ls-remote`. The workflow gets
-     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.14`. A ref that resolves to nothing is exit 2. Use
+     `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.15`. A ref that resolves to nothing is exit 2. Use
      `--action-repo OWNER/REPO` only when `l4` runs from a checkout or was not installed from the harness repository:
      a checkout has no install origin, and `init` then exits 2.
 - **A public repository, or one of another owner, with a private harness: a copy of the action and a deploy key.**
   GitHub never lets a public repository use a private action.
   1. Adopt with the copy:
      ```bash
-     l4 init --ci github --action --action-copy --harness-ref v0.4.14
+     l4 init --ci github --action --action-copy --harness-ref v0.4.15
      ```
      This writes the action under `.github/actions/l4` (the copy your `l4` ships, so no checkout of the harness is
      needed) and a workflow that uses it with the harness's SSH URL. `l4 upgrade` refreshes that copy too.

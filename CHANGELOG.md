@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.15 (unreleased)
+## 0.4.15 (2026-10-18)
 
 ### Added
 - `l4 mcp serve [--repo PATH]...` makes L4 an MCP server over stdio (newline-delimited JSON-RPC 2.0, protocol revision
