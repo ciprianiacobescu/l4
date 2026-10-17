@@ -1,21 +1,21 @@
 """The guarded merge of a plan unit (design D8, L4-YOLO-008; squash-and-delete D3, L4-YOLO-032): the harness lands a
 verified unit on the target branch, by default as one squash commit made by the forge's own merge call pinned to the
-verified head (`yolo.merge.method: squash`), or with one fast-forward push of the unit head (`fast-forward`), never
-forced.
+recorded hand-off commit H (`yolo.merge.method: squash`), or with one fast-forward push of H (`fast-forward`), never
+forced. H is the sha that `pr.ready{head}` recorded (L4-YOLO-040), never a branch tip the merge read.
 
 `merge_guarded` checks the preconditions in order (the unit is `in_review` with a PASS, no question and no feedback
-open; no person's commit after the hand-off; the PR exists, is open and is aimed at the target; the head equals the
-`ls-remote` tip of the unit branch and, when the forge shows it, the PR head sha (R5); the target tip is an ancestor
-of the head). Each failure is `not_ready` (or `stale` for the last) and pushes nothing. Then, when the caller gave a
-`before_push` callback, it is called with the outcome-to-be and a False answer pushes nothing (`not_ready`, "the plan
-no longer allows the merge": the plan step records `unit.merge_requested` there, under its lease, R5). Then, with
-`fast-forward`, it pushes `<head>:refs/heads/<target>`. The freshness of head and base is enforced by the git server,
-not by the read before the push: a target that moved in between is refused as a non-fast-forward and is `stale`; any
-other refusal (a protected branch, a push rule, a permission) is `refused` and carries the forge's message, redacted.
-With `squash` it calls `Forge.merge_pr(pr, sha=head, ...)`: the forge answers `head_moved` (`not_ready`, the next run
-reads again) or `refused`, or merges. That call has no guard on the target, so the landed commit is compared with what
-was read: its parent is the tip read and its tree is the head's tree, else `MergeOutcome.raced` is set and the
-post-merge check (L4-YOLO-009) of the landed commit decides.
+open; no commit after H; H is recorded and is the branch head; no red CI recorded on H; the PR exists, is open and is
+aimed at the target; H equals the `ls-remote` tip of the unit branch and, when the forge shows it, the PR head sha
+(R5); the target tip is an ancestor of H). Each failure is `not_ready` (or `stale` for the last) and pushes nothing.
+Then, when the caller gave a `before_push` callback, it is called with the outcome-to-be and a False answer pushes
+nothing (`not_ready`, "the plan no longer allows the merge": the plan step records `unit.merge_requested` there, under
+its lease, R5). Then, with `fast-forward`, it pushes `<head>:refs/heads/<target>`. The freshness of head and base is
+enforced by the git server, not by the read before the push: a target that moved in between is refused as a
+non-fast-forward and is `stale`; any other refusal (a protected branch, a push rule, a permission) is `refused` and
+carries the forge's message, redacted. With `squash` it calls `Forge.merge_pr(pr, sha=head, ...)`: the forge answers
+`head_moved` (`not_ready`, the next run reads again) or `refused`, or merges. That call has no guard on the target, so
+the landed commit is compared with what was read: its parent is the tip read and its tree is the head's tree, else
+`MergeOutcome.raced` is set and the post-merge check (L4-YOLO-009) of the landed commit decides.
 
 The function writes no ledger: the caller records `unit.merge_requested` and `unit.merged`. `confirm_merged` asks
 whether the target holds the landed commit (it is the tip, or an ancestor of it when the target moved on after the
@@ -201,11 +201,25 @@ def squash_merge(
     )
 
 
-def _unit_head(git: Git, snapshot: UnitSnapshot, cfg: L4Config) -> str | None:
-    if snapshot.review is not None and snapshot.review.head:
-        return snapshot.review.head
-    branch = unit_branch(snapshot.ref.id, cfg.forge.branch_prefix)
-    return git.rev_parse(f"refs/remotes/origin/{branch}")
+def _recorded_head(snapshot: UnitSnapshot) -> tuple[str | None, str | None]:
+    """The recorded hand-off commit H to merge, or the `not_ready` detail (L4-YOLO-040): no H is recorded, or the
+    snapshot's hand-off commit or branch head is not H."""
+    state, unit = snapshot.state, snapshot.ref.id
+    h = state.ready_head
+    if h is None:
+        return (
+            None,
+            f"no hand-off commit H is recorded for {unit} (no pr.ready): l4 retry --unit {unit} hands it off again",
+        )
+    review = snapshot.review
+    if review is None or not review.head:
+        return None, "the unit branch head is not known"
+    if review.handoff != h or review.head != h:
+        return None, (
+            f"the unit branch head {review.head[:10]} is not its recorded hand-off commit H {h[:10]}: "
+            "the next run verifies the new head"
+        )
+    return h, None
 
 
 def _readiness(snapshot: UnitSnapshot) -> str | None:
@@ -247,10 +261,19 @@ def merge_guarded(
     review = snapshot.review
     if review is not None and review.reentry:
         who = ", ".join(c.sha[:10] for c in review.foreign) or "history rewritten"
-        return _not_ready(f"a person changed the branch after the hand-off ({who})")
-    head = _unit_head(git, snapshot, cfg)
+        h = (snapshot.state.ready_head or review.handoff or "?")[:10]
+        return _not_ready(f"the branch changed after the hand-off commit H {h} ({who}): the unit is verified again")
+    head, why = _recorded_head(snapshot)
     if head is None:
-        return _not_ready("the unit branch head is not known")
+        return _not_ready(why or "the unit branch head is not known")
+    failure = snapshot.state.ci_failure
+    if failure is not None and failure.head == head:
+        names = ", ".join(sorted(str(j.get("name")) for j in failure.jobs))
+        return _not_ready(
+            f"the repository CI failed on the hand-off commit {head[:10]}: {names} (recorded): "
+            "the unit is verified again",
+            head=head,
+        )
     pr = _find_pr(forge, snapshot, cfg)
     if pr is None:
         return _not_ready("the unit has no pull request", head=head)

@@ -83,7 +83,7 @@ class World:
 
     def snapshot(self, **state) -> UnitSnapshot:
         fields = {
-            "unit": UNIT, "phase": "in_review", "pr": PR_URL,
+            "unit": UNIT, "phase": "in_review", "pr": PR_URL, "ready_head": self.handoff,
             "last_verdict": LastVerdict(round=1, verdict="PASS", findings=0),
         }  # fmt: skip
         fields.update(state)

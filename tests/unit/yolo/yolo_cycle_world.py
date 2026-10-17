@@ -262,7 +262,7 @@ class CycleWorld:
         )  # fmt: skip
 
     def in_review(self, name: str, head: str, **state) -> UnitSnapshot:
-        fields = {"unit": unit_id(name), "phase": "in_review", "pr": "local://forge/pull/1",
+        fields = {"unit": unit_id(name), "phase": "in_review", "pr": "local://forge/pull/1", "ready_head": head,
                   "last_verdict": LastVerdict(round=1, verdict="PASS", findings=0), **state}  # fmt: skip
         ref = UnitRef(Framework.OPENSPEC, name, self.repo / "openspec" / "changes" / name)
         return UnitSnapshot(

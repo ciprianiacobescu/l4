@@ -62,7 +62,7 @@ Every task follows these rules:
 
 ## 2. The merge lands the recorded H (L4-YOLO-040, L4-YOLO-008, L4-YOLO-032, design D3, D9)
 
-- [ ] 2.1 Fixtures, then tests first.
+- [x] 2.1 Fixtures, then tests first.
   - Fixtures: `CycleWorld.in_review` gets the default `"ready_head": head` in `fields`, which `**state` can override.
     In `tests/unit/yolo/test_yolo_merge_guard.py` and `tests/unit/yolo/test_yolo_merge_squash.py`, every in-review
     `UnitState(...)` gets `ready_head=` the hand-off commit that the snapshot's `AfterHandoff.handoff` names. A test
@@ -82,14 +82,14 @@ Every task follows these rules:
     a `CycleWorld` with the default squash. After the step, `world.forge.get_pr(1).head_sha == H`, the landed commit's
     tree is H's tree in `world.origin`, and the plan ledger's `unit.merged` has `head == H` and `merge_commit` that
     commit.
-- [ ] 2.2 Code. In `src/l4/yolo/merge.py`, `_recorded_head` replaces `_unit_head`, and the checks of D3 run in order
+- [x] 2.2 Code. In `src/l4/yolo/merge.py`, `_recorded_head` replaces `_unit_head`, and the checks of D3 run in order
   with their exact details. Every use of the head becomes H: the `ls-remote` and PR-head checks, `squash_merge`,
   `guarded_push` and `push_fast_forward`. The re-entry detail is reworded as D3 says. `cycle._merge` already passes
   `out.head` to `_delete_after_merge` and `_integrate`, and that is now H. Run: the files of 2.1 and `tests/unit/yolo`.
 
 ## 3. A review edge comes before the merge (L4-YOLO-041, design D4)
 
-- [ ] 3.1 Tests first, in `tests/unit/yolo/test_merge_safety_review_edge.py`, ported from
+- [x] 3.1 Tests first, in `tests/unit/yolo/test_merge_safety_review_edge.py`, ported from
   `<review>/verify-yolo/repo/tests/unit/vy/test_vy2_ci_red.py`.
   - Setup: an active `merge: auto` plan, `unit.dispatched` seeded, `head = world.unit_branch("a")`, an open PR, and
     `world.in_review("a", head, ci_failure=CiFailure(head=head, jobs=[{"name": "unit-tests"}], preexisting=[],
@@ -102,7 +102,7 @@ Every task follows these rules:
     world.git, world.forge, snap, before_push=lambda _: True, sleep=lambda s: None)` is `not_ready`, and its detail
     contains `the repository CI failed on the hand-off commit`, `unit-tests` and `(recorded)`. `world.landed(head)` is
     False.
-- [ ] 3.2 Code.
+- [x] 3.2 Code.
   - `src/l4/yolo/cycle.py` `_merge`: `if self._unit_action(snap) in _ACTIONABLE: return None` right after the PASS
     check.
   - `src/l4/yolo/merge.py`: the recorded-red check (D3 step 3).

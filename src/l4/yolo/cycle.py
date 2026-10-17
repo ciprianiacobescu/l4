@@ -1395,6 +1395,8 @@ class _Step:
         verdict = snap.state.last_verdict
         if verdict is None or verdict.verdict != "PASS":
             return None
+        if self._unit_action(snap) in _ACTIONABLE:  # a review edge comes before the merge (L4-YOLO-041)
+            return None
         assert ctx.file.plan is not None
         if (why := unit_blocker(ctx.file.plan, ctx.state, unit)) is not None:  # never out of order (review z1, H2)
             self._line(ctx.plan_id, f"{unit} is not merged: it {why}")
