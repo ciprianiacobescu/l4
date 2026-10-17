@@ -7,6 +7,7 @@ import click
 import l4.doctor.checks_ci  # noqa: F401  (registers CI-001)
 import l4.doctor.checks_config  # noqa: F401  (registers CFG-002)
 import l4.doctor.checks_env  # noqa: F401  (registers ENV-001..003)
+import l4.doctor.checks_skills  # noqa: F401  (registers SKL-003)
 import l4.doctor.checks_tools  # noqa: F401  (registers TOOL-001)
 from l4.config.defaults import cache_root, l4_home
 from l4.config.redaction import load_app_config

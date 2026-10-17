@@ -393,6 +393,7 @@ def plan_init(
         f"memory is off (memory.enabled: false): {carve_out_text(ignored)}\nthen set memory.enabled: true",
     ) if ignored else ()  # fmt: skip
     notes += (*ci_notes, *proposal.notes)
+    notes += (SKILL_NOTE,)
     if hold_existing:
         notes += (
             (f"yolo.hold lists {len(held)} existing unit(s); none of them runs until you remove it from the list",)
@@ -547,6 +548,12 @@ def _action_pin(
         return ActionPin(repository, sha, ref, copy=action_copy)
     except ValueError as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, f"init --action: {exc}") from None
+
+
+SKILL_NOTE = (
+    "coding agents (Claude Code, Codex, OpenCode, Kiro) learn L4 from its skill: run `l4 skills install` once "
+    "(add --project to commit it for the team)"
+)
 
 
 def _action_notes(pin: ActionPin) -> tuple[str, ...]:

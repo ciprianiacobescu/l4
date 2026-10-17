@@ -18,8 +18,8 @@ Every task follows these rules:
 
 ## 3. Doctor and init
 
-- [ ] 3.1 Tests: SCN-SKL-08; `l4 init`'s notes name `l4 skills install`.
-- [ ] 3.2 Doctor row SKL-003; the init note.
+- [x] 3.1 Tests: SCN-SKL-08; `l4 init`'s notes name `l4 skills install`.
+- [x] 3.2 Doctor row SKL-003; the init note.
 
 ## 4. Docs
 
