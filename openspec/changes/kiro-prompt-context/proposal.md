@@ -61,11 +61,17 @@ carries the criterion's text whole. Both lose an oversized file without saying s
   `_Requirements:_` line names must be traced by a new test of the red step, or the step fails with a reason that the
   next attempt reads. The no-new-test already-satisfied path must confirm passing, discriminating tests for every one of
   them.
-- **The judges** (L4-KSP-014). The step-9 judge gets each spec file whole or named as cut. An oversized spec file is a
-  hold, like a truncated diff. The S1 state keeps the criterion text whole.
+- **The judges** (L4-KSP-014; owner decisions 2 and 7). The step-9 judge gets its spec text within
+  `verifier.judge_context_budget_tokens` (48000) in the implementer's priority order, each spec file whole or named as
+  cut, and each done task's whole block, which it checks against the diff. An oversized, unread or budget-cut
+  requirements file is a hold, like a truncated diff. The S1 state keeps the criterion text whole. Step 1's scope reads
+  a Kiro unit's `requirements.md` and `bugfix.md`.
+- **Owner decisions of 2026-10-18** (design §7): `auto` steering is included last when the budget has room; the root
+  `AGENTS.md` joins with `implementer.include_agents_md`; a criterion an earlier red proved needs no copy in a red step;
+  the clarifier uses the same builder; the default budget is 32000.
 - MODIFIED: L4-IMP-004 (prompt sections), L4-IMP-003 (the cited set of a Kiro leaf), L4-KSP-003 (what the links bind).
 - Templates: `contract@12` (conventions and cut files), `red@11` (every listed criterion of a linked leaf needs a new
-  test), `judge@10` (cut spec files).
+  test or an earlier proof), `judge@10` (cut spec files, the done-tasks rule), `clarifier@5`.
 
 ## Impact
 
@@ -86,8 +92,9 @@ carries the criterion's text whole. Both lose an oversized file without saying s
 - Unchanged on purpose:
   - the sandbox masks (`GUIDANCE_DIRS`) and the protected paths;
   - the kiro-cli agent definition;
-  - `AGENTS.md` and `CLAUDE.md`, which no adapter loads and the prompt does not carry;
-  - `collect_sources` for the clarifier and the audit writer.
+  - `CLAUDE.md` and nested `AGENTS.md` files, which no adapter loads and the prompt does not carry (the root
+    `AGENTS.md` only with the opt-in);
+  - `collect_sources` for the audit writer (the clarifier now uses `read_sources` and the shared planner).
 - Tests: new `tests/unit/implementer/test_prompt_context.py`, `tests/unit/specs/test_steering.py`,
   `tests/unit/implementer/test_red_cited_criteria.py`, `tests/unit/verifier/test_judge_sources.py`. Updated: the tests
   that pin `contract@11`, `red@10` or `judge@9`, the K20 tests in `test_prompt.py`, the dry-run tests.
