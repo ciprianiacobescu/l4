@@ -167,18 +167,18 @@ Every task follows these rules:
 
 ## 4. What a person sees
 
-- [ ] 4.1 The dry run (L4-IMP-054).
+- [x] 4.1 The dry run (L4-IMP-054).
   - Tests: **SCN-IMP-288** in `tests/unit/sim/test_dryrun.py`, on `probe_tree` with and without the long design. Also
     update the dry-run prompt-hash test that K20 needed.
   - Code: `sim/dryrun._prompt` calls `prompt_inputs` (with the pushed branch's files as changed files). `Step.context`
     and the `_render` lines of D10.
-- [ ] 4.2 `l4 status --unit` (L4-IMP-054).
+- [x] 4.2 `l4 status --unit` (L4-IMP-054).
   - Tests: **SCN-IMP-289, status part** in `tests/unit/state/test_status_kiro.py`: a ledger whose last implementer
     `prompt.truncated` is SCN-IMP-285's prints the `Prompt cut:` line, and `--json` has `prompt_cut`. A later
     `prompt.truncated{role: judge}` does not replace it, and a unit with none prints no line.
   - Code: `state/status.py`: `UnitSnapshot.prompt_cut` from `read.events` in `load_snapshot`, the `_block` line (at
     most three files, then `and N more`), and the JSON key.
-- [ ] 4.3 Doctor SPEC-004 (L4-IMP-054).
+- [x] 4.3 Doctor SPEC-004 (L4-IMP-054).
   - Tests: **SCN-IMP-289, doctor part** in `tests/unit/doctor/test_checks_spec.py`: the probe tree with the long
     design warns with the message and the fix of the scenario, and with the short design adds nothing.
   - Code: `doctor/checks_spec.py` SPEC-004 builds the next pending task's context with `prompt_inputs` (no changed

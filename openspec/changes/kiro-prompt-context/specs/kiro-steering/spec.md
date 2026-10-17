@@ -45,7 +45,7 @@ instruction to open it, and with `readable: false` in `prompt.truncated`.
 
 #### Scenario: SCN-IMP-293 (−) A long steering file is cut at half the budget and named unreadable
 - **GIVEN** the probe unit with an extra `.kiro/steering/style.md` of 70,000 characters and no front matter, and the
-  default budget of 24000 tokens
+  budget of 24000 tokens (`implementer.context_budget_tokens: 24000`)
 - **WHEN** the red prompt of task 1 is rendered
 - **THEN** the `style.md` block holds at most 48,000 characters, `requirements.md` is still whole, and `# Not shown in
   full` lists `.kiro/steering/style.md: <shown> of 70000 characters shown (budget); not readable in this step's

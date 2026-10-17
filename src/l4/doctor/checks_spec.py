@@ -6,7 +6,10 @@ and SPEC-003, -005, -006, -007 with it). Spec Kit is named in SPEC-001's message
 
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, register
-from l4.specs.base import Framework, UnitRef
+from l4.implementer.prompt import PromptContext, render_prompt
+from l4.implementer.tasks import select_next_step
+from l4.implementer.unit_context import prompt_inputs
+from l4.specs.base import Framework, SpecError, UnitRef
 from l4.specs.detect import active_frameworks, detect_for
 from l4.specs.kiro import KiroProvider
 
@@ -71,6 +74,58 @@ def _spec_002(ctx: DoctorContext) -> CheckResult:
     return CheckResult("pass", f"{len(units)} Kiro unit(s) validate")
 
 
+CUT_FIX = "shorten the file, or raise implementer.context_budget_tokens"
+LINK_FIX = "add a `_Requirements: N.M_` line under each leaf, or tag the task with an exempt kind such as [docs]"
+
+
+def _prompt_cuts(ctx: DoctorContext, provider: KiroProvider, units: list[UnitRef]) -> list[str]:
+    """For each unit with a pending task, what the next task's prompt would cut (L4-IMP-054): the prompt's context is
+    planned by the builder of the run, with no changed files and the head implementer profile."""
+    names = ctx.cfg.roles.implementer
+    head = (names[0], ctx.cfg.profiles[names[0]]) if names and names[0] in ctx.cfg.profiles else (None, None)
+    found = []
+    for unit in units:
+        try:
+            tasks = provider.tasks(unit)
+            task = select_next_step(tasks)
+            if task is None:
+                continue
+            inputs = prompt_inputs(
+                root=ctx.repo, provider=provider, ref=unit, task=task, tasks=tasks, changed=[], cfg=ctx.cfg,
+                profile_name=head[0], profile=head[1],
+            )  # fmt: skip
+            rendered = render_prompt(
+                "red",
+                PromptContext(
+                    unit_id=unit.id,
+                    adapter="",
+                    task_key=task.key,
+                    task_title=task.title,
+                    task_links=task.links,
+                    criteria=inputs.criteria,
+                    own_criteria=inputs.own_criteria,
+                    source_files=inputs.source_files,
+                    conventions=inputs.conventions,
+                    task_block=inputs.task_block,
+                    unit_rel=inputs.unit_rel,
+                    context_budget_tokens=inputs.budget_tokens,
+                ),
+            )
+        except (SpecError, OSError, ValueError):  # SPEC-002 reports an unreadable unit
+            continue
+        for cut in rendered.cuts:
+            where = cut.path.removeprefix(f"{inputs.unit_rel}/")
+            if cut.reason in ("symlink", "not_regular"):
+                found.append(f"{unit.id} task {task.key}: {where} not read ({cut.reason})")
+            elif cut.reason == "oversize":
+                found.append(f"{unit.id} task {task.key}: {where} {cut.total_bytes} bytes, the first part read")
+            else:
+                found.append(
+                    f"{unit.id} task {task.key}: {where} {cut.shown_chars} of {cut.total_chars} characters shown"
+                )
+    return found
+
+
 def _spec_004(ctx: DoctorContext) -> CheckResult:
     picked = _kiro_units(ctx)
     if isinstance(picked, CheckResult):
@@ -81,11 +136,16 @@ def _spec_004(ctx: DoctorContext) -> CheckResult:
         for unit in units
         if (tasks := provider.leaves_without_requirements(unit))
     ]
-    if loose:
-        return CheckResult(
-            "fail", "leaves without `_Requirements:_`: " + _shown(loose),
-            "add a `_Requirements: N.M_` line under each leaf, or tag the task with an exempt kind such as [docs]",
-        )  # fmt: skip
+    cuts = _prompt_cuts(ctx, provider, units)
+    if loose or cuts:
+        message = "; ".join(
+            [
+                *(["leaves without `_Requirements:_`: " + _shown(loose)] if loose else []),
+                *([_shown(cuts)] if cuts else []),
+            ]
+        )
+        fix = "; ".join([*([LINK_FIX] if loose else []), *([CUT_FIX] if cuts else [])])
+        return CheckResult("fail", message, fix)
     return CheckResult("pass", f"{len(units)} Kiro unit(s): every leaf cites a requirement")
 
 

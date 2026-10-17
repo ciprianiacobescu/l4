@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import click
 
@@ -132,6 +132,7 @@ class UnitSnapshot:
     last_activity: Activity | None = None  # the newest ledger event (L4-OPS-020)
     open_run: OpenRun | None = None  # a run that started and has no end recorded (L4-OPS-020)
     fix_parks: tuple[FixPark, ...] = ()  # the trailing parks only a fix ends, no work between them (L4-YOLO-035)
+    prompt_cut: dict[str, Any] | None = None  # the data of the last implementer `prompt.truncated` (L4-IMP-054)
 
     @property
     def feedback_counts(self) -> dict[str, int]:
@@ -235,6 +236,39 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         last_activity=last,
         open_run=open_run,
         fix_parks=fix_parks(read.events),
+        prompt_cut=_prompt_cut(read.events),
+    )
+
+
+def _prompt_cut(events: Sequence[LedgerEvent]) -> dict[str, Any] | None:
+    """The last `prompt.truncated` of the unit that is not the judge's (L4-IMP-054): what the implementer's prompt
+    could not show whole."""
+    cuts = [e.data for e in events if e.type == "prompt.truncated" and e.data.get("role") != "judge"]
+    return dict(cuts[-1]) if cuts else None
+
+
+MAX_CUT_FILES = 3
+
+
+def _cut_text(cut: dict[str, Any]) -> str:
+    """`path shown of total characters` for a budget cut, `path not read (symlink)` and the like for the others."""
+    path, reason = cut.get("path", "?"), cut.get("reason", "budget")
+    if reason in ("symlink", "not_regular"):
+        return f"{path} not read ({reason})"
+    if reason == "oversize":
+        return f"{path} {cut.get('total_bytes', '?')} bytes, the first part read"
+    return f"{path} {cut.get('shown_chars', 0)} of {cut.get('total_chars', 0)} characters"
+
+
+def _prompt_cut_line(cut: dict[str, Any]) -> str:
+    sources = [s for s in cut.get("sources", []) if isinstance(s, dict)]
+    shown = [_cut_text(s) for s in sources[:MAX_CUT_FILES]]
+    more = [f"and {len(sources) - MAX_CUT_FILES} more"] if len(sources) > MAX_CUT_FILES else []
+    what = ", ".join([*shown, *more])
+    task = f"task {cut['task']} " if cut.get("task") else ""
+    return (
+        f"Prompt cut: {task}{cut.get('role', '?')} attempt {cut.get('attempt', '?')}: {what} "
+        "(raise implementer.context_budget_tokens or shorten the file)"
     )
 
 
@@ -520,6 +554,8 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, url
             [last.type, *([f"task {last.task}"] if last.task else []), *([f"run {last.run_id}"] if last.run_id else [])]
         )
         lines.append(f"Last activity: {_since(last.ts, now)} ago ({what})")
+    if snapshot.prompt_cut is not None:
+        lines.append(_prompt_cut_line(snapshot.prompt_cut))
     if (run := snapshot.open_run) is not None:
         link = f": {urls.expand(run.ci_url)}" if run.ci_url else ""
         lines.append(f"Open run: {run.run_id} started {_since(run.started, now)} ago, no end recorded{link}")
@@ -571,6 +607,7 @@ def run_status(
                 **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
                 "last_activity": _activity_json(s.last_activity),
+                "prompt_cut": s.prompt_cut,
                 "open_run": _open_run_json(s.open_run, urls),
             }
             for s in rows
