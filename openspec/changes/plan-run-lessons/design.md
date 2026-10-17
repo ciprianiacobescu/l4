@@ -89,7 +89,8 @@ MAX_JUDGE_PARTS = 8
 @dataclass(frozen=True)
 class DiffEntry:
     paths: tuple[str, ...]   # one path, or (old, new) for a rename or a copy
-    text: str                # the entry's own `git diff`, decoded utf-8 with errors="replace"
+    text: str                # the entry's own `git diff`, decoded utf-8 with errors="replace"; a lock file's one line
+    lock: bool = False       # a lock file (`LOCK_FILES`): `text` is its summary line, never a diff
 
 @dataclass(frozen=True)
 class DiffPart:
@@ -116,6 +117,13 @@ def judge_parts(git: Git, base: str, head: str, unit_dirs: Sequence[str]) -> Dif
   one entry with both paths, any other record one entry with one path. Each entry's text is `git diff --no-color
   --no-ext-diff --no-textconv -M <base>...<head> -- :(literal)<path>…` for its paths. No parsing of unified diff
   output. A part's text is its entries' texts in order.
+- **Lock files** (L4-VER-045) [owner decision 5]: `LOCK_FILES = ("uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json",
+  "pnpm-lock.yaml", "yarn.lock", "go.sum", "Cargo.lock", "composer.lock", "Gemfile.lock")`, matched on the base name of
+  the entry's path in any folder. Such an entry is not diffed: its text is the one line `lock file <path>: <old> ->
+  <new> bytes, +<added> -<removed> lines (not diffed)` (`binary` replaces the line counts for a binary file; sizes are
+  those of the file at the merge base and at head, 0 when absent; the counts are `git diff --numstat`). The line is a
+  few dozen characters, so a lock file is never cut and never raises a `judge view:` hold. `_git_diff` (the S1 step) is
+  unchanged: it still shows the lock file's diff, cut at `MAX_DIFF_CHARS`.
 - **Order** [G]: entries are sorted by `(group_key(new path), new path)`. `group_key`: the base name, lower case, cut at
   its first `.`, then without a leading `test_` and without a trailing `_test`, `_tests` or `_spec`. So
   `src/app/report.py`, `tests/unit/test_report.py`, `pkg/report_test.go` and `web/report.test.ts` all have the key
@@ -363,7 +371,7 @@ run that reads the answer, so no resume is needed after it`. The `waiting_capaci
 - **A larger cap, or a configuration key for it.** Moves the limit without removing it; a long prompt costs the same as
   several parts and judges worse [I].
 - **Cutting inside a file.** A judge cites `file:line`; a part that holds half a file invites wrong `fail`s. A file is
-  the unit of a part, and a single file over the cap is a person's hold.
+  the unit of a part, and a single file over the cap is a person's hold (a lock file is not a file in that sense: it is one line, D2).
 - **A summary of the other parts in each prompt.** An unverified model-written layer between the diff and the judge.
 - **Merging worst-first, as `pick_verdicts` does inside one reply.** Every criterion one part cannot see would be
   `insufficient_evidence` (D3).

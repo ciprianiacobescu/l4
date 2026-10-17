@@ -116,6 +116,17 @@ def test_scn_ver_130_the_judge_reads_the_units_work_not_the_familys_channel_file
     assert ladder._git_diff(wb, base, head)[1] is False
 
 
+def test_scn_ver_143_channel_file_names_outside_the_familys_folders_stay_in_the_diff(make_bench, monkeypatch):
+    from l4.verifier import ladder
+
+    wb, base, head, unit = _diff_world(make_bench)
+    monkeypatch.setattr(ladder, "_unit_dirs", lambda w: [unit])  # `<unit>-fix-1` is not a folder of this family
+    diff, _ = ladder._git_diff(wb, base, head)
+    assert f"CHANNEL-Q {unit}-fix-1" in diff and f"CHANNEL-F {unit}-fix-1" in diff and "PROJECT-QUESTIONS" in diff
+    assert f"CHANNEL-Q {unit}\n" not in diff and f"CHANNEL-F {unit}\n" not in diff
+    assert "CHANNEL-L" not in diff and "CHANNEL-A" not in diff  # `.l4/` is the harness's in every folder
+
+
 def test_a_project_verification_md_elsewhere_stays_in_the_diff(make_bench, monkeypatch):
     from l4.verifier import ladder
 

@@ -20,6 +20,13 @@ outside the family's folders SHALL stay in the diff.
 - **THEN** the diff holds the three project files and no file of the two unit folders, and the length the step compares
   with 120000 is the length of that diff
 
+#### Scenario: SCN-VER-143 (−) A channel-named file outside the family's folders stays in the diff
+- **GIVEN** a unit branch that changes `docs/questions.md`, and the `questions.md`, `feedback.md` and `.l4/ledger/r1.jsonl`
+  of the unit's folder and of a folder that is no unit of the unit's family
+- **WHEN** the judge step builds its diff
+- **THEN** the diff holds `docs/questions.md` and the `questions.md` and `feedback.md` of the folder outside the family,
+  and not the unit folder's `questions.md` and `feedback.md`; no `.l4/` file of either folder is in it
+
 ### Requirement: L4-VER-041 A diff longer than one prompt is judged in parts
 A diff (L4-VER-040) over 120000 characters SHALL be judged in parts, not cut: whole files, ordered so that a
 test sits next to the code it is named after, packed into at most 8 parts of at most 120000 characters each (a
@@ -86,11 +93,11 @@ the 0.4.14 hold `the diff is longer than 120000 characters: the judge saw only t
 shrink the diff, and ask for no `WHEN … THEN …`.
 
 #### Scenario: SCN-VER-137 (−) A file longer than one part holds, and its question asks for no scenario
-- **GIVEN** a unit whose diff holds `uv.lock` with 300000 characters of diff, and two small files
+- **GIVEN** a unit whose diff holds `data/seed.json` with 300000 characters of diff, and two small files
 - **WHEN** the round ends
-- **THEN** the judge saw the start of `uv.lock` in a part of its own, the round holds ``judge view: the diff of
-  `uv.lock` is longer than one part (120000 characters): the judge saw only its start``, the hold is of the kind
-  `judge_view`, and its question says that `accept` means a person checked `uv.lock` and that a fix unit cannot shrink
+- **THEN** the judge saw the start of `data/seed.json` in a part of its own, the round holds ``judge view: the diff of
+  `data/seed.json` is longer than one part (120000 characters): the judge saw only its start``, the hold is of the kind
+  `judge_view`, and its question says that `accept` means a person checked `data/seed.json` and that a fix unit cannot shrink
   the diff, and does not ask for `WHEN … THEN …`
 
 #### Scenario: SCN-VER-139 (−) The hold text of 0.4.14 is a hold on the judge's view
@@ -112,3 +119,30 @@ out (split the change, then `l4 restart`; or `accept` by `--replace`, then `l4 r
 - **THEN** no fix task is planned, the unit is escalated with `judge_view_rejected`, and `l4 status --unit`, the refusal
   of `l4 run --unit` and the sticky note name splitting the change (then `l4 restart`) or replacing the answer with
   `accept` (`--replace`) and `l4 retry`, and none of them names `l4 feedback add`
+
+### Requirement: L4-VER-045 A lock file is one line for the judge, never a diff
+A lock file (`uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`,
+`Cargo.lock`, `composer.lock`, `Gemfile.lock`, in any folder) SHALL be shown to the judge as one line (its path, its old
+and new size, the lines added and removed), never diffed, and SHALL never cause a hold on the judge's view.
+
+#### Scenario: SCN-VER-140 (+) A lock file is one line, never a diff
+- **GIVEN** a unit whose diff changes `src/app/a.py` and `uv.lock`, the lock file by 30000 added lines
+- **WHEN** the judge step lists the files of its diff
+- **THEN** `uv.lock` is one entry whose text is `lock file uv.lock: <old> -> <new> bytes, +30000 -0 lines (not diffed)`,
+  none of its lines is shown, and `src/app/a.py` is diffed as usual
+
+#### Scenario: SCN-VER-141 (+) A lock file of 300000 characters makes no hold
+- **GIVEN** a unit whose diff is two small files and a `uv.lock` whose own diff is 300000 characters
+- **WHEN** the judge step runs
+- **THEN** the judge is called once, with one prompt that holds the lock file's line, and the round has no hold about
+  the diff
+
+#### Scenario: SCN-VER-142 (−) A file named like a lock file but not on the list is diffed
+- **GIVEN** a unit whose diff adds `src/lock.py`, `docs/uv.lock.md` and `locks/notes.txt`
+- **WHEN** the judge step lists the files of its diff
+- **THEN** each is diffed in full, and none is shown as a lock file
+
+#### Scenario: SCN-VER-144 (−) A deleted lock file is one line too
+- **GIVEN** a unit whose diff deletes `Cargo.lock` of 6 bytes and 3 lines
+- **WHEN** the judge step lists the files of its diff
+- **THEN** it is one entry, `lock file Cargo.lock: 6 -> 0 bytes, +0 -3 lines (not diffed)`

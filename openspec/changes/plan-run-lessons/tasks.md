@@ -18,6 +18,7 @@ Every task follows these rules:
   `bookkeeping_pathspecs(["u", "u-fix-1"])` equals `[":(glob,exclude)**/.l4/**",
   ":(glob,exclude).serena/memories/harness/**", ":(literal,exclude)u/verification.md", ":(literal,exclude)u/questions.md",
   ":(literal,exclude)u/feedback.md", …the same three for u-fix-1]` in the order of `l4.state.review.UNIT_CHANNELS`.
+  SCN-VER-143 (owner decision 7, the negative of L4-VER-040): channel-named files outside the family's folders stay.
   The existing tests `test_the_judge_diff_has_no_verification_md_of_the_family` and
   `test_a_project_verification_md_elsewhere_stays_in_the_diff` must still pass.
 - [x] 1.2 Code: `src/l4/state/review.py`: `UNIT_CHANNELS = _NOT_SPEC` (public name, the tuple unchanged). New module
@@ -26,7 +27,7 @@ Every task follows these rules:
 
 ## 2. The parts (L4-VER-041)
 
-- [ ] 2.1 Tests, `tests/unit/verifier/test_diffparts.py`, pure and on a scratch git repository (`tmp_path`, `git init`,
+- [x] 2.1 Tests, `tests/unit/verifier/test_diffparts.py`, pure and on a scratch git repository (`tmp_path`, `git init`,
   two commits): `group_key` on `src/app/report.py`, `tests/unit/test_report.py`, `pkg/report_test.go`,
   `web/report.test.ts`, `web/report.spec.ts`, `lib/report_tests.py` (all `report`) and `src/__init__.py` (`__init__`);
   `pack` fills parts in key order with whole entries (SCN-VER-131: `DiffEntry` texts of exactly the six lengths and
@@ -34,11 +35,14 @@ Every task follows these rules:
   input order gives equal parts); an entry over `MAX_PART_CHARS` is a part of its own with `cut: True` and its text cut to
   `MAX_PART_CHARS` (SCN-VER-137, the part side); eleven entries of 70000 characters give eight parts and three
   `unseen` paths in pack order (SCN-VER-135, the packing side); `list_entries` lists a rename as one entry with both
-  paths and its text shows `rename from`; `judge_parts` applies `bookkeeping_pathspecs`.
-- [ ] 2.2 Code: in `src/l4/verifier/diffparts.py`: `MAX_PART_CHARS`, `MAX_JUDGE_PARTS`, `DiffEntry`, `DiffPart`,
+  paths and its text shows `rename from`; `judge_parts` applies `bookkeeping_pathspecs`. Lock files (SCN-VER-140, 142, 144): each name of `LOCK_FILES`, in the
+  root and in a folder, is one entry with `lock` true and the text `lock file <path>: <old> -> <new> bytes, +A -R lines
+  (not diffed)` (a 30000-line addition does not appear in it); a deleted one has `+0 -3 lines`; `src/lock.py`,
+  `docs/uv.lock.md` and `locks/notes.txt` are diffed; a part holding a huge lock change is not `cut`.
+- [x] 2.2 Code: in `src/l4/verifier/diffparts.py`: `MAX_PART_CHARS`, `MAX_JUDGE_PARTS`, `DiffEntry`, `DiffPart`,
   `DiffParts`, `group_key`, `pack`, `list_entries` (`git diff --name-status -z -M --no-color <base>...<head> -- .
   <pathspecs>`, then one `git diff --no-color --no-ext-diff --no-textconv -M <base>...<head> -- :(literal)<path>…` per
-  entry, `Git.run_bytes`, decoded `utf-8`/`replace`), `judge_parts(git, base, head, unit_dirs)`. No unified-diff parsing.
+  entry, `Git.run_bytes`, decoded `utf-8`/`replace`), `judge_parts(git, base, head, unit_dirs)`. No unified-diff parsing. `LOCK_FILES` and the one-line text of a lock file (design D2, owner decision 5).
 
 ## 3. One verdict from the parts (L4-VER-042)
 
@@ -74,8 +78,8 @@ Every task follows these rules:
   files over eight parts: eight calls, the hold `judge view: the diff needs more than 8 parts of <cap> characters: the
   judge did not see …` naming the three unseen files); SCN-VER-136 (part 2 answers `schema_invalid` twice: the hold
   `the judge's reply was discarded (part 2 of 2, schema_invalid: …)`, `run.judged is None`, no criterion verdict
-  recorded); SCN-VER-137 (one file over the cap: the hold ``judge view: the diff of `uv.lock` is longer than one part
-  (<cap> characters): the judge saw only its start``). A diff within the cap is one call with no part heading.
+  recorded); SCN-VER-137 (one file, `data/seed.json`, over the cap: the hold ``judge view: the diff of `data/seed.json` is longer than one part
+  (<cap> characters): the judge saw only its start``); SCN-VER-141 (a `uv.lock` whose diff is far over the cap beside two small files: one call, the lock file's line in the prompt, no hold). A diff within the cap is one call with no part heading.
 - [ ] 5.2 Code: `src/l4/verifier/ladder.py`: `_judge_step` per design D4 and D5 (the two `judge view:` holds made from
   `DiffParts`; the old hold line removed); `_ask_judges(vc, prompt, result, *, part: tuple[int, int] | None = None)`
   adds `part`/`parts` to `verify.judge`; `src/l4/verifier/types.py`: `VerifyResult.judge_parts: list[dict[str, Any]]`
@@ -170,11 +174,11 @@ Every task follows these rules:
 ## 9. Docs
 
 - [ ] 9.1 `docs/SPEC.md`:
-  - the nine requirements as Part I paragraphs in SPEC's form (`**L4-VER-040 <title>.** <text>`), with the text of this
-    change's specs: L4-VER-040..044 after L4-VER-018, L4-YOLO-050..053 after L4-YOLO-035;
+  - the ten requirements as Part I paragraphs in SPEC's form (`**L4-VER-040 <title>.** <text>`), with the text of this
+    change's specs: L4-VER-040..045 after L4-VER-018, L4-YOLO-050..053 after L4-YOLO-035;
   - the scenarios in Part II, in SPEC's form (`#### SCN-VER-130 (+) <title> · L4-VER-040`, then `- **Given**`,
-    `- **When**`, `- **Then**`), in id order: SCN-VER-130..139 after SCN-VER-77, SCN-YOLO-130..140 after SCN-YOLO-92.
-    The `·` references: SCN-VER-130 L4-VER-040; SCN-VER-131 L4-VER-041, L4-VER-042; SCN-VER-132..134 L4-VER-042;
+    `- **When**`, `- **Then**`), in id order: SCN-VER-130..144 after SCN-VER-77, SCN-YOLO-130..140 after SCN-YOLO-92.
+    The `·` references: SCN-VER-130, 143 L4-VER-040; SCN-VER-140, 142, 144 L4-VER-045; SCN-VER-141 L4-VER-043, L4-VER-045; SCN-VER-131 L4-VER-041, L4-VER-042; SCN-VER-132..134 L4-VER-042;
     SCN-VER-135 L4-VER-041, L4-VER-043; SCN-VER-136 L4-VER-042; SCN-VER-137 L4-VER-043; SCN-VER-138 L4-VER-044;
     SCN-VER-139 L4-VER-043, L4-VER-044; SCN-YOLO-130..133, 135, 136 L4-YOLO-050; SCN-YOLO-134 L4-YOLO-051;
     SCN-YOLO-137, 138 L4-YOLO-052; SCN-YOLO-139, 140 L4-YOLO-053;

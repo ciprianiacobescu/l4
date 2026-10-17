@@ -43,6 +43,9 @@ Three lessons from a delivery plan on a consumer repository (harness 0.4.11 to 0
   is one judge call with the round's prompt, the part's diff, a `part K of N` heading, the list of every file and the
   rules of a part. The replies are merged into one verdict with fixed rules (a `fail` beats a `pass`, a `pass` beats a
   part that could not see the code). A diff within the cap gets the same prompt as before. Template `judge@10`.
+- **Lock files are one line** (L4-VER-045): `uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`,
+  `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`, `composer.lock` and `Gemfile.lock` are shown to the judge as one
+  line each (path, old and new size, lines added and removed), never diffed, and never cause a hold.
 - **A hold on the judge's view is a person's decision, never a fix unit** (L4-VER-043, L4-VER-044): only a single
   file longer than one part, or a diff that needs more than 8 parts, still holds, with a `judge view: …` text that
   names the files. Its question says what `accept` and `reject` mean and asks for no scenario. A reject is a human
@@ -59,13 +62,14 @@ Three lessons from a delivery plan on a consumer repository (harness 0.4.11 to 0
   `l4 yolo resume` and `l4 yolo status` decide with the plan step's own predicate (`still_waits`), so a waiting plan
   whose answers are pushed resumes; the refusal for an open question says the plan continues by itself after the
   answer; the `Next:` line says how to answer, or that the next run reads the answer and how to start it.
-- **Docs.** `docs/SPEC.md` (the nine requirements, their scenarios, §2.1, §10.2, L4-VER-018, L4-OPS-022,
+- **Docs.** `docs/SPEC.md` (the ten requirements, their scenarios, §2.1, §10.2, L4-VER-018, L4-OPS-022,
   L4-YOLO-013/014, the change row), `docs/runbook.md` (§7.1, §7.3, §12.3, §12.4), `docs/yolo-mode.md`, the skill's
   `references/operate.md`, `CHANGELOG.md` under `## 0.4.16 (unreleased)`.
 
 Not in this change:
 - a configuration key for the part size or the number of parts (both are constants, as the cap is today);
-- special handling of lock files or generated files (a large one is a `judge_view` hold that a person accepts);
+- special handling of generated files other than the lock files named in D2 (a large one is a `judge_view` hold that a
+  person accepts);
 - the hold `the judge's reply was discarded (…)`, whose question still asks for a `WHEN … THEN …` (open question);
 - the `waiting_capacity` refusal of `l4 yolo resume` (unchanged).
 
@@ -74,7 +78,7 @@ Not in this change:
 ### New Capabilities
 
 - `judge-diff`: what the judge's diff holds, judging it in parts, merging the parts, and the holds on the judge's
-  view (L4-VER-040 to L4-VER-044).
+  view (L4-VER-040 to L4-VER-045).
 - `plan-limit-extension`: raising a limit of an active plan, audited, by a person (L4-YOLO-050, L4-YOLO-051).
 - `plan-answer-hints`: the resume and the hints of a plan that waits for an answer (L4-YOLO-052, L4-YOLO-053).
 
