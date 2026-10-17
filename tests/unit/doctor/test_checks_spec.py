@@ -122,3 +122,11 @@ def test_spec_002_names_the_expected_form_for_a_cited_requirement_with_no_criter
     assert "cites _Requirements: 2.1_, which no criterion has" in result.message
     assert "no acceptance criterion was read under Requirement 2" in result.message and "1.1. WHEN" in result.message
     assert "_Requirements: 1.1_" not in result.message  # requirement 1 is read: no hint, no error
+
+
+def test_spec_004_lists_pending_leaves_only_not_finished_history(make_ctx):
+    """L4-KSP-006: a done leaf without a link is history, so SPEC-004 does not list it."""
+    ctx, _ = make_ctx()
+    kiro(ctx.repo, "hist", "- [x] 1.1 done long ago\n- [ ] 1.2 pending\n")
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail" and "kiro:hist: 1.2" in result.message and "1.1" not in result.message

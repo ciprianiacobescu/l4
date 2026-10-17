@@ -581,9 +581,9 @@ class Orchestrator:
 
     def _validate_kiro(self) -> ExitCode | None:
         """L4-KSP-003, before any agent or probe: under `sdd.enforce` a Kiro leaf without `_Requirements:_` (unless it
-        is TDD-exempt), a reference that no requirement has, a missing file, a task line outside Kiro's grammar and an
-        invalid Task Dependency Graph are errors that reject the unit, exactly like `_discover`. The graph is an ERROR
-        here, so the runtime fallback to document order (`read_waves` logs it) only serves doctor and the verifier."""
+        is TDD-exempt), a reference that no requirement has, a missing file, a task line outside Kiro's grammar and a
+        JSON Task Dependency Graph that is wrong are errors that reject the unit, exactly like `_discover`. A done
+        leaf's missing or unresolvable link and a graph block that is not JSON are warnings (L4-KSP-006)."""
         s = self.services
         report = s.provider.validate(s.ref, strict=True)
         if report.valid:
