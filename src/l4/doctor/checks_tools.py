@@ -5,8 +5,9 @@ reaches it; this names the tool at `l4 doctor --adoption` time and points at `ci
 import re
 import shlex
 
+from l4.ci.detect import in_ci
 from l4.doctor.context import DoctorContext
-from l4.doctor.registry import Check, CheckResult, Severity, register
+from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, Severity, register
 
 _SEGMENTS = re.compile(r"\n|&&|\|\||;|\|")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -127,10 +128,8 @@ def _tool_001(ctx: DoctorContext) -> CheckResult:
     if not missing:
         return CheckResult("pass", f"the first word of each of {len(commands)} gate command(s) is on the gate PATH")
     lines = "; ".join(f"`{word}` ({', '.join(where)})" for word, where in missing.items())
-    severity: Severity = "warn" if ctx.adoption else "error"
+    severity: Severity = "error" if in_ci(ctx.env) and not ctx.adoption else "warn"
     return CheckResult("fail", f"not on the gate PATH: {lines}", _TOOL_HINT, severity=severity)
 
 
-TOOL_001 = register(
-    Check("TOOL-001", "Gate commands are on the gate PATH", "error", _tool_001, frozenset({"ci", "config"}))
-)
+TOOL_001 = register(Check("TOOL-001", "Gate commands are on the gate PATH", "error", _tool_001, CONFIG_SCOPES))

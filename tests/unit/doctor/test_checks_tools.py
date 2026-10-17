@@ -13,8 +13,8 @@ def gates(**over):
     return L4Config.model_validate({"gates": over})
 
 
-def run(make_ctx, cfg, tools=None, *, adoption=False):
-    ctx, _ = make_ctx(tools if tools is not None else {"uv": "uv 0.10", "go": "go1.26"}, cfg=cfg)
+def run(make_ctx, cfg, tools=None, *, adoption=False, **env):
+    ctx, _ = make_ctx(tools if tools is not None else {"uv": "uv 0.10", "go": "go1.26"}, cfg=cfg, **env)
     return TOOL_001.run(dataclasses.replace(ctx, adoption=adoption))
 
 
@@ -28,7 +28,7 @@ def test_scn_ci_23_a_gate_command_not_on_the_path_is_named_with_the_hint(make_ct
 
 
 def test_in_a_ci_run_the_miss_is_an_error(make_ctx):
-    result = run(make_ctx, gates(lint=["golangci-lint run ./..."]), adoption=False)
+    result = run(make_ctx, gates(lint=["golangci-lint run ./..."]), CI="true")
     assert result.status == "fail" and result.severity == "error"
 
 

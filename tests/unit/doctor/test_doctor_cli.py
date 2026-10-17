@@ -42,6 +42,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_tool(bin_dir, "git", '#!/bin/sh\necho "git version 2.43.0"\n')
     fake_tool(bin_dir, "uv", '#!/bin/sh\necho "uv 0.10.0"\n')
     fake_tool(bin_dir, "node", FAKE_NODE)
+    fake_tool(bin_dir, "pytest", "#!/bin/sh\n")  # TOOL-001: the configured test command starts pytest
     fake_tool(bin_dir, "serena", '#!/bin/sh\necho "1.7.0"\n')  # ENV-008: Serena is on by default
     repo = tmp_path / "repo"
     (repo / "openspec" / "changes").mkdir(parents=True)  # SPEC-001: an empty openspec/ is no framework
@@ -89,7 +90,18 @@ def test_json_output_and_resolved_paths(world, capsys):
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
     expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
     expected += ["S1-001", "S1-002", "COV-001", "SANDBOX-002", "CFG-005", "MEM-002", "CI-002", "ENV-013", "EVAL-001"]
-    expected += ["ENV-014", "CFG-004", "CFG-006", "CFG-007", "CFG-008", "CFG-009", "YOLO-001", "CI-003", "S1-003"]
+    expected += [
+        "ENV-014",
+        "CFG-004",
+        "CFG-006",
+        "CFG-007",
+        "CFG-008",
+        "CFG-009",
+        "YOLO-001",
+        "CI-003",
+        "S1-003",
+        "TOOL-001",
+    ]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
         "CI-001",
