@@ -9,6 +9,12 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.11 (unreleased)
 
 ### Fixed
+- A test of a context manager can prove its criterion. The zero-value run rewrote a `@contextmanager` function (or its
+  red stub) to `return None`, so every `with` raised a `TypeError` before the test body ran, and no test could fail by
+  assertion: on a consumer repository a unit halted after five red attempts on `search_phase`. Now a context manager's
+  zero value enters and yields the zero value of what it yields, a generator yields nothing, and a function annotated
+  to return a context manager or an iterator returns a null one. The `vacuous` message says how to test a context
+  manager.
 - A test gate reads every report it lists. With several reports in `gates.test.reports`, the harness read only the
   first one that existed, so the tests of the other suites were invisible to red, green and the verifier (on a
   consumer repository with three Python projects, the 423 tests of two suites). Now every listed report must exist (else
