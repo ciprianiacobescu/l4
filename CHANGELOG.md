@@ -6,6 +6,18 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.9 (2026-10-17)
+
+### Fixed
+- The zero-value run finds the modules a test imports in a workspace layout. It looked each import up under the
+  repository root and `src/` only, so in a uv workspace, where each member keeps its code under
+  `packages/<name>/src/<namespace>/<name>/`, it found no module to vary and refused every test of existing behaviour
+  with `no project source module is imported by those tests`. On a consumer repository, four of six units lost a red
+  attempt to it, and one unit then proved a scenario that pins existing behaviour with tests of the new path. Now an
+  import is also looked up under every directory named `src` and every directory with a `pyproject.toml`,
+  `setup.py` or `setup.cfg` (and its `src`), from git's tracked and not-ignored files. The head stubs of run (b),
+  the verifier's audit sampling and the proof of tests people wrote use the same lookup.
+
 ## 0.4.8 (2026-10-17)
 
 ### Fixed
