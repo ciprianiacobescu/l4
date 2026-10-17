@@ -740,11 +740,20 @@ class YoloReviewCfg(_Strict):
     accept_by_agents: bool = False
 
 
+class YoloMergeCfg(_Strict):
+    """How a plan's harness merge lands a unit (squash-and-delete L4-YOLO-032, L4-YOLO-033). Only the merges of an
+    active `merge: auto` plan read it; a person's merge uses the forge's own options."""
+
+    method: Literal["squash", "fast-forward"] = "squash"
+    delete_branches: bool = True
+
+
 class YoloCfg(_Strict):
     """Delivery plans (yolo-mode L4-YOLO-009): `profiles` maps a name to the gate kinds a post-merge check runs."""
 
     profiles: dict[str, list[str]] = Field(default_factory=dict)
     review: YoloReviewCfg = Field(default_factory=YoloReviewCfg)
+    merge: YoloMergeCfg = Field(default_factory=YoloMergeCfg)
     hold: list[str] = Field(default_factory=list)
 
     @field_validator("hold")

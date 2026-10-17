@@ -908,6 +908,9 @@ yolo:
     max_dependency_chars: 20000    # per prerequisite folder (>= 0)
     accept_after_rounds: 2         # versions of a subject's text judged not READY before `l4 yolo accept` (>= 1)
     accept_by_agents: false        # true: an agent may run `l4 yolo accept`; read from `.l4/config.yaml` at origin/<base>
+  merge:                           # how a plan's harness merge lands a unit (L4-YOLO-032, L4-YOLO-033)
+    method: squash                 # squash | fast-forward: one squash commit through the forge's merge call, or the push of the head
+    delete_branches: true          # false: keep the merged unit and archive branches
   hold: []                         # unit ids or fnmatch patterns (`openspec:a`, `kiro:*`): a matching unit that no plan file lists gets no
                                    # agent work and shows `held by yolo.hold`; an empty string is a load error (L4-ADO-011)
 
