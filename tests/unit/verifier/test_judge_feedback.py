@@ -85,7 +85,7 @@ def world(make_bench, *, code: str = "RATE = 1\n", path: str = "src/pytdd/roundi
 def judged(wb, base, head, feedback=None, *, as_is: dict | None = None):
     criteria = wb.provider.criteria(wb.ref)
     reply = judge_reply([c.id for c in criteria], **({"feedback": feedback} if feedback is not None else {}))
-    backend = Scripted(ok(as_is or reply))
+    backend = Scripted(ok(as_is or reply), ok(as_is or reply))  # an item left out is asked once more (L4-VER-017)
     result = VerifyResult(wb.ref.id, 1, Verdict.NEEDS_HUMAN, base, head)
     run = _Run(result)
     vc = VerifyContext(wb, backend, "judge", ["impl"], 1, 60)  # type: ignore[arg-type]
@@ -255,7 +255,8 @@ def test_a_judge_no_leaves_the_item_open_with_its_evidence_in_the_title(make_ben
 
 def test_a_reply_without_the_array_answers_no_for_every_item(make_bench):
     wb, base, head, _ = world(make_bench, code="PACK_ROUNDING = 1\n")
-    result, _ = judged(wb, base, head)
+    result, backend = judged(wb, base, head)
+    assert len(backend.calls) == 2 and "feedback FB-001, FB-002" in backend.calls[1][-1].content
     assert [(o.id, o.addressed, o.evidence) for o in result.feedback_outcomes] == [
         ("FB-001", False, "not answered"), ("FB-002", False, "not answered")
     ]  # fmt: skip
