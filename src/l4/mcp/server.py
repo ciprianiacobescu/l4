@@ -156,6 +156,8 @@ class Server:
         def progress(text: str) -> None:
             if token is not None:  # `progress` must increase with every notification (MCP specification)
                 with self._lock:
+                    if done.is_set():
+                        return  # none after the response: the reply is sent under this lock, after `done`
                     note = {"progressToken": token, "progress": next(counter), "message": text}
                     self._write(protocol.encode(protocol.notification("notifications/progress", note)))
 
@@ -169,9 +171,10 @@ class Server:
             beater = threading.Thread(target=beat, daemon=True)
             if token is not None:
                 beater.start()
+            reply: dict[str, Any] | None = None
             try:
                 payload = self._tools.call(params["name"], arguments, CallControl(cancelled, progress))
-                reply: dict[str, Any] | None = protocol.result(id_, payload)
+                reply = protocol.result(id_, payload)
             except UnknownTool:
                 reply = protocol.error(id_, protocol.INVALID_PARAMS, f"unknown tool: {params['name']}")
             except Exception as exc:
@@ -179,10 +182,11 @@ class Server:
                 text = f"{params['name']} failed inside the server: {type(exc).__name__}: {exc}"
                 reply = protocol.result(id_, {"content": [{"type": "text", "text": text}], "isError": True})
             finally:
-                done.set()
-            self._inflight.pop(id_, None)
-            if not cancelled.is_set() and reply is not None:
-                self._send(reply)
+                with self._lock:  # `done` and the reply under the lock progress takes: nothing follows the reply
+                    done.set()
+                    self._inflight.pop(id_, None)
+                    if not cancelled.is_set() and reply is not None:
+                        self._write(protocol.encode(reply))
 
         thread = threading.Thread(target=work, name=f"mcp-call-{id_}")
         self._inflight[id_] = (thread, cancelled)

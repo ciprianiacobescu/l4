@@ -98,8 +98,8 @@ def test_every_tool_runs_the_command_it_names_in_the_repository_as_an_agent(one,
     result = call(box(repos, recorder), key.strip(), arguments)
     assert result["isError"] is False
     [run] = recorder.runs
-    assert run["argv"][:3] == [sys.executable, "-m", "l4"]
-    assert run["argv"][3:] == tail
+    assert run["argv"][:4] == [sys.executable, "-P", "-m", "l4"]  # -P: the repository is not put on sys.path
+    assert run["argv"][4:] == tail
     assert run["cwd"] == root
     assert run["env"]["AI_AGENT"] == "l4-mcp"
     assert run["timeout"] > 0
@@ -385,11 +385,13 @@ def _load_questions_world():
     return module
 
 
-def test_f10_an_agent_rule_refuses_through_the_server(tmp_path):  # SCN-MCP-04
+def test_f10_an_agent_rule_refuses_through_the_server(tmp_path, monkeypatch):  # SCN-MCP-04
     """A real refused action: answering a verdict question is a person's decision, so the CLI refuses an agent
     (AI_AGENT=l4-mcp, stdin closed) and the refusal reaches the tool result with isError."""
+    from l4.mcp import server as server_mod
     from l4.mcp.server import Server
 
+    monkeypatch.setattr(server_mod, "EOF_GRACE_SECONDS", 600.0)  # stdin ends at once; a loaded machine must not cancel
     qw = _load_questions_world()
     with qw.fake_openspec_cli():
         world = qw.QWorld(tmp_path)
@@ -453,3 +455,64 @@ def test_scn_mcp_15_a_plan_that_is_not_pushed_is_refused_without_worktree_and_ad
     assert "p1: admitted (working tree)" in text and "order: openspec:add-local" in text
     refs = subprocess.run(["git", "-C", str(work), "for-each-ref"], capture_output=True, text=True, check=True)
     assert "refs/l4" not in refs.stdout  # nothing was recorded
+
+
+def test_m1_a_repository_file_named_like_a_dependency_does_not_run(repo_factory, tmp_path):
+    """The command runs with the repository as its working directory; `python -m` would put that directory first on
+    sys.path, so a planted yaml.py would run. `-P` keeps it off, for this child only."""
+    root = repo_factory("victim")
+    marker = tmp_path / "ran"
+    (root / "yaml.py").write_text(f"open({str(marker)!r}, 'w').write('planted code ran')\nraise ImportError('x')\n")
+    (root / "click.py").write_text(f"open({str(marker)!r}, 'a').write('click')\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "AI_AGENT", "PYTHONSAFEPATH")}
+    toolbox = Toolbox(repos=Repos.from_paths([root], cwd=Path("/")), environ=env, redactor=redactor_for(env))
+    result = call(toolbox, "l4_status")
+    assert not marker.exists(), marker.read_text()
+    assert "ModuleNotFoundError" not in text_of(result) and "planted" not in text_of(result)
+    assert "PYTHONSAFEPATH" not in env  # grandchildren must not inherit the setting from the server
+
+
+def _grandchild_world(tmp_path, body: str):
+    pidfile, mark = tmp_path / "gc.pid", tmp_path / "cleaned"
+    child = body.format(pid=str(pidfile), mark=str(mark))
+    parent = f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(120)"
+    return pidfile, mark, parent
+
+
+def _wait_dead(pid: int, seconds: float = 6.0) -> bool:
+    waited = 0.0
+    while _alive(pid) and waited < seconds:
+        threading.Event().wait(0.05)
+        waited += 0.05
+    return not _alive(pid)
+
+
+def test_m1_a_descendant_that_cleans_up_after_sigterm_gets_the_grace(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_mod, "KILL_GRACE_SECONDS", 4.0)
+    pidfile, mark, parent = _grandchild_world(
+        tmp_path,
+        "import os, signal, time\n"
+        "def h(n, f):\n    time.sleep(1.0); open({mark!r}, 'w').write('ok'); os._exit(0)\n"
+        "signal.signal(signal.SIGTERM, h); open({pid!r}, 'w').write(str(os.getpid())); time.sleep(120)",
+    )
+    done = tools_mod.run_subprocess(
+        [sys.executable, "-c", parent], tmp_path, dict(os.environ), 1.5, CallControl(threading.Event(), lambda t: None)
+    )
+    assert done.timed_out is True
+    assert _wait_dead(int(pidfile.read_text()))
+    assert mark.read_text() == "ok", "the descendant was killed before its 1 s of cleanup finished"
+
+
+def test_m1_a_descendant_that_ignores_sigterm_is_killed_when_the_grace_ends(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_mod, "KILL_GRACE_SECONDS", 0.5)
+    pidfile, mark, parent = _grandchild_world(
+        tmp_path,
+        "import os, signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); open({pid!r}, 'w').write(str(os.getpid())); time.sleep(120)",
+    )
+    started = threading.Event()
+    done = tools_mod.run_subprocess(
+        [sys.executable, "-c", parent], tmp_path, dict(os.environ), 1.5, CallControl(started, lambda t: None)
+    )
+    assert done.timed_out is True
+    assert _wait_dead(int(pidfile.read_text()))

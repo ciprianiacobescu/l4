@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,7 +30,9 @@ WRITE_SECONDS = 900.0
 REVIEW_SECONDS = 3600.0
 KILL_GRACE_SECONDS = 5.0  # between SIGTERM and SIGKILL of a stopped call's process group
 AGENT_MARKER = "l4-mcp"
-_L4 = [sys.executable, "-m", "l4"]
+# -P: `python -m` would put the working directory (the served repository) first on sys.path, and a file of that
+# repository named yaml.py or click.py would run. The flag is on this child only; PYTHONSAFEPATH would be inherited.
+_L4 = [sys.executable, "-P", "-m", "l4"]
 
 
 class UnknownTool(Exception):
@@ -57,15 +60,28 @@ class Completed:
 Runner = Callable[[list[str], Path, dict[str, str], float, CallControl], Completed]
 
 
+def _group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
 def _kill(proc: "subprocess.Popen[bytes]") -> None:
-    """Stop the call: SIGTERM to its process group, and after the grace period SIGKILL to the whole group, whether or
-    not the direct child exited (a descendant that ignores SIGTERM would otherwise keep running)."""
+    """Stop the call: SIGTERM to its process group; the group then has `KILL_GRACE_SECONDS` of wall-clock time to
+    finish, counted from the signal and whether or not the direct child has exited (a descendant may clean up after
+    its parent is gone); SIGKILL to what remains, so a descendant that ignores SIGTERM does not keep running."""
+    pgid = proc.pid
+    deadline = time.monotonic() + KILL_GRACE_SECONDS
     with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(proc.pid, signal.SIGTERM)
+        os.killpg(pgid, signal.SIGTERM)
     with contextlib.suppress(subprocess.TimeoutExpired):
-        proc.wait(KILL_GRACE_SECONDS)
+        proc.wait(max(0.0, deadline - time.monotonic()))  # reaps the leader; the group id outlives it
+    while time.monotonic() < deadline and _group_alive(pgid):
+        time.sleep(0.05)
     with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(proc.pid, signal.SIGKILL)  # the group id outlives the leader while any member runs
+        os.killpg(pgid, signal.SIGKILL)
     proc.wait()
 
 

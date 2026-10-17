@@ -268,14 +268,45 @@ def test_f5_utf8_input_is_read_whatever_the_locale(repo_factory):
     root = repo_factory("served")
     env = {**_clean_env(), "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
     call = request(2, "tools/call", {"name": "l4_status", "arguments": {"unit": "openspec:café-…"}})
-    done = subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "l4", "mcp", "serve", "--repo", str(root)],
-        input="\n".join([INIT, NOTE, call]).encode("utf-8") + b"\n", capture_output=True, env=env, timeout=60,
-        check=False,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
     )  # fmt: skip
-    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
-    messages = [json.loads(line) for line in done.stdout.decode("utf-8").splitlines()]
+    assert proc.stdin is not None and proc.stdout is not None
+    try:
+        proc.stdin.write("\n".join([INIT, NOTE, call]).encode("utf-8") + b"\n")
+        proc.stdin.flush()  # stdin stays open until the reply is in: closing it starts the 5 s end-of-input grace
+        messages = [json.loads(proc.stdout.readline().decode("utf-8")) for _ in range(2)]
+        proc.stdin.close()
+        assert proc.wait(timeout=60) == 0, proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+    finally:
+        proc.kill()
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe:
+                pipe.close()
     assert messages[1]["id"] == 2 and "result" in messages[1]
+
+
+def test_m3_no_progress_notification_follows_the_response():
+    from l4.mcp import server as server_mod
+
+    class Quick(FakeToolbox):
+        def call(self, name, arguments, control):
+            threading.Event().wait(0.003)
+            return {"content": [], "isError": False}
+
+    late = 0
+    original = server_mod.PROGRESS_SECONDS
+    server_mod.PROGRESS_SECONDS = 0.001
+    try:
+        for _ in range(300):
+            params = {"name": "echo", "_meta": {"progressToken": "t"}}
+            out = talk(request(1, "tools/call", params), toolbox=Quick())
+            at = next(k for k, m in enumerate(out) if m.get("id") == 1)
+            late += any(m.get("method") == "notifications/progress" for m in out[at + 1 :])
+    finally:
+        server_mod.PROGRESS_SECONDS = original
+    assert late == 0
 
 
 def test_f8_progress_values_increase_with_each_notification():
