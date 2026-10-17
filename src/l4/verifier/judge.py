@@ -36,6 +36,7 @@ PROMPT_VERSION = (
     # 7: the feedback block, its rule and the reply's `feedback` array; 6: the round-outputs block and its rule;
     # 5: the Owner changes block; 4: the test conventions block; 3: a spec gap names its criterion
 )
+NOT_IN_PART = "not in this part"  # what a part's reply says of an item whose code is in another part (L4-VER-041)
 MAX_REPAIR_ECHO_CHARS = 8_000
 MAX_CALLS = 2  # the first answer and one repair or retry
 MAX_RETRY_PROBLEM_CHARS = 800  # the validation error a retry shows the judge (paths and rules, never values)

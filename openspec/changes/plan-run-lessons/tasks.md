@@ -46,7 +46,7 @@ Every task follows these rules:
 
 ## 3. One verdict from the parts (L4-VER-042)
 
-- [ ] 3.1 Tests, new file `tests/unit/verifier/test_judge_parts_merge.py`, on `JudgeVerdict` objects built with
+- [x] 3.1 Tests, new file `tests/unit/verifier/test_judge_parts_merge.py`, on `JudgeVerdict` objects built with
   `conftest.judge_reply`: SCN-VER-132 (C-1 `pass` in part 1, `insufficient_evidence` "not in this part" in part 2 →
   `pass` with part 1's evidence; FB-001 true in part 1, false "not in this part" in part 2 → addressed); SCN-VER-133
   (C-2 `pass` then `fail` with a counterexample → `fail` with part 2's counterexample; test T adequate in part 1,
@@ -54,7 +54,7 @@ Every task follows these rules:
   old header` → false with that evidence). Also: `not_verifiable` beats `insufficient_evidence`; findings repeated
   across parts appear once; `riskiest_assumptions` are three, taken in turn; `accepted` and `satisfied` follow the
   feedback rule; one reply comes back unchanged; a list every part left out stays `None`.
-- [ ] 3.2 Code: new module `src/l4/verifier/judge_parts.py` with `merge_part_verdicts` (design D3);
+- [x] 3.2 Code: new module `src/l4/verifier/judge_parts.py` with `merge_part_verdicts` (design D3);
   `NOT_IN_PART = "not in this part"` in `src/l4/verifier/judge.py`.
 
 ## 4. The part prompt (L4-VER-041)
