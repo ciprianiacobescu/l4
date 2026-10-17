@@ -29,3 +29,15 @@ def test_a_second_pass_after_reentry_makes_a_new_handoff_commit(
     # a rerun on H2 hands nothing off again (the failed-MR-update retry has its own test)
     again = run_l4([])
     assert again.code == 0 and raw(tdd_repo.origin, "rev-parse", BRANCH).strip() == h2
+
+
+def test_the_evidence_link_of_the_mr_names_the_handoff_commit_so_it_survives_the_branch(
+    run_l4, install_hooks, forge_env, use_fake_gitlab, tdd_repo, raw, gitlab
+):
+    """squash-and-delete D9: the unit branch is deleted after the merge, the commit stays reachable."""
+    install_hooks(verify=lambda ctx: Trigger.VERIFY_PASS)
+    assert run_l4([red_step(), green_step()]).code == 0
+    h1 = raw(tdd_repo.origin, "rev-parse", BRANCH).strip()
+    (mr,) = gitlab.mrs.values()
+    link = [line for line in mr["description"].splitlines() if "Verification:" in line][0]
+    assert f"/blob/{h1}/" in link and f"/blob/{BRANCH}/" not in link

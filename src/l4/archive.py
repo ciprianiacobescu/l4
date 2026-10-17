@@ -122,12 +122,20 @@ def render_pr_title(name: str, proposal: str) -> str:
 
 
 def render_pr_body(
-    unit_id: str, branch: str, evidence_path: str, project_url: str | None, platform: Platform = "gitlab"
+    unit_id: str,
+    branch: str,
+    evidence_path: str,
+    project_url: str | None,
+    platform: Platform = "gitlab",
+    *,
+    head: str | None = None,
 ) -> str:
-    """Static: it names where the evidence will be, so it never needs rewriting when the phase changes."""
+    """Static: it names where the evidence will be, so it never needs rewriting when the phase changes. The link names
+    the unit `head` commit when given, not the branch, so it still opens after the merged branch is deleted
+    (squash-and-delete D9)."""
     evidence = f"`{evidence_path}`"
     if project_url:
-        evidence = f"[{evidence_path}]({blob_url(project_url, branch, evidence_path, platform)})"
+        evidence = f"[{evidence_path}]({blob_url(project_url, head or branch, evidence_path, platform)})"
     return "\n".join(
         [
             f"Implemented by the L4 harness from the spec unit `{unit_id}`.",
@@ -180,22 +188,27 @@ def _mr(ctx: HookContext) -> _Mr:
     return found
 
 
+def _pr_body(ctx: HookContext, mr: _Mr) -> str:
+    """The body of the unit's MR: the evidence linked at the unit's current head commit (squash-and-delete D9)."""
+    s = ctx.services
+    try:
+        project_url: str | None = mr.forge.project_url()
+    except ForgeAuthError:
+        raise
+    except ForgeError:
+        project_url = None  # the body then names the file without a link
+    evidence = (s.ref.path / "verification.md").resolve().relative_to(s.worktree.resolve()).as_posix()
+    platform = forge_platform(ctx.cfg, s.app.environ, origin_url(s.app.repo, s.app.environ))
+    return render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform, head=s.git.rev_parse("HEAD"))
+
+
 def _ensure_mr(ctx: HookContext, mr: _Mr) -> PullRequest:
     """The unit's open MR, opened as a draft when there is none yet."""
     s = ctx.services
     pr = mr.forge.find_pr(s.names.branch)
     if pr is None:
-        try:
-            project_url: str | None = mr.forge.project_url()
-        except ForgeAuthError:
-            raise
-        except ForgeError:
-            project_url = None  # the body then names the file without a link
-        evidence = (s.ref.path / "verification.md").resolve().relative_to(s.worktree.resolve()).as_posix()
-        platform = forge_platform(ctx.cfg, s.app.environ, origin_url(s.app.repo, s.app.environ))
-        body = render_pr_body(s.ref.id, s.names.branch, evidence, project_url, platform)
         title = render_pr_title(s.ref.name, proposal_title(s.ref.path, s.ref.name))
-        pr = mr.forge.create_pr(s.names.branch, ctx.cfg.forge.base_branch, title, body)
+        pr = mr.forge.create_pr(s.names.branch, ctx.cfg.forge.base_branch, title, _pr_body(ctx, mr))
     mr.number, mr.draft = pr.number, pr.draft
     urls = app_forge_urls(s.app, ctx.cfg)  # the recorded URL may hold `<forge>` or, from an older harness, the host
     recorded = fold(read_ledger(s.ref.path).events, s.ref.id).pr
@@ -362,7 +375,7 @@ def handoff_hook(ctx: HookContext) -> bool:
     ctx.push()
     ctx.shared[H_PUSHED] = True  # from here the unit branch stays at H, whatever the rest of the run does
     pr = _ensure_mr(ctx, mr)
-    mr.forge.update_pr(pr.number, draft=False)
+    mr.forge.update_pr(pr.number, body=_pr_body(ctx, mr), draft=False)  # the evidence link names H, which holds it
     mr.draft = False
     s.ledger.append("pr.ready", url=pr.url, number=pr.number, head=s.git.rev_parse("HEAD"))
     return True

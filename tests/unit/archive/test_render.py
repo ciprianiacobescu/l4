@@ -136,3 +136,14 @@ def test_the_archive_body_says_who_merges_it():
         "- Merge it with the merge-commit method. A person merges it, unless its unit is in an active delivery plan "
         "with `merge: auto`; then the harness merges it." in text
     )
+
+
+def test_the_evidence_link_names_the_head_sha_so_it_survives_the_branch(tmp_path):
+    """squash-and-delete D9: the unit branch is deleted after the merge; a link at the head still opens."""
+    sha = "a" * 40
+    args = ("openspec:x", "l4/openspec/x", "openspec/changes/x/verification.md", "https://h.test/g/p")
+    body = render_pr_body(*args, head=sha)
+    assert f"(https://h.test/g/p/-/blob/{sha}/openspec/changes/x/verification.md)" in body
+    assert "blob/l4/openspec/x" not in body and "- Branch: `l4/openspec/x`" in body  # the branch is still named
+    github = render_pr_body(*args, platform="github", head=sha)
+    assert f"(https://h.test/g/p/blob/{sha}/openspec/changes/x/verification.md)" in github
