@@ -37,6 +37,7 @@ HANDLERS: dict[str, str] = {
     "resume": "l4.state.resume:run_resume",
     "retry": "l4.state.retry:run_retry",
     "restart": "l4.state.restart:run_restart",
+    "mcp serve": "l4.mcp.server:run_serve",
     "yolo draft": "l4.yolo.commands:run_draft",
     "yolo check": "l4.yolo.commands:run_check",
     "yolo review": "l4.yolo.commands:run_review",
@@ -87,6 +88,7 @@ OWNING_CHANGE: dict[str, str] = {
     "resume": "state-vcs-locks",
     "retry": "operator-commands",
     "restart": "operator-commands",
+    "mcp serve": "mcp-server",
     **dict.fromkeys(
         (
             "yolo draft",

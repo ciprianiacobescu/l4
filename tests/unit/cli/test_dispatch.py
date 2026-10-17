@@ -18,7 +18,7 @@ SECTION_2_1 = {
     "kg build", "kg report", "kg why", "kg propose",
 }  # fmt: skip
 
-EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
+EXTRA = {"s1", "mcp serve"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
 YOLO_WORDS = ("draft", "check", "review", "findings", "accept", "waive", "activate", "status", "cancel", "resume")
 YOLO = {f"yolo {w}" for w in (*YOLO_WORDS, "report")}  # yolo-mode D6; waive: L4-YOLO-031
 EXTRA |= YOLO
@@ -70,6 +70,7 @@ ARGV = {
     "kg why": ["kg", "why", "openspec:a"],
     "kg propose": ["kg", "propose"],
     "s1": ["s1", "export"],
+    "mcp serve": ["mcp", "serve"],
     "eval": ["eval", "--dry-run", "--judge", "j"],
 }
 

@@ -73,6 +73,14 @@ base branch."""
 )
 
 
+MCP_SERVE_HELP = (
+    "Serve L4 to an MCP client over stdio: tools to manage delivery plans and debug units.\n\n"
+    "Started by the client (see `l4 mcp install`), not by hand. Every tool runs the l4 command it names in a "
+    "repository this instance serves (--repo), as an agent (AI_AGENT=l4-mcp), so the rules of the CLI for agents "
+    "hold. Only protocol messages go to standard output; logs go to standard error."
+)
+
+
 def _opt(*names: str, **kw: Any) -> click.Option:
     return click.Option(list(names), **kw)
 
@@ -314,6 +322,11 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
     "yolo report": ("Print the report of a delivery plan.", lambda: [click.Argument(["plan"])]),
+    "mcp serve": (MCP_SERVE_HELP, lambda: [
+        _opt("--repo", "repos", multiple=True, type=click.Path(path_type=Path),
+             help="A repository to serve (repeatable): a git repository with .l4/config.yaml. Several: every tool "
+                  "takes a `repo` argument naming one. Default: the working directory, when it is such a repository."),
+    ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
         _opt("--api-base", "api_base", help="GitLab API base (default: forge.gitlab.api_url, else from `origin`)."),
@@ -472,6 +485,7 @@ _GROUPS = {
     "setup": click.Group("setup", help="Forge setup."),
     "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
     "yolo": click.Group("yolo", help="Delivery plans: ordered units, a readiness review, one activation."),
+    "mcp": click.Group("mcp", help="L4 as an MCP server for IDEs and agents."),
     "kg": click.Group("kg", help="Read the recorded history across units (manual; nothing reaches an agent)."),
 }
 for _group in _GROUPS.values():
