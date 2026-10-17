@@ -297,7 +297,8 @@ skipped the unit because another run holds its lease is not a failure of the uni
 
 A plan **stops** on a fault: `unit_halted`, `unit_escalated`, `unit_abandoned`, `unit_rejected`, `merge_refused`,
 `postcheck_failed`, `batch_failed`, `limit_cost`, `limit_runs`, `limit_attempts`, `limit_deadline`, `inputs_changed`,
-`target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
+`capacity_needs_fix` (the unit parked twice in `waiting_capacity` for the same profiles with none cooling: renew the
+secret or install the binary, then `l4 yolo resume`), `target_missing` and `unit_missing` (the current unit is no longer among the units of the target; the plan continues
 when it is back). A merged unit whose folder moved to the archive is not missing: it is integrated. A stopped plan dispatches and merges nothing, including units that do not depend on the failed one. The
 cause of each stop and the command that clears it are in [runbook 12.3](runbook.md#123-procedure-a-plan-is-stopped).
 `l4 yolo cancel` stops the plan for good.

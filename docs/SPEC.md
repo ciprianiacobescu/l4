@@ -4101,7 +4101,8 @@ charged to the plan like the run of the step.
 
 **L4-YOLO-013** Stops, waits, cancel and resume. The plan SHALL stop, with the reason, when its current unit is `halted`, `escalated`, `abandoned` or `rejected`, when a
 frozen digest changes or the plan file is edited after the activation (`inputs_changed`), when a limit is reached, when
-the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), and as D8,
+the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), when its
+capacity wait only a fix can end (`capacity_needs_fix`, L4-YOLO-035), and as D8,
 D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit is `awaiting_human`, `clarifying` or
 `waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
 plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
@@ -4305,6 +4306,18 @@ fails SHALL keep the branch and record `unit.branch_kept{branch, reason}`; a del
 the unit and archive branches of the plan's integrated units whose PR is merged and whose tip is still the recorded
 head. The lock ref SHALL NOT be deleted at merge time. A branch of a PR the forge does not show merged SHALL NOT be
 deleted. The evidence link in the PR body names the unit head commit, so it opens after the branch is gone.
+
+**L4-YOLO-035** A capacity wait never chains runs, and a wait only a fix can end stops the plan. A plan step that
+dispatches its current unit while the unit is `waiting_capacity` SHALL NOT start the next run; the next schedule, push
+or person's command probes again. When the current unit parks in `waiting_capacity` with no profile of the chain
+cooling (every failure a missing binary, a failed login or `hello`, a constraint or `serves`; the unit's
+`availability.unavailable` has no `cooling`, `quota` or `concurrency` skip and its `retry_after` is not in the future),
+for the same set of unusable profiles as its previous park, with no `task.done`, `task.red_ok`, `task.green_committed`
+or successful `step.finished` of the unit between them, and both parks after the plan was last activated or resumed, the
+plan SHALL stop with `capacity_needs_fix`. The stop SHALL name each profile, its failure and the fix (renew the secret
+the profile reads, for example `OPENCODE_API_KEY`, or install the binary). `l4 yolo resume` SHALL be allowed after that
+stop; the next run probes. A park with a profile cooling (a limit or credit with a reset) keeps the plan waiting until
+`retry_after` (L4-AVL-007, L4-YOLO-013).
 ---
 
 ## 13. Memory and lessons
@@ -5223,6 +5236,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 | 35 | `job-toolchains` | `ci.toolchains` (go, node, pnpm): the GitHub workflow sets them up before L4 with pinned shas and their caches off, the default caches `gobuild` and `pnpm`, `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` for Go gates, doctor TOOL-001 for a gate command that is not on the PATH, and `l4 init` proposals (L4-CI-005, SCN-CI-19..23; `openspec/changes/job-toolchains/`) | the second consumer repository's gates of its Go and TypeScript code |
 | 36 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
+| 37 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9133,6 +9147,21 @@ scenario is a spec defect (§26).
 - **Given** the merge of SCN-YOLO-76 and `yolo.merge.delete_branches: false`
 - **When** the merge and the archive merge complete
 - **Then** both branches stay and no `refs/l4/merged/…` ref is pushed
+
+#### SCN-YOLO-90 (−) A failed login does not chain runs · L4-YOLO-035
+- **Given** an active plan whose current unit parks in `waiting_capacity` because every implementer profile fails its `hello` with an authentication error
+- **When** the next plan step dispatches the unit and its run parks again
+- **Then** no next run is started by that step
+
+#### SCN-YOLO-91 (−) The second identical park stops the plan with the fix named · L4-YOLO-035
+- **Given** the unit of SCN-YOLO-90 parked twice for the same two profiles, nothing cooling
+- **When** the plan step runs
+- **Then** `plan.stopped{capacity_needs_fix, unit}` is recorded, naming both profiles, `opencode authentication failed` and the fix (renew the key the profiles read), and `l4 yolo resume` with a reason goes on
+
+#### SCN-YOLO-92 (+) A cooling profile still waits for its reset · L4-YOLO-035
+- **Given** a unit parked in `waiting_capacity` because the only profile hit a rate limit that resets in 40 minutes
+- **When** the plan step runs before the reset
+- **Then** the plan waits (`unit_waiting_capacity`), starts no run, and does not stop
 
 ### 23.21 Experience graph (KG)
 

@@ -6,6 +6,15 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.14 (unreleased)
+
+### Fixed
+- A delivery plan no longer starts a run every minute for a unit that waits for capacity. A plan step that dispatches a
+  unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same profiles with none cooling
+  (an expired provider key, a missing binary) stops the plan with `capacity_needs_fix`; the stop names the profiles,
+  their failures and the fix, and `l4 yolo resume` goes on after it (L4-YOLO-035). A park with a cooling profile still
+  waits for its reset.
+
 ## 0.4.13 (2026-10-17)
 
 ### Added
