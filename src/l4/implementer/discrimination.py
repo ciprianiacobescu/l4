@@ -28,7 +28,8 @@ from l4.security.protected import glob_match
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
 PROOF_RED_ASSERTION = "red_assertion"
-_ROOTS = ("", "src")  # where an import is looked up inside the repository
+_ROOTS = ("", "src")  # where an import is always looked up inside the repository
+_PROJECT_FILES = ("pyproject.toml", "setup.py", "setup.cfg")  # their directory is an import root (L4-IMP-025)
 
 
 def fails_on_zero(case: TestCase | None) -> bool:
@@ -321,15 +322,35 @@ def _exact_case(root: Path, relative: str) -> bool:
     return True
 
 
-def _resolve(wb: Workbench, dotted: str) -> str | None:
+def import_roots(wb: Workbench) -> tuple[str, ...]:
+    """Where an import is looked up inside the repository (L4-IMP-025): the root and `src`, every directory named
+    `src`, and every directory holding a project file (`pyproject.toml`, `setup.py`, `setup.cfg`) together with its
+    `src`, so that a workspace member's `packages/<name>/src/<package>` and a flat member's `packages/<name>/<package>`
+    are found. The paths come from git (tracked, and untracked but not ignored), so an ignored virtual environment's
+    copy of a package is not the project's source."""
+    listed = wb.git.run("ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False).stdout
+    roots = set(_ROOTS)
+    for path in filter(None, listed.split("\0")):
+        parts = path.split("/")
+        if parts[-1] in _PROJECT_FILES:
+            parent = "/".join(parts[:-1])
+            roots |= {parent, f"{parent}/src" if parent else "src"}
+        roots |= {"/".join(parts[: i + 1]) for i, part in enumerate(parts[:-1]) if part == "src"}
+    return tuple(sorted(roots, key=lambda root: (root.count("/") + bool(root), root)))
+
+
+def _resolve(wb: Workbench, dotted: str, roots: Sequence[str] = _ROOTS) -> list[str]:
+    """Every file under one of `roots` that `dotted` names: Python takes the first on its path, which the harness
+    cannot know, and varying a copy the test does not import changes nothing."""
     path = dotted.replace(".", "/")
-    for root in _ROOTS:
+    found = []
+    for root in roots:
         for candidate in (f"{path}.py", f"{path}/__init__.py"):
             relative = f"{root}/{candidate}" if root else candidate
             target = wb.worktree / relative
             if target.is_file() and _is_inside(wb.worktree, target) and _exact_case(wb.worktree, relative):
-                return relative
-    return None
+                found.append(relative)
+    return found
 
 
 def _imports(wb: Workbench, relative: str) -> set[str]:
@@ -358,6 +379,9 @@ def imported_modules(wb: Workbench, test_ids: Sequence[str]) -> set[str]:
     """The project source modules (inside the repository, outside the test globs) that the tests import. A package
     `__init__.py` is followed, because it usually only re-exports the modules that hold the code."""
     pending = [f for t in test_ids if (f := _test_file(wb, t))]
+    if not pending:
+        return set()
+    roots = import_roots(wb)
     found: set[str] = set()
     seen: set[str] = set()
     while pending:
@@ -366,12 +390,12 @@ def imported_modules(wb: Workbench, test_ids: Sequence[str]) -> set[str]:
             continue
         seen.add(current)
         for dotted in _imports(wb, current):
-            resolved = _resolve(wb, dotted)
-            if resolved is None or _is_test_path(wb, resolved):
-                continue
-            found.add(resolved)
-            if resolved.endswith("__init__.py"):
-                pending.append(resolved)
+            for resolved in _resolve(wb, dotted, roots):
+                if _is_test_path(wb, resolved):
+                    continue
+                found.add(resolved)
+                if resolved.endswith("__init__.py"):
+                    pending.append(resolved)
     return found
 
 
