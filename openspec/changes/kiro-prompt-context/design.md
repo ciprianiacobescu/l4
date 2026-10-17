@@ -155,9 +155,11 @@ of that stage is left out.
 **Stage 1, conventions**, capped at `C = min(R, B // 2)`, in this order:
 
 1. steering decided `always`, by file name;
-2. steering decided `fileMatch`, by file name;
-3. steering decided `manual` or `auto` (referenced), by file name;
-4. an OpenSpec unit's `context`.
+2. the root `AGENTS.md`, when `implementer.include_agents_md` is on (owner decision 3);
+3. steering decided `fileMatch`, by file name;
+4. steering referenced by the task, `manual` or `auto`, by file name;
+5. steering `auto` that nothing references, by file name (owner decision 1);
+6. an OpenSpec unit's `context`.
 
 Each file is one piece. The cap keeps a huge steering file from emptying the unit context. `R` then shrinks by what was
 used.
@@ -274,7 +276,7 @@ prompt.truncated{role, task, attempt, budget_tokens, sources: [{path, kind, reas
 | `always` | always | `always` |
 | `fileMatch` | a pattern matches a path of `paths` | `matched <path>`, else `no_match` |
 | `manual` | `references` names the file | `referenced`, else `not_referenced` |
-| `auto` | `references` names the file or its `name` | `referenced`, else `not_referenced` |
+| `auto` | always: after the others when the budget has room (owner decision 1) | `referenced` when `references` names the file or its `name`, else `auto` |
 
 - **`paths`** is the backticked path tokens of the task block and of the design's named sections (D3), plus the files
   the unit branch changed so far (`memory.inject.task_paths`, as `_lessons` uses it). In a run that is
@@ -289,8 +291,11 @@ prompt.truncated{role, task, attempt, budget_tokens, sources: [{path, kind, reas
   - the path `.kiro/steering/x.md`;
   - for `auto`, `#<name>` of its front matter.
 
-**`auto` is treated like `manual`** [I]. Kiro decides an `auto` file by matching a request to its description, which
-needs a model. The harness stays deterministic (§7, Q1).
+**`auto` steering** (owner decision 1, 2026-10-18). Kiro decides an `auto` file by matching a request to its description,
+which needs a model, so the harness does not guess a match. It includes the file when the budget has room: an `auto` file
+is met last among the conventions, after `always`, `fileMatch` and the referenced `manual` files, and is cut or left out
+like any piece when the budget ends (the cut list then names it). A reference by `#<file>` or `#<name>` moves it up to
+the referenced files. The decision is recorded like the others: `included: true`, `why: auto` (or `referenced`).
 
 **Rendering.**
 

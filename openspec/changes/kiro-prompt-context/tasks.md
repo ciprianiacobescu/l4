@@ -15,7 +15,7 @@ Every task follows these rules:
 
 ## 0. The probe as a fixture
 
-- [ ] 0.1 Add `tests/fixtures/kiro_probe/`, the probe repository's spec, byte for byte:
+- [x] 0.1 Add `tests/fixtures/kiro_probe/`, the probe repository's spec, byte for byte:
   - `.kiro/specs/tip-calc/requirements.md` (409 bytes):
     `# Requirements Document\n\n## Introduction\nREQ-INTRO-MARKER: a tip calculator for the till.\n\n## Requirements\n\n### Requirement 1\n**User Story:** As a cashier, I want the tip computed, so that I can charge it.\n\n#### Acceptance Criteria\n1. WHEN a bill and a tip percent are given THEN the system SHALL return the tip rounded to 2 places.\n2. WHEN the tip percent is negative THEN the system SHALL raise ValueError.\n`;
   - `.kiro/specs/tip-calc/tasks.md`:
@@ -37,7 +37,7 @@ Every task follows these rules:
 
 ## 1. Readers
 
-- [ ] 1.1 Sources and the task block (L4-IMP-050, L4-IMP-052).
+- [x] 1.1 Sources and the task block (L4-IMP-050, L4-IMP-052).
   - Tests in `tests/unit/implementer/test_prompt_context.py`, all failing first:
     - **SCN-IMP-282, reader part:** `task_block(...)` of the probe leaf holds the checkbox line (marker `[ ]`), both
       detail bullets and `_Requirements: 1.1, 1.2_` in file order. Also: a Kiro leaf `1.1` under parent `1.` gets the
@@ -46,13 +46,13 @@ Every task follows these rules:
       `reason == "oversize"`, `total_bytes == 300000` and 262,144 bytes of text. A symlinked `requirements.md` comes
       back with `reason == "symlink"` and `text == ""`. A FIFO comes back as `not_regular`. `collect_sources` still
       skips all three.
-  - Code: `src/l4/implementer/unit_context.py`: `MAX_SOURCE_BYTES` (defined here, with the value of `prompt.py`; task 2.1
-    makes `prompt.py` import it, so that 1.1 and 1.3 do not both edit `prompt.py`),
+  - Code: `src/l4/implementer/unit_context.py`: `MAX_SOURCE_BYTES` (defined in `l4.fsutil`, which `steering.py` also needs, and shown here;
+    `prompt.py` imports it from here, so that 1.1 and 1.3 do not both edit it twice),
     `SourceFile`, `read_sources`, `task_block`, `split_sections` (the headings and fences of `specs/tasks_text.py`).
     `task_block` reuses `task_context` and `task_text` of `specs/tasks_text.py`. Read the prefix with a new
     `fsutil.read_regular_prefix(path, limit) -> (bytes, size)`, which keeps the symlink and regular-file rules of
     `read_regular_file`.
-- [ ] 1.2 Steering and the OpenSpec context (L4-KSP-010, L4-KSP-011, L4-IMP-051).
+- [x] 1.2 Steering and the OpenSpec context (L4-KSP-010, L4-KSP-011, L4-IMP-051).
   - Tests in `tests/unit/specs/test_steering.py`, all failing first:
     - **SCN-IMP-290, reader part:** the probe's `tech.md` (no front matter) is decided `always`, `included`, and its
       body holds `STEERING-MARKER`.
@@ -60,8 +60,8 @@ Every task follows these rules:
       `matched src/calc/tip.py`, and against `["docs/usage.md"]` is `no_match`. The string form `fileMatchPattern:
       "src/calc/**"` works too, and so does a pattern without `/` (`*.py`) against `src/calc/tip.py`.
     - **SCN-IMP-292:** `money.md` (`manual`) is `referenced` by `follow #money for amounts` and not by `#moneyx` or
-      `docs/#money`. `api.md` (`auto`, `name: api-design`) is `not_referenced` without a reference and `referenced`
-      by `see #api-design`. `bad.md` with front matter `inclusion: [` is `bad_front_matter`. Also: a symlinked
+      `docs/#money`. `api.md` (`auto`, `name: api-design`) is included last with `why: auto` without a reference (owner
+      decision 1, when the budget has room) and `referenced` by `see #api-design`. `bad.md` with front matter `inclusion: [` is `bad_front_matter`. Also: a symlinked
       `.kiro/steering` gives one `symlink` decision, and `~/.kiro/steering` is never opened (monkeypatch `HOME` to a
       directory holding a steering file and assert it is absent).
     - **SCN-IMP-284, reader part:** `openspec_context` of a tree whose `openspec/config.yaml` has `context` and
@@ -69,7 +69,7 @@ Every task follows these rules:
       `bad_front_matter`.
   - Code: `src/l4/specs/steering.py` as in design D5 and D6 (`yaml.safe_load`, `security.protected.glob_match`,
     `fsutil.reject_symlinks`, `read_regular_prefix`).
-- [ ] 1.3 One rule for linked criteria, on the leaf's own unit (design D1).
+- [x] 1.3 One rule for linked criteria, on the leaf's own unit (design D1).
   - Tests, failing first:
     - In `tests/unit/specs/test_kiro_criteria.py`, the three K20 cases of `tests/unit/implementer/test_prompt.py` (a
       `1.1`, a bare `2`, a line naming none) call `l4.specs.criteria.linked_criteria` directly.
@@ -81,7 +81,7 @@ Every task follows these rules:
     - Add `FamilyProvider.own_criteria(unit)` and `own_criteria(provider, ref)` in `verifier/fixloop.py`.
     - `prompt.py` keeps its import; the callers pass `own_criteria(...)` for the linked list (task 2.4's
       `prompt_inputs`).
-- [ ] 1.4 A Kiro bench (for groups 3 and 5).
+- [x] 1.4 A Kiro bench (for groups 3 and 5).
   - Add `make_kiro_bench` to `tests/unit/implementer/conftest.py`: the py_tdd fixture repository with the OpenSpec
     change replaced by the probe's `.kiro/specs/tip-calc/` and `.kiro/steering/tech.md`, `spec.frameworks: [kiro]` in
     the config, and the fake adapter. Extend `TddRepo.write_config` in `tests/unit/conftest.py` with a frameworks

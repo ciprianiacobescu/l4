@@ -48,6 +48,7 @@ from l4.specs.base import (
     Finding as SpecFinding,
 )
 from l4.specs.criteria import kiro_criteria, openspec_criteria
+from l4.specs.criteria import own_criteria as own_criteria  # re-exported: the prompt, red and doctor read it here
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import read_fix_marker, split_fix_name
 from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marker
@@ -161,6 +162,11 @@ class FamilyProvider:
             for criterion in self.merged_parent_criteria():
                 seen.setdefault(criterion.id, criterion)
         return list(seen.values())
+
+    def own_criteria(self, unit: UnitRef) -> list[Criterion]:
+        """The unit's own reading of its criteria (the inner provider's), not the family's: a fix unit's
+        `_Requirements:_` links are numbers of its own `bugfix.md` items (kiro-prompt-context D1)."""
+        return self.inner.criteria(unit)
 
     def merged_parent_criteria(self) -> list[Criterion]:
         """The criteria of the merged unit this one follows, as they are in the follow-up's tree: a refactor must leave

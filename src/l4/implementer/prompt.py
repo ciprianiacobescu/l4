@@ -11,7 +11,7 @@ with a real tokenizer estimate, lessons as `data_blocks`.
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
@@ -19,11 +19,12 @@ from typing import Any, Literal
 
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.result import FILE_RESULT_SCHEMA, RESULT_SCHEMA, TraceRules, trace_rules
+from l4.implementer.unit_context import CHARS_PER_TOKEN as CHARS_PER_TOKEN  # re-exported (the clarifier)
+from l4.implementer.unit_context import MAX_SOURCE_BYTES
 from l4.specs.base import Criterion
+from l4.specs.criteria import linked_criteria
 
 Role = Literal["red", "green", "single"]
-CHARS_PER_TOKEN = 4  # [I] a rough estimate; the budget only bounds the prompt, it does not meter it
-MAX_SOURCE_BYTES = 256 * 1024
 _TAG = re.compile(r"<\s*(/?)\s*l4\s*:\s*data", re.IGNORECASE)
 _ADAPTER_LINE = re.compile(r"^@([a-z0-9-]+): (.*)$")
 _VERSION = re.compile(r"^version: (\d+)\n\n")
@@ -152,18 +153,10 @@ def result_values_line(schema: Mapping[str, Any], phase: str) -> str:
     )
 
 
-def _linked(criteria: Sequence[Criterion], links: Sequence[str]) -> list[Criterion]:
-    """The criteria a Kiro leaf's `_Requirements:_` refs name: `1.1` names `Req 1.1`, a bare `1` every `Req 1.*`."""
-    return [
-        c for c in criteria
-        if any(c.alias == f"Req {ref}" or c.alias.startswith(f"Req {ref}.") for ref in links)
-    ]  # fmt: skip
-
-
 def _criteria_section(ctx: PromptContext) -> tuple[str, str]:
     """(the task block's text, the criteria section). A Kiro leaf shows its `_Requirements:_` line and gets only the
     criteria it names (kiro-e2e K20); a leaf whose refs name none, and every OpenSpec task, gets the whole list."""
-    linked = _linked(ctx.criteria, ctx.task_links)
+    linked = linked_criteria(ctx.criteria, ctx.task_links)
     if not ctx.task_links:
         title, shown = ctx.task_title, ctx.criteria
         lead = (

@@ -6,11 +6,10 @@ context budget, while the sandbox keeps the CLI from loading it as instructions;
 ## ADDED Requirements
 
 ### Requirement: L4-KSP-010 Applicable steering reaches the implementer as data
-Each `.kiro/steering/*.md` of the repository that applies SHALL reach the implementer's prompt as a `<l4:data>` block
-under `# Project conventions`, read by the harness on the host, and the sandbox masks of `.kiro/steering` SHALL stay.
-A file SHALL apply by its front matter: none or `always`; `fileMatch` when a `fileMatchPattern` matches a path of the
-task; `manual` or `auto` when the task block, `requirements.md`, `bugfix.md` or `design.md`
-references it.
+Each `.kiro/steering/*.md` that applies SHALL reach the implementer's prompt as a `<l4:data>` block under `# Project
+conventions`, read by the harness on the host; the sandbox masks of `.kiro/steering` SHALL stay. By its front matter a
+file applies when it has none or `always`; `fileMatch` and a pattern matches a path of the task; `manual` and the task
+block, `requirements.md`, `bugfix.md` or `design.md` references it; `auto`, last, when the budget has room.
 
 #### Scenario: SCN-IMP-290 (+) A steering file without front matter is always included, as data
 - **GIVEN** the probe's `.kiro/steering/tech.md`, which has no front matter and the line `STEERING-MARKER: all money
@@ -29,13 +28,14 @@ references it.
 - **AND** the second does not, and its `steering` lists `calc.md` with `included: false, why: no_match`; once the
   branch has changed `src/calc/tip.py`, the second task's prompt holds it too
 
-#### Scenario: SCN-IMP-292 (−) Manual and auto steering need a reference, and bad front matter is left out
+#### Scenario: SCN-IMP-292 (−) Manual steering needs a reference, auto steering comes last, bad front matter is left out
 - **GIVEN** `money.md` with `inclusion: manual`, `api.md` with `inclusion: auto`, `name: api-design` and
   `description: REST conventions`, and `bad.md` whose front matter is not YAML
 - **WHEN** the prompt of a task whose block says `follow #money for amounts` is rendered
-- **THEN** `money.md` is included with `why: referenced`, `api.md` is not (`not_referenced`), `bad.md` is not
-  (`bad_front_matter`), and all three are listed in `prompt.rendered.steering`
-- **AND** a task whose block says `see #api-design` gets `api.md` with `why: referenced`
+- **THEN** `money.md` is included with `why: referenced`, `bad.md` is not (`bad_front_matter`), and all three are
+  listed in `prompt.rendered.steering`
+- **AND** `api.md` is included after `money.md` with `why: auto`, and a task whose block says `see #api-design` gets it
+  with `why: referenced`
 
 ### Requirement: L4-KSP-011 Every steering decision is recorded, and a cut steering file is named unreadable
 `prompt.rendered.steering` SHALL list every steering file with its inclusion, whether it was included, and why
