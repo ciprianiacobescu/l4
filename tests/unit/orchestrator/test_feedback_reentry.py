@@ -140,12 +140,13 @@ def test_feedback_pushed_before_the_handoff_waits_for_the_units_own_verification
 def test_a_retaken_item_whose_work_is_done_completes_its_task_and_the_next_judge_closes_it(
     in_review, run_l4, tdd_repo, raw, use_fake_gitlab, tmp_path
 ):
-    """review #8 follow-up: the judge leaves FB-001 out of its reply, so the PASS round fails it as not judged; the
-    item is taken again into fix unit 2, whose refactor finds nothing left to change (it was done in unit 1) and
-    completes as already done; the parent is verified again and the judge answers yes in the PASS round."""
+    """review #8 follow-up: the judge leaves FB-001 out of its reply, and again when the second call asks for it
+    (L4-VER-017), so the PASS round fails it as not judged; the item is taken again into fix unit 2, whose refactor
+    finds nothing left to change (it was done in unit 1) and completes as already done; the parent is verified again
+    and the judge answers yes in the PASS round."""
     human_commit(tdd_repo, raw, {FEEDBACK: feedback_text(tmp_path, {})}, "ask for a refactor")
     nothing = Step(structured=result("single"))
-    run = run_l4([CHORE, JUDGE, nothing, JUDGE_FB1])
+    run = run_l4([CHORE, JUDGE, JUDGE, nothing, JUDGE_FB1])
     assert run.code == 0, run.adapter.requests[-1].prompt[-500:]
     assert [v["verdict"] for v in run.events("verify.verdict")] == ["PASS", "FAIL", "FAIL", "PASS"]
     first, second = run.events("fix.spawned")
