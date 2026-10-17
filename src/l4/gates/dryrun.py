@@ -28,6 +28,7 @@ from l4.safepath import resolve_tool
 from l4.sandbox.base import Sandbox, SandboxUnavailable, gate_sandbox_spec
 from l4.sandbox.bwrap import BwrapSandbox
 from l4.sandbox.caches import mount_caches
+from l4.sandbox.env import toolchain_env
 from l4.sandbox.none import NoSandbox
 from l4.vcs.git import Git, GitError
 
@@ -246,13 +247,14 @@ def dry_run_gates(
             result = run_gate(
                 spec, worktree=tree, sandbox=chosen, sandbox_spec=sandbox_spec, host_env=environ,
                 log_path=logs / f"{number:03d}-{gate}.log", redactor=redactor, runner=runner,
+                extra_env=toolchain_env(cfg),
             )  # fmt: skip
             run = _run_of(gate, command, result)
             if gate == "lint" and run.status == "fail" and (narrowed := narrow_ruff(command)) is not None:
                 again = run_gate(
                     dataclasses.replace(spec, name="lint-narrow", command=narrowed), worktree=tree, sandbox=chosen,
                     sandbox_spec=sandbox_spec, host_env=environ, log_path=logs / f"{number:03d}-lint-narrow.log",
-                    redactor=redactor, runner=runner,
+                    redactor=redactor, runner=runner, extra_env=toolchain_env(cfg),
                 )  # fmt: skip
                 run = dataclasses.replace(run, narrowed=narrowed, narrowed_ok=again.status == "pass")
                 if (
@@ -263,6 +265,7 @@ def dry_run_gates(
                         dataclasses.replace(spec, name="lint-narrow-paths", command=by_dirs), worktree=tree,
                         sandbox=chosen, sandbox_spec=sandbox_spec, host_env=environ,
                         log_path=logs / f"{number:03d}-lint-narrow-paths.log", redactor=redactor, runner=runner,
+                        extra_env=toolchain_env(cfg),
                     )  # fmt: skip
                     run = dataclasses.replace(run, narrowed_paths=by_dirs, narrowed_paths_ok=third.status == "pass")
             runs.append(run)

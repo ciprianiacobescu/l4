@@ -28,6 +28,7 @@ from l4.context import AppContext
 from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.sandbox.base import Sandbox, gate_sandbox_spec, runner_tmp_paths
 from l4.sandbox.caches import mount_caches
+from l4.sandbox.env import toolchain_env
 from l4.sandbox.select import select_sandbox
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
@@ -183,7 +184,7 @@ def _run(
         safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)[:60]
         result = run_gate(
             spec, worktree=tree, sandbox=chosen, sandbox_spec=sandbox_spec, host_env=app.environ,
-            log_path=logs / f"{number:03d}-{safe}.log", redactor=app.redactor,
+            log_path=logs / f"{number:03d}-{safe}.log", redactor=app.redactor, extra_env=toolchain_env(cfg),
         )  # fmt: skip
         results.append(result)
         if result.status != "pass" and required:

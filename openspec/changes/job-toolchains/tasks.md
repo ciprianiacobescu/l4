@@ -13,9 +13,9 @@ Every task follows these rules:
 
 ## 2. Workflow and gate environment (L4-CI-005)
 
-- [ ] 2.1 Tests: SCN-CI-19 (render), SCN-CI-20 (byte-identical without toolchains, for both the action and the copy
+- [x] 2.1 Tests: SCN-CI-19 (render), SCN-CI-20 (byte-identical without toolchains, for both the action and the copy
   form), SCN-CI-22 (gate env).
-- [ ] 2.2 `ci/github.py` renders the steps (pinned shas, caches off); `sandbox/env.py` (or the gate env builder) adds
+- [x] 2.2 `ci/github.py` renders the steps (pinned shas, caches off); `sandbox/env.py` (or the gate env builder) adds
   `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` when `ci.toolchains.go` is set.
 
 ## 3. Doctor and init

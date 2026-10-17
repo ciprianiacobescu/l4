@@ -78,3 +78,42 @@ def test_python_never_writes_bytecode_in_either_environment(make_spec):
     """SCN-VER-60 (L4-SEC-001): a stray `__pycache__` under the worktree would be a protected-path violation."""
     assert build_agent_env(HOST, make_spec("agent", "codex"))["PYTHONDONTWRITEBYTECODE"] == "1"
     assert build_gate_env(HOST, make_spec("gate"))["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def _cfg(**toolchains):
+    from l4.config.schema import L4Config
+
+    return L4Config.model_validate({"ci": {"toolchains": toolchains}})
+
+
+def test_scn_ci_22_go_gates_run_with_the_local_toolchain_and_a_read_only_module_graph(make_spec):
+    """SCN-CI-22 (+): GOTOOLCHAIN=local and GOFLAGS=-mod=readonly next to the per-unit GOMODCACHE and GOCACHE."""
+    from l4.sandbox.env import toolchain_env
+
+    caches = (CacheMount(Path("/c/go"), "GOMODCACHE"), CacheMount(Path("/c/gobuild"), "GOCACHE"))
+    env = build_gate_env(HOST, make_spec("gate", caches=caches), extra=toolchain_env(_cfg(go={"version": "1.26"})))
+    assert env["GOTOOLCHAIN"] == "local" and env["GOFLAGS"] == "-mod=readonly"
+    assert env["GOMODCACHE"] == "/c/go" and env["GOCACHE"] == "/c/gobuild"
+
+
+def test_scn_ci_22_without_ci_toolchains_go_the_gate_environment_has_no_go_settings(make_spec):
+    from l4.sandbox.env import toolchain_env
+
+    assert toolchain_env(_cfg()) == {} and toolchain_env(_cfg(node={"version": "22"})) == {}
+    env = build_gate_env(HOST, make_spec("gate"), extra=toolchain_env(_cfg()))
+    assert "GOTOOLCHAIN" not in env and "GOFLAGS" not in env
+
+
+def test_scn_ci_22_a_gate_environment_that_sets_them_wins():
+    from l4.gates.coverage import merge_pytest_env
+    from l4.sandbox.env import toolchain_env
+
+    merged = merge_pytest_env(toolchain_env(_cfg(go={"version": "1.26"})), {"GOFLAGS": "-mod=vendor"})
+    assert merged == {"GOTOOLCHAIN": "local", "GOFLAGS": "-mod=vendor"}
+
+
+def test_the_pnpm_store_is_visible_to_pnpm_9_to_11(make_spec):
+    """pnpm 11 reads pnpm_config_store_dir and ignores npm_config_*; pnpm 9 and 10 read only npm_config_store_dir."""
+    spec = make_spec("gate", caches=(CacheMount(Path("/c/pnpm"), "pnpm_config_store_dir"),))
+    env = build_gate_env(HOST, spec)
+    assert env["pnpm_config_store_dir"] == env["npm_config_store_dir"] == "/c/pnpm"

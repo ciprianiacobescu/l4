@@ -52,6 +52,7 @@ jobs:
           fi
           git checkout --quiet --detach "origin/$L4_BASE_BRANCH"
           echo "l4: base checkout $(git rev-parse HEAD)"
+@@TOOLCHAINS@@
 @@ACTION_STEP@@
       - name: doctor
         run: l4 @@DOCTOR@@ || l4 ci map-exit $?

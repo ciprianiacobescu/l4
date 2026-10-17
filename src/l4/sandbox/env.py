@@ -1,6 +1,7 @@
 """The complete child environment of an agent or gate process (SPEC L4-SEC-001): built, never inherited."""
 
 from collections.abc import Mapping
+from typing import Any
 
 from l4.safepath import safe_path
 from l4.sandbox.base import SandboxSpec
@@ -11,6 +12,8 @@ ALLOWED_PASSTHROUGH = (
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 )  # fmt: skip
 RESULT_FILE = "result.json"
+PNPM_STORE_ENV = "pnpm_config_store_dir"
+PNPM_STORE_ENV_LEGACY = "npm_config_store_dir"
 
 
 def _base(host_env: Mapping[str, str], spec: SandboxSpec) -> dict[str, str]:
@@ -38,6 +41,15 @@ def build_agent_env(
     return env
 
 
+def toolchain_env(cfg: Any) -> dict[str, str]:
+    """Gate variables of `ci.toolchains` (L4-CI-005): with Go configured no gate downloads another Go
+    (`GOTOOLCHAIN=local`) or rewrites `go.mod`/`go.sum` (`GOFLAGS=-mod=readonly`). Passed as `extra`, a gate
+    environment that sets either itself wins when the caller merges its own values over these."""
+    if getattr(cfg.ci.toolchains, "go", None) is None:
+        return {}
+    return {"GOTOOLCHAIN": "local", "GOFLAGS": "-mod=readonly"}
+
+
 def build_gate_env(
     host_env: Mapping[str, str], spec: SandboxSpec, *, extra: Mapping[str, str] | None = None
 ) -> dict[str, str]:
@@ -45,5 +57,8 @@ def build_gate_env(
     env.update({cache.env: str(cache.path) for cache in spec.caches})
     if any(cache.env == "UV_CACHE_DIR" for cache in spec.caches):
         env["UV_LINK_MODE"] = "copy"  # the cache and the worktree are separate binds: a hard link fails (EXDEV) anyway
+    if any(cache.env == PNPM_STORE_ENV for cache in spec.caches):
+        # pnpm 11 reads `pnpm_config_store_dir` and ignores `npm_config_*`; pnpm 9 and 10 read only the latter
+        env.setdefault(PNPM_STORE_ENV_LEGACY, env[PNPM_STORE_ENV])
     env.update(extra or {})
     return env
