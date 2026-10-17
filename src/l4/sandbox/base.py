@@ -40,6 +40,10 @@ class SandboxSpec:
     caches: tuple[CacheMount, ...] = ()
     network: bool = True
     runner_tmp: tuple[Path, ...] = ()  # the CI runner's own scratch dirs (job-token git config, CA file): hidden
+    # keyword-only and required: a spec that forgets them would show the runner cache and lose every tool under the home
+    cache_root: Path = field(kw_only=True)  # `$L4_CACHE`: covered by a tmpfs when outside the home (L4-SEC-031)
+    tool_paths: tuple[Path, ...] = field(kw_only=True)  # bound read-only after the tmpfs over the home (L4-SEC-032)
+    setup_paths: tuple[Path, ...] = field(default=(), kw_only=True)  # gate of a `gates.setup` command only (L4-SEC-033)
 
     def __post_init__(self) -> None:
         if (self.kind == "agent") != (self.adapter is not None):
@@ -141,12 +145,18 @@ def gate_sandbox_spec(
     configured_credential_paths: Mapping[str, Sequence[str]],
     caches: tuple[CacheMount, ...],
     network: bool,
+    cache_root: Path,
+    tool_paths: tuple[Path, ...],
+    setup_paths: tuple[Path, ...] = (),
+    builds_env: bool,
     runner_tmp: tuple[Path, ...] = (),
 ) -> SandboxSpec:
     """The one way to build a gate sandbox: no adapter, so every adapter's login is hidden. A spec without
     `credential_paths` hides nothing, which is how a gate could read `~/.codex`. `configured_credential_paths` is
-    `cfg.sandbox.credential_paths`; `caches` come from `l4.sandbox.caches.mount_caches`."""
+    `cfg.sandbox.credential_paths`; `caches` come from `l4.sandbox.caches.mount_caches`. `builds_env` is true for a
+    `gates.setup` command only: it alone keeps `setup_paths` (a registry login for the download)."""
     return SandboxSpec(
         "gate", worktree, git_common_dir, tmp_dir, home, expand_credential_paths(configured_credential_paths, home),
-        caches=caches, network=network, runner_tmp=runner_tmp,
+        caches=caches, network=network, runner_tmp=runner_tmp, cache_root=cache_root, tool_paths=tool_paths,
+        setup_paths=setup_paths if builds_env else (),
     )  # fmt: skip

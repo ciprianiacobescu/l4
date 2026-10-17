@@ -12,9 +12,17 @@ Status: design, 2026-10-17. Harness at 0.4.14 (`795e97a9`). Markers: **[V]** ver
 | sandbox-security-1 (major): per-unit paths have no repository key | yes [V] | `workbench.py:566` (`cache / "units" / framework / ref.name`), `sandbox/caches.py:23-24` (`{unit}` = `<fw>/<name>`), `config/defaults.py:64-70`, `state/pending.py:88,96`, `orchestrator.py:1245,1275`, `state/restart.py:273`, `verifier/basemerge.py:66-67`, `implementer/uvseed.py:92`, `verifier/playwright.py:69` (follows `wb.unit_cache`) |
 | sandbox-security-4 (major): another unit's key files are readable | yes [V] | `agents/opencode.py:207-218` (key file in `<agent-tmp>/opencode-config/provider.key`), `agents/credentials.py:104-111` (loader file in `<agent-tmp>/credential`); both under `$L4_CACHE/units/...`, which `--ro-bind / /` shows to every sandbox; no mask over `$L4_CACHE` in `bwrap.py:103-127` |
 
-The same mounts also close sandbox-security-6 (minor, not in this change's list) for the default layout: the login lock
-files live in `~/.cache/l4/locks` (SPEC 8.4) and the unit locks in `$L4_CACHE/locks/<key>/...`, both under a hidden
-root after this change [I]. SCN-SEC-75 checks the unit lock directory; the owner decides whether to record -6 as fixed.
+The same mounts also close sandbox-security-6 (minor) for the default layout: the login lock files live in
+`~/.cache/l4/locks` (SPEC 8.4; `l4.agents.gate.lock_root`, the passwd home of the runner user) and the unit locks in
+`$L4_CACHE/locks/<key>/...` (`UnitNames.flock_path`), both under a hidden root after this change. **Owner decision Q3: -6
+is recorded as fixed by this change, on one condition that the tests carry**: SCN-SEC-99 shows, with the paths taken from
+`lock_root` and `UnitNames` (never literals) and a model of the bwrap mount order (`tests/unit/sandbox/mountsim.py`),
+that neither lock file is readable in a gate or an agent sandbox of any adapter (the login lock directory lies under no
+adapter's credential path, so the agent kind's bind of its own login does not bring it back), with the cache under the
+home and outside it; and, where bwrap exists, by a real read in both kinds. Two limits are stated, not hidden: a
+`$L4_LOCK_DIR` outside the home and the cache stays readable (an operator's choice, named in the runbook), and under
+`sandbox.mode: none` nothing is hidden. The other half of -6, that a read-only descriptor is enough for `flock`, is not
+changed here: the files are no longer reachable.
 
 ## 2. Goals and non-goals
 

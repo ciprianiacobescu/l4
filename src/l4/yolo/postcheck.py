@@ -26,9 +26,10 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.gates.runner import GateResult, GateSpec, run_gate
-from l4.sandbox.base import Sandbox, gate_sandbox_spec, runner_tmp_paths
+from l4.sandbox.base import Sandbox, expand_credential_paths, gate_sandbox_spec, runner_tmp_paths
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
+from l4.sandbox.home import spec_paths
 from l4.sandbox.select import select_sandbox
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
@@ -177,10 +178,17 @@ def _run(
     results: list[GateResult] = []
     failure = ""
     for number, (name, _kind, spec, required, network) in enumerate(planned, start=1):
+        builds_env = _kind == "setup"
+        tools, setup_extra = spec_paths(
+            app.environ, home=home, cache_root=cache, kind="gate", sandbox_cfg=cfg.sandbox, builds_env=builds_env,
+            credential_paths=expand_credential_paths(cfg.sandbox.credential_paths, home),
+            forbid=(tree, common.parent),
+        )  # fmt: skip
         sandbox_spec = gate_sandbox_spec(
             worktree=tree, git_common_dir=common, tmp_dir=tmp, home=home,
             configured_credential_paths=cfg.sandbox.credential_paths, caches=caches, network=network,
-            runner_tmp=runner_tmp_paths(app.environ),
+            runner_tmp=runner_tmp_paths(app.environ), cache_root=cache, tool_paths=tools,
+            setup_paths=setup_extra, builds_env=builds_env,
         )  # fmt: skip
         safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)[:60]
         result = run_gate(

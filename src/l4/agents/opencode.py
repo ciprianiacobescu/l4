@@ -399,7 +399,7 @@ def _hello(
     with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode-probe-") as scratch:
         work, config_dir = Path(scratch) / "cwd", Path(scratch) / "config"
         work.mkdir()
-        config_dir.mkdir()
+        config_dir.mkdir(mode=0o700)  # the scratch directory is 0700 already (tempfile); the key's own is too
         key_path = write_key_file(config_dir, key) if key is not None else None
         content = config_content(PermissionPolicy("judge"), work, model, options, key_path)
         env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env(config_dir, content)})

@@ -99,7 +99,7 @@ def run_build_gates(wb: Workbench, ci_steps: Sequence[ChoreCiStep] = ()) -> Buil
         ("typecheck", cfg.typecheck),
     ):
         for command in commands:
-            result = wb.run_gate(name, command, network=True if name == "setup" else None)
+            result = wb.run_gate(name, command, network=True if name == "setup" else None, builds_env=name == "setup")
             line = _line(wb, name, command, result)
             out.gates.append(line)
             if result.status != "pass":

@@ -328,6 +328,14 @@ m0_masks() {  # HB-1: /run (and /var/run) is a tmpfs, so a container daemon's so
     *) if [ -d "$root$var_run" ]; then printf '%s\n' --tmpfs "$var_run"; fi;;
   esac
 }
+m0_home_check() {  # L4-SEC-030: a HOME that is not an existing absolute directory other than / makes the sandbox unavailable
+  case $HOME in
+    /) ;;
+    /*) [ -d "$HOME" ] && return 0;;
+  esac
+  echo "HOME must name an existing directory other than / for the sandbox to hide it" >&2
+  return 3
+}
 m0_env() {  # private-dir [NAME=VALUE...] -> NAME=VALUE lines: l4.sandbox.env.build_agent_env, same names, same order
   local tmp=$1 entry name path=
   shift
@@ -349,12 +357,15 @@ m0_gate_env() {  # private-dir [NAME=VALUE...] -> l4.sandbox.env.build_gate_env:
 }
 m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir [cache:DIR|rocache:DIR|hide:DIR|extra:FLAG...] NAME=VALUE... -- command...
   local adapter=$1 wt=$2 gd=$3 tmp=$4 other p
-  local -a caches=() hides=()
+  local -a caches=() hides=() tools=()
+  local root=
   shift 4
   while [ "$#" -gt 0 ]; do
     case "$1" in
       cache:*) caches+=(--bind "${1#cache:}" "${1#cache:}");;
       rocache:*) caches+=(--ro-bind "${1#rocache:}" "${1#rocache:}");;
+      root:*) root=${1#root:};;  # the runner cache ($L4_CACHE): a tmpfs when it is a directory outside $HOME (L4-SEC-031)
+      tool:*) tools+=("${1#tool:}");;  # a tool path under a hidden root, bound read-only (L4-SEC-032)
       hide:*) hides+=("${1#hide:}");;  # the CI runner's <CI_PROJECT_DIR>.tmp: l4.sandbox.base.runner_tmp_paths
       *) break;;
     esac
@@ -363,6 +374,12 @@ m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir 
   printf '%s\n' bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp
   m0_masks
   printf '%s\n' --unshare-pid --unshare-ipc "--${M0_NET:-share}-net" --die-with-parent
+  m0_home_check || return 3
+  printf '%s\n' --tmpfs "$HOME"  # L4-SEC-030: the real home is not there; the binds below put back what a step needs
+  case $root in
+    /?*) if [ -d "$root" ]; then case $root in "$HOME"|"$HOME"/*) ;; *) printf '%s\n' --tmpfs "$root";; esac; fi;;
+  esac
+  for p in ${tools[@]+"${tools[@]}"}; do printf '%s\n' --ro-bind "$p" "$p"; done
   for other in codex claude-code opencode kiro-cli; do
     [ "$other" = "$adapter" ] && continue
     m0_cred_paths "$other" | while IFS= read -r p; do m0_hide "$p"; done
@@ -376,6 +393,29 @@ m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir 
   printf '%s\n' --chdir "$wt" -- "$@"
 }
 # --- m0-profile end ---
+
+site_args() {  # root: and tool: arguments for this runner's m0_argv calls: a documented subset of l4.sandbox.home.tool_paths
+  # (every PATH entry under $HOME, the install root of a symlink in it that points elsewhere under $HOME, and $L4_HOME)
+  local entry f t
+  printf '%s\n' "root:${L4_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/l4}"
+  for entry in $(printf '%s' "$PATH" | tr ':' ' '); do
+    case $entry in
+      "$HOME"/*)
+        [ -d "$entry" ] || continue
+        printf '%s\n' "tool:$entry"
+        for f in "$entry"/*; do
+          [ -L "$f" ] || continue
+          t=$(readlink -f "$f")
+          case $t in "$entry"/*) continue;; "$HOME"/*) [ -f "$t" ] && printf '%s\n' "tool:$(dirname "$t")";; esac
+        done;;
+    esac
+  done
+  if [ -d "${L4_HOME:-$HOME/.local/share/l4}" ]; then printf '%s\n' "tool:${L4_HOME:-$HOME/.local/share/l4}"; fi
+}
+site_array() {  # -> SITE: the lines of site_args as an array
+  local line; SITE=()
+  while IFS= read -r line; do SITE+=("$line"); done < <(site_args)
+}
 
 argv_to_array() {  # BW <- the lines on stdin (what m0_argv prints, one token per line); call as `argv_to_array < <(m0_argv ...)`
   local line; BW=()
@@ -451,8 +491,9 @@ L_EOF
       local -a envp=()
       while IFS= read -r line; do envp+=("$line"); done < <(M0_NET=unshare m0_gate_env "$P/gate-tmp" \
         "UV_CACHE_DIR=$P/uv" "PIP_CACHE_DIR=$P/pip" "npm_config_cache=$P/npm" "GOMODCACHE=$P/go" "PLAYWRIGHT_BROWSERS_PATH=$PW_DIR")
+      site_array
       argv_to_array < <(M0_NET=unshare m0_argv "" "$P/wt" "$P/repo/.git" "$P/gate-tmp" "cache:$P/uv" "cache:$P/pip" \
-        "cache:$P/npm" "cache:$P/go" "rocache:$PW_DIR" ${CI_PROJECT_DIR:+"hide:${CI_PROJECT_DIR%/}.tmp"} "${envp[@]}" -- ./launch.sh)
+        "cache:$P/npm" "cache:$P/go" "rocache:$PW_DIR" "${SITE[@]}" ${CI_PROJECT_DIR:+"hide:${CI_PROJECT_DIR%/}.tmp"} "${envp[@]}" -- ./launch.sh)
       local -a argv=(); local n
       for n in "${BW[@]}"; do  # extra flags go with the base flags, after `--dev /dev` (which would cover an earlier /dev/shm)
         if [ "$n" = --die-with-parent ]; then argv+=("$@"); fi
@@ -487,7 +528,8 @@ if [ -d "$P/wt" ]; then
   printf 'def add(a, b):\n    return a + b\n' > "$W/calc.py"
   printf 'base_modes:\n  - editing\nprojects: []\n' > "$B/tmp/serena-home/serena_config.yml"
   envb=(); while IFS= read -r line; do envb+=("$line"); done < <(m0_env "$B/tmp" "UV_CACHE_DIR=$B/uv" "SERENA_HOME=$B/tmp/serena-home" "UV_TOOL_DIR=$B/tmp/uv-tools" "CI=true")
-  argv_to_array < <(m0_argv codex "$W" "$P/repo/.git" "$B/tmp" "cache:$B/uv" ${CI_PROJECT_DIR:+"hide:${CI_PROJECT_DIR%/}.tmp"} \
+  site_array
+  argv_to_array < <(m0_argv codex "$W" "$P/repo/.git" "$B/tmp" "cache:$B/uv" "${SITE[@]}" ${CI_PROJECT_DIR:+"hide:${CI_PROJECT_DIR%/}.tmp"} \
     "${envb[@]}" -- serena start-mcp-server --context codex --project "$W" --enable-web-dashboard false \
     --open-web-dashboard false --mode one-shot --mode no-onboarding)
   python3 "$T/tool.py" mcp "$B/serena.err" 120 env -i PATH="$PATH" "${BW[@]}" | tee "$T/b.out" >/dev/null

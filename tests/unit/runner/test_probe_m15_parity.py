@@ -49,6 +49,9 @@ def world(tmp_path: Path):
     (tmp_path / "builds" / "p.tmp").mkdir(parents=True)
     creds = expand_credential_paths({k: list(v) for k, v in CREDENTIAL_PATHS.items()}, home)
     (tmp_path / "cache root" / "shared" / "ms-playwright").mkdir(parents=True)
+    tools = (home / ".local" / "bin dir", home / ".local" / "share" / "l4")  # L4-SEC-032, one with a space
+    for tool in tools:
+        tool.mkdir(parents=True)
     caches = mount_caches(L4Config().sandbox.caches, tmp_path / "cache root", "openspec:add-x", "proj-0123456789")
 
     def spec(adapter: str | None) -> SandboxSpec:
@@ -56,6 +59,7 @@ def world(tmp_path: Path):
             kind="agent" if adapter else "gate", worktree=tmp_path / "wt dir", git_common_dir=tmp_path / "main/.git",
             tmp_dir=tmp_path / "res", home=home, credential_paths=creds, adapter=adapter, caches=caches,
             network=bool(adapter), runner_tmp=(tmp_path / "builds" / "p.tmp", tmp_path / "missing.tmp"),
+            cache_root=tmp_path / "cache root", tool_paths=tools,
         )  # fmt: skip
 
     return home, spec
@@ -64,6 +68,7 @@ def world(tmp_path: Path):
 def bash_argv(tmp_path: Path, home: Path, spec: SandboxSpec, env: dict[str, str], cmd: list[str]) -> list[str]:
     caches = [f"{'rocache' if c.read_only else 'cache'}:{c.path}" for c in spec.caches]
     caches += [f"hide:{p}" for p in spec.runner_tmp]
+    caches += [f"root:{spec.cache_root}", *(f"tool:{p}" for p in spec.tool_paths)]
     net = {"M0_NET": "share" if spec.network else "unshare"}
     return run_bash(
         tmp_path, home, {"PATH": "/usr/bin:/bin", **net}, "m0_argv",
@@ -130,6 +135,7 @@ def test_the_daemon_socket_masks_match_on_a_host_with_run(tmp_path, world, net):
     assert "/run" in expected and "--ro-bind-try" in expected
     caches = [f"{'rocache' if c.read_only else 'cache'}:{c.path}" for c in spec.caches]
     caches += [f"hide:{p}" for p in spec.runner_tmp]
+    caches += [f"root:{spec.cache_root}", *(f"tool:{p}" for p in spec.tool_paths)]
     got = run_bash(
         tmp_path, home, {"PATH": "/usr/bin:/bin", "M0_NET": "share" if net else "unshare", "L4_HOST_ROOT": str(root)},
         "m0_argv", spec.adapter or "", str(spec.worktree), str(spec.git_common_dir), str(spec.tmp_dir), *caches,

@@ -25,10 +25,11 @@ from l4.gates.pyproject import project_dirs, read_pyproject
 from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.proc import run_process
 from l4.safepath import resolve_tool
-from l4.sandbox.base import Sandbox, SandboxUnavailable, gate_sandbox_spec
+from l4.sandbox.base import Sandbox, SandboxUnavailable, expand_credential_paths, gate_sandbox_spec
 from l4.sandbox.bwrap import BwrapSandbox
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
+from l4.sandbox.home import spec_paths
 from l4.sandbox.none import NoSandbox
 from l4.vcs.git import Git, GitError
 from l4.vcs.repokey import key_of_common_dir
@@ -242,9 +243,16 @@ def dry_run_gates(
             reports = tuple(cfg.gates.test.reports) if gate == "test" else ()
             spec = GateSpec(gate, command, reports, cfg.gates.test.format, timeout)
             network = True if gate == "setup" else cfg.gates.network == "allow"
+            builds_env = gate == "setup"
+            tools, setup_extra = spec_paths(
+                environ, home=home, cache_root=cache, kind="gate", sandbox_cfg=cfg.sandbox, builds_env=builds_env,
+                credential_paths=expand_credential_paths(cfg.sandbox.credential_paths, home),
+                forbid=(tree, common.parent),
+            )  # fmt: skip
             sandbox_spec = gate_sandbox_spec(
                 worktree=tree, git_common_dir=common, tmp_dir=base / f"{sha[:12]}-tmp", home=home,
                 configured_credential_paths=cfg.sandbox.credential_paths, caches=caches, network=network,
+                cache_root=cache, tool_paths=tools, setup_paths=setup_extra, builds_env=builds_env,
             )  # fmt: skip
             (base / f"{sha[:12]}-tmp").mkdir(exist_ok=True)
             result = run_gate(

@@ -437,7 +437,7 @@ def run_setup(wb: Workbench) -> None:
         wb.seed_checked = True
         ensure_uv_seed(wb)
     for command in wb.cfg.gates.setup:
-        result = wb.run_gate("setup", command, network=True)
+        result = wb.run_gate("setup", command, network=True, builds_env=True)
         if result.status != "pass":
             raise SetupFailed(f"gates.setup failed ({result.reason}); see {result.log_path}")
     wb.setup_at = head

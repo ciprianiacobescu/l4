@@ -105,9 +105,9 @@ def launcher_command(gate: E2eGate, base_url_env: str) -> str:
     ])  # fmt: skip
 
 
-def run_gate_at(wb: Workbench, tree: Path, spec: GateSpec, *, network: bool) -> GateResult:
+def run_gate_at(wb: Workbench, tree: Path, spec: GateSpec, *, network: bool, builds_env: bool = False) -> GateResult:
     """`Workbench.run_gate` for another worktree of the repository (the merge-base checkout): the very same wrapper."""
-    return wb.run_gate_spec(spec, network=network, tree=tree)
+    return wb.run_gate_spec(spec, network=network, tree=tree, builds_env=builds_env)
 
 
 def _read(tree: Path, relpath: str, *, limit: int) -> str | None:

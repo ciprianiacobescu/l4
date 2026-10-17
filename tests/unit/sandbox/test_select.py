@@ -109,7 +109,7 @@ def test_no_sandbox_refuses_every_wrap():
     from l4.sandbox.none import AbsentSandbox
 
     sandbox = AbsentSandbox("resume runs no agent or gate")
-    spec = SandboxSpec("gate", Path("/w"), Path("/g"), Path("/t"), Path("/h"))
+    spec = SandboxSpec("gate", Path("/w"), Path("/g"), Path("/t"), Path("/h"), cache_root=Path("/c"), tool_paths=())
     with pytest.raises(SandboxUnavailable, match="resume runs no agent or gate"):
         sandbox.wrap(["true"], spec, {})
     with pytest.raises(SandboxUnavailable, match="resume runs no agent or gate"):

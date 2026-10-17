@@ -29,14 +29,21 @@ def m0_functions() -> str:
 
 
 def bash_argv(
-    tmp_path: Path, home: Path, adapter: str, spec: SandboxSpec, env: dict[str, str], cmd: list[str],
-    chdir: Path | None = None, host_root: Path | None = None,
+    tmp_path: Path,
+    home: Path,
+    adapter: str,
+    spec: SandboxSpec,
+    env: dict[str, str],
+    cmd: list[str],
+    chdir: Path | None = None,
+    host_root: Path | None = None,
 ):
     lib = tmp_path / "m0.sh"
     lib.write_text(m0_functions())
     pairs = [f"{k}={v}" for k, v in env.items()]
     caches = [f"{'rocache' if c.read_only else 'cache'}:{c.path}" for c in spec.caches]
     caches += [f"hide:{p}" for p in spec.runner_tmp]
+    caches += [f"root:{spec.cache_root}", *(f"tool:{p}" for p in spec.tool_paths)]
     caches += [f"chdir:{chdir}"] if chdir else []
     done = subprocess.run(
         [BASH, "-c", 'source "$1"; shift; m0_argv "$@"', "_", str(lib), adapter, str(spec.worktree),
@@ -71,6 +78,10 @@ def world(tmp_path: Path):
     (tmp_path / "wt dir" / ".kiro" / "prompts").write_text("a file")
     (tmp_path / "wt dir" / ".kiro" / "hooks").symlink_to("/etc")
     creds = expand_credential_paths({k: list(v) for k, v in CREDENTIAL_PATHS.items()}, home)
+    # tool paths under the home (L4-SEC-032), one with a space: tokens are lines, not words
+    tools = (home / ".local" / "bin dir", home / ".local" / "share" / "l4")
+    for tool in tools:
+        tool.mkdir(parents=True)
 
     # the production default mounts (four read-write per-unit caches, the read-only shared one), a path with a space
     (tmp_path / "cache root" / "shared" / "ms-playwright").mkdir(parents=True, exist_ok=True)
@@ -81,6 +92,7 @@ def world(tmp_path: Path):
         return SandboxSpec(
             kind="agent", worktree=tmp_path / "wt dir", git_common_dir=tmp_path / "main/.git",
             tmp_dir=tmp_path / "res", home=home, credential_paths=creds, adapter=adapter, caches=caches,
+            cache_root=tmp_path / "cache root", tool_paths=tools,
         )  # fmt: skip
 
     return home, spec
@@ -257,3 +269,32 @@ def test_the_probe_masks_the_repo_guidance_directories_exactly_like_the_sandbox(
     assert expected[at - 4 : at - 1] == ["--ro-bind", str(spec.git_common_dir), str(spec.git_common_dir)]
     assert expected[last + 1] == "--clearenv"
     assert bash_argv(tmp_path, home, "codex", spec, env, ["t"]) == expected
+
+
+def test_the_probe_covers_the_home_and_the_cache_like_the_sandbox(tmp_path, world):
+    """L4-SEC-030/031/032: the home's tmpfs follows the base flags, the runner cache (outside the home) gets its own,
+    the tool paths are read-only binds before the login masks, a cache inside the home gets no second tmpfs, and a
+    HOME of `/` or a missing directory ends the probe's argv with exit 3."""
+    home, make_spec = world
+    spec = make_spec("codex")
+    env = build_agent_env({"PATH": "/usr/bin", "HOME": str(home)}, spec)
+    argv = bash_argv(tmp_path, home, "codex", spec, env, ["t"])
+    assert argv == BwrapSandbox("bwrap").build_argv(["t"], spec, env)
+    at = argv.index("--tmpfs", argv.index("--die-with-parent"))
+    assert argv[at : at + 4] == ["--tmpfs", str(home), "--tmpfs", str(spec.cache_root)]
+    for tool in spec.tool_paths:
+        assert ["--ro-bind", str(tool), str(tool)] == argv[argv.index(str(tool)) - 1 : argv.index(str(tool)) + 2]
+        assert argv.index(str(tool)) < argv.index(str(home / ".claude"))  # before the login masks
+    inside = replace(spec, cache_root=home / ".cache" / "l4")
+    (home / ".cache" / "l4").mkdir(parents=True)
+    got = bash_argv(tmp_path, home, "codex", inside, env, ["t"])
+    assert got == BwrapSandbox("bwrap").build_argv(["t"], inside, env)
+    assert str(inside.cache_root) not in got
+    lib = tmp_path / "m0.sh"
+    lib.write_text(m0_functions())
+    for bad in ("/", str(tmp_path / "missing"), "relative"):
+        done = subprocess.run(
+            [BASH, "-c", 'source "$1"; shift; m0_argv "$@"', "_", str(lib), "codex", "w", "g", "t", "--", "true"],
+            env={"HOME": bad, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True,
+        )  # fmt: skip
+        assert done.returncode == 3 and "HOME" in done.stderr

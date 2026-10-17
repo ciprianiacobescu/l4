@@ -117,7 +117,9 @@ def _fill(wb: Workbench, seed: Path, key: str, base: str, setup: list[str]) -> N
     try:
         for command in setup:
             spec = GateSpec("seed", command, (), "junit", duration_seconds(wb.cfg.gates.timeout))
-            result = wb.run_gate_spec(spec, network=True, tree=tree, caches=(CacheMount(seed, "UV_CACHE_DIR", False),))
+            result = wb.run_gate_spec(
+                spec, network=True, tree=tree, caches=(CacheMount(seed, "UV_CACHE_DIR", False),), builds_env=True
+            )
             if result.status != "pass":
                 raise SeedFailed(f"gates.setup failed on the base ({result.reason})")
     finally:

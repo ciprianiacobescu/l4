@@ -22,7 +22,10 @@ PROFILES = {
     "kiro-cli": Profile(adapter="kiro-cli", model="claude-sonnet-4.5"),  # HB-13: never run live, so pinned here
 }
 ADAPTERS = {
-    "claude-code": ClaudeCodeAdapter, "codex": CodexAdapter, "opencode": OpenCodeAdapter, "kiro-cli": KiroCliAdapter,
+    "claude-code": ClaudeCodeAdapter,
+    "codex": CodexAdapter,
+    "opencode": OpenCodeAdapter,
+    "kiro-cli": KiroCliAdapter,
 }
 
 
@@ -110,7 +113,7 @@ def test_codex_judge_may_run_outside_a_git_repository_and_the_implementer_may_no
 def test_through_bwrap_the_judge_chdir_is_the_empty_directory_inside_a_mounted_path(world, adapter):
     spec = SandboxSpec(
         kind="agent", worktree=world / "wt", git_common_dir=world / "main/.git", tmp_dir=world / "res",
-        home=world / "home", adapter=adapter,
+        home=world / "home", adapter=adapter, cache_root=world / "runner-cache", tool_paths=(),
     )  # fmt: skip
     sandbox = BwrapSandbox("/usr/bin/bwrap")
     argvs = {}

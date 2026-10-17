@@ -66,7 +66,7 @@ Every task follows these rules:
 
 ## 2. Hidden home and runner cache, tools read-only (sandbox-security-2, -4; L4-SEC-030..033)
 
-- [ ] 2.1 Live tests, ported from `verify-sandbox-security/live_bwrap.py` parts `r2` and `r4` (run there as user
+- [x] 2.1 Live tests, ported from `verify-sandbox-security/live_bwrap.py` parts `r2` and `r4` (run there as user
   `runner` in a privileged Debian 12 container, bwrap 0.8.0). Add `tests/unit/sandbox/bwrap_live.py` (`requires_bwrap`;
   a fixture `var_tmp_dir` that makes and removes a directory under `/var/tmp`, skipping when `/var/tmp` is not
   writable). In `tests/unit/sandbox/test_bwrap_live_home.py`, all `@requires_bwrap`, with a fake home `H` under
@@ -92,7 +92,7 @@ Every task follows these rules:
     `write_credential_file(wa.agent_tmp, "sk-PROFILE-A-LOADER-VALUE")`; B's gate and agent read neither, both under the
     default cache (`H/.cache/l4`) and under a `L4_CACHE` outside `H` (parametrized), and both files still hold their
     values on the host.
-- [ ] 2.2 Argv and config tests (no bwrap needed). `tests/unit/sandbox/test_bwrap_home.py`:
+- [x] 2.2 Argv and config tests (no bwrap needed). `tests/unit/sandbox/test_bwrap_home.py`:
   - `test_the_home_tmpfs_comes_before_every_bind` (SCN-SEC-72): gate and agent spec with worktree, tmp dir, a cache and
     the git dir all under the home: `["--tmpfs", home]` follows `base_flags`, and the index of each of their binds is
     greater.
@@ -106,6 +106,11 @@ Every task follows these rules:
   - `test_a_tool_bind_never_re_exposes_a_login` (SCN-SEC-77).
   - `test_setup_paths_reach_only_a_setup_gate` (SCN-SEC-79): `gate_sandbox_spec(..., builds_env=True)` binds
     `~/.npmrc` read-only; `builds_env=False` and an agent spec do not.
+  - `tests/unit/sandbox/test_lock_files_hidden.py::test_the_lock_files_are_not_visible_in_either_sandbox_kind`
+    (SCN-SEC-99, owner decision Q3): the login lock file from `l4.agents.gate.lock_root` and the unit lock file from
+    `UnitNames.flock_path` (paths from the code, `pwd.getpwuid` patched to the fake home) are not visible in the gate
+    and agent argv of any adapter, cache inside and outside the home, by the mount model of
+    `tests/unit/sandbox/mountsim.py`; the live twin is in `test_bwrap_live_home.py`.
   - `test_the_hello_key_directory_is_hidden` (SCN-PRV-103): `ProbeCtx(environ, cache_root, fake_run)` with
     `l4.agents.opencode_provider.reachable` patched to `(True, "")`; `fake_run` reads the `{file:<path>}` of the
     provider key from `OPENCODE_CONFIG_CONTENT` and records the directory's mode and location; the directory is 0700
@@ -115,7 +120,7 @@ Every task follows these rules:
   `setup_paths` entries `/`, `~`, `~/.codex/bin`, `~/.codex`, `~/.local/share` (holds opencode's login) and `relative`
   each fail `load_config` with exit 2 naming the key, and the message never holds the path; `~/.local/opt` loads; an
   entry that contains `$L4_CACHE` raises `L4Exit(USAGE_ERROR)` from `l4.sandbox.home.tool_paths`.
-- [ ] 2.3 Code, sandbox layer: `src/l4/sandbox/base.py`: `SandboxSpec` gains keyword-only fields with no default
+- [x] 2.3 Code, sandbox layer: `src/l4/sandbox/base.py`: `SandboxSpec` gains keyword-only fields with no default
   `cache_root: Path` and `tool_paths: tuple[Path, ...]`, and `setup_paths: tuple[Path, ...] = ()`;
   `gate_sandbox_spec(..., cache_root, tool_paths, setup_paths=(), builds_env: bool)` (keyword, required) keeps
   `setup_paths` only when `builds_env`. New `src/l4/sandbox/home.py`: `tool_paths(host_env, *, home, cache_root, kind,
@@ -128,7 +133,7 @@ Every task follows these rules:
   Update `tests/unit/sandbox/conftest.py` (`make_spec`) and the argv tests whose expected order changes
   (`test_bwrap_argv.py::test_gate_argv_shape`, `::test_main_repo_git_dir_is_read_only_and_after_the_writable_binds`,
   `::test_the_runner_tmp_dir_is_covered_by_a_tmpfs_in_both_kinds_before_any_bind`). Verify: 2.2 files, `tests/unit/sandbox/`.
-- [ ] 2.4 Code, configuration and callers: `src/l4/config/schema.py` `SandboxCfg.tool_paths: list[str] = []` and
+- [x] 2.4 Code, configuration and callers: `src/l4/config/schema.py` `SandboxCfg.tool_paths: list[str] = []` and
   `setup_paths: list[str] = []` with the validator of design D5 (`ValueFree`). Every `SandboxSpec` constructor passes
   `cache_root` and `tool_paths` from `l4.sandbox.home`: `implementer/workbench.py` (`agent_spec` with `kind="agent"`,
   `gate_spec`, which gains `builds_env: bool = False` and passes `sandbox.setup_paths`), `yolo/readiness.py:515`,
@@ -139,7 +144,7 @@ Every task follows these rules:
   (`grep -rln "SandboxSpec(" tests`: `tests/unit/gates/test_runner.py`, `tests/unit/agents/test_judge_cwd.py`,
   `tests/unit/agents/test_login_lock.py`, `tests/unit/sandbox/test_select.py`, the two parity tests). Verify: the 2.2
   config test, `tests/unit/config/`, `tests/unit/yolo/`, `tests/unit/sim/`, `tests/unit/gates/`, `tests/unit/agents/`.
-- [ ] 2.5 Parity: `scripts/runner/sandbox-probe.sh` and `scripts/runner/ci-probe-m15.sh` (`m0-profile` blocks) build
+- [x] 2.5 Parity: `scripts/runner/sandbox-probe.sh` and `scripts/runner/ci-probe-m15.sh` (`m0-profile` blocks) build
   the new argv: `--tmpfs "$HOME"` (exit 3 with a message when `HOME` is `/` or not a directory), new arguments
   `root:DIR` (the runner cache: `--tmpfs` when outside `$HOME`) and `tool:DIR` (one `--ro-bind` each) and, for the m15
   gate kind, `ro:DIR` and `empty:DIR` (task 4.4), in design D3's order. Their own call sites pass `root:` from

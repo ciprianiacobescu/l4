@@ -108,7 +108,7 @@ def _implementer_command(cfg: L4Config, profile: Profile) -> str | None:
 def _env_names(app: AppContext) -> list[str]:
     spec = SandboxSpec(
         "agent", Path("<worktree>"), Path("<git-common-dir>/.git"), Path("<agent-tmp>"), Path("<home>"),
-        adapter="dry-run",
+        adapter="dry-run", cache_root=Path("<cache>"), tool_paths=(),
     )  # fmt: skip
     return sorted(build_agent_env(app.environ, spec))
 

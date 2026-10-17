@@ -43,6 +43,7 @@ from l4.sandbox.base import (
 )
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
+from l4.sandbox.home import spec_paths
 from l4.security.protected import ProtectedSet, restore_protected, revert_unsnapshotted, snapshot_protected
 from l4.specs.base import SpecProvider, UnitRef
 from l4.state.ledger import ledger_path
@@ -207,22 +208,38 @@ class Workbench:
 
     def agent_spec(self) -> SandboxSpec:
         """Only the selected adapter's login is visible; the sandbox hides every other adapter's."""
+        tools, _ = spec_paths(
+            self.host_env, home=self.home, cache_root=self.cache_root, kind="agent", sandbox_cfg=self.cfg.sandbox,
+            credential_paths=self.credential_paths, forbid=(self.worktree, self.git_common_dir.parent),
+        )  # fmt: skip
         return SandboxSpec(
             "agent", self.worktree, self.git_common_dir, self.agent_tmp, self.home, self.credential_paths,
             adapter=self.selected.profile.adapter, caches=self.caches, network=True,
-            runner_tmp=runner_tmp_paths(self.host_env),
+            runner_tmp=runner_tmp_paths(self.host_env), cache_root=self.cache_root, tool_paths=tools,
         )  # fmt: skip
 
     def gate_spec(
-        self, *, network: bool, tree: Path | None = None, caches: tuple[CacheMount, ...] | None = None
+        self,
+        *,
+        network: bool,
+        tree: Path | None = None,
+        caches: tuple[CacheMount, ...] | None = None,
+        builds_env: bool = False,
     ) -> SandboxSpec:
         """No adapter: the sandbox hides every login, so agent-written tests cannot read one. `caches` replaces the
-        unit's own mounts (the uv seed's fill, which runs no agent-written code)."""
+        unit's own mounts (the uv seed's fill, which runs no agent-written code). `builds_env` is true for a
+        `gates.setup` command: it alone gets `sandbox.setup_paths` (L4-SEC-033)."""
+        root = tree or self.worktree
+        tools, setup = spec_paths(
+            self.host_env, home=self.home, cache_root=self.cache_root, kind="gate", sandbox_cfg=self.cfg.sandbox,
+            credential_paths=self.credential_paths, forbid=(root, self.git_common_dir.parent), builds_env=builds_env,
+        )  # fmt: skip
         return gate_sandbox_spec(
-            worktree=tree or self.worktree, git_common_dir=self.git_common_dir, tmp_dir=self.unit_cache / "gate-tmp",
+            worktree=root, git_common_dir=self.git_common_dir, tmp_dir=self.unit_cache / "gate-tmp",
             home=self.home, configured_credential_paths=self.cfg.sandbox.credential_paths,
             caches=self.caches if caches is None else caches,
             network=network, runner_tmp=runner_tmp_paths(self.host_env),
+            cache_root=self.cache_root, tool_paths=tools, setup_paths=setup, builds_env=builds_env,
         )  # fmt: skip
 
     def run_gate(
@@ -235,6 +252,7 @@ class Workbench:
         must_contain: Collection[str] = (),
         extra_env: Mapping[str, str] | None = None,
         note: Callable[[TestReport], dict] | None = None,
+        builds_env: bool = False,
     ) -> GateResult:
         """`network` defaults to `gates.network`; the setup step passes True (it downloads the dependencies).
         `extra_env` (the coverage plugin's `cov_env`) is merged with the trace plugin's: `PYTEST_ADDOPTS` and
@@ -244,7 +262,7 @@ class Workbench:
             name, command, tuple(reports), self.cfg.gates.test.format, duration_seconds(self.cfg.gates.timeout),
             frozenset(must_contain),
         )  # fmt: skip
-        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note)
+        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note, builds_env=builds_env)
 
     def run_gate_spec(
         self,
@@ -255,6 +273,7 @@ class Workbench:
         extra_env: Mapping[str, str] | None = None,
         caches: tuple[CacheMount, ...] | None = None,
         note: Callable[[TestReport], dict] | None = None,
+        builds_env: bool = False,
     ) -> GateResult:
         """The one way a gate runs, in the unit's worktree or in another checkout of the repository (the merge base the
         verifier serves): bytecode purged before, the protected set put back after, the trace plugin loaded, the
@@ -268,9 +287,9 @@ class Workbench:
             result = run_gate(
                 spec, worktree=root, sandbox=self.sandbox,
                 sandbox_spec=(
-                    self.gate_spec(network=network, tree=root)
+                    self.gate_spec(network=network, tree=root, builds_env=builds_env)
                     if caches is None
-                    else self.gate_spec(network=network, tree=root, caches=caches)
+                    else self.gate_spec(network=network, tree=root, caches=caches, builds_env=builds_env)
                 ),
                 host_env=self.host_env, log_path=log,
                 redactor=self.redactor, runner=self.runner,

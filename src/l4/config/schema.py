@@ -18,6 +18,7 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -285,9 +286,38 @@ class SandboxCfg(_Strict):
     credential_paths: dict[str, list[str]] = Field(
         default_factory=lambda: {k: list(v) for k, v in d.CREDENTIAL_PATHS.items()}
     )
+    tool_paths: list[str] = Field(default_factory=list)  # read-only into both sandbox kinds (L4-SEC-033)
+    setup_paths: list[str] = Field(default_factory=list)  # read-only into the gate sandbox of a gates.setup command
     user: str = "l4-sandbox"
     image: str | None = None
     allow_none: bool = False
+
+    @field_validator("tool_paths", "setup_paths")
+    @classmethod
+    def _home_paths_hold_no_login(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        """Each entry is `~/...` or absolute, is not `/` or the home, and neither equals, contains nor lies inside any
+        adapter's login path, the built-in or the configured one: a tool bind must never hand over a login. Compared
+        as text against a placeholder home, so no environment is needed; what needs one (the runner cache, an
+        absolute entry that reaches a login once `~` is expanded) is checked in `l4.sandbox.home` (L4-SEC-033)."""
+        placeholder = PurePosixPath("/l4-placeholder-home")
+
+        def expand(raw: str) -> PurePosixPath:
+            return placeholder / raw[2:] if raw.startswith("~/") else PurePosixPath(raw)
+
+        logins = [
+            expand(p)
+            for paths in {**d.CREDENTIAL_PATHS, **(info.data.get("credential_paths") or {})}.values()
+            for p in paths
+        ]
+        for raw in value:
+            if not (raw.startswith("~/") or PurePosixPath(raw).is_absolute()):
+                raise ValueFree("every entry must start with ~/ or be absolute")
+            path = expand(raw)
+            if raw.rstrip("/") in ("", "~") or path in (PurePosixPath("/"), placeholder) or path in placeholder.parents:
+                raise ValueFree("an entry may not be / or the home")
+            if any(path == login or path in login.parents or login in path.parents for login in logins):
+                raise ValueFree("an entry may not be, contain or lie inside a login path")
+        return value
 
     @field_validator("credential_paths")
     @classmethod

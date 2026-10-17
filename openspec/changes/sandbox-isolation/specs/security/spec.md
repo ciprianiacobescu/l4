@@ -47,6 +47,11 @@ MUST NOT be visible.
 - **WHEN** a gate and an agent of this unit read them
 - **THEN** every read fails, while the unit's own worktree and caches are readable
 
+#### Scenario: SCN-SEC-99 (−) The login and unit lock files are not readable in any sandbox
+- **GIVEN** the login lock file of `l4.agents.gate.lock_root` and the unit lock file of `UnitNames.flock_path`, both existing, a runner cache under the home and one outside it, and the gate and agent specs of a unit of any adapter
+- **WHEN** the bwrap argv is built (and, with a working bwrap, a command in each sandbox kind reads both files)
+- **THEN** neither file is visible at its path in either kind, and the login lock directory lies under no adapter's credential path
+
 ### Requirement: L4-SEC-032 Tools under a hidden root stay usable, read-only
 After the tmpfs of L4-SEC-030 and L4-SEC-031 the sandbox SHALL bind read-only each existing tool path under the home
 or the runner cache: the sandbox's PATH entries and the install roots of their symlinks, the `node_modules` of a

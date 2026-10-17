@@ -708,6 +708,12 @@ sandbox:                           # isolation of agents AND gate commands from 
     claude-code: ["~/.claude", "~/.claude.json"]
     opencode: ["~/.local/share/opencode", "~/.config/opencode"]
     kiro-cli: ["~/.kiro", "~/.aws/sso/cache", "~/.local/share/kiro-cli", "~/Library/Application Support/kiro-cli"]
+  tool_paths: []                   # ~/... or absolute: a tool under the home that the harness does not find on its own
+                                   # (L4-SEC-032), bound read-only into both sandbox kinds; a path that is, holds or lies
+                                   # inside a login is a load error (L4-SEC-033)
+  setup_paths: []                  # ~/... or absolute: bound read-only into the gate sandbox of a gates.setup command only
+                                   # (~/.npmrc, ~/.config/pip/pip.conf for a private registry); a login is exposed to setup
+                                   # code the agent can influence (doctor SANDBOX-004 warns while it is set)
   user: l4-sandbox                 # for mode=user (sudo -n -u), created by the runner admin
   image: null                      # for mode=container
   allow_none: false                # mode=none is refused unless explicitly allowed (doctor SANDBOX-001)
