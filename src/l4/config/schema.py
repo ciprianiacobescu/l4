@@ -422,6 +422,7 @@ class Profile(_Strict):
     min_version: ToolVersion | None = None
     min_remaining_percent: float | None = Field(None, ge=0, le=100)  # overrides availability.min_remaining_percent
     max_concurrency: int | None = Field(default=None, ge=1)
+    context_budget_tokens: int | None = Field(default=None, ge=1000)  # this profile's steps: replaces the implementer's
     options: dict[str, Any] = Field(default_factory=dict)
     vendor: str | None = None
     base_url: str | None = None
@@ -501,7 +502,8 @@ class AvailabilityCfg(_Strict):
 
 class ImplementerCfg(_Strict):
     task_grouping: Literal["task", "parent"] = "task"
-    context_budget_tokens: int = 24000
+    context_budget_tokens: int = 32000  # tokens of 4 characters (L4-IMP-053)
+    include_agents_md: bool = False  # the repository root's AGENTS.md joins the prompt as a convention (L4-IMP-051)
     max_task_attempts: int = Field(default=3, ge=1)
     escalate_after: int = Field(default=2, ge=0)  # failed attempts of a phase on one profile before the next (0: off)
     result_repair_attempts: int = Field(default=1, ge=0)

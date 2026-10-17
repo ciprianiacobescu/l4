@@ -8,9 +8,9 @@ is missing and where to read it.
 
 ### Requirement: L4-IMP-004 Prompt assembly
 Prompts MUST be assembled from versioned templates (`l4harness/prompts/*.md`, overridable in
-`.l4/prompts/`) with these sections, in order: harness contract (rules below); project conventions (the steering files that apply, L4-KSP-010, or an OpenSpec unit's `context`, L4-IMP-051), when there are any; unit context (the requirements narrative, spec deltas, design and proposal, chosen within the context budget by L4-IMP-051 and L4-IMP-053); `Not shown in full`, when a source was cut or not read (L4-IMP-052); the task's whole block (L4-IMP-050); its criteria with ids, aliases and full text (L4-IMP-050);
+`.l4/prompts/`) with these sections, in order: harness contract (rules below); project conventions (the steering files that apply, L4-KSP-010, an OpenSpec unit's `context` and, when `implementer.include_agents_md` is on, the repository root's `AGENTS.md`, L4-IMP-051), when there are any; unit context (the requirements narrative, spec deltas, design and proposal, chosen within the context budget by L4-IMP-051 and L4-IMP-053); `Not shown in full`, when a source was cut or not read (L4-IMP-052); the task's whole block (L4-IMP-050); its criteria with ids, aliases and full text (L4-IMP-050);
 answered questions relevant to the task; selected lessons (§13); the previous attempt (a limit or an escalation, L4-IMP-017); the person's note on a retry (`# A person's note`, one data block, the last of the data blocks, L4-OPS-018; `prompt.rendered{retry_note: {event, ts, sha256}}`); gate commands; output contract and
-`$L4_RESULT_PATH`. The rendered prompt's sha256, template version, budget (`budget_tokens`, `budget_source`) and steering decisions (`steering`) MUST be recorded in the ledger (`prompt.rendered`), and a cut or unread source as `prompt.truncated` (L4-IMP-052). The output contract of a prompt-contract step comes from the template `output.md` (L4-IMP-019), and `template_version` names it (`+output@1`); the output contract of a native step does not change. The phase section MUST carry one `result values:` line, built from the result schema, that names the allowed `status` values and the step's `phase` (a model that has just read `# Phase: RED` otherwise writes `"status": "red"`). The Codex implementer's sandbox blocks sockets, loopback included (an all-outbound `network_access` switch is not taken, L4-SEC-001; verified on macOS seatbelt, where `network.enabled` without a proxy opens full egress and the seccomp profile of Linux denies every IP socket call): the contract says so, tells Codex to WRITE the real-server test a task or design asks for (port 0 in a thread, every read bounded), which the gate run executes with loopback, and to add in-process tests beside it, never instead of it and never a `socket.socketpair()` in place of a requested server (wave D W-D3: five units without a real-server test, because the earlier text recommended the in-process route). A loopback-only profile (`default_permissions` with `network.enabled`, `allow_local_binding` and the `network_proxy` feature, no `domains`) works on macOS and is NOT adopted until a Linux spike confirms it inside bwrap (the Linux seccomp ProxyRouted mode also denies AF_UNIX sockets). A blocked green step on a frozen test that contradicts the spec asks one technical question whose first option is "Edit `<path>`: <the exact change>", which is also written as its suggested answer, so one `accepted` unfreezes exactly that file (L4-IMP-002). The question ends with a harness note (`Harness note: ...`, M1.13) that names the frozen test files the question already names, at most three, and says how they are unfrozen: the answer, or `accepted` on the suggested edit, must name the path, and an answer edited after a run has used it counts as an override and unfreezes nothing; a question that names no frozen file says that it cannot unfreeze anything. The note never names a file the agent did not, so it cannot widen what an `accepted` suggestion unfreezes.
+`$L4_RESULT_PATH`. The rendered prompt's sha256, template version, budget (`budget_tokens`, `budget_source`) and steering decisions (`steering`) MUST be recorded in the ledger (`prompt.rendered`), and a cut or unread source as `prompt.truncated` (L4-IMP-052). The clarifier's documents are chosen by the same builder, in the same order, with the same cut list. The output contract of a prompt-contract step comes from the template `output.md` (L4-IMP-019), and `template_version` names it (`+output@1`); the output contract of a native step does not change. The phase section MUST carry one `result values:` line, built from the result schema, that names the allowed `status` values and the step's `phase` (a model that has just read `# Phase: RED` otherwise writes `"status": "red"`). The Codex implementer's sandbox blocks sockets, loopback included (an all-outbound `network_access` switch is not taken, L4-SEC-001; verified on macOS seatbelt, where `network.enabled` without a proxy opens full egress and the seccomp profile of Linux denies every IP socket call): the contract says so, tells Codex to WRITE the real-server test a task or design asks for (port 0 in a thread, every read bounded), which the gate run executes with loopback, and to add in-process tests beside it, never instead of it and never a `socket.socketpair()` in place of a requested server (wave D W-D3: five units without a real-server test, because the earlier text recommended the in-process route). A loopback-only profile (`default_permissions` with `network.enabled`, `allow_local_binding` and the `network_proxy` feature, no `domains`) works on macOS and is NOT adopted until a Linux spike confirms it inside bwrap (the Linux seccomp ProxyRouted mode also denies AF_UNIX sockets). A blocked green step on a frozen test that contradicts the spec asks one technical question whose first option is "Edit `<path>`: <the exact change>", which is also written as its suggested answer, so one `accepted` unfreezes exactly that file (L4-IMP-002). The question ends with a harness note (`Harness note: ...`, M1.13) that names the frozen test files the question already names, at most three, and says how they are unfrozen: the answer, or `accepted` on the suggested edit, must name the path, and an answer edited after a run has used it counts as an override and unfreezes nothing; a question that names no frozen file says that it cannot unfreeze anything. The note never names a file the agent did not, so it cannot widen what an `accepted` suggestion unfreezes.
 The harness contract MUST name the run's own ledger file and say that `git status` shows it as modified, that this is
 expected, and that nothing under any `.l4/` directory, at any depth, may be edited, restored, checked out or
 overwritten; this holds for every step, a fix unit's included (it names its parent's ledger). For an adapter whose
@@ -47,7 +47,7 @@ next task or heading. Neither SHALL ever be cut, and both SHALL be charged to th
 
 #### Scenario: SCN-IMP-281 (−) A long design no longer takes the criteria text away
 - **GIVEN** the probe unit with its `design.md` of 125,492 characters (the preamble with `DESIGN-MARKER`, then 1,100
-  `## Component N` sections) and the default budget of 24000 tokens
+  `## Component N` sections) and `implementer.context_budget_tokens: 24000` (the default, 32000, holds it whole)
 - **WHEN** the red prompt of task 1 is rendered
 - **THEN** the Criteria section holds `C-1a9abc58  Req 1.1` followed by `WHEN a bill and a tip percent are given THEN
   the system SHALL return the tip rounded to 2 places.`, and `C-41bc8f70  Req 1.2` followed by `WHEN the tip percent
@@ -71,7 +71,7 @@ the requirements narrative, named sections first; `design.md`, named sections fi
 
 #### Scenario: SCN-IMP-283 (+) A short budget keeps the conventions, then the requirements, then the design
 - **GIVEN** the probe unit whose 125,492-character `design.md` has `**Validates: Requirements 1.2**` in its section
-  `## Component 1050`, and the default budget
+  `## Component 1050`, and `implementer.context_budget_tokens: 24000`
 - **WHEN** the red prompt of task 1 is rendered
 - **THEN** `tech.md` and `requirements.md` are whole, and `design.md` shows, in document order, its preamble
   (`DESIGN-MARKER`), its first sections and `## Component 1050`, although that section lies past the point where the
@@ -111,7 +111,7 @@ tools. The run SHALL record `prompt.truncated{role, task, attempt, budget_tokens
 - **AND** the probe unit with its short design gets no `# Not shown in full` section and no `prompt.truncated`
 
 ### Requirement: L4-IMP-053 The context budget and how to raise it
-The context budget SHALL be `implementer.context_budget_tokens` (default 24000) tokens of 4 characters, unless the
+The context budget SHALL be `implementer.context_budget_tokens` (default 32000) tokens of 4 characters, unless the
 selected profile sets `context_budget_tokens`, which SHALL then hold for that profile's steps. No model window SHALL be
 guessed. `prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`implementer` or `profile:<name>`).
 
@@ -121,6 +121,7 @@ guessed. `prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`im
 - **WHEN** the red prompt of task 1 is rendered in each case
 - **THEN** with 40000, `design.md` is whole, nothing is cut, and `prompt.rendered` has `budget_tokens: 40000,
   budget_source: implementer`
+- **AND** with the default, `prompt.rendered` has `budget_tokens: 32000, budget_source: implementer`
 - **AND** with the profile, `tech.md` and `requirements.md` are whole, `design.md` is cut, and `prompt.rendered` has
   `budget_tokens: 4000, budget_source: "profile:local"`
 
@@ -131,7 +132,7 @@ last implementer `prompt.truncated`, and doctor SPEC-004 SHALL warn about each u
 a source, naming the file and the key to raise.
 
 #### Scenario: SCN-IMP-288 (+) The dry run shows the cut before a run
-- **GIVEN** the probe repository with the 125,492-character design
+- **GIVEN** the probe repository with the 125,492-character design and `implementer.context_budget_tokens: 24000`
 - **WHEN** `l4 run --dry-run` runs
 - **THEN** under `kiro:tip-calc` it prints `context: budget 24000 tokens (implementer.context_budget_tokens)`,
   `steering: .kiro/steering/tech.md included (always)` and `cut: .kiro/specs/tip-calc/design.md <shown> of 125492
@@ -141,9 +142,27 @@ a source, naming the file and the key to raise.
 
 #### Scenario: SCN-IMP-289 (+) Status and doctor name the cut
 - **GIVEN** a unit whose ledger ends with the `prompt.truncated` of SCN-IMP-285, and the probe repository with the
-  long design
+  long design at 24000 tokens
 - **WHEN** `l4 status --unit kiro:tip-calc` and `l4 doctor --adoption --no-gates` run
 - **THEN** the status prints `Prompt cut: task 1 red attempt 1: .kiro/specs/tip-calc/design.md <shown> of 125492
   characters (raise implementer.context_budget_tokens or shorten the file)`, and `--json` carries `prompt_cut`
 - **AND** doctor's SPEC-004 warns `kiro:tip-calc task 1: design.md <shown> of 125492 characters shown` with the fix
   `shorten the file, or raise implementer.context_budget_tokens`
+
+#### Scenario: SCN-KSP-004 (+) The root AGENTS.md is a convention only when asked for
+- **GIVEN** the probe unit, a root `AGENTS.md` with the line `AGENTS-MARKER: run the formatter.`, a `CLAUDE.md`, and a
+  nested `docs/AGENTS.md`
+- **WHEN** the red prompt of task 1 is rendered, first with the defaults and then with `implementer.include_agents_md:
+  true`
+- **THEN** the first prompt has no `AGENTS-MARKER`, and the second holds it in a block with the source `AGENTS.md` under
+  `# Project conventions`, after the `always` steering, with the decision `{path: "AGENTS.md", inclusion: agents_md,
+  included: true, why: include_agents_md}`
+- **AND** neither prompt holds the text of `CLAUDE.md` or of the nested file, and a symbolic-link `AGENTS.md` is left
+  out with `why: symlink`
+
+#### Scenario: SCN-KSP-005 (+) The clarifier's documents come in the implementer's order, and a cut is named
+- **GIVEN** the probe unit with its long design and a clarifier question that names `src/calc/tip.py`
+- **WHEN** the clarifier's prompt is built with a small budget
+- **THEN** its documents are `requirements.md` before `design.md`, each kept line carries the file's own line number,
+  each run left out is marked `[not shown: lines A-B]`, and a block `Not shown in full` names every cut file
+

@@ -42,7 +42,7 @@ carries the criterion's text whole. Both lose an oversized file without saying s
   unread file by its repository path, with the characters shown and the total, the lines left out and the reason
   (`budget`, `oversize`, `symlink`, `not_regular`). The contract tells the agent to open a readable file with its tools.
   The run records `prompt.truncated`. A source over 262,144 bytes is read up to that size and named, not skipped.
-- **The budget** (L4-IMP-053). `implementer.context_budget_tokens` stays 24000 and stays the way a consumer raises it. A
+- **The budget** (L4-IMP-053). `implementer.context_budget_tokens` rises from 24000 to 32000 (owner decision 8) and stays the way a consumer raises it. A
   profile can set its own `context_budget_tokens`, for a small local model in a fallback chain. No model window is read,
   because no profile declares one before a run. `prompt.rendered` records `budget_tokens` and `budget_source`.
 - **A person sees the cuts** (L4-IMP-054). `l4 run --dry-run` prints per unit the budget, the steering decisions and each

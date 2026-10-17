@@ -93,11 +93,11 @@ Every task follows these rules:
 
 ## 2. The prompt
 
-- [ ] 2.1 Criteria text, the task block and the sections (MODIFIED L4-IMP-004, L4-IMP-050).
+- [x] 2.1 Criteria text, the task block and the sections (MODIFIED L4-IMP-004, L4-IMP-050).
   - Tests in `tests/unit/implementer/test_prompt_context.py`, built on `probe_tree`, failing first:
     - **SCN-IMP-280:** the section order of the probe's red prompt with the short design, no `# Not shown in full`,
       and `template_version == "contract@12+red@11"`.
-    - **SCN-IMP-281:** the long design with the default budget: both criteria with their full EARS text under their
+    - **SCN-IMP-281:** the long design with `context_budget_tokens=24000` (the default, 32000, holds it whole): both criteria with their full EARS text under their
       `PROBE_IDS`, and `REQ-INTRO-MARKER` in the unit context.
     - **SCN-IMP-282, prompt part:** the `# Task 1` block of red, green and single, with the default budget and with
       `context_budget_tokens=1`, holds `TASK-DETAIL-MARKER`, `Use Decimal throughout` and `_Requirements: 1.1, 1.2_`,
@@ -116,7 +116,7 @@ Every task follows these rules:
     `test_criterion_tests_chore.py`, `test_decided_tests_chore.py`.
   - Update the K20 tests of `test_prompt.py` whose task-block expectations change (the links line now comes from the
     block), and `tests/unit/test_template_lock.py` if it pins versions.
-- [ ] 2.2 The budget plan (L4-IMP-051, L4-KSP-011).
+- [x] 2.2 The budget plan (L4-IMP-051, L4-KSP-011).
   - Tests in `tests/unit/implementer/test_prompt_context.py`, failing first:
     - **SCN-IMP-283:** the long design with `**Validates: Requirements 1.2**` written into `## Component 1050`.
     - **SCN-IMP-284, prompt part:** the OpenSpec `context` block under `# Project conventions`, and no `rules` text.
@@ -126,20 +126,24 @@ Every task follows these rules:
     - Unit tests of `split_sections` (a `#` inside a ``` fence is no heading), of `is_named` (the D3 rules, with
       `Validates: Requirements 1.1, 1.2`, `### Requirement 1` and a backticked token), and of `MIN_CUT_CHARS` (a
       piece with 1,999 characters left is left out, not cut).
+  - Owner decision 8: the scenarios that cut the long design set `implementer.context_budget_tokens: 24000`.
   - Code: `unit_context.plan_context`, `section_keys` and `is_named` (D2, D3). `render_prompt` calls it and fills
     `RenderedPrompt.cuts` and `budget_tokens`.
-- [ ] 2.3 The cut list (L4-IMP-052).
+- [x] 2.3 The cut list (L4-IMP-052).
   - Tests in `tests/unit/implementer/test_prompt_context.py`, failing first:
     - **SCN-IMP-285, prompt part:** the `# Not shown in full` line for the probe's long design, in the exact format
       of design D4, and the contract bullet that tells the agent to open such a file.
     - **SCN-IMP-286, prompt part:** the `oversize` and `symlink` lines, and no section or `cuts` for the short design.
   - Code: the section in `render_prompt` (harness text, then `data_block("not shown in full", ...)`), and the `Cut`
     entries.
-- [ ] 2.4 The budget source (L4-IMP-053).
+- [x] 2.4 The budget source (L4-IMP-053).
   - Tests: **SCN-IMP-287** in `tests/unit/implementer/test_prompt_context.py` (render level, with `budget_tokens`
     40000 and 4000). In `tests/unit/config/test_loader.py`, `profiles.local.context_budget_tokens: 4000` loads, and
     999 is refused.
-  - Code: `Profile.context_budget_tokens` (`config/schema.py`) and `unit_context.effective_budget` (D7).
+  - Code: `Profile.context_budget_tokens` (`config/schema.py`), `ImplementerCfg.context_budget_tokens` 32000 (owner
+    decision 8) and `implementer.include_agents_md` (owner decision 3, D6a), and `unit_context.effective_budget` (D7).
+    Config tests: the default 32000, the profile key (999 refused) and the AGENTS.md key. Prompt-input tests: the
+    root `AGENTS.md` is a convention only when asked for, never `CLAUDE.md` or a nested one, a link is left out.
   - Also `unit_context.prompt_inputs` (D12), the one builder that groups 3 and 4 call. It is tested in
     `test_prompt_context.py`: the probe's inputs with no changed files and with `["src/calc/tip.py"]` changed (the
     `calc.md` decision of SCN-IMP-291), and its linked criteria come from `own_criteria` (1.3).
@@ -188,15 +192,16 @@ Every task follows these rules:
       previous attempt was rejected` (run the loop with two fake steps).
     - **SCN-IMP-295:**
       - (a) with `unchanged_criteria` monkeypatched to return `{PROBE_IDS["1.1"]}`;
-      - (b) with the earlier red of task 0.9 recorded by the helpers of `test_earlier_red.py`, given the criterion id;
+      - (b) with the earlier red of task 0.9 recorded as `test_earlier_red.py` does, both when the step adds a copy of
+        `Req 1.1` that passes at once and (owner decision 4) when it adds no copy: the existing passing tests prove it;
       - (c) with the family of task 1.3's test: `required` is the restated id only.
     - `tests/unit/implementer/test_check_criteria.py`: `check_criteria(..., required={X})` fails for an untraced X,
       the message names X with its alias, an empty `required` behaves as today, and the OpenSpec tests stay green.
   - Code:
     - `result.check_criteria(..., required=(), aliases=None, links="")` (D8): `cited` is the union, and the message
       names the alias and the line.
-    - `tdd.run_red` computes `required` once (`linked_criteria(own_criteria(...))` minus `unchanged_criteria`) and
-      passes it in.
+    - `tdd.run_red` computes `required` once (`linked_criteria(own_criteria(...))` minus `unchanged_criteria`), drops
+      the criteria that existing passing tests prove by an earlier red (owner decision 4) and passes the rest in.
 - [ ] 5.2 The no-new-test path proves every cited criterion (MODIFIED L4-IMP-003, L4-KSP-013).
   - Tests in `tests/unit/implementer/test_red_cited_criteria.py`, failing first: **SCN-IMP-296**, **SCN-IMP-297**.
     `tests/unit/implementer/test_already_satisfied_no_test.py` stays green (OpenSpec: no links).
@@ -205,12 +210,15 @@ Every task follows these rules:
 
 ## 6. The judges
 
-- [ ] 6.1 An unread spec file is named and held (L4-KSP-014).
+- [ ] 6.1 An unread spec file is named and held, the judge's spec text has a budget, and the done tasks are checked
+  (L4-KSP-014; owner decisions 2 and 7).
   - Tests in `tests/unit/verifier/test_judge_sources.py`, failing first:
     - **SCN-IMP-298:** `build_judge_prompt` with the probe's sources, the long design and a fix unit's `bugfix.md`
       (from `_family_sources` on a FamilyProvider bench, as `tests/unit/verifier/test_judge_step.py` builds one).
       Assert that the three files are whole, that each criterion's text is there, and that there is no hold. For the
       S1 part, `s1_step.evidence_for` plus `s1._render` for each probe criterion start with `Criterion <id>:\n<text>`.
+    - **SCN-KSP-001, SCN-KSP-002:** the done-tasks block and its rule; `verifier.judge_context_budget_tokens` cuts a
+      requirements file (a hold) and a design (only named).
     - **SCN-IMP-299:** the 300,000-byte design: the `Not shown in full` block, the hold, `prompt.truncated{role:
       judge}`, and `JudgePrompt.version == "judge@10"`.
   - Code:
@@ -219,7 +227,17 @@ Every task follows these rules:
       `PROMPT_VERSION = 10`.
     - `_judge_step` adds the holds and emits the event.
     - `uv run python -m l4.templatelock --write`.
+  - Config: `verifier.judge_context_budget_tokens` (48000, at least 1000). Code: `ladder._done_tasks`, `_spec_holds`,
+    `judge.TaskRef`.
   - Update the `judge@9` pins in `tests/unit/verifier/`.
+
+- [ ] 6.2 The clarifier uses the shared builder (owner decision 6, design D9).
+  - Tests in `tests/unit/clarifier/test_context.py`: the documents are filled requirements before design, kept lines
+    carry the file's line numbers, a gap is marked, a block `Not shown in full` names the cuts, `clarifier@5`.
+  - Code: `ContextBuilder.build_prompt` via `plan_context`; `clarifier.py` reads its documents with `read_sources`.
+- [ ] 6.3 Step 1's scope reads a Kiro unit's `requirements.md` and `bugfix.md` (owner decision 7).
+  - Tests in `tests/unit/evidence/test_scope.py` (the Kiro-unit case now declares a path named in `requirements.md`).
+  - Code: `evidence/scope.py` `_sections` and `UNIT_FILES`.
 
 ## 7. Docs
 
@@ -254,7 +272,8 @@ Every task follows these rules:
       `contract@12`, `red@11` and `judge@10`.
     - Fixed: requirements dropped behind a long design; an oversized spec file dropped silently; a Kiro leaf's cited
       criteria not required in red (implementer-5).
-  - **The skill's `plugins/l4/skills/l4/references/spec.md`, for Kiro authors**, one short paragraph each:
+  - **The skill, for Kiro authors** (`spec.md` is held to 450 words by `test_adoption_docs.py`, so the paragraphs are the
+    new `references/kiro.md`, linked from `spec.md` and `SKILL.md`), one short paragraph each:
     - the criteria text and every task line reach the implementer;
     - steering is used by its inclusion mode (`auto` only when referenced);
     - `l4 run --dry-run` shows what is cut;
@@ -265,7 +284,8 @@ Every task follows these rules:
 
 ## 8. Orchestrator
 
-- [ ] 8.1 With the built harness, re-run `l4 run --dry-run` on the probe repository, or on a copy made by
+- [ ] 8.1 With the built harness (the probe's config needs `implementer.context_budget_tokens: 24000`: the new default,
+  32000, holds its 125,492-character design whole and the dry run says `nothing cut`), re-run `l4 run --dry-run` on the probe repository, or on a copy made by
   `probe_tree(long=True)` committed as a repository.
   - Confirm that `1-red.prompt.md` holds:
     - `REQ-INTRO-MARKER`;

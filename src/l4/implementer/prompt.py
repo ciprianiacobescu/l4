@@ -19,9 +19,19 @@ from typing import Any, Literal
 
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.result import FILE_RESULT_SCHEMA, RESULT_SCHEMA, TraceRules, trace_rules
-from l4.implementer.unit_context import CHARS_PER_TOKEN as CHARS_PER_TOKEN  # re-exported (the clarifier)
-from l4.implementer.unit_context import MAX_SOURCE_BYTES
-from l4.specs.base import Criterion
+from l4.implementer.unit_context import (
+    CHARS_PER_TOKEN as CHARS_PER_TOKEN,  # re-exported (the clarifier)
+)
+from l4.implementer.unit_context import (
+    MAX_SOURCE_BYTES,
+    Convention,
+    Cut,
+    SourceFile,
+    cut_line,
+    plan_context,
+    section_keys,
+)
+from l4.specs.base import Criterion, Framework
 from l4.specs.criteria import linked_criteria
 
 Role = Literal["red", "green", "single"]
@@ -43,14 +53,14 @@ class PromptContext:
     adapter: str
     task_key: str
     task_title: str
-    sources: tuple[tuple[str, str], ...]  # (path relative to the unit directory, text)
-    criteria: tuple[Criterion, ...]
-    gate_command: str
+    sources: tuple[tuple[str, str], ...] = ()  # (path relative to the unit directory, text); see `source_files`
+    criteria: tuple[Criterion, ...] = ()
+    gate_command: str = ""
     result_path: Path | None = None  # only for an adapter that writes its result to a file
     previous_failure: str | None = None
     # (heading, blocks): answered questions, lessons. The supplier wraps its text in `<l4:data>` blocks itself.
     data_blocks: tuple[tuple[str, str], ...] = ()
-    context_budget_tokens: int = 24000
+    context_budget_tokens: int = 32000
     static_gate_commands: tuple[str, ...] = ()  # lint and typecheck: a step that makes them fail is rejected
     run_ledger: str | None = None  # the run's ledger, repo-relative: it shows as modified in `git status` (expected)
     e2e_dir: str | None = None  # where the browser tests of `gates.e2e` live; None when the project has no e2e gate
@@ -66,6 +76,15 @@ class PromptContext:
     # (`requirement`, `old_id`, `old_text`, `new_id`, `new_text`); both empty unless the task was reopened by an edit
     stale_tests: tuple[str, ...] = ()
     stale_changes: tuple[Mapping[str, Any], ...] = ()
+    # kiro-prompt-context: the unit's sources as read (`sources` is converted when this is empty), the project
+    # conventions, the task's whole block from `tasks.md` (empty: the title and the links line), the unit directory
+    # relative to the repository, and the unit's own criteria (a Kiro leaf's links are numbers of these)
+    source_files: tuple[SourceFile, ...] = ()
+    conventions: tuple[Convention, ...] = ()
+    task_block: str = ""
+    unit_rel: str = ""
+    budget_source: str = "implementer"
+    own_criteria: tuple[Criterion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,6 +93,8 @@ class RenderedPrompt:
     sha256: str
     template_version: str
     sources: tuple[str, ...]
+    cuts: tuple[Cut, ...] = ()
+    budget_tokens: int = 0
 
 
 def load_template(name: str) -> Template:
@@ -125,20 +146,6 @@ def _trace_rules(ctx: PromptContext) -> TraceRules:
     return replace(rules, rule=ctx.trace_rule) if ctx.trace_rule is not None else rules
 
 
-def _context(ctx: PromptContext) -> str:
-    budget = max(ctx.context_budget_tokens, 1) * CHARS_PER_TOKEN
-    blocks = []
-    for path, text in ctx.sources:
-        if budget <= 0:
-            blocks.append(data_block(path, "[truncated: omitted to fit the context budget]"))
-            continue
-        if len(text) > budget:
-            text = f"{text[:budget]}\n[truncated: {len(text) - budget} characters omitted]"
-        budget -= len(text)
-        blocks.append(data_block(path, text))
-    return "# Unit context\n" + "\n".join(blocks)
-
-
 def result_values_line(schema: Mapping[str, Any], phase: str) -> str:
     """The one line next to the phase heading that names the values the result's `status` and `phase` can take
     (SCN-IMP-M1). It is built from the result schema, so an edit of the schema's enum reaches the prompt. The agent's
@@ -153,10 +160,27 @@ def result_values_line(schema: Mapping[str, Any], phase: str) -> str:
     )
 
 
+def _listed(criterion: Criterion) -> str:
+    """A criterion with its id, alias and full text, the text indented under them (L4-IMP-050)."""
+    text = "\n".join(f"  {line}" if line.strip() else "" for line in criterion.text.strip().splitlines())
+    return f"- {criterion.id}  {criterion.alias}" + (f"\n{text}" if text else "")
+
+
+def _source_files(ctx: PromptContext) -> tuple[SourceFile, ...]:
+    """The unit's sources: `source_files`, else `sources` as they were given (path and text)."""
+    if ctx.source_files:
+        return ctx.source_files
+    return tuple(
+        SourceFile(path, f"{ctx.unit_rel}/{path}" if ctx.unit_rel else path, text, len(text.encode("utf-8")))
+        for path, text in ctx.sources
+    )
+
+
 def _criteria_section(ctx: PromptContext) -> tuple[str, str]:
     """(the task block's text, the criteria section). A Kiro leaf shows its `_Requirements:_` line and gets only the
     criteria it names (kiro-e2e K20); a leaf whose refs name none, and every OpenSpec task, gets the whole list."""
-    linked = linked_criteria(ctx.criteria, ctx.task_links)
+    linked = linked_criteria(ctx.own_criteria or ctx.criteria, ctx.task_links)
+    with_links = "" if ctx.task_block else f"\n_Requirements: {', '.join(ctx.task_links)}_"
     if not ctx.task_links:
         title, shown = ctx.task_title, ctx.criteria
         lead = (
@@ -164,15 +188,15 @@ def _criteria_section(ctx: PromptContext) -> tuple[str, str]:
             "requirement names."
         )
     elif linked:
-        title, shown = f"{ctx.task_title}\n_Requirements: {', '.join(ctx.task_links)}_", tuple(linked)
+        title, shown = f"{ctx.task_title}{with_links}", tuple(linked)
         lead = (
             "This task's `_Requirements:_` line names these criteria; cover these. The unit's other criteria belong "
             "to its other tasks: do not test them here."
         )
     else:
-        title, shown = f"{ctx.task_title}\n_Requirements: {', '.join(ctx.task_links)}_", ctx.criteria
+        title, shown = f"{ctx.task_title}{with_links}", ctx.criteria
         lead = "This task's `_Requirements:_` line names none of the criteria below, so all of them are listed."
-    listing = "\n".join(f"- {c.id}  {c.alias}" for c in shown) or "(the unit has no scenarios)"
+    listing = "\n".join(_listed(c) for c in shown) or "(the unit has no scenarios)"
     return title, f"# Criteria of this unit\n{lead}\n" + data_block("criteria", listing)
 
 
@@ -204,12 +228,28 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     contract = load_template("contract")
     phase = load_template("single_tests" if role == "single" and ctx.adds_tests else role)
     title, criteria = _criteria_section(ctx)
-    parts = [
-        _contract(contract, ctx),
-        _context(ctx),
-        f"# Task {ctx.task_key}\n" + data_block("tasks.md", title),
-        criteria,
-    ]
+    task_source = f"{ctx.unit_rel}/tasks.md" if ctx.task_block and ctx.unit_rel else "tasks.md"
+    task_section = f"# Task {ctx.task_key}\n" + data_block(task_source, ctx.task_block or title)
+    framework = Framework.OPENSPEC if ctx.unit_id.startswith("openspec:") else Framework.KIRO
+    plan = plan_context(
+        fixed_chars=len(task_section) + len(criteria), budget_tokens=ctx.context_budget_tokens,
+        conventions=ctx.conventions, source_files=_source_files(ctx),
+        keys=section_keys(ctx.task_block or title, ctx.task_links, framework),
+    )  # fmt: skip
+    parts = [_contract(contract, ctx)]
+    if plan.conventions:
+        parts.append(
+            "# Project conventions\nThe project's conventions for this task. The harness contract says how to use "
+            "them.\n" + "\n".join(data_block(b.path, b.body()) for b in plan.conventions)
+        )
+    parts.append("# Unit context\n" + "\n".join(data_block(b.path, b.body()) for b in plan.sources))
+    if plan.cuts:
+        parts.append(
+            "# Not shown in full\nThese files were cut to fit this prompt or could not be read in full. The harness "
+            "contract says what to do with them.\n"
+            + data_block("not shown in full", "\n".join(cut_line(c) for c in plan.cuts))
+        )
+    parts += [task_section, criteria]
     for heading, text in ctx.data_blocks:
         _require_wrapped(heading, text)
         parts.append(f"# {heading.capitalize()}\n{text}")
@@ -280,7 +320,12 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     parts.append(output)
     text = "\n\n".join(parts) + "\n"
     return RenderedPrompt(
-        text, hashlib.sha256(text.encode("utf-8")).hexdigest(), version, tuple(p for p, _ in ctx.sources)
+        text,
+        hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        version,
+        tuple(s.name for s in _source_files(ctx)),
+        plan.cuts,
+        ctx.context_budget_tokens,
     )
 
 
