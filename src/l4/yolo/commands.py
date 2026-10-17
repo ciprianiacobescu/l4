@@ -576,19 +576,35 @@ def budget_overruns(git: Git, cfg: L4Config, plan: Plan, units: Mapping[str, Uni
     return out
 
 
-def run_check(app: AppContext, *, plan: str) -> ExitCode:
-    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write."""
+def run_check(app: AppContext, *, plan: str, worktree: bool = False) -> ExitCode:
+    """Admit the plan at the target head; print the findings and the order. Exit 0 admitted, 2 not. No write. With
+    `worktree`, the plan file and the unit folders are those of the working tree (before the push), as in
+    `review --worktree`."""
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="check")
-    file = _file(ctx, plan_id, "check")
+    if worktree:
+        file = next((f for f in plan_files(ctx.app.repo) if f.plan_id == plan_id), None)
+        if file is None:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"check: no plan file .l4/plans/{plan_id}.json in the working tree")
+    else:
+        file = _file(ctx, plan_id, "check")
     if file.plan is None:
         assert file.invalid is not None
         for error in file.invalid.errors:
             ctx.say(error)
         ctx.say(f"{plan_id}: not admitted")
         return ExitCode.USAGE_ERROR
-    units = _read_units(ctx, rev, file.plan.known_ids(), intake=True)
+    if worktree:
+        found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
+        units = _Units(
+            unit_infos(ctx.app.repo, found, file.plan.known_ids(), check_intake=True, target=ctx.target),
+            {s.ref.id: s.state.phase for _, s in found},
+            {s.ref.id: s.state.cost_usd for _, s in found},
+            {s.ref.id: (s.last_activity, s.open_run) for _, s in found},
+        )
+    else:
+        units = _read_units(ctx, rev, file.plan.known_ids(), intake=True)
     state = fold_plan(plan_id, ctx.store(plan_id).read().events)  # read-only: the plan's own merged units are done
     admission = admit(
         file.plan,
@@ -602,9 +618,17 @@ def run_check(app: AppContext, *, plan: str) -> ExitCode:
         ctx.say(f"{plan_id}: not admitted ({len(admission.findings)} finding(s))")
         _print_findings(ctx, _findings_text(admission, plan_id))
         return ExitCode.USAGE_ERROR
-    ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
+    read_at = rev
+    if worktree:
+        from l4.yolo import worktree as worktree_tree  # late: that module reads this one
+
+        folders = [units.infos[u].folder for u in file.plan.unit_ids() if u in units.infos]
+        read_at = worktree_tree.snapshot(ctx.git, [file.path, *dict.fromkeys(folders)])  # objects only, no ref
+        ctx.say(f"{plan_id}: admitted in the working tree (target origin/{ctx.target} {rev[:10]})")
+    else:
+        ctx.say(f"{plan_id}: admitted at origin/{ctx.target} {rev[:10]}")
     ctx.say(f"order: {', '.join(admission.order)}")
-    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, units.infos, rev):  # a warning: the exit code stays 0
+    for line in budget_overruns(ctx.git, ctx.cfg, file.plan, units.infos, read_at):  # a warning: the exit code stays 0
         ctx.say(line)
     return ExitCode.OK
 

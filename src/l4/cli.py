@@ -81,6 +81,15 @@ MCP_SERVE_HELP = (
 )
 
 
+MCP_CLIENTS = ("claude-code", "cursor", "vscode", "kiro", "codex", "opencode")
+MCP_INSTALL_HELP = (
+    "Write the MCP configuration of a client so it starts `l4 mcp serve --repo <repository>`.\n\n"
+    "Merges into the file, keeps every other server, writes atomically, refuses a file that does not parse. One "
+    "entry per repository in a user configuration (l4-<folder>); --project writes the repository's own file. "
+    "claude-code at user scope prints the documented `claude mcp add` command instead; vscode has --project only."
+)
+
+
 def _opt(*names: str, **kw: Any) -> click.Option:
     return click.Option(list(names), **kw)
 
@@ -164,6 +173,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "status": ("Show units, phases, open questions, last verdict and cool-downs.", lambda: [
         _unit(), _flag("--json", "as_json"), _flag("--rebuild", "rebuild", help=NYI),
+        _flag("--events", "events", help="With --unit: the unit's ledger events (read only; --json: l4/events@1)."),
+        _opt("--type", "event_type", help="With --events: only events of this type, for example task.attempt_failed."),
+        _opt("--last", "last", type=int, help="With --events: only the newest N events."),
+        _flag("--verification", "verification", help="With --unit: print the unit's verification.md."),
     ]),
     "probe": ("Run availability probes.", lambda: [
         click.Argument(["profiles"], nargs=-1), _opt("--role", "role"), _flag("--json", "as_json"),
@@ -271,6 +284,8 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
         click.Argument(["plan"]),
+        _flag("--worktree", "worktree", help="Admit the plan file and unit folders of the working tree, before the "
+                                             "push (as review --worktree reads them)."),
     ]),
     "yolo review": ("Ask CI to review a plan (--local: here; --worktree: the working tree, before the push).", lambda: [
         click.Argument(["plan"]),
@@ -326,6 +341,16 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _opt("--repo", "repos", multiple=True, type=click.Path(path_type=Path),
              help="A repository to serve (repeatable): a git repository with .l4/config.yaml. Several: every tool "
                   "takes a `repo` argument naming one. Default: the working directory, when it is such a repository."),
+    ]),
+    "mcp install": (MCP_INSTALL_HELP, lambda: [
+        _opt("--client", "client", required=True, type=click.Choice(MCP_CLIENTS),
+             help="The MCP client whose configuration to write."),
+        _flag("--project", "project", help="Write the repository's own configuration file (entry named l4), not the "
+                                           "user's."),
+        _opt("--repo", "target_repo", type=click.Path(path_type=Path),
+             help="The repository the server serves (default: the repository of the working directory)."),
+        _opt("--name", "entry", help="The entry name (default: l4 with --project, else l4-<repository folder>)."),
+        _flag("--dry-run", "dry_run", help="Print what would be written; write nothing."),
     ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),

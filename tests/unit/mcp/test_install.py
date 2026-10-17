@@ -1,0 +1,215 @@
+"""`l4 mcp install` writes a client's documented MCP configuration (L4-MCP-004, SCN-MCP-08, SCN-MCP-09)."""
+
+import json
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from l4.cli import main
+
+ALL = ["claude-code", "cursor", "vscode", "kiro", "codex", "opencode"]
+
+
+@pytest.fixture
+def home(tmp_path: Path) -> Path:
+    path = tmp_path / "home"
+    path.mkdir()
+    return path
+
+
+def install(home: Path, *argv: str) -> int:
+    env = {"HOME": str(home), "PATH": "/usr/bin"}
+    return main(["mcp", "install", *argv], environ=env)
+
+
+def read(path: Path):
+    return tomllib.loads(path.read_text()) if path.suffix == ".toml" else json.loads(path.read_text())
+
+
+def entry_of(client: str, data: dict, name: str):
+    key = {"vscode": "servers", "opencode": "mcp", "codex": "mcp_servers"}.get(client, "mcpServers")
+    return data[key][name]
+
+
+def command_of(client: str, entry: dict) -> list[str]:
+    return [*entry["command"]] if client == "opencode" else [entry["command"], *entry["args"]]
+
+
+PROJECT_FILE = {
+    "claude-code": ".mcp.json",
+    "cursor": ".cursor/mcp.json",
+    "vscode": ".vscode/mcp.json",
+    "kiro": ".kiro/settings/mcp.json",
+    "codex": ".codex/config.toml",
+    "opencode": "opencode.json",
+}
+USER_FILE = {
+    "cursor": ".cursor/mcp.json",
+    "kiro": ".kiro/settings/mcp.json",
+    "codex": ".codex/config.toml",
+    "opencode": ".config/opencode/opencode.json",
+}
+
+
+@pytest.mark.parametrize("client", ALL)
+def test_project_scope_writes_the_documented_file_with_the_serve_command(client, repo_factory, home):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
+    entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")  # the project entry is named l4
+    assert command_of(client, entry) == ["l4", "mcp", "serve", "--repo", str(root)]
+    assert not (home / ".mcp.json").exists()
+
+
+@pytest.mark.parametrize("client", sorted(USER_FILE))
+def test_user_scope_names_the_entry_after_the_repository(client, repo_factory, home):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", client, "--repo", str(root)) == 0
+    entry = entry_of(client, read(home / USER_FILE[client]), "l4-mint-mory")
+    assert command_of(client, entry) == ["l4", "mcp", "serve", "--repo", str(root)]
+
+
+@pytest.mark.parametrize("client", sorted(USER_FILE))
+def test_a_second_repository_adds_an_entry_and_keeps_the_others(client, repo_factory, home):  # SCN-MCP-08
+    first, second = repo_factory("mint-mory"), repo_factory("mintkey")
+    path = home / USER_FILE[client]
+    path.parent.mkdir(parents=True)
+    if client == "codex":
+        path.write_text('model = "x"  # keep me\n\n[mcp_servers.other]\ncommand = "other"\nargs = ["a"]\n')
+    else:
+        key = {"opencode": "mcp"}.get(client, "mcpServers")
+        path.write_text(json.dumps({"theme": "dark", key: {"other": {"command": "other"}}}))
+    assert install(home, "--client", client, "--repo", str(first)) == 0
+    before = read(path)
+    assert install(home, "--client", client, "--repo", str(second)) == 0
+    after = read(path)
+    assert command_of(client, entry_of(client, after, "l4-mintkey"))[-1] == str(second)
+    assert entry_of(client, after, "l4-mint-mory") == entry_of(client, before, "l4-mint-mory")
+    assert entry_of(client, after, "other") == entry_of(client, before, "other")
+    if client == "codex":
+        assert after["model"] == "x" and "# keep me" in path.read_text()
+    else:
+        assert after["theme"] == "dark"
+
+
+def test_the_same_name_is_replaced_not_duplicated(repo_factory, home):
+    root = repo_factory("mint-mory")
+    for _ in range(2):
+        assert install(home, "--client", "cursor", "--repo", str(root)) == 0
+    assert list(read(home / ".cursor/mcp.json")["mcpServers"]) == ["l4-mint-mory"]
+    path = home / ".codex/config.toml"
+    for _ in range(2):
+        assert install(home, "--client", "codex", "--repo", str(root)) == 0
+    assert path.read_text().count("[mcp_servers.l4-mint-mory]") == 1
+
+
+def test_codex_replace_keeps_the_text_around_the_table(repo_factory, home):
+    root = repo_factory("mint-mory")
+    path = home / ".codex/config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '# my codex\nmodel = "x"\n\n[mcp_servers.l4-mint-mory]\ncommand = "old"\n'
+        '[mcp_servers.l4-mint-mory.env]\nA = "1"\n'
+        '\n[mcp_servers.after]\ncommand = "after"\n\n[profiles.p]\nmodel = "y"\n'
+    )
+    assert install(home, "--client", "codex", "--repo", str(root)) == 0
+    text = path.read_text()
+    data = tomllib.loads(text)
+    assert text.startswith("# my codex\n")
+    assert data["mcp_servers"]["l4-mint-mory"] == {"command": "l4", "args": ["mcp", "serve", "--repo", str(root)]}
+    assert data["mcp_servers"]["after"] == {"command": "after"} and data["profiles"]["p"] == {"model": "y"}
+
+
+def test_name_overrides_the_default(repo_factory, home):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", "kiro", "--repo", str(root), "--name", "memory") == 0
+    assert list(read(home / ".kiro/settings/mcp.json")["mcpServers"]) == ["memory"]
+    assert install(home, "--client", "kiro", "--project", "--repo", str(root), "--name", "mm") == 0
+    assert list(read(root / ".kiro/settings/mcp.json")["mcpServers"]) == ["mm"]
+
+
+def test_a_folder_name_that_is_not_a_valid_entry_name_is_cleaned(repo_factory, home):
+    root = repo_factory("my repo.v2")
+    assert install(home, "--client", "cursor", "--repo", str(root)) == 0
+    assert list(read(home / ".cursor/mcp.json")["mcpServers"]) == ["l4-my-repo-v2"]
+
+
+@pytest.mark.parametrize("bad", ["", "a b", "a.b", "../x", "a\nb"])
+def test_a_bad_name_is_refused(repo_factory, home, bad):
+    root = repo_factory("r")
+    assert install(home, "--client", "cursor", "--repo", str(root), "--name", bad) == 2
+    assert not (home / ".cursor").exists()
+
+
+def test_the_default_repository_is_the_working_directorys(repo_factory, home, monkeypatch):
+    root = repo_factory("here")
+    (root / "sub").mkdir()
+    monkeypatch.chdir(root / "sub")
+    assert install(home, "--client", "cursor", "--project") == 0
+    assert read(root / ".cursor/mcp.json")["mcpServers"]["l4"]["args"][-1] == str(root)
+
+
+def test_a_repository_that_is_not_an_l4_repository_is_refused(tmp_path, repo_factory, home, capsys):
+    assert install(home, "--client", "cursor", "--repo", str(tmp_path)) == 2
+    assert install(home, "--client", "cursor", "--repo", str(repo_factory("plain", l4=False))) == 2
+    assert not (home / ".cursor").exists()
+
+
+@pytest.mark.parametrize("client", ["cursor", "codex", "opencode", "claude-code"])
+def test_an_unparseable_file_is_not_overwritten(client, repo_factory, home, capsys):  # SCN-MCP-09
+    root = repo_factory("r")
+    path = root / PROJECT_FILE[client]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ this is = not valid [")
+    assert install(home, "--client", client, "--project", "--repo", str(root)) == 2
+    assert path.read_text() == "{ this is = not valid ["
+    assert str(path) in capsys.readouterr().err
+    assert not [p for p in path.parent.iterdir() if p.name.startswith(f".{path.name}.")]  # no temp file
+
+
+def test_a_container_of_the_wrong_type_is_refused_untouched(repo_factory, home, capsys):
+    root = repo_factory("r")
+    path = root / ".cursor/mcp.json"
+    path.parent.mkdir()
+    path.write_text('{"mcpServers": []}')
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root)) == 2
+    assert path.read_text() == '{"mcpServers": []}'
+
+
+def test_dry_run_prints_the_result_and_writes_nothing(repo_factory, home, capsys):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", "cursor", "--repo", str(root), "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert str(home / ".cursor/mcp.json") in out and '"l4-mint-mory"' in out
+    assert not (home / ".cursor").exists()
+
+
+def test_the_output_says_what_was_written(repo_factory, home, capsys):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", "codex", "--project", "--repo", str(root)) == 0
+    out = capsys.readouterr().out
+    assert str(root / ".codex/config.toml") in out and "[mcp_servers.l4]" in out
+
+
+def test_no_temporary_file_is_left_behind(repo_factory, home):
+    root = repo_factory("r")
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root)) == 0
+    assert [p.name for p in (root / ".cursor").iterdir()] == ["mcp.json"]
+
+
+def test_vscode_has_no_user_scope(repo_factory, home, capsys):
+    root = repo_factory("r")
+    assert install(home, "--client", "vscode", "--repo", str(root)) == 2
+    assert "--project" in capsys.readouterr().err
+
+
+def test_claude_code_user_scope_prints_the_documented_command_and_writes_nothing(repo_factory, home, capsys):
+    root = repo_factory("mint-mory")
+    assert install(home, "--client", "claude-code", "--repo", str(root)) == 0
+    out = capsys.readouterr().out
+    assert f"claude mcp add --transport stdio --scope user l4-mint-mory -- l4 mcp serve --repo {root}" in out
+    assert list(home.iterdir()) == []
+
+
+def test_an_unknown_client_is_refused(repo_factory, home):
+    assert install(home, "--client", "windsurf", "--repo", str(repo_factory("r"))) == 2
