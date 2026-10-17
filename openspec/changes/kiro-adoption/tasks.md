@@ -7,11 +7,11 @@ Every task follows these rules:
 
 ## 1. Kiro provider (L4-KSP-006)
 
-- [ ] 1.1 Tests: SCN-ODD-10 .. SCN-ODD-15 in `tests/unit/specs/`.
-- [ ] 1.2 `specs/kiro.py`: done leaves warn; a non-JSON graph block warns; whole-requirement references resolve; both
+- [x] 1.1 Tests: SCN-ODD-10 .. SCN-ODD-15 in `tests/unit/specs/`.
+- [x] 1.2 `specs/kiro.py`: done leaves warn; a non-JSON graph block warns; whole-requirement references resolve; both
   heading levels; references only as standalone numbers.
 
 ## 2. Docs
 
-- [ ] 2.1 `docs/SPEC.md` (L4-KSP-003 text, L4-KSP-006 after L4-KSP-005, SCN-ODD-10..15 after SCN-ODD-09, a change row
+- [x] 2.1 `docs/SPEC.md` (L4-KSP-003 text, L4-KSP-006 after L4-KSP-005, SCN-ODD-10..15 after SCN-ODD-09, a change row
   after the last), `CHANGELOG.md` under `## 0.4.13 (unreleased)` (create it if missing).

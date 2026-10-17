@@ -1094,11 +1094,11 @@ valid (a task depends on every task in earlier waves); otherwise document order.
 graph are inserted at their document position.
 
 **L4-KSP-003** Criteria come from `requirements.md` (EARS acceptance criteria, numbered per requirement) or
-`bugfix.md` (its `2.n` and `3.n` items; the `1.n` describe the defect); a criterion line under a requirement's `#### Acceptance Criteria` heading may be numbered `1.`, `1)`,
+`bugfix.md` (its `2.n` and `3.n` items; the `1.n` describe the defect); a requirement is `### Requirement N` with `#### Acceptance Criteria`, or `## Requirement N` with `### Acceptance Criteria` (one level higher); a criterion line under that heading may be numbered `1.`, `1)`,
 `1.1.`, `1.1)` or `1.1` (in the dotted forms the first number is the requirement's own, and they count only in a
 requirement with no plain `N.`/`N)` item, so a `1.1 …` sub-line of a plain criterion stays part of it), with or without
 a `-`/`*` bullet; the form never changes the criterion's alias (`Req N.M` by position) or id (L4-CRT-001). When a task
-cites a requirement under which no criterion was read, SPEC-002 names the expected form; task→criterion links come from `_Requirements: 2.1, 3.3_` lines. A leaf task without a requirements
+cites a requirement under which no criterion was read, SPEC-002 names the expected form; task→criterion links come from `_Requirements: 2.1, 3.3_` lines, where a number is a reference only when it stands alone (not inside a word such as `ADR-0014.8` or `AC3`), and a reference `2` cites every `2.x` (L4-KSP-006). A leaf task without a requirements
 reference MUST be reported by `doctor` (`SPEC-004`) and, under `sdd.enforce`, block intake unless the task kind is
 TDD-exempt.
 
@@ -1137,6 +1137,14 @@ the OpenSpec writer to `.kiro/specs/<parent>-fix-<n>/` (L4-FBK-008):
   id and its own alias `Req 2.n`, so the family of a parent and its fix units counts it once (L4-CRT-001).
   A failed Kiro round therefore spawns a fix unit and the parent goes to `fixing`; it escalates only on the limits of
   L4-VER-007.
+
+**L4-KSP-006** Finished Kiro history MUST be read, not validated as work. A done leaf whose `_Requirements:_` line is
+missing, or names no criterion, MUST be a WARNING, not an ERROR, whatever `sdd.enforce` says; a pending leaf keeps the
+rule of L4-KSP-003 (SPEC-004 lists the pending leaves only). A `## Task Dependency Graph` whose block is not JSON (a
+fence of another language, or JSON that does not parse) MUST be a WARNING and the tasks run in document order, as the
+reader already does; a JSON graph with an unknown key, an unknown task or a cycle stays an ERROR. A reference `N`
+resolves when requirement `N` has criteria. A requirement is read under `## Requirement N` with `### Acceptance
+Criteria` as under `### Requirement N` with `#### Acceptance Criteria`.
 
 ### 4.6 Byte-safe task marker writes
 
@@ -5162,6 +5170,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 31 | `home-rejected-findings` | a finding a person rejected with a `WHEN … THEN …` and no criterion becomes a fix task even when the parent has several requirements: its scenario goes under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, so a rejected "ticked as already satisfied, but its text is not done" finding (L4-VER-018) no longer escalates the unit with `no_convertible_finding` (L4-VER-006; `openspec/changes/home-rejected-findings/`) | the consumer repository's escalated unit, after the upgrade |
 | 32 | `multi-report-gates` | a test gate reads every report it lists: each must exist, and they are merged, a test in two reports keeping its worse result, so a repository that runs several suites is judged on all of them; the adoption docs and the `l4 init` note name the public harness first (L4-GAT-005; `openspec/changes/multi-report-gates/`) | the second consumer repository's adoption |
 | 33 | `zero-value-generators` | the zero-value variant of a context manager enters and yields the zero value, a generator yields nothing, and a function annotated to return a context manager or an iterator returns a null one, so a test of a context manager can fail by assertion instead of a `TypeError` on `with`; the `vacuous` message says how to test one (L4-IMP-026; `openspec/changes/zero-value-generators/`) | the consumer repository's halted unit, after the upgrade |
+| 34 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -5597,6 +5606,36 @@ scenario is a spec defect (§26).
   differs only inside a code span (`apply_code("A")` vs. `apply_code("B")`)
 - **When** intake runs
 - **Then** no question is written and every task is eligible.
+
+#### SCN-ODD-10 (+) A finished leaf with no requirement link is a warning · L4-KSP-006
+- **Given** a done leaf `- [x] 3.1 Add cache` with no `_Requirements:_` line, under `sdd.enforce`
+- **When** the spec is validated
+- **Then** there is a warning for 3.1 and no error, and intake admits the unit.
+
+#### SCN-ODD-11 (−) A pending leaf with no requirement link is still an error · L4-KSP-006, L4-KSP-003
+- **Given** a pending leaf `- [ ] 3.2 Add eviction` with no `_Requirements:_` line, under `sdd.enforce`
+- **When** intake runs
+- **Then** it is rejected (14) with a reason that names task 3.2 and its missing `_Requirements:_` line.
+
+#### SCN-ODD-12 (+) A mermaid dependency graph falls back to document order · L4-KSP-006, L4-KSP-002
+- **Given** a `## Task Dependency Graph` whose block is a `mermaid` fence
+- **When** the spec is validated and its tasks are read
+- **Then** there is a warning and no error, and the tasks are in document order.
+
+#### SCN-ODD-13 (+) A whole-requirement reference resolves · L4-KSP-006
+- **Given** requirement 1 with criteria 1.1 and 1.2, and a pending leaf with `_Requirements: 1_`
+- **When** the spec is validated
+- **Then** the reference resolves, and the task cites Req 1.1 and Req 1.2.
+
+#### SCN-ODD-14 (+) A requirement one heading level higher is read · L4-KSP-006, L4-KSP-003
+- **Given** `requirements.md` with `## Requirement 1: Login` and `### Acceptance Criteria` holding two criteria
+- **When** its criteria are read
+- **Then** there are two, `Req 1.1` and `Req 1.2`.
+
+#### SCN-ODD-15 (−) A number inside a word is not a reference · L4-KSP-006
+- **Given** `_Requirements: 2.1, ADR-0014.8, Req 1 AC3_`
+- **When** the line is read
+- **Then** the references are `2.1` and `1`.
 
 ### 23.6 Availability, quota and fallback (AVL)
 
