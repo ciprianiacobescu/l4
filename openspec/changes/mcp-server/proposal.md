@@ -27,7 +27,11 @@ OpenCode, Windsurf …) typed tools for that, with descriptions an agent reads b
     minutes), `l4_question_answer`, `l4_retry`, `l4_plan_resume`;
   - not offered: `l4 yolo activate` and `l4 yolo cancel` (a person's decision, L4-YOLO-005); `l4 run`; anything that
     starts an agent CLI. A tool's description names the command a person runs instead.
-- **`l4 mcp install --client <name> [--project]`** (L4-MCP-004): writes the client's MCP configuration so the server is
+- **An instance serves the repositories it is started for** (L4-MCP-005): `l4 mcp serve --repo PATH` (repeatable);
+  with several, each tool takes `repo` naming one of them; nothing else is ever resolved; without `--repo` only a
+  working directory that is an L4 repository serves; every result names its repository. One IDE can hold one entry per
+  repository.
+- **`l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME]`** (L4-MCP-004): writes the client's MCP configuration so the server is
   one command away, for each client whose configuration file is documented by its vendor (the source URL kept in the
   code); a client that cannot be verified is not offered. It merges into an existing file, keeps every other server,
   refuses a file it cannot parse, and prints what it wrote.

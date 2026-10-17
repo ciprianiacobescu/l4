@@ -21,6 +21,31 @@ runtime dependency to the harness.
 - **WHEN** a line that is not JSON, or a call of an unknown method, arrives
 - **THEN** it answers -32700 or -32601 and keeps serving
 
+### Requirement: L4-MCP-005 An instance serves the repositories it was started for
+`l4 mcp serve` SHALL take `--repo PATH`, repeatable. Each PATH SHALL be resolved to the root of a git repository that has
+`.l4/config.yaml`, else the server SHALL exit 2 before it serves. With one `--repo`, every tool SHALL run in that
+repository and a tool's `repo` argument, when given, SHALL name it (its name or its path), else the call is refused. With
+several, every tool SHALL take a required `repo` argument that names one of them (the folder name, or the path), and any
+other value SHALL be refused, never resolved on its own. Without `--repo`, the server SHALL serve the repository of its
+working directory when that is a git repository with `.l4/config.yaml`, and SHALL otherwise answer every tool call with
+an error that names `--repo`. Every tool result SHALL name the repository it ran in. A tool SHALL NOT run in a
+repository the server was not started for.
+
+#### Scenario: SCN-MCP-10 (+) Two IDE entries serve two repositories
+- **GIVEN** two servers configured as `l4 mcp serve --repo /work/mint-mory` and `l4 mcp serve --repo /work/mintkey`
+- **WHEN** a client calls `l4_status` on each
+- **THEN** each runs in its own repository and its result names that repository
+
+#### Scenario: SCN-MCP-11 (−) A repository the instance does not serve is refused
+- **GIVEN** a server started with `--repo /work/mint-mory --repo /work/mintkey`
+- **WHEN** a client calls `l4_plan_status` with `repo: /etc` or `repo: other`
+- **THEN** the call is refused with the list of the repositories it serves, and nothing runs
+
+#### Scenario: SCN-MCP-12 (−) No repository, no guess
+- **GIVEN** a server started without `--repo` in a folder that is not a git repository with `.l4/config.yaml`
+- **WHEN** a client calls any tool
+- **THEN** the result is an error that says to start the server with `--repo PATH`
+
 ### Requirement: L4-MCP-002 Every tool runs the l4 command it names, as an agent
 Each tool SHALL run the `l4` command it names as a subprocess in the repository, with the caller's environment plus
 `AI_AGENT=l4-mcp` and no terminal on stdin, so that every rule the CLI applies to an agent caller holds. The server SHALL
@@ -62,15 +87,18 @@ A write tool's description SHALL say what it writes, whether it pushes to origin
   `l4 yolo activate <plan> --reason "…"` as a person's command
 
 ### Requirement: L4-MCP-004 l4 mcp install configures a client in one command
-`l4 mcp install --client <name> [--project] [--dry-run]` SHALL write the client's documented MCP configuration with the
-server command `l4 mcp serve`, merging into an existing file and keeping every other server, atomically; it SHALL refuse a
+`l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's
+documented MCP configuration with the server command `l4 mcp serve --repo <the repository's absolute path>` (default: the
+repository of the working directory) under the entry NAME (default `l4` for `--project`, `l4-<repository folder name>`
+for the user scope, so that several repositories have one entry each), merging into an existing file and keeping every other server, atomically; it SHALL refuse a
 file it cannot parse and print what it wrote. Only clients whose configuration path and format were checked against the
 vendor's documentation SHALL be offered.
 
 #### Scenario: SCN-MCP-08 (+) A client is configured and other servers stay
-- **GIVEN** a client configuration file that already lists another MCP server
-- **WHEN** `l4 mcp install --client <that client> --project` runs
-- **THEN** the file lists `l4` with the command `l4 mcp serve` and still lists the other server
+- **GIVEN** a client user configuration file that already lists another MCP server and an entry `l4-mint-mory`
+- **WHEN** `l4 mcp install --client <that client> --repo /work/mintkey` runs
+- **THEN** the file adds `l4-mintkey` with the command `l4 mcp serve --repo /work/mintkey`, and still lists the other
+  server and `l4-mint-mory` unchanged
 
 #### Scenario: SCN-MCP-09 (−) An unparseable configuration is not overwritten
 - **GIVEN** a client configuration file that is not valid JSON (or TOML)
