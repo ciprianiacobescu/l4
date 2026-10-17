@@ -18,7 +18,7 @@ What changed in each release: [CHANGELOG.md](CHANGELOG.md).
 Install `l4` and give your coding agents the `l4` skill, in one line:
 
 ```bash
-uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.13 && l4 skills install
+uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.14 && l4 skills install
 ```
 
 `l4 skills install` copies the skill that ships inside the package, with no network, into the skill folder of every
