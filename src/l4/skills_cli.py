@@ -33,6 +33,9 @@ _DETECT: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "opencode": ((".config/opencode", ".opencode"), ("opencode",)),
     "kiro": ((".kiro",), ("kiro-cli",)),
 }
+# agent -> its own folder relative to the home folder
+_USER_ROOTS = {"claude-code": ".claude", "codex": ".agents", "opencode": ".config/opencode", "kiro": ".kiro"}
+_PROJECT_ROOTS = {"claude-code": ".claude", "codex": ".agents", "opencode": ".opencode", "kiro": ".kiro"}
 # agent -> skills folder relative to the home folder (user scope) and to the repository root (project scope)
 _USER_DIRS = {
     "claude-code": ".claude/skills",
@@ -108,6 +111,12 @@ class Target:
     agent: str
     scope: str  # "user" | "project"
     path: Path  # <skills dir>/l4
+    agent_root: Path  # the agent's own folder (~/.claude, .kiro, …): the copy must resolve inside it
+
+    def escapes(self) -> bool:
+        """True when `path` resolves outside `agent_root` (a `skills` folder linked elsewhere); both sides resolved,
+        so an agent folder that is itself a link (dotfiles) still works."""
+        return not self.path.resolve().is_relative_to(self.agent_root.resolve())
 
 
 def _home(environ: Mapping[str, str]) -> Path:
@@ -140,11 +149,11 @@ def targets_for(agents: list[str], *, scope: str, home: Path, root: Path | None)
     for agent in agents:
         if scope == "project":
             assert root is not None
-            out.append(Target(agent, scope, root / _PROJECT_DIRS[agent] / SKILL_NAME))
+            out.append(Target(agent, scope, root / _PROJECT_DIRS[agent] / SKILL_NAME, root / _PROJECT_ROOTS[agent]))
             continue
-        out.append(Target(agent, scope, home / _USER_DIRS[agent] / SKILL_NAME))
+        out.append(Target(agent, scope, home / _USER_DIRS[agent] / SKILL_NAME, home / _USER_ROOTS[agent]))
         if agent == "codex" and (home / _CODEX_EXTRA).is_dir():
-            out.append(Target(agent, scope, home / _CODEX_EXTRA / SKILL_NAME))
+            out.append(Target(agent, scope, home / _CODEX_EXTRA / SKILL_NAME, home / ".codex"))
     return out
 
 
@@ -246,7 +255,7 @@ def installed_copies(home: Path, root: Path | None) -> list[Copy]:
     found = []
     for t in all_targets(home, root):
         seen = inspect(t.path, {})
-        if seen.exists and seen.refused is None and seen.has_manifest:
+        if seen.exists and seen.refused is None and seen.has_manifest and not t.escapes():
             found.append(Copy(t.agent, t.scope, t.path, seen.version, seen.edited))
     return found
 
@@ -315,8 +324,13 @@ def run_skills_install(
     for t in targets_for(agents, scope=scope, home=home, root=root):
         label = f"{t.agent} ({t.scope}) {t.path}"
         seen = inspect(t.path, bundle)
+        if seen.refused is None and t.escapes():
+            seen = Inspection(seen.exists, refused=f"{t.path} (it resolves outside {t.agent_root})")
         if seen.refused is not None:
-            _say(f"{label}: refused, {seen.refused} is a symbolic link; l4 does not follow it", err=True)
+            _say(
+                f"{label}: refused, {seen.refused} is a symbolic link or leaves the agent folder; not followed",
+                err=True,
+            )
             refused += 1
             continue
         if seen.edited and not force:
@@ -351,8 +365,12 @@ def run_skills_status(app: AppContext) -> ExitCode:
         seen = inspect(t.path, {})
         if not seen.exists:
             continue
+        if seen.refused is None and t.escapes():
+            seen = Inspection(True, refused=f"{t.path} (it resolves outside {t.agent_root})")
         if seen.refused is not None:
-            rows.append(f"{t.agent}\t{t.scope}\t{t.path}\trefused: {seen.refused} is a symbolic link")
+            rows.append(
+                f"{t.agent}\t{t.scope}\t{t.path}\trefused: {seen.refused} is a symbolic link or leaves the agent folder"
+            )
         elif not seen.has_manifest:
             rows.append(f"{t.agent}\t{t.scope}\t{t.path}\tno manifest (not installed by l4)")
         else:

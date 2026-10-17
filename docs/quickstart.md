@@ -9,7 +9,17 @@ One script, then a commit, a push and the forge and runner steps, on a project w
 * For CI: a GitLab project and a Maintainer token, or a GitHub repository where you can add a secret.
 * A runner host you control, with sudo (section 3).
 
-## 1. Clone and adopt
+## 1. Install, then clone and adopt
+
+Install `l4` and the `l4` skill for your coding agents (Claude Code, Codex, OpenCode, Kiro CLI) first:
+
+```bash
+uv tool install git+https://github.com/ciprianiacobescu/l4@v0.4.13 && l4 skills install
+```
+
+`l4 skills install` needs no network; `--project` writes the skill into the repository for the team, and
+`l4 skills status` shows the copies. (Claude Code users can instead use the marketplace:
+`/plugin marketplace add ciprianiacobescu/l4`, then `/plugin install l4@l4-harness`.)
 
 ```bash
 git clone https://github.com/ciprianiacobescu/l4.git ~/l4

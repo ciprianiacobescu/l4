@@ -243,9 +243,10 @@ test.
 format: frontmatter `name: l4`, a description that starts "Use when…" and names the triggers (adopting L4, a unit's
 status, questions, feedback, an escalated or halted unit), a body under 500 words, and the references `adopt.md`,
 `operate.md` and `feedback.md`. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` MUST make it
-installable with `/plugin marketplace add` and `/plugin install l4@l4-harness`; for Codex the folder is copied to
-`~/.agents/skills/`. The skill MUST never ask for, print or move a secret, and never tell an agent to run an agent CLI
-by hand on a runner. [Not yet built: delivery change 18, tasks 4.1–4.3.]
+installable with `/plugin marketplace add` and `/plugin install l4@l4-harness`; for every coding agent (Codex, OpenCode and Kiro CLI included) `l4 skills install`
+copies the folder into the agent's skill folder (L4-SKL-003). The skill MUST never ask for, print or move a secret, and
+never tell an agent to run an agent CLI by hand on a runner. [Built: the marketplace files and the skill exist, and
+`l4 skills install` is L4-SKL-003 (change 37, `skills-install`).]
 
 **L4-SKL-002** The skill MUST be written against recorded failures. Before it is written, subagents without it attempt
 the scenarios (a configurable URL is `config` with `--env`; renaming a function the tests call is `behaviour`, never
@@ -255,6 +256,25 @@ with the action, source `action` and no key; a public one with a deploy key; a v
 once human-feedback is merged), and their answers go to `plugins/l4/tests/baseline.md`. The same scenarios are then run
 with the skill (`plugins/l4/tests/with-skill.md`); every scenario that applies MUST pass, and any loophole found is
 closed and re-run. [Not yet built: delivery change 18, tasks 4.1–4.3.]
+
+**L4-SKL-003** One command installs the `l4` skill for every coding agent. The wheel and the sdist MUST carry the
+skill folder byte-equal to `plugins/l4/skills/l4` (package data under `l4/_skill/l4`; a source checkout without it
+reads the repository's copy next to `src/`). `l4 skills install` MUST copy it, without network, to
+`~/.claude/skills/l4` (Claude Code), `~/.agents/skills/l4` (Codex and the open Agent Skills path; also
+`~/.codex/skills/l4` when `~/.codex/skills` exists), `~/.config/opencode/skills/l4` (OpenCode) and `~/.kiro/skills/l4`
+(Kiro CLI), or with `--project` to `.claude/skills/l4`, `.agents/skills/l4`, `.opencode/skills/l4` and
+`.kiro/skills/l4` in the repository root. `--agent auto` (the default) MUST pick the agents whose home folder exists
+(`~/.claude`; `~/.agents` or `~/.codex`; `~/.config/opencode` or `~/.opencode`; `~/.kiro`) or whose CLI is on `PATH`
+(`claude`, `codex`, `opencode`, `kiro-cli`), and exit 2 naming `--agent` when none is found; `all` takes every agent.
+Each target MUST get `.l4-skill.json` (`name`, `version`, and a sha256 per file). A rerun MUST replace a copy whose files
+still match its manifest and MUST refuse, naming the paths, a copy with a changed, missing or extra file (a folder with
+no manifest counts as edited unless it equals the bundled files) unless `--force`; a refusal exits 2 and the other
+targets are still installed. A target folder that is a symbolic link, that resolves outside its agent folder, or that has a
+symbolic link inside it, MUST be refused even with `--force`, and nothing outside `<skills dir>/l4/` is ever written. Files are written atomically one by one.
+`--dry-run` prints the plan and writes nothing. `l4 skills status` lists each installed copy with its version,
+`current` or `old` (`newer` when it is ahead of the running `l4`) and its edited paths. Doctor row SKL-003 MUST warn when
+an installed copy (user scope, and project scope inside a repository) is older than the running `l4`, with the fix
+`l4 skills install`; `l4 init`'s final notes MUST name the command.
 
 **Adoption lessons (L4-ADO-001..019).** The first adoption on a real consumer (a public monorepo with an integration branch) worked only through hand work. These requirements make each workaround a feature of the harness. The evidence, the cost of each fix and the lessons rejected are in `docs/plan/adoption-lessons.md`; the decisions are in `openspec/changes/adoption-lessons/design.md`.
 
@@ -432,6 +452,8 @@ of the harness package.
 | `l4 kg report [--out PATH] [--min-units N]` | Print the cross-unit report, *n* on every line; builds the index first when it is missing or stale; `--out` inside the repository must be git-ignored, else exit 2 (L4-KG-009) | the index under the cache root; `--out` file |
 | `l4 kg why ID` | The timeline of a unit, or the 1-hop view of `F-<8 hex>`, `L-<8 hex>`, a run id or `<unit>#Q-<n>`, with the source of every line; an unknown id exits 2 (L4-KG-010) | the index under the cache root |
 | `l4 kg propose [--min-units N] [--dry-run]` | Write inbox drafts for recurring patterns that no lesson covers, for a person to finish and promote; never writes `lessons.md`, stages or commits (L4-KG-012) | inbox files; the index under the cache root |
+| `l4 skills install [--agent auto\|all\|claude-code\|codex\|opencode\|kiro] [--project] [--force] [--dry-run]` | Copy the `l4` skill that ships in this package into each coding agent's skill folder (L4-SKL-003): user scope `~/.claude/skills/l4`, `~/.agents/skills/l4` (and `~/.codex/skills/l4` when it exists), `~/.config/opencode/skills/l4`, `~/.kiro/skills/l4`; `--project` the repository's `.claude/`, `.agents/`, `.opencode/`, `.kiro/` `skills/l4`. `auto` takes the agents whose home folder or CLI is present. One line per target; a manifest `.l4-skill.json` per copy; an edited copy is refused (exit 2) unless `--force`; a symbolic link, or a folder that resolves outside the agent folder, is always refused; no network | the target folders `<skills dir>/l4/` only |
+| `l4 skills status` | Each installed copy of the skill with its version, `current`, `old` or `newer`, and the files edited since the install (L4-SKL-003) | none |
 | `l4 feedback add --kind refactor\|duplication\|tests\|config\|behaviour --text TEXT\|- [--title T] [--at PATH[:L[-L]]]… [--env NAME] [--when W --then T] [--lesson] [--draft] [--unit ID]` | Ask for a change to an open unit (L4-FBK-003): append an item to the unit's `feedback.md` (created when missing) with the lines named by `--at` quoted (at most 40 lines or 4,000 bytes, redacted), Status `submitted` (`draft` with `--draft`), and print the item id, the file and the `git add`, `git commit` and `git push` lines that send it. The unit is `--unit`, else the checked-out `l4/<framework>/<name>` branch; the kind rules of L4-FBK-002 are checked before writing; exit 0, 2 for a bad item, place or unit (nothing written) | edits `feedback.md` only; no commit, push or forge call |
 | `l4 feedback list [--unit ID] [--json]` | List the items of a unit (id, status, kind, first place, title, problems); `--json` prints `l4/feedback@1` | none |
 | `l4 feedback show FB-NNN [--unit ID] [--json]` | Show one item as the file holds it; `--json` adds its problems and its content sha256 | none |
@@ -4672,6 +4694,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | MEM-002 | warn | memory on and `.serena/project.yml` or `.serena/memories/harness/lessons.md` ignored by git (`git check-ignore`): prints the `.gitignore` carve-out | — |
 | GATE-001 | error (scope `adoption`) | `gates.setup`, `build`, `lint`, `typecheck` and `gates.test.command` pass at HEAD, run in a detached worktree of HEAD in the gate sandbox (unsandboxed outside CI when bwrap is unusable, and said so; a failure in CI): lists the failing tests (ten, then a count), the first lint lines and suggestions (a missing module's extra, `ruff check --select F,E9`, the same on the source and test directories when `--select F,E9 .` still fails (path narrowing), deselect) | — |
 | TOOL-001 | error in a CI run, warn in `l4 doctor --adoption` | the first word of each configured gate command (`gates.setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) is on the gate PATH; builtins, paths and what `uv run` starts are skipped; the message names the tool and the gate and points at `ci.toolchains` (L4-CI-005) | — |
+| SKL-003 | warn | an installed `l4` skill (user scope; project scope inside a repository) is older than the running `l4` (L4-SKL-003) | `l4 skills install` |
 | LIVE-001 | error | `hello` probe for the first profile of every required role chain | — |
 | LIVE-002 | warn | `hello` probe for fallback profiles; quota for all | — |
 | LIVE-003 | warn | MCP servers start (Serena, Playwright) per adapter | — |
@@ -5223,6 +5246,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 | 35 | `job-toolchains` | `ci.toolchains` (go, node, pnpm): the GitHub workflow sets them up before L4 with pinned shas and their caches off, the default caches `gobuild` and `pnpm`, `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` for Go gates, doctor TOOL-001 for a gate command that is not on the PATH, and `l4 init` proposals (L4-CI-005, SCN-CI-19..23; `openspec/changes/job-toolchains/`) | the second consumer repository's gates of its Go and TypeScript code |
 | 36 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
+| 37 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8486,6 +8510,33 @@ scenario is a spec defect (§26).
 - **Given** the request "rename `calc` to `compute`; the tests call `calc`"
 - **When** an agent with the skill chooses the kind
 - **Then** it chooses `behaviour`, with `--when`/`--then`, and says why.
+
+#### SCN-SKL-04 (+) One command installs the skill for the agents that are present · L4-SKL-003
+- **Given** a home folder with `~/.claude` and `~/.kiro`, and no Codex or OpenCode folder or CLI
+- **When** `l4 skills install` runs
+- **Then** `~/.claude/skills/l4/SKILL.md` and `~/.kiro/skills/l4/SKILL.md` equal the package's copy, each folder has
+  `.l4-skill.json` with the running version, nothing else is written, and the output names the two targets.
+
+#### SCN-SKL-05 (+) A rerun after an upgrade updates the skill in place · L4-SKL-003
+- **Given** the install of SCN-SKL-04 made by an older `l4`, its files unchanged
+- **When** the newer `l4 skills install` runs
+- **Then** both copies hold the new files and the new version, and `l4 skills status` says `current`.
+
+#### SCN-SKL-06 (−) An edited copy is not overwritten · L4-SKL-003
+- **Given** an installed copy whose `references/plan.md` a person edited
+- **When** `l4 skills install` runs without `--force`
+- **Then** that target is refused with the edited path named, the others are installed, the exit code is 2, and
+  `--force` replaces it.
+
+#### SCN-SKL-07 (+) A team installs the skill into the repository · L4-SKL-003
+- **Given** a repository checkout
+- **When** `l4 skills install --project --agent all` runs
+- **Then** the four project folders hold the skill, ready to commit.
+
+#### SCN-SKL-08 (−) An old installed skill is named by doctor · L4-SKL-003
+- **Given** `~/.claude/skills/l4/.l4-skill.json` with a version older than the running `l4`
+- **When** `l4 doctor` runs
+- **Then** SKL-003 warns with the fix `l4 skills install`.
 
 ### 23.19 Operator commands (OPS)
 

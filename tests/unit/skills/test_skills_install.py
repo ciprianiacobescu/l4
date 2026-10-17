@@ -372,14 +372,25 @@ def test_a_symlinked_subfolder_inside_the_target_is_refused(world, tmp_path, cap
     assert list(elsewhere.iterdir()) == []
 
 
-def test_a_symlinked_skills_parent_folder_is_allowed(world, tmp_path):
-    """dotfile managers link `~/.claude/skills`; only the `l4` folder and what is inside it must be real."""
+def test_a_skills_folder_linked_outside_the_agent_folder_is_refused(world, tmp_path, capsys):
     real = tmp_path / "dotfiles-skills"
     real.mkdir()
     (world.home / ".claude").mkdir()
     (world.home / ".claude" / "skills").symlink_to(real, target_is_directory=True)
+    assert world.run("install") == 2
+    assert str(world.home / ".claude" / "skills" / "l4") in capsys.readouterr().err
+    assert list(real.iterdir()) == []
+
+
+def test_a_link_that_stays_inside_the_agent_folder_or_an_agent_folder_that_is_a_link_is_allowed(world, tmp_path):
+    (world.home / ".claude" / "store").mkdir(parents=True)
+    (world.home / ".claude" / "skills").symlink_to(world.home / ".claude" / "store", target_is_directory=True)
+    dotfiles = tmp_path / "dotfiles-kiro"
+    dotfiles.mkdir()
+    (world.home / ".kiro").symlink_to(dotfiles, target_is_directory=True)
     assert world.run("install") == 0
-    assert (real / "l4" / "SKILL.md").exists()
+    assert (world.home / ".claude" / "store" / "l4" / "SKILL.md").exists()
+    assert (dotfiles / "skills" / "l4" / "SKILL.md").exists()
 
 
 def test_writes_are_atomic_per_file_and_leave_no_temp_files(world):

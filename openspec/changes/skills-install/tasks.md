@@ -23,6 +23,6 @@ Every task follows these rules:
 
 ## 4. Docs
 
-- [ ] 4.1 `docs/SPEC.md` (L4-SKL-001's "Not yet built" note, L4-SKL-003, SCN-SKL-04..07, the CLI table, the change row),
+- [x] 4.1 `docs/SPEC.md` (L4-SKL-001's "Not yet built" note, L4-SKL-003, SCN-SKL-04..07, the CLI table, the change row),
   README and `docs/quickstart.md` lead with `uv tool install … && l4 skills install`, the skill's `adopt.md`,
   `CHANGELOG.md` under `## 0.4.14 (unreleased)`.

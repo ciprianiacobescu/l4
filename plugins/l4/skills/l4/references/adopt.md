@@ -22,9 +22,12 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.13   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.13 && l4 skills install   # or @<sha>
 l4 --version
 ```
+
+`l4 skills install` puts this skill into the skill folder of each coding agent on the machine (add `--project` to
+commit it for the team, `--agent NAME` for one agent); run it again after an upgrade.
 
 ## 3. Adopt
 

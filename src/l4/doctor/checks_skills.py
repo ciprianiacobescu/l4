@@ -5,7 +5,7 @@ from pathlib import Path
 
 from l4 import __version__, skills_cli
 from l4.doctor.context import DoctorContext
-from l4.doctor.registry import Check, CheckResult, register
+from l4.doctor.registry import CONFIG_SCOPES, Check, CheckResult, register
 
 
 def _skl_003(ctx: DoctorContext) -> CheckResult:
@@ -25,4 +25,4 @@ def _skl_003(ctx: DoctorContext) -> CheckResult:
     )
 
 
-SKL_003 = register(Check("SKL-003", "The installed l4 skill matches this l4", "warn", _skl_003))
+SKL_003 = register(Check("SKL-003", "The installed l4 skill matches this l4", "warn", _skl_003, CONFIG_SCOPES))

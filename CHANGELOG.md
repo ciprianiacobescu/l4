@@ -6,6 +6,19 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.14 (unreleased)
+
+### Added
+- `l4 skills install` puts the `l4` skill into the skill folder of every coding agent, with no network and no clone:
+  the skill now ships inside the wheel and the sdist. User scope writes `~/.claude/skills/l4`, `~/.agents/skills/l4`
+  (and `~/.codex/skills/l4` when that folder exists), `~/.config/opencode/skills/l4` and `~/.kiro/skills/l4`;
+  `--project` writes `.claude/`, `.agents/`, `.opencode/` and `.kiro/` `skills/l4` in the repository. `--agent auto`
+  (the default) takes the agents whose home folder or CLI (`claude`, `codex`, `opencode`, `kiro-cli`) is present. Each
+  copy has a manifest `.l4-skill.json`; a rerun updates an untouched copy, refuses an edited one (exit 2) unless
+  `--force`, and never follows a symbolic link. `--dry-run` prints the plan. `l4 skills status` lists the copies with
+  version, `current` or `old`, and edited files. Doctor row SKL-003 warns about an installed skill older than `l4`, and
+  `l4 init` names the command (L4-SKL-003).
+
 ## 0.4.13 (2026-10-17)
 
 ### Added
