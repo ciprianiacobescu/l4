@@ -3482,7 +3482,7 @@ section for the items taken or judged in the round, and `l4 status` counts the i
 merge from the merge request and the tree, a merge commit keeps the commits' L4 trailers in the history and a squash
 drops them (the history of truth is in the files either way). The body is static and also says who merges: a person,
 unless the unit is in an active delivery plan with `merge: auto`, where the harness merges it (L4-YOLO-008). A merged PR is detected by the
-sweeper → `merged`; WIP branch and lock ref are deleted. Whether the merged result is archived is decided from the
+sweeper → `merged`; the lock ref moves to `refs/l4/archived/…` after the archive merge (nothing pushes the WIP branch: it is a local ref). Whether the merged result is archived is decided from the
 **tree at the merge commit** (is the unit's change folder still under `openspec/changes/` / is the Kiro unit's ledger
 phase `archived`), never from the presence of an archive commit in history; a merged but unarchived unit gets the
 post-merge archive PR of L4-ARC-007.
@@ -3809,7 +3809,9 @@ user, `l4 retry --unit <unit> --reason TEXT`.
 - A PR closed without a merge MUST make the unit `abandoned` (`pr.closed`, trigger `pr_closed`) from any phase that is
   not `merged`, `abandoned` or `archived`, with the note `### Abandoned: the merge request was closed without a merge`
   that names `l4 restart`. A PR reopened before a restart returns the unit to its phase (`pr_reopened`).
-- A deleted unit branch MUST name `l4 restart --unit <unit> --reason TEXT` in its message.
+- A deleted unit branch MUST name `l4 restart --unit <unit> --reason TEXT` in its message. A unit branch the harness
+  deleted after the unit's merge (L4-YOLO-033) is normal: the unit is `merged`, not abandoned, and its verified head is
+  at `refs/l4/merged/<framework>/<name>`.
 - A verdict question with Status `dismissed` MUST read as `open`; the note and the plan reason say `Q-NNN: a verdict
   question cannot be dismissed: start the answer with accept or reject`.
 
@@ -4027,9 +4029,10 @@ unit stays `in_review` and its cause says `merged into <x>, not the base <base>`
 **L4-YOLO-008** The guarded merge. With `merge: auto`, the plan step SHALL merge a unit only when all the preconditions of design D8 hold (in review, PASS,
 no open question, no person's commit after the hand-off, the PR open with the target as base, the target tip an
 ancestor of the unit head, and the head to push equals the tip of the unit branch on `origin` and the head of the PR),
-by pushing the unit head to the target without force. The step MUST record `unit.merge_requested` with the lease before
-the push, after it has read the plan again: a cancelled or stopped plan MUST NOT merge (R5). A refused push for
-`non-fast-forward` MUST send the unit to `verifying` once per attempt (`stale`); a second one, or any other refusal,
+with the method of `yolo.merge.method` (L4-YOLO-032): by default one squash commit made by the forge's merge call pinned
+to the unit head, with `fast-forward` by pushing the unit head to the target without force. The step MUST record
+`unit.merge_requested` with the lease before the merge, after it has read the plan again: a cancelled or stopped plan MUST NOT merge (R5). With
+`fast-forward`, a refused push for `non-fast-forward` MUST send the unit to `verifying` once per attempt (`stale`); a second one, or any other refusal,
 MUST stop the plan with `merge_refused` and the forge's reason. The harness MUST NOT merge any unit that is not the
 current unit of an active `merge: auto` plan. When the head of the PR differs from the tip of the unit branch, the step
 MUST read the PR again, up to three times, five seconds apart (a forge may show a push late), before it calls the merge
@@ -4255,6 +4258,27 @@ report SHALL show `waived by <by> (<actor>): <reason>` for a waived finding the 
 `addressed: true`, and `l4 yolo status` SHALL list the waivers. For a plan waiting with `accepted_finding_open`, the
 `Next:` line SHALL name `l4 retry --unit U` (the verifier gave no answer), `l4 feedback add --unit U` (the code must
 change) and `l4 yolo waive` (the finding needs no handling).
+
+**L4-YOLO-032** The plan merges a unit by squash unless configured to fast-forward. The configuration has
+`yolo.merge.method` (`squash` or `fast-forward`, default `squash`). With `squash`, after every precondition of
+L4-YOLO-008 and `unit.merge_requested`, the plan step SHALL merge the unit's PR through the forge's merge call with the
+squash method, pinned to the verified head, with a message the harness writes: the PR title without `[skip ci]` and with
+` (#<pr>)`, and the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run`. A forge answer that the head moved SHALL be
+`not_ready`; any other refusal SHALL stop the plan with `merge_refused` and the forge's message. After the merge the
+harness SHALL compare the landed commit's parent with the target tip it read and its tree with the head's tree, and
+SHALL record `unit.merged{head, merge_commit, method, raced}` with `raced: true` when either differs. The post-merge
+check SHALL run on the landed commit. With `fast-forward` the merge SHALL stay the push of L4-YOLO-008, recorded with
+`merge_commit` equal to the head.
+
+**L4-YOLO-033** Merged branches are deleted unless configured to stay. The configuration has
+`yolo.merge.delete_branches` (default `true`). When it is true, after the forge reports a plan unit's PR merged, the
+harness SHALL push `refs/l4/merged/<framework>/<name>` at the verified head and then delete the unit branch with a lease
+on that head; after `archive.merged` it SHALL delete the archive branch with a lease on the archive head. A lease that
+fails SHALL keep the branch and record `unit.branch_kept{branch, reason}`; a deleted branch SHALL be recorded as
+`unit.branch_deleted{branch, head}`. Neither SHALL stop the plan. A plan step SHALL also delete, at most five per step,
+the unit and archive branches of the plan's integrated units whose PR is merged and whose tip is still the recorded
+head. The lock ref SHALL NOT be deleted at merge time. A branch of a PR the forge does not show merged SHALL NOT be
+deleted. The evidence link in the PR body names the unit head commit, so it opens after the branch is gone.
 ---
 
 ## 13. Memory and lessons
@@ -5151,6 +5175,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 30 | `resolve-workspace-imports` | the modules a test imports are found under every import root: the repository root, `src`, every directory named `src`, and every directory with a `pyproject.toml`, `setup.py` or `setup.cfg` and its `src`, so the zero-value run, the head stubs of run (b), the audit sampling and the proof of tests people wrote can vary a uv workspace member's modules (L4-IMP-025; `openspec/changes/resolve-workspace-imports/`) | the consumer repository's next units, after the upgrade |
 | 31 | `home-rejected-findings` | a finding a person rejected with a `WHEN … THEN …` and no criterion becomes a fix task even when the parent has several requirements: its scenario goes under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, so a rejected "ticked as already satisfied, but its text is not done" finding (L4-VER-018) no longer escalates the unit with `no_convertible_finding` (L4-VER-006; `openspec/changes/home-rejected-findings/`) | the consumer repository's escalated unit, after the upgrade |
 | 32 | `multi-report-gates` | a test gate reads every report it lists: each must exist, and they are merged, a test in two reports keeping its worse result, so a repository that runs several suites is judged on all of them; the adoption docs and the `l4 init` note name the public harness first (L4-GAT-005; `openspec/changes/multi-report-gates/`) | the second consumer repository's adoption |
+| 33 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7549,7 +7574,7 @@ scenario is a spec defect (§26).
 #### SCN-ARC-04 (+) Human merge detected · L4-ARC-003
 - **Given** a human merged an `archived` unit's PR with a merge commit
 - **When** the sweeper runs
-- **Then** phase `merged`; WIP branch and lock ref deleted; no further runs for the unit.
+- **Then** phase `merged`; after the archive merge the lock ref is at `refs/l4/archived/…`; no further runs for the unit.
 
 #### SCN-ARC-05 (+) Spec edits during review · L4-ARC-004, L4-CFG-004
 - **Given** phase `in_review` and a human pushes an edit to the unit's `design.md` and a new scenario
@@ -8622,7 +8647,7 @@ scenario is a spec defect (§26).
 - **Then** the unit stays `in_review`, no archive PR is opened, and `l4 status --unit` says `merged into release, not the base l4/main`
 
 #### SCN-YOLO-14 (+) A verified unit is merged by a fast-forward push · L4-YOLO-008
-- **Given** an active `merge: auto` plan whose current unit is `in_review` with a PASS, and the target tip in its head
+- **Given** an active `merge: auto` plan whose current unit is `in_review` with a PASS, the target tip in its head, and `yolo.merge.method: fast-forward`
 - **When** the CI step runs
 - **Then** the target's tip is the unit head, `unit.merge_requested` and `unit.merged{head, pr}` are recorded, and the PR is merged on the forge
 
@@ -8938,6 +8963,56 @@ scenario is a spec defect (§26).
 - **Given** a plan waiting with `accepted_finding_open` on unit U
 - **When** `l4 yolo status` prints its `Next:` line
 - **Then** the line names `l4 retry --unit U`, `l4 feedback add --unit U` and `l4 yolo waive`
+
+#### SCN-YOLO-76 (+) A verified unit is squash-merged by default · L4-YOLO-032
+- **Given** an active `merge: auto` plan whose current unit is `in_review` with a PASS, the target tip in its head, and no `yolo.merge` configuration
+- **When** the plan step runs
+- **Then** the forge's squash merge is called with the head as `sha`, the target's tip is one new commit whose parent is the old tip and whose tree is the head's tree, its message has no `[skip ci]` and has `L4-Verified-Head: <head>`, the PR is merged, and `unit.merged{merge_commit: <that commit>, method: squash, raced: false}` is recorded
+
+#### SCN-YOLO-77 (+) The post-merge check runs on the landed commit · L4-YOLO-032
+- **Given** the squash merge of SCN-YOLO-76
+- **When** the unit is integrated
+- **Then** `unit.postcheck` and `unit.integrated` name the squash commit, and the receipt has `merge_commit` the squash commit and `reviewed_head` the head
+
+#### SCN-YOLO-78 (+) Fast-forward stays an option · L4-YOLO-032
+- **Given** the unit of SCN-YOLO-76 and `yolo.merge.method: fast-forward`
+- **When** the plan step runs
+- **Then** no merge call is made, the target's tip is the head, and `unit.merged{merge_commit: <head>, method: fast-forward}` is recorded
+
+#### SCN-YOLO-79 (−) A forge that refuses a squash stops the plan · L4-YOLO-032
+- **Given** a forge whose merge call answers that squash merging is not allowed
+- **When** the plan step merges
+- **Then** `plan.stopped{merge_refused}` carries the forge's message, nothing is deleted, and no later unit is dispatched
+
+#### SCN-YOLO-80 (−) A head that moved is not merged · L4-YOLO-032
+- **Given** a forge whose merge call answers that the PR head is not the given sha
+- **When** the plan step merges
+- **Then** nothing is merged, the unit waits `merge_not_ready`, and the plan stays active
+
+#### SCN-YOLO-81 (−) A target that moved during the merge is recorded · L4-YOLO-032
+- **Given** a person's commit that lands on the target after the step read the tip and before the forge squashes
+- **When** the squash merge completes
+- **Then** `unit.merged` has `raced: true`, the step prints a warning, and the post-merge check of the landed commit decides whether the unit is integrated
+
+#### SCN-YOLO-82 (+) The unit branch is deleted after the merge and its head is kept · L4-YOLO-033
+- **Given** the squash merge of SCN-YOLO-76 and no `yolo.merge` configuration
+- **When** the merge completes
+- **Then** `refs/l4/merged/openspec/<name>` points at the head, `refs/heads/l4/openspec/<name>` is gone on origin, and `unit.branch_deleted` is recorded
+
+#### SCN-YOLO-83 (−) A branch a person pushed to after the merge stays · L4-YOLO-033
+- **Given** a merged unit whose branch got a person's commit after the merge
+- **When** the harness deletes it
+- **Then** the lease fails, the branch stays with the person's commit, and `unit.branch_kept` names the reason
+
+#### SCN-YOLO-84 (+) Branches of units merged before the upgrade are cleaned · L4-YOLO-033
+- **Given** two integrated units of an active plan whose unit and archive branches still point at their recorded heads and whose PRs are merged
+- **When** a plan step runs with `delete_branches` on
+- **Then** the four branches are deleted, each unit head has its `refs/l4/merged/…` ref, and a third unit whose branch moved after its merge keeps it
+
+#### SCN-YOLO-85 (+) Keeping the branches stays an option · L4-YOLO-033
+- **Given** the merge of SCN-YOLO-76 and `yolo.merge.delete_branches: false`
+- **When** the merge and the archive merge complete
+- **Then** both branches stay and no `refs/l4/merged/…` ref is pushed
 
 ### 23.21 Experience graph (KG)
 

@@ -1262,6 +1262,14 @@ Choose one of these:
   had.
 - **Start the unit over.** Use `l4 restart` (the procedure below), or add the label `l4:restart` to the closed PR.
 
+**A unit branch deleted after its merge is normal.** With `yolo.merge.delete_branches: true` (the default) the harness
+deletes the branch of a merged unit of a delivery plan, and its archive branch after the archive PR merges. The unit is
+`merged`, not abandoned, and nothing needs a restart. The verified head stays at
+`refs/l4/merged/<framework>/<name>`. If the plan ledger has `unit.branch_kept`, the harness did not delete that
+branch: a person pushed to it after the merge, the keep ref held another commit, or the forge refused the delete (the
+reason is in the event). Delete it by hand when you are sure, or leave it. Set `yolo.merge.delete_branches: false` to
+keep every branch.
+
 **A deleted unit branch.** The next run stops with exit 1. The log says `the unit branch was deleted or moved on the
 forge`, and it names `l4 restart`. Choose one of these:
 
@@ -1778,7 +1786,7 @@ unit.
 | `unit_escalated` | The current unit is `escalated` ([7.3](#73-escalated)). | `l4 retry --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `unit_abandoned` | A person closed the PR of the current unit with no merge ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). | Open the PR again, or run `l4 restart --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). `l4 retry` does not move a rejected unit, and a resume cannot clear this stop. | Fix the cause. If it is the spec, correct it (on the unit branch, or on the target when the unit has no branch), push it, and the next run stops the plan with `inputs_changed` and CI reviews the plan. If it is the configuration (for example an empty `gates.test.command`), set it: there is nothing to review. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit, and the next run of the unit reads the corrected spec. You do not need `l4 restart`. If the unit is rejected again, the plan stops again with `unit_rejected`. |
-| `merge_refused` | The push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the push of the harness to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
+| `merge_refused` | The forge refused the squash merge (squash merging is off, or a rule blocks it), the push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the harness to merge, or, when the forge refuses a squash, set `yolo.merge.method: fast-forward` in `.l4/config.yaml` on the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
 | `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |

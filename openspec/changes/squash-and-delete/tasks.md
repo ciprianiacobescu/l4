@@ -27,15 +27,15 @@ Every task follows these rules:
 
 ## 4. Branch deletion (D6, D7, D8)
 
-- [ ] 4.1 First: a test on a local bare repository of `delete_branch` (lease matches → gone; a stranger's push moved the
+- [x] 4.1 First: a test on a local bare repository of `delete_branch` (lease matches → gone; a stranger's push moved the
   tip → kept) and `keep_ref`. Then SCN-YOLO-82, 83, 84, 85 and the archive-branch delete after `archive.merged`.
-- [ ] 4.2 `vcs/push.py` `delete_branch`, `keep_ref`; the unit-branch delete after the merge in `cycle._merge`; the
+- [x] 4.2 `vcs/push.py` `delete_branch`, `keep_ref`; the unit-branch delete after the merge in `cycle._merge`; the
   cleanup of earlier merges in the plan step; the archive-branch delete in the sweeper after `archive.merged`; the events.
 
 ## 5. Links and docs
 
-- [ ] 5.1 `archive.py` links `verification.md` at the head sha (test).
-- [ ] 5.2 `docs/SPEC.md`: L4-YOLO-008 (the method), L4-YOLO-032, L4-YOLO-033, SCN-YOLO-76..85, SCN-YOLO-14 says
+- [x] 5.1 `archive.py` links `verification.md` at the head sha (test).
+- [x] 5.2 `docs/SPEC.md`: L4-YOLO-008 (the method), L4-YOLO-032, L4-YOLO-033, SCN-YOLO-76..85, SCN-YOLO-14 says
   `method: fast-forward`, L4-ARC-003 and SCN-ARC-04 corrected to what the code does (no WIP-branch deletion; the lock ref
   moves to `refs/l4/archived/…`), L4-OPS-009 (a branch deleted after a merge is normal), the change row.
   `docs/yolo-mode.md`, `docs/runbook.md` (a refused squash: set `yolo.merge.method: fast-forward`; §7.13), CHANGELOG.

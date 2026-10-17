@@ -19,6 +19,18 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `--directory`, `--project`, `--package`, `--frozen`, `--locked` and `--no-sync` options when it compares commands.
 
 ### Changed
+- A delivery plan with `merge: auto` now squash-merges each verified unit by default, and deletes the merged branches.
+  Behaviour change on upgrade: the harness used to push the unit head to the target as a fast-forward and never deleted a
+  branch. Now it calls the forge's merge, pinned to the verified head, so the target gets one commit (the PR title and
+  ` (#<pr>)`, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run`; `unit.merged` records `merge_commit`,
+  `method` and `raced`), and, once the forge shows the PR merged, it keeps the verified head at
+  `refs/l4/merged/<framework>/<name>` and deletes the unit branch under a lease (and the archive branch after the archive
+  merge). A branch a person pushed to after the merge stays (`unit.branch_kept`); a plan step also cleans up to five
+  branches of earlier merges. The lock ref is not deleted. The forge's token must be allowed to merge PRs; a forge that
+  refuses a squash stops the plan with `merge_refused`. To keep the old behaviour set `yolo.merge.method: fast-forward`
+  and `yolo.merge.delete_branches: false`. The evidence link in a PR body now names the head commit, not the branch
+  (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033).
+- The archive step no longer builds a worktree for a merged unit whose folder is already archived on the base.
 - The adoption docs and the `l4 init` note name the public harness first: the plain `--action` form needs no deploy
   key for any repository. The copy form and the deploy key are for a private harness.
 

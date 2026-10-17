@@ -16,7 +16,8 @@ This page is for the person who operates a plan. The commands for a stopped plan
 - With `merge: auto` it merges the PR of each verified unit into the target. Nobody has to be present between units.
 - It never promotes. It does not push, open a PR or merge to your production branch (`main`). You do that by hand.
 - It does not deploy and it does not roll back.
-- It does not use the forge merge API. It does not work with a target that requires a pull request.
+- By default it merges through the forge's merge call (one squash commit); with `yolo.merge.method: fast-forward` it
+  pushes to the target instead and does not work with a target that requires a pull request.
 
 ## The plan file
 
@@ -131,9 +132,19 @@ plan, never writes `refs/l4/plans/*`, and sets `merge: auto` only when you ask a
 next run, L4 sees the merge, runs the acceptance profile of the unit on the merged target, and then lets the next unit
 start. Only a merge into the target counts. A merge into another branch does not. This mode needs no extra opt-in.
 
-**`merge: auto`.** L4 merges a verified unit by pushing the unit head to the target, without force, as a fast-forward. The
-git server accepts the push only if the target tip is still part of the head. So a target that moved in the meantime is
-refused by git, not by a check that could be out of date. L4 does not squash and does not rebase.
+**`merge: auto`.** L4 merges a verified unit with the method in `yolo.merge.method` (`.l4/config.yaml`):
+
+- `squash` (the default). L4 calls the forge's merge for the PR, pinned to the verified head: the forge refuses if the PR
+  head is not that commit. The target gets one new commit with the PR title and ` (#<pr>)`, no `[skip ci]`, and the
+  trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run`. The forge's call has no guard on the target, so L4 then checks
+  that the new commit sits on the tip it read and has the head's tree. If a person's commit landed in between, the unit
+  is recorded with `raced: true`, the step prints a warning, and the acceptance profile on the landed commit decides
+  whether the unit is accepted. The merge cannot be undone. The forge's token must be allowed to merge PRs; a forge
+  that has squash merging off, or a rule that blocks the merge, stops the plan with `merge_refused` and the forge's text.
+  Set `yolo.merge.method: fast-forward` in that case.
+- `fast-forward`. L4 pushes the unit head to the target, without force. The git server accepts the push only if the
+  target tip is still part of the head. So a target that moved in the meantime is refused by git, not by a check that
+  could be out of date. L4 does not rebase.
 
 The merge happens only when all of this is true:
 
@@ -147,11 +158,21 @@ The merge happens only when all of this is true:
 L4 records the request, with the lease of the plan ref, before it pushes. It reads the plan again first: a plan that is
 cancelled or stopped does not merge.
 
-If the target moved, L4 sends the unit to `verifying`. The verifier merges the new base in and checks again. If this
-happens twice for the same attempt, or if the push is refused for another reason (for example a protected branch), the
-plan stops with `merge_refused`. After the merge, L4 runs the acceptance profile of the unit on the merged revision. A
+With `fast-forward`, if the target moved, L4 sends the unit to `verifying`. The verifier merges the new base in and
+checks again. If this happens twice for the same attempt, or if the push or the merge call is refused for another reason
+(for example a protected branch), the plan stops with `merge_refused`. With `squash`, a PR head that moved makes the
+unit wait (`merge_not_ready`) until the next run reads it again. After the merge, L4 runs the acceptance profile of the unit on the merged revision. A
 fail or an error stops the plan with `postcheck_failed`. The archive PR of an OpenSpec unit is merged by L4 in the same
 way. After `merge_refused`, `l4 yolo resume` resets the count of stale merges, and the next step tries the merge once more.
+
+**Merged branches.** With `yolo.merge.delete_branches: true` (the default), L4 deletes a merged unit's branch and, after
+the archive PR merges, its archive branch. It first keeps the verified head at `refs/l4/merged/<framework>/<name>`
+(created once, never moved), so receipts and the knowledge graph still reach the commit, and it deletes only when the
+forge shows the PR merged and the branch is still at the merged head (a lease): a branch a person pushed to after the
+merge stays, and the plan records `unit.branch_kept` with the reason. A deleted branch is `unit.branch_deleted`. The lock
+ref stays: the sweep retires it later. Each plan step also cleans up to five branches of earlier merges of the plan's
+integrated units, so a plan that was merged before the upgrade is tidied too. Set `delete_branches: false` to keep every
+branch. The evidence link in a PR body names the head commit, so it opens after the branch is gone.
 
 L4 does not merge any unit that is not in an active plan with `merge: auto`. This is true whatever `forge.merge_policy`
 says. A unit that a person removed from the plan file is not merged by the plan, even if it was the current unit before
