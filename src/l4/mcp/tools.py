@@ -5,7 +5,9 @@ nothing itself, so every rule the CLI applies to an agent caller holds. A value 
 `--option=value` or after `--`, so a value can never be read as an option; the global `--repo` and `--config` options
 are never passed (the repository is chosen by `repos.Repos`, nothing else)."""
 
+import contextlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -25,6 +27,7 @@ READ_LIMIT = 1024 * 1024  # bytes the runner keeps of each stream
 READ_SECONDS = 180.0
 WRITE_SECONDS = 900.0
 REVIEW_SECONDS = 3600.0
+KILL_GRACE_SECONDS = 5.0  # between SIGTERM and SIGKILL of a stopped call's process group
 AGENT_MARKER = "l4-mcp"
 _L4 = [sys.executable, "-m", "l4"]
 
@@ -55,16 +58,15 @@ Runner = Callable[[list[str], Path, dict[str, str], float, CallControl], Complet
 
 
 def _kill(proc: "subprocess.Popen[bytes]") -> None:
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except (ProcessLookupError, PermissionError):
-            return
-        try:
-            proc.wait(5)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+    """Stop the call: SIGTERM to its process group, and after the grace period SIGKILL to the whole group, whether or
+    not the direct child exited (a descendant that ignores SIGTERM would otherwise keep running)."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGTERM)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(KILL_GRACE_SECONDS)
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)  # the group id outlives the leader while any member runs
+    proc.wait()
 
 
 def run_subprocess(argv: list[str], cwd: Path, env: dict[str, str], timeout: float, control: CallControl) -> Completed:
@@ -176,18 +178,26 @@ class Tool:
             elif p.kind == "integer":
                 ok = isinstance(value, int) and not isinstance(value, bool)
             elif p.kind == "number":
-                ok = isinstance(value, int | float) and not isinstance(value, bool)
+                ok = isinstance(value, int | float) and not isinstance(value, bool) and _finite(value)
             else:
                 ok = isinstance(value, bool)
             if not ok:
                 return (
                     f"the argument {p.name} must be a non-empty {p.kind}"
                     if p.kind == "string"
-                    else (f"the argument {p.name} must be a {p.kind}")
+                    else (f"the argument {p.name} must be a {'finite ' if p.kind == 'number' else ''}{p.kind}")
                 )
             if p.enum and value not in p.enum:
                 return f"the argument {p.name} must be one of: {', '.join(p.enum)}"
         return None
+
+
+def _finite(value: float) -> bool:
+    """A number that is neither NaN nor infinite (an integer too large for a float counts as infinite)."""
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
 
 
 REPO_HELP = (
@@ -390,9 +400,19 @@ class Toolbox:
     redactor: Redactor
     runner: Runner = field(default=run_subprocess)
 
+    def served(self) -> str:
+        """The repositories this instance serves, named by folder and path (what tells instances apart)."""
+        try:
+            roots = self.repos.served()
+        except Refused:
+            return ""
+        return "; ".join(f"{r.name} = {r}" for r in roots)
+
     def specs(self) -> list[dict[str, Any]]:
         required = self.repos.needs_repo_argument
-        return [{"name": t.name, "description": t.description, "inputSchema": t.schema(required)} for t in TOOLS]
+        served = self.served()
+        note = f" Serves: {served}." if served else ""
+        return [{"name": t.name, "description": t.description + note, "inputSchema": t.schema(required)} for t in TOOLS]
 
     def _error(self, text: str, **extra: Any) -> dict[str, Any]:
         text = self.redactor.redact_text(text)

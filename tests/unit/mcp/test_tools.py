@@ -216,6 +216,9 @@ def test_a_cut_json_is_not_parsed(one):
         ("l4_retry", {"unit": "u"}),
         ("l4_plan_draft", {"plan": "p", "merge": "sometimes"}),
         ("l4_unit_events", {"unit": "u", "last": True}),
+        ("l4_plan_resume", {"plan": "p", "reason": "r", "extend_cost": float("nan")}),  # F9
+        ("l4_plan_resume", {"plan": "p", "reason": "r", "extend_cost": float("inf")}),
+        ("l4_plan_resume", {"plan": "p", "reason": "r", "extend_cost": float("-inf")}),
     ],
 )
 def test_bad_arguments_are_an_error_result_and_nothing_runs(one, name, arguments):
@@ -332,3 +335,121 @@ def test_a_real_command_through_the_real_runner(repo_factory):
     result = call(toolbox, "l4_plan_report", {"plan": "nope"})
     assert result["structuredContent"]["exit_code"] != 0 and result["isError"] is True
     assert subprocess is not None
+
+
+# --- review findings F4, F10 and SCN-MCP-15 --------------------------------------------------------------------------
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("how", ["timeout", "cancel"])
+def test_f4_descendants_that_ignore_sigterm_are_killed_after_the_grace(tmp_path, monkeypatch, how):
+    monkeypatch.setattr(tools_mod, "KILL_GRACE_SECONDS", 0.3)
+    pidfile = tmp_path / "grandchild.pid"
+    child = (
+        "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid())); time.sleep(120)"
+    )
+    # the direct child exits on SIGTERM at once; its descendant ignores it and keeps the output files open
+    parent = f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(120)"
+    stop = threading.Event()
+    if how == "cancel":
+        threading.Timer(1.5, stop.set).start()
+    done = tools_mod.run_subprocess(
+        [sys.executable, "-c", parent], tmp_path, dict(os.environ), 1.5 if how == "timeout" else 60,
+        CallControl(stop, lambda t: None),
+    )  # fmt: skip
+    assert (done.timed_out if how == "timeout" else done.cancelled) is True
+    pid = int(pidfile.read_text())
+    deadline = 5.0
+    while _alive(pid) and deadline > 0:
+        threading.Event().wait(0.05)
+        deadline -= 0.05
+    assert not _alive(pid), "a descendant that ignores SIGTERM kept running"
+
+
+def _load_questions_world():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "specs" / "questions_world.py"
+    spec = importlib.util.spec_from_file_location("l4_mcp_test_questions_world", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_f10_an_agent_rule_refuses_through_the_server(tmp_path):  # SCN-MCP-04
+    """A real refused action: answering a verdict question is a person's decision, so the CLI refuses an agent
+    (AI_AGENT=l4-mcp, stdin closed) and the refusal reaches the tool result with isError."""
+    from l4.mcp.server import Server
+
+    qw = _load_questions_world()
+    with qw.fake_openspec_cli():
+        world = qw.QWorld(tmp_path)
+    world.unit_branch("a", qw.questions_md("a", {"title": "Allow it?", "kind": "verdict", "tasks": ()}))
+    head = world.origin_head("a")
+    config = world.app.repo / ".l4" / "config.yaml"
+    config.parent.mkdir(exist_ok=True)
+    config.write_text(
+        (world.root / qw.CONFIG_FILE).read_text(encoding="utf-8"), encoding="utf-8"
+    )  # the subprocess reads it
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "AI_AGENT", "L4_RESULT_PATH")}
+    toolbox = Toolbox(repos=Repos.from_paths([world.app.repo], cwd=Path("/")), environ=env, redactor=redactor_for(env))
+    request = {
+        "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+        "params": {"name": "l4_question_answer",
+                   "arguments": {"unit": qw.A, "id": "Q-001", "text": "accept fine", "no_run": True}},
+    }  # fmt: skip
+    out: list[str] = []
+    Server(toolbox, write=out.append).serve(iter([json.dumps(request)]))
+    [reply] = [json.loads(line) for line in out]
+    result = reply["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["exit_code"] == 2
+    text = result["content"][0]["text"]
+    assert "an agent may not answer Q-001" in text and "a verdict answer is a person's decision" in text
+    assert world.origin_head("a") == head  # nothing was pushed
+
+
+def test_scn_mcp_15_a_plan_that_is_not_pushed_is_refused_without_worktree_and_admitted_with_it(tmp_path):
+    origin, work = tmp_path / "origin.git", tmp_path / "work"
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "AI_AGENT")}
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    work.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / ".l4").mkdir()
+    (work / ".l4" / "config.yaml").write_text("version: 1\n", encoding="utf-8")
+    subprocess.run([*git, "-C", str(work), "add", "-A"], check=True)
+    subprocess.run([*git, "-C", str(work), "commit", "-qm", "init"], check=True)
+    subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
+    subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "main"], check=True)
+    unit = work / "openspec" / "changes" / "add-local"
+    unit.mkdir(parents=True)
+    (unit / "tasks.md").write_text("## 1. L\n\n- [ ] 1.1 Add `local()`\n", encoding="utf-8")
+    (unit / "proposal.md").write_text("# L\n", encoding="utf-8")
+    (unit / ".openspec.yaml").write_text("schema: spec-driven\nskip_specs: true\n", encoding="utf-8")
+    (work / ".l4" / "plans").mkdir()
+    plan = {
+        "schema": "l4/delivery-plan@1", "plan_id": "p1", "target": "main", "merge": "human",
+        "limits": {"max_cost_usd": 40, "max_runs": 60},
+        "batches": [{"id": "b1", "units": [{"id": "openspec:add-local", "depends_on": []}]}],
+    }  # fmt: skip
+    (work / ".l4" / "plans" / "p1.json").write_text(json.dumps(plan), encoding="utf-8")
+    toolbox = Toolbox(repos=Repos.from_paths([work], cwd=Path("/")), environ=env, redactor=redactor_for(env))
+
+    without = call(toolbox, "l4_plan_check", {"plan": "p1"})
+    assert without["isError"] is True and "no plan file .l4/plans/p1.json on origin/main" in text_of(without)
+    admitted = call(toolbox, "l4_plan_check", {"plan": "p1", "worktree": True})
+    assert admitted["isError"] is False, text_of(admitted)
+    text = text_of(admitted)
+    assert "p1: admitted (working tree)" in text and "order: openspec:add-local" in text
+    refs = subprocess.run(["git", "-C", str(work), "for-each-ref"], capture_output=True, text=True, check=True)
+    assert "refs/l4" not in refs.stdout  # nothing was recorded

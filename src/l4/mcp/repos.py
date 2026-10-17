@@ -75,6 +75,10 @@ class Repos:
                 "(`l4 mcp install --repo PATH` writes that)"
             ) from None
 
+    def served(self) -> tuple[Path, ...]:
+        """The repositories served; `NoRepository` when none was named and the working directory is not one."""
+        return self._served()
+
     @property
     def needs_repo_argument(self) -> bool:
         return len(self.roots) > 1
