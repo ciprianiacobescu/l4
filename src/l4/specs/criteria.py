@@ -108,8 +108,8 @@ def openspec_criteria(unit_dir: Path) -> list[Criterion]:
     return criteria
 
 
-_KIRO_REQUIREMENT = re.compile(r"^###\s+Requirement\s+(\d+)\s*[:.\-\u2013\u2014]?\s*(.*?)\s*$", re.IGNORECASE)
-_KIRO_CRITERIA_HEADING = re.compile(r"^####\s+Acceptance Criteria\s*:?\s*$", re.IGNORECASE)
+_KIRO_REQUIREMENT = re.compile(r"^#{2,3}\s+Requirement\s+(\d+)\s*[:.\-\u2013\u2014]?\s*(.*?)\s*$", re.IGNORECASE)
+_KIRO_CRITERIA_HEADING = re.compile(r"^#{3,4}\s+Acceptance Criteria\s*:?\s*$", re.IGNORECASE)
 _KIRO_ITEM = re.compile(r"^\s*(?:[-*]\s+)?(\d+)[.)]\s+(\S.*)$")  # `1. WHEN` and `1) WHEN`
 # `1.1. WHEN`, `1.1) WHEN` and `1.1 WHEN`: the way Kiro and humans number a criterion by its requirement. Only the item
 # of the requirement being read counts, so a decimal that starts a wrapped line is not taken for one; and only in a
