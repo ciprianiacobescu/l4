@@ -17,6 +17,7 @@ Left out, and why:
 import json
 import os
 import re
+import shlex
 import tempfile
 import tomllib
 from collections.abc import Callable, Mapping
@@ -309,8 +310,9 @@ def run_install(
         assert isinstance(spec, JsonClient)
         if not project and spec.user is None:
             if client == "claude-code":
-                line = (
-                    f"claude mcp add --transport stdio --scope user {name} -- {COMMAND} {' '.join(server_args(repo))}"
+                line = shlex.join(
+                    ["claude", "mcp", "add", "--transport", "stdio", "--scope", "user", name, "--", COMMAND]
+                    + server_args(repo)
                 )
                 click.echo(
                     "Claude Code keeps user-scope servers in ~/.claude.json, which holds all of its state, so l4 "

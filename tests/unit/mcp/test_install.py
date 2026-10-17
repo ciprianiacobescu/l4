@@ -366,3 +366,16 @@ def test_f3_user_scope_still_follows_a_dotfile_symlink(repo_factory, home, tmp_p
     (home / ".cursor/mcp.json").symlink_to(real)
     assert install(home, "--client", "cursor", "--repo", str(root)) == 0
     assert (home / ".cursor/mcp.json").is_symlink() and "l4-app" in real.read_text()
+
+
+def test_f6_the_printed_claude_command_is_shell_quoted(tmp_path, home, capsys):
+    import shlex
+
+    root = make_repo(tmp_path / "my projects" / "it's here")
+    assert install(home, "--client", "claude-code", "--repo", str(root)) == 0
+    out = capsys.readouterr().out
+    line = next(ln for ln in out.splitlines() if ln.startswith("claude mcp add"))
+    assert shlex.split(line) == [
+        "claude", "mcp", "add", "--transport", "stdio", "--scope", "user", "l4-it-s-here", "--",
+        "l4", "mcp", "serve", "--repo", str(root),
+    ]  # fmt: skip
