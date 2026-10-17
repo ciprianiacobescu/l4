@@ -1696,8 +1696,8 @@ pending leaves of one parent into one step.
       the retry fixed it]. A gate that already failed at the base is recorded as `gate.static_baseline_failed`.
 
    **Zero-value stubs** come from the return annotation by AST rewrite: Python `str→""`, `int→0`, `float→0.0`,
-   `bool→False`, `list→[]`, `dict→{}`, `set→set()`, `tuple→()`, `bytes→b""`; unannotated or unknown → `None`. A
-   guarded stub's guard body gets the same treatment [V, spikes/02, which also showed `return None` to be wrong for a
+   `bool→False`, `list→[]`, `dict→{}`, `set→set()`, `tuple→()`, `bytes→b""`; unannotated or unknown → `None`; a
+   generator or a context manager stays one (L4-IMP-026). A guarded stub's guard body gets the same treatment [V, spikes/02, which also showed `return None` to be wrong for a
    `-> str` function]. Other languages use the type's zero value, an empty value, or doing nothing [U: per-language
    derivation, change-0 fixtures].
 
@@ -2359,6 +2359,19 @@ be varied: Python takes the first one on its path, which the harness cannot know
 import changes nothing. A match under the test globs SHALL NOT be varied. A repository whose modules sit under the root
 or `src` gets the same modules as before. [V: a consumer repository's uv workspace keeps each member's code under
 `packages/<name>/src/<namespace>/<name>/`, and before this rule no zero-value run there ever had a module to vary.]
+
+**L4-IMP-026** The zero-value variant of a generator or a context manager still behaves as one.
+
+A function decorated with `contextmanager` or `asynccontextmanager` (under any module name) SHALL get the zero-value
+body `yield <the zero value of T>` for its `Iterator[T]` or `Generator[T, …]` annotation (`yield None` without one), so
+that `with f() as x:` enters, `x` is the zero value, and an exception of the block still reaches the caller. Any other
+function whose own body has a `yield` SHALL get an empty generator. A function annotated to return
+`AbstractContextManager` or `ContextManager` (or their async forms) SHALL return `contextlib.nullcontext()`, and one
+annotated `Iterator`, `Iterable` or `Generator` SHALL return an empty iterator. The rule holds for a red stub, which
+has no `yield`: the decorator and the annotation decide. The `vacuous` message SHALL tell how to test a context
+manager: assert on what it yields, or on its effects after the block. [V: a consumer repository's unit halted after
+five red attempts on a `@contextmanager` stub whose zero-value variant `return None` made every `with` raise a
+`TypeError` before the test body ran, so no test could fail by assertion.]
 
 ## 8. Agent and model factory
 
@@ -5175,7 +5188,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 30 | `resolve-workspace-imports` | the modules a test imports are found under every import root: the repository root, `src`, every directory named `src`, and every directory with a `pyproject.toml`, `setup.py` or `setup.cfg` and its `src`, so the zero-value run, the head stubs of run (b), the audit sampling and the proof of tests people wrote can vary a uv workspace member's modules (L4-IMP-025; `openspec/changes/resolve-workspace-imports/`) | the consumer repository's next units, after the upgrade |
 | 31 | `home-rejected-findings` | a finding a person rejected with a `WHEN … THEN …` and no criterion becomes a fix task even when the parent has several requirements: its scenario goes under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, so a rejected "ticked as already satisfied, but its text is not done" finding (L4-VER-018) no longer escalates the unit with `no_convertible_finding` (L4-VER-006; `openspec/changes/home-rejected-findings/`) | the consumer repository's escalated unit, after the upgrade |
 | 32 | `multi-report-gates` | a test gate reads every report it lists: each must exist, and they are merged, a test in two reports keeping its worse result, so a repository that runs several suites is judged on all of them; the adoption docs and the `l4 init` note name the public harness first (L4-GAT-005; `openspec/changes/multi-report-gates/`) | the second consumer repository's adoption |
-| 33 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
+| 33 | `zero-value-generators` | the zero-value variant of a context manager enters and yields the zero value, a generator yields nothing, and a function annotated to return a context manager or an iterator returns a null one, so a test of a context manager can fail by assertion instead of a `TypeError` on `with`; the `vacuous` message says how to test one (L4-IMP-026; `openspec/changes/zero-value-generators/`) | the consumer repository's halted unit, after the upgrade |
+| 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6692,6 +6706,21 @@ scenario is a spec defect (§26).
 - **Given** an ignored `.venv/` that holds a `pyproject.toml` and a package `vendored`, and a test that imports `vendored`
 - **When** the harness looks up the modules that test imports
 - **Then** it finds none
+
+#### SCN-IMP-216 (+) A context manager's zero value enters and yields the zero value · L4-IMP-026
+- **Given** a red stub `@contextmanager def search_phase(name) -> Iterator[Phase]: raise NotImplementedError`
+- **When** the zero-value variant runs a test `with search_phase("fts") as phase: assert phase is not None`
+- **Then** the block is entered and the test fails by assertion, not with a `TypeError`
+
+#### SCN-IMP-217 (+) An exception of the block still reaches the caller · L4-IMP-026
+- **Given** the zero-value variant of a context manager
+- **When** its block raises `ValueError`
+- **Then** the caller sees the `ValueError`
+
+#### SCN-IMP-218 (+) A generator's zero value yields nothing · L4-IMP-026
+- **Given** `def numbers() -> Iterator[int]` with a `yield` body, and a red stub of the same signature
+- **When** a test runs `list(numbers())` against the zero-value variant
+- **Then** both give `[]`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

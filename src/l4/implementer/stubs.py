@@ -557,6 +557,61 @@ def _zero_statement(fn: _Def) -> ast.stmt:
     return ast.Pass() if expr is None else ast.parse(f"return {expr}").body[0]
 
 
+_ITERATOR_TYPES = frozenset({"Iterator", "Iterable", "Generator", "AsyncIterator", "AsyncIterable", "AsyncGenerator"})
+_CONTEXT_TYPES = frozenset({"AbstractContextManager", "ContextManager", "AbstractAsyncContextManager",
+                            "AsyncContextManager"})  # fmt: skip
+_SYNC_ITERATOR_TYPES = frozenset({"Iterator", "Iterable", "Generator"})
+_NULL_CONTEXT = 'return __import__("contextlib").nullcontext()'
+
+
+def _yields(fn: _Def) -> bool:
+    """Whether `fn` itself is a generator: a `yield` in its body, not in a nested function, lambda or class."""
+    pending: list[ast.AST] = list(fn.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Yield | ast.YieldFrom):
+            return True
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            pending.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def _is_context_manager(fn: _Def) -> bool:
+    """Decorated with `contextmanager` or `asynccontextmanager`, under any module name."""
+    for node in fn.decorator_list:
+        name = _name(node.func if isinstance(node, ast.Call) else node)
+        if name is not None and name.endswith("contextmanager"):
+            return True
+    return False
+
+
+def _yield_annotation(annotation: ast.expr | None) -> ast.expr | None:
+    """`T` of `Iterator[T]`, `Generator[T, S, R]` and their async forms; None when the annotation says nothing."""
+    if not isinstance(annotation, ast.Subscript) or _name(annotation.value) not in _ITERATOR_TYPES:
+        return None
+    inner = annotation.slice
+    return inner.elts[0] if isinstance(inner, ast.Tuple) and inner.elts else inner
+
+
+def _zero_body(fn: _Def) -> list[ast.stmt]:
+    """The zero-value body of `fn` (L4-IMP-026). A generator stays one, so a test meets the zero value and not a
+    `TypeError` on `with` or `for`: a context manager (by its decorator: a red stub has no `yield`) yields the zero
+    value of what it yields once, and an exception of the block still reaches the caller; any other generator yields
+    nothing. A function annotated to return a context manager returns a null one, and one annotated `Iterator`,
+    `Iterable` or `Generator` an empty iterator. Anything else answers the zero value of its return annotation."""
+    if _is_context_manager(fn):  # a red stub has no `yield`: the decorator says what it is
+        return ast.parse(f"yield {_zero_expr(_yield_annotation(fn.returns)) or 'None'}").body
+    if _yields(fn):
+        return ast.parse("return\nyield").body
+    returns = fn.returns.value if isinstance(fn.returns, ast.Subscript) else fn.returns
+    name = _name(returns) if returns is not None else None
+    if name in _CONTEXT_TYPES:
+        return ast.parse(_NULL_CONTEXT).body
+    if name in _SYNC_ITERATOR_TYPES:
+        return ast.parse("return iter(())").body
+    return [_zero_statement(fn)]
+
+
 class _Zero(ast.NodeTransformer):
     """Stub bodies (or, with `public`, every public function and method) answer the zero value of their return type."""
 
@@ -576,17 +631,17 @@ class _Zero(ast.NodeTransformer):
         doc = len(_docstring(fn.body))
         if self.public:
             if not fn.name.startswith("_"):
-                fn.body = [*fn.body[:doc], _zero_statement(fn)]
+                fn.body = [*fn.body[:doc], *_zero_body(fn)]
         elif _is_stub_body(fn.body):
-            fn.body = [*fn.body[:doc], _zero_statement(fn)]
+            fn.body = [*fn.body[:doc], *_zero_body(fn)]
         elif (
             len(fn.body) > doc
             and isinstance(guard := fn.body[doc], ast.If)
             and _guard_ok(guard, {a.arg for a in _params(fn.args)})
         ):
-            guard.body = [_zero_statement(fn)]  # the guard body gets the same treatment
+            guard.body = _zero_body(fn)  # the guard body gets the same treatment
         if not self.public and _ends_with_stub(fn.body):
-            fn.body[-1] = _zero_statement(fn)  # a partial stub: its guards stay, its final raise answers the zero value
+            fn.body[-1:] = _zero_body(fn)  # a partial stub: its guards stay, its final raise answers the zero value
         return fn
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:

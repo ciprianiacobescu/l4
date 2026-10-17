@@ -204,7 +204,9 @@ class Vacuity:
         parts = [
             f"{criterion} (its tests pass or error against the zero-value stubs: {', '.join(tests[:5])}); "
             "a test must fail by assertion on the answer (for an object, assert `result is not None` or isinstance "
-            "first, then on its attributes)" + self._zero_answer_remedy(criterion)
+            "first, then on its attributes; for a context manager, which then yields the zero value, assert on what "
+            "it yields, `with f() as x: assert x is not None`, or on its effects after the block)"
+            + self._zero_answer_remedy(criterion)
             for criterion, tests in sorted(self.vacuous.items())
         ]
         return "vacuous: " + "; ".join(parts) if parts else ""
