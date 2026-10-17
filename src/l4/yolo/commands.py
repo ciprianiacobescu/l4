@@ -1105,6 +1105,14 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
             f"run when the unit has something to run (l4 yolo resume {plan_id} --reason TEXT wakes it at once, but "
             "it waits again if the unit still has nothing to run)"
         )
+    if status == "waiting" and state.wait_reason == "accepted_finding_open":  # L4-YOLO-031: retry, feedback, waive
+        unit = state.current or "<unit>"
+        return (
+            f"answer the accepted findings the wait names: when the verifier gave no answer, l4 retry --unit {unit} "
+            f"--reason TEXT; when the code must change, l4 feedback add --unit {unit} ... (then the git lines it "
+            f"prints) and l4 retry --unit {unit} --reason TEXT; when a finding needs no handling, l4 yolo waive "
+            f"{plan_id} F-... --reason TEXT (audited); the plan goes on by itself once none is open"
+        )
     if status in ("waiting", "stopped"):
         resume = f"l4 yolo resume {plan_id} --reason TEXT"
         if blocker and blocker.fix.startswith(resume.split(" --")[0]):
@@ -1128,6 +1136,11 @@ def _describe(
     }  # fmt: skip
     if file is not None and file.plan is not None and state.status not in (*FINAL, "active"):
         out["holds"] = len(holds_of({pid: state}, [file]).held)  # units no run touches until the plan is fixed
+    if state.waived:  # L4-YOLO-031
+        out["waived"] = [
+            {"finding": fid, **{k: w.get(k) for k in ("subject", "by", "actor", "reason")}}
+            for fid, w in sorted(state.waived.items())
+        ]
     if file is not None and file.invalid is not None:
         held = readable_unit_ids(file.text)  # R8: an invalid plan file still holds the units its JSON names
         out["problems"] = [
@@ -1266,6 +1279,7 @@ def _render(d: dict[str, Any]) -> str:
         lines.append(f"  stopped: {stop['reason']}{unit}" + (f": {stop['detail']}" if stop.get("detail") else ""))
     if d.get("wait"):
         lines.append(f"  waiting: {d['wait']}" + (f": {d['wait_detail']}" if d.get("wait_detail") else ""))
+    lines += [f"  waived: {w['finding']} by {w['by']} ({w['actor']}): {w['reason']}" for w in d.get("waived", [])]
     if d.get("units"):
         lines.append("  units:")
         for u in d["units"]:
@@ -1599,6 +1613,96 @@ def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdra
     return ExitCode.OK
 
 
+_WAIVABLE = ("active", "waiting", "stopped")
+
+
+def _accepted_findings(state: PlanState) -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
+    """finding id -> (subject, the finding, its item) for every finding the activation froze (L4-YOLO-028)."""
+    out: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
+    for subject, item in state.activated_accepted.items():
+        for finding in item.get("findings") or ():
+            if isinstance(finding, Mapping):
+                out[fnd.finding_id(subject, finding)] = (subject, dict(finding), item)
+    return out
+
+
+def run_waive(
+    app: AppContext, *, plan: str, finding: str, reason: str, withdraw: bool, yes: bool, no_run: bool = False
+) -> ExitCode:
+    """`l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]`: record that a person (or, when the
+    target's configuration lets agents accept, an agent) waives one accepted finding of the activation: the merge gate
+    counts it as answered and the harness merges the unit itself (L4-YOLO-031). A person sees the finding and types the
+    plan id. Writes one event with the lease, then starts a run. Exit 2 for every refusal, with nothing recorded."""
+    text = reason.strip()
+    if not text:
+        raise L4Exit(ExitCode.USAGE_ERROR, "waive: --reason must say why (why the finding needs no handling)")
+    if len(text) > MAX_REASON:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"waive: --reason has {len(text)} characters; at most {MAX_REASON}")
+    plan_id = _plan_id(plan)
+    ctx = _open(app)
+    _sync(ctx, who="waive")
+    store = ctx.store(plan_id)
+    read = store.read()
+    state = fold_plan(plan_id, read.events)
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
+    if state.status not in _WAIVABLE:
+        before = state.status in _BEFORE_ACTIVATION
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"waive: {plan_id} is {state.status}: a waiver is of a finding the activation froze"
+            + (f"\nFix: before the activation, accept the review instead: l4 yolo accept {plan_id} SUBJECT "
+               "--reason TEXT" if before else ""),
+        )  # fmt: skip
+    if withdraw:
+        if finding not in state.waived:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"waive: {finding} has no waiver: nothing to withdraw")
+        event = _event("plan.waiver_withdrawn", finding=finding, reason=text, by=ctx.who(), actor=who[0])
+        _append(store, [event], read.head)
+        ctx.say(f"{plan_id}: the waiver of {finding} is withdrawn")
+        ctx.say(f"Next: l4 yolo status {plan_id}")
+        return ExitCode.OK
+    known = _accepted_findings(state)
+    if finding not in known:
+        ids = ", ".join(sorted(known)) or "none"
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"waive: {finding} is not an accepted finding of {plan_id} (its accepted findings: {ids})\n"
+            f"Fix: l4 yolo status {plan_id} names the open ones in its wait",
+        )
+    if who[0] == "agent" and not accepting.target_config(ctx.git, ctx.target_ref).accept_by_agents:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            "waive: a waiver is a person's decision\n"
+            f'Fix: a person runs: l4 yolo waive {plan_id} {finding} --reason "..."; or set '
+            "yolo.review.accept_by_agents: true in .l4/config.yaml on the base branch (a pushed change a person can "
+            "see)",
+        )
+    subject, found, item = known[finding]
+    if who[0] == "person":
+        kind = f"{found.get('criterion', '')}/{found.get('severity', '')}"
+        ctx.say(f"{finding} [{kind}] of {subject}: {found.get('text', '')}")
+        ctx.say(f"  accepted by {item.get('by', '?')} ({item.get('actor', '?')}): {item.get('reason', '')}")
+        answer = click.prompt(
+            f"Type the plan id ({plan_id}) to waive {finding}: the unit merges without it", default="",
+            show_default=False,
+        )  # fmt: skip
+        if str(answer).strip() != plan_id:
+            raise L4Exit(ExitCode.USAGE_ERROR, "waive: the plan id was not typed: nothing was recorded")
+    elif not yes:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR, "waive: no terminal to ask the plan id on: an agent that may accept passes --yes"
+        )
+    event = _event(
+        "plan.finding_waived", finding=finding, subject=subject, reason=text, by=ctx.who(), actor=who[0], marker=who[1]
+    )
+    _append(store, [event], read.head)
+    ctx.say(f"waived: {finding} by {event.data['by']} ({who[0]}): {text}")
+    if not no_run:
+        ctx.say(start_run_line(ctx.app, ctx.cfg))
+    ctx.say(f"Next: l4 yolo status {plan_id}")
+    return ExitCode.OK
+
+
 def _show_and_confirm(
     ctx: _Ctx, plan_id: str, subject: str, review: Mapping[str, Any], events: Sequence[PlanEvent], state: PlanState
 ) -> None:
@@ -1635,4 +1739,5 @@ __all__ = [
     "run_resume",
     "run_review",
     "run_status",
+    "run_waive",
 ]

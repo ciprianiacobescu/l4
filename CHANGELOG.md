@@ -6,6 +6,28 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.7 (2026-10-17)
+
+### Fixed
+- A unit whose verification passed because a person accepted a hold is merged again by a `merge: auto` plan. The hold
+  (for example `the diff is longer than 120000 characters`) was accepted, and the next round reused the judged steps
+  without calling the judge. That round did not carry the judge's answers to the plan's accepted review findings, so
+  the merge guard found none and the plan waited with `accepted_finding_open`, every finding `no answer recorded`. A
+  resumed round now records the answers of the round it reuses again, with `reused_from`.
+- A judge reply that leaves out an accepted finding or a feedback item it was asked about is asked once more. The
+  second call names the missing ids. A valid second reply is the verdict (`reply: retried`). A broken second reply
+  keeps the first verdict. Before, the reply counted as valid, the finding was `not answered`, and a feedback item
+  counted as not addressed.
+
+### Added
+- `l4 yolo waive PLAN F-id --reason TEXT [--withdraw] [--yes] [--no-run]`: a person (or an agent, when
+  `yolo.review.accept_by_agents` is true on the base branch) waives an accepted finding of an active plan on record.
+  The merge guard counts it as answered and the harness merges the unit itself, through its guarded merge. The
+  report and `l4 yolo status` show the waiver.
+- For a plan that waits with `accepted_finding_open`, `l4 yolo status` names the ways out in its `Next:` line:
+  `l4 retry` when the verifier gave no answer, `l4 feedback add` when the code must change, `l4 yolo waive` when the
+  finding needs no handling.
+
 ## 0.4.6 (2026-10-17)
 
 ### Fixed

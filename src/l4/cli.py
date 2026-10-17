@@ -285,6 +285,13 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--withdraw", "withdraw", help="Withdraw an acceptance."),
         _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
     ]),
+    "yolo waive": ("Waive an accepted finding of an active plan: the unit merges without it (audited).", lambda: [
+        click.Argument(["plan"]), click.Argument(["finding"]),
+        _opt("--reason", "reason", required=True, help="Why the finding needs no handling (kept in the plan ledger)."),
+        _flag("--withdraw", "withdraw", help="Withdraw a waiver."),
+        _flag("--yes", "yes", help="Do not ask for the plan id (only when agents may accept)."),
+        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+    ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan is activated (kept in the plan ledger)."),

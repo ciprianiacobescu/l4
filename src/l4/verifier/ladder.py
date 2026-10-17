@@ -698,12 +698,28 @@ def _resume(
         if record.status == "reused":
             _emit_step(vc, record, subject)
     result.subject_sha = subject
-    result.feedback_outcomes = judged_outcomes(events, int(prev.get("round") or 0))  # the judge check is not stored
+    reused = int(prev.get("round") or 0)
+    result.feedback_outcomes = judged_outcomes(events, reused)  # the judge check is not stored
+    _carry_accepted(vc, events, reused)
     _finalize(vc, run, criteria, events)
     last = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
     _emit_step(vc, last, subject)
     result.steps.append(last)
     return result
+
+
+def _carry_accepted(vc: VerifyContext, events: Sequence[LedgerEvent], reused: int) -> None:
+    """L4-VER-017: the judge's answers to the accepted findings in the round this one reuses, recorded again for this
+    round (`reused_from`), since the merge guard reads the rows of the PASS round only (L4-YOLO-028). A reused round
+    with no rows carries none."""
+    for event in events:
+        data = event.data
+        if event.type != "review.accepted_judged" or data.get("round") != reused or not data.get("id"):
+            continue
+        vc.wb.emit(
+            "review.accepted_judged", id=str(data["id"]), round=vc.round, addressed=data.get("addressed") is True,
+            evidence=str(data.get("evidence") or ""), profile=str(data.get("profile") or ""), reused_from=reused,
+        )  # fmt: skip
 
 
 def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], events: Sequence[LedgerEvent]) -> None:

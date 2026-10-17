@@ -141,6 +141,7 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             state.activated_accepted = {  # frozen for the unit run (D7, D8); a re-activation replaces
                 str(k): dict(v) for k, v in (data.get("accepted") or {}).items() if isinstance(v, dict)
             }
+            state.waived = {}  # a waiver is of a finding of the activation it was given in (L4-YOLO-031)
             state.stop_reason = state.stop_detail = state.stop_unit = state.wait_reason = None
             if data.get("merge") in MERGE:
                 state.merge = data["merge"]
@@ -156,6 +157,12 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 state.accepted[subject] = dict(data)
         elif kind == "plan.acceptance_withdrawn":
             state.accepted.pop(_text(data.get("subject")) or "", None)
+        elif kind == "plan.finding_waived":
+            finding = _text(data.get("finding"))
+            if finding and state.status not in _FINAL:
+                state.waived[finding] = dict(data)
+        elif kind == "plan.waiver_withdrawn":
+            state.waived.pop(_text(data.get("finding")) or "", None)
         elif kind == "unit.dispatched" and unit:
             state.current = unit
             if state.used.attempts.get(unit, 0) > stale_at.get(unit, state.used.attempts.get(unit, 0)):

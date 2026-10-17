@@ -1322,8 +1322,8 @@ class _Step:
 
     def _accepted_open(self, ctx: _Ctx, snap: UnitSnapshot) -> str | None:
         """Fail closed (D8.4): the accepted findings of the unit and its batch that no judge of the latest PASS round
-        answered `addressed: true`, as the wait detail (`<unit>: F-… not addressed: <evidence>; …`); None when none is
-        open. An id without an answer is open (`no answer recorded`)."""
+        answered `addressed: true` and no person waived (L4-YOLO-031), as the wait detail (`<unit>: F-… not addressed:
+        <evidence>; …`); None when none is open. An id without an answer is open (`no answer recorded`)."""
         unit = snap.ref.id
         completes = self._completes_batch(ctx, unit)
         ids = [
@@ -1332,7 +1332,8 @@ class _Step:
             if completes or not str(item["subject"]).startswith("batch:")
             for f in item["findings"]
         ]  # batch-level items travel to every unit, but only the unit that completes the batch must have them answered
-        held = [fid for fid in dict.fromkeys(ids) if fid not in snap.state.accepted_addressed]
+        answered = snap.state.accepted_addressed | set(ctx.state.waived)
+        held = [fid for fid in dict.fromkeys(ids) if fid not in answered]
         if not held:
             return None
         why = (f"{fid} not addressed: {snap.state.accepted_evidence.get(fid) or 'no answer recorded'}" for fid in held)
@@ -1361,7 +1362,7 @@ class _Step:
             return f"the cause is gone: {unit} is {phase or 'not started'}"
         now = self._accepted_open(ctx, snap)
         if now is None:
-            return f"the cause is gone: the accepted findings of {unit} are addressed"
+            return f"the cause is gone: the accepted findings of {unit} are addressed or waived"
         waiting = _last(ctx.read.events, "plan.waiting", unit)
         if now != (str(waiting.data.get("detail") or "") if waiting is not None else ""):
             return f"the cause is gone: the accepted findings of {unit} are open for another reason ({now})"
