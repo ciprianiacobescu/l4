@@ -1806,11 +1806,12 @@ The note MUST NOT offer an edit that the harness would refuse.
 **L4-IMP-003** TDD exemptions come only from a **human-written** tag in the task title (`[docs]`, `[config]`,
 `[chore]`, `[no-test]`, `[test-infra]`, matching `tdd.exempt_task_kinds`) plus a `tdd_exemption.reason` in the result,
 or from harness-generated internal steps (test bootstrap, merge-conflict resolution). Agent claims and file-type
-heuristics never create an exemption. The one agent-initiated exemption, `already_satisfied`, is accepted only when the
-agent names an earlier task/commit **and** the harness confirms that a discriminating test (L4-VER-009) tracing
-**every** criterion of the task exists and passes. Exemptions are logged (`task.tdd_exempt{kind, reason}`) and listed
-in `verification.md`. `already_satisfied` confirmation = the pre-satisfied check of L4-IMP-002 for every cited
-criterion, plus a `tdd_exemption.reason` naming the task or commit.
+heuristics never create an exemption. The one agent-initiated exemption, `already_satisfied`, is accepted only when
+the harness confirms that a discriminating test (L4-VER-009) tracing **every** criterion the step cites exists and
+passes. Exemptions are logged (`task.tdd_exempt{kind, reason}`) and listed in `verification.md`. `already_satisfied`
+confirmation = the pre-satisfied check of L4-IMP-002 for every cited criterion. A step that adds new tests may give a
+`tdd_exemption.reason` naming the task or commit; the harness proves the claim from the tests and does not require it.
+A step that adds no test requires it (below).
 **Confirmation by an earlier red.** A cited criterion whose tests already FAILED at an earlier red of the same unit on
 this branch is confirmed by that red, without a zero-value run (language-neutral: the zero-value run is Python-only).
 It is confirmed when a test T, not one of this step's new tests, traces it, passes at head, is listed by a
@@ -1819,7 +1820,9 @@ It is confirmed when a test T, not one of this step's new tests, traces it, pass
 `already-satisfied` event contributes nothing), when that red's `base` and its commit (the `sha` of the
 `task.red_committed` with the same task and base) are ancestors of `HEAD` (a rebase voids it), and when T's file is
 has only gained lines since that commit, in later commits and in this step alike (a task may be told to add its tests
-to an earlier task's file; a changed or deleted line voids the evidence). Only the criteria so
+to an earlier task's file; a changed or deleted line voids the evidence). T's file is the part of its id before `::`
+when that path exists in the red commit, else the longest dotted prefix of it that names a `.py` file there, so the
+class of `pkg.tests.test_x.TestY::test_z` does not hide `pkg/tests/test_x.py`. Only the criteria so
 confirmed skip the zero-value run; the rest go through it. The proof is `pre_satisfied` with `discriminating` = the
 earlier tests, `via: earlier_red`, `red_sha` and `red_task` of the newest such red; `criterion.pre_satisfied` carries
 `via` too. On success the harness commits the tests as
@@ -1843,6 +1846,20 @@ run; an error (missing export, import or collection error, TypeError) is inconcl
 unit base too shows the criterion was satisfied before the unit: not confirmed. The step then fails with `not
 discriminating: ` naming only the criteria neither run confirmed. The proof is `pre_satisfied` with `discriminating` =
 the tests that failed at the base, `via: base_run` and `base_sha`; `criterion.pre_satisfied` carries `via` too.
+**Already satisfied without a new test.** When an earlier task already wrote and proved the tests of every criterion a
+task cites, a copy proves nothing more. A red step that adds no new test, changes no file and adds no stub is accepted
+as already satisfied when its result reports `criteria_ids` and a `tdd_exemption.reason` that starts with
+`already_satisfied`, and every cited criterion is the unit's and is confirmed. The candidates of a criterion are the
+tests of the head report that trace it and pass, and they go through the same order: the earlier red, the zero-value
+run, the base run. The harness then ticks the task and commits `test(<unit>): <task> already satisfied` with
+`L4-TDD: already-satisfied`, holding no test change. The proofs are `pre_satisfied` with `tests: []` and the confirmed
+tests as `discriminating`, and no green step runs. The console says `task <key> already satisfied by existing tests, no
+green step`. A cited criterion that no passing test traces fails the step with `no test traces <ids> yet: write a new
+test for each`. One that nothing confirms fails it with `not discriminating: `, as above. A step that adds no test
+without that reason or without `criteria_ids` fails as before (L4-IMP-002): `no tests added`, or `no new test` when it
+touched a test file. `already_satisfied` needs the
+task's own text to be true in the code: a task that asks for a change that is not there yet (a document line, say) is
+not already satisfied, whatever its criteria say, and the judge checks each such task against its text (L4-VER-018).
 
 ### 7.3 Prompt assembly
 
@@ -3029,7 +3046,11 @@ pytest tests only; changed code is not python`: no writer call, no finding, no f
     "accepted": {"type": "array", "items": {"type": "object",
       "required": ["id", "addressed", "evidence"],
       "properties": {"id": {"type": "string", "pattern": "^F-[0-9a-f]{6}$"},
-                     "addressed": {"type": "boolean"}, "evidence": {"type": "string"}}}}
+                     "addressed": {"type": "boolean"}, "evidence": {"type": "string"}}}},
+    "satisfied": {"type": "array", "items": {"type": "object",
+      "required": ["task", "holds", "evidence"],
+      "properties": {"task": {"type": "string", "minLength": 1, "maxLength": 40},
+                     "holds": {"type": "boolean"}, "evidence": {"type": "string"}}}}
   }
 }
 ```
@@ -3045,6 +3066,11 @@ reply without the array, or without an item, counts as `addressed: false` with t
 decides from the answers (every judge asked must say `true`; a `config` item also needs its variable in the changed
 non-test code); the judge's answer alone closes nothing.
 
+`satisfied` is optional. When the prompt holds a `<l4:data kind="satisfied">` block (L4-VER-018), the reply answers once
+per listed task: `holds` says whether the code and documents at head do what the task's text says, and `evidence`
+cites `file:line` or a test id. A task left out is asked for once more (L4-VER-017) and then counts as
+`holds: false` with the evidence "not answered", which is a minor finding; a `holds: false` answer is a major one.
+
 **Weak judges (live wave D, W-D1).** A reply that breaks the schema only trivially is repaired by the harness
 before it counts as invalid: a string over its `maxLength` is cut there and ends in `…`, a free-text field (`suggested_fix`,
 `reasoning`, `reason`, `detail`, `title`, `quote`, `expected`, `actual`) that is a list is joined by newlines and one that is
@@ -3055,7 +3081,7 @@ applied, so a reply is never repaired into a `pass` it did not state. A repaired
 recorded as `judge.reply_repaired{round, profile, fields}` (schema paths, never values). A reply that is still invalid is
 asked for once more with the violated paths (at most 800 characters, never values) and its own rejected reply; a second
 break discards the judge (L4-VER-015). Every `verify.judge` event carries `reply`, one of `valid`, `repaired` (the repair
-alone), `retried` (a second call answered a schema break, or a reply that left out an asked id, L4-VER-017) or `discarded`, and `verification.md` and `verdict.json` count the
+alone), `retried` (a second call answered a schema break, or a reply that left out an asked accepted, feedback or satisfied id, L4-VER-017) or `discarded`, and `verification.md` and `verdict.json` count the
 four per judge profile over the unit's ledger (`judge_replies`) beside the round's own (`judge_reply`).
 
 ### 10.4 Aggregation (deterministic)
@@ -3152,6 +3178,22 @@ first prompt, the judge's own reply (redacted and cut as for a schema repair) an
 id. A valid second reply SHALL be the verdict (`reply: retried`). A second reply that is not valid, a second call that
 times out or errs, and a second call served by another model SHALL keep the first verdict: a valid verdict is never
 dropped over an evidence answer. An id that no kept reply answers is recorded as not answered, as before.
+
+**L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
+(L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
+that a task asks for is no criterion's. The judge prompt SHALL hold a satisfied block when the unit has such tasks: the
+unit's own tasks (not a fix unit's) whose last `task.done` outside any fix-unit context has `tdd: already-satisfied`.
+Per task it lists the key, the text from `tasks.md`, and the criteria of its last `task.red_ok` with their
+`discriminating` tests. The system text asks for `satisfied: [{task, holds, evidence}]`, one entry per listed task.
+`holds` is true only when the diff or the gate report shows that the code and documents at head do what the task's
+text says. `evidence` is the file:line or test id that shows it, or what is still missing. A prompt with no such task
+has no block, and the reply leaves `satisfied` out. Each answer is recorded as
+`verify.satisfied_judged{task, round, holds, evidence, profile}`. `holds: false` adds the major judge finding `task
+<key> is ticked as already satisfied, but its text is not done` with the evidence as its detail. It is judge-only, so it
+goes to a person (L4-VER-013): only a person can tell a task whose work sits in base code the diff does not show. A
+listed task the reply leaves out is asked for in L4-VER-017's second call (`satisfied <key>`). A task still not answered
+adds the minor finding `the judge did not say whether task <key> is done` and is recorded with `holds: false` and
+evidence `not answered`, so a missing answer never fails a round. The prompt template is `judge@9`.
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -4922,10 +4964,26 @@ value, not even in redacted form), `breaker.tripped{reason: secret_in_push}` is 
 13 and `exit_reason` naming the paths: through the `breaker_or_budget` edge in `implementing` and `fixing`; in any other
 phase the phase is unchanged and only the exit code says halted. The run's final ledger is not pushed either, because it
 would carry the same commits, so the halt is visible in the run's console and `outcome.json`, not on the forge. There is
-no allow-list: a fixture that must look like a key is written so that the shapes do not match. This scan is in addition to
+no allow-list: a fixture that must look like a key is written so that the shapes do not match, and an implementer step
+that writes one loses its attempt before this scan is reached (L4-SEC-008). This scan is in addition to
 the gitleaks step of verifier step 1 (L4-VER-002), which runs later and on the net diff. Residual: only the known token
 shapes and the configured values are found; the harness's own pushes of the ledger lock ref (redacted ledger) and the
 archive branch (files moved by the harness) are not scanned.
+
+**L4-SEC-008 An implementer step's changes are read for secrets before any gate or commit.** A step that writes a
+token shape into a test fixture should lose its attempt, not halt the unit at the push with no advice. After an
+implementer step (red, green or single) returns and the protected paths are put back (`agent_step` in `implementer/tdd.py`), the harness
+MUST read the lines that the worktree adds to `HEAD` with the redactor of L4-OBS-002, as L4-SEC-007 does for outgoing
+commits (`secretscan.worktree_secrets`). These are the added lines of a tracked file and every line of a new file,
+never the run's ledger. On a hit the attempt fails before any gate runs, and its changes are discarded. One
+`guard.secret {path, kind, task, phase, attempt}` is recorded per path and kind, never with the value, and
+`breaker.tripped` is not. The failure, which the next attempt's prompt carries, is `the change holds text shaped like a
+secret: <path> (<kind>), …. Nothing of this attempt is kept. Never write a secret value. A test that needs a value
+shaped like a token builds it at run time from parts, with the prefix split (for example "mk_" + "agent_" + "A" * 24),
+so that no file holds the whole shape: the harness refuses to push one.` The attempt counts as any failed attempt does
+(L4-IMP-017 escalation, the attempt limits). The contract template says the same rule up front. The push scan of
+L4-SEC-007 stays: it is the last net for what the step check does not see (a gate or a harness step that writes a file).
+Residual: a deleted file, a symlink, a binary file and a new file over 2,000,000 bytes add nothing to the step check.
 
 ---
 
@@ -5064,6 +5122,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 26 | `run-liveness` | a person can tell a working run from a stuck one: a heartbeat log line every `implementer.heartbeat` (default 2m) with counts and times only, `implementer.idle_timeout` (default 10m) that stops an agent with no stdout line and no open tool call (SIGINT, 5 s, SIGKILL) with the `agent.idle` record and a reason that names the key, stream readers that see open tool calls of claude-code, codex and kiro-cli, `l4 status` and `l4 yolo status` with the last activity and the open run with its CI link (`run.started.ci_url`), the red gate line `red: <n> new tests fail, as intended`, the GitHub job summary, and the runbook procedure 4.6 (L4-IMP-023, L4-IMP-024, L4-FAC-012, L4-OPS-020, L4-OPS-021, L4-YOLO-030, L4-OBS-004, L4-OBS-005; `openspec/changes/run-liveness/`) | the live check of task 7.3 on a dummy repository: a unit of two tasks with heartbeat lines every 2 minutes, `Last activity:` and `Open run:` during the run, the OpenCode silent-call probe, and a re-run with `/attempts/2` |
 | 27 | `settle-human-rejects` | a human reject that no fix task could be derived from ends when a feedback-only fix unit takes the person's concrete feedback, so the next round judges the fixed code: `effective_verdicts` drops a reject recorded before a `fix.spawned{feedback_only}`, and the spawn lists those questions in `consumed` (L4-VER-016); an escalation with `no_convertible_finding` says to give the fix as feedback before the retry in `l4 status`, the refusal of `l4 run --unit` and the sticky note (L4-OPS-022); and `l4 questions answer Q-NNN --replace` replaces the answer of an answered verdict question and keeps the old one in a comment (L4-QMD-010; `openspec/changes/settle-human-rejects/`) | the live check on a dummy repository, not run in this change: a hold rejected in prose, the feedback, the fix unit and a round that passes |
 | 28 | `answer-accepted-findings` | a unit whose PASS came from an accepted hold merges by itself again: a round resumed at aggregation records the judge's answers to the accepted findings of the round it reuses (L4-VER-017); a valid judge reply that leaves out an asked accepted or feedback id gets one more call that names the ids, and a broken second reply keeps the first verdict (L4-VER-017); and `l4 yolo waive PLAN FINDING --reason TEXT` lets a person (or an allowed agent) waive an accepted finding on record, so the harness merges the unit through its guarded merge, with a `Next:` line that names retry, feedback and waive for `accepted_finding_open` (L4-YOLO-031; `openspec/changes/answer-accepted-findings/`) | the consumer repository's unit that waited with `accepted_finding_open`, after the upgrade |
+| 29 | `check-already-satisfied` | an already-satisfied task writes no copy of tests that exist: a red step that adds no test and reports `already_satisfied by <task>` with its `criteria_ids` is confirmed by the passing tests that already trace them, and earlier-red evidence holds for tests in a class (L4-IMP-003); the judge answers, for each task ticked as already satisfied, whether its own text is done, and a no is a major judge finding for a person (L4-VER-018); an implementer step that writes a token shape (a test fixture) loses the attempt with advice to build the value from parts, before any gate or commit, instead of halting the unit at the push (L4-SEC-008; `openspec/changes/check-already-satisfied/`) | the consumer repository's next units, after the upgrade |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6516,6 +6575,31 @@ scenario is a spec defect (§26).
 - **When** the configuration loads
 - **Then** the first two fail with a message that names the key and its minimum, and the last two load
 
+#### SCN-IMP-206 (+) A test in a class is evidence of the earlier red that saw it fail · L4-IMP-003
+- **Given** an earlier red of the unit whose discriminating test is `tests.test_old.TestTotal::test_old_total` in `tests/test_old.py`, unchanged and passing at head
+- **When** a later red step's new tests for the same criterion pass
+- **Then** the criterion is confirmed `via: earlier_red` with that test as `discriminating`, and no zero-value run covers it
+
+#### SCN-IMP-207 (+) An already-satisfied task adds no test and reuses the earlier ones · L4-IMP-003
+- **Given** task 1.1's red wrote a test tracing criterion C that failed by assertion, and green made it pass
+- **When** task 2.1's red step adds no test, changes no file, and reports `criteria_ids: [C]` and `tdd_exemption.reason: "already_satisfied by 1.1"`
+- **Then** C is confirmed `via: earlier_red` by 1.1's test, the task is committed as `already satisfied` with no test file in the commit, its proof is `{tests: [], proof: pre_satisfied, discriminating: [1.1's test], via: earlier_red}`, and no green step runs
+
+#### SCN-IMP-208 (−) A cited criterion no test traces yet needs a new test · L4-IMP-003
+- **Given** a red step that adds no test, reports `already_satisfied by 1.1` and cites a criterion no test of the head report traces
+- **When** the red step is checked
+- **Then** it fails with `no test traces <id> yet: write a new test for each`, and nothing is committed
+
+#### SCN-IMP-209 (−) No test and no reason is still no new test · L4-IMP-002, L4-IMP-003
+- **Given** a red step that adds no test and reports no `tdd_exemption`
+- **When** the red step is checked
+- **Then** it fails as before: `no tests added` when it changed nothing, the `no new test` message when it touched a test file
+
+#### SCN-IMP-210 (−) Existing tests that nothing confirms are no proof · L4-IMP-003
+- **Given** a red step that adds no test, reports `already_satisfied by 1.1`, and cites a criterion whose passing tests no earlier red saw fail, no zero-value run fails and no base run fails
+- **When** the red step is checked
+- **Then** it fails with the confirmation's `not discriminating` message, and nothing is committed
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -7160,6 +7244,26 @@ scenario is a spec defect (§26).
 - **Given** a prompt with the feedback item FB-001, a first reply without `feedback`, and in turn a first reply that answers every asked id
 - **When** the judge runs
 - **Then** the first makes a second call that names FB-001; the second makes one call
+
+#### SCN-VER-72 (+) The judge sees the tasks ticked as already satisfied · L4-VER-018
+- **Given** a unit whose task 3.1 ("add (legacy alias X) to the README table") ended `task.done{tdd: already-satisfied}` with criterion C proved by test T, and whose task 1.1 ended `tdd: green`
+- **When** the judge prompt is built
+- **Then** it holds a satisfied block that lists 3.1 with its text, C and T, and does not list 1.1; the template is `judge@9`
+
+#### SCN-VER-73 (−) A task whose text is not done is a major finding · L4-VER-018
+- **Given** the prompt of SCN-VER-72 and a reply with `satisfied: [{task: "3.1", holds: false, evidence: "README.md is not in the diff"}]`
+- **When** the judge step records the reply
+- **Then** the round has the major judge finding `task 3.1 is ticked as already satisfied, but its text is not done` with that evidence, and the ledger holds `verify.satisfied_judged{task: 3.1, holds: false}`
+
+#### SCN-VER-74 (+) A task whose text holds adds no finding · L4-VER-018
+- **Given** the prompt of SCN-VER-72 and a reply with `satisfied: [{task: "3.1", holds: true, evidence: "README.md:188"}]`
+- **When** the judge step records the reply
+- **Then** no finding names task 3.1, and the ledger holds `verify.satisfied_judged{task: 3.1, holds: true}`
+
+#### SCN-VER-75 (−) A task left out is asked for once, then is a minor finding · L4-VER-018
+- **Given** the prompt of SCN-VER-72 and two valid replies that both leave `satisfied` out
+- **When** the judge runs
+- **Then** the second call names `satisfied 3.1`, the round has the minor finding `the judge did not say whether task 3.1 is done`, and no major one names 3.1
 
 ### 23.9.1 Human feedback (FBK)
 
@@ -7898,6 +8002,16 @@ scenario is a spec defect (§26).
 - **Then** nothing is pushed (the forge's branch still ends at the clean checkpoint), the ledger has
   `guard.secret {path: "src/app.py", kind: "anthropic-key"}` and `breaker.tripped{reason: secret_in_push}`, the console,
   the logs and `outcome.json` carry the path and the kind but not the key, the unit is `halted` and the run exits 13.
+
+#### SCN-SEC-20 (−) A fixture that spells a token whole fails the attempt, not the unit · L4-SEC-008
+- **Given** a red step whose new test in `tests/test_redact.py` holds `SECRET = "mk_agent_…"` (20 characters after the prefix), in a file whose existing tests already hold such strings
+- **When** the step returns
+- **Then** no gate runs, the changes are discarded, the ledger has `guard.secret{path: tests/test_redact.py, kind: mintkey, task, phase: red, attempt: 1}` and no `breaker.tripped`, and the attempt fails with a message that names the path and the kind and says to build the value from parts
+
+#### SCN-SEC-21 (+) A value built from parts and a token already at head pass the step check · L4-SEC-008
+- **Given** a step that adds `NEW = "mk_" + "agent_" + "A" * 24` to a file whose unchanged line holds a whole token
+- **When** the step returns
+- **Then** the step check finds nothing and the step goes on to its gates
 
 #### SCN-SEC-19 (−) The project's own CI jobs cannot read the harness secrets · L4-SEC-001
 - **Given** `L4_FORGE_TOKEN` stored with `gitlab_bot_token.py` (environment scope `l4`), and a project job named `test`

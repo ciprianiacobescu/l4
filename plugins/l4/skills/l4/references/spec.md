@@ -14,6 +14,8 @@ design agree): a fix in one file often raises a consistency finding in another.
   `conftest.py`, not "the conftest", in the task line or in its section heading. Only that task's green step may change
   it, and only from a reviewed text (an active plan, or the base branch). A data fixture or an ignore file needs a person's answer. `[test-infra]` does not open a
   support file in green.
+- **tasks.** Each task writes its own tests (red), then its code (green): no "failing tests" task before a "fix" task,
+  no task that only runs the gates. A document edit needs a scenario.
 - **failure_cases.** Say what happens when a stage does not run, raises, or gets bad input.
 - **feasibility.** Use only tools the runner has. Say in prose what is already delivered; ticked tasks are done. When a
   spec relies on code already on the base branch, name it in the spec (module, function, values) instead of adding a
