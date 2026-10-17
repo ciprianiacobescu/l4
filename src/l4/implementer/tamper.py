@@ -1,4 +1,4 @@
-"""The comparison of a pre-existing test, per test, on the AST (detect-test-tamper, L4-IMP-045..047).
+"""The comparison of a pre-existing test, per test, on the AST (detect-test-tamper, L4-IMP-045..047, L4-IMP-049).
 
 Pure: text in, facts out; Python only; no git. A test is its file and qualified name (`test_x`, or `Class.test_x` for a
 method of a module-level class), never a bare name. Its definition is every statement that binds its name in its
@@ -11,12 +11,12 @@ No public name here starts with `test` (a test module that imports this one must
 
 import ast
 import hashlib
+import inspect
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 
-from l4.implementer.guards import _MODULE_HOOKS
-from l4.verifier.scan import _qualified
+from l4.implementer.guards import _MODULE_HOOKS, _defines_only, _inert, _pytest_mark
 
 MAX_NAMES = 5
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -53,17 +53,33 @@ class _Part:
     line: int
     reads: frozenset[str]
     is_import: bool = False
+    func: bool = False  # the statement is a `def` of the name
 
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
 
 
+def _doc(text: str) -> str:
+    return "\n".join(line.rstrip() for line in inspect.cleandoc(text).splitlines())
+
+
 def _parse(source: str) -> ast.Module | None:
+    """The tree, with every docstring replaced by its normalised text: re-indenting one is no change, new words are."""
     try:
-        return ast.parse(source)
+        tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
         return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) and node.body:
+            first = node.body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                first.value.value = _doc(first.value.value)
+    return tree
 
 
 # --- what a statement binds ----------------------------------------------------------------------------------------
@@ -121,10 +137,11 @@ def _stored(statement: ast.stmt) -> set[str]:
     return names
 
 
-def _function_locals(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+def _locals_of(body: Iterable[ast.AST]) -> set[str]:
+    """The names bound in the scope of these statements (no nested scope), less the ones declared global."""
     declared: set[str] = set()
     names: set[str] = set()
-    for node in _own_nodes(function.body):
+    for node in _own_nodes(body):
         if isinstance(node, ast.Global | ast.Nonlocal):
             declared |= set(node.names)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
@@ -138,56 +155,125 @@ def _function_locals(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[st
     return names - declared
 
 
-def _params(node: ast.AST) -> set[str]:
-    found: set[str] = set()
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-            a = sub.args
-            found |= {arg.arg for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs)}
-            found |= {arg.arg for arg in (a.vararg, a.kwarg) if arg}
-    return found
+def _arg_names(a: ast.arguments) -> set[str]:
+    return {arg.arg for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg) if arg}
 
 
-def _loads(nodes: Iterable[ast.AST]) -> set[str]:
-    found: set[str] = set()
-    for root in nodes:
-        for sub in ast.walk(root):
-            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                found.add(sub.id)
-            elif isinstance(sub, ast.Call):
-                func = ast.unparse(sub.func)
-                if func.endswith("usefixtures"):
-                    found |= {a.value for a in sub.args if isinstance(a, ast.Constant) and isinstance(a.value, str)}
-    return found
+def _annotations(a: ast.arguments) -> list[ast.expr]:
+    every = (*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg)
+    return [arg.annotation for arg in every if arg and arg.annotation]
+
+
+class _Reader:
+    """The module-level names a statement reads. A name that is local to a function, a lambda, a class body or a
+    comprehension around the read is not the module's name of the same spelling (design D12)."""
+
+    def __init__(self) -> None:
+        self.out: set[str] = set()
+
+    def visit(self, node: ast.AST, env: frozenset[str], outer: frozenset[str]) -> None:
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load) and node.id not in env:
+                self.out.add(node.id)
+            return
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            a = node.args
+            for expr in [*node.decorator_list, *a.defaults, *(d for d in a.kw_defaults if d), *_annotations(a)]:
+                self.visit(expr, env, outer)
+            if node.returns:
+                self.visit(node.returns, env, outer)
+            inner = outer | _arg_names(a) | _locals_of(node.body)
+            for statement in node.body:
+                self.visit(statement, inner, inner)
+            return
+        if isinstance(node, ast.Lambda):
+            for expr in [*node.args.defaults, *(d for d in node.args.kw_defaults if d)]:
+                self.visit(expr, env, outer)
+            inner = env | _arg_names(node.args)
+            self.visit(node.body, inner, inner)
+            return
+        if isinstance(node, ast.ClassDef):
+            for expr in [*node.decorator_list, *node.bases, *(k.value for k in node.keywords)]:
+                self.visit(expr, env, outer)
+            inner = env | _locals_of(node.body)
+            for statement in node.body:
+                self.visit(statement, inner, outer)
+            return
+        if isinstance(node, _COMPREHENSIONS):
+            targets = {n.id for g in node.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+            self.visit(node.generators[0].iter, env, outer)
+            inner = env | targets
+            for position, generator in enumerate(node.generators):
+                if position:
+                    self.visit(generator.iter, inner, inner)
+                for condition in generator.ifs:
+                    self.visit(condition, inner, inner)
+            for child in (node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,):
+                self.visit(child, inner, inner)
+            return
+        if isinstance(node, ast.Call) and ast.unparse(node.func).endswith("usefixtures"):
+            self.out |= {a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str)}
+        for child in ast.iter_child_nodes(node):
+            self.visit(child, env, outer)
 
 
 def _reads(node: ast.stmt, owner: str | None) -> frozenset[str]:
-    """The module names (and `<Class>.<attr>` for `self.<attr>`) a statement reads: every name in a load context, every
-    parameter of every function or lambda in it (the fixtures a test requests), the fixtures a `usefixtures` names. A
-    local variable of a function is not the module's name of the same spelling."""
+    """The module names (and `<Class>.<attr>` for `self.<attr>`) a statement reads, and the fixtures a test function
+    requests (its parameters)."""
+    reader = _Reader()
+    reader.visit(node, frozenset(), frozenset())
+    names = reader.out
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-        a = node.args
-        annotations = [
-            x.annotation for x in (*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg) if x and x.annotation
-        ]
-        outer = [*node.decorator_list, *a.defaults, *(d for d in a.kw_defaults if d), *annotations]
-        if node.returns:
-            outer.append(node.returns)
-        local = _function_locals(node) - _params(node)
-        names = _loads(outer) | (_loads(node.body) - local)
-        if owner and (first := (*a.posonlyargs, *a.args)):
+        names |= _arg_names(node.args)
+        if owner and (first := (*node.args.posonlyargs, *node.args.args)):
             me = first[0].arg
             names |= {
                 f"{owner}.{sub.attr}"
                 for sub in ast.walk(node)
                 if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name) and sub.value.id == me
             }
-        return frozenset(names | _params(node))
-    return frozenset(_loads([node]) | _params(node))
+    return frozenset(names)
 
 
-def _scope(body: list[ast.stmt], owner: str | None) -> dict[str, list[_Part]]:
-    """name -> its parts, in order, for one scope (the module body, or one class body)."""
+def _plain_fixture(decorator: ast.expr) -> bool:
+    """A fixture decorator (`pytest.fixture`, `fixture(...)`, `pytest_asyncio.fixture`) that is not autouse."""
+    call = decorator if isinstance(decorator, ast.Call) else None
+    name = ast.unparse(call.func if call else decorator)
+    if name != "fixture" and not name.endswith(".fixture"):
+        return False
+    if call is None:
+        return True
+    for keyword in call.keywords:
+        if keyword.arg == "autouse" and not (isinstance(keyword.value, ast.Constant) and keyword.value.value is False):
+            return False
+    return _inert(*call.args, *(k.value for k in call.keywords))
+
+
+def _plain(node: ast.stmt, *, top: bool) -> bool:
+    """A statement that only defines (`guards._defines_only`), where a fixture that is not autouse also counts: it
+    reaches only the tests that request it, and the closure follows requests. Anything else reaches every test."""
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        a = node.args
+        marks = [d for d in node.decorator_list if _pytest_mark(d)]
+        others = [d for d in node.decorator_list if not _pytest_mark(d)]
+        return (
+            (top or not node.name.startswith("__"))
+            and all(_plain_fixture(d) for d in others)
+            and _inert(*marks, *a.defaults, *a.kw_defaults, node.returns, *_annotations(a))
+        )
+    if isinstance(node, ast.ClassDef):
+        return (
+            not node.keywords
+            and all(_pytest_mark(d) for d in node.decorator_list)
+            and _inert(*node.decorator_list, *node.bases)
+            and all(_plain(statement, top=False) for statement in node.body)
+        )
+    return _defines_only(node, top=top)
+
+
+def _scope(body: list[ast.stmt], owner: str | None, pseudo: str) -> dict[str, list[_Part]]:
+    """name -> its parts, in order, for one scope (the module body, or one class body). The statements that are not
+    plain definitions are the parts of the pseudo-name `pseudo` (`<module>`, `<class>`), a leading docstring aside."""
     out: dict[str, list[_Part]] = {}
 
     def add(name: str, part: _Part) -> None:
@@ -195,8 +281,19 @@ def _scope(body: list[ast.stmt], owner: str | None) -> dict[str, list[_Part]]:
         if not (part.is_import and any(p.is_import and p.text == part.text for p in parts)):
             parts.append(part)  # a repeated import is no rebinding
 
-    for statement in body:
+    for position, statement in enumerate(body):
         line = getattr(statement, "lineno", 0)
+        docstring = (
+            position == 0
+            and isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        )
+        if docstring:
+            continue
+        dump = ast.dump(statement, include_attributes=False)
+        if not _plain(statement, top=owner is None):
+            add(pseudo, _Part(dump, line, _reads(statement, owner)))
         if isinstance(statement, ast.Import | ast.ImportFrom):
             for name, text in _import_parts(statement):
                 add(name, _Part(text, line, frozenset(), True))
@@ -206,7 +303,8 @@ def _scope(body: list[ast.stmt], owner: str | None) -> dict[str, list[_Part]]:
         names = _stored(statement)
         if not names:
             continue
-        part = _Part(ast.dump(statement, include_attributes=False), line, _reads(statement, owner))
+        func = isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+        part = _Part(dump, line, _reads(statement, owner), False, func)
         for name in names - {"*"}:
             add(name, part)
     return out
@@ -231,34 +329,60 @@ def _digest_of(parts: Iterable[_Part]) -> str:
     return _sha("\n".join(p.text for p in parts))
 
 
+def _shell(node: ast.ClassDef) -> ast.ClassDef:
+    """The class header: decorators, bases and keywords, with an empty body."""
+    shell = ast.ClassDef(
+        name=node.name,
+        bases=node.bases,
+        keywords=node.keywords,
+        body=[ast.Pass()],
+        decorator_list=node.decorator_list,
+        type_params=getattr(node, "type_params", []),
+    )
+    return ast.fix_missing_locations(shell)
+
+
 def _closure(
     own: str,
     parts: list[_Part],
     module: dict[str, list[_Part]],
-    members: dict[str, list[_Part]],
-    owner: ast.ClassDef | None,
+    classes: dict[str, ast.ClassDef],
+    members: dict[str, dict[str, list[_Part]]],
+    chain: list[str],
     autouse: set[str],
 ) -> tuple[str, dict[str, str]]:
-    cls = owner.name if owner else None
+    """What a test uses in its file. `chain` is its class followed by the module-level classes it inherits from."""
     seeds: set[str] = set().union(*(p.reads for p in parts)) if parts else set()
     seeds |= autouse
     seeds |= {n for n in module if _MODULE_HOOKS.match(n) and not (n.startswith("__") and n.endswith("__"))}
     if "*" in module:
         seeds.add("*")
+    if "<module>" in module:
+        seeds.add("<module>")
     uses: dict[str, str] = {}
-    if owner is not None and cls is not None:
-        shell = ast.ClassDef(
-            name=owner.name,
-            bases=owner.bases,
-            keywords=owner.keywords,
-            body=[ast.Pass()],
-            decorator_list=owner.decorator_list,
-            type_params=getattr(owner, "type_params", []),
-        )
-        uses[f"{cls}:"] = _sha(ast.dump(shell, include_attributes=False))
-        uses[f"{cls}#"] = str(len(module.get(cls, [])))
-        seeds |= _reads(ast.fix_missing_locations(shell), None)
-        seeds |= {f"{cls}.{m}" for m in members if not m.startswith("test")}
+    cls = chain[0] if chain else None
+    for name in chain:
+        shell = _shell(classes[name])
+        uses[f"{name}:"] = _sha(ast.dump(shell, include_attributes=False))
+        uses[f"{name}#"] = str(len(module.get(name, [])))
+        seeds |= _reads(shell, None)
+        if "<class>" in members[name]:
+            seeds.add(f"{name}.<class>")
+        seeds |= {f"{cls}.{m}" for m in members[name] if not m.startswith("test") and m != "<class>"}
+
+    def lookup(name: str) -> list[_Part]:
+        if "." not in name:
+            return module.get(name, [])
+        prefix, attr = name.split(".", 1)
+        if prefix not in chain:
+            return []
+        if attr == "<class>":
+            return members[prefix].get("<class>", [])
+        for member in chain:  # the class itself first, then what it inherits: the override wins
+            if attr in members[member]:
+                return members[member][attr]
+        return []
+
     todo = sorted(seeds)
     seen: set[str] = set()
     while todo:
@@ -266,7 +390,12 @@ def _closure(
         if name in seen or name == own:
             continue
         seen.add(name)
-        found = members.get(name.split(".", 1)[1], []) if cls and name.startswith(f"{cls}.") else module.get(name, [])
+        if "." in name and name.split(".", 1)[0] in chain and name.split(".", 1)[0] != cls:
+            name = f"{cls}.{name.split('.', 1)[1]}"  # `self.attr` read in a base class method: the subclass's view
+            if name in seen:
+                continue
+            seen.add(name)
+        found = lookup(name)
         if found:
             uses[name] = _digest_of(found)
             for part in found:
@@ -279,37 +408,53 @@ def _closure(
 @lru_cache(maxsize=512)
 def facts_of(source: str) -> dict[str, Facts] | None:
     """The facts of every name that has a binding in a scope that holds a test: the module's names that start with
-    `test` and, for each module-level class, `Class.<name>` for those that start with `test`. `None` when the source
-    does not parse. A name is a test (`Facts.test`) when a `def` of it is a test function (`scan._qualified`)."""
+    `test` and, for each module-level class, `Class.<name>` for the `test*` names its body binds and those it inherits
+    from module-level classes of the same file. `None` when the source does not parse. A name is a test
+    (`Facts.test`) when a `def` of it is among its parts."""
     tree = _parse(source)
     if tree is None:
         return None
-    module = _scope(tree.body, None)
+    module = _scope(tree.body, None, "<module>")
     autouse = {n.name for n in tree.body if is_autouse(n) and isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)}
-    test_names = {name for name, _ in _qualified(tree) if name.rsplit(".", 1)[-1].startswith("test")}
+    classes: dict[str, ast.ClassDef] = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}  # the last wins
+    members = {name: _scope(node.body, name, "<class>") for name, node in classes.items()}
     facts: dict[str, Facts] = {}
 
-    def record(key: str, parts: list[_Part], members: dict[str, list[_Part]], owner: ast.ClassDef | None) -> None:
-        closure, uses = _closure(key, parts, module, members, owner, autouse)
+    def record(key: str, parts: list[_Part], texts: list[str], chain: list[str]) -> None:
+        closure, uses = _closure(key, parts, module, classes, members, chain, autouse)
         facts[key] = Facts(
-            tuple(p.text for p in parts),
+            tuple(texts),
             tuple(p.line for p in parts),
-            _digest_of(parts),
+            _sha("\n".join(texts)),
             closure,
             uses,
-            key in test_names,
+            any(p.func for p in parts),
             frozenset(n for n in uses if n in module and all(p.is_import for p in module[n])),
         )
 
     for name, parts in module.items():
         if name.startswith("test"):
-            record(name, parts, {}, None)
-    classes: dict[str, ast.ClassDef] = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}  # the last wins
-    for cls, node in classes.items():
-        members = _scope(node.body, cls)
-        for name, parts in members.items():
-            if name.startswith("test"):
-                record(f"{cls}.{name}", parts, members, node)
+            record(name, parts, [p.text for p in parts], [])
+
+    def chain_of(name: str, seen: list[str]) -> None:
+        if name in seen:
+            return
+        seen.append(name)
+        for base in classes[name].bases:
+            if isinstance(base, ast.Name) and base.id in classes:
+                chain_of(base.id, seen)
+
+    for cls in classes:
+        chain: list[str] = []
+        chain_of(cls, chain)
+        owner: dict[str, str] = {}
+        for member in chain:
+            for name in members[member]:
+                if name.startswith("test"):
+                    owner.setdefault(name, member)
+        for name, defining in owner.items():
+            parts = members[defining][name]
+            record(f"{cls}.{name}", parts, [f"{defining}:{p.text}" for p in parts], chain)
     return facts
 
 
@@ -325,6 +470,9 @@ def _closure_why(before: Facts, after: Facts) -> str:
     both = {n for n in differing if n in before.uses and n in after.uses}
     imports = before.imports | after.imports
     named = both or {n for n in differing if n not in imports} or differing
+    real = {n for n in named if not n.endswith(("<module>", "<class>")) and not n.lower().startswith("test")}
+    pseudo = {n for n in named if n.endswith(("<module>", "<class>"))}
+    named = real or pseudo or named  # a new autouse fixture is named, not only the `<module>` statement it is
     shown = sorted(n.rstrip("#:") for n in named)
     shown = list(dict.fromkeys(shown))
     more = f" (+{len(shown) - MAX_NAMES} more)" if len(shown) > MAX_NAMES else ""

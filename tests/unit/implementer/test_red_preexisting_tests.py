@@ -133,3 +133,16 @@ def test_a_later_tasks_red_may_not_change_an_earlier_tasks_red_test(make_bench):
     assert out.status == "failed" and "tests/test_discount.py::test_known_code" in out.reason
     [event] = tamper_events(bench)
     assert event["path"] == "tests/test_discount.py"
+
+
+def test_a_code_swap_in_the_test_file_fails_the_red_attempt(make_bench):  # SCN-IMP-278 at red level (review B1)
+    bench = make_bench([])
+    original = (bench.wb.worktree / BASE_TEST).read_text()
+    swap = original + "\n\ntest_total_adds_prices.__code__ = (lambda: None).__code__\n"
+    bench.adapter._script.append(tampering_red(swap))
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "failed" and committed(bench) == original
+    assert "test_total_adds_prices" in out.reason and "<module>" in out.reason
+    [event] = tamper_events(bench)
+    assert event["path"] == BASE_TEST and event["action"] == "rejected"
+    assert sorted(event["tests"]) == ["test_total_adds_prices", "test_total_of_nothing_is_zero"]

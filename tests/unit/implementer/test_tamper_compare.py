@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from l4.implementer import tamper
-from l4.implementer.tamper import compare, moved, names_test_id
+from l4.implementer.tamper import compare, facts_of, moved, names_test_id
 
 PATH = "tests/test_pricing.py"
 BASE = (Path(__file__).parents[2] / "fixtures/py_tdd/tests/test_pricing.py").read_text()
@@ -47,8 +47,8 @@ def test_a_second_definition_is_a_rebinding_that_names_its_line():  # SCN-IMP-26
     ],
 )
 def test_an_assignment_an_import_or_a_del_that_binds_the_name_is_a_rebinding(suffix):  # SCN-IMP-262
-    [found] = compare(PATH, BASE, BASE + suffix)
-    assert (found.name, found.kind) == ("test_total_adds_prices", "rebound")
+    found = {t.name: t.kind for t in compare(PATH, BASE, BASE + suffix)}
+    assert found["test_total_adds_prices"] == "rebound"  # a `del` is also a statement that reaches every test (D12)
 
 
 PARAM = (
@@ -206,13 +206,10 @@ def test_one_added_test_stands_for_one_deleted_test_only():  # SCN-IMP-270
     assert moved(old, new) == {("tests/test_a.py", "test_dup")}
 
 
-def test_a_test_moved_into_a_class_with_the_same_definition_is_moved():  # SCN-IMP-269
+def test_a_test_moved_into_a_class_is_not_moved():  # SCN-IMP-269 as amended: the class is part of a method's definition
     old = digests("tests/test_a.py", "def test_one(self):\n    assert 1\n")
     new = digests("tests/test_a.py", "class TestOne:\n    def test_one(self):\n        assert 1\n")
-    assert list(new.values()) == list(old.values())  # the method keeps its definition
-    assert moved({("tests/test_a.py", "test_one"): old[("tests/test_a.py", "test_one")]}, new) == {
-        ("tests/test_a.py", "test_one")
-    }
+    assert moved({("tests/test_a.py", "test_one"): old[("tests/test_a.py", "test_one")]}, new) == set()
 
 
 @pytest.mark.parametrize(
@@ -231,3 +228,78 @@ def test_names_test_id(test_id, path, name, expected):
 
 def test_no_public_name_of_the_module_starts_with_test():
     assert not [n for n in vars(tamper) if not n.startswith("_") and n.lower().startswith("test")]
+
+
+# --- the review's false positives and a weak move (8.1, design D12) -------------------------------------------------
+
+GEN = (
+    "import pytest\n\nfrom shop import cart_total\n\n\ndef test_sum_of_lines():\n    lines = [(2, 1.5), (1, 3.0)]\n"
+    "    assert cart_total(lines) == sum(q * p for q, p in lines)\n"
+)
+HOOK = (
+    "from shop import apply\n\n\ndef test_apply_calls_hook():\n    seen = []\n"
+    "    apply(hook=lambda code: seen.append(code))\n    assert seen\n"
+)
+
+
+def test_a_comprehension_variable_and_a_lambda_parameter_are_not_module_reads():  # SCN-IMP-266
+    new_p = (
+        GEN
+        + "\n\np = pytest.param\n\n\n@pytest.mark.parametrize('code', ['A'])\ndef test_new(code):\n    assert code\n"
+    )
+    assert compare("tests/test_cart.py", GEN, new_p) == []
+    new_code = (
+        HOOK
+        + "\n\nimport pytest\n\n\n@pytest.fixture\ndef code():\n    return 'SAVE10'\n\n\n"
+        + "def test_new(code):\n    assert apply(code=code)\n"
+    )
+    assert compare("tests/test_cart.py", HOOK, new_code) == []
+
+
+def test_a_name_a_test_really_reads_is_still_a_read():  # SCN-IMP-266 control
+    reads = "LIMIT = 1\n\n\ndef test_a():\n    assert LIMIT\n"
+    assert [t.name for t in compare("t.py", reads, reads.replace("LIMIT = 1", "LIMIT = 0"))] == ["test_a"]
+
+
+def test_a_re_indented_docstring_is_no_change_and_a_new_word_is():  # SCN-IMP-266
+    root = Path(__file__).parents[2] / "fixtures" / "py_tdd" / "tests"
+    before = "\n".join(
+        [
+            "from pytdd import total",
+            "",
+            "",
+            "def test_total_adds_prices():",
+            "    '''   Adds the prices.   ",
+            "    ",
+            "\tIt rounds to cents.    '''",
+            "    assert total([1.25, 2.5]) == 3.75",
+            "",
+        ]
+    )
+    after = (
+        'from pytdd import total\n\n\ndef test_total_adds_prices():\n    """Adds the prices.\n\n'
+        '    It rounds to cents."""\n    assert total([1.25, 2.5]) == 3.75\n'
+    )
+    assert compare("tests/test_pricing.py", before, after) == []
+    assert [t.kind for t in compare("tests/test_pricing.py", before, after.replace("rounds", "floors"))] == ["changed"]
+    assert root.is_dir()
+
+
+def test_a_class_wrapper_around_the_same_body_stays_a_deletion():  # SCN-IMP-266 (the probe's refactor)
+    found = compare(
+        "t.py", "def test_one():\n    assert 1\n", "class TestOne:\n    def test_one(self):\n        assert 1\n"
+    )
+    assert [(t.name, t.kind) for t in found] == [("test_one", "deleted")]
+
+
+def test_a_test_moved_next_to_a_weakened_helper_is_not_moved():  # SCN-IMP-270
+    a = "def _check(v):\n    assert v == 3\n\n\ndef test_one():\n    _check(1 + 2)\n"
+    b = "def _check(v):\n    return None\n\n\ndef test_one():\n    _check(1 + 2)\n"
+    gone = {
+        ("tests/test_a.py", t.name): (facts_of(a)[t.name].definition, facts_of(a)[t.name].closure)
+        for t in compare("tests/test_a.py", a, None)
+    }
+    added = {("tests/test_b.py", n): (f.definition, f.closure) for n, f in facts_of(b).items() if f.test}
+    assert moved(gone, added) == set()
+    same = {("tests/test_b.py", n): (f.definition, f.closure) for n, f in facts_of(a).items() if f.test}
+    assert moved(gone, same) == {("tests/test_a.py", "test_one")}

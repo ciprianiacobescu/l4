@@ -856,10 +856,14 @@ def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleT
         was = facts_of(before) or {}
         for t in compare(path, before, after):
             if t.kind == "deleted":
-                deleted[path, t.name] = was[t.name].definition
+                deleted[path, t.name] = (was[t.name].definition, was[t.name].closure)
             found.append(t)
         if after is not None and (new := facts_of(after)):
-            added |= {(path, n): f.definition for n, f in new.items() if f.test and not (n in was and was[n].test)}
+            added |= {
+                (path, n): (f.definition, f.closure)
+                for n, f in new.items()
+                if f.test and not (n in was and was[n].test)
+            }
     gone = moved(deleted, added)
     stale_ids = list(stale.tests) if stale else []
     return [
