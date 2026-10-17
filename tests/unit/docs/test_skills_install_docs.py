@@ -30,5 +30,5 @@ def test_the_spec_and_the_changelog_carry_the_requirement() -> None:
         assert f"#### SCN-SKL-0{n} " in spec
     assert "| `l4 skills install " in spec and "| `l4 skills status` |" in spec
     changelog = read("CHANGELOG.md")
-    head = changelog.split("## 0.4.14 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    head = changelog.split("## 0.4.14 (", 1)[1].split("\n## ", 1)[0]
     assert "### Added" in head and "l4 skills install" in head
