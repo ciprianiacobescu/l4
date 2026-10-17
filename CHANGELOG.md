@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.9 (unreleased)
+## 0.4.9 (2026-10-17)
 
 ### Fixed
 - The zero-value run finds the modules a test imports in a workspace layout. It looked each import up under the
