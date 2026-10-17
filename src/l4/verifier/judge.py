@@ -24,14 +24,15 @@ from l4.implementer.prompt import data_block, defuse
 from l4.implementer.tdd import RoleLimit
 from l4.llm.agent_judge import LLMBackend, Msg, StructuredResult, render_prompt
 from l4.schemacheck import validate
-from l4.specs.base import Criterion
+from l4.specs.base import Criterion, Task
 from l4.verifier.judge_repair import repair_reply
 from l4.verifier.selection import same_model
 from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    8  # 8: the accepted review findings block, its rule and the reply's `accepted` array;
+    9  # 9: the satisfied block, its rule and the reply's satisfied array;
+    # 8: the accepted review findings block, its rule and the reply's `accepted` array;
     # 7: the feedback block, its rule and the reply's `feedback` array; 6: the round-outputs block and its rule;
     # 5: the Owner changes block; 4: the test conventions block; 3: a spec gap names its criterion
 )
@@ -112,6 +113,14 @@ class AcceptedAnswer(_Open):
     evidence: str
 
 
+class SatisfiedAnswer(_Open):
+    """The judge's answer for one task of the `satisfied` block (L4-VER-018): the task's key, as `tasks.md` has it."""
+
+    task: str = Field(min_length=1, max_length=40)
+    holds: bool
+    evidence: str
+
+
 class JudgeVerdict(_Open):
     criteria: list[CriterionVerdict]
     test_adequacy: list[TestAdequacy]
@@ -119,6 +128,7 @@ class JudgeVerdict(_Open):
     riskiest_assumptions: list[str] = Field(min_length=3, max_length=3)
     feedback: list[FeedbackAnswer] | None = None
     accepted: list[AcceptedAnswer] | None = None
+    satisfied: list[SatisfiedAnswer] | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +198,12 @@ person accepted, with the reason they gave for how the implementer should handle
 the gap as the reason says; `evidence` is the file:line of the diff that shows it, or what is still missing. Your \
 answers are evidence for the harness: they do not change any criterion verdict, and a gap is no reason to fail a \
 criterion the spec states. Without such a block, leave `accepted` out.
+- When the prompt has a <l4:data kind="satisfied"> block, each task in it was ticked by the harness without a change \
+of its own, because the implementer said earlier work already satisfies the criteria it cited. Answer in the reply's \
+`satisfied: [{task, holds, evidence}]`, one entry per task key: `holds` is true only when the diff or the gate report \
+shows that the code and documents at head do what the task's text says (the criteria passing is not enough: check the \
+task's own text, for example a line a document must hold); `evidence` is the file:line or test id that shows it, or \
+what is still missing. Without such a block, leave `satisfied` out.
 - test_adequacy: one entry per test of the gate report you rely on (does it check the criterion's observable \
 outcome?); an empty list when you rely on none.
 - riskiest_assumptions: exactly three things that, if wrong, would make your verdicts wrong.
@@ -281,6 +297,55 @@ def _accepted_block(items: Sequence[AcceptedRef]) -> str:
 
 
 @dataclass(frozen=True)
+class SatisfiedRef:
+    """One task the harness ticked as already satisfied (L4-VER-018): its key, its text from `tasks.md`, and per
+    criterion its last red's proof, the criterion id and the discriminating tests."""
+
+    task: str
+    text: str
+    criteria: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+def satisfied_refs(
+    tasks: Sequence[Task], events: Sequence[Any], text_of: Callable[[Task], str] | None = None
+) -> list[SatisfiedRef]:
+    """The unit's own tasks (a fix unit's events are not read) whose last `task.done` has `tdd: already-satisfied`, with
+    the criteria of the last `task.red_ok` of the same task: the `discriminating` tests of each, else its `tests`.
+    `text_of` gives a task's whole text (its checkbox line and the lines under it); without it, the title line."""
+    done: dict[str, bool] = {}
+    proofs: dict[str, dict[str, Any]] = {}
+    for event in events:
+        data = event.data
+        key = str(data.get("task") or "")
+        if data.get("fix_unit") or not key:
+            continue
+        if event.type == "task.done":
+            done[key] = data.get("tdd") == "already-satisfied"
+        elif event.type == "task.red_ok":
+            proofs[key] = data.get("criteria") or {}
+
+    def proof(key: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return tuple(
+            (cid, tuple(str(t) for t in info.get("discriminating") or info.get("tests") or ()))
+            for cid, info in sorted(proofs.get(key, {}).items())
+        )
+
+    text = text_of or (lambda task: task.title)
+    return [SatisfiedRef(t.key, text(t), proof(t.key)) for t in tasks if done.get(t.key)]
+
+
+def _satisfied_block(items: Sequence[SatisfiedRef]) -> str:
+    """`<l4:data kind="satisfied">`: per task its key, its text and the criteria that proved it, defused like the other
+    blocks."""
+    sections = []
+    for i in items:
+        lines = [f"### Task {i.task}", i.text.strip()]
+        lines += [f"Proved by: {cid} (tests: {', '.join(tests)})" for cid, tests in i.criteria]
+        sections.append("\n".join(lines))
+    return '<l4:data kind="satisfied">\n' + defuse("\n\n".join(sections)) + "\n</l4:data>"
+
+
+@dataclass(frozen=True)
 class JudgePrompt:
     system: str
     user: str
@@ -288,6 +353,7 @@ class JudgePrompt:
     version: str
     accepted_ids: tuple[str, ...] = ()  # the ids of the accepted block, each to be answered in `accepted` (L4-VER-017)
     feedback_ids: tuple[str, ...] = ()  # the ids of the feedback block, each to be answered in `feedback`
+    satisfied_ids: tuple[str, ...] = ()  # the task keys of the satisfied block, each to be answered in `satisfied`
 
 
 def build_judge_prompt(
@@ -305,6 +371,7 @@ def build_judge_prompt(
     round_outputs: Sequence[RoundOutput] = (),
     feedback: Sequence[FeedbackRef] = (),
     accepted: Sequence[AcceptedRef] = (),
+    satisfied: Sequence[SatisfiedRef] = (),
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -312,7 +379,7 @@ def build_judge_prompt(
     project's people changed on the unit branch (`owner_changes`: path and the first commit's sha10), and what the
     harness wrote in this round and commits after the review (`round_outputs`: the accepted audit tests), and the
     feedback items taken and not yet addressed (`feedback`, L4-FBK-007), and the review findings a person accepted
-    (`accepted`, L4-YOLO-028). `redact` runs
+    (`accepted`, L4-YOLO-028), and the tasks ticked as already satisfied (`satisfied`, L4-VER-018). `redact` runs
     over the whole text before it is hashed (L4-OBS-002), so `sha256` is the hash of the prompt document the judge was
     sent (`render_prompt`: system, blank line, user; the schema instruction a prompt-contract adapter appends is not
     part of it) and of the published `.prompt.md` (HB-5)."""
@@ -349,6 +416,11 @@ def build_judge_prompt(
         if accepted
         else []
     )
+    satisfied_block = (
+        ["## Tasks ticked as already satisfied (answer each in the reply's satisfied)\n" + _satisfied_block(satisfied)]
+        if satisfied
+        else []
+    )
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
@@ -360,6 +432,7 @@ def build_judge_prompt(
         *written,
         *asked,
         *accepted_block,
+        *satisfied_block,
         "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
         + data_block("notes_for_verifier", notes_for_verifier or "(none)"),
     ]
@@ -367,7 +440,7 @@ def build_judge_prompt(
     digest = hashlib.sha256(render_prompt(SYSTEM, [Msg("user", user)]).encode("utf-8")).hexdigest()
     return JudgePrompt(
         SYSTEM, user, digest, f"judge@{PROMPT_VERSION}", accepted_ids=tuple(i.id for i in accepted),
-        feedback_ids=tuple(i.id for i in feedback),
+        feedback_ids=tuple(i.id for i in feedback), satisfied_ids=tuple(i.task for i in satisfied),
     )  # fmt: skip
 
 
@@ -406,19 +479,26 @@ def _repair(problems: str) -> Msg:
     )
 
 
-def _unanswered(prompt: JudgePrompt, verdict: JudgeVerdict) -> tuple[list[str], list[str]]:
-    """The accepted and the feedback ids the prompt asked for that the reply does not answer (L4-VER-017)."""
+def _unanswered(prompt: JudgePrompt, verdict: JudgeVerdict) -> tuple[list[str], list[str], list[str]]:
+    """The accepted ids, the feedback ids and the satisfied task keys the prompt asked for that the reply does not
+    answer (L4-VER-017, L4-VER-018)."""
     accepted = {a.id for a in verdict.accepted or ()}
     feedback = {f.id for f in verdict.feedback or ()}
-    return [i for i in prompt.accepted_ids if i not in accepted], [i for i in prompt.feedback_ids if i not in feedback]
+    satisfied = {s.task for s in verdict.satisfied or ()}
+    return (
+        [i for i in prompt.accepted_ids if i not in accepted],
+        [i for i in prompt.feedback_ids if i not in feedback],
+        [i for i in prompt.satisfied_ids if i not in satisfied],
+    )
 
 
-def _ask_missing(accepted: Sequence[str], feedback: Sequence[str]) -> Msg:
-    named = [f"{kind} {', '.join(ids)}" for kind, ids in (("accepted", accepted), ("feedback", feedback)) if ids]
+def _ask_missing(accepted: Sequence[str], feedback: Sequence[str], satisfied: Sequence[str] = ()) -> Msg:
+    kinds = (("accepted", accepted), ("feedback", feedback), ("satisfied", satisfied))
+    named = [f"{kind} {', '.join(ids)}" for kind, ids in kinds if ids]
     return Msg(
         "user",
         f"Your reply left out the answers for these ids: {'; '.join(named)}. Reply again with the complete JSON "
-        "object, with one entry per id in accepted and in feedback.",
+        "object, with one entry per id in accepted, in feedback and in satisfied.",
     )
 
 
@@ -446,10 +526,10 @@ def run_judge(
     expect_model: str | None = None,
 ) -> JudgeRun:
     """At most two calls: a schema break gets one repair prompt, a timeout one retry, and a valid reply that leaves out
-    an id the prompt asked for (`accepted_ids`, `feedback_ids`) one call that names the missing ids (L4-VER-017): a
-    valid second reply is the verdict, anything else keeps the first one. A usage limit or a lost login raises
-    `RoleLimit` (the role is unavailable, exit 12); any other failure to answer is the returned status. The repair
-    prompt shows the model its own rejected reply, `redact`ed and cut to MAX_REPAIR_ECHO_CHARS.
+    an id the prompt asked for (`accepted_ids`, `feedback_ids`, `satisfied_ids`) one call that names the missing ids
+    (L4-VER-017, L4-VER-018): a valid second reply is the verdict, anything else keeps the first one. A usage limit or
+    a lost login raises `RoleLimit` (the role is unavailable, exit 12); any other failure to answer is the returned
+    status. The repair prompt shows the model its own rejected reply, `redact`ed and cut to MAX_REPAIR_ECHO_CHARS.
     `expect_model` is the full model id of the profile, for an adapter that reports the served model: an answer from
     another model is `model_mismatch` and its verdict is dropped (SPEC 8.1, SCN-AVL-15)."""
     first = [Msg("user", prompt.user)]
@@ -478,12 +558,12 @@ def run_judge(
         if status == "ok":
             out.reply = "retried" if retried else ("repaired" if repaired else "valid")
             assert verdict is not None
-            accepted, feedback = _unanswered(prompt, verdict) if kept is None else ([], [])
-            if (accepted or feedback) and call < MAX_CALLS:
+            accepted, feedback, satisfied = _unanswered(prompt, verdict) if kept is None else ([], [], [])
+            if (accepted or feedback or satisfied) and call < MAX_CALLS:
                 kept, retried = replace(out), True
                 answered = result.raw or result.parsed
                 echo = [Msg("assistant", redact(json.dumps(answered))[:MAX_REPAIR_ECHO_CHARS])] if answered else []
-                messages = [*first, *echo, _ask_missing(accepted, feedback)]
+                messages = [*first, *echo, _ask_missing(accepted, feedback, satisfied)]
                 continue
             return out
         if kept is not None:  # the second reply is no answer: the first verdict stands, with both calls' cost

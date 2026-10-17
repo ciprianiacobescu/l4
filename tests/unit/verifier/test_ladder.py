@@ -181,8 +181,10 @@ def test_the_verify_command_refuses_a_unit_that_is_not_implemented(run_verify, v
 
 
 def test_secrets_in_the_diff_and_the_notes_never_reach_the_judge(run_l4, valid_spec, monkeypatch):
-    """Defence in depth: the pre-push scan (HB-4, tests/unit/orchestrator/test_push_secret_scan.py) would stop this
-    commit first, so it is switched off here to prove the judge prompt is redacted on its own."""
+    """Defence in depth: the step check (L4-SEC-008, tests/unit/implementer/test_step_secrets.py) and the pre-push scan
+    (HB-4, tests/unit/orchestrator/test_push_secret_scan.py) would stop this commit first, so both are switched off here
+    to prove the judge prompt is redacted on its own."""
+    monkeypatch.setattr("l4.implementer.tdd.worktree_secrets", lambda *a, **k: [])
     monkeypatch.setattr("l4.orchestrator.outgoing_secrets", lambda *a, **k: [])
     token = "glpat-" + "A1b2C3d4" * 3
     key = "sk-ant-" + "Z9y8X7w6" * 3

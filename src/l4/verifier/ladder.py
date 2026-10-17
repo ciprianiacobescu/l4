@@ -55,7 +55,7 @@ from l4.evidence.collect import (
 from l4.evidence.report import evidence_json
 from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
-from l4.fsutil import UnsafeFile, reject_symlinks
+from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport
 from l4.implementer.discrimination import discriminate_extra, file_of_test
@@ -73,12 +73,14 @@ from l4.s1.records import append_records
 from l4.s1.shadow import run_shadow
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
-from l4.specs.base import Criterion, Framework, SpecError
+from l4.specs.base import Criterion, Framework, SpecError, Task
 from l4.specs.criteria import base_criteria_at
 from l4.specs.feedback import FeedbackFile
 from l4.specs.followup import feedback_home
+from l4.specs.markers import MAX_TASKS_BYTES
 from l4.specs.providers import providers_for
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
+from l4.specs.tasks_text import task_text
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.state.lifecycle import Trigger
@@ -123,6 +125,7 @@ from l4.verifier.judge import (
     build_judge_prompt,
     reply_counts,
     run_judge,
+    satisfied_refs,
 )
 from l4.verifier.notes import verdict_section
 from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
@@ -1001,6 +1004,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     ids = {c.id for c in criteria}
     asked = _asked_feedback(wb)
     accepted = accepted_refs(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
+    satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
 
     def judge_body() -> tuple[bool, str]:
         diff, truncated = _git_diff(wb, base_sha, result.head_sha)
@@ -1010,6 +1014,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
             owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
             round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted,
+            satisfied=satisfied,
         )  # fmt: skip
         result.prompt_sha256 = prompt.sha256
         result.prompt_template = prompt.version
@@ -1042,9 +1047,39 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 "review.accepted_judged", id=item.id, round=vc.round, addressed=answer.addressed if answer else False,
                 evidence=answer.evidence if answer else "not answered", profile=vc.judge_profile,
             )  # fmt: skip
+        for ref in satisfied:  # L4-VER-018: a task ticked without a change of its own is checked against its text
+            said = next((a for a in judged.verdict.satisfied or [] if a.task == ref.task), None)
+            holds, evidence = (said.holds, said.evidence) if said else (False, "not answered")
+            wb.emit(
+                "verify.satisfied_judged", task=ref.task, round=vc.round, holds=holds, evidence=evidence,
+                profile=vc.judge_profile,
+            )  # fmt: skip
+            if said is None:
+                title = f"the judge did not say whether task {ref.task} is done"
+                result.findings.append(Finding(Severity.MINOR, title, "", "judge"))
+            elif not said.holds:
+                title = f"task {ref.task} is ticked as already satisfied, but its text is not done"
+                result.findings.append(Finding(Severity.MAJOR, title, said.evidence, "judge"))
         return True, f"{judged.calls} call(s)"
 
     _step(vc, run, "9", "judge", judge_body)
+
+
+def _task_text(wb: Workbench) -> Callable[[Task], str]:
+    """A task's whole text as `tasks.md` at head holds it (its checkbox line and the lines under it, L4-VER-018): the
+    title alone is the first line, and a task's instruction often goes on below it."""
+    try:
+        data = read_regular_file(wb.ref.path / "tasks.md", limit=MAX_TASKS_BYTES)
+    except (OSError, UnsafeFile):
+        data = b""
+
+    def text(task: Task) -> str:
+        try:
+            return task_text(data, task, wb.ref.framework) if data else task.title
+        except ValueError:  # the line moved: the title is still the task's own words
+            return task.title
+
+    return text
 
 
 def _judge_feedback(

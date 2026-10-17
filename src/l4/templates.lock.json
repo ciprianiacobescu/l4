@@ -4,8 +4,8 @@
     "version": 4
   },
   "implementer/contract": {
-    "sha256": "418c27bdfdd8fbb6bb6f28455b0e3377e7d270e586fea4ba07dedf186a31cf22",
-    "version": 10
+    "sha256": "3406b42df87f1024fe771eb8fedc5a731be42b509b4b607a6417d57d2d342c61",
+    "version": 11
   },
   "implementer/green": {
     "sha256": "29adc0f3f7213e2b1393ec01db370128c2e76dce658e2d68ef81e1a0a38ddab9",
@@ -16,8 +16,8 @@
     "version": 1
   },
   "implementer/red": {
-    "sha256": "9470113fe548923e6ddd237582f078d8b4920ffee2cac5663219960b1a003bec",
-    "version": 9
+    "sha256": "a07b283823268862a023f9376d9fcb87007bf0495871376d93bc2f6ec9e0bf5a",
+    "version": 10
   },
   "implementer/single": {
     "sha256": "e3c49b925c35b8de8a9a36df35e8d6886d95cdf0df7ca4b93954f5b6eb38d7a6",
@@ -28,8 +28,8 @@
     "version": 5
   },
   "judge": {
-    "sha256": "5659be6702d2130525db3ffdd3e1cf1719750de346f16cb6aceb869deeba1fb7",
-    "version": 8
+    "sha256": "89e59b67271f5624d2c8776c150fdfe3bad866e6b3d53f7355d7f734c974acea",
+    "version": 9
   },
   "testwriter/audit": {
     "sha256": "60b28f79c5b7ca34c9e93edab8c32d2846fb1c416a8f1e46c7f65b52ae887970",

@@ -42,7 +42,7 @@ def test_a_hint_cannot_close_its_data_block_or_forge_a_section():
 def test_the_prompt_does_not_claim_that_the_harness_runs_the_counterexample():
     from l4.verifier.judge import PROMPT_VERSION, SYSTEM
 
-    assert PROMPT_VERSION == 8
+    assert PROMPT_VERSION == 9
     assert "The harness runs it" not in SYSTEM and "harness runs" not in SYSTEM
     assert "recorded for a human" in SYSTEM and "does not run it" in SYSTEM
 
@@ -55,7 +55,7 @@ def test_every_fail_needs_a_counterexample_and_three_assumptions_are_asked_for()
 def test_a_truncated_diff_says_so_and_the_digest_changes_with_the_prompt():
     full, cut = build(), build(diff_truncated=True)
     assert "diff truncated" in cut.user and "diff truncated" not in full.user
-    assert full.sha256 != cut.sha256 and full.version == "judge@8"
+    assert full.sha256 != cut.sha256 and full.version == "judge@9"
 
 
 def test_secrets_are_redacted_everywhere_before_the_hash_is_taken():
@@ -103,7 +103,7 @@ def test_owner_changes_block_and_rubric_line():
     assert '<l4:data source="owner changes">' in block  # paths are repository text: a data block
     many = build(owner_changes=[(f"f{n}.py", "a" * 10) for n in range(60)]).user
     assert many.count("(commit aaaaaaaaaa)") == 40 and "(+20 more)" in many
-    assert listed.version == "judge@8"
+    assert listed.version == "judge@9"
     assert listed.sha256 != plain.sha256
 
 
