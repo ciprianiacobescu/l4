@@ -6,6 +6,28 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.11 (2026-10-17)
+
+### Fixed
+- A test of a context manager can prove its criterion. The zero-value run rewrote a `@contextmanager` function (or its
+  red stub) to `return None`, so every `with` raised a `TypeError` before the test body ran, and no test could fail by
+  assertion: on a consumer repository a unit halted after five red attempts on `search_phase`. Now a context manager's
+  zero value enters and yields the zero value of what it yields, a generator yields nothing, and a function annotated
+  to return a context manager or an iterator returns a null one. The `vacuous` message says how to test a context
+  manager.
+- A test gate reads every report it lists. With several reports in `gates.test.reports`, the harness read only the
+  first one that existed, so the tests of the other suites were invisible to red, green and the verifier (on a
+  consumer repository with three Python projects, the 423 tests of two suites). Now every listed report must exist (else
+  `report missing: <report>`), and the reports are merged; a test in two reports keeps its worse result.
+
+- Doctor's CI-003 no longer lists a job that a `typecheck` or `build` gate mirrors: verification runs those gates in
+  every round, but the row counted them only when a `yolo.profiles` entry named them. It also ignores `uv run`'s
+  `--directory`, `--project`, `--package`, `--frozen`, `--locked` and `--no-sync` options when it compares commands.
+
+### Changed
+- The adoption docs and the `l4 init` note name the public harness first: the plain `--action` form needs no deploy
+  key for any repository. The copy form and the deploy key are for a private harness.
+
 ## 0.4.10 (2026-10-17)
 
 ### Fixed
