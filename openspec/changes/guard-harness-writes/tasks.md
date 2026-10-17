@@ -17,7 +17,7 @@ Every task follows these rules:
 
 ## 1. File primitives that never follow a link (L4-SEC-020; design D1)
 
-- [ ] 1.1 Tests in `tests/unit/test_fsutil_inside.py` (new), on a `tmp_path` tree with an outside directory:
+- [x] 1.1 Tests in `tests/unit/test_fsutil_inside.py` (new), on a `tmp_path` tree with an outside directory:
   - `linked_component` finds a linked parent, a linked last component, or nothing.
   - `remove_link` removes a link and leaves its target.
   - `read_inside` / `write_inside` / `unlink_inside` under a linked parent raise `LinkedPath`, whose `.link` is
