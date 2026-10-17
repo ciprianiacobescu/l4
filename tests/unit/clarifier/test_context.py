@@ -65,19 +65,44 @@ def test_full_context_in_data_blocks(repo, git_for):
     assert 'source="src/vat.py"' in user and "59: def vat_cents(net):" in user
     assert "(lines" not in user  # a `ref` copied from a source attribute must be a bare path
     assert "that prefix is not part of the file" in SYSTEM
-    assert prompt.sha256 == hashlib.sha256((SYSTEM + user).encode()).hexdigest() and prompt.version == "clarifier@4"
+    assert prompt.sha256 == hashlib.sha256((SYSTEM + user).encode()).hexdigest() and prompt.version == "clarifier@5"
     assert "Answer question Q-002 now." in user.splitlines()[-2:] or user.rstrip().endswith(
         "Answer question Q-002 now."
     )
 
 
 def test_documents_are_cut_to_their_share_of_the_budget(repo, git_for):
-    b = builder(repo, git_for, tokens=100)  # 400 characters, half for documents
+    """clarifier@5 (kiro-prompt-context, owner decision 6): the implementer's builder, order and cut list."""
+    b = builder(repo, git_for, tokens=1200)  # 4,800 characters, half for documents
+    design = "".join(f"design line {n:03d} xx\n" for n in range(300))
     prompt = b.build_prompt(
-        view(), documents=[("design.md", "d" * 1000), ("proposal.md", "p" * 10)], base_specs=[], answered="", code=[]
+        view(), documents=[("design.md", design), ("proposal.md", "p" * 10)], base_specs=[], answered="", code=[]
     )
-    assert "[truncated: 803 characters omitted]" in prompt.user
-    assert "omitted to fit the context budget" in prompt.user and "p" * 10 not in prompt.user
+    assert "[cut: lines " in prompt.user and "1: design line 000 xx" in prompt.user  # numbered by the file's own lines
+    assert "design line 299" not in prompt.user and "p" * 10 not in prompt.user.split("# Earlier answers")[0].split(
+        "Not shown in full"
+    )[0]  # fmt: skip
+    assert (
+        'kind="cuts"' in prompt.user
+        and "- design.md: " in prompt.user
+        and "- proposal.md: 0 of 10 characters" in prompt.user
+    )
+
+
+def test_the_requirements_come_before_the_design_and_gaps_keep_the_files_line_numbers(repo, git_for):
+    from l4.implementer.unit_context import SourceFile
+
+    requirements = "# Requirements\n" + "".join(f"## R{n}\nline {n}\n" for n in range(1, 30))
+    big_design = "# Design\n" + "".join(f"## Component {n}\n" + "x" * 150 + "\n" for n in range(100))
+    docs = [
+        SourceFile("design.md", ".kiro/specs/u/design.md", big_design, len(big_design)),
+        SourceFile("requirements.md", ".kiro/specs/u/requirements.md", requirements, len(requirements)),
+    ]
+    b = builder(repo, git_for, tokens=1500)
+    user = b.build_prompt(view(), documents=docs, base_specs=[], answered="", code=[]).user
+    assert user.index('source="requirements.md"') < user.index('source="design.md"')
+    assert "[not shown: lines " in user and "- .kiro/specs/u/design.md: " in user
+    assert "3: line 1" in user  # the second section's text keeps its own line number
 
 
 def test_search_terms_take_paths_names_and_identifiers_not_words():
@@ -140,7 +165,7 @@ def test_the_confidence_rule_is_calibrated_and_product_is_never_technical():
 def test_the_prompt_version_is_bumped_for_the_new_rules():
     from l4.clarifier.context import PROMPT_VERSION
 
-    assert PROMPT_VERSION == 4
+    assert PROMPT_VERSION == 5
 
 
 def test_the_answer_length_rule_is_in_the_system_prompt():

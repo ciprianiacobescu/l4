@@ -80,7 +80,7 @@ out a Kiro unit's `requirements.md`. That is **not** so for the judges [V, read]
 
 - `evidence/collect.py:41` `UNIT_FILES` is never used. The live copy, `evidence/scope.py:156`, feeds only step 1's
   declared scope: the paths that proposal, design and tasks name (`unit_declared_scope`, `scope.py:186-199`). A path
-  named only in a Kiro `requirements.md` is not declared [V]. This is a scope matter, left as it is (§7, Q7).
+  named only in a Kiro `requirements.md` is not declared [V]. Owner decision 7 changes it: step 1's scope reads them (D9).
 - **Step-9 judge.**
   - Its spec is `_family_sources(wb)` (`ladder.py:425-431`), which is `collect_sources` of the unit and of each fix unit.
     So it holds `requirements.md` and `bugfix.md`, with **no budget** (`judge.py:383`).
@@ -96,8 +96,7 @@ out a Kiro unit's `requirements.md`. That is **not** so for the judges [V, read]
   together at 8,000 characters (`audit.py:98-108`). Step 4a writes "from the criterion text alone" by design, so this
   is unchanged [I].
 - **Clarifier.** It reads `collect_sources` and gives the documents half of the same budget (`DOCUMENT_SHARE = 2`,
-  `clarifier/context.py:28`). It can lose `requirements.md` behind a long design the same way. Not changed here (§7,
-  Q6).
+  `clarifier/context.py:28`). It can lose `requirements.md` behind a long design the same way. The clarifier now uses the same builder (D9, owner decision 6).
 
 ### 1.5 implementer-5 (confirmed review finding)
 
@@ -322,6 +321,7 @@ conventions.
 - A file whose YAML does not parse, or whose `context` is not a string, adds nothing and records the decision
   `{path, inclusion: "context", included: false, why: "bad_front_matter"}`. One shape for every decision.
 - `openspec/project.md` belongs to the pre-1.0 layout that L4 refuses (SPEC-001), so it is not read.
+
 ### D6a. The root `AGENTS.md`, opt-in (owner decision 3)
 
 - `implementer.include_agents_md` (default `false`). When on, the repository root's `AGENTS.md` (only that file: no
@@ -331,7 +331,6 @@ conventions.
   why: "include_agents_md"}`; a link or a file that is not regular is left out with `why: symlink` or `not_regular`.
 - It is off by default because no adapter loads it under L4 and a project may keep agent rules there that this
   harness's contract forbids (`git commit`).
-
 
 ### D7. The budget
 
@@ -396,7 +395,7 @@ A copy of such a criterion is still accepted and confirmed the same way. `red@11
 - A leaf that reports only `Req 1.1` while both are proved is accepted, with both proofs in `task.red_ok.criteria`.
 
 **Criteria of other tasks** are still accepted when a leaf's test traces them. The zero-value rule of `red.md` tells the
-agent to tag a test with a second criterion, so rejecting them would break it (§7, Q5).
+agent to tag a test with a second criterion, so rejecting them would break it (owner decision 5: unchanged).
 
 This makes the code meet L4-IMP-005's existing schema text: `criteria_ids` "must include the task's cited criteria
 (Kiro)".
@@ -406,20 +405,34 @@ This makes the code meet L4-IMP-005's existing schema text: `criteria_ids` "must
 **Step 9.**
 
 - `_family_sources` uses `read_sources` for the unit and each fix unit. Fix units are prefixed `<name>/` as today.
-- `build_judge_prompt` gains `unread`: the `oversize`, `symlink` and `not_regular` entries. When there are any, it
-  appends `### Not shown in full` to `## Specification`, in the format of D4 with no "open it" advice (the judge has no
-  tools).
-- Each such file adds the hold `the spec file <path> is larger than 262144 bytes: the judge saw only its start` (or
-  `... is a symlink: the judge did not see it`), as the diff cut does.
-- The ledger gets `prompt.truncated{role: "judge", round, sources}`.
-- `SYSTEM` gains one rule (below), and `PROMPT_VERSION` becomes 10.
-- The spec stays unbudgeted otherwise. The judge already sees every criterion's text and the requirements whole
-  (§1.4). Bounding the judge prompt is §7, Q2.
+- **A budget (owner decision 2).** `verifier.judge_context_budget_tokens` (default 48000, at least 1000) bounds the spec
+  text. The criteria's text and the done-tasks block (below) are charged first; the sources are then filled by the
+  planner of D2 with no conventions and no named sections (the judge has no task): the narrative (`requirements.md`,
+  `bugfix.md`, spec deltas), then `design.md`, then `proposal.md`, each by whole sections, each gap marked.
+- `build_judge_prompt` gains `unread`: every cut or unread source. When there are any, it appends `### Not shown in
+  full` to `## Specification`, in the format of D4 with no "open it" advice (the judge has no tools).
+- **Holds.** An `oversize`, `symlink` or `not_regular` file adds `the spec file <path> is larger than 262144 bytes: the
+  judge saw only its start` (or `... is a symlink: the judge did not see it`). A `requirements.md`, `bugfix.md` or spec
+  delta cut by the budget adds `the spec file <path> was cut to fit the judge's budget: the judge saw only part of it`,
+  because criteria come from them. A design or proposal cut by the budget is only named.
+- The ledger gets `prompt.truncated{role: "judge", round, budget_tokens, sources}`.
+- **The done tasks (owner decision 7).** Every done task of the unit and of its fix units (`<fix>/<key>`) that the
+  `satisfied` block does not already ask about is listed with its whole block from its `tasks.md`, in `## Done tasks
+  (check each against the diff; a mismatch is a finding)` as `<l4:data kind="tasks">`. The judge is asked whether the
+  diff does what each task's text says, detail lines included; a mismatch is a finding titled `task <key>: …` of severity
+  major or minor, never blocker for this reason alone (a major finding blocks like any other, as with L4-VER-018). The
+  reply schema does not change.
+- `SYSTEM` gains the two rules of D11, and `PROMPT_VERSION` becomes 10.
+
+**Step 1's scope (owner decision 7).** `unit_declared_scope` reads a Kiro unit's `requirements.md` and `bugfix.md` whole,
+like `design.md` and `tasks.md`: a path named only there is declared.
 
 **S1 (step 8).** No change in behaviour. A regression test pins that each state starts with `Criterion <id>:` and the
 criterion's whole text, beside a 125 kB design.
 
-**Audit writer and clarifier.** Unchanged (§1.4). Their `collect_sources` still skips an oversized file (§6).
+**Audit writer.** Unchanged (§1.4); its `collect_sources` still skips an oversized file.
+
+**Clarifier (owner decision 6).** `ContextBuilder.build_prompt` fills its documents (half the budget, `DOCUMENT_SHARE`) with the planner of D2: the same order, sections and cut list, the question's backticked tokens naming sections first, the archived specs last. Kept lines carry the file's own line numbers (a citation `#L<n>` still resolves), each gap is marked, and a block `Not shown in full` names the cuts; `clarifier.py` reads its documents with `read_sources`. `PROMPT_VERSION` becomes 5, with one `SYSTEM` sentence about gaps.
 
 ### D10. What a person sees
 
@@ -505,6 +518,10 @@ the profile.
 
 ## 3. What the agent sees (the probe, task 1, red)
 
+With the new default of 32000 tokens (128,000 characters) the probe's 125,492-character design fits whole beside the
+requirements and the steering, so nothing is cut. The scenarios, the tests and the live check therefore set
+`implementer.context_budget_tokens: 24000`, where the design is cut; the picture below is that case.
+
 ```
 # Harness contract                (contract@12: + conventions, + not-shown rules)
 # Project conventions
@@ -526,10 +543,6 @@ DESIGN-MARKER: put `tip(bill, percent)` in src/calc/tip.py ...
 This task's `_Requirements:_` line names these criteria; cover these. ...
 <l4:data source="criteria">- C-1a9abc58  Req 1.1
   WHEN a bill and a tip percent are given THEN the system SHALL return the tip rounded to 2 places.
-With the new default of 32000 tokens (128,000 characters) the probe's 125,492-character design fits whole beside the
-requirements and the steering, so nothing is cut. The scenarios, the tests and the live check therefore set
-`implementer.context_budget_tokens: 24000`, where the design is cut; the picture below is that case.
-
 - C-41bc8f70  Req 1.2
   WHEN the tip percent is negative THEN the system SHALL raise ValueError.</l4:data>
 # Phase: RED ... (red@11)
@@ -553,7 +566,9 @@ requirements and the steering, so nothing is cut. The scenarios, the tests and t
 | `src/l4/state/status.py` | `UnitSnapshot.prompt_cut`, `_block` line, `--json` key |
 | `src/l4/doctor/checks_spec.py` | SPEC-004 cut warnings |
 | `src/l4/verifier/ladder.py` | `_family_sources` via `read_sources`; the holds and `prompt.truncated{role: judge}` in `_judge_step` |
-| `src/l4/verifier/judge.py` | `build_judge_prompt(unread=...)`, the `Not shown in full` block, `SYSTEM` rule, `PROMPT_VERSION = 10` |
+| `src/l4/verifier/judge.py` | `build_judge_prompt(unread=..., tasks=...)`, the `Not shown in full` block, the done-tasks block, two `SYSTEM` rules, `TaskRef`, `PROMPT_VERSION = 10` |
+| `src/l4/clarifier/context.py`, `clarifier.py` | `build_prompt` fills the documents with `plan_context`; `clarifier@5`; `read_sources` |
+| `src/l4/evidence/scope.py`, `collect.py` | `UNIT_FILES` and `_sections` read `requirements.md` and `bugfix.md` |
 
 ## 5. What a person sees
 

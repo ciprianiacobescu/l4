@@ -210,7 +210,7 @@ Every task follows these rules:
 
 ## 6. The judges
 
-- [ ] 6.1 An unread spec file is named and held, the judge's spec text has a budget, and the done tasks are checked
+- [x] 6.1 An unread spec file is named and held, the judge's spec text has a budget, and the done tasks are checked
   (L4-KSP-014; owner decisions 2 and 7).
   - Tests in `tests/unit/verifier/test_judge_sources.py`, failing first:
     - **SCN-IMP-298:** `build_judge_prompt` with the probe's sources, the long design and a fix unit's `bugfix.md`
@@ -231,11 +231,11 @@ Every task follows these rules:
     `judge.TaskRef`.
   - Update the `judge@9` pins in `tests/unit/verifier/`.
 
-- [ ] 6.2 The clarifier uses the shared builder (owner decision 6, design D9).
+- [x] 6.2 The clarifier uses the shared builder (owner decision 6, design D9).
   - Tests in `tests/unit/clarifier/test_context.py`: the documents are filled requirements before design, kept lines
     carry the file's line numbers, a gap is marked, a block `Not shown in full` names the cuts, `clarifier@5`.
   - Code: `ContextBuilder.build_prompt` via `plan_context`; `clarifier.py` reads its documents with `read_sources`.
-- [ ] 6.3 Step 1's scope reads a Kiro unit's `requirements.md` and `bugfix.md` (owner decision 7).
+- [x] 6.3 Step 1's scope reads a Kiro unit's `requirements.md` and `bugfix.md` (owner decision 7).
   - Tests in `tests/unit/evidence/test_scope.py` (the Kiro-unit case now declares a path named in `requirements.md`).
   - Code: `evidence/scope.py` `_sections` and `UNIT_FILES`.
 

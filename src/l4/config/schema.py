@@ -617,6 +617,7 @@ class VerifierCfg(_Strict):
     evidence: EvidenceCfg = Field(default_factory=EvidenceCfg)
     panel: PanelCfg = Field(default_factory=PanelCfg)
     fix_minor_findings: bool = False
+    judge_context_budget_tokens: int = Field(default=48000, ge=1000)  # the step-9 judge's spec text (L4-KSP-014)
     secret_scan: Literal["gitleaks", "none"] = "gitleaks"
 
 

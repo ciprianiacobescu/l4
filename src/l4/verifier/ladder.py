@@ -30,7 +30,7 @@ import os
 import shutil
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -59,8 +59,8 @@ from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport
 from l4.implementer.discrimination import discriminate_extra, file_of_test
-from l4.implementer.prompt import collect_sources
 from l4.implementer.tdd import RoleLimit
+from l4.implementer.unit_context import MAX_SOURCE_BYTES, Cut, SourceFile, plan_context, read_sources
 from l4.implementer.workbench import Workbench, clip_subject, make_workbench
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, LLMBackend, workbench_request_factory
 from l4.llm.system_one import SystemOneBackend, open_s1_backend
@@ -121,6 +121,8 @@ from l4.verifier.judge import (
     JudgeRun,
     JudgeVerdict,
     RoundOutput,
+    SatisfiedRef,
+    TaskRef,
     accepted_refs,
     build_judge_prompt,
     reply_counts,
@@ -422,13 +424,44 @@ def _unit_dirs(wb: Workbench) -> list[str]:
     return [u.path.resolve().relative_to(root).as_posix() for u in family_units(wb.provider, wb.ref)]
 
 
-def _family_sources(wb: Workbench) -> tuple[tuple[str, str], ...]:
+def _family_sources(wb: Workbench) -> tuple[SourceFile, ...]:
     """The unit's spec files, then each fix unit's under its own name: the judge reads the regression scenarios and the
-    findings they answer."""
-    found = list(collect_sources(wb.ref.path))
+    findings they answer. A file it cannot read whole (over the size limit, a link) comes back named (L4-KSP-014)."""
+    found = list(read_sources(wb.ref.path, wb.worktree))
     for unit in family_units(wb.provider, wb.ref)[1:]:
-        found += [(f"{unit.name}/{path}", text) for path, text in collect_sources(unit.path)]
+        found += [replace(s, name=f"{unit.name}/{s.name}") for s in read_sources(unit.path, wb.worktree)]
     return tuple(found)
+
+
+def _done_tasks(wb: Workbench, satisfied: Sequence[SatisfiedRef]) -> list[TaskRef]:
+    """Every done task of the unit and of its fix units, with its whole text from its own `tasks.md` (owner decision 7):
+    the judge checks that the diff does what each says. A task of the `satisfied` block is asked there already."""
+    asked = {r.task for r in satisfied}
+    found = []
+    for unit in family_units(wb.provider, wb.ref):
+        own = getattr(wb.provider, "own_tasks", wb.provider.tasks)
+        text = _task_text_of(unit.path, wb.ref.framework)
+        prefix = "" if unit == wb.ref else f"{unit.name}/"
+        found += [TaskRef(f"{prefix}{t.key}", text(t)) for t in own(unit) if t.done and f"{prefix}{t.key}" not in asked]
+    return found
+
+
+def _spec_holds(cuts: Sequence[Cut]) -> list[str]:
+    """What the judge did not see of its spec, as holds (L4-KSP-014): a file over the size limit or not readable, and a
+    requirements, bugfix or spec-delta file cut by the budget (the criteria's source). A design or proposal cut by the
+    budget is only named."""
+    holds = []
+    for cut in cuts:
+        if cut.reason == "oversize":
+            holds.append(
+                f"the spec file {cut.path} is larger than {MAX_SOURCE_BYTES} bytes: the judge saw only its start"
+            )
+        elif cut.reason in ("symlink", "not_regular"):
+            kind = "a symlink" if cut.reason == "symlink" else "not a regular file"
+            holds.append(f"the spec file {cut.path} is {kind}: the judge did not see it")
+        elif cut.kind == "narrative":
+            holds.append(f"the spec file {cut.path} was cut to fit the judge's budget: the judge saw only part of it")
+    return holds
 
 
 def verify_unit(vc: VerifyContext) -> VerifyResult:
@@ -1005,21 +1038,35 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     asked = _asked_feedback(wb)
     accepted = accepted_refs(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
+    done = _done_tasks(wb, satisfied)
+    listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
+    plan = plan_context(  # the spec text has a budget of its own; the criteria and the done tasks are charged first
+        fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done),
+        budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=_family_sources(wb),
+        keys=None,
+    )  # fmt: skip
 
     def judge_body() -> tuple[bool, str]:
         diff, truncated = _git_diff(wb, base_sha, result.head_sha)
         prompt = build_judge_prompt(
-            unit_id=wb.ref.id, sources=_family_sources(wb), criteria=criteria, diff=diff,
+            unit_id=wb.ref.id, sources=[(b.path, b.body()) for b in plan.sources], criteria=criteria, diff=diff,
             diff_truncated=truncated, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
             redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
             owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
             round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted,
-            satisfied=satisfied,
+            satisfied=satisfied, tasks=done, unread=plan.cuts,
         )  # fmt: skip
         result.prompt_sha256 = prompt.sha256
         result.prompt_template = prompt.version
         if truncated:
             result.holds.append(f"the diff is longer than {MAX_DIFF_CHARS} characters: the judge saw only the start")
+        if plan.cuts:  # L4-KSP-014: a cut or unread spec file is named to the judge, held, and on the ledger
+            result.holds.extend(_spec_holds(plan.cuts))
+            budget = wb.cfg.verifier.judge_context_budget_tokens
+            wb.emit(
+                "prompt.truncated", role="judge", round=vc.round, budget_tokens=budget,
+                sources=[c.as_dict() for c in plan.cuts],
+            )  # fmt: skip
         judged = _ask_judges(vc, prompt, result)
         if judged.status == "error":
             raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
@@ -1068,14 +1115,18 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
 def _task_text(wb: Workbench) -> Callable[[Task], str]:
     """A task's whole text as `tasks.md` at head holds it (its checkbox line and the lines under it, L4-VER-018): the
     title alone is the first line, and a task's instruction often goes on below it."""
+    return _task_text_of(wb.ref.path, wb.ref.framework)
+
+
+def _task_text_of(unit_dir: Path, framework: Framework) -> Callable[[Task], str]:
     try:
-        data = read_regular_file(wb.ref.path / "tasks.md", limit=MAX_TASKS_BYTES)
+        data = read_regular_file(unit_dir / "tasks.md", limit=MAX_TASKS_BYTES)
     except (OSError, UnsafeFile):
         data = b""
 
     def text(task: Task) -> str:
         try:
-            return task_text(data, task, wb.ref.framework) if data else task.title
+            return task_text(data, task, framework) if data else task.title
         except ValueError:  # the line moved: the title is still the task's own words
             return task.title
 

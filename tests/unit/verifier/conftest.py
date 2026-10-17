@@ -9,7 +9,7 @@ from l4.specs.openspec import CliResult, OpenSpecProvider
 
 from ..archive.conftest import forge_env, gitlab, use_fake_gitlab  # noqa: F401  (a fake GitLab for the hand-off)
 from ..conftest import TddRepo
-from ..implementer.conftest import make_bench  # noqa: F401  (the unit worktree and its gates, no agent run)
+from ..implementer.conftest import make_bench, make_kiro_bench  # noqa: F401  (the unit worktree and its gates)
 from ..orchestrator.conftest import (  # noqa: F401  (`l4 run` with a scripted fake agent)
     BRANCH,
     UNIT_DIR,
