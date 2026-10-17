@@ -23,7 +23,7 @@ from l4.agents.proc import ProcRunner
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
-from l4.fsutil import atomic_write_bytes
+from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, remove_link
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult, GateSpec, run_gate
@@ -110,6 +110,21 @@ def clip_subject(message: str) -> str:
 
 
 @dataclass(frozen=True)
+class UnsafeWrite:
+    """A harness write that was refused (L4-SEC-021): the `path` it was for, the `rule` (`planted link` or `restore
+    failed`) and the step it happened in (`where`). `link` is the planted link itself, `target` where it pointed."""
+
+    path: str
+    rule: str
+    where: str
+    link: str = ""
+    target: str = ""
+
+
+MAX_UNSAFE_SHOWN = 5
+
+
+@dataclass(frozen=True)
 class PreviousAttempt:
     """What the next profile is told after a limit cut a task short: who it was and which limit, never a transcript."""
 
@@ -162,6 +177,7 @@ class Workbench:
     coverage_checked: bool = False  # `check_coverage_after_setup` has answered once for this workbench
     seed_checked: bool = False  # `ensure_uv_seed` has looked at this workbench's uv cache once
     guard_notes: list[GuardNote] = field(default_factory=list)  # what the guards put back since `run_task` cleared it
+    unsafe: list[UnsafeWrite] = field(default_factory=list)  # harness writes refused since `run_task` cleared it
     activated_digest: str | None = None  # the unit folder's digest frozen at the plan's activation (plan step), if any
     activated_plan: str | None = None  # the plan that froze it
 
@@ -194,6 +210,51 @@ class Workbench:
     def append(self, event_type: str, /, **data: Any) -> None:
         """The event sink of the guards, which would otherwise write to the ledger without the context."""
         self.emit(event_type, **data)
+
+    def refused_write(self, exc: UnsafeFile, *, path: str, where: str) -> None:
+        """A harness write was refused (L4-SEC-020). A planted link is removed itself (never its target) and recorded as
+        `guard.violation{phase: gate, rule: "planted link"}`; any other refusal is `rule: "restore failed"`. Nothing is
+        raised: this runs in `finally` blocks. The same link is recorded once per attempt."""
+        if isinstance(exc, LinkedPath):
+            if any(u.rule == "planted link" and u.link == exc.link for u in self.unsafe):
+                remove_link(self.worktree, exc.link)
+                return
+            try:
+                target = os.readlink(self.worktree / exc.link)
+            except OSError:
+                target = ""
+            remove_link(self.worktree, exc.link)
+            self.unsafe.append(UnsafeWrite(path, "planted link", where, exc.link, target))
+            self.emit(
+                "guard.violation", phase="gate", rule="planted link", path=exc.link, action="removed", where=where,
+                target=path, points_to=target,
+            )  # fmt: skip
+            return
+        self.unsafe.append(UnsafeWrite(path, "restore failed", where))
+        self.emit(
+            "guard.violation", phase="gate", rule="restore failed", path=path, action="refused", where=where,
+            why=str(exc),
+        )  # fmt: skip
+
+    def planted_links(self) -> list[UnsafeWrite]:
+        return [u for u in self.unsafe if u.rule == "planted link"]
+
+    def unsafe_reason(self) -> str:
+        """ "" when no harness write was refused in this attempt; else why the attempt cannot stand (L4-SEC-021)."""
+        if not self.unsafe:
+            return ""
+        planted = self.planted_links()
+        pool = planted or self.unsafe
+        paths = list(dict.fromkeys(u.link if u.rule == "planted link" else u.path for u in pool))
+        shown = ", ".join(paths[:MAX_UNSAFE_SHOWN]) + (
+            f" (+{len(paths) - MAX_UNSAFE_SHOWN} more)" if len(paths) > MAX_UNSAFE_SHOWN else ""
+        )
+        if planted:
+            return (
+                f"a gate run put a symbolic link at {shown} (on the path of a file the harness restores); the harness "
+                "removed it and wrote nothing through it. Nothing of this attempt is kept"
+            )
+        return f"the harness could not put {shown} back after a gate run. Nothing of this attempt is kept"
 
     @property
     def credential_paths(self) -> dict[str, tuple[Path, ...]]:

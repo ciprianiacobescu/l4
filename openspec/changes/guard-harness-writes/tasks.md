@@ -39,7 +39,7 @@ Every task follows these rules:
 
 ## 2. The record of a refused write (L4-SEC-021; D4)
 
-- [ ] 2.1 Tests in `tests/unit/implementer/test_unsafe_record.py` (new), with `make_bench([])`:
+- [x] 2.1 Tests in `tests/unit/implementer/test_unsafe_record.py` (new), with `make_bench([])`:
   - `wb.refused_write(LinkedPath("src/pytdd"), path="src/pytdd/pricing.py", where="test-zero")` removes the link but
     not its target, and emits one `guard.violation{phase: "gate", rule: "planted link", path: "src/pytdd", action:
     "removed", where: "test-zero", target: "src/pytdd/pricing.py"}`.

@@ -41,6 +41,15 @@ _ADVICE = {
         "rebind a name or a fixture, do not patch or assign the unit's code from it (set the environment instead), "
         "and leave it a regular file. The harness put it back to its red version, so write the change again."
     ),
+    "planted link": (
+        "A test run replaced a directory or file of the worktree with a symbolic link. The harness never writes "
+        "through one: it removed the link and discarded the attempt. Create links only under the test's own temporary "
+        "directory (`tmp_path`)."
+    ),
+    "restore failed": (
+        "The harness could not put a file back after a test run changed it. Tests must not replace, delete or lock "
+        "source files."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),
