@@ -6,6 +6,36 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.8 (2026-10-17)
+
+### Fixed
+- A task that an earlier task already did no longer writes a copy of tests that exist. A red step had to add new test
+  functions even when an earlier task of the unit had written and proved the tests of every criterion it cites, so
+  each such task added a near-copy of them (on a consumer repository, four classes that assert one contract, and about
+  4,400 test lines across four units). Now a red step may add no test and report `criteria_ids` and
+  `tdd_exemption: {reason: "already_satisfied by <task>"}`. The passing tests that already trace those criteria are
+  then its proof, confirmed as new tests are (the earlier red, the zero-value run, the base run), and the task is
+  committed `already satisfied` with no test change.
+- A test fixture shaped like a token no longer halts the unit. A red step wrote a redaction test whose fixture spells
+  a token whole, as the file's existing tests do; the push scan refused the push and the unit halted with `secret in
+  the outgoing commits`, and the plan stopped. Now each implementer step's changes are read for secrets before any
+  gate or commit: a hit discards the attempt and tells the agent to build such a value from parts at run time
+  (`"mk_" + "agent_" + "A" * 24`), and the next attempt gets that advice. The contract template says the same up
+  front. The push scan stays as the last net.
+- The confirmation by an earlier red holds for tests in a class. It turned `pkg.tests.test_x.TestY::test_z` into the
+  path `pkg/tests/test_x/TestY.py`, found no file, and confirmed nothing, so every such criterion took the zero-value
+  run and the base run.
+
+### Added
+- The judge checks each task ticked as already satisfied against its own text. The prompt lists those tasks with the
+  criteria and tests that proved them, and the reply answers `satisfied: [{task, holds, evidence}]`. A `holds: false`
+  is a major finding (`task <key> is ticked as already satisfied, but its text is not done`) that goes to a person.
+  Before, a task whose criteria an earlier step satisfied was ticked although its own work (a README line) was never
+  done, and the round passed. The judge prompt is `judge@9`.
+- The red prompt says when to add no test, and that `already_satisfied` needs the task's own text to be true. The
+  skill's `spec.md` has a **tasks** rule: put a behaviour's tests in the task that implements it, write no gate-only
+  task, and give a document edit a check that a red step can test.
+
 ## 0.4.7 (2026-10-17)
 
 ### Fixed

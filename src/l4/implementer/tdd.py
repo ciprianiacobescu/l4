@@ -105,6 +105,7 @@ from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
+from l4.vcs.secretscan import step_secret_reason, worktree_secrets
 from l4.verifier.scan import task_tags
 from l4.yolo.digest import RevisionMissing, unit_digest
 
@@ -300,10 +301,14 @@ def _red_advice(head: TestReport, wrong: Sequence[str], rules: TraceRules | None
     return ". ".join(advice)
 
 
+ALREADY_SATISFIED = "already_satisfied"  # what `tdd_exemption.reason` of a red step that adds no test starts with
+
 NO_NEW_TEST = (
     "no new test: no test with a new name was added. Editing or re-tagging an existing test creates no new test; "
     "write a new test function (a new name) for each criterion. If the behaviour already exists, the new tests pass "
-    "against it: report `tdd_exemption: already_satisfied` and the harness checks that they discriminate"
+    "against it: report `tdd_exemption: already_satisfied` and the harness checks that they discriminate. If every "
+    "criterion this task cites is already traced by passing tests (an earlier task wrote them), add no test and "
+    'report `criteria_ids` and `tdd_exemption: {reason: "already_satisfied by <task>"}`'
 )
 
 
@@ -766,6 +771,10 @@ def agent_step(
     if result.status == "blocked":
         dropped = sum(f.count or 0 for f in normalized.fixes if f.field == "questions" and f.fix == "dropped")
         return StepOutcome("blocked", result, dropped_questions=dropped)
+    if hits := worktree_secrets(wb.git, wb.redactor, changed):  # L4-SEC-008: before any gate or commit
+        for hit in hits:
+            wb.emit("guard.secret", path=hit.path, kind=hit.kind, task=task.key, phase=role, attempt=attempt)
+        return StepOutcome("failed", reason=step_secret_reason(hits))
     return StepOutcome("ok", result)
 
 
@@ -886,15 +895,6 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         for criterion, tests in pre_satisfied.items():
             via = {"via": VIA} if criterion in earlier else {"via": BASE_VIA} if criterion in based.confirmed else {}
             wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
-    allowed = {t for tests in pre_satisfied.values() for t in tests}
-    verdict = classify_red(
-        base_report, report, test_files_changed=test_files,
-        failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
-        rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
-    )  # fmt: skip
-    if not verdict.ok:
-        wb.discard_changes()
-        return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
     # a stale test that is gone or fails now was replaced on purpose; one that still passes is simply kept
     replaced = frozenset(
         t for t in (stale.tests if stale else ()) if t not in report.tests or report.tests[t].status != "passed"
@@ -907,11 +907,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 criteria=sorted({c for t in replaced for c in stale.tests[t]}),
             )  # fmt: skip
 
-    # `tests` trace the criterion; `discriminating` are the ones the zero-value run showed to look at the answer
-    # a criterion confirmed by an earlier red names that red's tests (`discriminating`), `via` and the newest red's
-    # commit and task; `tests` stay this step's own, which `classify_red` allows to pass
-    proofs: dict[str, dict[str, Any]] = {
-        criterion: {
+    def proof_of(criterion: str, tests: Sequence[str]) -> dict[str, Any]:
+        """`tests` trace the criterion; `discriminating` are the ones the zero-value run showed to look at the answer.
+        A criterion confirmed by an earlier red names that red's tests (`discriminating`), `via` and the newest red's
+        commit and task; `tests` stay this step's own, which `classify_red` allows to pass."""
+        return {
             "tests": list(tests),
             "proof": PROOF_PRE_SATISFIED,
             "discriminating": list(
@@ -929,40 +929,12 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 else {}
             ),
         }
-        for criterion, tests in pre_satisfied.items()
-    }
-    open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
-    discriminating: Mapping[str, Sequence[str]] = {}
-    zeroed = list(scope.stub_files)
-    if open_criteria and not zeroed:  # no stub added by red: the ones that HEAD holds answer run (b)
-        zeroed = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
-    if open_criteria and zeroed:
-        vacuity = vacuity_check(wb, zeroed, open_criteria)
-        if (out := tampered("vacuity check")) is not None:
-            return out
-        if vacuity.message:
-            wb.discard_changes()
-            return RedOutcome("failed", vacuity.message)
-        discriminating = vacuity.proofs
-    elif open_criteria and (message := no_assertion_failure(report, open_criteria)):
-        wb.discard_changes()
-        return RedOutcome("failed", message)
-    for criterion, tests in open_criteria.items():
-        failing = [t for t in tests if fails_on_zero(report.tests.get(t))]
-        proofs[criterion] = {
-            "tests": list(tests),
-            "proof": PROOF_ZERO_VALUE if zeroed else PROOF_RED_ASSERTION,
-            "discriminating": list(discriminating.get(criterion) or failing),
-        }
-    worse = worse_static_gates(wb, base, "red")  # a lint error in a test file would be frozen and deadlock green
-    if (out := tampered("static gates")) is not None:
-        return out
-    if worse:
-        wb.discard_changes()
-        return RedOutcome("failed", worse)
-    new_tests = frozenset(new_ids)
-    notes = result.notes_for_verifier  # the schema caps it at 2000 characters
-    if tracing and not open_criteria:  # every cited criterion is pre-satisfied: the harness has proved it (L4-IMP-003)
+
+    def finish_already_satisfied(proofs: dict[str, dict[str, Any]]) -> RedOutcome:
+        """The commit of a task whose every cited criterion is pre-satisfied: the stubs go back to the base, the task
+        is ticked, the proof travels inside the commit, no green step follows (L4-IMP-003)."""
+        new_tests = frozenset(new_ids)
+        notes = result.notes_for_verifier  # the schema caps it at 2000 characters
         for path in scope.stub_files:
             restore_to_base(wb, base, path)  # a stub no test needs is not left behind
         guard.release(scope.stub_files)
@@ -970,11 +942,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             final = wb.run_gate("test-restored", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
             if (out := tampered("restored test run")) is not None:
                 return out
-            report = final.report
+            final_report = final.report
             if (
-                report is None
-                or report.collection_errors
-                or any((c := report.tests.get(i)) is None or c.status != "passed" for i in new_ids)
+                final_report is None
+                or final_report.collection_errors
+                or any((c := final_report.tests.get(i)) is None or c.status != "passed" for i in new_ids)
             ):
                 wb.discard_changes()
                 return RedOutcome(
@@ -1009,6 +981,83 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             "already_satisfied", sha=sha, new_ids=new_tests, base_report=base_report, criteria=proofs,
             superseded=replaced,
         )  # fmt: skip
+
+    cited = tuple(sorted(set(result.criteria_ids)))
+    reason = result.tdd_exemption.reason.strip() if result.tdd_exemption else ""
+    if (  # L4-IMP-003: no new test, no file changed, and the task says that tests of an earlier task already hold it
+        cited and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
+        and not [p for p in changed if p != wb.ledger_rel]
+        and not set(report.collection_errors) - set(base_report.collection_errors)
+    ):  # fmt: skip
+        if unknown := [c for c in cited if c not in family]:
+            wb.discard_changes()
+            return RedOutcome("failed", f"criteria that are not one of this unit's: {', '.join(unknown)}")
+        candidates = {
+            c: tuple(sorted(i for i, case in report.tests.items() if case.status == "passed" and c in trace_ids(case)))
+            for c in cited
+        }
+        if bare := [c for c, tests in candidates.items() if not tests]:
+            wb.discard_changes()
+            return RedOutcome("failed", f"no test traces {', '.join(bare)} yet: write a new test for each")
+        earlier = confirmed_by_earlier_red(wb, candidates, report, frozenset())
+        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in candidates.items() if c not in earlier})
+        if (out := tampered("pre-satisfied confirmation")) is not None:
+            return out
+        if confirmation.unconfirmed:
+            every = {t for tests in candidates.values() for t in tests}
+            based = confirmed_by_base_run(wb, confirmation.unconfirmed, every)
+            if (out := tampered("base run")) is not None:
+                return out
+        if message := failure_message(confirmation, based):
+            wb.discard_changes()
+            return RedOutcome("failed", message)
+        for criterion, tests in candidates.items():
+            via = {"via": VIA} if criterion in earlier else {"via": BASE_VIA} if criterion in based.confirmed else {}
+            wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
+        return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
+    allowed = {t for tests in pre_satisfied.values() for t in tests}
+    verdict = classify_red(
+        base_report, report, test_files_changed=test_files,
+        failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
+        rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
+    )  # fmt: skip
+    if not verdict.ok:
+        wb.discard_changes()
+        return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
+    proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
+    open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
+    discriminating: Mapping[str, Sequence[str]] = {}
+    zeroed = list(scope.stub_files)
+    if open_criteria and not zeroed:  # no stub added by red: the ones that HEAD holds answer run (b)
+        zeroed = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
+    if open_criteria and zeroed:
+        vacuity = vacuity_check(wb, zeroed, open_criteria)
+        if (out := tampered("vacuity check")) is not None:
+            return out
+        if vacuity.message:
+            wb.discard_changes()
+            return RedOutcome("failed", vacuity.message)
+        discriminating = vacuity.proofs
+    elif open_criteria and (message := no_assertion_failure(report, open_criteria)):
+        wb.discard_changes()
+        return RedOutcome("failed", message)
+    for criterion, tests in open_criteria.items():
+        failing = [t for t in tests if fails_on_zero(report.tests.get(t))]
+        proofs[criterion] = {
+            "tests": list(tests),
+            "proof": PROOF_ZERO_VALUE if zeroed else PROOF_RED_ASSERTION,
+            "discriminating": list(discriminating.get(criterion) or failing),
+        }
+    worse = worse_static_gates(wb, base, "red")  # a lint error in a test file would be frozen and deadlock green
+    if (out := tampered("static gates")) is not None:
+        return out
+    if worse:
+        wb.discard_changes()
+        return RedOutcome("failed", worse)
+    new_tests = frozenset(new_ids)
+    notes = result.notes_for_verifier  # the schema caps it at 2000 characters
+    if tracing and not open_criteria:  # every cited criterion is pre-satisfied: the harness has proved it (L4-IMP-003)
+        return finish_already_satisfied(proofs)
     if (out := tampered("before the red commit")) is not None:
         return out
     # The proof is recorded BEFORE the commit so that it travels inside it: a run killed right after the push has

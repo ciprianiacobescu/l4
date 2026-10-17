@@ -216,6 +216,30 @@
      }
     }
    }
+  },
+  "satisfied": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "task",
+     "holds",
+     "evidence"
+    ],
+    "properties": {
+     "task": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+     },
+     "holds": {
+      "type": "boolean"
+     },
+     "evidence": {
+      "type": "string"
+     }
+    }
+   }
   }
  }
 }
