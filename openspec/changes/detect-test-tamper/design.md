@@ -1,6 +1,7 @@
 # Detect test tamper: pre-existing tests are compared per test, and audit tests run without the unit's support files
 
-Status: design, 2026-10-17. Harness at release 0.4.14 (`795e97a9`). Markers: **[V]** verified (read in the code at the
+Status: design, 2026-10-17; **amended 2026-10-18 after an adversarial review of the built change (section 6, which
+wins wherever it and an earlier section differ)**. Harness at release 0.4.14 (`795e97a9`). Markers: **[V]** verified (read in the code at the
 cited line, or run), **[I]** inferred (follows from the code, not run end to end).
 
 ## 0. The answer in five lines
@@ -20,7 +21,16 @@ cited line, or run), **[I]** inferred (follows from the code, not run end to end
    never blocked. A second sub-part blocks a red commit that changed a test an earlier step of the unit wrote (D5-D7).
 5. Step 4a (and step 5's head run): the unit's added, changed or deleted test-support files are put at their base
    versions for the run and restored byte for byte after; a test that does not run that way runs with them in place only
-   when step 1's content scan read them and found nothing, else it is rejected; the record says which (D8-D9).
+   when step 1's content scan read them and found nothing, else it is rejected; the record says which (D8-D9). (The
+   original design; section 6 replaces the audit part: no fallback, all test files too.)
+
+**Amendment (section 6).** An adversarial review of the built change (`ae802740`) reproduced 2 blockers and 5 majors as
+false PASSes on broken code or refusals of honest work. The primary defence is now behavioural and language-agnostic:
+step 1 runs the base's tests on the unit's code with every test and support file the unit touched at its base version,
+and each test that passed at the base must still pass (D13). The audit runs without any of the unit's test or support
+files, collects only the audit file, never falls back, and holds a criterion whose production module does not import
+(D15). The AST comparison stays as fast feedback and a second signal, with statements that are not plain definitions,
+inherited tests, real locals, normalised docstrings and closure-aware moves (D12).
 
 ## 1. Current state and the findings
 
@@ -61,7 +71,7 @@ Facts the design builds on [V]:
 
 ## 2. Decisions
 
-### D1 One comparison, by file and qualified name (L4-IMP-045)
+### D1 One comparison, by file and qualified name (L4-IMP-045; amended by D12)
 
 New pure module `src/l4/implementer/tamper.py` (text in, facts out; Python only; no git). The implementer side owns it
 because it reuses `guards._bound` and `guards._MODULE_HOOKS`; `verifier/integrity.py` imports it, as it already imports
@@ -99,7 +109,7 @@ because it reuses `guards._bound` and `guards._MODULE_HOOKS`; `verifier/integrit
     (the names whose parts differ, sorted, at most 5, then `(+<k> more)`);
   - otherwise nothing. A `before` that does not parse yields nothing (there was no test to protect).
 
-### D2 What a test uses in its own file is part of it (L4-IMP-046)
+### D2 What a test uses in its own file is part of it (L4-IMP-046; amended by D12)
 
 The closure of a test at one revision is a map *name -> sha256 of that name's parts in the module scope* (`""` when the
 file does not bind it), built by a work list:
@@ -129,7 +139,7 @@ Not covered, on purpose: fixtures and hooks in `conftest.py` and other test-supp
 the step-1 content scan, the red-to-green freeze, the support-file AST rule (L4-IMP-016 rule 3, extended to every changed
 support file by D11 on the owner's decision) and, for the audit, D8.
 
-### D3 A moved test is the same definition in a new place (L4-IMP-047)
+### D3 A moved test is the same definition in a new place (L4-IMP-047; amended by D12)
 
 `moved(deleted, added)` is pure: `deleted` maps `(path, name)` to the definition digest at the earlier revision of each
 `deleted` outcome, `added` maps `(path, name)` to the definition digest at the later revision of each test of a changed
@@ -215,7 +225,7 @@ the unit directories), `moved` within that commit; every outcome for a test that
 judges those) and that no `tests.superseded` id names is a blocker `a red step changed a test that an earlier step wrote`,
 detail `<path>::<name> (task <t>, red commit <sha10>: <why>)`. People's commits are not walked here.
 
-### D7 Blocker or finding
+### D7 Blocker or finding (amended by D17)
 
 | What | Where | Result |
 |---|---|---|
@@ -233,7 +243,7 @@ finding comes back and the fix loop escalates to a person, as for a deleted test
 person restores the test on the unit branch (`git checkout <base> -- <path>` in their own commit) or, if the change is
 wanted, makes it in their own commit after restoring; `l4 resume` goes on. The runbook names this (task 7.1).
 
-### D8 Audit tests run with the unit's support files at the base (L4-VER-033, L4-VER-034)
+### D8 Audit tests run with the unit's support files at the base (L4-VER-033, L4-VER-034; replaced by D15)
 
 New module `src/l4/verifier/support_base.py`:
 
@@ -278,7 +288,7 @@ for `base`, the plan's paths for `head`); `verify.audit` carries both.
 With the reproduction (appendix A), the audit test fails at head once `tests/conftest.py` is set aside, so the record is
 `failed`, the criterion is held and the verdict is not PASS. An honest unit with no support change runs exactly as today.
 
-### D9 A generated UI test's head run follows the same rule (L4-VER-035)
+### D9 A generated UI test's head run follows the same rule (L4-VER-035; amended by D16)
 
 `generate._discriminates` runs the head with `run_e2e(wb, name="e2e-head")`. With a plan that has changes, that run is
 made inside `support_at_base` (no `PYTEST_ADDOPTS`: `run_e2e` takes none, and its server must start as configured);
@@ -351,6 +361,10 @@ the second line, and SCN-VER-112 uses exactly that form.
   silently in a fixture.
 - `--continue-on-collection-errors` is a pytest option. The audit writes pytest tests only (the step is `not_run` for
   other code, `ladder._no_python`), so it is set only there.
+- The `<module>` rule of D12 makes red stricter: an honest red that adds a statement that is not a plain definition to
+  an existing test file (`logger = logging.getLogger(__name__)`, `FIXTURE_DIR = Path(__file__).parent / "data"`, a
+  call at import) changes every old test of that file and fails the attempt; the retry text says to put it in a new
+  file. The owner accepted the strictness of the closure (section 5, decision 4); this is the same trade.
 - `support_at_base` edits the worktree for the length of a run. A killed verifier can leave it edited; the verifier
   starts every round from a fresh worktree at the unit head (L4-VER-001), so nothing reaches a commit.
 
@@ -366,6 +380,242 @@ the second line, and SCN-VER-112 uses exactly that form.
 4. **The in-file closure (D2) stays strict as designed.**
 5. **0.4.15 is another change (the MCP server).** This change's `CHANGELOG.md` entries are under `## 0.4.16
    (unreleased)`; a released section is never edited.
+
+## 6. Amendment after the adversarial review (2026-10-18)
+
+### 6.1 What the review found
+
+The review ran against the built change (branch `review-w1-tamper` at `ae802740`). Reproductions are under the session
+scratchpad `review-tamper/` (`rt/tests/unit/verifier/test_rv_e2e.py`, `test_rv_generate_fp.py`,
+`test_rv_audit_retry.py`, `test_rv_step1.py`, `probes/pure_bypass.py`, `pure_fp.py`, `pure_move.py`, `fmt/`); each test
+asserts the bug, so a port flips its assertion.
+
+| Id | Severity | What | Reproduction and output |
+|---|---|---|---|
+| B1 | blocker | a pre-existing test replaced by a statement that binds no name: `test_x.__code__ = …`, `globals()[…] = …`, `vars()[…] = …`, `setattr(sys.modules[__name__], …)`, `test_x.pytestmark = […]`, `Cls.test_x = lambda self: None`, a subclass overriding an inherited test; `tamper._scope` gives none of them a part | `probes/pure_bypass.py`; `test_rv_e2e.py::test_a_code_swap_in_the_test_file`: `[A] CODE 0 VERDICT PASS` |
+| B2 | blocker | a conftest hook neuters a test: `pytest_pyfunc_call` returning `True`, `pytest_collection_modifyitems` setting `item.obj`; `scan.result_hooks` knows neither | `test_c_pyfunc_call_hook`, `test_c2_modifyitems_replaces_the_body`: PASS |
+| M3a | major | a weakened helper in a test-glob file with no tests (`tests/checks.py`): not compared, not scanned, not reverted | `test_b1_helper_in_another_test_file`: `[B1] CODE 0 VERDICT PASS` |
+| M3b | major | a weakened conftest fixture (it returns a check that asserts nothing): L4-VER-037 sees only patches of production symbols | `test_b2_fixture_in_conftest`: PASS |
+| M4 | major | a conftest/production handshake (`os.environ` set by the conftest, read by production at import) makes the audit test uncollectable at the base support; the fallback (or, with the scan skipped, a minor rejection with `support: ""`) ends in PASS | `test_d_forced_fallback`, `test_d2_no_fallback_still_passes`: PASS |
+| M5 | major | the verifier-6 patch at import time in the unit's own new test module: only support globs are reverted and the audit gate imports every test module | `test_e_patch_in_the_units_test_module`: `support: 'unchanged'`, PASS |
+| M6 | major | `generate._head_run` lets `ServerNotReady` out: an honest UI unit whose app reads `fixtures/cart.html` (a support glob) crashes with exit 1 | `test_rv_generate_fp.py` |
+| M7 | major | nested lambda parameters and comprehension variables count as module reads (`tamper.py:177,185`): an honest red that adds a constant `p` or a fixture `code` fails | `probes/pure_fp.py` |
+| minor | minor | docstring re-indentation counts as a change; `support: ""`; the writer's collection retry (W-D2) is lost in the base-support path; the move rule ignores the closure (a test moved next to a weakened `_check` is "moved") | `fmt/`, `test_rv_audit_retry.py`, `probes/pure_move.py` |
+| note | - | weakened Go and TypeScript tests give no finding, and the row says `no test file changed` | `test_rv_step1.py` |
+
+Root cause: the change compared texts and reverted some files; the tampering moved to forms and files the text rules do
+not read.
+
+### 6.2 Owner decisions (2026-10-18)
+
+1. Primary defence, behavioural and language-agnostic: a step-1 sub-check that runs the base's tests on the unit's code
+   (D13).
+2. The audit runs with all of the unit's added or changed test and support files set aside or reverted, collects only
+   the audit file when the runner allows it, holds a criterion whose production module fails to import, keeps the
+   writer's collection retry, and never records an empty label (D15).
+3. The AST comparison stays (red: fast feedback; step 1: a second signal), amended (D12).
+4. A test-glob file that defines no test is test-support: scanned, and reverted for the audit and for D13 (D14).
+5. The content scan flags `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` / `pytest_runtest_setup`, and
+   assignments to `.obj` / `.runtest` in support files (D14).
+6. Step 5: `ServerNotReady` in the head run takes the fallback / `uncollectable` rule; only the e2e runner's own support
+   files are reverted, never app data the unit added under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` (D16).
+
+### D12 The AST comparison, amended (L4-IMP-045, L4-IMP-046, L4-IMP-047, L4-IMP-049)
+
+- **`<module>`**: a pseudo-name whose parts are the dumps (docstrings normalised) of every top-level statement that is
+  not a plain definition. Plain is `guards._defines_only(node, top=True)`, or a fixture that is not autouse: a `def`
+  whose decorators are pytest marks plus one fixture decorator (`pytest.fixture`, `pytest.fixture(...)`, `fixture`,
+  `pytest_asyncio.fixture`) without an `autouse` keyword or with the constant `False`, its decorator arguments, defaults
+  and annotations `guards._inert`. A leading module docstring is no part. Every test's closure seeds `<module>`, so
+  `test_x.__code__ = …`, `globals()[…] = …`, `vars()[…] = …`, `setattr(…)`, `test_x.pytestmark = […]`,
+  `TestCart.test_empty = lambda self: None`, a call at import and an `if`/`try` block all change every test of the file.
+- **`<Class>`**: for each module-level class `C`, a pseudo-name `C.<class>` whose parts are the class-body statements
+  that are not plain (`_defines_only(statement, top=False)`, or a fixture method that is not autouse), docstring
+  excluded; every test of `C`, own or inherited, seeds it (`test_empty = staticmethod(…)` in a class body is caught).
+- **Inherited tests**: the tests of a module-level class `C` are the `test*` names its body binds and those it inherits
+  from module-level classes of the same file named in its bases (depth first, left to right, each class once). The key
+  stays `C.test_x`. Its definition is the defining class's parts for the name, each prefixed `<defining class>:`; its
+  closure holds the defining class's header, members and `<class>` and those of `C`. A subclass that defines an
+  inherited test changes `C.test_x` (`its body, decorators or parametrisation changed`). A base class imported from
+  another file is not followed; D13 covers it.
+- **Locals**: through `symtable`, a name local to the test function, a nested function, a lambda or a comprehension (a
+  parameter, a target of `=`, `for`, `with`, `except`, `:=`, a comprehension target) is not a module read. The test's
+  own parameters (and a fixture's) stay reads: they request fixtures. A definition's module-level expressions
+  (decorators, defaults, annotations, bases) are read in the module scope, as before.
+- **Docstrings**: the docstring of a module, class or function is replaced by its normalised text before the dump:
+  `inspect.cleandoc`, then every line right-stripped. A change of its words still counts.
+- **Moves**: `moved(deleted, added)` maps `(path, name)` to `(definition, closure)` and matches on both.
+- Red (D4) and step 1 (D5, D6) take all of this through `compare` and `moved`; nothing else changes there.
+
+### D13 Step 1 runs the base's tests on the unit's code (L4-VER-038)
+
+New module `src/l4/verifier/base_tests.py`: `check_base_tests(wb, ctx, *, prior) -> Outcome`. The ladder's integrity
+step calls it after `run_integrity` and adds its row, `pre-existing tests still pass` (the last row of step 1), and its
+findings to `result.integrity`; `prior` is the rows already there.
+
+1. **Skip** when another step-1 row has a blocker (`skipped: step 1 already failed`), and when the unit changed no path
+   of the revert set and no `tdd.runner_config_files` path (`ok: the unit changed no test or support file; step 3 runs
+   the base's tests as they are`).
+2. **Setup**: each `gates.setup` command runs in the verifier worktree first (name `setup-base-tests`, network on), as
+   step 2 does; a failure makes the row `skipped: gates.setup failed (step 2 reports it)`.
+3. **The revert set** (`support_base.unit_test_plan`, shared with D15): every path of `git diff --name-status -z
+   --no-renames <base> <head>` that matches `tdd.test_globs` or `tdd.test_support_globs` (with their `extra_` entries),
+   outside `.l4/` directories and `tdd.runner_config_files`, except an **added** file under `**/fixtures/**`,
+   `**/mocks/**`, `**/__mocks__/**` or `**/testdata/**` (`support_base.DATA_GLOBS`) whose suffix is not in
+   `evidence.diffcov.CODE_SUFFIXES`: new data cannot change what a base test checks, and setting it aside breaks an
+   honest app (M6). A changed or deleted data file is reverted. A test-glob file with no test (decision 4) is in the set
+   by its glob.
+4. **R1**: inside `support_at_base(wb, base_sha, plan)`, `gates.test.command` with every report of
+   `gates.test.reports` (merged as the gate does), name `base-tests`, `extra_env={"PYTEST_ADDOPTS":
+   "--continue-on-collection-errors"}` (pytest reads it; another runner ignores it). A run that writes no readable
+   report fails closed: the blocker `a pre-existing test no longer runs on the unit's code` with the detail `the test
+   gate gave no report with the unit's test and support files at the base (<reason>)` (a production module that calls
+   `os._exit` without the unit's conftest ends here).
+5. **R0, the base reference**, is needed only when R1 has a test that is not `passed`, a collection error, or the unit
+   changed a runner configuration file; otherwise every base test ran and passed (the test files are the base's). Its
+   sources, in order: `wb.baselines[base_sha]`; the newest `base-tests.json` of an earlier round of this unit with the
+   same `base_sha` and command (read at head from `<unit>/.l4/evidence/round-*/`); a run in a merge-base worktree
+   (`playwright.base_checkout`, which runs `gates.setup`, then `l4.gates.e2e.run_gate_at`, name `base-tests-base`). When
+   R0 was run, its passed ids and collection errors go to `<unit>/.l4/evidence/round-<n>/base-tests.json`
+   (`{schema: "l4/base-tests@1", base_sha, command, passed, collection_errors}`), committed with the round. Trust: the
+   unit's `.l4/` lies in the protected spec root, so an agent step cannot plant or edit one (L4-IMP-006 (1)); and a file
+   is reused only when its `passed` list is not empty, else R0 runs (a forged empty baseline would neuter the check).
+   Why R0 may be skipped: R1's test files are exactly the base's, the runner configuration is the base's, so R1 collects
+   the base's test set; when every collected test passed and nothing failed to collect, every base-passing test passed.
+6. **Judge**: each id `passed` in R0 SHALL be `passed` in R1. A failed or erroring id, an id R1 does not hold, and each
+   collection error of R1 that R0 lacks (a production module that no longer imports without the unit's test files, a
+   runner change that hides a test) are candidates. Except: an absent parametrised id (`name[case]`) whose function
+   (`name`, same classname) has at least one case in R1 and all of them `passed` is listed (`a parametrised case changed
+   with the unit's data`), not a candidate: parametrisation over production data changes the ids honestly. A function
+   with no case left in R1 stays a candidate. When some are test results, R1 runs once more
+   (`base-tests-repeat`, same block); an id that passes there is flaky (minor finding `a pre-existing test is flaky on
+   the unit's code`), the others stay.
+7. **Allowed**, listed in `allowed_tests` (no finding): an id a `tests.superseded` event names; an id whose file a
+   `task.unfrozen` of the unit names, or that a `[test-infra]` task's commits touched (`integrity.tagged_files`); an id
+   whose file only people's commits changed (listed in `human_tests`, L4-SEC-004; open question 1). The file of an id is
+   `discrimination.file_of_test`.
+8. **Blockers**: `a pre-existing test fails on the unit's code` (detail `<id> (<first line of its message>)`, at most 5,
+   then `(+<n> more)`) and `a pre-existing test no longer runs on the unit's code` (ids R1 does not hold, and
+   `<file>: <E line>` per new collection error).
+9. **Record**: `verify.base_tests{round, base_sha, base_source: "not needed"|"baseline"|"evidence"|"base worktree",
+   reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}`; the row note `<p> of
+   <n> base tests pass on the unit's code with its <k> test and support files at the base (base: <source>)`.
+
+`check_tests` (D5) keeps its AST part as the second signal. When only non-Python test files changed, its note reads `no
+Python test file changed; <n> other test file(s) are checked by the run of pre-existing tests` instead of `no test file
+changed`: Go and TypeScript tests are covered by this run, through their JUnit reports.
+
+### D14 Helper modules and the content scan (L4-VER-039)
+
+- A changed `.py` file that matches `tdd.test_globs` and defines no test at head (`tamper.facts_of` finds no test; a
+  file that does not parse counts too) is a test-support file for `check_scan` (result hooks, coverage refs) and for the
+  support-file AST rule (D11, `opened.new_patches`). It is in the revert sets of D13 and D15 by its glob.
+- `scan.result_hooks` also reports: a `pytest_pyfunc_call` implementation (`pytest_pyfunc_call: runs or replaces the
+  test function`); a `pytest_runtest_call` or `pytest_runtest_setup` implementation that is not a wrapper (`<hook>: code
+  around every test call`); an assignment to an attribute named `obj` or `runtest` (`assignment to .<attr>: replaces a
+  collected test`). Each is a content-scan hit: a blocker, listed when only people's commits wrote it, exempt for a
+  `[test-infra]` task.
+
+### D15 The audit, amended (L4-VER-033, L4-VER-034)
+
+- **Revert set**: D13's `unit_test_plan`, so the unit's own test modules are set aside too (M5).
+- **Only the audit file**: the run sets `L4_COLLECT_ONLY` (the audit paths, `os.pathsep`-joined, from
+  `support_base.collect_only_env`), and the harness's own plugin `l4_trace` (loaded into every pytest gate run)
+  implements `pytest_ignore_collect`: every Python file that is neither listed nor named `conftest.py` is ignored;
+  directories never are. No configured command is edited; another runner runs its whole command.
+  `PYTEST_ADDOPTS=--continue-on-collection-errors` stays. A test file that the configured command names explicitly may
+  be collected whatever the hook says (pytest version dependent); it then runs too, with the revert in place, as in
+  D13: slower, not less safe, since the unit's own test files are set aside.
+- **Zero-value run**: in the same block, with the same environment.
+- **No fallback**: an audit test never runs with the unit's test or support files in place. The fallback was the M4
+  bypass, and an honest audit test cannot need the unit's files: its writer never sees them (open question 3).
+  `SupportPlan.fallback` stays for step 5 only.
+- **A file that did not run** is classified from its collection-error section of the gate log by
+  `audit.import_failure(log_text, stem, wb)`: the frames `<path>:<line>: in <module>` after the audit file's own frame;
+  a frame that is a tracked file of the worktree outside the test and support globs gives `("production", <path>)`;
+  only the audit file's frames give `("own", "")`; no frame at all gives `("unknown", "")`.
+  - `production`: the criterion is held: record `failed`, reason `a production module fails to import without the
+    unit's test and support files: <path>: <E line>` (L4-VER-012), never a minor rejection (M4).
+  - `own`: the writer's one collection retry (W-D2, `_retry_collected`), judged again the same way; a second `own` is
+    rejected (minor, as today); a second `production` or `unknown` holds.
+  - `unknown`, and a file that left no result (no report, no id of it, no collection error naming it): held, reason
+    `the audit test does not collect and the log does not say why` or `the audit run gave no result for the audit test`.
+  - A test that errors in setup is `failed` (held), as before this change.
+- **Label**: `support` is `base` (the plan has paths) or `unchanged`, on every record, never empty.
+
+### D16 Step 5, amended (L4-VER-035)
+
+- The head run reverts only the e2e runner's own support (`support_base.runner_support(plan, cfg)`): the plan's paths
+  that match `tdd.test_support_globs` or are test-glob files with no test (D14), never an added data file of D13 step
+  3. The unit's other e2e test files stay but are not collected (`L4_COLLECT_ONLY` with the generated file).
+- `ServerNotReady` in the reverted head run is a run that did not happen: the fallback rule applies (in place, name
+  `e2e-head-support`, when step 1's content scan is `ok`; else `uncollectable` with `the app does not start with the
+  unit's support files at the base (<reason>), and a run with them needs step 1's content scan to have read them:
+  <why_not>`). A `ServerNotReady` of the in-place run keeps its meaning (exit 1).
+
+### D17 Blocker or finding, additions
+
+| What | Where | Result |
+|---|---|---|
+| a test that passed at the base fails, does not run, or no longer collects with the unit's test and support files at the base | step 1 | blocker `a pre-existing test fails on the unit's code` / `a pre-existing test no longer runs on the unit's code` |
+| the same, failing once and passing on the repeat | step 1 | minor `a pre-existing test is flaky on the unit's code` |
+| the same, for a superseded test, an unfrozen or `[test-infra]` file, or a file only people changed | step 1 | listed |
+| a support or helper file with `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` / `pytest_runtest_setup`, or an `.obj` / `.runtest` assignment | step 1 | content-scan blocker |
+| an audit test whose import fails in a production module, or whose run gives no result or no readable cause | 4a | held (L4-VER-012) |
+| an audit test whose own import fails twice | 4a | minor rejection |
+
+### D18 What a person sees, additions
+
+- verification.md's integrity table has the row `pre-existing tests still pass` with the counts and the base source;
+  the blocker lists the ids; flaky and allowed ids are listed. The runbook names the two new blockers and the fix: a
+  person restores the base version of the test or support file on the unit branch in their own commit, or, when a
+  production module needs a test file to import, fixes the code; then `l4 resume`.
+- The Audit table's `Support` column shows `base` or `-`; a held audit test says why.
+
+### 6.3 Contracts, additions
+
+- `support_base.unit_test_plan(git, cfg, base_sha, head, integrity) -> SupportPlan` (D13 step 3; `fallback` and
+  `why_not` as `support_plan` computes them, used by step 5 only), `support_base.runner_support(plan, cfg) ->
+  SupportPlan` (D16), `support_base.DATA_GLOBS`, `support_base.collect_only_env(paths) -> dict[str, str]`.
+- `l4_trace`: environment variable `L4_COLLECT_ONLY`, hook `pytest_ignore_collect`.
+- `base_tests.check_base_tests(wb, ctx, *, prior: Sequence[IntegrityCheck]) -> Outcome`; event `verify.base_tests`
+  (D13 step 9); evidence `round-<n>/base-tests.json` (`l4/base-tests@1`).
+- `audit.import_failure(log_text: str, stem: str, wb: Workbench) -> tuple[Literal["production", "own", "unknown"],
+  str]`.
+- `tamper`: the pseudo-names `<module>` and `<Class>.<class>`; `moved(deleted, added)` with `(definition, closure)`
+  values.
+- `scan.result_hooks`: the three texts of D14.
+- Finding titles: `a pre-existing test fails on the unit's code`, `a pre-existing test no longer runs on the unit's
+  code`, `a pre-existing test is flaky on the unit's code`.
+
+### 6.4 Open questions for the owner
+
+1. In the run of D13, a test whose file only people's commits changed is listed, not blocked (L4-SEC-004: the owner's
+   edit on the unit branch). Confirm, or block it too?
+2. Added data files under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` stay at head in all three runs (D13 step 3),
+   not only in step 5 as decision 6 names it: setting them aside crashed an honest UI unit, and data cannot run code. A
+   production handshake through such a file is visible only in the production diff. Confirm.
+3. The audit's fallback to the unit's support files is removed (D15), which goes beyond decision 2's wording; it was the
+   M4 bypass. Step 5 keeps its fallback, as decision 6 says. Confirm.
+4. The run of D13 covers `gates.test` only. Should `gates.e2e` join it (it needs a served base app)?
+5. Cost: R1 runs for nearly every unit (red adds test files); R0 only when R1 is not all green or the unit changed runner
+   configuration, and once per base sha thanks to the evidence file. Acceptable?
+6. A parametrised base case whose id disappears because the unit changed the production data it is parametrised over is
+   listed when every remaining case of that function passes (D13 step 6), not blocked. Confirm.
+
+### 6.5 Where the amendment goes beyond the owner's words
+
+- People-only test files are listed in the run of D13, not blocked (open question 1).
+- Added data under the data directories stays at head in all three runs, not only in step 5 (open question 2).
+- The audit's fallback is removed (open question 3).
+- R0 runs lazily (D13 step 5): the same verdict as an always-run R0, because R1's test files and runner configuration
+  are the base's, so an all-green R1 with no collection error has run and passed every base-passing test.
+- "Only the audit file" is done by the harness's own pytest plugin (`L4_COLLECT_ONLY`), not by appending a path to the
+  configured command, which may already name paths or not be a plain pytest call (D15).
+- A fixture that is not autouse counts as a plain definition in the `<module>` rule, a refinement of
+  `guards._defines_only`: it reaches only the tests that request it, and the closure already follows requests (D12).
+- The parametrised-case listing of D13 step 6 (open question 6).
+
 
 ## Appendix A: the reproductions
 

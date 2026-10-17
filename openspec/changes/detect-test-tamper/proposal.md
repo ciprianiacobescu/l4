@@ -30,10 +30,19 @@ section 1, re-run in this worktree):
   unit wrote is a blocker too.
 - **Step 1, support files** (L4-VER-037): an autouse fixture or module-level code in any changed test-support file that
   patches a symbol of a module the unit changed is a blocker; a fixture a test requests by name is listed.
-- **Step 4a and step 5's head run** (L4-VER-033..036): the unit's added, changed or deleted test-support files are put at
-  their base versions for the run and restored byte for byte; a test that does not run that way runs with them only
-  when step 1's content scan is `ok`, else it is rejected. `verify.audit`, `verify.generated` and verification.md say
-  which way each test ran.
+- **Amendment after an adversarial review of the built change** (design section 6): step 1 runs the base's tests on
+  the unit's code, with every test and support file the unit touched at its base version, and each test that passed at
+  the base must still pass (L4-VER-038, any language with a JUnit report); helper modules under the test globs are
+  support files, and the content scan flags hooks that replace a test's call (L4-VER-039); statements that are not
+  plain definitions, inherited tests, real locals, normalised docstrings and closure-aware moves in the AST comparison
+  (L4-IMP-045..047, L4-IMP-049); the audit runs without any of the unit's test or support files, collects only the audit
+  file, never falls back, and holds a criterion whose production module does not import (L4-VER-033, L4-VER-034); step
+  5 keeps added app data and survives a server that does not start (L4-VER-035).
+- **Step 4a and step 5's head run** (L4-VER-033..036): the unit's added, changed or deleted test files and support files
+  (step 5: the e2e runner's own support files) are put at their base versions for the run and restored byte for byte.
+  An audit test never runs with them in place: one that cannot run that way holds its criterion, or, when its own import
+  fails twice, is rejected; step 5 runs in place only after a clean step-1 content scan. `verify.audit`,
+  `verify.generated` and verification.md say which way each test ran.
 
 ## Impact
 
@@ -42,8 +51,11 @@ section 1, re-run in this worktree):
   `verifier/integrity.py` (`check_tests`), `verifier/types.py`, `verifier/audit.py`, `verifier/generate.py`,
   `verifier/ladder.py`, `verifier/report.py`. Tests under `tests/unit/implementer/` and `tests/unit/verifier/`, the
   reviewer's four reproductions among them.
-- Spec: L4-IMP-045..048 and L4-VER-030..037 added; L4-IMP-006 and L4-VER-002 (rows 1, 4a, 5) modified;
-  SCN-IMP-260..277, SCN-VER-100..125.
+- Spec: L4-IMP-045..049 and L4-VER-030..039 added; L4-IMP-006 and L4-VER-002 (rows 1, 4a, 5) modified;
+  SCN-IMP-260..279, SCN-VER-100..139.
+- Code of the amendment: new `src/l4/verifier/base_tests.py`; `implementer/tamper.py`, `verifier/support_base.py`,
+  `gates/pytest_trace/l4_trace.py` (`L4_COLLECT_ONLY`), `verifier/scan.py`, `verifier/integrity.py`, `verifier/audit.py`,
+  `verifier/generate.py`, `verifier/ladder.py`, `verifier/report.py`.
 - Behaviour a consumer sees: a red attempt that edits an existing test now fails and is retried; a unit whose branch
   weakened a pre-existing test fails step 1 (a person restores the test on the unit branch); an audit test that relied
   on the unit's own `conftest.py` is held or rejected instead of accepted. Nothing changes for a unit that leaves its

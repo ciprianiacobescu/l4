@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
 ### Requirement: L4-IMP-045 A pre-existing test is compared per test on the AST
-The harness SHALL identify a Python test by its file path and qualified name (`test_x`, or `Class.test_x` for a method of
-a module-level class), never by its bare name. A test's definition SHALL be every statement that binds its name in its
-scope, in order, as an AST dump without positions, so decorators, parametrisation, requested fixtures and body count and
-comments, layout and a trailing newline do not. A second binding of the name SHALL be a change.
+The harness SHALL identify a Python test by its file and qualified name (`test_x`, or `Class.test_x` for a method a
+module-level class defines or inherits from a class of the same file), never by bare name. Its definition SHALL be every
+statement binding the name in its defining scope, dumped without positions, docstrings normalised, so decorators,
+parametrisation, requested fixtures and body count and layout does not. A second binding SHALL be a change.
 
 #### Scenario: SCN-IMP-260 (−) A weakened assertion is a changed test
 - **GIVEN** `tests/test_pricing.py` at the step's base with `assert total([1.25, 2.5]) == 3.75` in
@@ -30,9 +30,11 @@ comments, layout and a trailing newline do not. A second binding of the name SHA
 - **WHEN** the comparison runs
 - **THEN** each SHALL be reported as `changed`
 
-#### Scenario: SCN-IMP-266 (+) New tests, a widened import and a trailing newline change nothing
+#### Scenario: SCN-IMP-266 (+) New tests, a widened import, locals and a re-indented docstring change nothing
 - **GIVEN** a red step that appends two new tests to a pre-existing test file, changes `from pytdd import total` to
-  `from pytdd import apply_discount, total`, adds a second `import pytest`, edits a comment and adds a trailing newline
+  `from pytdd import apply_discount, total`, adds a second `import pytest`, edits a comment, re-indents a docstring
+  (equal after `inspect.cleandoc` and right-stripping), adds a module constant `p` and a fixture `code` while an old test
+  uses `p` as a generator variable and `code` as a lambda parameter, and adds a trailing newline
 - **WHEN** the comparison runs
 - **THEN** it SHALL report nothing for the file
 
@@ -41,11 +43,18 @@ comments, layout and a trailing newline do not. A second binding of the name SHA
 - **WHEN** the comparison runs
 - **THEN** every test of the base file SHALL be reported as `unparsable` with `the file does not parse`
 
+#### Scenario: SCN-IMP-279 (−) A subclass that overrides an inherited test changes it
+- **GIVEN** `TestBase.test_x` asserting `sum([1, 2]) == 3` and `class TestChild(TestBase): pass`, and a step that gives
+  `TestChild` its own `def test_x(self): pass`
+- **WHEN** the comparison runs
+- **THEN** `TestChild.test_x` SHALL be reported as `changed`, and a subclass that keeps inheriting it SHALL change
+  nothing
+
 ### Requirement: L4-IMP-046 What a test uses in its own file is part of it
-The comparison SHALL include, for each pre-existing test, every binding in its file that it reaches: the names it reads,
-the fixtures it requests or names in `usefixtures`, transitively; every autouse fixture, `pytestmark`, module setup and
-`pytest_*` name of the file; and for a method its class's decorators, bases and non-test members. An import SHALL count
-as its source, so a name added to an import line or a repeated import is no change.
+The comparison SHALL include every binding of the file a pre-existing test reaches: the module names it reads (a local,
+a nested parameter or a comprehension variable is none), the fixtures it requests or names in `usefixtures`,
+transitively; every autouse fixture, `pytestmark`, module setup and `pytest_*` name; for a method, its class's
+decorators, bases and non-test members. An import SHALL count as its source, so a widened import line is no change.
 
 #### Scenario: SCN-IMP-264 (−) A helper, a constant or a fixture the test uses in its file is part of it
 - **GIVEN** a pre-existing test that calls the helper `_check` and compares with the constant `EXPECTED`, and a step that
@@ -66,20 +75,36 @@ as its source, so a name added to an import line or a repeated import is no chan
   nothing
 
 ### Requirement: L4-IMP-047 A moved test is the same definition in a new place
-A test of the earlier revision that is gone from its file SHALL count as moved only when a test that did not exist under
-that file and name before has the same definition (decorators included) at the later revision in a changed file; each
-such test SHALL stand for at most one gone test. Every other gone test SHALL be deleted.
+A test gone from its file SHALL count as moved only when a test that did not exist under that file and name before has
+the same definition and the same closure (L4-IMP-046) at the later revision in a changed file; each such test SHALL
+stand for at most one gone test. Every other gone test SHALL be deleted.
 
 #### Scenario: SCN-IMP-269 (+) A test moved unchanged to another file is moved
 - **GIVEN** `test_one` deleted from `tests/test_a.py` and the same definition added to the new `tests/test_b.py`
 - **WHEN** the comparison and the move rule run
 - **THEN** `tests/test_a.py::test_one` SHALL be moved, not deleted
 
-#### Scenario: SCN-IMP-270 (−) A same-named test with another body is no move
+#### Scenario: SCN-IMP-270 (−) A same-named test with another body, or with a weakened helper, is no move
 - **GIVEN** `test_empty` (`assert compute([]) == 0`) deleted from `tests/test_cart.py`, and `def test_empty(): assert
-  True` appended to the changed `tests/test_orders.py`
+  True` appended to the changed `tests/test_orders.py`; or `test_one` moved unchanged from `tests/test_a.py` to
+  `tests/test_b.py` next to a `_check` helper that no longer asserts
 - **WHEN** the move rule runs
-- **THEN** `tests/test_cart.py::test_empty` SHALL be deleted
+- **THEN** `tests/test_cart.py::test_empty` and `tests/test_a.py::test_one` SHALL be deleted
+
+### Requirement: L4-IMP-049 A statement that is not a plain definition reaches every test of its scope
+Each top-level statement of a test file that is not a plain definition (`guards._defines_only`, where a fixture that is
+not autouse also counts as plain) SHALL be a part of the pseudo-name `<module>`, which every test of the file reaches;
+each such statement of a class body SHALL be a part of `<Class>`, which every test of the class reaches. An attribute,
+`globals()` or `vars()` assignment, a `setattr` call or a class attribute that replaces a test SHALL be a change.
+
+#### Scenario: SCN-IMP-278 (−) A statement that replaces a test without binding its name is a change
+- **GIVEN** the base `tests/test_pricing.py` followed by one of `test_total_adds_prices.__code__ = (lambda:
+  None).__code__`, `globals()["test_total_adds_prices"] = lambda: None`, `vars()[…] = …`,
+  `setattr(sys.modules[__name__], "test_total_adds_prices", lambda: None)` or `test_total_adds_prices.pytestmark =
+  [pytest.mark.skip]`; and a `TestCart` file followed by `TestCart.test_empty = lambda self: None`
+- **WHEN** the comparison runs, and when a red step makes the first of these changes
+- **THEN** every pre-existing test of the file SHALL be reported as `changed` with `what it uses in this file changed:
+  <module>`, and the red attempt SHALL fail naming `test_total_adds_prices`
 
 ### Requirement: L4-IMP-048 A red step may not change a test that existed before it
 After `classify_red` accepts a red step, the harness SHALL compare every test that existed at the step's base in each
@@ -134,7 +159,8 @@ changes to gate configuration — files matching `tdd.gate_config_globs` and the
 `[tool.mypy*]`/`[tool.ruff*]`/`[tool.pylint*]`, package.json `eslintConfig`) — unless the task carries a human-written
 `[config]` or `[test-infra]` tag; (4) run the redaction filter over every file the harness itself writes; (5) detect test
 tamper per test on the AST, by file and qualified name, never by bare name: every binding of the test's name with its
-decorators, parametrisation and requested fixtures, and what it uses in its own file (L4-IMP-045, L4-IMP-046); comments,
+decorators, parametrisation and requested fixtures, what it uses in its own file, and every statement of its file or class that is not a plain definition (L4-IMP-045,
+L4-IMP-046, L4-IMP-049); comments,
 layout and a trailing newline are not tamper [V, spikes/02]; other languages are not compared [U]; (6) treat adapter
 permission rules as no freeze: shell redirects write files under `Edit(./**)` [V, spikes/01], so the hash freeze and
 revert are mandatory for every adapter; (7) **test-path freeze:** a step that may not write tests, `green` (`L4-TDD:

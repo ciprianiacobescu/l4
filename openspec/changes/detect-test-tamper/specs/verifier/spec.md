@@ -90,11 +90,11 @@ changed a test that an earlier step wrote`, naming the test, the task and the co
 - **WHEN** the check runs
 - **THEN** it SHALL raise no finding
 
-### Requirement: L4-VER-033 Audit tests run with the unit's support files at the base
-Step 4a SHALL run each audit test, and the zero-value run that judges it, with every test-support file
-(`tdd.test_support_globs`) the unit added, changed or deleted put at its base version (an added one set aside), and
-SHALL restore each byte for byte afterwards, also after an error. The run SHALL go on past a collection error of another
-file. Runner configuration files SHALL not be reverted. With no support change the run is as before.
+### Requirement: L4-VER-033 Audit tests run without the unit's test and support files
+Step 4a SHALL run each audit test and its zero-value run with every file the unit added, changed or deleted that matches
+`tdd.test_globs` or `tdd.test_support_globs` at its base version (an added one set aside, but not added data under
+`fixtures/`, `mocks/`, `__mocks__/`, `testdata/`), collecting only the audit file when the gate is pytest, past other
+collection errors, and SHALL restore each file byte for byte after, also after an error. Runner configuration stays.
 
 #### Scenario: SCN-VER-112 (−) The broken code is held when the unit's conftest is set aside
 - **GIVEN** the verifier-6 reproduction written so that step 1's AST rule (L4-VER-037) does not see it (the autouse
@@ -129,28 +129,52 @@ file. Runner configuration files SHALL not be reverted. With no support change t
 - **WHEN** its zero-value confirmation runs
 - **THEN** that run SHALL also have the support files at the base
 
-### Requirement: L4-VER-034 An audit test that does not run at the base support falls back only after a clean scan
-An audit test that has no test in the run of L4-VER-033, a test with a setup error, or a collection error of its own
-SHALL be run again with the unit's support files in place only when step 1's `content scan` check is `ok`, recorded
-`support: "head"`. Otherwise it SHALL be rejected as a minor finding whose reason names the cause and the scan's note.
+#### Scenario: SCN-VER-133 (−) An import-time patch in the unit's own new test module does not reach the audit
+- **GIVEN** the verifier-6 patch moved into the unit's own new `tests/test_discount.py` (code at import that swaps
+  `apply_discount` while `CODES` is set), and green ships `return amount`
+- **WHEN** the unit is verified with `audit_sample_ratio: 0.5`
+- **THEN** `tests/test_discount.py` SHALL be set aside and not collected for the audit run, the record SHALL be `failed`
+  with `support: "base"`, the criterion SHALL be held, and the verdict SHALL not be PASS
 
-#### Scenario: SCN-VER-116 (+) An audit test that needs the unit's fixture falls back after a clean scan
+### Requirement: L4-VER-034 An audit test that does not run without the unit's files holds its criterion
+An audit test SHALL never run with the unit's test or support files in place. One whose collection fails in a
+production module it imports, whose cause the log does not show, or that leaves no result SHALL hold its criterion
+(L4-VER-012). One whose own import fails SHALL get the writer's one retry (W-D2) and be rejected as a minor finding when
+it fails again. Every record SHALL carry `support` `base` or `unchanged`, never empty.
+
+#### Scenario: SCN-VER-116 (−) An audit test that needs a fixture only the unit defines is held
 - **GIVEN** an audit test that requests a fixture only the unit's `tests/conftest.py` defines, and a step-1 content scan
   with status `ok`
 - **WHEN** step 4a runs
-- **THEN** the test SHALL be judged from a second run with the support files in place, recorded `support: "head"`
+- **THEN** the record SHALL be `failed` with `support: "base"` (the fixture is missing at setup), the criterion SHALL be
+  held, and no run SHALL have the unit's `tests/conftest.py` in place
 
-#### Scenario: SCN-VER-117 (−) No fallback when step 1 could not read the support files
-- **GIVEN** the audit test of SCN-VER-116 and a step-1 content scan with status `skipped` because the unit changed a
-  `tests/helpers/setup.ts` it cannot read
+#### Scenario: SCN-VER-117 (−) An audit test whose own import fails twice is a minor rejection
+- **GIVEN** a writer whose audit test imports a name that `pytdd.pricing` does not define, and whose retry does the same
 - **WHEN** step 4a runs
-- **THEN** the test SHALL be rejected with a minor finding `an audit test was rejected` whose reason starts with `it does
-  not run with the unit's support files at the base` and names the scan's note
+- **THEN** the writer SHALL be asked once more with the collection error, and the second failure SHALL be the minor
+  finding `an audit test was rejected` with `support: "base"`
+
+#### Scenario: SCN-VER-132 (−) A production module that imports only with the unit's conftest holds the criterion
+- **GIVEN** the handshake reproduction: the unit's `tests/conftest.py` sets `PYTDD_SUPPORT` in `os.environ`, the green
+  `src/pytdd/pricing.py` reads it at import and returns `amount`, and step 1's run of L4-VER-038 is bypassed
+- **WHEN** step 4a runs, with step 1's content scan `ok` and again with it `skipped`
+- **THEN** each time the record SHALL be `failed` with a reason that starts with `a production module fails to import
+  without the unit's test and support files: src/pytdd/pricing.py`, the criterion SHALL be held, and the verdict SHALL
+  not be PASS
+
+#### Scenario: SCN-VER-136 (+) The writer's collection retry is kept and the label is never empty
+- **GIVEN** a unit with a harmless `tests/conftest.py` and a `tests/helpers/setup.ts`, a writer whose first audit test
+  does not import and whose retry is correct
+- **WHEN** step 4a runs
+- **THEN** the second request SHALL carry the collection error, the record SHALL be `accepted` with `support: "base"`,
+  and no `verify.audit` of the round SHALL have an empty `support`
 
 ### Requirement: L4-VER-035 A generated UI test's head run follows the same rule
-Step 5 SHALL run a generated UI test at head with the unit's changed support files at their base versions (L4-VER-033),
-fall back to them in place only as L4-VER-034 says, and else record the test `uncollectable` with that reason. The run
-at the merge base SHALL be unchanged, and `verify.generated` SHALL carry `support`.
+Step 5 SHALL run a generated UI test at head with the e2e runner's own support files the unit changed at their base
+versions, never added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/`, collecting only that file. One that
+does not run so, or whose server does not start, SHALL run in place only when step 1's content scan is `ok`, else be
+`uncollectable` with the reason. The base run stays; `verify.generated` SHALL carry `support`.
 
 #### Scenario: SCN-VER-119 (−) A generated UI test's head run uses the base support files
 - **GIVEN** a UI unit that added `e2e/conftest.py` with an autouse fixture that makes every page check pass, and a
@@ -165,11 +189,24 @@ at the merge base SHALL be unchanged, and `verify.generated` SHALL carry `suppor
 - **WHEN** step 5 judges the test
 - **THEN** the outcome SHALL be `accepted` with `support: "base"`
 
+#### Scenario: SCN-VER-134 (+) An honest UI unit's app data under `fixtures/` stays for the head run
+- **GIVEN** a UI unit whose app serves the page from `fixtures/cart.html`, which the unit added, and a generated test
+  that fails at the merge base and passes at head
+- **WHEN** step 5 judges the test with a clean content scan
+- **THEN** `fixtures/cart.html` SHALL stay in place for the head run and the outcome SHALL be `accepted`
+
+#### Scenario: SCN-VER-135 (−) A server that does not start without the unit's runner support takes the fallback rule
+- **GIVEN** a head app that starts only while the unit's `e2e/conftest.py` is present
+- **WHEN** step 5 judges a generated test, once with step 1's content scan `ok` and once `skipped`
+- **THEN** no exception SHALL leave step 5: with `ok` the test SHALL run in place (`support: "head"`), with `skipped` it
+  SHALL be `uncollectable` with a reason that starts with `the app does not start with the unit's support files at the
+  base`
+
 ### Requirement: L4-VER-036 A person sees how each verifier test ran
-`verify.audit` SHALL carry `support` (`base`, `head` or `unchanged`) and `support_files`, and verification.md's Audit
-table SHALL show a `Support` column. verification.md SHALL list the pre-existing test changes that L4-VER-031 allowed
-under `## Pre-existing tests changed with an allowance (L4-VER-031)` and the fixtures of L4-VER-037 that patch the
-unit's code on request.
+`verify.audit` SHALL carry `support` and `support_files`, and verification.md's Audit table a `Support` column.
+`verify.base_tests` SHALL carry the counts, the base source and the reverted files of L4-VER-038, shown in the row
+`pre-existing tests still pass`. verification.md SHALL list the changes L4-VER-031 allowed and the fixtures of
+L4-VER-037 that patch the unit's code on request.
 
 #### Scenario: SCN-VER-120 (+) verification.md says how each audit test ran and lists the allowed changes
 - **GIVEN** a round with one audit test run at the base support, one that fell back, and one allowed `[test-infra]`
@@ -205,23 +242,108 @@ commit and a `[test-infra]` task SHALL be handled as for every other content-sca
   test requests` under `Fixtures that patch the unit's code when a test requests them`; module-level code, a fixture
   an autouse fixture requests and a plain function SHALL block like an autouse fixture
 
+### Requirement: L4-VER-038 Step 1 runs the base's tests on the unit's code
+Step 1 SHALL run the test gate at head with every test and support file the unit added or changed at its base version
+(added ones set aside) and SHALL require each test that passed at the base (a base run of the same command, or the base
+sha's recorded result) to pass. One that fails twice, does not run, or no longer collects SHALL be a blocker naming it,
+unless `tests.superseded`, a `task.unfrozen`, a `[test-infra]` task or only people's commits cover its file.
+
+#### Scenario: SCN-VER-126 (−) A `__code__` swap in the test file fails the run alone
+- **GIVEN** the red of the B1 reproduction that appends `test_total_adds_prices.__code__ = (lambda: None).__code__` to
+  `tests/test_pricing.py`, a green that makes `total()` return `999.0`, and both text signals bypassed (the red check of
+  L4-IMP-048 and step 1's `pre-existing tests` row)
+- **WHEN** the unit is verified
+- **THEN** step 1 SHALL fail with `a pre-existing test fails on the unit's code` naming
+  `tests.test_pricing::test_total_adds_prices`, and the verdict SHALL be FAIL
+
+#### Scenario: SCN-VER-127 (−) A weakened helper module under `tests/` fails step 1
+- **GIVEN** a base whose `tests/test_pricing.py` calls `assert_total` from `tests/checks.py`, a red that makes
+  `assert_total` return without asserting, and a green that breaks `total()`
+- **WHEN** the unit is verified
+- **THEN** step 1 SHALL fail with `a pre-existing test fails on the unit's code` naming
+  `tests.test_pricing::test_total_adds_prices`, and the content scan SHALL have read `tests/checks.py`
+
+#### Scenario: SCN-VER-128 (−) A weakened conftest fixture fails step 1
+- **GIVEN** a base fixture `check_total` in `tests/conftest.py` that `test_total_adds_prices` requests, a red that makes
+  it return a check that asserts nothing, and a green that breaks `total()`
+- **WHEN** the unit is verified
+- **THEN** step 1 SHALL fail with `a pre-existing test fails on the unit's code` and the verdict SHALL be FAIL
+
+#### Scenario: SCN-VER-131 (−) A production module that imports only with the unit's conftest fails step 1
+- **GIVEN** the handshake reproduction (the unit's conftest sets `PYTDD_SUPPORT`, the green module reads it at import)
+- **WHEN** the unit is verified
+- **THEN** step 1 SHALL fail with `a pre-existing test no longer runs on the unit's code` naming
+  `tests/test_pricing.py` and the `KeyError`, and the ladder SHALL stop before step 2
+
+#### Scenario: SCN-VER-137 (−) A weakened Go or TypeScript test fails step 1
+- **GIVEN** a base with `cart/cart_test.go` and `web/cart.test.ts` that check `3.75`, a test command that writes a
+  JUnit report for both, and a harness red commit that weakens both
+- **WHEN** step 1 runs
+- **THEN** the run SHALL fail both tests with `a pre-existing test fails on the unit's code`, and the row `pre-existing
+  tests` SHALL say `no Python test file changed; 2 other test file(s) are checked by the run of pre-existing tests`
+
+#### Scenario: SCN-VER-138 (+) An honest unit passes, and allowed or people's files are listed
+- **GIVEN** an honest unit that adds tests and a conftest fixture; four base tests that fail with the base versions of
+  their files because of a `tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task and a person's commit; and
+  a base test parametrised over production data whose case `[OLD]` the unit's data replaced with `[NEW]`, which passes
+- **WHEN** step 1 runs
+- **THEN** it SHALL raise no finding, list the five with their reasons, and record `verify.base_tests` with the counts
+
+#### Scenario: SCN-VER-139 (+) The base reference is reused, and a flaky test is a minor finding
+- **GIVEN** a round whose run with the base files has one failure that passes on the repeat, and an earlier round's
+  `base-tests.json` for the same base sha and command
+- **WHEN** step 1 runs
+- **THEN** no merge-base worktree SHALL be made (`base_source: "evidence"`), the test SHALL be the minor finding `a
+  pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
+
+### Requirement: L4-VER-039 The content scan reads helper modules and flags test-call replacement
+Step 1's content scan SHALL read a changed Python file that matches `tdd.test_globs` and defines no test as a support
+file (also for L4-VER-037), and SHALL flag in support files a `pytest_pyfunc_call` hook, a `pytest_runtest_call` or
+`pytest_runtest_setup` hook that is not a wrapper, and an assignment to an `.obj` or `.runtest` attribute, as blockers
+like its other hits.
+
+#### Scenario: SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits
+- **GIVEN** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
+  plain `pytest_runtest_setup`, `item.obj = lambda: None` in `pytest_collection_modifyitems`, and `item.runtest = …`;
+  and a `tests/checks.py` with no test that holds a `pytest_runtest_setup`
+- **WHEN** the content scan runs
+- **THEN** each SHALL be a hit of the blocker `a construct that can change what the tests report`, and a wrapper
+  `pytest_runtest_call` already flagged SHALL keep its text
+
+#### Scenario: SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone
+- **GIVEN** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for
+  `test_total_adds_prices`, or with `pytest_collection_modifyitems` setting its `item.obj`, a green that breaks
+  `total()`, and step 1's `content scan` row bypassed
+- **WHEN** the unit is verified
+- **THEN** step 1 SHALL fail in the run of L4-VER-038 (the conftest is set aside), and the verdict SHALL be FAIL
+
 ## MODIFIED Requirements
 
 ### Requirement: L4-VER-002 Ladder
 Steps run in order; a hard failure in steps 0–3 stops the ladder with `FAIL` (evidence collected so far is still
-written). Each step is resumable (L4-VER-011). In the step table of docs/SPEC.md §10.2 three cells change (and one clause of row 1's content scan, below) and every
-other cell stays as it is. Row 1 (integrity): the clause "no deleted/skipped/weakened pre-existing tests (diff
-analysis)" SHALL read "no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an
-earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name
-(L4-VER-030..032; people's changes and allowed ones are listed)". Row 1, content scan: "the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes" SHALL read
-"the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file (L4-VER-037) and stays
-[U] for other languages". Row 4a: the sentence "Audit and generated tests run with
-the unit's added or changed support files reverted to their base versions where they still collect; otherwise with them,
-provided the step-1 content scan of those files is clean" SHALL read "Audit tests, and their zero-value run, run with the
-unit's added, changed or deleted test-support files at their base versions, past other files' collection errors
-(L4-VER-033); a test that does not run that way runs with them in place only when step 1's content scan is `ok`, else it
-is rejected (L4-VER-034); each record says which (`support`, L4-VER-036)". Row 5: after "**pass on head**" add "(the head
-run with the unit's support files at their base versions, L4-VER-035)".
+written). Each step is resumable (L4-VER-011). In the step table of docs/SPEC.md §10.2 the cells below SHALL read as
+given here, and every other cell stays as it is.
+
+Row 1 (integrity), the pre-existing-tests clause: "no pre-existing test deleted, skipped, changed or bound again by a
+harness commit, and no test an earlier step of the unit wrote changed by a later red commit, compared per test on the AST
+by file and qualified name (L4-VER-030..032; people's changes and allowed ones are listed); and **every test that passed
+at the base still passes on the unit's code** when the gate runs at head with every test and support file the unit added
+or changed at its base version (L4-VER-038; any language with a JUnit report)".
+
+Row 1, the content-scan clause on support files: "the rule is checked for opened files (L4-IMP-016) and for every
+changed Python test-support file, a test-glob file with no test included (L4-VER-037, L4-VER-039), and stays [U] for
+other languages"; and its list of result-manipulating constructs gains `pytest_pyfunc_call`, a non-wrapper
+`pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-VER-039).
+
+Row 4a, the last sentence: "Audit tests, and their zero-value run, run with every test and support file the unit added,
+changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted),
+collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an
+audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one
+whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036)".
+
+Row 5: after "**pass on head**" add "(the head run with the e2e runner's own support files the unit changed at their base
+versions, never added app data; when it cannot run that way or its server does not start, in place only after a clean
+step-1 content scan, else uncollectable, L4-VER-035)".
 
 #### Scenario: SCN-VER-121 (−) The weakened pre-existing test of the verifier-2 reproduction fails step 1
 - **GIVEN** a unit branch whose harness red commit rewrote `assert total([1.25, 2.5]) == 3.75` to `is not None`
