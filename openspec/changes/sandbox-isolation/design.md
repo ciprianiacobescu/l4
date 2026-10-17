@@ -219,6 +219,11 @@ New module `src/l4/implementer/envguard.py`:
 - The comment at `tdd.py:1205` becomes true: "`gates.setup` runs on an environment the harness rebuilt after the agent
   step (L4-SEC-036)".
 
+`run_gate_spec` does not call `run_setup` itself (a gate does not start another gate). In a sequence of gates with no
+`run_setup` between them (the static gates after green's test gate, the verifier's setup, build, lint, typecheck,
+repository-ci loop), a gate after a removal runs with no environment and fails: fail-safe, never a pass on the plant.
+Under bwrap this needs a plant by a gate, which the read-only binds prevent; it is a `mode: none` path.
+
 A project with `gates.setup: []` never gets a manifest: every environment directory an agent step or a gate leaves is
 removed (`unverified` / `created`), so a test command that builds its own (`uv run`) builds it in every gate. Correct, and
 slow; the runbook says to set `gates.setup`.

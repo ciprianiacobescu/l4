@@ -51,7 +51,7 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
   `src/l4/yolo/{postcheck.py,readiness.py}`, `src/l4/sim/dryrun.py`, `src/l4/agents/{opencode.py,credentials.py}`,
   `src/l4/config/{schema.py,defaults.py}`, `src/l4/doctor/checks_sandbox.py`, `scripts/runner/sandbox-probe.sh`.
 - Spec: L4-SEC-030..038 and L4-PRV-040..041 added; L4-SEC-005 parts b, c, d modified; L4-CFG-005 and the SPEC text of
-  L4-SEC-005 amended in `docs/SPEC.md`; SCN-SEC-70..98, SCN-PRV-100..103; doctor row `SANDBOX-003`; config keys
+  L4-SEC-005 amended in `docs/SPEC.md`; SCN-SEC-70..98, SCN-PRV-100..104; doctor row `SANDBOX-003`; config keys
   `sandbox.tool_paths`, `sandbox.setup_paths`; event `env.rebuilt`.
 - Behaviour per environment (design section 4): on Linux with bwrap (GitHub-hosted and self-hosted) all of it; on a mac with
   `sandbox.mode: none` (accepted risk) only the keyed directories, the environment rebuild and the file modes.

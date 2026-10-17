@@ -121,8 +121,11 @@ Every task follows these rules:
   `setup_paths` only when `builds_env`. New `src/l4/sandbox/home.py`: `tool_paths(host_env, *, home, cache_root, kind,
   configured, forbid)` (design D4, items 1-9, in that order, deduplicated), `setup_paths(host_env, *, home, cache_root,
   configured)`, and `hidden_roots(spec)`. `src/l4/sandbox/bwrap.py`: `build_argv` in design D3's order with the home
-  refusal of D1; update the module docstring (line 17: "empty home" is built; name L4-SEC-030..032). Update
-  `tests/unit/sandbox/conftest.py` (`make_spec`) and the argv tests whose expected order changes
+  refusal of D1; update the module docstring (line 17: "empty home" is built; name L4-SEC-030..032). D1 refuses a
+  home that does not exist: every test fixture that builds a spec and calls `build_argv`/`wrap` must create its `home`
+  as a directory on disk (`tests/unit/sandbox/conftest.py`, the parity `world` fixtures, `tests/unit/gates/test_runner.py`,
+  `tests/unit/agents/test_judge_cwd.py`, `tests/unit/agents/test_login_lock.py`, `tests/unit/sandbox/test_select.py`).
+  Update `tests/unit/sandbox/conftest.py` (`make_spec`) and the argv tests whose expected order changes
   (`test_bwrap_argv.py::test_gate_argv_shape`, `::test_main_repo_git_dir_is_read_only_and_after_the_writable_binds`,
   `::test_the_runner_tmp_dir_is_covered_by_a_tmpfs_in_both_kinds_before_any_bind`). Verify: 2.2 files, `tests/unit/sandbox/`.
 - [ ] 2.4 Code, configuration and callers: `src/l4/config/schema.py` `SandboxCfg.tool_paths: list[str] = []` and
@@ -156,6 +159,9 @@ Every task follows these rules:
   test_a_key_left_by_a_killed_run_is_removed` (SCN-PRV-102): with `make_bench`, write
   `<unit_cache>/agent-tmp/opencode-config/provider.key` and `<unit_cache>/agent-tmp/credential`, build a second
   workbench for the unit (`make_workbench` with the bench's arguments): both files are gone.
+  `tests/unit/implementer/test_credential_leftovers.py::test_a_normal_end_leaves_nothing_to_remove` (SCN-PRV-104): an
+  opencode-shaped step that ends normally (the fake adapter writing no key file), then a second workbench: nothing was
+  removed (patch `Path.unlink` or check before/after listings) and `agent-tmp` exists with mode 0700.
 - [ ] 3.2 Code: `src/l4/implementer/workbench.py`: `__post_init__` unlinks `agent-tmp/opencode-config/provider.key`
   and `agent-tmp/credential` (names from `l4.agents.opencode_provider.KEY_FILE`, `l4.agents.opencode.CONFIG_DIR`,
   `l4.agents.credentials.CREDENTIAL_FILE`) before it creates the directories; `reset_agent_tmp` and the creation of
@@ -257,7 +263,7 @@ Every task follows these rules:
     bwrap is absent or the mode is not `auto`/`bwrap`).
   - The ledger event list: `env.rebuilt` (`{tree, dirs, phase, added, changed, removed, reason, declared,
     planted_more}`), and rule `environment` on `guard.violation`.
-  - Part II: a new section `### 23.24 Sandbox isolation (SEC, PRV)` with SCN-SEC-70..98 and SCN-PRV-100..103 in SPEC
+  - Part II: a new section `### 23.24 Sandbox isolation (SEC, PRV)` with SCN-SEC-70..98 and SCN-PRV-100..104 in SPEC
     form (`#### SCN-SEC-70 (−) <title> · L4-SEC-030`, `- **Given** / **When** / **Then**`), the texts of this change's
     scenarios.
   - §21 change table: a row after the last one present, `sandbox-isolation` (an empty home and a hidden runner cache in

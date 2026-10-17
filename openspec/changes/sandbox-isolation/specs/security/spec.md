@@ -156,7 +156,7 @@ that differs, is new or has no manifest MUST be removed, so the next `gates.setu
 #### Scenario: SCN-SEC-91 (−) Under `sandbox.mode: none` a gate's plant is removed after the gate
 - **GIVEN** `sandbox.mode: none`, `sandbox.allow_none: true`, and a test gate whose test writes `sitecustomize.py` into `.venv`
 - **WHEN** the gate ends
-- **THEN** `.venv` is removed, `guard.violation{phase: "gate", rule: "environment"}` names the file, and the next gate runs after `gates.setup`
+- **THEN** `.venv` is removed, `guard.violation{phase: "gate", rule: "environment"}` names the file, and `setup_at` is cleared, so no later gate runs on the planted environment: the next `run_setup` builds it again, and a gate before that runs without it and fails rather than passes
 
 #### Scenario: SCN-SEC-92 (−) A changed installed package is removed with `node_modules`
 - **GIVEN** an agent step that edits `node_modules/vitest/dist/index.js` and changes no package manifest or lock file

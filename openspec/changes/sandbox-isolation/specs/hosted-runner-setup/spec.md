@@ -32,6 +32,11 @@ system temp directory in doctor (hidden by the sandbox's own `/tmp`).
 - **WHEN** the next run builds the unit's workbench
 - **THEN** both files are gone before the first gate or agent step
 
+#### Scenario: SCN-PRV-104 (+) A run that ends normally leaves nothing for the next workbench to remove
+- **GIVEN** an opencode agent step with a provider key that ended normally
+- **WHEN** the unit's next workbench is built
+- **THEN** no key file or credential file was there to remove, and the private directory exists with mode 0700
+
 #### Scenario: SCN-PRV-103 (−) The hello's key directory is hidden from every sandbox
 - **GIVEN** a probe context whose working directory is the runner cache, and a gate spec of any unit
 - **WHEN** the hello writes its key and the gate argv is built
