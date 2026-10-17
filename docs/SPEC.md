@@ -4361,7 +4361,7 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - Only protocol messages SHALL go to stdout; logs go to stderr.
 - The harness SHALL add no runtime dependency for it (the official `mcp` package is a dev dependency of the interop test only).
 - The streams SHALL be read and written as UTF-8 bytes whatever the locale; bytes that are not UTF-8 give a parse error on that line, never a crash.
-- A `progress` value of a progress notification SHALL be greater than that of the notification before it for the same token.
+- A `progress` value of a progress notification SHALL be greater than that of the notification before it for the same token, and none SHALL follow the response of its call.
 - `initialize` and `tools/list` SHALL name the repositories the instance serves (`serverInfo.title`, `instructions`, each tool's description), so a client with several instances can tell them apart.
 
 **L4-MCP-005** An instance serves the repositories it was started for. `l4 mcp serve` SHALL take `--repo PATH`, repeatable; each PATH SHALL resolve to the root of a git repository with `.l4/config.yaml`, else the server SHALL exit 2 before it serves.
@@ -4370,10 +4370,10 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - No `--repo`: the working directory serves when it is such a repository; otherwise every tool call SHALL answer an error that names `--repo`.
 - Every tool result SHALL name the repository it ran in. A tool SHALL NOT run in a repository the server was not started for.
 
-**L4-MCP-002** Every tool runs the `l4` command it names, as an agent. A tool SHALL run `python -m l4 <command>` as a subprocess in the repository, with the caller's environment plus `AI_AGENT=l4-mcp` and no terminal on stdin, so that every rule the CLI applies to an agent caller holds (`clarifier.answer_by_agents` and the others). The server SHALL make no write of its own, and SHALL NOT pass the global `--repo` or `--config` options.
+**L4-MCP-002** Every tool runs the `l4` command it names, as an agent. A tool SHALL run `python -P -m l4 <command>` as a subprocess in the repository (`-P`, on this child only, keeps the repository's own files, such as a `yaml.py`, off `sys.path`), with the caller's environment plus `AI_AGENT=l4-mcp` and no terminal on stdin, so that every rule the CLI applies to an agent caller holds (`clarifier.answer_by_agents` and the others). The server SHALL make no write of its own, and SHALL NOT pass the global `--repo` or `--config` options.
 - A value reaches the command as `--option=value` or after `--`, so it cannot be read as an option.
 - A result SHALL carry the exit code, the output redacted again and cut at 64 KiB with the cut said, the parsed JSON when the command printed JSON, and `isError` for a non-zero exit, a timeout or a cancel.
-- A timeout or a cancel SHALL stop the command's whole process group: SIGTERM, and after a grace period SIGKILL to the group even when the command itself exited, so a descendant that ignores SIGTERM does not keep running.
+- A timeout or a cancel SHALL stop the command's whole process group: SIGTERM, then a grace period counted in wall-clock time from the signal, also after the command itself exited (a descendant may clean up), then SIGKILL to what remains, so a descendant that ignores SIGTERM does not keep running.
 - A `number` argument SHALL be finite; NaN and infinity are refused as a bad argument, and `--extend-cost` of `l4 resume` and `l4 yolo resume` refuses them too (exit 2).
 
 **L4-MCP-003** The tools manage plans and debug units.
@@ -4386,6 +4386,9 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - It SHALL refuse a file it cannot parse (exit 2, naming the file, nothing written) and print what it wrote.
 - It SHALL refuse (exit 2, nothing written) an entry of that name that serves another repository, naming both paths and `--name`, and, for `--project`, a symlink on the file or on a folder above it inside the repository.
 - Only clients whose path and format were checked against the vendor's documentation are offered: Claude Code (project `.mcp.json`; user scope prints `claude mcp add --scope user`), Cursor, VS Code (project only), Kiro, Codex (TOML, only the `[mcp_servers.NAME]` table is replaced), OpenCode. The vendor URLs are in `src/l4/mcp/install.py`.
+- A project entry depends on where the client starts the server. Claude Code sets `CLAUDE_PROJECT_DIR` (from v2.1.139), VS Code starts it in the workspace folder, OpenCode and Codex in the session's directory: their entries hold `l4 mcp serve` with no path. Cursor documents no working directory, so its project entry holds `--repo ${workspaceFolder}` (the folder that contains `.cursor/mcp.json`; https://cursor.com/docs/context/mcp). Kiro documents neither, so `--project` for Kiro SHALL be refused (exit 2, nothing written) with the hint to use the user scope.
+- Codex starts a server with an allowlisted environment: its entry SHALL also carry `env_vars` naming `forge.token_env` of the repository's `.l4/config.yaml` when that file sets it, keeping the variables the user listed.
+- Claude Code desktop worktree sessions read `.mcp.json` of the main checkout and set `CLAUDE_PROJECT_DIR` to it (https://code.claude.com/docs/en/worktrees): a project file serves a worktree only for a session started inside it; to serve a worktree otherwise, use a user-scope entry with `--repo <worktree path>`.
 
 ---
 
@@ -9835,8 +9838,8 @@ scenario is a spec defect (§26).
 - **When** a client calls `l4_plan_check` for `p1` without `worktree`, then with `worktree: true`
 - **Then** the first result is an error because origin has no such file; the second prints the order and exits 0, and nothing is recorded
 
-#### SCN-MCP-16 (+) A committed project file serves each worktree · L4-MCP-004
-- **Given** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository
+#### SCN-MCP-16 (+) A committed project file serves a worktree a session starts in · L4-MCP-004
+- **Given** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository in which the client's session starts
 - **When** the server starts with that file's arguments in the worktree and a tool is called
 - **Then** the file holds no absolute path and the result names the worktree
 
@@ -9884,6 +9887,36 @@ scenario is a spec defect (§26).
 - **Given** two servers, one per repository
 - **When** a client reads each `initialize` result and `tools/list`
 - **Then** `serverInfo.title`, `instructions` and every tool description name that server's repositories and no other
+
+#### SCN-MCP-26 (−) A file of the repository named like a dependency does not run · L4-MCP-002
+- **Given** a repository that holds a `yaml.py` (or `click.py`) whose code writes a marker file
+- **When** a client calls `l4_status`
+- **Then** the marker is not written: the command ran with `-P`, and the setting is not in the environment of its children
+
+#### SCN-MCP-27 (+) A descendant gets the grace to clean up · L4-MCP-002
+- **Given** a call that times out, whose descendant needs one second to clean up after SIGTERM while the command exited at once
+- **When** the grace period is longer than that
+- **Then** the descendant finishes its cleanup; one that ignores SIGTERM is killed when the grace ends
+
+#### SCN-MCP-28 (+) Cursor's project entry names the workspace folder · L4-MCP-004
+- **Given** `l4 mcp install --client cursor --project`
+- **When** the file `.cursor/mcp.json` is read
+- **Then** its entry runs `l4 mcp serve --repo ${workspaceFolder}`, holds no path of this machine, and a second install is not refused
+
+#### SCN-MCP-29 (−) A Kiro project entry is refused · L4-MCP-004
+- **Given** `l4 mcp install --client kiro --project`
+- **When** it runs
+- **Then** it exits 2 with a hint to use the user scope (`--repo PATH`, one entry per repository), and writes nothing
+
+#### SCN-MCP-30 (+) Codex gets the forge token variable · L4-MCP-004
+- **Given** a repository whose `.l4/config.yaml` sets `forge.token_env: MY_FORGE_TOKEN`
+- **When** `l4 mcp install --client codex` runs, with a user-listed `env_vars` already in the entry
+- **Then** the entry's `env_vars` holds the user's variables and `MY_FORGE_TOKEN`
+
+#### SCN-MCP-31 (−) No progress follows the response · L4-MCP-001
+- **Given** a call with a progress token and a very short heartbeat
+- **When** the call completes, many times over
+- **Then** no progress notification is written after its response
 
 ## 24. Definition of done
 

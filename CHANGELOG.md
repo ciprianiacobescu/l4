@@ -31,6 +31,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `progress` value; `initialize` and each tool name the served repositories, so a client with several instances can
   tell them apart.
 - `l4 mcp install --client claude-code` prints the `claude mcp add` line shell-quoted, so a path with a space works.
+- `l4 mcp serve`: the tool commands run with `python -P`, so a file of the served repository named `yaml.py`,
+  `click.py` or an `l4` package can no longer run in place of a dependency; a stopped call's process group keeps its
+  grace period after the command exited, so a descendant can clean up before it is killed; no progress notification
+  follows the response of its call.
+- `l4 mcp install --project` writes what each client can use: Cursor `--repo ${workspaceFolder}` (Cursor documents no
+  working directory for servers), VS Code, OpenCode, Codex and Claude Code `l4 mcp serve` (they start in the project
+  or set `CLAUDE_PROJECT_DIR`); Kiro, which documents neither, is refused with a hint to use the user scope. A Codex
+  entry lists `forge.token_env` of `.l4/config.yaml` under `env_vars`. The quickstart says a project file serves a
+  worktree only for a session started inside it (Claude Code desktop worktree sessions use the main checkout's file).
 
 ## 0.4.14 (2026-10-17)
 

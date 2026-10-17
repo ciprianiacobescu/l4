@@ -57,12 +57,16 @@ USER_FILE = {
 }
 
 
-@pytest.mark.parametrize("client", ALL)
+PROJECT_ARGS = {"cursor": ["mcp", "serve", "--repo", "${workspaceFolder}"]}  # M2: the others start in the folder
+
+
+@pytest.mark.parametrize("client", [c for c in ALL if c != "kiro"])
 def test_project_scope_writes_the_documented_file_with_the_serve_command(client, repo_factory, home):
     root = repo_factory("mint-mory")
     assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
     entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")  # the project entry is named l4
-    assert command_of(client, entry) == ["l4", "mcp", "serve"]  # no path: the file is committed (F1)
+    # no path of this machine: the file is committed (F1)
+    assert command_of(client, entry) == ["l4", *PROJECT_ARGS.get(client, ["mcp", "serve"])]
     assert not (home / ".mcp.json").exists()
 
 
@@ -133,8 +137,8 @@ def test_name_overrides_the_default(repo_factory, home):
     root = repo_factory("mint-mory")
     assert install(home, "--client", "kiro", "--repo", str(root), "--name", "memory") == 0
     assert list(read(home / ".kiro/settings/mcp.json")["mcpServers"]) == ["memory"]
-    assert install(home, "--client", "kiro", "--project", "--repo", str(root), "--name", "mm") == 0
-    assert list(read(root / ".kiro/settings/mcp.json")["mcpServers"]) == ["mm"]
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root), "--name", "mm") == 0
+    assert list(read(root / ".cursor/mcp.json")["mcpServers"]) == ["mm"]
 
 
 def test_a_folder_name_that_is_not_a_valid_entry_name_is_cleaned(repo_factory, home):
@@ -155,7 +159,7 @@ def test_the_default_repository_is_the_working_directorys(repo_factory, home, mo
     (root / "sub").mkdir()
     monkeypatch.chdir(root / "sub")
     assert install(home, "--client", "cursor", "--project") == 0
-    assert read(root / ".cursor/mcp.json")["mcpServers"]["l4"]["args"] == ["mcp", "serve"]
+    assert read(root / ".cursor/mcp.json")["mcpServers"]["l4"]["args"] == PROJECT_ARGS["cursor"]
     assert install(home, "--client", "cursor") == 0  # user scope: the working directory's repository, by path
     assert read(home / ".cursor/mcp.json")["mcpServers"]["l4-here"]["args"][-1] == str(root)
 
@@ -255,12 +259,12 @@ def serve_status(cwd: Path, args: list[str], env: dict[str, str] | None = None) 
     return call["result"]["content"][0]["text"]
 
 
-@pytest.mark.parametrize("client", ALL)
+@pytest.mark.parametrize("client", [c for c in ALL if c != "kiro"])
 def test_f1_project_scope_writes_no_absolute_path(client, repo_factory, home):
     root = repo_factory("mint-mory")
     assert install(home, "--client", client, "--project", "--repo", str(root)) == 0
     entry = entry_of(client, read(root / PROJECT_FILE[client]), "l4")
-    assert command_of(client, entry) == ["l4", "mcp", "serve"]
+    assert command_of(client, entry) == ["l4", *PROJECT_ARGS.get(client, ["mcp", "serve"])]
     assert str(root) not in (root / PROJECT_FILE[client]).read_text()
 
 
@@ -352,8 +356,8 @@ def test_f3_project_install_refuses_a_symlinked_parent_folder(repo_factory, home
     root = repo_factory("evil")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (root / ".kiro").symlink_to(elsewhere)
-    assert install(home, "--client", "kiro", "--project", "--repo", str(root)) == 2
+    (root / ".cursor").symlink_to(elsewhere)
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root)) == 2
     assert list(elsewhere.iterdir()) == []
 
 
@@ -379,3 +383,107 @@ def test_f6_the_printed_claude_command_is_shell_quoted(tmp_path, home, capsys):
         "claude", "mcp", "add", "--transport", "stdio", "--scope", "user", "l4-it-s-here", "--",
         "l4", "mcp", "serve", "--repo", str(root),
     ]  # fmt: skip
+
+
+# --- review finding M2: what each client does with a project entry --------------------------------------------------
+
+
+def test_m2_claude_code_project_entry(repo_factory, home):  # sets CLAUDE_PROJECT_DIR (v2.1.139 and later)
+    root = repo_factory("app")
+    assert install(home, "--client", "claude-code", "--project", "--repo", str(root)) == 0
+    assert read(root / ".mcp.json")["mcpServers"]["l4"] == {"type": "stdio", "command": "l4", "args": ["mcp", "serve"]}
+
+
+def test_m2_vscode_project_entry(repo_factory, home):  # the server's cwd defaults to the workspace folder
+    root = repo_factory("app")
+    assert install(home, "--client", "vscode", "--project", "--repo", str(root)) == 0
+    assert read(root / ".vscode/mcp.json")["servers"]["l4"] == {
+        "type": "stdio",
+        "command": "l4",
+        "args": ["mcp", "serve"],
+    }
+
+
+def test_m2_opencode_project_entry(repo_factory, home):  # the session's cwd
+    root = repo_factory("app")
+    assert install(home, "--client", "opencode", "--project", "--repo", str(root)) == 0
+    entry = read(root / "opencode.json")["mcp"]["l4"]
+    assert entry == {"type": "local", "command": ["l4", "mcp", "serve"], "enabled": True}
+
+
+def test_m2_cursor_project_entry_names_the_workspace_folder_variable(repo_factory, home):
+    root = repo_factory("app")
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root)) == 0
+    text = (root / ".cursor/mcp.json").read_text()
+    assert json.loads(text)["mcpServers"]["l4"] == {
+        "type": "stdio", "command": "l4", "args": ["mcp", "serve", "--repo", "${workspaceFolder}"],
+    }  # fmt: skip
+    assert str(root) not in text  # commit-safe: no path of this machine
+    assert install(home, "--client", "cursor", "--project", "--repo", str(root)) == 0  # a rerun is not refused
+    assert json.loads((root / ".cursor/mcp.json").read_text())["mcpServers"]["l4"]["args"][-1] == "${workspaceFolder}"
+
+
+def test_m2_cursor_user_entry_names_the_repository(repo_factory, home):
+    root = repo_factory("app")
+    assert install(home, "--client", "cursor", "--repo", str(root)) == 0
+    entry = read(home / ".cursor/mcp.json")["mcpServers"]["l4-app"]
+    assert entry == {"type": "stdio", "command": "l4", "args": ["mcp", "serve", "--repo", str(root)]}
+
+
+def test_m2_kiro_project_scope_is_refused_with_the_user_scope_hint(repo_factory, home, capsys):
+    root = repo_factory("app")
+    assert install(home, "--client", "kiro", "--project", "--repo", str(root)) == 2
+    err = capsys.readouterr().err
+    assert "kiro" in err and "user scope" in err and "--repo" in err
+    assert not (root / ".kiro").exists() and not (home / ".kiro").exists()
+
+
+def test_m2_kiro_user_entry_is_unchanged(repo_factory, home):
+    root = repo_factory("app")
+    assert install(home, "--client", "kiro", "--repo", str(root)) == 0
+    entry = read(home / ".kiro/settings/mcp.json")["mcpServers"]["l4-app"]
+    assert entry == {"command": "l4", "args": ["mcp", "serve", "--repo", str(root)]}
+
+
+def with_token_env(root: Path, name: str | None = "MY_FORGE_TOKEN") -> None:
+    text = "version: 1\n" + (f"forge:\n  token_env: {name}\n" if name else "")
+    (root / ".l4" / "config.yaml").write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize("project", [True, False])
+def test_m2_codex_entry_lists_the_forge_token_variable_it_passes_through(repo_factory, home, project):
+    root = repo_factory("app")
+    with_token_env(root)
+    path = root / ".codex/config.toml" if project else home / ".codex/config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "[mcp_servers." + ("l4" if project else "l4-app") + ']\ncommand = "old"\nstartup_timeout_sec = 30\n'
+    )
+    argv = ["--client", "codex", "--repo", str(root), *(["--project"] if project else [])]
+    assert install(home, *argv) == 0
+    entry = tomllib.loads(path.read_text())["mcp_servers"]["l4" if project else "l4-app"]
+    assert entry == {
+        "command": "l4",
+        "args": ["mcp", "serve"] if project else ["mcp", "serve", "--repo", str(root)],
+        "env_vars": ["MY_FORGE_TOKEN"],
+        "startup_timeout_sec": 30,  # the user's own key stays
+    }
+
+
+def test_m2_codex_entry_without_a_configured_token_variable_has_no_env_vars(repo_factory, home):
+    root = repo_factory("app")
+    assert install(home, "--client", "codex", "--project", "--repo", str(root)) == 0
+    assert tomllib.loads((root / ".codex/config.toml").read_text())["mcp_servers"]["l4"] == {
+        "command": "l4", "args": ["mcp", "serve"],
+    }  # fmt: skip
+
+
+def test_m2_codex_keeps_the_env_vars_the_user_listed(repo_factory, home):
+    root = repo_factory("app")
+    with_token_env(root)
+    path = root / ".codex/config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text('[mcp_servers.l4]\ncommand = "l4"\nenv_vars = ["HTTPS_PROXY"]\n')
+    assert install(home, "--client", "codex", "--project", "--repo", str(root)) == 0
+    entry = tomllib.loads(path.read_text())["mcp_servers"]["l4"]
+    assert entry["env_vars"] == ["HTTPS_PROXY", "MY_FORGE_TOKEN"]

@@ -7,8 +7,8 @@ Any MCP client can manage L4 plans and debug L4 units through typed tools, under
 ### Requirement: L4-MCP-001 l4 mcp serve is an MCP server over stdio
 `l4 mcp serve` SHALL speak MCP over stdio as newline-delimited JSON-RPC 2.0: `initialize`, `ping`, `tools/list`,
 `tools/call` and `notifications/initialized`. It SHALL answer -32601 for an unknown method and -32700 or -32600 for
-malformed input, put only protocol messages on stdout, add no runtime dependency, read and write UTF-8 under any
-locale, and send a rising `progress` value.
+malformed input, put only protocol messages on stdout, add no runtime dependency, use UTF-8 under any locale, and
+send a rising `progress` value, none after the response.
 
 #### Scenario: SCN-MCP-01 (+) A client connects and lists the tools
 - **GIVEN** `l4 mcp serve` started by an MCP client in a repository
@@ -30,6 +30,11 @@ locale, and send a rising `progress` value.
 - **GIVEN** a call that carries a progress token and runs long enough for several notifications
 - **WHEN** the server sends them
 - **THEN** each `progress` value is greater than the one before
+
+#### Scenario: SCN-MCP-31 (−) No progress follows the response
+- **GIVEN** a call with a progress token and a very short heartbeat
+- **WHEN** the call completes, many times over
+- **THEN** no progress notification is written after its response
 
 ### Requirement: L4-MCP-005 An instance serves the repositories it was started for
 `l4 mcp serve` SHALL take `--repo PATH`, repeatable, each the root of a git repository with `.l4/config.yaml`, else exit
@@ -61,7 +66,7 @@ naming `--repo`. Results and `initialize` SHALL name the repositories.
 Each tool SHALL run the `l4` command it names as a subprocess in the repository, with the caller's environment plus
 `AI_AGENT=l4-mcp` and no terminal on stdin, so that every CLI rule for agents holds. The server SHALL make no write of
 its own. A result SHALL carry the exit code, the redacted output cut at 64 KiB, the parsed JSON, and `isError`. A
-timeout or cancel SHALL stop the whole process group.
+timeout or cancel SHALL stop the whole process group after a grace. The child SHALL NOT put the repository on sys.path.
 
 #### Scenario: SCN-MCP-03 (+) A read tool returns the command's output
 - **GIVEN** a repository with a delivery plan `p`
@@ -77,6 +82,16 @@ timeout or cancel SHALL stop the whole process group.
 - **GIVEN** a command whose descendant ignores SIGTERM
 - **WHEN** the call times out or is cancelled
 - **THEN** after the grace period the whole process group is killed, also when the command itself already exited
+
+#### Scenario: SCN-MCP-26 (−) A file of the repository named like a dependency does not run
+- **GIVEN** a repository that holds a `yaml.py` (or `click.py`) whose code writes a marker file
+- **WHEN** a client calls `l4_status`
+- **THEN** the marker is not written: the command ran with `-P`, and the setting is not in the environment of its children
+
+#### Scenario: SCN-MCP-27 (+) A descendant gets the grace to clean up
+- **GIVEN** a call that times out, whose descendant needs one second to clean up after SIGTERM while the command exited at once
+- **WHEN** the grace period is longer than that
+- **THEN** the descendant finishes its cleanup; one that ignores SIGTERM is killed when the grace ends
 
 ### Requirement: L4-MCP-003 The tools manage plans and debug units
 The server SHALL offer the read tools `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check`, `l4_plan_findings`,
@@ -131,8 +146,8 @@ The server SHALL offer the read tools `l4_status`, `l4_doctor`, `l4_plan_status`
 `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's
 documented MCP configuration with the server command, one entry per repository, merging into an existing file,
 keeping other servers and the user's keys, atomically. It SHALL refuse what it cannot parse, an entry that serves
-another repository and a symlink, writing nothing. Only clients checked against the vendor's documentation SHALL be
-offered.
+another repository, a symlink and a client project entry that could not find its repository. Only documented clients
+SHALL be offered.
 
 #### Scenario: SCN-MCP-08 (+) A client is configured and other servers stay
 - **GIVEN** a client user configuration file that already lists another MCP server and an entry `l4-mint-mory`
@@ -145,8 +160,8 @@ offered.
 - **WHEN** `l4 mcp install` runs for it
 - **THEN** it exits 2 naming the file and writes nothing
 
-#### Scenario: SCN-MCP-16 (+) A committed project file serves each worktree
-- **GIVEN** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository
+#### Scenario: SCN-MCP-16 (+) A committed project file serves a worktree a session starts in
+- **GIVEN** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository in which the client's session starts
 - **WHEN** the server starts with that file's arguments in the worktree and a tool is called
 - **THEN** the file holds no absolute path and the result names the worktree
 
@@ -164,3 +179,18 @@ offered.
 - **GIVEN** a repository whose path holds a space or a quote
 - **WHEN** `l4 mcp install --client claude-code` prints its `claude mcp add` line
 - **THEN** the line, split as a shell splits it, gives the exact `l4 mcp serve --repo <path>` arguments
+
+#### Scenario: SCN-MCP-28 (+) Cursor's project entry names the workspace folder
+- **GIVEN** `l4 mcp install --client cursor --project`
+- **WHEN** the file `.cursor/mcp.json` is read
+- **THEN** its entry runs `l4 mcp serve --repo ${workspaceFolder}`, holds no path of this machine, and a second install is not refused
+
+#### Scenario: SCN-MCP-29 (−) A Kiro project entry is refused
+- **GIVEN** `l4 mcp install --client kiro --project`
+- **WHEN** it runs
+- **THEN** it exits 2 with a hint to use the user scope (`--repo PATH`, one entry per repository), and writes nothing
+
+#### Scenario: SCN-MCP-30 (+) Codex gets the forge token variable
+- **GIVEN** a repository whose `.l4/config.yaml` sets `forge.token_env: MY_FORGE_TOKEN`
+- **WHEN** `l4 mcp install --client codex` runs, with a user-listed `env_vars` already in the entry
+- **THEN** the entry's `env_vars` holds the user's variables and `MY_FORGE_TOKEN`

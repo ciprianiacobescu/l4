@@ -1,6 +1,16 @@
 """`l4 mcp install` (L4-MCP-004): write the MCP configuration of a client so that it starts
 `l4 mcp serve --repo <repository>` (user scope) or `l4 mcp serve` (project scope: the file is committed, so it holds
-no path of this machine and every clone and worktree serves its own folder).
+no path of this machine; where the client starts the server decides the folder, see below).
+
+Where each client starts a project server (checked on 2026-10-17; a worktree is served only by a session started in it,
+Claude Code desktop worktree sessions use the main checkout's `.mcp.json`: https://code.claude.com/docs/en/worktrees):
+- Claude Code sets CLAUDE_PROJECT_DIR (v2.1.139 and later): `l4 mcp serve` reads it. https://code.claude.com/docs/en/mcp
+- VS Code: the working directory defaults to the workspace folder. https://code.visualstudio.com/docs/copilot/customization/mcp-servers
+- OpenCode and Codex: the session's directory (https://opencode.ai/docs/mcp-servers/, the Codex MCP page below).
+- Cursor: no working directory is documented (reported as "/"), so the entry says `--repo ${workspaceFolder}`, which
+  Cursor resolves to the folder that contains `.cursor/mcp.json` (https://cursor.com/docs/context/mcp).
+- Kiro: nothing documented (reported as "~"): `--project` is refused; the user scope works (https://kiro.dev/docs/mcp/configuration/).
+- Codex passes a server only an allowlisted environment, so its entry lists `forge.token_env` under `env_vars`.
 
 Every path and shape below was checked against the vendor's documentation on 2026-10-17 (the URL is kept beside each
 client). The write merges into the file, keeps every other server, is atomic and refuses a file that does not parse.
@@ -20,12 +30,13 @@ import re
 import shlex
 import tempfile
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import click
+import yaml
 
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
@@ -36,8 +47,9 @@ NAME = re.compile(r"[A-Za-z0-9_-]+")
 COMMAND = "l4"
 
 
-def server_args(repo: Path | None) -> list[str]:
-    """`--repo` only for a user-scope entry: a project file is committed and must not name a path of this machine."""
+def server_args(repo: Path | str | None) -> list[str]:
+    """`--repo` only for a user-scope entry: a project file is committed and must not name a path of this machine
+    (except as a client variable such as Cursor's `${workspaceFolder}`)."""
     return ["mcp", "serve", *(["--repo", str(repo)] if repo is not None else [])]
 
 
@@ -61,6 +73,8 @@ class JsonClient:
     user: str | None  # relative to the home folder
     source: str  # the vendor documentation
     schema: str | None = None
+    workspace_var: str | None = None  # a project entry names its folder with this client variable (commit-safe)
+    project_refused: str | None = None  # why a project entry is refused (exit 2), with the way out
 
 
 CLIENTS: dict[str, JsonClient | str] = {
@@ -68,9 +82,17 @@ CLIENTS: dict[str, JsonClient | str] = {
     # "command", "args", "env"}}}; user scope is `~/.claude.json` (all state): the documented command is printed.
     "claude-code": JsonClient("mcpServers", _stdio, True, ".mcp.json", None, "https://code.claude.com/docs/en/mcp"),
     # https://cursor.com/docs/context/mcp: `.cursor/mcp.json` (project), `~/.cursor/mcp.json` (global)
+    # The documentation names no working directory for the server (reported as "/"), so a project entry says the
+    # folder: `${workspaceFolder}` resolves to the folder that contains `.cursor/mcp.json`.
     "cursor": JsonClient(
-        "mcpServers", _stdio, True, ".cursor/mcp.json", ".cursor/mcp.json", "https://cursor.com/docs/context/mcp"
-    ),
+        "mcpServers",
+        _stdio,
+        True,
+        ".cursor/mcp.json",
+        ".cursor/mcp.json",
+        "https://cursor.com/docs/context/mcp",
+        workspace_var="${workspaceFolder}",
+    ),  # fmt: skip
     # https://code.visualstudio.com/docs/copilot/customization/mcp-servers: `.vscode/mcp.json`, top-level "servers",
     # "type": "stdio"; no documented path for the user profile file.
     "vscode": JsonClient(
@@ -82,6 +104,8 @@ CLIENTS: dict[str, JsonClient | str] = {
         "https://code.visualstudio.com/docs/copilot/customization/mcp-servers",
     ),  # fmt: skip
     # https://kiro.dev/docs/mcp/configuration/: `.kiro/settings/mcp.json` (workspace) and `~/.kiro/settings/mcp.json`
+    # Its documentation names neither a working directory nor a workspace variable for the server (reported as "~"),
+    # so a project entry could serve nothing: --project is refused, the user scope (one entry per repository) works.
     "kiro": JsonClient(
         "mcpServers",
         _stdio,
@@ -89,6 +113,11 @@ CLIENTS: dict[str, JsonClient | str] = {
         ".kiro/settings/mcp.json",
         ".kiro/settings/mcp.json",
         "https://kiro.dev/docs/mcp/configuration/",
+        project_refused=(
+            "kiro does not document the working directory of a server or a workspace variable, so a committed "
+            "project entry could not find its repository; use the user scope: `l4 mcp install --client kiro "
+            "--repo PATH` (one entry per repository)"
+        ),
     ),  # fmt: skip
     # https://opencode.ai/docs/mcp-servers/ ("mcp": {name: {"type": "local", "command": [argv...], "enabled"}}) and
     # https://opencode.ai/docs/config/ (`opencode.json` in the project root, `~/.config/opencode/opencode.json`)
@@ -144,7 +173,7 @@ def repo_of(args: Any) -> str | None:
 
 def check_same_repository(where: Path, name: str, existing: str | None, repo: Path) -> None:
     """An entry of that name that serves another repository is never replaced (two folders can share a name)."""
-    if existing is None:
+    if existing is None or existing.startswith("${"):  # a client variable: the folder of the file itself
         return
     try:
         same = Path(existing).expanduser().resolve() == repo.resolve()
@@ -218,7 +247,7 @@ def _toml_value(value: Any, where: Path) -> str:
     raise ConfigRefused(f"{where}: a value of type {type(value).__name__} cannot be kept; nothing written")
 
 
-def merge_toml(path: Path, name: str, repo: Path, *, with_repo: bool) -> str:
+def merge_toml(path: Path, name: str, repo: Path, *, with_repo: bool, env_vars: Sequence[str] = ()) -> str:
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
         before = tomllib.loads(text)
@@ -243,12 +272,19 @@ def merge_toml(path: Path, name: str, repo: Path, *, with_repo: bool) -> str:
         if not skipping:
             kept.append(line)
     argv = server_args(repo if with_repo else None)
-    extra = {k: v for k, v in old.items() if k not in ("command", "args") and k not in subtables}
+    old_vars = old.get("env_vars") if isinstance(old.get("env_vars"), list) else []
+    passed = list(dict.fromkeys([*old_vars, *env_vars]))  # the user's own variables stay, the token's is added
+    extra = {k: v for k, v in old.items() if k not in ("command", "args", "env_vars") and k not in subtables}
     base = "".join(kept).rstrip("\n")
     block = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(argv)}\n"
+    if passed:
+        block += f"env_vars = {json.dumps(passed)}\n"
     block += "".join(f"{json.dumps(str(k))} = {_toml_value(v, path)}\n" for k, v in extra.items())
     result = (base + "\n\n" if base else "") + block
-    expected = {**{k: v for k, v in old.items() if k not in ("command", "args")}, "command": COMMAND, "args": argv}
+    expected = {**{k: v for k, v in old.items() if k not in ("command", "args", "env_vars")}, "command": COMMAND}
+    expected["args"] = argv
+    if passed:
+        expected["env_vars"] = passed
     try:
         after = tomllib.loads(result)
     except tomllib.TOMLDecodeError as exc:
@@ -276,6 +312,17 @@ def entry_name(repo: Path, *, project: bool, name: str | None) -> str:
     return f"l4-{cleaned or 'repo'}"
 
 
+def forge_token_env(repo: Path) -> str | None:
+    """`forge.token_env` of the repository's `.l4/config.yaml`, when the file sets it (the default is not listed)."""
+    try:
+        data = yaml.safe_load((repo / ".l4" / "config.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    forge = data.get("forge") if isinstance(data, dict) else None
+    value = forge.get("token_env") if isinstance(forge, dict) else None
+    return value if isinstance(value, str) and NAME.fullmatch(value) else None
+
+
 def _refuse_symlinks(repo: Path, relative: str) -> None:
     """A file inside the repository is repository content, so it is untrusted: a committed symlink (on the file or on
     a folder above it) would send the write, or the merge, outside the repository."""
@@ -299,15 +346,21 @@ def run_install(
     served = None if project else repo  # a project file is committed: no path of this machine, the folder decides
     if client == "codex":
         path = repo / CODEX_PROJECT if project else _home(app.environ) / CODEX_USER
+        token = forge_token_env(repo)  # Codex starts a server with an allowlisted environment: pass the token's
         try:
             if project:
                 _refuse_symlinks(repo, CODEX_PROJECT)
-            text = merge_toml(path, name, repo, with_repo=not project)
+            text = merge_toml(path, name, repo, with_repo=not project, env_vars=[token] if token else [])
         except (ConfigRefused, UnsafeFile) as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, f"mcp install: {exc}") from None
         shown = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(server_args(served))}"
+        shown += f"\nenv_vars = {json.dumps([token])}" if token else ""
     else:
         assert isinstance(spec, JsonClient)
+        if project and spec.project_refused:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"mcp install: --project: {spec.project_refused}")
+        if project and spec.workspace_var:
+            served = spec.workspace_var
         if not project and spec.user is None:
             if client == "claude-code":
                 line = shlex.join(

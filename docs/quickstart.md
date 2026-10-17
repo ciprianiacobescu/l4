@@ -356,10 +356,20 @@ l4 mcp install --client <claude-code|cursor|vscode|kiro|codex|opencode> [--proje
   repositories at different places on disk each have their own server: the entry runs
   `l4 mcp serve --repo <absolute path>` and that server runs commands in that repository only. Two repositories
   with the same folder name need `--name` for the second (install refuses to replace the entry of another repository).
-- With `--project` the repository's own file is written (entry `l4`), for example `.cursor/mcp.json`. It holds
-  `l4 mcp serve` with no path, so you can commit it: the server serves `$CLAUDE_PROJECT_DIR` when set, else the
-  repository of the folder it is started in (each clone and git worktree serves itself). Install refuses a symlink in
-  the repository (a cloned repository cannot redirect the write).
+- With `--project` the repository's own file is written (entry `l4`), for example `.cursor/mcp.json`, and you can
+  commit it: it holds no path of this machine. What it holds depends on where the client starts the server:
+  Claude Code sets `CLAUDE_PROJECT_DIR` (v2.1.139 and later), VS Code starts the server in the workspace folder, OpenCode
+  and Codex in the session's directory, so their entries hold `l4 mcp serve` and the server serves that folder. Cursor
+  documents no working directory, so its entry holds `--repo ${workspaceFolder}` (the folder that contains
+  `.cursor/mcp.json`, [Cursor MCP](https://cursor.com/docs/context/mcp)). Kiro documents neither, so
+  `l4 mcp install --client kiro --project` is refused: use the user scope (`--repo PATH`, one entry per repository).
+  A Codex entry also lists `forge.token_env` of your `.l4/config.yaml` under `env_vars`, because Codex gives a server
+  only an allowlisted environment. Install refuses a symlink in the repository (a cloned repository cannot redirect
+  the write).
+- A project file serves a git worktree only for a session started inside that worktree. Claude Code desktop
+  worktree sessions read `.mcp.json` of the main checkout and point `CLAUDE_PROJECT_DIR` at it
+  ([worktrees](https://code.claude.com/docs/en/worktrees)); to serve such a worktree use a user-scope entry with
+  `--repo <worktree path>` (and `--name`, since the folder name differs).
 - `vscode` has no documented user file (use `--project`); `claude-code` keeps user servers in `~/.claude.json`, so
   without `--project` the command prints the documented `claude mcp add --scope user …` line to run.
 - The IDE must find `l4` on its PATH. A server with several `--repo` takes a `repo` argument in every tool.

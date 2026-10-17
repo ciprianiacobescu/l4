@@ -153,3 +153,6 @@ failed), `l4_verification`, `l4_questions` / `l4_question` / `l4_question_answer
 CLI commands as an agent, so an agent still cannot answer a verdict question unless `clarifier.answer_by_agents` allows
 it. With several repositories, every tool takes `repo` (folder name or path). Activating or cancelling a plan is not a
 tool: a person runs `l4 yolo activate <plan> --reason "…"`.
+`--project` entries find their repository differently per client (Claude Code `CLAUDE_PROJECT_DIR`; VS Code, OpenCode and
+Codex the workspace; Cursor `--repo ${workspaceFolder}`); Kiro has no project scope (use `--repo PATH`); a worktree is
+served only by a session started inside it, else by a user-scope entry with `--repo`.
