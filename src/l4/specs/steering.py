@@ -97,6 +97,10 @@ def _inclusion(meta: Mapping[str, Any]) -> tuple[str, tuple[str, ...]]:
 
 
 def _read_file(path: Path, rel: str) -> SteeringFile:
+    if not _SAFE_NAME.fullmatch(path.name):  # the name is the source of a data block: it must not forge structure
+        return SteeringFile(
+            f"{STEERING_DIR}/{re.sub(r'[^A-Za-z0-9._ -]', '?', path.name)}", "none", (), "", "", 0, "bad_name"
+        )
     try:
         info = os.lstat(path)
         if stat.S_ISLNK(info.st_mode):
@@ -132,6 +136,9 @@ def read_steering(root: Path) -> tuple[list[SteeringFile], list[SteeringDecision
     except OSError:  # no steering folder (or it is not a directory)
         return [], []
     return [_read_file(directory / name, f"{STEERING_DIR}/{name}") for name in names], []
+
+
+_SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]*\.md")
 
 
 def _stem(path: str) -> str:
@@ -170,7 +177,7 @@ def decide_steering(files: Sequence[SteeringFile], paths: Sequence[str], referen
     a manual or auto file: the task block, `requirements.md`, `bugfix.md` and `design.md`."""
     decisions = []
     for file in files:
-        if file.reason in ("symlink", "not_regular", "bad_front_matter"):
+        if file.reason in ("symlink", "not_regular", "bad_front_matter", "bad_name"):
             decisions.append(SteeringDecision(file.path, "none", False, file.reason))
         elif file.inclusion == "always":
             decisions.append(SteeringDecision(file.path, "always", True, "always", ALWAYS))

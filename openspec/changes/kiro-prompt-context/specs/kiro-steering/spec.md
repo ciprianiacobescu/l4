@@ -39,7 +39,7 @@ block, `requirements.md`, `bugfix.md` or `design.md` references it; `auto`, last
 
 ### Requirement: L4-KSP-011 Every steering decision is recorded, and a cut steering file is named unreadable
 `prompt.rendered.steering` SHALL list every steering file with its inclusion, whether it was included, and why
-(`always`, `matched <path>`, `referenced`, `no_match`, `not_referenced`, `bad_front_matter`, `symlink`). A steering
+(`always`, `matched <path>`, `referenced`, `no_match`, `not_referenced`, `bad_front_matter`, `bad_name`, `symlink`). A steering
 file cut by the budget SHALL be named under `# Not shown in full` as not readable in the step's sandbox, never with an
 instruction to open it, and with `readable: false` in `prompt.truncated`.
 
