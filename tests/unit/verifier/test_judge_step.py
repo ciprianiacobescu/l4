@@ -72,7 +72,15 @@ def _diff_world(make_bench):
         f"{unit}-fix-1/verification.md": "# Verification\nFIX-ROUND\n",  # a fix unit's
         "docs/verification.md": "# Our verification guide\nPROJECT-DOC\n",  # a project file of the same name
         "src/pytdd/extra.py": "X = 1\n",
+        "src/app/report.py": "REPORT = 1\n",
+        "tests/test_report.py": "def test_report():\n    assert True\n",
+        "docs/questions.md": "# Our questions\nPROJECT-QUESTIONS\n",
     }
+    for folder in (unit, f"{unit}-fix-1"):  # the channel files of both unit folders (L4-VER-040)
+        files[f"{folder}/questions.md"] = f"# Questions\nCHANNEL-Q {folder}\n"
+        files[f"{folder}/feedback.md"] = f"# Feedback\nCHANNEL-F {folder}\n"
+        files[f"{folder}/.l4/ledger/r1.jsonl"] = f'{{"CHANNEL-L": "{folder}"}}\n'
+        files[f"{folder}/.l4/review-accepted.json"] = f'{{"CHANNEL-A": "{folder}"}}\n'
     for rel, text in files.items():
         (wb.worktree / rel).parent.mkdir(parents=True, exist_ok=True)
         (wb.worktree / rel).write_text(text)
@@ -89,6 +97,23 @@ def test_the_judge_diff_has_no_verification_md_of_the_family(make_bench, monkeyp
     diff, truncated = ladder._git_diff(wb, base, head)
     assert not truncated and "src/pytdd/extra.py" in diff
     assert "ROUND-1" not in diff and "FIX-ROUND" not in diff  # the harness's reports are not the unit's work
+
+
+def test_scn_ver_130_the_judge_reads_the_units_work_not_the_familys_channel_files(make_bench, monkeypatch):
+    from l4.verifier import ladder
+
+    wb, base, head, unit = _diff_world(make_bench)
+    monkeypatch.setattr(ladder, "_unit_dirs", lambda w: [unit, f"{unit}-fix-1"])
+    diff, truncated = ladder._git_diff(wb, base, head)
+    assert not truncated
+    for kept in ("src/app/report.py", "tests/test_report.py", "docs/questions.md", "PROJECT-QUESTIONS"):
+        assert kept in diff
+    for dropped in ("CHANNEL-Q", "CHANNEL-F", "CHANNEL-L", "CHANNEL-A", "ROUND-1", "FIX-ROUND"):
+        assert dropped not in diff
+    monkeypatch.setattr(ladder, "MAX_DIFF_CHARS", len(diff) - 1)  # the flag is computed on the filtered text
+    assert ladder._git_diff(wb, base, head)[1] is True
+    monkeypatch.setattr(ladder, "MAX_DIFF_CHARS", len(diff))
+    assert ladder._git_diff(wb, base, head)[1] is False
 
 
 def test_a_project_verification_md_elsewhere_stays_in_the_diff(make_bench, monkeypatch):

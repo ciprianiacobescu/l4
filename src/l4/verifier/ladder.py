@@ -91,6 +91,7 @@ from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_fin
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
 from l4.verifier.conventions import test_conventions
+from l4.verifier.diffparts import bookkeeping_pathspecs
 from l4.verifier.evidence import (
     commit_verifier_tests,
     read_verdict,
@@ -246,13 +247,13 @@ class VerifyContext:
 
 
 def _git_diff(wb: Workbench, base_sha: str, head: str) -> tuple[str, bool]:
-    """`git diff <base>...<head>` without the harness's own `.l4/` files and the `verification.md` of each unit of the
-    family (the harness's report of an earlier round, not the unit's work: M1.9 live F4), cut at MAX_DIFF_CHARS. A
-    `verification.md` anywhere else is project content and stays."""
-    reports = [f":(literal,exclude){d}/verification.md" for d in _unit_dirs(wb)]
+    """`git diff <base>...<head>` without the harness's bookkeeping (`bookkeeping_pathspecs`, L4-VER-040: the `.l4/`
+    files, the harness's memories, and the `verification.md`, `questions.md` and `feedback.md` of each unit of the
+    family: the harness's own files, not the unit's work), cut at MAX_DIFF_CHARS. A file of those names anywhere else
+    is project content and stays."""
     raw = wb.git.run_bytes(
         "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{base_sha}...{head}", "--", ".",
-        ":(glob,exclude)**/.l4/**", *reports,
+        *bookkeeping_pathspecs(_unit_dirs(wb)),
     )  # fmt: skip
     text = raw.decode("utf-8", errors="replace")
     return text[:MAX_DIFF_CHARS], len(text) > MAX_DIFF_CHARS

@@ -19,6 +19,7 @@ from l4.vcs.git import Git
 MAX_LISTED = 10  # commits named in an edge context, a plan row or a note
 _HARNESS_OWNED = ("verification.md", ".l4")
 _NOT_SPEC = (*_HARNESS_OWNED, "questions.md", "feedback.md")  # the files with a channel of their own (L4-OPS-014)
+UNIT_CHANNELS = _NOT_SPEC  # the public name: the judge's diff leaves these out of the family's folders (L4-VER-040)
 
 
 @dataclass(frozen=True)

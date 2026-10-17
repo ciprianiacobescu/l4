@@ -10,7 +10,7 @@ Every task follows these rules:
 
 ## 1. The judge's diff leaves out the bookkeeping (L4-VER-040)
 
-- [ ] 1.1 Tests, `tests/unit/verifier/test_judge_step.py`: extend `_diff_world` (or add `_channels_world`) with, in the
+- [x] 1.1 Tests, `tests/unit/verifier/test_judge_step.py`: extend `_diff_world` (or add `_channels_world`) with, in the
   unit folder and in `<unit>-fix-1`, `questions.md`, `feedback.md`, `verification.md`, `.l4/ledger/r1.jsonl` and
   `.l4/review-accepted.json`, plus the project files `src/app/report.py`, `tests/test_report.py` and
   `docs/questions.md`. SCN-VER-130: `ladder._git_diff(wb, base, head)` holds the three project files and no file of
@@ -20,7 +20,7 @@ Every task follows these rules:
   ":(literal,exclude)u/feedback.md", …the same three for u-fix-1]` in the order of `l4.state.review.UNIT_CHANNELS`.
   The existing tests `test_the_judge_diff_has_no_verification_md_of_the_family` and
   `test_a_project_verification_md_elsewhere_stays_in_the_diff` must still pass.
-- [ ] 1.2 Code: `src/l4/state/review.py`: `UNIT_CHANNELS = _NOT_SPEC` (public name, the tuple unchanged). New module
+- [x] 1.2 Code: `src/l4/state/review.py`: `UNIT_CHANNELS = _NOT_SPEC` (public name, the tuple unchanged). New module
   `src/l4/verifier/diffparts.py` with `BOOKKEEPING_GLOBS` and `bookkeeping_pathspecs` (design D1). `ladder._git_diff`
   passes `"--", ".", *bookkeeping_pathspecs(_unit_dirs(wb))`; signature, cut and the S1 use stay.
 
