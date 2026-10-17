@@ -55,7 +55,7 @@ parsed JSON when the command printed JSON, and `isError` for a non-zero exit.
 #### Scenario: SCN-MCP-03 (+) A read tool returns the command's output
 - **GIVEN** a repository with a delivery plan `p`
 - **WHEN** a client calls `l4_plan_status` with `plan: p`
-- **THEN** the server runs `l4 yolo status p` with `AI_AGENT=l4-mcp` and returns its output and exit code
+- **THEN** the server runs `l4 yolo status --json -- p` with `AI_AGENT=l4-mcp` and returns its output and exit code
 
 #### Scenario: SCN-MCP-04 (−) An agent rule still refuses through the server
 - **GIVEN** a repository whose base config does not set `clarifier.answer_by_agents`, and an open verdict question
@@ -73,7 +73,7 @@ A write tool's description SHALL say what it writes, whether it pushes to origin
 #### Scenario: SCN-MCP-05 (+) A plan is checked before the push through the server
 - **GIVEN** a working tree with a new plan file `multitenancy` and its specs, not pushed
 - **WHEN** a client calls `l4_plan_check` with `plan: multitenancy, worktree: true`
-- **THEN** the server runs `l4 yolo check multitenancy --worktree` and returns its findings and order
+- **THEN** the server runs `l4 yolo check --worktree -- multitenancy` and returns its findings and order
 
 #### Scenario: SCN-MCP-06 (+) A stopped unit is debugged through the server
 - **GIVEN** a unit that halted on a task

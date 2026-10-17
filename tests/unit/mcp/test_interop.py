@@ -34,4 +34,4 @@ def test_the_official_client_connects_lists_the_tools_and_calls_one(repo_factory
     version, names, is_error = asyncio.run(asyncio.wait_for(session(), 120))
     assert version == __version__
     assert "l4_status" in names and "l4_plan_check" in names
-    assert is_error is not None  # the call came back as a result (doctor may find problems in a bare repository)
+    assert is_error is True  # doctor exits non-zero on a bare repository: the call came back as an error result
