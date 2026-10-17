@@ -6,14 +6,14 @@ Every task follows these rules:
 
 ## 1. Package data
 
-- [ ] 1.1 Test: the installed package's skill files (importlib.resources) are byte-equal to `plugins/l4/skills/l4`;
+- [x] 1.1 Test: the installed package's skill files (importlib.resources) are byte-equal to `plugins/l4/skills/l4`;
   a built wheel holds them.
-- [ ] 1.2 `pyproject.toml` force-include of the skill into the wheel and the sdist.
+- [x] 1.2 `pyproject.toml` force-include of the skill into the wheel and the sdist.
 
 ## 2. Command (L4-SKL-003)
 
-- [ ] 2.1 Tests: SCN-SKL-04..06 with a temporary HOME and PATH; the symlink refusal; `l4 skills status`.
-- [ ] 2.2 `src/l4/skills_cli.py`: targets, `auto` detection, manifest, update and refusal rules, `--project`,
+- [x] 2.1 Tests: SCN-SKL-04..06 with a temporary HOME and PATH; the symlink refusal; `l4 skills status`.
+- [x] 2.2 `src/l4/skills_cli.py`: targets, `auto` detection, manifest, update and refusal rules, `--project`,
   `--dry-run`, `--force`; `l4 skills install|status` in `cli.py`.
 
 ## 3. Doctor and init

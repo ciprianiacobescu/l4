@@ -216,6 +216,18 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
              help="A pattern needs at least this many units."),
         _flag("--dry-run", "dry_run", help="Print the drafts instead of writing them."),
     ]),
+    "skills install": (
+        "Install the l4 skill (shipped in this package) for coding agents; no network.", lambda: [
+            _opt("--agent", "agent", default="auto", show_default=True,
+                 type=click.Choice(["auto", "all", "claude-code", "codex", "opencode", "kiro"]),
+                 help="auto: the agents whose home folder or CLI is present."),
+            _flag("--project", "project", help="Install into the repository (.claude/skills, .agents/skills, "
+                                               ".opencode/skills, .kiro/skills) instead of the home folder."),
+            _flag("--force", "force", help="Replace a copy whose files were edited."),
+            _flag("--dry-run", "dry_run", help="Print what would be written; write nothing."),
+        ],
+    ),
+    "skills status": ("Show each installed l4 skill: version, current or old, and edited files.", lambda: []),
     "s1": ("S1 data set: export, canary, score, report, audit (M1.6).", lambda: [
         click.Argument(["words"], nargs=-1),
         _opt("--out", "out", type=click.Path(path_type=Path)),
@@ -472,6 +484,7 @@ _GROUPS = {
     "setup": click.Group("setup", help="Forge setup."),
     "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
     "yolo": click.Group("yolo", help="Delivery plans: ordered units, a readiness review, one activation."),
+    "skills": click.Group("skills", help="The l4 skill for coding agents."),
     "kg": click.Group("kg", help="Read the recorded history across units (manual; nothing reaches an agent)."),
 }
 for _group in _GROUPS.values():
