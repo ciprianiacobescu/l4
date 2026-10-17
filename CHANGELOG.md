@@ -38,7 +38,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - `l4 mcp install --project` writes what each client can use: Cursor `--repo ${workspaceFolder}` (Cursor documents no
   working directory for servers), VS Code, OpenCode, Codex and Claude Code `l4 mcp serve` (they start in the project
   or set `CLAUDE_PROJECT_DIR`); Kiro, which documents neither, is refused with a hint to use the user scope. A Codex
-  entry lists `forge.token_env` of `.l4/config.yaml` under `env_vars`. The quickstart says a project file serves a
+  entry lists `forge.token_env` of `.l4/config.yaml` (else the default `L4_FORGE_TOKEN`) under `env_vars`, because Codex
+  starts a server with an allowlisted environment. An existing user-scope entry whose `--repo` is a client variable is
+  refused like another repository's entry instead of being rewritten. The quickstart says a project file serves a
   worktree only for a session started inside it (Claude Code desktop worktree sessions use the main checkout's file).
 
 ## 0.4.14 (2026-10-17)

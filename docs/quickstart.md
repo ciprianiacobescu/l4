@@ -363,7 +363,7 @@ l4 mcp install --client <claude-code|cursor|vscode|kiro|codex|opencode> [--proje
   documents no working directory, so its entry holds `--repo ${workspaceFolder}` (the folder that contains
   `.cursor/mcp.json`, [Cursor MCP](https://cursor.com/docs/context/mcp)). Kiro documents neither, so
   `l4 mcp install --client kiro --project` is refused: use the user scope (`--repo PATH`, one entry per repository).
-  A Codex entry also lists `forge.token_env` of your `.l4/config.yaml` under `env_vars`, because Codex gives a server
+  A Codex entry also lists `forge.token_env` of your `.l4/config.yaml` (else its default) under `env_vars`, because Codex gives a server
   only an allowlisted environment. Install refuses a symlink in the repository (a cloned repository cannot redirect
   the write).
 - A project file serves a git worktree only for a session started inside that worktree. Claude Code desktop

@@ -129,6 +129,7 @@ def test_codex_replace_keeps_the_text_around_the_table(repo_factory, home):
         "command": "l4",
         "args": ["mcp", "serve", "--repo", str(root)],
         "env": {"A": "1"},  # the user's own subtable stays (F2)
+        "env_vars": ["L4_FORGE_TOKEN"],  # the default forge.token_env (n1)
     }
     assert data["mcp_servers"]["after"] == {"command": "after"} and data["profiles"]["p"] == {"model": "y"}
 
@@ -470,11 +471,14 @@ def test_m2_codex_entry_lists_the_forge_token_variable_it_passes_through(repo_fa
     }
 
 
-def test_m2_codex_entry_without_a_configured_token_variable_has_no_env_vars(repo_factory, home):
-    root = repo_factory("app")
+def test_n1_codex_entry_without_a_configured_token_variable_lists_the_schema_default(repo_factory, home):
+    from l4.config.schema import ForgeCfg
+
+    default = ForgeCfg.model_fields["token_env"].default
+    root = repo_factory("app")  # its config does not set forge.token_env; Codex clears the environment to an allowlist
     assert install(home, "--client", "codex", "--project", "--repo", str(root)) == 0
     assert tomllib.loads((root / ".codex/config.toml").read_text())["mcp_servers"]["l4"] == {
-        "command": "l4", "args": ["mcp", "serve"],
+        "command": "l4", "args": ["mcp", "serve"], "env_vars": [default],
     }  # fmt: skip
 
 
@@ -487,3 +491,16 @@ def test_m2_codex_keeps_the_env_vars_the_user_listed(repo_factory, home):
     assert install(home, "--client", "codex", "--project", "--repo", str(root)) == 0
     entry = tomllib.loads(path.read_text())["mcp_servers"]["l4"]
     assert entry["env_vars"] == ["HTTPS_PROXY", "MY_FORGE_TOKEN"]
+
+
+def test_n2_a_user_scope_entry_with_a_variable_repo_is_another_repositorys_and_is_refused(repo_factory, home, capsys):
+    root = repo_factory("app")
+    path = home / ".cursor/mcp.json"
+    path.parent.mkdir(parents=True)
+    hand = {"mcpServers": {"l4-app": {"command": "l4", "args": ["mcp", "serve", "--repo", "${workspaceFolder}"]}}}
+    path.write_text(json.dumps(hand))
+    before = path.read_text()
+    assert install(home, "--client", "cursor", "--repo", str(root)) == 2
+    err = capsys.readouterr().err
+    assert "--name" in err and "${workspaceFolder}" in err
+    assert path.read_text() == before  # not rewritten to an absolute path

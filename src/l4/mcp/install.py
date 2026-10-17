@@ -10,7 +10,8 @@ Claude Code desktop worktree sessions use the main checkout's `.mcp.json`: https
 - Cursor: no working directory is documented (reported as "/"), so the entry says `--repo ${workspaceFolder}`, which
   Cursor resolves to the folder that contains `.cursor/mcp.json` (https://cursor.com/docs/context/mcp).
 - Kiro: nothing documented (reported as "~"): `--project` is refused; the user scope works (https://kiro.dev/docs/mcp/configuration/).
-- Codex passes a server only an allowlisted environment, so its entry lists `forge.token_env` under `env_vars`.
+- Codex passes a server only an allowlisted environment, so its entry lists `forge.token_env` (else the schema
+  default) under `env_vars`.
 
 Every path and shape below was checked against the vendor's documentation on 2026-10-17 (the URL is kept beside each
 client). The write merges into the file, keeps every other server, is atomic and refuses a file that does not parse.
@@ -38,6 +39,7 @@ from typing import Any
 import click
 import yaml
 
+from l4.config.schema import ForgeCfg
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, reject_symlinks
@@ -171,9 +173,11 @@ def repo_of(args: Any) -> str | None:
     return None
 
 
-def check_same_repository(where: Path, name: str, existing: str | None, repo: Path) -> None:
+def check_same_repository(where: Path, name: str, existing: str | None, repo: Path, *, project: bool = False) -> None:
     """An entry of that name that serves another repository is never replaced (two folders can share a name)."""
-    if existing is None or existing.startswith("${"):  # a client variable: the folder of the file itself
+    if existing is None:
+        return
+    if project and existing.startswith("${"):  # a client variable in the repository's own file: its folder
         return
     try:
         same = Path(existing).expanduser().resolve() == repo.resolve()
@@ -186,7 +190,9 @@ def check_same_repository(where: Path, name: str, existing: str | None, repo: Pa
         )
 
 
-def merge_json(path: Path, client: JsonClient, name: str, entry: dict[str, Any], repo: Path) -> str:
+def merge_json(
+    path: Path, client: JsonClient, name: str, entry: dict[str, Any], repo: Path, *, project: bool = False
+) -> str:
     data: dict[str, Any] = {}
     if path.exists():
         raw = path.read_text(encoding="utf-8")
@@ -205,7 +211,7 @@ def merge_json(path: Path, client: JsonClient, name: str, entry: dict[str, Any],
     old = servers.get(name)
     if isinstance(old, dict):
         argv = old.get("command") if isinstance(old.get("command"), list) else old.get("args")
-        check_same_repository(path, name, repo_of(argv), repo)
+        check_same_repository(path, name, repo_of(argv), repo, project=project)
         kept = {k: v for k, v in old.items() if k not in entry or k == "enabled"}  # the user's own keys stay
         servers[name] = {**entry, **kept}
     else:
@@ -259,7 +265,7 @@ def merge_toml(path: Path, name: str, repo: Path, *, with_repo: bool, env_vars: 
     if old is not None and not isinstance(old, dict):
         raise ConfigRefused(f"{path}: mcp_servers.{name} is not a table; nothing written")
     old = old or {}
-    check_same_repository(path, name, repo_of(old.get("args")), repo)
+    check_same_repository(path, name, repo_of(old.get("args")), repo, project=not with_repo)
     kept: list[str] = []
     subtables: set[str] = set()
     skipping = False
@@ -312,15 +318,17 @@ def entry_name(repo: Path, *, project: bool, name: str | None) -> str:
     return f"l4-{cleaned or 'repo'}"
 
 
-def forge_token_env(repo: Path) -> str | None:
-    """`forge.token_env` of the repository's `.l4/config.yaml`, when the file sets it (the default is not listed)."""
+def forge_token_env(repo: Path) -> str:
+    """`forge.token_env` of the repository's `.l4/config.yaml`, else the schema's default: Codex clears the environment
+    to an allowlist, so the variable the harness reads its forge token from must be listed either way."""
+    default = ForgeCfg.model_fields["token_env"].default
     try:
         data = yaml.safe_load((repo / ".l4" / "config.yaml").read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
-        return None
+        return default
     forge = data.get("forge") if isinstance(data, dict) else None
     value = forge.get("token_env") if isinstance(forge, dict) else None
-    return value if isinstance(value, str) and NAME.fullmatch(value) else None
+    return value if isinstance(value, str) and NAME.fullmatch(value) else default
 
 
 def _refuse_symlinks(repo: Path, relative: str) -> None:
@@ -350,11 +358,11 @@ def run_install(
         try:
             if project:
                 _refuse_symlinks(repo, CODEX_PROJECT)
-            text = merge_toml(path, name, repo, with_repo=not project, env_vars=[token] if token else [])
+            text = merge_toml(path, name, repo, with_repo=not project, env_vars=[token])
         except (ConfigRefused, UnsafeFile) as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, f"mcp install: {exc}") from None
         shown = f"[mcp_servers.{name}]\ncommand = {json.dumps(COMMAND)}\nargs = {json.dumps(server_args(served))}"
-        shown += f"\nenv_vars = {json.dumps([token])}" if token else ""
+        shown += f"\nenv_vars = {json.dumps([token])}"
     else:
         assert isinstance(spec, JsonClient)
         if project and spec.project_refused:
@@ -381,7 +389,7 @@ def run_install(
         try:
             if project:
                 _refuse_symlinks(repo, spec.project)
-            text = merge_json(path, spec, name, spec.entry(served, typed=spec.typed), repo)
+            text = merge_json(path, spec, name, spec.entry(served, typed=spec.typed), repo, project=project)
         except (ConfigRefused, UnsafeFile) as exc:
             raise L4Exit(ExitCode.USAGE_ERROR, f"mcp install: {exc}") from None
         shown = json.dumps({spec.key: {name: spec.entry(served, typed=spec.typed)}}, indent=2)
