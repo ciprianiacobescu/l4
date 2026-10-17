@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.13 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.14 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -23,7 +23,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.13](#11-known-limits-of-0413)
+11. [Known limits of 0.4.14](#11-known-limits-of-0414)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -1146,7 +1146,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.13 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.14 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1211,7 +1211,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.13 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.14 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.12 Red job: exit 1, 2 or 3
@@ -1529,7 +1529,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.13. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.14. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -1548,7 +1548,7 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
 
-## 11. Known limits of 0.4.13
+## 11. Known limits of 0.4.14
 
 These limits make operation more difficult. Know them before you start.
 
@@ -1647,7 +1647,7 @@ stateDiagram-v2
 ### 12.2 Procedure: review and activate a plan
 
 1. Put the plan file in `.l4/plans/<plan-id>.json` on `<base>`. Push it. To make the file, use 12.8.
-2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing.
+2. Run `l4 yolo check <plan-id>`. It prints the findings and the order of the units. It changes nothing. Before the push, run `l4 yolo check <plan-id> --worktree`: it reads the plan files and the units from the working tree.
 3. If the exit code is 2, correct each finding. Push the plan file again. Do step 2 again.
 4. Run `l4 yolo review <plan-id>`. This starts a run on `<base>`. The run reviews the plan.
 5. Run `l4 yolo status <plan-id>`. Read the verdict of each unit and each batch.
@@ -1787,6 +1787,7 @@ unit.
 | `unit_abandoned` | A person closed the PR of the current unit with no merge ([7.13](#713-a-pr-closed-without-a-merge-or-a-deleted-unit-branch)). | Open the PR again, or run `l4 restart --unit <unit> --reason "<why>"` | `l4 yolo resume <plan-id> --reason "<why>"` |
 | `unit_rejected` | The harness refuses the spec of the current unit ([7.8](#78-rejected-unit-exit-14)). `l4 retry` does not move a rejected unit, and a resume cannot clear this stop. | Fix the cause. If it is the spec, correct it (on the unit branch, or on the target when the unit has no branch), push it, and the next run stops the plan with `inputs_changed` and CI reviews the plan. If it is the configuration (for example an empty `gates.test.command`), set it: there is nothing to review. | A person runs `l4 yolo activate <plan-id> --reason "<why>"`. The plan dispatches the unit, and the next run of the unit reads the corrected spec. You do not need `l4 restart`. If the unit is rejected again, the plan stops again with `unit_rejected`. |
 | `merge_refused` | The forge refused the squash merge (squash merging is off, or a rule blocks it), the push to the target was refused, or the target moved twice for the same attempt (the merge was stale). The reason of the forge is in `l4 yolo status`. A protected branch is a usual cause. | Correct the cause. For example, allow the harness to merge, or, when the forge refuses a squash, set `yolo.merge.method: fast-forward` in `.l4/config.yaml` on the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The resume resets the count of stale merges. The next step tries the merge once more. |
+| `capacity_needs_fix` | The current unit parked in `waiting_capacity` twice for the same profiles with none cooling: each failed its probe (a login that expired or was rejected, for example `opencode authentication failed`, or a missing binary). Only a fix ends this wait, and a plan that kept running would spend a run on every trigger. `l4 yolo status` names each profile and its failure. | Renew the secret the profile reads (for example `OPENCODE_API_KEY`) or install the binary, then check with `l4 probe`. | `l4 yolo resume <plan-id> --reason "<why>"`. The next run probes the profiles again. |
 | `postcheck_failed` | The acceptance profile of a unit failed on the merged target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `batch_failed` | The acceptance profile of a batch failed on the target. | Push a fix to the target. | `l4 yolo resume <plan-id> --reason "<why>"`. The check runs again. |
 | `limit_cost` | The plan used `limits.max_cost_usd`. The figure includes the cost of the attempt that stopped the plan. | None. Decide if the plan can cost more. | `l4 yolo resume <plan-id> --reason "<why>" --extend-cost <usd>` |
@@ -1889,11 +1890,11 @@ Use this procedure to make a new plan file, or to change a plan after you add or
    commit, push or call a model. It refuses a file that exists.
 2. Edit the file. Move the units into batches. Add `depends_on` only where a spec uses something that another spec
    introduces or changes. Give each `exclude` entry a reason that a person can check.
-3. Run `python3 scripts/validate_plan.py` (the skill has the same file in `plugins/l4/skills/l4/scripts/`). Correct each
-   problem. The script prints the order and the waves. A wave shows what could run together. The plan runs one unit at a
-   time.
-4. Run `l4 yolo check <plan-id>`. Correct each finding.
-5. Commit and push the plan file. Write one line of evidence for each dependency in the commit message.
+3. Run `l4 yolo check <plan-id> --worktree`. Correct each finding. It prints the order. Without the harness installed,
+   run `python3 scripts/validate_plan.py` (the skill has the same file in `plugins/l4/skills/l4/scripts/`); it prints the
+   order and the waves. A wave shows what could run together. The plan runs one unit at a time.
+4. Commit and push the plan file. Write one line of evidence for each dependency in the commit message.
+5. Run `l4 yolo check <plan-id>`. It reads the pushed plan. Correct each finding.
 6. Run `l4 yolo review <plan-id>`, then read it (12.2).
 7. A person runs `l4 yolo activate <plan-id> --reason "<why>"`.
 

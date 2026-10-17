@@ -402,3 +402,16 @@ def test_s1_none_writes_no_system_one_and_a_todo(target: Path, git_environ, caps
 
 def test_an_unknown_s1_choice_is_exit_2(target: Path, git_environ):
     assert init(target, git_environ, *BASE, "--s1", "grok") == 2
+
+
+def test_the_final_notes_name_l4_skills_install(target: Path, git_environ, capsys):  # skills-install 3.1
+    assert init(target, git_environ, *BASE) == 0
+    notes = [line for line in capsys.readouterr().err.splitlines() if line.startswith("note:")]
+    assert sum("l4 skills install" in line for line in notes) == 1
+
+
+def test_the_plain_notes_name_l4_skills_install(target: Path, harness_repo: Path, git_environ, capsys):  # 3.1
+    flags = ["--harness", str(harness_repo), "--ci", "gitlab", "--vendor"]
+    assert main(["init", "--repo", str(target), *flags], environ=git_environ) == 0
+    notes = [line for line in capsys.readouterr().err.splitlines() if line.startswith("note:")]
+    assert sum("l4 skills install" in line for line in notes) == 1

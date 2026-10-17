@@ -241,6 +241,18 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
              help="A pattern needs at least this many units."),
         _flag("--dry-run", "dry_run", help="Print the drafts instead of writing them."),
     ]),
+    "skills install": (
+        "Install the l4 skill (shipped in this package) for coding agents; no network.", lambda: [
+            _opt("--agent", "agent", default="auto", show_default=True,
+                 type=click.Choice(["auto", "all", "claude-code", "codex", "opencode", "kiro"]),
+                 help="auto: the agents whose home folder or CLI is present."),
+            _flag("--project", "project", help="Install into the repository (.claude/skills, .agents/skills, "
+                                               ".opencode/skills, .kiro/skills) instead of the home folder."),
+            _flag("--force", "force", help="Replace a copy whose files were edited."),
+            _flag("--dry-run", "dry_run", help="Print what would be written; write nothing."),
+        ],
+    ),
+    "skills status": ("Show each installed l4 skill: version, current or old, and edited files.", lambda: []),
     "s1": ("S1 data set: export, canary, score, report, audit (M1.6).", lambda: [
         click.Argument(["words"], nargs=-1),
         _opt("--out", "out", type=click.Path(path_type=Path)),
@@ -288,8 +300,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "yolo check": ("Admit a delivery plan at the target head and print the order; writes nothing.", lambda: [
         click.Argument(["plan"]),
-        _flag("--worktree", "worktree", help="Admit the plan file and unit folders of the working tree, before the "
-                                             "push (as review --worktree reads them)."),
+        _flag("--worktree", "worktree", help="check the working tree's plan before the push"),
     ]),
     "yolo review": ("Ask CI to review a plan (--local: here; --worktree: the working tree, before the push).", lambda: [
         click.Argument(["plan"]),
@@ -515,6 +526,7 @@ _GROUPS = {
     "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
     "yolo": click.Group("yolo", help="Delivery plans: ordered units, a readiness review, one activation."),
     "mcp": click.Group("mcp", help="L4 as an MCP server for IDEs and agents."),
+    "skills": click.Group("skills", help="The l4 skill for coding agents."),
     "kg": click.Group("kg", help="Read the recorded history across units (manual; nothing reaches an agent)."),
 }
 for _group in _GROUPS.values():

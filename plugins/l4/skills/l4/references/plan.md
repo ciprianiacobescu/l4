@@ -76,25 +76,24 @@ after the other.
 
 ## Validate
 
-Before the push, run the script from the repository root and fix every problem it prints. Never silence one: not by
+Before the push, run the check from the repository root and fix every problem it prints. Never silence one: not by
 deleting a dependency you cannot justify, nor by excluding a spec only to make the check pass.
 
 ```sh
-python3 <skill dir>/scripts/validate_plan.py
+l4 yolo check <id> --worktree
 ```
 
-`l4 yolo check <id>` reads the plan file and the units from the target, so it cannot run before the push (it exits 2 for
-a plan file that is not on the target). Run it after the push, as the last step of the hand-off; CI runs the same
-admission and the review. Fix its findings the same way.
+It reads the plan files and the units from the working tree, so it runs before the push and changes nothing. Without the
+harness installed, run the standalone script instead: `python3 <skill dir>/scripts/validate_plan.py`. After the push,
+`l4 yolo check <id>` runs the same admission on the target, as the last step of the hand-off; CI runs it and the review.
 
-- The script needs only Python. It reads every `.l4/plans/*.json`, finds the units like the harness does, and checks
-  the schema, the graph (cycles, unknown units, duplicates) and the coverage across all plan files (`uncovered`,
-  `covered_twice`). On success it prints the dispatch order and the waves. Exit 0 is valid, 1 lists problems. A planned
-  unit whose change is archived prints `finished: <id>`: remove it, because `l4 yolo check` refuses it as `unknown_unit`, unless this plan already
-  merged or integrated it.
-- `l4 yolo check` also checks what the script cannot: open questions, intake, finished units, profiles, the target
-  against `forge.base_branch`, and the merge policy. Exit 0, or 2 with findings. It changes nothing.
-- Errors (exit 1): a planned unit's own folder over the budget; a delta with no baseline or no `## Purpose`. A
+- It checks the schema, the graph (cycles, unknown units, duplicates), open questions, intake, finished units, profiles,
+  the target against `forge.base_branch`, the merge policy, and the coverage across all plan files (`uncovered`,
+  `covered_twice`). Exit 0, or 2 with findings; on success it prints the dispatch order. A planned unit whose change is
+  archived is refused as `unknown_unit`, unless this plan already merged or integrated it.
+- The script needs only Python and checks what the harness checks without a network (not open questions, intake or
+  profiles). Exit 0 is valid, 1 lists problems. A planned archived unit prints `finished: <id>`: remove it.
+- Errors (script, exit 1): a planned unit's own folder over the budget; a delta with no baseline or no `## Purpose`. A
   dependency's folder over the budget is only a `warning:` line (exit 0).
 
 ## Check and fix the review

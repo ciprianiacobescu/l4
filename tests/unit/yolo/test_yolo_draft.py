@@ -97,6 +97,12 @@ def test_a_draft_lists_every_unplanned_unit_without_dependencies(world, monkeypa
     assert "validate_plan.py" in out and "l4 yolo check p1" in out
 
 
+def test_scn_yolo_89_the_next_lines_name_the_worktree_check(world, monkeypatch, capsys):
+    draft_with(monkeypatch, world)
+    assert world.l4("draft", "p1") == 0
+    assert "l4 yolo check p1 --worktree" in capsys.readouterr().out
+
+
 def test_a_fresh_draft_passes_the_standalone_validator(world, monkeypatch):
     draft_with(monkeypatch, world, merged=(K2,))
     assert world.l4("draft", "p1") == 0

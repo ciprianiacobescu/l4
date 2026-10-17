@@ -243,9 +243,10 @@ test.
 format: frontmatter `name: l4`, a description that starts "Use when…" and names the triggers (adopting L4, a unit's
 status, questions, feedback, an escalated or halted unit), a body under 500 words, and the references `adopt.md`,
 `operate.md` and `feedback.md`. `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` MUST make it
-installable with `/plugin marketplace add` and `/plugin install l4@l4-harness`; for Codex the folder is copied to
-`~/.agents/skills/`. The skill MUST never ask for, print or move a secret, and never tell an agent to run an agent CLI
-by hand on a runner. [Not yet built: delivery change 18, tasks 4.1–4.3.]
+installable with `/plugin marketplace add` and `/plugin install l4@l4-harness`; for every coding agent (Codex, OpenCode and Kiro CLI included) `l4 skills install`
+copies the folder into the agent's skill folder (L4-SKL-003). The skill MUST never ask for, print or move a secret, and
+never tell an agent to run an agent CLI by hand on a runner. [Built: the marketplace files and the skill exist, and
+`l4 skills install` is L4-SKL-003 (change 37, `skills-install`).]
 
 **L4-SKL-002** The skill MUST be written against recorded failures. Before it is written, subagents without it attempt
 the scenarios (a configurable URL is `config` with `--env`; renaming a function the tests call is `behaviour`, never
@@ -255,6 +256,25 @@ with the action, source `action` and no key; a public one with a deploy key; a v
 once human-feedback is merged), and their answers go to `plugins/l4/tests/baseline.md`. The same scenarios are then run
 with the skill (`plugins/l4/tests/with-skill.md`); every scenario that applies MUST pass, and any loophole found is
 closed and re-run. [Not yet built: delivery change 18, tasks 4.1–4.3.]
+
+**L4-SKL-003** One command installs the `l4` skill for every coding agent. The wheel and the sdist MUST carry the
+skill folder byte-equal to `plugins/l4/skills/l4` (package data under `l4/_skill/l4`; a source checkout without it
+reads the repository's copy next to `src/`). `l4 skills install` MUST copy it, without network, to
+`~/.claude/skills/l4` (Claude Code), `~/.agents/skills/l4` (Codex and the open Agent Skills path; also
+`~/.codex/skills/l4` when `~/.codex/skills` exists), `~/.config/opencode/skills/l4` (OpenCode) and `~/.kiro/skills/l4`
+(Kiro CLI), or with `--project` to `.claude/skills/l4`, `.agents/skills/l4`, `.opencode/skills/l4` and
+`.kiro/skills/l4` in the repository root. `--agent auto` (the default) MUST pick the agents whose home folder exists
+(`~/.claude`; `~/.agents` or `~/.codex`; `~/.config/opencode` or `~/.opencode`; `~/.kiro`) or whose CLI is on `PATH`
+(`claude`, `codex`, `opencode`, `kiro-cli`), and exit 2 naming `--agent` when none is found; `all` takes every agent.
+Each target MUST get `.l4-skill.json` (`name`, `version`, and a sha256 per file). A rerun MUST replace a copy whose files
+still match its manifest and MUST refuse, naming the paths, a copy with a changed, missing or extra file (a folder with
+no manifest counts as edited unless it equals the bundled files) unless `--force`; a refusal exits 2 and the other
+targets are still installed. A target folder that is a symbolic link, that resolves outside its agent folder, or that has a
+symbolic link inside it, MUST be refused even with `--force`, and nothing outside `<skills dir>/l4/` is ever written. Files are written atomically one by one.
+`--dry-run` prints the plan and writes nothing. `l4 skills status` lists each installed copy with its version,
+`current` or `old` (`newer` when it is ahead of the running `l4`) and its edited paths. Doctor row SKL-003 MUST warn when
+an installed copy (user scope, and project scope inside a repository) is older than the running `l4`, with the fix
+`l4 skills install`; `l4 init`'s final notes MUST name the command.
 
 **Adoption lessons (L4-ADO-001..019).** The first adoption on a real consumer (a public monorepo with an integration branch) worked only through hand work. These requirements make each workaround a feature of the harness. The evidence, the cost of each fix and the lessons rejected are in `docs/plan/adoption-lessons.md`; the decisions are in `openspec/changes/adoption-lessons/design.md`.
 
@@ -432,6 +452,8 @@ of the harness package.
 | `l4 kg report [--out PATH] [--min-units N]` | Print the cross-unit report, *n* on every line; builds the index first when it is missing or stale; `--out` inside the repository must be git-ignored, else exit 2 (L4-KG-009) | the index under the cache root; `--out` file |
 | `l4 kg why ID` | The timeline of a unit, or the 1-hop view of `F-<8 hex>`, `L-<8 hex>`, a run id or `<unit>#Q-<n>`, with the source of every line; an unknown id exits 2 (L4-KG-010) | the index under the cache root |
 | `l4 kg propose [--min-units N] [--dry-run]` | Write inbox drafts for recurring patterns that no lesson covers, for a person to finish and promote; never writes `lessons.md`, stages or commits (L4-KG-012) | inbox files; the index under the cache root |
+| `l4 skills install [--agent auto\|all\|claude-code\|codex\|opencode\|kiro] [--project] [--force] [--dry-run]` | Copy the `l4` skill that ships in this package into each coding agent's skill folder (L4-SKL-003): user scope `~/.claude/skills/l4`, `~/.agents/skills/l4` (and `~/.codex/skills/l4` when it exists), `~/.config/opencode/skills/l4`, `~/.kiro/skills/l4`; `--project` the repository's `.claude/`, `.agents/`, `.opencode/`, `.kiro/` `skills/l4`. `auto` takes the agents whose home folder or CLI is present. One line per target; a manifest `.l4-skill.json` per copy; an edited copy is refused (exit 2) unless `--force`; a symbolic link, or a folder that resolves outside the agent folder, is always refused; no network | the target folders `<skills dir>/l4/` only |
+| `l4 skills status` | Each installed copy of the skill with its version, `current`, `old` or `newer`, and the files edited since the install (L4-SKL-003) | none |
 | `l4 feedback add --kind refactor\|duplication\|tests\|config\|behaviour --text TEXT\|- [--title T] [--at PATH[:L[-L]]]… [--env NAME] [--when W --then T] [--lesson] [--draft] [--unit ID]` | Ask for a change to an open unit (L4-FBK-003): append an item to the unit's `feedback.md` (created when missing) with the lines named by `--at` quoted (at most 40 lines or 4,000 bytes, redacted), Status `submitted` (`draft` with `--draft`), and print the item id, the file and the `git add`, `git commit` and `git push` lines that send it. The unit is `--unit`, else the checked-out `l4/<framework>/<name>` branch; the kind rules of L4-FBK-002 are checked before writing; exit 0, 2 for a bad item, place or unit (nothing written) | edits `feedback.md` only; no commit, push or forge call |
 | `l4 feedback list [--unit ID] [--json]` | List the items of a unit (id, status, kind, first place, title, problems); `--json` prints `l4/feedback@1` | none |
 | `l4 feedback show FB-NNN [--unit ID] [--json]` | Show one item as the file holds it; `--json` adds its problems and its content sha256 | none |
@@ -453,7 +475,7 @@ of the harness package.
 | `l4 restart --unit ID --reason TEXT [--no-run]` | Start a unit over on a new branch cut from the base, and keep the old branch head as `refs/l4/attempts/<fw>/<name>/<n>` (L4-OPS-004): the unit folder without `.l4/`, `verification.md` and fix-unit folders, task boxes as the base has them, the old PR closed with a comment, then a run started unless `--no-run`; a lost lease exits 1 and changes nothing. Refuses an unstarted, `merged` or locked unit (exit 2). The sweep does the same for a member's `l4:restart` label (L4-OPS-008) | new branch (push with a lease), attempts ref, PR closed, forge call |
 | `l4 resume --unit ID --reason TEXT [--extend-iterations N] [--extend-cost USD] [--extend-fix-rounds N] [--extend-feedback-rounds N]` | Human command (members only), kept for compatibility: the retry (L4-OPS-001) restricted to `halted` and `escalated`, with the same note (L4-OPS-018). Leave the stop, reset breaker counters, optionally extend budgets (L4-IMP-013). It records `unit.resumed`, starts no run and does not look for a spec edit; it runs no agent and no gate, so it needs no sandbox. The sweep does the same for a member's `l4:resume` label, which means `l4:retry` (L4-CI-004, L4-OPS-008) | ledger commit |
 | `l4 yolo draft PLAN [--target BRANCH] [--merge human\|auto] [--update]` | Scaffold `.l4/plans/PLAN.json` in the working tree from the specs no plan lists: one batch `unplanned` with no dependencies, finished units under `exclude` (L4-YOLO-018); with `--update` add only what is new and keep the person's edits. Fetches the base branch and the unit refs first (offline: one line says the phases may be old). No commit, no push, no model | the plan file in the working tree |
-| `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. With `--worktree` the plan file and the unit folders are those of the working tree, before the push (L4-MCP-003). Exit 0, or 2 with the findings | none |
+| `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings. `--worktree` reads the plan files and the units from the working tree, before the push, and adds `uncovered` and `covered_twice` (L4-YOLO-034) | none |
 | `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
 | `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
@@ -4103,7 +4125,8 @@ charged to the plan like the run of the step.
 
 **L4-YOLO-013** Stops, waits, cancel and resume. The plan SHALL stop, with the reason, when its current unit is `halted`, `escalated`, `abandoned` or `rejected`, when a
 frozen digest changes or the plan file is edited after the activation (`inputs_changed`), when a limit is reached, when
-the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), and as D8,
+the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), when its
+capacity wait only a fix can end (`capacity_needs_fix`, L4-YOLO-035), and as D8,
 D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit is `awaiting_human`, `clarifying` or
 `waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
 plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
@@ -4307,6 +4330,27 @@ fails SHALL keep the branch and record `unit.branch_kept{branch, reason}`; a del
 the unit and archive branches of the plan's integrated units whose PR is merged and whose tip is still the recorded
 head. The lock ref SHALL NOT be deleted at merge time. A branch of a PR the forge does not show merged SHALL NOT be
 deleted. The evidence link in the PR body names the unit head commit, so it opens after the branch is gone.
+**L4-YOLO-034** A plan is checked in the working tree before the push. `l4 yolo check PLAN --worktree` SHALL read the
+plan files and the units from the working tree and run the admission of `l4 yolo check` on them, and SHALL also report,
+across all plan files of the working tree, `uncovered` (a unit no plan lists as planned or excluded, except a derived
+unit whose parent is listed, and except a unit `yolo.hold` matches) and `covered_twice` (a unit two plan files plan).
+It SHALL print every finding, then the order of the units and the budget warnings, write nothing, and exit 0 when the
+plan is admitted and nothing is uncovered or covered twice, else 2. A plan file that is not in the working tree SHALL be
+exit 2 naming the path. For the same tree, its coverage findings SHALL be the ones `scripts/validate_plan.py` prints.
+`l4 yolo draft` and the worktree review SHALL name this command in their hints.
+
+**L4-YOLO-035** A capacity wait never chains runs, and a wait only a fix can end stops the plan. A plan step that
+dispatches its current unit while the unit is `waiting_capacity` SHALL NOT start the next run; the next schedule, push
+or person's command probes again. When the current unit parks in `waiting_capacity` with no profile of the chain
+cooling (every failure a missing binary, a failed login or `hello`, a constraint or `serves`; the unit's
+`availability.unavailable` has no `cooling`, `quota` or `concurrency` skip and its `retry_after` is not in the future),
+for the same set of unusable profiles as its previous park, with no `task.done`, `task.red_ok`, `task.green_committed`
+or successful `step.finished` of the unit between them, and both parks after the plan was last activated or resumed, the
+plan SHALL stop with `capacity_needs_fix`. The stop SHALL name each profile, its failure and the fix (renew the secret
+the profile reads, for example `OPENCODE_API_KEY`, or install the binary). `l4 yolo resume` SHALL be allowed after that
+stop; the next run probes. A park with a profile cooling (a limit or credit with a reset) keeps the plan waiting until
+`retry_after` (L4-AVL-007, L4-YOLO-013).
+
 ### 12.6 L4 as an MCP server (MCP)
 
 Any MCP client (an IDE, an agent) manages delivery plans and debugs units through typed tools, under the same rules as the
@@ -4331,7 +4375,7 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - Read: `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check` (`worktree`: `l4 yolo check --worktree`), `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events` (`l4 status --unit U --events`), `l4_verification` (`l4 status --unit U --verification`).
 - Write: `l4_plan_draft`, `l4_plan_review` (`worktree`), `l4_question_answer`, `l4_retry`, `l4_plan_resume`. A write tool's description SHALL say what it writes, whether it pushes to origin, and that CI may be running; `l4_plan_review`'s SHALL say that it costs judge tokens and takes minutes.
 - Not offered: `l4 yolo activate`, `l4 yolo cancel`, `l4 run`, anything that starts an agent CLI. The descriptions name the command a person runs.
-- The read-only commands `l4 yolo check PLAN --worktree` (admission of the working tree's plan file and unit folders, no judge) and `l4 status --unit U --events|--verification` SHALL exist for them and SHALL write nothing to a ref, the index or a tracked file.
+- The read-only command `l4 status --unit U --events|--verification` SHALL exist for them and SHALL write nothing to a ref, the index or a tracked file; `l4_plan_check` with `worktree` runs `l4 yolo check PLAN --worktree` (L4-YOLO-034).
 
 **L4-MCP-004** `l4 mcp install` configures a client in one command. `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's documented MCP configuration with the command `l4 mcp serve --repo <absolute path>` (user scope) or `l4 mcp serve` with no path (`--project`: the file is committed, so each clone and worktree serves its own folder: `$CLAUDE_PROJECT_DIR` when it names an L4 repository, else the working directory's) under the entry NAME (default `l4` with `--project`, `l4-<repository folder>` otherwise), merging into an existing file, keeping every other server and the keys of the entry the user added, atomically.
 - It SHALL refuse a file it cannot parse (exit 2, naming the file, nothing written) and print what it wrote.
@@ -4705,6 +4749,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | MEM-002 | warn | memory on and `.serena/project.yml` or `.serena/memories/harness/lessons.md` ignored by git (`git check-ignore`): prints the `.gitignore` carve-out | — |
 | GATE-001 | error (scope `adoption`) | `gates.setup`, `build`, `lint`, `typecheck` and `gates.test.command` pass at HEAD, run in a detached worktree of HEAD in the gate sandbox (unsandboxed outside CI when bwrap is unusable, and said so; a failure in CI): lists the failing tests (ten, then a count), the first lint lines and suggestions (a missing module's extra, `ruff check --select F,E9`, the same on the source and test directories when `--select F,E9 .` still fails (path narrowing), deselect) | — |
 | TOOL-001 | error in a CI run, warn in `l4 doctor --adoption` | the first word of each configured gate command (`gates.setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) is on the gate PATH; builtins, paths and what `uv run` starts are skipped; the message names the tool and the gate and points at `ci.toolchains` (L4-CI-005) | — |
+| SKL-003 | warn | an installed `l4` skill (user scope; project scope inside a repository) is older than the running `l4` (L4-SKL-003) | `l4 skills install` |
 | LIVE-001 | error | `hello` probe for the first profile of every required role chain | — |
 | LIVE-002 | warn | `hello` probe for fallback profiles; quota for all | — |
 | LIVE-003 | warn | MCP servers start (Serena, Playwright) per adapter | — |
@@ -5256,7 +5301,10 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 34 | `squash-and-delete` | a plan merge lands one squash commit made by the forge's merge call, pinned to the verified head, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run` (`yolo.merge.method`, default `squash`; `fast-forward` keeps the push), and the merged unit and archive branches are deleted under a lease while the verified head stays at `refs/l4/merged/…` (`yolo.merge.delete_branches`, default `true`); the PR's evidence link names the head commit (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033; `openspec/changes/squash-and-delete/`) | a consumer repository's plan, after the upgrade: set `method: fast-forward` and `delete_branches: false` to keep the old behaviour |
 | 35 | `job-toolchains` | `ci.toolchains` (go, node, pnpm): the GitHub workflow sets them up before L4 with pinned shas and their caches off, the default caches `gobuild` and `pnpm`, `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly` for Go gates, doctor TOOL-001 for a gate command that is not on the PATH, and `l4 init` proposals (L4-CI-005, SCN-CI-19..23; `openspec/changes/job-toolchains/`) | the second consumer repository's gates of its Go and TypeScript code |
 | 36 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
-| 37 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; the read-only `l4 yolo check --worktree` and `l4 status --events|--verification` back two tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
+| 37 | `check-worktree` | `l4 yolo check PLAN --worktree` admits the plan files and the units of the working tree before the push and reports `uncovered` and `covered_twice` as `validate_plan.py` does; the hints of `l4 yolo draft` and of the worktree review name it (L4-YOLO-034; `openspec/changes/check-worktree/`) | a plan author on a feature branch: run it before the push |
+| 38 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
+| 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
+| 40 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; `l4 yolo check --worktree` (L4-YOLO-034) backs `l4_plan_check`, and the read-only `l4 status --events|--verification` back two more tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8521,6 +8569,33 @@ scenario is a spec defect (§26).
 - **When** an agent with the skill chooses the kind
 - **Then** it chooses `behaviour`, with `--when`/`--then`, and says why.
 
+#### SCN-SKL-04 (+) One command installs the skill for the agents that are present · L4-SKL-003
+- **Given** a home folder with `~/.claude` and `~/.kiro`, and no Codex or OpenCode folder or CLI
+- **When** `l4 skills install` runs
+- **Then** `~/.claude/skills/l4/SKILL.md` and `~/.kiro/skills/l4/SKILL.md` equal the package's copy, each folder has
+  `.l4-skill.json` with the running version, nothing else is written, and the output names the two targets.
+
+#### SCN-SKL-05 (+) A rerun after an upgrade updates the skill in place · L4-SKL-003
+- **Given** the install of SCN-SKL-04 made by an older `l4`, its files unchanged
+- **When** the newer `l4 skills install` runs
+- **Then** both copies hold the new files and the new version, and `l4 skills status` says `current`.
+
+#### SCN-SKL-06 (−) An edited copy is not overwritten · L4-SKL-003
+- **Given** an installed copy whose `references/plan.md` a person edited
+- **When** `l4 skills install` runs without `--force`
+- **Then** that target is refused with the edited path named, the others are installed, the exit code is 2, and
+  `--force` replaces it.
+
+#### SCN-SKL-07 (+) A team installs the skill into the repository · L4-SKL-003
+- **Given** a repository checkout
+- **When** `l4 skills install --project --agent all` runs
+- **Then** the four project folders hold the skill, ready to commit.
+
+#### SCN-SKL-08 (−) An old installed skill is named by doctor · L4-SKL-003
+- **Given** `~/.claude/skills/l4/.l4-skill.json` with a version older than the running `l4`
+- **When** `l4 doctor` runs
+- **Then** SKL-003 warns with the fix `l4 skills install`.
+
 ### 23.19 Operator commands (OPS)
 
 #### SCN-OPS-01 (+) An escalated unit at the fix-round limit needs no flag · L4-OPS-001
@@ -9168,6 +9243,40 @@ scenario is a spec defect (§26).
 - **When** the merge and the archive merge complete
 - **Then** both branches stay and no `refs/l4/merged/…` ref is pushed
 
+#### SCN-YOLO-86 (+) A plan on a feature branch is checked before the push · L4-YOLO-034
+- **Given** a working tree with three new specs, a plan file `.l4/plans/multitenancy.json` that lists them with their dependencies and excludes the two held changes, none of it pushed
+- **When** `l4 yolo check multitenancy --worktree` runs
+- **Then** it prints `multitenancy: admitted (working tree)` and the order, writes nothing, and exits 0
+
+#### SCN-YOLO-87 (−) A spec no plan lists is uncovered · L4-YOLO-034
+- **Given** the working tree of SCN-YOLO-86 with one held change left out of `exclude`
+- **When** the check runs
+- **Then** it prints `uncovered: openspec:add-llm-vision-provider` and exits 2, as `validate_plan.py` does for that tree
+
+#### SCN-YOLO-88 (−) A dependency cycle and an unknown unit are refused before the push · L4-YOLO-034
+- **Given** a plan file whose units depend on each other in a cycle and name a unit that does not exist
+- **When** the check runs
+- **Then** it prints the `cycle` and `unknown_unit` findings, writes nothing, and exits 2
+
+#### SCN-YOLO-89 (+) The draft names the command · L4-YOLO-034
+- **Given** a working tree with specs that no plan lists
+- **When** `l4 yolo draft p` runs
+- **Then** its `Next:` lines name `l4 yolo check p --worktree`
+#### SCN-YOLO-90 (−) A failed login does not chain runs · L4-YOLO-035
+- **Given** an active plan whose current unit parks in `waiting_capacity` because every implementer profile fails its `hello` with an authentication error
+- **When** the next plan step dispatches the unit and its run parks again
+- **Then** no next run is started by that step
+
+#### SCN-YOLO-91 (−) The second identical park stops the plan with the fix named · L4-YOLO-035
+- **Given** the unit of SCN-YOLO-90 parked twice for the same two profiles, nothing cooling
+- **When** the plan step runs
+- **Then** `plan.stopped{capacity_needs_fix, unit}` is recorded, naming both profiles, `opencode authentication failed` and the fix (renew the key the profiles read), and `l4 yolo resume` with a reason goes on
+
+#### SCN-YOLO-92 (+) A cooling profile still waits for its reset · L4-YOLO-035
+- **Given** a unit parked in `waiting_capacity` because the only profile hit a rate limit that resets in 40 minutes
+- **When** the plan step runs before the reset
+- **Then** the plan waits (`unit_waiting_capacity`), starts no run, and does not stop
+
 ### 23.21 Experience graph (KG)
 
 #### SCN-KG-01 (+) The run path never loads the graph code · L4-KG-001
@@ -9716,10 +9825,10 @@ scenario is a spec defect (§26).
 - **When** `l4 status --unit U --verification` runs
 - **Then** it prints that file; for a unit without one it says `no verification.md`
 
-#### SCN-MCP-15 (+) A plan that is not pushed is admitted from the working tree · L4-MCP-003
-- **Given** a plan file `.l4/plans/p1.json` and its unit folders only in the working tree
-- **When** `l4 yolo check p1 --worktree` runs
-- **Then** it prints `p1: admitted in the working tree` and the order, exits 0 and records nothing; without `--worktree` it exits 2 because origin has no such file
+#### SCN-MCP-15 (+) A plan that is not pushed is refused without `worktree` and admitted with it · L4-MCP-003
+- **Given** a plan file `.l4/plans/p1.json` and its unit folders only in the working tree (the command is L4-YOLO-034's)
+- **When** a client calls `l4_plan_check` for `p1` without `worktree`, then with `worktree: true`
+- **Then** the first result is an error because origin has no such file; the second prints the order and exits 0, and nothing is recorded
 
 #### SCN-MCP-16 (+) A committed project file serves each worktree · L4-MCP-004
 - **Given** `l4 mcp install --client claude-code --project` committed its `.mcp.json`, and a git worktree of the repository

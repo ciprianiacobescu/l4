@@ -96,10 +96,11 @@ A write tool's description SHALL say what it writes, whether it pushes to origin
 - **WHEN** `l4 status --unit U --verification` runs
 - **THEN** it prints that file; for a unit without one it says `no verification.md`
 
-#### Scenario: SCN-MCP-15 (+) A plan that is not pushed is admitted from the working tree
-- **GIVEN** a plan file and its unit folders only in the working tree
-- **WHEN** `l4 yolo check <plan> --worktree` runs
-- **THEN** it prints the order and exits 0, recording nothing; without `--worktree` it exits 2
+#### Scenario: SCN-MCP-15 (+) A plan that is not pushed is refused without `worktree` and admitted with it
+- **GIVEN** a plan file and its unit folders only in the working tree (the command is L4-YOLO-034's)
+- **WHEN** a client calls `l4_plan_check` for it without `worktree`, then with `worktree: true`
+- **THEN** the first result is an error because origin has no such file; the second prints the order and exits 0,
+  recording nothing
 
 ### Requirement: L4-MCP-004 l4 mcp install configures a client in one command
 `l4 mcp install --client <name> [--project] [--repo PATH] [--name NAME] [--dry-run]` SHALL write the client's
