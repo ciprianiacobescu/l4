@@ -31,6 +31,7 @@ from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
 from l4.sandbox.none import NoSandbox
 from l4.vcs.git import Git, GitError
+from l4.vcs.repokey import key_of_common_dir
 
 MAX_FAILING = 10
 EXCERPT_LINES = 10
@@ -228,7 +229,9 @@ def dry_run_gates(
     try:
         home = Path(environ["HOME"]) if environ.get("HOME") else Path.home()
         common = Path(git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
-        caches = mount_caches(cfg.sandbox.caches, cache, "openspec:l4-adoption-check")
+        caches = mount_caches(
+            cfg.sandbox.caches, cache, "openspec:l4-adoption-check", key_of_common_dir(common, environ)
+        )
         redactor = redactor_for_config(cfg, environ)
         timeout = duration_seconds(cfg.gates.timeout)
         setup_failed = False

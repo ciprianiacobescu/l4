@@ -1,6 +1,7 @@
 """The per-unit cache mounts of `sandbox.caches` (SPEC L4-SEC-005): `$L4_CACHE` and `{unit}` expanded, directories
 created, so that agent-written code in one unit cannot poison another unit's cache."""
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -17,11 +18,16 @@ def cache_dir(cfg: CacheCfg, root: Path, slug: str) -> Path:
     return path
 
 
-def mount_caches(caches: Mapping[str, CacheCfg], cache_root: Path, unit_id: str) -> tuple[CacheMount, ...]:
-    """`{unit}` becomes `<framework>/<name>` (the layout of the worktree path; a colon would be a bad path part).
+def mount_caches(
+    caches: Mapping[str, CacheCfg], cache_root: Path, unit_id: str, repo_key: str
+) -> tuple[CacheMount, ...]:
+    """`{unit}` becomes `<repository key>/<framework>/<name>` (the layout of the worktree path; a colon would be a bad
+    path part), so two projects with a unit of the same name never share a cache (L4-SEC-034).
     A read-only cache is a shared one the operator provisions: when it is absent there is nothing to mount."""
     framework, name = parse_unit_id(unit_id)  # ValueError: the id comes from repo content
-    slug = f"{framework.value}/{name}"
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", repo_key):
+        raise ValueError(f"not a usable repository key: {repo_key!r}")
+    slug = f"{repo_key}/{framework.value}/{name}"
     root = cache_root.resolve()
     mounts: list[CacheMount] = []
     for cache_name, cfg in caches.items():

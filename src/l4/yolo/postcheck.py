@@ -32,6 +32,7 @@ from l4.sandbox.env import toolchain_env
 from l4.sandbox.select import select_sandbox
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
+from l4.vcs.repokey import key_of_common_dir
 from l4.yolo.model import PROFILE_ALL, PROFILE_NONE, ProfileResult
 
 AREA = ("yolo", "postcheck")  # under the runner cache
@@ -169,7 +170,7 @@ def _run(
     cache = cache_root(app.environ, repo=app.repo)
     common = Path(git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
     home = Path(app.environ["HOME"]) if app.environ.get("HOME") else Path.home()
-    caches = mount_caches(cfg.sandbox.caches, cache, CACHE_UNIT)
+    caches = mount_caches(cfg.sandbox.caches, cache, CACHE_UNIT, key_of_common_dir(common, app.environ))
     tmp = work / "gate-tmp"
     tmp.mkdir()
     logs = app.out_dir / "yolo" / "postcheck" / app.run_id

@@ -49,7 +49,7 @@ def world(tmp_path: Path):
     (tmp_path / "builds" / "p.tmp").mkdir(parents=True)
     creds = expand_credential_paths({k: list(v) for k, v in CREDENTIAL_PATHS.items()}, home)
     (tmp_path / "cache root" / "shared" / "ms-playwright").mkdir(parents=True)
-    caches = mount_caches(L4Config().sandbox.caches, tmp_path / "cache root", "openspec:add-x")
+    caches = mount_caches(L4Config().sandbox.caches, tmp_path / "cache root", "openspec:add-x", "proj-0123456789")
 
     def spec(adapter: str | None) -> SandboxSpec:
         return SandboxSpec(

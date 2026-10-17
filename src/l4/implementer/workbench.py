@@ -47,6 +47,8 @@ from l4.security.protected import ProtectedSet, restore_protected, revert_unsnap
 from l4.specs.base import SpecProvider, UnitRef
 from l4.state.ledger import ledger_path
 from l4.vcs.git import Git
+from l4.vcs.names import unit_dir
+from l4.vcs.repokey import key_of_common_dir
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.wip import restore_wip, snapshot_wip, wip_ref
 
@@ -143,6 +145,8 @@ class Workbench:
     run_id: str
     iteration: int
     unit_cache: Path
+    cache_root: Path
+    repo_key: str
     out_dir: Path
     home: Path
     git_common_dir: Path
@@ -166,6 +170,8 @@ class Workbench:
     activated_plan: str | None = None  # the plan that froze it
 
     def __post_init__(self) -> None:
+        self.unit_cache.mkdir(parents=True, exist_ok=True)
+        self.unit_cache.chmod(0o700)  # the unit's step files are for its own sandboxes only (L4-PRV-040)
         for sub in ("agent-tmp", "gate-tmp"):
             (self.unit_cache / sub).mkdir(parents=True, exist_ok=True)
         self.excludes.write_text("\n".join(HARNESS_EXCLUDES) + "\n", encoding="utf-8")
@@ -555,16 +561,17 @@ def make_workbench(
     (the one file of the run that every step leaves alone). `family_glob` is the namespace of fix units that no step
     may create or edit (`<changes>/<parent>-fix-*`; the unit's own by default): only the harness writes them."""
     cache = cache_root(app.environ, repo=app.repo)
-    framework = ref.framework.value
     common = Path(git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    repo_key = key_of_common_dir(common, app.environ)  # the key every per-unit directory carries (L4-SEC-034)
     unit_rel = ref.path.resolve().relative_to(worktree.resolve()).as_posix()
     ledger_rel = ledger_rel or ledger_path(ref.path, app.run_id).resolve().relative_to(worktree.resolve()).as_posix()
     home = Path(app.environ["HOME"]) if app.environ.get("HOME") else Path.home()
     return Workbench(
         cfg=cfg, ref=ref, provider=provider, worktree=worktree, git=git, ledger=ledger, sandbox=sandbox,
         selected=selected, host_env=app.environ, redactor=app.redactor, run_id=app.run_id, iteration=iteration,
-        unit_cache=cache / "units" / framework / ref.name, out_dir=app.out_dir, home=home, git_common_dir=common,
-        caches=caches if caches is not None else mount_caches(cfg.sandbox.caches, cache, ref.id),
+        unit_cache=unit_dir(cache, repo_key, ref.id), cache_root=cache, repo_key=repo_key, out_dir=app.out_dir,
+        home=home, git_common_dir=common,
+        caches=caches if caches is not None else mount_caches(cfg.sandbox.caches, cache, ref.id, repo_key),
         protected=ProtectedSet(
             tuple(cfg.odd.forbidden_paths), unit_rel, ledger_rel, tuple(extra_unit_dirs),
             (family_glob or f"{unit_rel}-fix-*",),

@@ -36,11 +36,11 @@ from l4.state.ledger import (
     parse_ledger_files,
 )
 from l4.vcs.git import BOT_IDENTITY, Git, Identity
+from l4.vcs.names import UNPUBLISHED_DIR as UNPUBLISHED_DIR  # re-exported: the constant lives with the names
 from l4.vcs.push import PushRejected
 from l4.vcs.tree import regular_blobs
 
 PENDING_DIR = "ledger-pending"
-UNPUBLISHED_DIR = "pending-unpublished"  # under $L4_CACHE: run files whose publish to the lock ref failed
 MAX_ATTEMPTS = 3  # a lease that is stale this often means the ref is being written by someone in a loop
 _ENTRY = re.compile(rf"^{RUN_ID.pattern[1:-1]}\.jsonl$")
 _TS = "%Y-%m-%dT%H:%M:%SZ"
@@ -82,18 +82,18 @@ def read_pending_files(git: Git, lock_ref: str) -> dict[str, bytes]:
     }
 
 
-def keep_unpublished(cache: Path, framework: str, name: str, run_file: Path) -> Path:
+def keep_unpublished(directory: Path, run_file: Path) -> Path:
     """Copy a run file that could not be published out of the worktree, which the next run deletes. It is published
-    (and the copy dropped) by the next run of the unit, before that run folds the unit's state."""
-    target = cache / UNPUBLISHED_DIR / framework / name / f"{run_file.stem}.jsonl"
+    (and the copy dropped) by the next run of the unit, before that run folds the unit's state. `directory` is the
+    unit's keyed `UnitNames.unpublished_dir` (L4-SEC-034)."""
+    target = directory / f"{run_file.stem}.jsonl"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(run_file, target)
     return target
 
 
-def unpublished_files(cache: Path, framework: str, name: str) -> dict[str, Path]:
-    """`<run-id>` -> the kept copy, for every regular file that is named like a run file."""
-    directory = cache / UNPUBLISHED_DIR / framework / name
+def unpublished_files(directory: Path) -> dict[str, Path]:
+    """`<run-id>` -> the kept copy, for every regular file of `directory` that is named like a run file."""
     if not directory.is_dir():
         return {}
     return {
@@ -101,6 +101,48 @@ def unpublished_files(cache: Path, framework: str, name: str) -> dict[str, Path]
         for path in sorted(directory.iterdir())
         if _ENTRY.match(path.name) and path.is_file() and not path.is_symlink()
     }
+
+
+def _started_commits(path: Path) -> list[str]:
+    """The commit ids the file's `run.started` names (its base and head); none when the file says nothing usable."""
+    try:
+        first = read_regular_file(path, limit=MAX_LEDGER_FILE_BYTES).split(b"\n", 1)[0]
+        body = json.loads(first)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(body, dict) or body.get("type") != "run.started":
+        return []
+    return [v for k in ("base", "head") if isinstance(v := body.get(k), str) and re.fullmatch(r"[0-9a-f]{40,64}", v)]
+
+
+def adopt_legacy(legacy_dir: Path, keyed_dir: Path, git: Git) -> list[Path]:
+    """The run files of the earlier, unkeyed layout (`pending-unpublished/<fw>/<name>`) that belong to this
+    repository move to `keyed_dir`: one is adopted when a commit its `run.started` names is a commit of `git`. Any
+    other stays where it is (it may be another project's) and is named in one warning, never by content. Returns the
+    files moved, at their new place (L4-SEC-034)."""
+    if not legacy_dir.is_dir():
+        return []
+    moved: list[Path] = []
+    left = 0
+    for path in unpublished_files(legacy_dir).values():
+        commits = _started_commits(path)
+        if any(git.run("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0 for sha in commits):
+            keyed_dir.mkdir(parents=True, exist_ok=True)
+            target = keyed_dir / path.name
+            if target.exists():  # the keyed copy of the same run is the one this repository wrote
+                path.unlink()
+            else:
+                shutil.move(str(path), target)
+            moved.append(target)
+        else:
+            left += 1
+    if left:
+        log.warning(
+            "%d unpublished run files of the earlier layout in %s belong to no commit of this repository; "
+            "they are kept and never published",
+            left, legacy_dir,
+        )  # fmt: skip
+    return moved
 
 
 def read_pending(git: Git, lock_ref: str) -> LedgerRead:

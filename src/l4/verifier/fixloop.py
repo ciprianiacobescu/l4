@@ -304,7 +304,9 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int) -> Workbenc
         cfg=ctx.cfg, app=s.app, ref=fix, provider=family, worktree=s.worktree, git=s.git,
         ledger=s.ledger, sandbox=s.sandbox, selected=selected, iteration=iteration, push=ctx.push,
         event_context={"fix_unit": fix.name}, extra_unit_dirs=others, family_glob=f"{parent_rel}-fix-*",
-        caches=mount_caches(ctx.cfg.sandbox.caches, cache_root(s.app.environ, repo=s.app.repo), s.ref.id),
+        caches=mount_caches(
+            ctx.cfg.sandbox.caches, cache_root(s.app.environ, repo=s.app.repo), s.ref.id, s.names.repo_key
+        ),
         ledger_rel=ledger_path(s.ref.path, s.app.run_id).resolve().relative_to(root).as_posix(),
     )  # fmt: skip
 

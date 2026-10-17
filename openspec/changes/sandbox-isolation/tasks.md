@@ -16,7 +16,7 @@ Every task follows these rules:
 
 ## 1. Repository key in every per-unit path (sandbox-security-1; L4-SEC-034)
 
-- [ ] 1.1 Tests, ported from `verify-sandbox-security/r1_unitcache_real.py`, in `tests/unit/sandbox/test_unit_dirs_keyed.py`.
+- [x] 1.1 Tests, ported from `verify-sandbox-security/r1_unitcache_real.py`, in `tests/unit/sandbox/test_unit_dirs_keyed.py`.
   Build two git repositories under `tmp_path` (origins `https://gitlab.example.com/team-a/projecta.git` and
   `https://gitlab.example.com/team-b/projectb.git`, each with `openspec/changes/add-login/proposal.md` committed), one
   `L4_CACHE`, `HOME` under `tmp_path`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, and call the real
@@ -32,7 +32,7 @@ Every task follows these rules:
     repo_key="proj-0123456789")` gives `root/units/proj-0123456789/openspec/add-x/cache/uv`; a configured
     `$L4_CACHE/custom/{unit}/npm` gives `root/custom/proj-0123456789/openspec/add-x/npm`; the read-only `playwright`
     cache is unchanged.
-- [ ] 1.2 Code: `src/l4/vcs/names.py`: `unit_dir(cache, repo_key, unit_id) -> Path` (`cache/units/<key>/<fw>/<name>`),
+- [x] 1.2 Code: `src/l4/vcs/names.py`: `unit_dir(cache, repo_key, unit_id) -> Path` (`cache/units/<key>/<fw>/<name>`),
   and `UnitNames` fields `repo_key`, `unit_cache` (that path), `unpublished_dir`
   (`cache/pending-unpublished/<key>/<fw>/<name>`, using `l4.state.pending.UNPUBLISHED_DIR`'s value without importing
   the state package if that makes a cycle: move the constant to `vcs/names.py` and re-export it from `pending.py`).
@@ -45,7 +45,7 @@ Every task follows these rules:
   `src/l4/gates/dryrun.py:231` and `src/l4/yolo/postcheck.py:172` (`key_of_common_dir` of the `common` they read). Update
   `tests/unit/sandbox/test_caches.py` and any test that spells `units/<fw>/<name>` to the keyed layout.
   Verify: the 1.1 file, `tests/unit/sandbox/`, `tests/unit/implementer/test_setup.py`, `tests/unit/verifier/`.
-- [ ] 1.3 Tests in `tests/unit/state/test_pending_keyed.py` (the reproduction's "extra" part):
+- [x] 1.3 Tests in `tests/unit/state/test_pending_keyed.py` (the reproduction's "extra" part):
   - `test_another_projects_unpublished_file_is_not_published` (SCN-SEC-83): `keep_unpublished(names_a.unpublished_dir,
     run_file)` for project A; `unpublished_files(names_b.unpublished_dir)` is `{}`; and `Orchestrator._unpublished`
     reads `services.names.unpublished_dir` (call it on an orchestrator built by the existing orchestrator test world in
@@ -56,7 +56,7 @@ Every task follows these rules:
     `r-20261017T1201Z-bbbb.jsonl` naming a sha that is not in the repository; `adopt_legacy(legacy_dir, keyed_dir, git)`
     moves the first into `keyed_dir`, leaves the second, and logs exactly one warning (caplog) naming `legacy_dir` and
     the count 1, never a file's content.
-- [ ] 1.4 Code: `src/l4/state/pending.py`: `keep_unpublished(directory, run_file)`, `unpublished_files(directory)`,
+- [x] 1.4 Code: `src/l4/state/pending.py`: `keep_unpublished(directory, run_file)`, `unpublished_files(directory)`,
   `adopt_legacy(legacy_dir, keyed_dir, git) -> list[Path]` (a file is adopted when a commit sha of its `run.started`
   passes `git cat-file -e <sha>^{commit}`; unreadable or unknown: left). `src/l4/orchestrator.py`: `_unpublished` and
   `_publish_pending` pass `s.names.unpublished_dir` (lines 1245, 1275); `_publish_unpublished` first adopts from

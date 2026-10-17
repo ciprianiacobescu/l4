@@ -74,7 +74,7 @@ def world(tmp_path: Path):
 
     # the production default mounts (four read-write per-unit caches, the read-only shared one), a path with a space
     (tmp_path / "cache root" / "shared" / "ms-playwright").mkdir(parents=True, exist_ok=True)
-    caches = mount_caches(L4Config().sandbox.caches, tmp_path / "cache root", "openspec:add-x")
+    caches = mount_caches(L4Config().sandbox.caches, tmp_path / "cache root", "openspec:add-x", "proj-0123456789")
     assert len(caches) == 7 and any(c.read_only for c in caches)
 
     def spec(adapter: str) -> SandboxSpec:

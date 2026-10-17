@@ -97,14 +97,21 @@ from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
 from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
-from l4.state.pending import PendingLedger, keep_unpublished, merge_ledgers, read_pending, unpublished_files
+from l4.state.pending import (
+    PendingLedger,
+    adopt_legacy,
+    keep_unpublished,
+    merge_ledgers,
+    read_pending,
+    unpublished_files,
+)
 from l4.state.reconcile import reconcile
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, review_note, review_trigger, spec_edit_since_harness
 from l4.state.status import discover, load_snapshot, refresh_refs
 from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
-from l4.vcs.names import UnitNames
+from l4.vcs.names import UNPUBLISHED_DIR, UnitNames
 from l4.vcs.repokey import repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
@@ -1241,12 +1248,16 @@ class Orchestrator:
         )  # fmt: skip
 
     def _unpublished(self) -> dict[str, Path]:
-        s = self.services
-        return unpublished_files(cache_root(s.app.environ, repo=s.app.repo), s.ref.framework.value, s.ref.name)
+        return unpublished_files(self.services.names.unpublished_dir)
 
     def _publish_unpublished(self) -> None:
         """The tails that earlier runs could not publish (the lock ref refused the push) exist nowhere else, so they
         go first. A failure here is only logged: this run's own publish reports a lock ref that cannot be written."""
+        s = self.services
+        adopt_legacy(
+            cache_root(s.app.environ, repo=s.app.repo) / UNPUBLISHED_DIR / s.ref.framework.value / s.ref.name,
+            s.names.unpublished_dir, s.git,
+        )  # fmt: skip
         for run_id, path in self._unpublished().items():
             try:
                 self._pending_ledger(run_id).publish(path)
@@ -1272,7 +1283,7 @@ class Orchestrator:
         else:
             return
         try:
-            keep_unpublished(cache_root(s.app.environ, repo=s.app.repo), s.ref.framework.value, s.ref.name, run_file)
+            keep_unpublished(s.names.unpublished_dir, run_file)
         except OSError as exc:
             log.warning("the pending ledger of %s could not be kept for the next run: %s", s.app.run_id, exc)
         if not failing:
