@@ -118,12 +118,12 @@ Every task follows these rules:
 
 ## 7. A limit of an active plan, by a person (L4-YOLO-050, L4-YOLO-051)
 
-- [ ] 7.1 Tests: `tests/unit/yolo/test_yolo_state_fold.py`, SCN-YOLO-135 (active, waiting with
+- [x] 7.1 Tests: `tests/unit/yolo/test_yolo_state_fold.py`, SCN-YOLO-135 (active, waiting with
   `unit_awaiting_human`, stopped with `merge_refused` and one stale merge, each then `plan.extended{extend: {runs: 5}}`:
   status, `wait_reason`, `stop_reason` and `stale_merges` unchanged, `extended.runs == 5`; `plan.extended` before
   `plan.activated` changes nothing); `tests/unit/yolo/test_yolo_state_limits.py`, SCN-YOLO-131 (`max_runs` 90,
   `plan.extended{extend: {runs: 20}}`, a charge of 90 runs: `reached` is None, and `effective_limits(...).runs == 110`).
-- [ ] 7.2 Code: `src/l4/yolo/state.py`: `plan.extended` in `fold_plan` (design D7) and a line about it in the module
+- [x] 7.2 Code: `src/l4/yolo/state.py`: `plan.extended` in `fold_plan` (design D7) and a line about it in the module
   docstring.
 - [ ] 7.3 Tests, `tests/unit/yolo/test_yolo_commands_manage.py`. First add
   `monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)` to every existing test that passes an

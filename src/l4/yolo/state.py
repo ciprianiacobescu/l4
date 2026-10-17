@@ -26,6 +26,9 @@ plan's cost and runs but are not units: they have no entry in `used.attempts`.
 kept under the key `*`) or a `{unit: n}` mapping. An `extend.deadline` raises `extended_deadline` (the latest wins; a
 time without a zone is read as UTC).
 
+`plan.extended{extend}` (L4-YOLO-050) raises the limits of an activated plan that is not final, in any status, and
+changes nothing else: no status, no wait or stop reason, no `stale_merges`. Before the activation it is ignored.
+
 `plan.activated{current: <unit or null>}` says which unit the plan goes on with: the activation keeps the current unit
 only when the new order holds it and every prerequisite of it is integrated, else it is null. An event without the key
 (an older ledger) keeps the current unit unless the new order drops it.
@@ -212,6 +215,9 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 if data.get("by") != "harness":  # a person's resume: the next step tries the merge once more (R7)
                     state.stale_merges.clear()
                     stale_at.clear()
+        elif kind == "plan.extended":
+            if activated and state.status not in _FINAL:
+                apply_extend(state, data.get("extend"))
         elif kind == "plan.cancelled":
             if state.status not in _FINAL:
                 state.status = "cancelled"

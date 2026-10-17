@@ -402,3 +402,39 @@ def test_activation_freezes_the_accepted_findings_and_a_reactivation_replaces_th
 def test_an_old_ledger_without_acceptances_folds_to_empty():
     s = fold(ev("plan.admitted", plan_digest="d1"), ACTIVATED, ev("plan.stopped", reason="deadline"))
     assert s.accepted == {} and s.activated_accepted == {}
+
+
+# ---- plan.extended: a limit of an active plan, raised without a resume (L4-YOLO-050) --------------------------------
+
+
+def _extended(runs=5):
+    return ev("plan.extended", by="me", actor="person", reason="more", extend={"runs": runs})
+
+
+def test_scn_yolo_135_an_extension_changes_the_limits_only():
+    active = fold(ACTIVATED, _extended())
+    waiting = fold(ACTIVATED, ev("plan.waiting", reason="unit_awaiting_human", unit="u"), _extended())
+    stale = ev("unit.merge_refused", unit="u", reason="stale")
+    stopped = fold(ACTIVATED, stale, ev("plan.stopped", reason="merge_refused", unit="u"), _extended())
+    assert (active.status, active.wait_reason, active.stop_reason) == ("active", None, None)
+    assert (waiting.status, waiting.wait_reason) == ("waiting", "unit_awaiting_human")
+    assert (stopped.status, stopped.stop_reason, stopped.stop_unit) == ("stopped", "merge_refused", "u")
+    assert stopped.stale_merges == {"u": 1}
+    for state in (active, waiting, stopped):
+        assert state.extended.runs == 5
+
+
+def test_scn_yolo_135_an_extension_before_the_activation_changes_nothing():
+    state = fold(_extended(), ACTIVATED)
+    assert state.status == "active" and state.extended.runs == 0 and state.extended.cost_usd == 0
+
+
+def test_an_extension_of_a_final_plan_changes_nothing():
+    for last in (ev("plan.cancelled", by="me"), ev("plan.completed", revision="r")):
+        assert fold(ACTIVATED, last, _extended()).extended.runs == 0
+
+
+def test_extensions_add_up_with_the_resumes():
+    resume = ev("plan.resumed", by="me", extend={"runs": 2})
+    state = fold(ACTIVATED, _extended(5), ev("plan.stopped", reason="limit_runs"), resume, _extended(1))
+    assert state.extended.runs == 8 and state.status == "active"
