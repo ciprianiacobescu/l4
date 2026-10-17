@@ -141,3 +141,16 @@ def test_ci_results_are_folded_per_head():
     later = [*events, ev(4, RUN1, 5, "ci.failed", head="c" * 40, pipeline=9, jobs=[], preexisting=[])]
     assert fold(later, "openspec:x").ci_failure.head == "c" * 40  # type: ignore[union-attr]
     assert fold(events[:1], "openspec:x").ci_heads == {} and fold(events[:1], "openspec:x").ci_failure is None
+
+
+def test_pr_ready_folds_into_ready_head():
+    """L4-ARC-008: the latest `pr.ready{head}` in fold order is H; one without a string head changes nothing."""
+    assert fold([], "openspec:x").ready_head is None
+    assert fold([ev(0, RUN1, 1, "pr.ready", url="u", number=1)], "openspec:x").ready_head is None
+    first = ev(1, RUN1, 2, "pr.ready", url="u", number=1, head="a" * 40)
+    second = ev(2, RUN2, 1, "pr.ready", url="u", number=1, head="b" * 40)
+    assert fold([first, second], "openspec:x").ready_head == "b" * 40
+    for bad in (None, 7, "", ["c"]):
+        junk = ev(3, RUN2, 2, "pr.ready", url="u", number=1, head=bad)
+        assert fold([first, second, junk], "openspec:x").ready_head == "b" * 40
+    assert "pr.ready" in HANDLERS

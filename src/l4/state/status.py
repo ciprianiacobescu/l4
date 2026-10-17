@@ -215,7 +215,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         follow = found.parent
     review = None
     if on_branch and state.phase == Phase.IN_REVIEW.value:
-        review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git))
+        review = after_handoff(git, tracking_ref, ref.name, _relative(provider, ref, git), recorded=state.ready_head)
     edit = None
     if on_branch and state.phase in {p.value for p in SPEC_EDIT_PHASES}:
         edit = spec_edit_since_harness(git, tracking_ref, _relative(provider, ref, git))

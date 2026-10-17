@@ -774,7 +774,7 @@ class Orchestrator:
         merge."""
         s = self.services
         unit_rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
-        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel)
+        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel, recorded=self.state.ready_head)
         found = review_trigger(after, self.state)
         if found is None:
             return False

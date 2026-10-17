@@ -11,7 +11,7 @@ Every task follows these rules:
 
 ## 1. The recorded hand-off commit H (L4-ARC-008, design D1, D2)
 
-- [ ] 1.1 Tests first.
+- [x] 1.1 Tests first.
   - `tests/unit/yolo/test_merge_safety_handoff.py`, ported from
     `<review>/verify-yolo/repo/tests/unit/vy/test_vy1_forged_after_h.py`.
     - Setup: a `CycleWorld` with an active `merge: auto` plan. The unit branch `l4/openspec/a` has a commit, then H made
@@ -51,7 +51,7 @@ Every task follows these rules:
     branch whose ledger (`unit_repo.write_ledger`) ends with `phase.changed` to `in_review` and `pr.ready{head: B}`,
     where B is the branch's first commit. Monkeypatch `l4.state.status.after_handoff` with a wrapper that records its
     keyword arguments and calls the real function. Then `recorded == B` and `snapshot.state.ready_head == B`.
-- [ ] 1.2 Code.
+- [x] 1.2 Code.
   - `src/l4/state/fold.py`: `UnitState.ready_head`, `_pr_ready`, `HANDLERS["pr.ready"]`.
   - `src/l4/state/review.py`: `after_handoff(..., *, recorded=None)` as D2, and update the module docstring.
   - `src/l4/state/status.py` `load_snapshot` and `src/l4/orchestrator.py` `_review`: pass `recorded=` the state's

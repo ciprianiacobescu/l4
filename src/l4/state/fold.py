@@ -124,6 +124,7 @@ class UnitState(_Model):
         default_factory=dict
     )  # head sha -> failed | preexisting: the sweep acts once per H
     ci_failure: CiFailure | None = None
+    ready_head: str | None = None  # `pr.ready{head}`: the hand-off commit H of the latest hand-off (L4-ARC-008)
     breaker_trips: int = 0  # `breaker.tripped` events since the last `unit.resumed` (L4-IMP-013)
     fix_rounds_extra: int = 0  # the sum of `budget.extended{fix_rounds}`, added to `verifier.max_fix_rounds`
     feedback_rounds_extra: int = 0  # the sum of `budget.extended{feedback_rounds}`, added to `feedback.max_rounds`
@@ -382,6 +383,12 @@ def _ci_preexisting(state: UnitState, event: LedgerEvent) -> None:
         state.ci_heads.setdefault(head, "preexisting")
 
 
+def _pr_ready(state: UnitState, event: LedgerEvent) -> None:
+    """`pr.ready{url, number, head}` (L4-ARC-008): the sha of the hand-off commit H, the latest one in fold order."""
+    if head := _text(event, "head"):
+        state.ready_head = head
+
+
 def _pr_closed(state: UnitState, event: LedgerEvent) -> None:
     """`pr.closed{number, from_phase, from_previous}` (L4-OPS-009), written just before the `pr_closed` edge: the return
     state of the unit. An event without the two fields (the sweeper writes `{number}`) takes them from the state at
@@ -548,6 +555,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "human.verdict": _human_verdict,
     "pr.updated": _pr_updated,
     "pr.misdirected": _pr_misdirected,
+    "pr.ready": _pr_ready,
     "ci.failed": _ci_failed,
     "ci.preexisting": _ci_preexisting,
     "pr.closed": _pr_closed,
