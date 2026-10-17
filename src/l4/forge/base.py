@@ -96,6 +96,17 @@ PrState = Literal["open", "merged", "closed", "all"]
 
 
 @dataclass(frozen=True)
+class MergeCall:
+    """The answer of `Forge.merge_pr` (squash-and-delete D2): `merged` (`sha` is the commit on the target), `head_moved`
+    (the pull request head is no longer the `sha` the call pinned: nothing merged) or `refused` (the forge will not
+    squash-merge it: `detail` carries its message, redacted). Any other failure raises `ForgeError`."""
+
+    status: Literal["merged", "head_moved", "refused"]
+    sha: str | None = None
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class LabelEvent:
     """One entry of a merge request's label history, attributed by the forge itself (L4-SEC-004, M1.11): `user_id` is
     who added or removed the label, as the forge records it (not a text anyone can write into a commit)."""
@@ -213,6 +224,11 @@ class Forge(Protocol):
         """Post `comment` on the pull request, then close it without a merge (L4-OPS-004 step 6). One that is no
         longer open is left as it is: no comment, no write. Returns the pull request as the forge now has it; its
         `state` (`open`, `closed` or `merged`) is also what `get_pr` says, so there is no separate state call."""
+
+    def merge_pr(self, number: int, *, sha: str, title: str, message: str) -> MergeCall:
+        """Squash-merge the pull request through the forge's own merge call, pinned to the head `sha` (L4-YOLO-032): the
+        forge refuses with `head_moved` when the head is not `sha`. `title` and `message` are the squash commit's. The
+        call has no guard on the target tip; the caller compares the landed commit with what it read."""
 
 
 Platform = Literal["gitlab", "github", "local"]

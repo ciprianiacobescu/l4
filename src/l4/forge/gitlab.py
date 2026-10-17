@@ -29,6 +29,7 @@ from l4.forge.base import (
     JobLog,
     JobResult,
     LabelEvent,
+    MergeCall,
     PrState,
     PullRequest,
     StartRun,
@@ -228,7 +229,9 @@ class GitLabForge:
             base_branch=str(data["target_branch"]), title=strip_draft(title),
             draft=bool(data.get("draft", _DRAFT.match(title) is not None)),
             state=_STATES.get(str(data.get("state")), "open"), labels=tuple(str(x) for x in data.get("labels", ())),
-            merge_commit_sha=str(data["merge_commit_sha"]) if data.get("merge_commit_sha") else None,
+            merge_commit_sha=(
+                str(data.get("merge_commit_sha") or data.get("squash_commit_sha") or "") or None
+            ),  # a squash merge leaves `merge_commit_sha` empty and fills `squash_commit_sha`
             head_sha=str(data["sha"]) if data.get("sha") else None,  # the MR's `sha` is its source branch head
         )  # fmt: skip
 
@@ -441,6 +444,31 @@ class GitLabForge:
         if find() is None:
             post_once(lambda: self._request("POST", path, json={"body": comment}).json(), find, self._pause)
         return self._pr(self._request("PUT", f"/merge_requests/{number}", json={"state_event": "close"}).json())
+
+    def merge_pr(self, number: int, *, sha: str, title: str, message: str) -> MergeCall:
+        """`PUT merge_requests/:iid/merge` with `squash: true`, pinned to `sha`: 200 merged, 409 the head is not `sha`,
+        405, 406 and 422 (cannot be merged, squash not allowed) refused with GitLab's message. A refusal of a merge
+        request that is merged by now (a lost answer, sent again) is the merge."""
+        text = f"{title}\n\n{message}"
+        payload = {
+            "squash": True, "sha": sha, "squash_commit_message": text, "merge_commit_message": text,
+            "should_remove_source_branch": False,
+        }  # fmt: skip
+        try:
+            reply = self._request("PUT", f"/merge_requests/{number}/merge", json=payload).json()
+        except ForgeError as exc:
+            if exc.status == 409:
+                return MergeCall("head_moved", None, str(exc))
+            if exc.status in (405, 406, 422):
+                now = self.get_pr(number)
+                if now.state == "merged" and now.merge_commit_sha:
+                    return MergeCall("merged", now.merge_commit_sha, "the merge request was merged already")
+                return MergeCall("refused", None, str(exc))
+            raise
+        landed = self._pr(reply).merge_commit_sha
+        if not landed:
+            return MergeCall("refused", None, f"GitLab merged !{number} but names no commit")
+        return MergeCall("merged", landed, f"squash-merged as {landed}")
 
     # --- labels -----------------------------------------------------------------------------------------------
 

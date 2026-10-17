@@ -31,6 +31,7 @@ from l4.forge.base import (
     JobLog,
     JobResult,
     LabelEvent,
+    MergeCall,
     PrState,
     PullRequest,
     StartRun,
@@ -326,6 +327,27 @@ class GitHubForge:
             post_once(lambda: self._request("POST", path, json={"body": comment}).json(), find, self._pause)
         self._request("PATCH", f"/repos/{self._repo}/pulls/{number}", json={"state": "closed"})
         return self.get_pr(number)
+
+    def merge_pr(self, number: int, *, sha: str, title: str, message: str) -> MergeCall:
+        """`PUT pulls/:n/merge` with the squash method, pinned to `sha`: 200 merged, 409 the head is not `sha`, 405 and
+        422 (not mergeable, squash not allowed, a rule) refused with GitHub's message. A refusal of a pull request that
+        is merged by now (a lost answer, sent again) is the merge."""
+        payload = {"merge_method": "squash", "sha": sha, "commit_title": title, "commit_message": message}
+        try:
+            reply = self._request("PUT", f"/repos/{self._repo}/pulls/{number}/merge", json=payload).json()
+        except ForgeError as exc:
+            if exc.status == 409:
+                return MergeCall("head_moved", None, str(exc))
+            if exc.status in (405, 422):
+                now = self.get_pr(number)
+                if now.state == "merged" and now.merge_commit_sha:
+                    return MergeCall("merged", now.merge_commit_sha, "the pull request was merged already")
+                return MergeCall("refused", None, str(exc))
+            raise
+        landed = reply.get("sha") if isinstance(reply, dict) and reply.get("merged") else None
+        if not landed:
+            return MergeCall("refused", None, self._scrub(f"GitHub did not merge pull request {number}: {reply}"[:200]))
+        return MergeCall("merged", str(landed), f"squash-merged as {landed}")
 
     # --- labels -------------------------------------------------------------------------------------------------
 

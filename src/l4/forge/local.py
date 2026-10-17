@@ -7,6 +7,7 @@ the same pull requests. Every call is logged for tests ("zero forge writes in a 
 
 import json
 import os
+import subprocess
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,10 +17,12 @@ from typing import Any
 from l4.forge.base import (
     UNFINISHED,
     Continuation,
+    ForgeError,
     ForgeNotFound,
     JobLog,
     JobResult,
     LabelEvent,
+    MergeCall,
     PrState,
     PullRequest,
     StartRun,
@@ -49,8 +52,11 @@ class Call:
 
 
 class LocalForge:
-    def __init__(self, directory: Path | None = None, *, url: str = "local://forge") -> None:
+    def __init__(
+        self, directory: Path | None = None, *, url: str = "local://forge", origin: Path | None = None
+    ) -> None:
         self._dir = directory
+        self._origin = origin  # the repository whose branches `merge_pr` squashes into (a bare origin in tests)
         self._url = url.rstrip("/")
         self.calls: list[Call] = []
         self._prs: dict[int, dict[str, Any]] = {}
@@ -308,6 +314,36 @@ class LocalForge:
         raw.update(state="merged", draft=False, merge_commit_sha=merge_commit_sha)
         self._save()
         return self._view(number)
+
+    def merge_pr(self, number: int, *, sha: str, title: str, message: str) -> MergeCall:
+        """The squash merge on the origin repository (squash-and-delete D2): one commit with the head's tree whose
+        parent is the target tip, the target ref moved to it, the pull request merged with that commit. `head_moved`
+        when `sha` is not the tip of the pull request's branch."""
+        self._log("merge", number)
+        raw = self._prs.get(number)
+        if raw is None:
+            raise ForgeNotFound(f"local forge: no pull request {number}", status=404)
+        if self._origin is None:
+            raise ForgeError("local forge: merge_pr needs an origin repository")
+        branch, target = f"refs/heads/{raw['head']}", f"refs/heads/{raw['base']}"
+        if self._git("rev-parse", "--verify", "-q", branch) != sha:
+            return MergeCall("head_moved", None, f"{raw['head']} is not at {sha[:10]}")
+        tip = self._git("rev-parse", "--verify", target)
+        commit = self._git("commit-tree", f"{sha}^{{tree}}", "-p", tip, "-m", f"{title}\n\n{message}")
+        self._git("update-ref", target, commit, tip)
+        raw.update(state="merged", draft=False, merge_commit_sha=commit)
+        self._save()
+        return MergeCall("merged", commit, f"squash-merged as {commit}")
+
+    def _git(self, *args: str) -> str:
+        env = {
+            **os.environ, "GIT_AUTHOR_NAME": "local forge", "GIT_AUTHOR_EMAIL": "forge@local.invalid",
+            "GIT_COMMITTER_NAME": "local forge", "GIT_COMMITTER_EMAIL": "forge@local.invalid",
+        }  # fmt: skip
+        done = subprocess.run(
+            ["git", "-C", str(self._origin), *args], env=env, capture_output=True, text=True, check=False
+        )
+        return done.stdout.strip() if done.returncode == 0 else ""
 
     def close(self, number: int) -> PullRequest:
         self._log("close", number)

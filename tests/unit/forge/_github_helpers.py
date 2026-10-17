@@ -36,6 +36,8 @@ class FakeGitHub:
     queued_runs: int = 0  # workflow runs the `status=queued` listing finds
     dispatch_status: int = 204  # the answer of a workflow_dispatch (403: the token may not start workflows)
     hosts_seen: list[tuple[str, bool]] = field(default_factory=list)  # (host, request carried a token)
+    merge_status: int = 200  # the answer of PUT pulls/:n/merge (409: head moved, 405/422: refused)
+    merge_message: str = "Pull Request is not mergeable"  # the body message of a failed merge call
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -132,6 +134,8 @@ class FakeGitHub:
             return httpx.Response(200, json={"html_url": f"https://github.test/{REPO}"})
         if m := re.fullmatch(rf"/repos/{REPO}/pulls", path):
             return self._pulls(request, body)
+        if m := re.fullmatch(rf"/repos/{REPO}/pulls/(\d+)/merge", path):
+            return self._merge(int(m.group(1)), body)
         if m := re.fullmatch(rf"/repos/{REPO}/pulls/(\d+)", path):
             return self._pull(int(m.group(1)), request.method, body)
         if re.fullmatch(rf"/repos/{REPO}/labels", path):
@@ -174,6 +178,13 @@ class FakeGitHub:
         if method == "PATCH":
             pr.update({k: v for k, v in body.items() if k in ("title", "body", "state")})
         return httpx.Response(200, json=pr)
+
+    def _merge(self, number: int, body: dict | None) -> httpx.Response:
+        if self.merge_status != 200:
+            return httpx.Response(self.merge_status, json={"message": self.merge_message})
+        sha = f"{number:040x}"
+        self.prs[number].update(state="closed", merged=True, merge_commit_sha=sha)
+        return httpx.Response(200, json={"sha": sha, "merged": True, "message": "Pull Request successfully merged"})
 
     def _graphql(self, body: dict) -> httpx.Response:
         if self.graphql_errors:

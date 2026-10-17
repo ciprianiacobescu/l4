@@ -33,6 +33,9 @@ class FakeGitLab:
     traces: dict[int, str] = field(default_factory=dict)  # job id -> log text
     label_events: dict[int, list[dict]] = field(default_factory=dict)  # per MR iid: GitLab's resource_label_events
     pipeline_post_status: int = 201  # the answer of POST /pipeline (401/403: the token may not start pipelines)
+    merge_status: int = 200  # the answer of PUT merge_requests/:iid/merge (409: sha moved, 405/406/422: refused)
+    merge_message: str = "Method Not Allowed"  # the body message of a failed merge call
+    merge_sha_key: str = "squash_commit_sha"  # which field the successful answer fills (the other stays empty)
 
     def add_pipeline(self, sha: str, jobs: list[tuple], *, status: str = "success") -> int:
         """A pipeline for `sha`: `jobs` are `(name, status[, {stage, allow_failure, trace}])`. Returns its id."""
@@ -136,6 +139,14 @@ class FakeGitLab:
                 "source_project_id": int(PROJECT), "target_project_id": int(PROJECT), "updated_at": self.touch(),
             }  # fmt: skip
             return httpx.Response(201, json=self.mr_json(self.mrs[iid]))
+        merge = re.fullmatch(rf"{re.escape(base)}/merge_requests/(\d+)/merge", path)
+        if merge and method == "PUT" and int(merge[1]) in self.mrs:
+            mr = self.mrs[int(merge[1])]
+            if self.merge_status != 200:
+                return httpx.Response(self.merge_status, json={"message": self.merge_message})
+            sha = f"{mr['iid']:040x}"
+            mr.update({"state": "merged", "merge_commit_sha": None, "squash_commit_sha": None, self.merge_sha_key: sha})
+            return httpx.Response(200, json=self.mr_json(mr))
         match = re.fullmatch(rf"{re.escape(base)}/merge_requests/(\d+)", path)
         if match and int(match[1]) in self.mrs:
             mr = self.mrs[int(match[1])]
