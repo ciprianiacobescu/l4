@@ -22,6 +22,16 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - `l4 status --unit U --events [--type T] [--last N] [--json]` and `--verification` read a unit's ledger events and
   `verification.md`. The tool `l4_plan_check` runs 0.4.14's `l4 yolo check PLAN --worktree` before the push.
 
+### Fixed
+- `l4 resume` and `l4 yolo resume` refuse `--extend-cost` of `nan` or `inf` with a usage error (exit 2); the MCP tools
+  refuse a non-finite number the same way.
+- `l4 mcp serve`: a timed-out or cancelled call now kills its whole process group after the grace period, also when
+  the command itself exited and a descendant ignored SIGTERM; the protocol is read and written as UTF-8 under any
+  locale (a non-UTF-8 locale used to kill the server on `tools/list`); progress notifications carry a rising
+  `progress` value; `initialize` and each tool name the served repositories, so a client with several instances can
+  tell them apart.
+- `l4 mcp install --client claude-code` prints the `claude mcp add` line shell-quoted, so a path with a space works.
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

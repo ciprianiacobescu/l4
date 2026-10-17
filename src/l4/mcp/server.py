@@ -4,6 +4,9 @@ Requests other than `tools/call` are answered at once. A `tools/call` runs on it
 `notifications/cancelled` (which stops the command and sends no reply, as the specification says) and the progress
 notifications that keep a client's timeout from firing during a review of minutes are served meanwhile."""
 
+import contextlib
+import io
+import itertools
 import json
 import logging
 import sys
@@ -105,14 +108,20 @@ class Server:
             if not isinstance(params, dict):
                 self._send(protocol.error(id_, protocol.INVALID_PARAMS, "initialize needs params"))
                 return
+            info: dict[str, Any] = {"name": "l4", "version": __version__}
+            instructions = INSTRUCTIONS
+            served = getattr(self._tools, "served", lambda: "")()  # optional: a toolbox that serves repositories
+            if served:  # several instances (one per repository) must be told apart by the client's agent
+                info["title"] = f"L4 ({', '.join(part.split(' = ')[0] for part in served.split('; '))})"
+                instructions += f" This instance serves: {served}."
             self._send(
                 protocol.result(
                     id_,
                     {
                         "protocolVersion": protocol.negotiate(requested),
                         "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "l4", "version": __version__},
-                        "instructions": INSTRUCTIONS,
+                        "serverInfo": info,
+                        "instructions": instructions,
                     },
                 )
             )
@@ -142,10 +151,13 @@ class Server:
         cancelled = threading.Event()
         done = threading.Event()
 
+        counter = itertools.count(1)
+
         def progress(text: str) -> None:
-            if token is not None:
-                note = {"progressToken": token, "progress": 0, "message": text}
-                self._send(protocol.notification("notifications/progress", note))
+            if token is not None:  # `progress` must increase with every notification (MCP specification)
+                with self._lock:
+                    note = {"progressToken": token, "progress": next(counter), "message": text}
+                    self._write(protocol.encode(protocol.notification("notifications/progress", note)))
 
         def beat() -> None:
             ticks = 0
@@ -187,6 +199,16 @@ def serve_stdio(tools: Toolbox, stdin: TextIO | None = None, stdout: TextIO | No
     Server(tools, write=write).serve(stdin if stdin is not None else sys.stdin)
 
 
+def utf8_stream(stream: TextIO, mode: str) -> TextIO:
+    """`stream` over its byte buffer as UTF-8 with `\n` line ends, independent of the locale (stdio uses the locale
+    encoding, and a description holds U+2026). Bad input bytes and lone surrogates become replacement characters, so
+    a line with them gets a parse error instead of killing the server. `detach()` the result to give the buffer back."""
+    buffer = getattr(stream, "buffer", None)
+    if buffer is None:
+        return stream  # a text stream with no bytes under it (a test double): used as it is
+    return io.TextIOWrapper(buffer, encoding="utf-8", errors="replace", newline="\n", write_through=mode == "w")
+
+
 def run_serve(app: Any, *, repos: Sequence[Path] = ()) -> ExitCode:
     """`l4 mcp serve`: stdout is the protocol channel and nothing else writes to it (logging goes to stderr).
 
@@ -198,11 +220,16 @@ def run_serve(app: Any, *, repos: Sequence[Path] = ()) -> ExitCode:
     except RepoError as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, f"mcp serve: {exc}") from None
     protocol_out = sys.stdout
+    out, inp = utf8_stream(protocol_out, "w"), utf8_stream(sys.stdin, "r")
     sys.stdout = sys.stderr  # a stray print in any dependency can no longer corrupt the protocol stream
     try:
-        serve_stdio(Toolbox(repos=served, environ=app.environ, redactor=app.redactor), stdout=protocol_out)
+        serve_stdio(Toolbox(repos=served, environ=app.environ, redactor=app.redactor), stdin=inp, stdout=out)
     except KeyboardInterrupt:
         pass
     finally:
         sys.stdout = protocol_out
+        for wrapper, original in ((out, protocol_out), (inp, sys.stdin)):
+            if wrapper is not original:
+                with contextlib.suppress(OSError, ValueError):
+                    wrapper.detach()  # flushes, and gives the byte buffer back to sys.stdout / sys.stdin
     return ExitCode.OK

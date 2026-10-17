@@ -243,3 +243,100 @@ def test_the_harness_gained_no_runtime_dependency():
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     names = {d.split(">")[0].split("=")[0].strip() for d in data["project"]["dependencies"]}
     assert names == {"click", "httpx", "pydantic", "pynacl", "pyyaml"}
+
+
+# --- review findings F5, F7, F8 -------------------------------------------------------------------------------------
+
+
+def test_f5_stdio_is_utf8_whatever_the_locale(repo_factory):
+    root = repo_factory("served")
+    env = {**_clean_env(), "LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    for name in ("PYTHONIOENCODING", "LC_CTYPE"):
+        env.pop(name, None)
+    lines = "\n".join([INIT, NOTE, request(2, "tools/list"), request(3, "ping")]) + "\n"
+    done = subprocess.run(
+        [sys.executable, "-m", "l4", "mcp", "serve", "--repo", str(root)],
+        input=lines.encode("utf-8"), capture_output=True, env=env, timeout=60, check=False,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    messages = [json.loads(line) for line in done.stdout.decode("utf-8").splitlines()]  # strict UTF-8
+    assert [m.get("id") for m in messages] == [1, 2, 3]
+    assert "…" in done.stdout.decode("utf-8")  # a description carries U+2026 as itself
+
+
+def test_f5_utf8_input_is_read_whatever_the_locale(repo_factory):
+    root = repo_factory("served")
+    env = {**_clean_env(), "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    call = request(2, "tools/call", {"name": "l4_status", "arguments": {"unit": "openspec:café-…"}})
+    done = subprocess.run(
+        [sys.executable, "-m", "l4", "mcp", "serve", "--repo", str(root)],
+        input="\n".join([INIT, NOTE, call]).encode("utf-8") + b"\n", capture_output=True, env=env, timeout=60,
+        check=False,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    messages = [json.loads(line) for line in done.stdout.decode("utf-8").splitlines()]
+    assert messages[1]["id"] == 2 and "result" in messages[1]
+
+
+def test_f8_progress_values_increase_with_each_notification():
+    class Progressing(FakeToolbox):
+        def call(self, name, arguments, control):
+            for text in ("one", "two", "three"):
+                control.progress(text)
+            return {"content": [], "isError": False}
+
+    params = {"name": "echo", "_meta": {"progressToken": "tok"}}
+    out = talk(request(1, "tools/call", params), toolbox=Progressing())
+    values = [m["params"]["progress"] for m in out if m.get("method") == "notifications/progress"]
+    assert len(values) == 3
+    assert values == sorted(set(values)) and values[0] > 0
+
+
+def test_f8_the_heartbeat_progress_increases_too(monkeypatch):
+    from l4.mcp import server as server_mod
+
+    monkeypatch.setattr(server_mod, "PROGRESS_SECONDS", 0.05)
+
+    class Slow(FakeToolbox):
+        def call(self, name, arguments, control):
+            control.cancelled.wait(0.4)
+            control.progress("explicit")
+            return {"content": [], "isError": False}
+
+    params = {"name": "echo", "_meta": {"progressToken": 5}}
+    out = talk(request(1, "tools/call", params), toolbox=Slow())
+    values = [m["params"]["progress"] for m in out if m.get("method") == "notifications/progress"]
+    assert len(values) >= 3
+    assert all(a < b for a, b in zip(values, values[1:], strict=False))
+
+
+def test_f7_instances_for_different_repositories_tell_themselves_apart(repo_factory):
+    from l4.cli import redactor_for
+    from l4.mcp.repos import Repos
+    from l4.mcp.tools import Toolbox
+
+    first, second = repo_factory("alpha"), repo_factory("beta")
+    replies = {}
+    for root in (first, second):
+        repos = Repos.from_paths([root], cwd=Path("/"))
+        toolbox = Toolbox(repos=repos, environ={}, redactor=redactor_for({}))
+        replies[root.name] = talk(INIT, request(2, "tools/list"), toolbox=toolbox)
+    for name, replied in replies.items():
+        init, listed = replied[0]["result"], replied[1]["result"]["tools"]
+        other = "beta" if name == "alpha" else "alpha"
+        assert name in init["serverInfo"]["title"] and other not in init["serverInfo"]["title"]
+        assert name in init["instructions"] and other not in init["instructions"]
+        assert init["serverInfo"]["name"] == "l4"
+        assert all(name in tool["description"] and other not in tool["description"] for tool in listed)
+
+
+def test_f7_several_repositories_are_all_named(repo_factory):
+    from l4.cli import redactor_for
+    from l4.mcp.repos import Repos
+    from l4.mcp.tools import Toolbox
+
+    roots = [repo_factory("alpha"), repo_factory("beta")]
+    toolbox = Toolbox(repos=Repos.from_paths(roots, cwd=Path("/")), environ={}, redactor=redactor_for({}))
+    replied = talk(INIT, request(2, "tools/list"), toolbox=toolbox)
+    assert "alpha" in replied[0]["result"]["instructions"] and "beta" in replied[0]["result"]["instructions"]
+    assert all("alpha" in t["description"] and "beta" in t["description"] for t in replied[1]["result"]["tools"])

@@ -4360,6 +4360,9 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - An unknown method SHALL answer -32601, a line that is not JSON -32700, an invalid request -32600; the server keeps serving.
 - Only protocol messages SHALL go to stdout; logs go to stderr.
 - The harness SHALL add no runtime dependency for it (the official `mcp` package is a dev dependency of the interop test only).
+- The streams SHALL be read and written as UTF-8 bytes whatever the locale; bytes that are not UTF-8 give a parse error on that line, never a crash.
+- A `progress` value of a progress notification SHALL be greater than that of the notification before it for the same token.
+- `initialize` and `tools/list` SHALL name the repositories the instance serves (`serverInfo.title`, `instructions`, each tool's description), so a client with several instances can tell them apart.
 
 **L4-MCP-005** An instance serves the repositories it was started for. `l4 mcp serve` SHALL take `--repo PATH`, repeatable; each PATH SHALL resolve to the root of a git repository with `.l4/config.yaml`, else the server SHALL exit 2 before it serves.
 - One `--repo`: every tool runs there, and a tool's `repo` argument, when given, SHALL name it (folder name or path), else the call is refused.
@@ -4370,6 +4373,8 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 **L4-MCP-002** Every tool runs the `l4` command it names, as an agent. A tool SHALL run `python -m l4 <command>` as a subprocess in the repository, with the caller's environment plus `AI_AGENT=l4-mcp` and no terminal on stdin, so that every rule the CLI applies to an agent caller holds (`clarifier.answer_by_agents` and the others). The server SHALL make no write of its own, and SHALL NOT pass the global `--repo` or `--config` options.
 - A value reaches the command as `--option=value` or after `--`, so it cannot be read as an option.
 - A result SHALL carry the exit code, the output redacted again and cut at 64 KiB with the cut said, the parsed JSON when the command printed JSON, and `isError` for a non-zero exit, a timeout or a cancel.
+- A timeout or a cancel SHALL stop the command's whole process group: SIGTERM, and after a grace period SIGKILL to the group even when the command itself exited, so a descendant that ignores SIGTERM does not keep running.
+- A `number` argument SHALL be finite; NaN and infinity are refused as a bad argument, and `--extend-cost` of `l4 resume` and `l4 yolo resume` refuses them too (exit 2).
 
 **L4-MCP-003** The tools manage plans and debug units.
 - Read: `l4_status`, `l4_doctor`, `l4_plan_status`, `l4_plan_check` (`worktree`: `l4 yolo check --worktree`), `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`, `l4_unit_events` (`l4 status --unit U --events`), `l4_verification` (`l4 status --unit U --verification`).
