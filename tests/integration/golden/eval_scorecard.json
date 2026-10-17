@@ -12,7 +12,7 @@
    "cost_usd": null,
    "errors": [
     {
-     "detail": "the agent's result is invalid: status: not one of the allowed values (done, blocked, failed, partial); status is the outcome of the step (done, blocked, failed, partial); \"red\" is the phase and belong",
+     "detail": "the agent's result is invalid: no result was delivered (no result object in the final message)",
      "kind": "schema"
     }
    ],

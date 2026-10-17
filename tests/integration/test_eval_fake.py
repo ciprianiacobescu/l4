@@ -65,7 +65,8 @@ def red_green(unit_id: str, *, wrong_first: bool = False) -> list[Step]:
     tests = sorted(r for r in writes_red if r.startswith("tests/"))
     red = Step(writes=writes_red, structured=result("red", criteria_ids=ids, tests_added=[f"{tests[0]}::t"]))
     green = Step(writes={r: d.decode() for r, d in unit.reference_green.items()}, structured=result("green"))
-    wrong = Step(writes=writes_red, structured=result("red", status="red", criteria_ids=ids))  # the phase as status
+    wrong = Step(writes=writes_red)  # no result object: the one result failure left (L4-IMP-021; a "red" status is
+    # normalized since 0.4.4, L4-IMP-020, so it no longer fails the attempt)
     return [*([wrong] if wrong_first else []), red, green]
 
 
@@ -89,7 +90,7 @@ def test_a_seed_unit_goes_red_green_and_verdict_pass_with_a_scripted_retry_and_a
     late_ids = [c.id for c in late.criteria]
     major = {"severity": "major", "title": "The fee ignores the balance", "detail": "always 200", "evidence": []}
     script = [
-        # cell 1: implementer `impl` on add-shelf-code: a result with status "red", then red, green, judge PASS
+        # cell 1: implementer `impl` on add-shelf-code: a step with no result, then red, green, judge PASS
         *red_green("add-shelf-code", wrong_first=True), Step(structured=judge_reply(shelf_ids)),
         # cell 2: implementer `impl429`: the first red step is rate limited
         Step(status="rate_limited", limit=LimitSignal("fake", None, "rate_limit", None, "fake.status", "429", None)),
