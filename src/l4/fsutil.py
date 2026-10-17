@@ -2,6 +2,7 @@
 
 import contextlib
 import errno
+import fnmatch
 import os
 import secrets
 import stat
@@ -247,3 +248,33 @@ def unlink_inside(root: Path, rel: str) -> bool:
         return True
     finally:
         os.close(fd)
+
+
+def unlink_matching_inside(root: Path, rel_dir: str, pattern: str) -> int:
+    """Remove the regular files of `rel_dir` whose name matches the `fnmatch` `pattern`; the number removed. A link as
+    the last component of `rel_dir` is removed itself, a link above it ends the call: nothing is followed."""
+    parts = _parts(rel_dir)
+    try:
+        fd = _open_dir(root, parts, create=False)
+    except LinkedPath as exc:
+        if exc.link == rel_dir:
+            remove_link(root, rel_dir)
+        return 0
+    except UnsafeFile:
+        return 0
+    if fd is None:
+        return 0
+    removed = 0
+    try:
+        for name in os.listdir(fd):
+            if not fnmatch.fnmatchcase(name, pattern):
+                continue
+            try:
+                if stat.S_ISREG(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                    os.unlink(name, dir_fd=fd)
+                    removed += 1
+            except OSError:
+                continue
+    finally:
+        os.close(fd)
+    return removed

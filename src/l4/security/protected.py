@@ -31,6 +31,9 @@ SPEC_ROOT_GLOBS = ("openspec/**", ".kiro/specs/**")  # reported last: a unit or 
 CONTRACT_PROTECTED_GLOBS = (
     ".github/workflows/**", ".gitlab-ci.yml", ".gitlab/**", ".l4/**", ".claude/**", ".mcp.json", ".codex/**",
     "opencode.json", ".kiro/agents/**", ".kiro/settings/**", ".serena/project.yml", ".serena/memories/harness/**",
+    # every directory the sandbox covers with a tmpfs (`sandbox.base.GUIDANCE_DIRS`, mirrored in the probe script) is a
+    # protected path: what a step or a gate writes there is removed before anything is committed
+    ".hermes/**", ".kiro/hooks/**", ".kiro/prompts/**", ".kiro/skills/**",
     # repo guidance files the CLIs load as instructions (docs/research/07 A1): human-owned, like the specs
     "**/AGENTS.md", "**/CLAUDE.md", "**/CLAUDE.local.md", ".agents/**", ".kiro/steering/**", ".opencode/**",
     "opencode.jsonc",

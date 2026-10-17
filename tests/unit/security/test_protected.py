@@ -55,7 +55,7 @@ def test_contract_list_and_forbidden_paths_match():
                  "opencode.json", ".kiro/agents/x.json", ".kiro/settings/y", ".serena/project.yml",
                  ".serena/memories/harness/a.md"):  # fmt: skip
         assert is_protected(path), path
-    assert len(CONTRACT_PROTECTED_GLOBS) == 23  # M1.13: `.l4-result/**`, the result alias of a step
+    assert len(CONTRACT_PROTECTED_GLOBS) == 27  # +4 guidance folders (L4-SEC-004, SCN-SEC-52)
     assert is_protected("db/migrations/1.sql", ["**/migrations/**"]) == "**/migrations/**"
     assert is_protected("src/app.py") is None
     assert is_protected(".serena/memories/lessons/a.md") is None

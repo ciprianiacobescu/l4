@@ -24,7 +24,7 @@ from l4.config.defaults import cache_root
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.loop import run_task
 from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
-from l4.implementer.tdd import BaselineFailed, RoleLimit
+from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, clip_subject, make_workbench
 from l4.sandbox.caches import mount_caches
 from l4.services import HookContext
@@ -244,6 +244,7 @@ class FixOutcome:
     question_ids: tuple[str, ...] = ()
     reason: str = ""
     section: str | None = None  # the sticky-note section for the questions of a blocked fix unit
+    code: str = ""  # a halt that names its own code (`planted_link`); else the orchestrator derives it from `reason`
 
 
 def _halt(ctx: HookContext, reason: str, **event: object) -> FixOutcome:
@@ -362,6 +363,12 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             outcome = run_task(wb, task)
         except BaselineFailed as exc:
             return _halt(ctx, str(exc), fix_unit=name)
+        except PlantedLink as exc:
+            links = [{"path": u.link, "points_to": u.target, "where": u.where} for u in exc.links][:20]
+            ctx.services.ledger.append(
+                "breaker.tripped", reason="planted_link", fix_unit=name, task=task.key, links=links
+            )  # fmt: skip
+            return FixOutcome("halt", reason=f"task {task.key} of {name}: {exc}", code="planted_link")
         except RoleLimit as exc:
             if task.key in retried or "fall_back" not in ctx.shared:
                 raise

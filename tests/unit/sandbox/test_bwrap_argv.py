@@ -299,13 +299,16 @@ def test_only_existing_guidance_directories_are_masked_never_created(make_spec):
 
 def test_the_kiro_spec_root_stays_visible(make_spec):
     """`.kiro/specs/**` is the spec root (read by the step, L4-SEC-004): only the Kiro CLI's own guidance
-    (`steering`, `agents`, `settings`, `hooks`, `prompts`) is masked, never `.kiro` as a whole."""
+    (`steering`, `agents`, `settings`, `hooks`, `prompts`, `skills`) is masked, never `.kiro` as a whole."""
     spec = make_spec("agent", "codex")
-    guidance(spec, ".kiro/specs/x", ".kiro/steering", ".kiro/agents", ".kiro/settings", ".kiro/hooks", ".kiro/prompts")
+    guidance(
+        spec, ".kiro/specs/x", ".kiro/steering", ".kiro/agents", ".kiro/settings", ".kiro/hooks", ".kiro/prompts",
+        ".kiro/skills",
+    )  # fmt: skip
     masked = {p for (p,) in pairs(build(spec), "--tmpfs")}
     kiro = spec.worktree / ".kiro"
     assert str(kiro) not in masked and str(kiro / "specs") not in masked
-    assert {str(kiro / d) for d in ("steering", "agents", "settings", "hooks", "prompts")} <= masked
+    assert {str(kiro / d) for d in ("steering", "agents", "settings", "hooks", "prompts", "skills")} <= masked
 
 
 def test_a_guidance_directory_that_is_a_symlink_is_not_mounted_over(tmp_path, make_spec):

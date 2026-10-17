@@ -16,6 +16,7 @@ from l4.fsutil import (
     read_inside,
     remove_link,
     unlink_inside,
+    unlink_matching_inside,
     write_inside,
 )
 
@@ -209,3 +210,20 @@ def test_a_root_whose_own_path_holds_a_link_works(tree, tmp_path):
     assert read_inside(alias, "pkg/new.py", limit=10) is not None
     assert (root / "pkg" / "new.py").read_bytes() == b"ok\n"
     assert linked_component(alias, "pkg/new.py") is None
+
+
+def test_unlink_matching_inside_removes_matches_and_follows_nothing(tree):
+    root, outside = tree
+    cache = root / "pkg" / "__pycache__"
+    cache.mkdir()
+    (cache / "mod.cpython-312.pyc").write_bytes(b"x")
+    (cache / "other.cpython-312.pyc").write_bytes(b"x")
+    assert unlink_matching_inside(root, "pkg/__pycache__", "mod.*.pyc") == 1
+    assert [p.name for p in cache.iterdir()] == ["other.cpython-312.pyc"]
+    shutil.rmtree(cache)
+    (outside / "mod.cpython-312.pyc").write_bytes(b"outside")
+    cache.symlink_to(outside)  # a linked last component is removed itself
+    assert unlink_matching_inside(root, "pkg/__pycache__", "mod.*.pyc") == 0
+    assert not cache.exists() and not cache.is_symlink()
+    assert (outside / "mod.cpython-312.pyc").read_bytes() == b"outside"
+    assert unlink_matching_inside(root, "nodir/__pycache__", "*.pyc") == 0

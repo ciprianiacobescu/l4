@@ -76,7 +76,7 @@ from l4.implementer.tasks import (
     tick_completed_parents,
     unselectable,
 )
-from l4.implementer.tdd import BaselineFailed, RoleLimit
+from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
@@ -907,6 +907,8 @@ class Orchestrator:
             except BaselineFailed as exc:
                 ledger.append("breaker.tripped", reason="baseline_failed", detail=str(exc))
                 return self._halt("baseline_failed", str(exc))
+            except PlantedLink as exc:
+                return self._halt_planted_link(exc, task.key)
             except RoleLimit as exc:
                 wb = self._fall_back(exc, wb, task.key)
                 continue
@@ -925,6 +927,14 @@ class Orchestrator:
                 return self._await_human(outcome.question_ids, task=task.key)
             if outcome.status == "halt":
                 return self._halt("max_task_attempts", outcome.reason)  # `run_task` halts only on the attempt limit
+
+    def _halt_planted_link(self, exc: PlantedLink, task: str) -> ExitCode:
+        """A gate run planted a symbolic link on a path the harness restores (L4-SEC-021): the unit halts at once, like
+        a secret in a push, with the evidence in the ledger (`breaker.tripped{links}` and the `guard.violation`s) and
+        the paths at the front of the detail. The harness already removed the link and wrote nothing through it."""
+        links = [{"path": u.link, "points_to": u.target, "where": u.where} for u in exc.links][:20]
+        self.services.ledger.append("breaker.tripped", reason="planted_link", task=task, links=links)
+        return self._halt("planted_link", f"task {task}: {exc}")
 
     def switch_profile(self, limit: RunResult | LimitSignal, task: str | None = None) -> Selected:
         """The implementer hit a limit: cool it down and select the next profile. The one place `_selected` changes
@@ -1048,7 +1058,8 @@ class Orchestrator:
 
     def _halt(self, code: str, detail: str) -> ExitCode:
         """The halted edge (L4-OPS-005): `code` is one of D5's (`max_task_attempts`, `unselectable_task`,
-        `baseline_failed`, `secret_in_push`, `fix_records`), `detail` the person's text. Both go in the `phase.changed`;
+        `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`), `detail` the person's text. Both go in
+        the `phase.changed`;
         the log line, `exit_reason` and the note headline use the detail."""
         log.error("%s halted: %s", self.services.ref.id, detail)
         self._exit_reason = self._exit_reason or f"halted: {detail}"[:300]
@@ -1127,7 +1138,7 @@ class Orchestrator:
         if outcome.status == "halt":
             # the fix loop gives the text only: its own task limit names itself, every other halt is a record of the
             # fix unit that cannot be used (no open fix unit, not a fix unit of this one, unselectable task)
-            code = "max_task_attempts" if "max_task_attempts" in outcome.reason else "fix_records"
+            code = outcome.code or ("max_task_attempts" if "max_task_attempts" in outcome.reason else "fix_records")
             return self._halt(code, outcome.reason)
         self._notes = _sections(outcome.section)
         self._refold()

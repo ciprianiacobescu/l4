@@ -50,6 +50,11 @@ _ADVICE = {
         "The harness could not put a file back after a test run changed it. Tests must not replace, delete or lock "
         "source files."
     ),
+    "link outside worktree": (
+        "A symbolic link that points outside the repository (an absolute target, or `..` above the root) is never "
+        "committed: the harness discarded the step. Keep the link out of the work, or point it at a path inside the "
+        "repository."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),

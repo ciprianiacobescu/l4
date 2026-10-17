@@ -23,7 +23,7 @@ from l4.agents.proc import ProcRunner
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
-from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, remove_link
+from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, linked_component, remove_link
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult, GateSpec, run_gate
@@ -211,19 +211,21 @@ class Workbench:
         """The event sink of the guards, which would otherwise write to the ledger without the context."""
         self.emit(event_type, **data)
 
-    def refused_write(self, exc: UnsafeFile, *, path: str, where: str) -> None:
+    def refused_write(self, exc: UnsafeFile, *, path: str, where: str, root: Path | None = None) -> None:
         """A harness write was refused (L4-SEC-020). A planted link is removed itself (never its target) and recorded as
         `guard.violation{phase: gate, rule: "planted link"}`; any other refusal is `rule: "restore failed"`. Nothing is
-        raised: this runs in `finally` blocks. The same link is recorded once per attempt."""
+        raised: this runs in `finally` blocks. The same link is recorded once per attempt. `root`: the checkout the
+        gate ran in (the worktree by default)."""
+        root = root or self.worktree
         if isinstance(exc, LinkedPath):
             if any(u.rule == "planted link" and u.link == exc.link for u in self.unsafe):
-                remove_link(self.worktree, exc.link)
+                remove_link(root, exc.link)
                 return
             try:
-                target = os.readlink(self.worktree / exc.link)
+                target = os.readlink(root / exc.link)
             except OSError:
                 target = ""
-            remove_link(self.worktree, exc.link)
+            remove_link(root, exc.link)
             self.unsafe.append(UnsafeWrite(path, "planted link", where, exc.link, target))
             self.emit(
                 "guard.violation", phase="gate", rule="planted link", path=exc.link, action="removed", where=where,
@@ -318,6 +320,7 @@ class Workbench:
         git = self.git if tree is None else self.git.at(root)
         log = self._next_gate_log(spec.name)
         purge_bytecode(root, self._tracked_bytecode(git))
+        self._report_links(root, spec)  # a link on a report path is removed and recorded: the gate writes a real one
         before = snapshot_protected(root, self.protected)
         try:
             result = run_gate(
@@ -341,6 +344,7 @@ class Workbench:
             for v in [*restore_protected(root, self.protected, before),
                       *revert_unsnapshotted(git, self.protected, excludes=self.excludes)]:  # fmt: skip
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
+        self._report_links(root, spec)  # ... and one the gate planted: the restores that follow must find a real folder
         self.restore_ledger()
         readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
         extra = note(result.report) if note is not None and readable else {}
@@ -352,6 +356,11 @@ class Workbench:
             **extra,
         )  # fmt: skip
         return result
+
+    def _report_links(self, root: Path, spec: GateSpec) -> None:
+        for rel in spec.reports:
+            if (link := linked_component(root, rel)) is not None:
+                self.refused_write(LinkedPath(link), path=rel, where=spec.name, root=root)
 
     def _tracked_bytecode(self, git: Git | None = None) -> frozenset[str]:
         """Bytecode the repository itself commits (rare): a changed copy is a production change the guards see."""

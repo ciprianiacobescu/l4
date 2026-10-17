@@ -87,11 +87,11 @@ from l4.implementer.result import (
 )
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
 from l4.implementer.retrynote import RetryNote, note_block, retry_note
-from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
+from l4.implementer.stubs import ProductionGuard, enforce_red_scope, escaping_links, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
-from l4.implementer.workbench import PreviousAttempt, Workbench
+from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
@@ -130,6 +130,49 @@ class SetupFailed(L4Exit):
 
 class BaselineFailed(Exception):
     """The test gate cannot run at the step base: no report, a timeout or a collection error. The unit is halted."""
+
+
+class PlantedLink(Exception):
+    """A gate run put a symbolic link on the path of a file the harness restores (L4-SEC-021). The harness removed it
+    and wrote nothing through it, and discarded the attempt; the unit halts at once, like a secret in a push: code that
+    plants a link in the worktree is not an attempt to retry but evidence for a person. `links` is the record."""
+
+    def __init__(self, reason: str, links: Sequence[UnsafeWrite]) -> None:
+        super().__init__(reason)
+        self.links = tuple(links)
+
+
+def stop_on_unsafe(wb: Workbench) -> str:
+    """ "" when no harness write was refused in this attempt. A planted link discards the attempt and raises
+    `PlantedLink`; any other refusal (`restore failed`) returns the reason that fails the attempt."""
+    if links := wb.planted_links():
+        reason = wb.unsafe_reason()
+        wb.discard_changes()
+        raise PlantedLink(reason, links)
+    return wb.unsafe_reason()
+
+
+MAX_LINKS_SHOWN = 5
+
+
+def outside_links_reason(wb: Workbench, base: str, phase: str) -> str:
+    """L4-SEC-020 part e: "" when the step leaves no symbolic link that points outside the worktree (an absolute target
+    or one that climbs above the root) beyond what `base` already held. Else one `guard.violation` per link, and the
+    reason that fails the attempt before its commit; the caller discards the changes."""
+    found = escaping_links(wb, base)
+    for path, target in found:
+        wb.emit(
+            "guard.violation", phase=phase, rule="link outside worktree", path=path, action="refused",
+            target=target, why=f"it points to {target}, outside the worktree",
+        )  # fmt: skip
+    if not found:
+        return ""
+    shown = ", ".join(f"{path} -> {target}" for path, target in found[:MAX_LINKS_SHOWN])
+    more = f" (+{len(found) - MAX_LINKS_SHOWN} more)" if len(found) > MAX_LINKS_SHOWN else ""
+    return (
+        f"the step left a symbolic link that points outside the worktree: {shown}{more}. A link that leaves the "
+        "repository is never committed; nothing of this attempt is kept"
+    )
 
 
 class RoleLimit(Exception):
@@ -839,6 +882,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
 
     def tampered(where: str) -> RedOutcome | None:
         notes = guard.check(where)
+        if unsafe := stop_on_unsafe(wb):  # a planted link halts the unit (raised); a failed restore fails the attempt
+            wb.discard_changes()
+            return RedOutcome("failed", unsafe)
         if not notes:
             return None
         wb.discard_changes()
@@ -957,6 +1003,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 )
         if (out := tampered("before the already-satisfied commit")) is not None:
             return out
+        if linked := outside_links_reason(wb, base, "red"):
+            wb.discard_changes()
+            return RedOutcome("failed", linked)
         wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
         parents = tick_completed_parents(wb.provider, wb.ref)
         # contract C22, as for red and green: the proof travels inside the commit and names the base; the sha follows
@@ -1060,6 +1109,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         return finish_already_satisfied(proofs)
     if (out := tampered("before the red commit")) is not None:
         return out
+    if linked := outside_links_reason(wb, base, "red"):
+        wb.discard_changes()
+        return RedOutcome("failed", linked)
     # The proof is recorded BEFORE the commit so that it travels inside it: a run killed right after the push has
     # nothing else on the branch to resume from (the ledger tail after a commit is only ever a local file).
     # The event names the step base instead of the red sha, which does not exist yet.
@@ -1211,6 +1263,7 @@ def run_green(
         excerpt = hang_excerpt(hung) or excerpt
         wb.emit("gate.hung", task=task.key, tests=[h.id for h in hung], attempt=attempt)
     reason = reason or _undiscriminating(wb, red, unfreeze) or worse_static_gates(wb, base, "green")
+    reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt, hung=tuple(hung))
@@ -1385,16 +1438,22 @@ def task_source(wb: Workbench, task: Task) -> str | None:
     return named[0] if named else None
 
 
+def _answer_events(wb: Workbench) -> list[LedgerEvent]:
+    """The ledger events that record a person's answers: the run's, and a fix unit's own (its questions file lives in
+    its own folder)."""
+    events = _ledger_events(wb)
+    if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
+        events = [*events, *own]
+    return events
+
+
 def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tuple[Unfreeze, Unfreeze, str | None]:
     """(what human answers unfreeze, what the task's own text opens, that text's source)."""
     human = Unfreeze()
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is not None:
-        events = _ledger_events(wb)
-        if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
-            events = [*events, *own]  # a fix unit's answers are recorded where its own questions file is
         scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-        human = unfrozen(file.questions, events, scope, manifest)
+        human = unfrozen(file.questions, _answer_events(wb), scope, manifest)
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None
@@ -1508,13 +1567,7 @@ def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> T
 
 
 def _put_back(wb: Workbench, base: str, path: str, existed: bool) -> None:
-    target = wb.worktree / path
-    if not existed:
-        target.unlink(missing_ok=True)
-        return
-    if target.is_symlink():
-        target.unlink()
-    wb.git.run("checkout", base, "--", f":(literal){path}")
+    restore_to_base(wb, base, path)  # a link at or above the path is removed, never followed
 
 
 def _appended(wb: Workbench, base: str, path: str, target: Path) -> bool:
@@ -1676,6 +1729,7 @@ def run_single(
     discriminating: list[str] | None = None
     if adds_tests and not reason and added and CRITERION_IN_TITLE.search(task.title):
         discriminating, reason = _discriminating_tests(wb, added)
+    reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "single")
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt)

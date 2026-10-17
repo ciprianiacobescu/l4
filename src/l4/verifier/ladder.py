@@ -543,8 +543,10 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             _judge_step(vc, run, base_sha, events)
         finally:  # step 8's rows survive a judge that raises (their `judge` column stays empty)
             _calibrate(vc, run)
+        findings.extend(_unsafe_findings(wb))
         _finalize(vc, run, criteria, events)
     else:  # a failed step 0-3 is a FAIL (a blocker came with it); no criterion was judged
+        findings.extend(_unsafe_findings(wb))
         result.verdict = aggregate_unit(findings, result.criteria, result.holds)
     _publish_evidence(run)
     run.records["10"] = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
@@ -554,6 +556,20 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         for step, name, why in LADDER
     ]
     return result
+
+
+def _unsafe_findings(wb: Workbench) -> list[Finding]:
+    """L4-SEC-021 part c: a gate run of the verifier planted a link on a path the harness restores, or the harness could
+    not put a file back. The round ends FAIL; the verifier goes on (a planted link halts the implementer, not the
+    verifier, which has no attempt to retry)."""
+    planted = wb.planted_links()
+    if planted:
+        paths = ", ".join(dict.fromkeys(u.link for u in planted))
+        return [Finding(Severity.BLOCKER, "a gate run planted a symbolic link in the worktree", paths, "deterministic")]
+    if wb.unsafe:
+        paths = ", ".join(dict.fromkeys(u.path for u in wb.unsafe))
+        return [Finding(Severity.BLOCKER, "could not restore a file after a gate run", paths, "deterministic")]
+    return []
 
 
 def _scope_step(vc: VerifyContext, run: _Run, base_sha: str) -> str:
