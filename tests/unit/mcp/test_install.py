@@ -2,8 +2,10 @@
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import tomllib
 from pathlib import Path
 
@@ -240,23 +242,42 @@ def git(cwd: Path, *argv: str) -> str:
 
 
 def serve_status(cwd: Path, args: list[str], env: dict[str, str] | None = None) -> str:
-    """Start `l4 mcp serve <args>` in `cwd`, call l4_status without a repo argument, return the result text."""
+    """Start `l4 mcp serve <args>` in `cwd`, call l4_status without a repo argument, return the result text.
+
+    stdin stays open until the reply arrives: the server stops calls still running EOF_GRACE_SECONDS after the client
+    closes stdin, and on a loaded machine `l4 status` can take longer than that."""
     lines = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "l4_status", "arguments": {}}},
     ]
-    done = subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "l4", *args],
-        input="".join(json.dumps(m) + "\n" for m in lines),
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         cwd=cwd,
         env={**os.environ, **(env or {})},
-        timeout=120,
-        check=False,
     )
-    replies = [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
-    call = next(r for r in replies if r.get("id") == 2)
+    assert proc.stdin is not None and proc.stdout is not None
+    out: queue.Queue[str] = queue.Queue()
+    reader = threading.Thread(target=lambda: [out.put(line) for line in proc.stdout], daemon=True)
+    reader.start()
+    call = None
+    try:
+        proc.stdin.write("".join(json.dumps(m) + "\n" for m in lines))
+        proc.stdin.flush()
+        while call is None:
+            line = out.get(timeout=120)
+            if line.strip() and (message := json.loads(line)).get("id") == 2:
+                call = message
+    finally:
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
     return call["result"]["content"][0]["text"]
 
 
