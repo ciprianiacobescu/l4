@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.11 (unreleased)
+## 0.4.11 (2026-10-17)
 
 ### Fixed
 - A test of a context manager can prove its criterion. The zero-value run rewrote a `@contextmanager` function (or its
