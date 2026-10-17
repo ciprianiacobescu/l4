@@ -42,6 +42,7 @@ HANDLERS: dict[str, str] = {
     "yolo review": "l4.yolo.commands:run_review",
     "yolo findings": "l4.yolo.commands:run_findings",
     "yolo accept": "l4.yolo.commands:run_accept",
+    "yolo waive": "l4.yolo.commands:run_waive",
     "yolo activate": "l4.yolo.commands:run_activate",
     "yolo status": "l4.yolo.commands:run_status",
     "yolo cancel": "l4.yolo.commands:run_cancel",

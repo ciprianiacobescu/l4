@@ -45,8 +45,8 @@ def _charged(events: Sequence[PlanEvent], unit: str) -> tuple[float, int, int] |
 
 def _accepted_lines(plan: Plan, state: PlanState, unit_id: str, batch_id: str, folded: UnitState | None) -> list[str]:
     """The findings a person accepted for the unit (its own subject and its batch's), who accepted them, and the
-    verifier's answers: `addressed by the verifier`, `not addressed: <evidence>`, or `no answer recorded`
-    (L4-YOLO-028)."""
+    verifier's answers: `addressed by the verifier`, `waived by <by> (<actor>): <reason>` (L4-YOLO-031),
+    `not addressed: <evidence>`, or `no answer recorded` (L4-YOLO-028)."""
     lines: list[str] = []
     for subject in (unit_id, f"batch:{batch_id}"):
         data = state.activated_accepted.get(subject)
@@ -60,6 +60,8 @@ def _accepted_lines(plan: Plan, state: PlanState, unit_id: str, batch_id: str, f
             fid = finding_id(subject, f)
             if folded is not None and fid in folded.accepted_addressed:
                 answer = "addressed by the verifier"
+            elif (waiver := state.waived.get(fid)) is not None:
+                answer = f"waived by {waiver.get('by', '?')} ({waiver.get('actor', '?')}): {waiver.get('reason', '')}"
             elif folded is not None and fid in folded.accepted_evidence:
                 answer = f"not addressed: {folded.accepted_evidence[fid]}"
             else:

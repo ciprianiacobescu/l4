@@ -257,3 +257,67 @@ def test_the_report_has_no_line_without_items(world):
     world.plan()
     world.activate()
     assert "Accepted review findings" not in report_of(world, {})
+
+
+# --- L4-YOLO-031: a person can waive an accepted finding, and the harness merges the unit itself ----------------------
+
+
+def waive(world, finding, reason="the spec asks for no handling; checked by hand", actor="person"):
+    world.seed(ev("plan.finding_waived", finding=finding, subject=A, reason=reason, by="alice", actor=actor,
+                  marker=None))  # fmt: skip
+
+
+def test_scn_yolo_73_a_waived_finding_lets_the_harness_merge_the_unit(world):
+    head, snaps = in_review(world, accepted={A: accepted_item(F1)}, accepted_evidence={ID1: "case 1 is not handled"})
+    world.step(snaps)
+    assert fold_plan("p1", world.events()).wait_reason == "accepted_finding_open"
+    waive(world, ID1)
+    world.step(snaps)
+    kinds = world.kinds()
+    assert "plan.resumed" in kinds and "unit.merged" in kinds and world.tip() == head
+
+
+def test_a_waiver_covers_its_own_finding_only(world):
+    _, snaps = in_review(world, accepted={A: accepted_item(F1, F2)})
+    waive(world, ID1)
+    world.step(snaps)
+    (waiting,) = waits(world)
+    assert waiting.data["detail"] == f"{A}: {ID2} not addressed: no answer recorded"
+    assert "unit.merged" not in world.kinds()
+
+
+def test_a_withdrawn_waiver_holds_the_merge_again(world):
+    _, snaps = in_review(world, accepted={A: accepted_item(F1)})
+    waive(world, ID1)
+    world.seed(ev("plan.waiver_withdrawn", finding=ID1, reason="look again", by="alice", actor="person"))
+    world.step(snaps)
+    assert waits(world) and "unit.merged" not in world.kinds()
+
+
+def test_the_fold_keeps_the_waivers_until_a_new_activation(world):
+    in_review(world, accepted={A: accepted_item(F1)})
+    waive(world, ID1)
+    assert fold_plan("p1", world.events()).waived[ID1]["reason"] == "the spec asks for no handling; checked by hand"
+    world.seed(ev("plan.activated", plan_digest="x", digests={}, limits={}, by="alice", reason="again", accepted={}))
+    assert fold_plan("p1", world.events()).waived == {}
+
+
+def test_the_report_shows_a_waiver(world):
+    from l4.state.fold import UnitState
+
+    in_review(world, accepted={A: accepted_item(F1, F2)})
+    waive(world, ID2, reason="needs no handling")
+    unit = UnitState(unit=A, accepted_addressed=frozenset({ID1}), accepted_evidence={ID2: "still inline"})
+    section = report_of(world, {A: unit}).split(f"### {A}")[1].split("### ")[0]
+    assert f"{ID1} [testability/major] {TEXT1}: addressed by the verifier" in section
+    assert f"{ID2} [ordering/major] {TEXT2}: waived by alice (person): needs no handling" in section
+
+
+def test_scn_yolo_75_the_wait_names_its_ways_out():
+    from l4.yolo.commands import _next_line
+    from l4.yolo.model import PlanState
+
+    state = PlanState(plan_id="p1", status="waiting", wait_reason="accepted_finding_open", current=A)
+    line = _next_line("p1", state, None, None)
+    for needle in (f"l4 retry --unit {A}", f"l4 feedback add --unit {A}", "l4 yolo waive p1", "the wait names"):
+        assert needle in line
