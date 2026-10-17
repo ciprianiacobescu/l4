@@ -90,10 +90,10 @@ not already satisfied, whatever its criteria say, and the judge checks each such
 ## ADDED Requirements
 
 ### Requirement: L4-KSP-012 Red covers every criterion a Kiro leaf cites
-In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names, less those
-L4-OPS-015 leaves unchanged, SHALL count as cited whatever `criteria_ids` lists, and SHALL be traced by a new test of the step, which
-then fails or is confirmed pre-satisfied (L4-IMP-003). A step that leaves one untraced SHALL fail with a reason that
-names its id, its alias and the line, and the next attempt's prompt SHALL carry that reason.
+In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names SHALL count as
+cited and SHALL be traced by a new test of the step, unless L4-OPS-015 leaves it unchanged or passing tests that an
+earlier red of the unit proved already trace it. A step that leaves one untraced SHALL fail with a reason that names its
+id, alias and the line, and the next attempt's prompt SHALL carry that reason.
 
 #### Scenario: SCN-IMP-294 (−) A red step that leaves a cited criterion untested is rejected with the reason
 - **GIVEN** a Kiro leaf `1. Implement the tip function` with `_Requirements: 1.1, 1.2_`, and a red step whose one new
@@ -105,13 +105,13 @@ names its id, its alias and the line, and the next attempt's prompt SHALL carry 
 
 #### Scenario: SCN-IMP-295 (+) An unchanged criterion needs no new test, and an earlier-proved one is confirmed
 - **GIVEN** (a) the leaf of SCN-IMP-294 reopened by a spec edit that changed `Req 1.2` only (L4-OPS-015), (b) the
-  same leaf when task 0.9's red already proved `Req 1.1`, and (c) a fix unit's leaf citing `2.1`, the item that
+  same leaf when task 0.9's red already proved `Req 1.1` with tests that pass now, and (c) a fix unit's leaf citing `2.1`, the item that
   restates the parent's `Req 1.2`, in a parent that also has a `Req 2.1` of its own
-- **WHEN** (a) a red step adds a failing test for `Req 1.2` only, (b) a red step adds a new test for `Req 1.1` that
-  passes at once and a failing one for `Req 1.2`, and (c) the fix leaf's red step is checked
+- **WHEN** (a) a red step adds a failing test for `Req 1.2` only, (b) a red step adds a failing test for `Req 1.2`
+  only, or also a new test for `Req 1.1` that passes at once, and (c) the fix leaf's red step is checked
 - **THEN** (a) is committed as red with no test for `Req 1.1` required
-- **AND** (b) is committed as red with `Req 1.1` proved `pre_satisfied` `via: earlier_red` and `Req 1.2` proved by
-  its failing test
+- **AND** (b) is committed as red in both cases, with `Req 1.1` proved `pre_satisfied` `via: earlier_red` (by the
+  earlier tests, no copy needed) and `Req 1.2` proved by its failing test
 - **AND** (c) requires only the restated criterion's id, never the parent's own `Req 2.1`, and its prompt lists only
   that criterion
 

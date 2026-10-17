@@ -376,12 +376,15 @@ unchanged_criteria(wb, task, base_report)`
   attempt was rejected`).
 - A required id that a new test traces goes through the checks of every cited criterion: red assertion, zero-value run,
   or pre-satisfied confirmation.
-- So a leaf citing a criterion that an earlier task already proved needs a new test for it in a mixed step. That test
-  may pass at once and is confirmed `via: earlier_red`, cheaply (`earlier_red.py`).
+- A criterion that an earlier task already proved needs no copy in a mixed step (see the decision below); a copy that
+  passes at once is confirmed `via: earlier_red`, cheaply (`earlier_red.py`).
 
-**Decision, strict.** This is the brief's outcome, and it keeps one path per step: a step that adds tests is judged by
-its new tests, and a step that adds none by existing ones. `red@11` tells the agent so. Accepting existing tests inside
-a mixed step is §7, Q4.
+**Decision (owner decision 4, 2026-10-18).** A step that adds tests is judged by its new tests, except that a cited
+criterion an earlier red of the unit proved needs no copy: the harness looks for existing passing tests that trace it,
+confirms them against the earlier red (`earlier_red.py`, the same evidence as for a copy), and drops it from `required`.
+It is recorded in `task.red_ok.criteria` as `pre_satisfied` with `tests: []` and `via: earlier_red`, and as a
+`criterion.pre_satisfied` event with the existing tests. A cited criterion that nothing proved still needs its new test.
+A copy of such a criterion is still accepted and confirmed the same way. `red@11` tells the agent so.
 
 **No new test (`tdd.py:986`).**
 
@@ -466,15 +469,20 @@ At most three files are listed, then `and N more`. `--json` carries `prompt_cut`
 `red@11` adds, after "Cover every criterion that this task's requirement names.":
 
 > When the task has a `_Requirements:_` line, every criterion listed under `# Criteria of this unit` needs a NEW test in
-> this step, also one that an earlier task already tests (such a test may pass at once: the harness confirms it against
-> the earlier test). The harness rejects a step that leaves one out. The one exception is the already-satisfied case
-> below, when every listed criterion is already traced by passing tests.
+> this step, except one that passing tests already trace and that an earlier task of this unit proved (the harness
+> confirms it against that earlier red): such a criterion needs no copy. The harness rejects a step that leaves a listed
+> criterion without a new test and without such a proof. The one other exception is the already-satisfied case below,
+> when every listed criterion is already traced by passing tests.
 
-`judge@10` adds one rule to `SYSTEM`, after the `<l4:data>` rule:
+`judge@10` adds two rules to `SYSTEM`, after the `<l4:data>` rule:
 
 > - When the specification ends with a `Not shown in full` block, the files it names were cut or not read: you saw only
 >   what is shown. Judge each criterion from its full text in the criteria list, and do not fail a criterion for what a
 >   cut part might say.
+> - When the prompt has a `<l4:data kind="tasks">` block, each task in it is done, with the text `tasks.md` gives it.
+>   Check that the diff does what each task's text says, detail lines included. A task whose text the diff does not do
+>   is a finding, with a title that starts `task <key>:` and a detail that names what is missing; give it the severity
+>   major or minor, never blocker for this reason alone. Without such a block, raise no such finding.
 
 `green@5`, `single@3`, `single_tests@5` and `output@1` keep their bodies. Their prompts change through the code-rendered
 sections, so their `prompt.rendered.sha256` changes too. Regenerate the lock with `uv run python -m l4.templatelock

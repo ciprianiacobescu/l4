@@ -186,7 +186,7 @@ Every task follows these rules:
 
 ## 5. Red enforces a Kiro leaf's cited criteria (implementer-5)
 
-- [ ] 5.1 New tests must trace every cited criterion (L4-KSP-012). It uses the Kiro bench of task 1.4.
+- [x] 5.1 New tests must trace every cited criterion (L4-KSP-012). It uses the Kiro bench of task 1.4.
   - Tests in `tests/unit/implementer/test_red_cited_criteria.py`, failing first:
     - **SCN-IMP-294:** the message of D8, nothing committed, and the next attempt's prompt has it under `# Your
       previous attempt was rejected` (run the loop with two fake steps).
@@ -202,7 +202,7 @@ Every task follows these rules:
       names the alias and the line.
     - `tdd.run_red` computes `required` once (`linked_criteria(own_criteria(...))` minus `unchanged_criteria`), drops
       the criteria that existing passing tests prove by an earlier red (owner decision 4) and passes the rest in.
-- [ ] 5.2 The no-new-test path proves every cited criterion (MODIFIED L4-IMP-003, L4-KSP-013).
+- [x] 5.2 The no-new-test path proves every cited criterion (MODIFIED L4-IMP-003, L4-KSP-013).
   - Tests in `tests/unit/implementer/test_red_cited_criteria.py`, failing first: **SCN-IMP-296**, **SCN-IMP-297**.
     `tests/unit/implementer/test_already_satisfied_no_test.py` stays green (OpenSpec: no links).
   - Code: in the no-new-test branch of `run_red`, `cited = sorted(set(result.criteria_ids) | required)` before the

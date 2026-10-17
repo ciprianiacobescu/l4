@@ -95,8 +95,8 @@ from l4.implementer.workbench import PreviousAttempt, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env
 from l4.security.protected import glob_match, revert_protected
-from l4.specs.base import Framework, Marker, Task
-from l4.specs.criteria import trace_ids
+from l4.specs.base import Framework, Marker, Task, UnitRef
+from l4.specs.criteria import linked_criteria, own_criteria, trace_ids
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import read_follow_up_marker
 from l4.specs.kiro import parse_kiro_tasks
@@ -265,6 +265,13 @@ def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset
         return frozenset()
     changed = {str(c["new_id"]) for c in pending_stale(events, task.key) if c.get("new_id")}
     return frozenset({i for case in base.tests.values() for i in trace_ids(case)} - changed)
+
+
+def cited_criteria(provider: Any, ref: UnitRef, links: Sequence[str]) -> dict[str, str]:
+    """id -> alias of the criteria a Kiro leaf's `_Requirements:_` links name, read on the task's OWN unit (a fix unit
+    cites the numbers of its own `bugfix.md` items, never the parent's `Req 2.1`). Empty for an OpenSpec task, which
+    has no links, and for links that name no criterion (L4-KSP-012, kiro-prompt-context D8)."""
+    return {c.id: c.alias for c in linked_criteria(own_criteria(provider, ref), links)}
 
 
 def _first_line(case: TestCase) -> str:
@@ -860,18 +867,34 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     report = gate.report
     new_ids = new_test_ids(base_report, report)
     family = {c.id for c in wb.provider.criteria(wb.ref)}
+    exempt = unchanged_criteria(wb, task, base_report)
+    named = cited_criteria(wb.provider, wb.ref, task.links)  # L4-KSP-012: the leaf's own cited criteria
+    required = {c for c in named if c not in exempt}
+    proved_earlier: dict[str, EarlierRed] = {}
+    existing: dict[str, tuple[str, ...]] = {}
     tracing: dict[str, tuple[str, ...]] = {}
     pre_satisfied: dict[str, tuple[str, ...]] = {}
     confirmation = PreSatisfied()
     based = BaseRunResult()
     earlier: dict[str, EarlierRed] = {}
     if family and new_ids and not set(report.collection_errors) - set(base_report.collection_errors):
+        # owner decision 4: a cited criterion that an earlier red of the unit proved, and whose tests pass now, needs
+        # no copy among the new tests
+        traced_new = set().union(*(trace_ids(report.tests[i]) for i in new_ids))
+        passing_now = {
+            i: trace_ids(case) for i, case in report.tests.items() if i not in new_ids and case.status == "passed"
+        }
+        existing = {c: tuple(sorted(i for i, ids in passing_now.items() if c in ids)) for c in required - traced_new}
+        proved_earlier = confirmed_by_earlier_red(wb, {c: t for c, t in existing.items() if t}, report, new_ids)
         check = check_criteria(
             result,
             family,
             {i: report.tests[i] for i in new_ids},
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
-            exempt=unchanged_criteria(wb, task, base_report),
+            exempt=exempt,
+            required=required - set(proved_earlier),
+            aliases=named,
+            links=", ".join(task.links),
         )
         for test in check.untraced:
             wb.emit("test.untraced", task=task.key, test=test)
@@ -880,8 +903,12 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return RedOutcome("failed", check.error)
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
-        earlier = confirmed_by_earlier_red(wb, passing, report, new_ids)  # L4-IMP-003: no zero-value run for these
+        earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
         confirmation = confirm_pre_satisfied(wb, {c: t for c, t in passing.items() if c not in earlier})
+        for criterion in proved_earlier:  # proved by tests that exist already: recorded like the no-new-test path
+            wb.emit(
+                "criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(existing[criterion]), via=VIA
+            )
         if (out := tampered("pre-satisfied confirmation")) is not None:
             return out
         if confirmation.unconfirmed:  # whatever the zero-value run left (all of it, or part): last, the base run
@@ -982,10 +1009,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             superseded=replaced,
         )  # fmt: skip
 
-    cited = tuple(sorted(set(result.criteria_ids)))
+    reported = tuple(sorted(set(result.criteria_ids)))
+    cited = tuple(sorted(set(reported) | required))  # L4-KSP-013: the leaf's cited criteria are proved too
     reason = result.tdd_exemption.reason.strip() if result.tdd_exemption else ""
     if (  # L4-IMP-003: no new test, no file changed, and the task says that tests of an earlier task already hold it
-        cited and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
+        reported and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
         and not [p for p in changed if p != wb.ledger_rel]
         and not set(report.collection_errors) - set(base_report.collection_errors)
     ):  # fmt: skip
@@ -1025,6 +1053,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
+    proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
     discriminating: Mapping[str, Sequence[str]] = {}
     zeroed = list(scope.stub_files)

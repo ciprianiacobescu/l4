@@ -75,7 +75,7 @@ TIP_ROUNDS = (
 )
 TIP_NEGATIVE = (
     f'@pytest.mark.l4("{PROBE_IDS["1.2"]}")\ndef test_negative_percent_raises():\n'
-    "    with pytest.raises(ValueError):\n        tip(10, -1)\n"
+    "    try:\n        tip(10, -1)\n    except ValueError:\n        return\n    raise AssertionError('no ValueError')\n"
 )
 
 
