@@ -169,3 +169,45 @@ def test_stall_outcome_still_removes_the_key(tmp_path):
     proc = SpyProc("", ProcOutcome(1, stalled=True))
     OpenCodeAdapter(proc).run(request(tmp_path, profile=MAG, host_env=HOST_ENV))
     assert not proc.key_file.exists()
+
+
+class ModeSpy(FakeProc):
+    """Records, while the agent would run, the modes of the step directory, `opencode-config`, the key file and the
+    credential-loader file (all are gone afterwards)."""
+
+    def __init__(self, req_dir: Path, *args, boom: bool = False, **kw):
+        super().__init__(*args, **kw)
+        self.req_dir, self.boom, self.modes = req_dir, boom, {}
+
+    def run(self, argv, env, cwd, **kw):
+        mode = lambda p: stat.S_IMODE(p.stat().st_mode) if p.exists() else None  # noqa: E731
+        self.modes = {
+            "step": mode(self.req_dir), "config": mode(self.req_dir / "opencode-config"),
+            "key": mode(self.req_dir / "opencode-config" / "provider.key"),
+            "credential": mode(self.req_dir / "credential"),
+        }  # fmt: skip
+        out = super().run(argv, env, cwd, **kw)
+        if self.boom:
+            raise RuntimeError("spawn failed")
+        return out
+
+
+GO = Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", auth="api_key", vendor="deepseek")
+
+
+def test_private_dirs_are_0700_and_no_key_outlives_the_step(tmp_path):  # SCN-PRV-101
+    for boom in (False, True):
+        for profile, env in ((MAG, HOST_ENV), (GO, {"OPENCODE_API_KEY": "sk-go-loader-value", "PATH": "/usr/bin"})):
+            work = tmp_path / f"{boom}-{profile.model.split('/')[0]}"
+            work.mkdir()
+            proc = ModeSpy(work / "res", (RECORDED / "hello-ok-stdin-prompt.jsonl").read_text(), boom=boom)
+            req = request(work, profile=profile, host_env=env)
+            if boom:
+                with pytest.raises(RuntimeError):
+                    OpenCodeAdapter(proc).run(req)
+            else:
+                OpenCodeAdapter(proc).run(req)
+            assert proc.modes["step"] == 0o700 and proc.modes["config"] == 0o700
+            assert proc.modes["key" if profile is MAG else "credential"] == 0o600
+            assert not (work / "res" / "opencode-config" / "provider.key").exists()
+            assert not (work / "res" / "credential").exists()

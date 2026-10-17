@@ -156,7 +156,7 @@ Every task follows these rules:
 
 ## 3. Key and credential files (sandbox-security-4; L4-PRV-040, L4-PRV-041)
 
-- [ ] 3.1 Tests: `tests/unit/agents/test_opencode_provider.py::test_private_dirs_are_0700_and_no_key_outlives_the_step`
+- [x] 3.1 Tests: `tests/unit/agents/test_opencode_provider.py::test_private_dirs_are_0700_and_no_key_outlives_the_step`
   (SCN-PRV-101): with the file's `request` helper and a fake runner that, during the run, records the modes of
   `req.result_path.parent`, of `opencode-config` and of `provider.key`: 0700, 0700, 0600; after a run that returns and
   after one that raises, neither `provider.key` nor `credential` exists (use an `auth: api_key` opencode-go profile with
@@ -167,7 +167,7 @@ Every task follows these rules:
   `tests/unit/implementer/test_credential_leftovers.py::test_a_normal_end_leaves_nothing_to_remove` (SCN-PRV-104): an
   opencode-shaped step that ends normally (the fake adapter writing no key file), then a second workbench: nothing was
   removed (patch `Path.unlink` or check before/after listings) and `agent-tmp` exists with mode 0700.
-- [ ] 3.2 Code: `src/l4/implementer/workbench.py`: `__post_init__` unlinks `agent-tmp/opencode-config/provider.key`
+- [x] 3.2 Code: `src/l4/implementer/workbench.py`: `__post_init__` unlinks `agent-tmp/opencode-config/provider.key`
   and `agent-tmp/credential` (names from `l4.agents.opencode_provider.KEY_FILE`, `l4.agents.opencode.CONFIG_DIR`,
   `l4.agents.credentials.CREDENTIAL_FILE`) before it creates the directories; `reset_agent_tmp` and the creation of
   `agent-tmp`/`gate-tmp` use mode 0700 (`mkdir(mode=0o700)` then `chmod(0o700)`: the umask can only remove bits).

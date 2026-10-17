@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4.agents.base import AgentAdapter, McpServer
+from l4.agents.credentials import CREDENTIAL_FILE
 from l4.agents.factory import Selected
+from l4.agents.opencode import CONFIG_DIR
+from l4.agents.opencode_provider import KEY_FILE
 from l4.agents.proc import ProcRunner
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
@@ -75,6 +78,26 @@ SERENA_PROJECT = ".serena/project.yml"
 _SERENA_CHECKED: dict[tuple[str, str, str], tuple[SerenaStatus, bytes | None]] = {}
 
 _BYTECODE_KEPT = frozenset({".git", ".venv", "node_modules"})  # the installed environment and git are not ours here
+
+
+def private_dir(path: Path) -> None:
+    """The directory, and mode 0700 on it: only the unit's own sandboxes may see what a step keeps there. The mode is
+    set after the `mkdir` because the umask can only remove bits, never add them (L4-PRV-040)."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.chmod(0o700)
+
+
+def remove_leftover_credentials(agent_tmp: Path) -> list[Path]:
+    """A provider key file and a credential-loader file that a killed run (SIGKILL skips every `finally`) left in the
+    unit's step directory are removed before any agent or gate runs. Returns what it removed (L4-PRV-041)."""
+    removed: list[Path] = []
+    for path in (agent_tmp / CONFIG_DIR / KEY_FILE, agent_tmp / CREDENTIAL_FILE):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            removed.append(path)
+    if removed:
+        log.warning("%s: removed %d credential file(s) a killed run left behind", agent_tmp.parent.name, len(removed))
+    return removed
 
 
 def purge_bytecode(worktree: Path, tracked: Collection[str] = ()) -> None:
@@ -171,10 +194,10 @@ class Workbench:
     activated_plan: str | None = None  # the plan that froze it
 
     def __post_init__(self) -> None:
-        self.unit_cache.mkdir(parents=True, exist_ok=True)
-        self.unit_cache.chmod(0o700)  # the unit's step files are for its own sandboxes only (L4-PRV-040)
+        private_dir(self.unit_cache)  # the unit's step files are for its own sandboxes only (L4-PRV-040)
+        remove_leftover_credentials(self.unit_cache / "agent-tmp")  # a killed run skipped the `finally` (L4-PRV-041)
         for sub in ("agent-tmp", "gate-tmp"):
-            (self.unit_cache / sub).mkdir(parents=True, exist_ok=True)
+            private_dir(self.unit_cache / sub)
         self.excludes.write_text("\n".join(HARNESS_EXCLUDES) + "\n", encoding="utf-8")
 
     @property
@@ -513,7 +536,7 @@ class Workbench:
 
     def reset_agent_tmp(self) -> Path:
         shutil.rmtree(self.agent_tmp, ignore_errors=True)
-        self.agent_tmp.mkdir(parents=True)
+        private_dir(self.agent_tmp)
         return self.agent_tmp
 
     def _take_serena_project(self) -> bytes | None:
