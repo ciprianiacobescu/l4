@@ -4123,7 +4123,8 @@ charged to the plan like the run of the step.
 
 **L4-YOLO-013** Stops, waits, cancel and resume. The plan SHALL stop, with the reason, when its current unit is `halted`, `escalated`, `abandoned` or `rejected`, when a
 frozen digest changes or the plan file is edited after the activation (`inputs_changed`), when a limit is reached, when
-the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), and as D8,
+the current unit is no longer among the units of the target (`unit_missing`, cleared when the unit is back), when its
+capacity wait only a fix can end (`capacity_needs_fix`, L4-YOLO-035), and as D8,
 D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit is `awaiting_human`, `clarifying` or
 `waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
 plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
@@ -4336,6 +4337,18 @@ It SHALL print every finding, then the order of the units and the budget warning
 plan is admitted and nothing is uncovered or covered twice, else 2. A plan file that is not in the working tree SHALL be
 exit 2 naming the path. For the same tree, its coverage findings SHALL be the ones `scripts/validate_plan.py` prints.
 `l4 yolo draft` and the worktree review SHALL name this command in their hints.
+
+**L4-YOLO-035** A capacity wait never chains runs, and a wait only a fix can end stops the plan. A plan step that
+dispatches its current unit while the unit is `waiting_capacity` SHALL NOT start the next run; the next schedule, push
+or person's command probes again. When the current unit parks in `waiting_capacity` with no profile of the chain
+cooling (every failure a missing binary, a failed login or `hello`, a constraint or `serves`; the unit's
+`availability.unavailable` has no `cooling`, `quota` or `concurrency` skip and its `retry_after` is not in the future),
+for the same set of unusable profiles as its previous park, with no `task.done`, `task.red_ok`, `task.green_committed`
+or successful `step.finished` of the unit between them, and both parks after the plan was last activated or resumed, the
+plan SHALL stop with `capacity_needs_fix`. The stop SHALL name each profile, its failure and the fix (renew the secret
+the profile reads, for example `OPENCODE_API_KEY`, or install the binary). `l4 yolo resume` SHALL be allowed after that
+stop; the next run probes. A park with a profile cooling (a limit or credit with a reset) keeps the plan waiting until
+`retry_after` (L4-AVL-007, L4-YOLO-013).
 ---
 
 ## 13. Memory and lessons
@@ -5257,6 +5270,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 36 | `kiro-adoption` | finished Kiro history is read, not validated as work: a done leaf's missing or unresolvable `_Requirements:_` link and a dependency-graph block that is not JSON are warnings, a whole-requirement reference `N` resolves, `## Requirement N` with `### Acceptance Criteria` is read, and a number inside a word such as `ADR-0014.8` or `AC3` is not a reference (L4-KSP-006; `openspec/changes/kiro-adoption/`) | the consumer repository's adoption of its finished Kiro specs |
 | 37 | `check-worktree` | `l4 yolo check PLAN --worktree` admits the plan files and the units of the working tree before the push and reports `uncovered` and `covered_twice` as `validate_plan.py` does; the hints of `l4 yolo draft` and of the worktree review name it (L4-YOLO-034; `openspec/changes/check-worktree/`) | a plan author on a feature branch: run it before the push |
 | 38 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
+| 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -9214,6 +9228,20 @@ scenario is a spec defect (§26).
 - **Given** a working tree with specs that no plan lists
 - **When** `l4 yolo draft p` runs
 - **Then** its `Next:` lines name `l4 yolo check p --worktree`
+#### SCN-YOLO-90 (−) A failed login does not chain runs · L4-YOLO-035
+- **Given** an active plan whose current unit parks in `waiting_capacity` because every implementer profile fails its `hello` with an authentication error
+- **When** the next plan step dispatches the unit and its run parks again
+- **Then** no next run is started by that step
+
+#### SCN-YOLO-91 (−) The second identical park stops the plan with the fix named · L4-YOLO-035
+- **Given** the unit of SCN-YOLO-90 parked twice for the same two profiles, nothing cooling
+- **When** the plan step runs
+- **Then** `plan.stopped{capacity_needs_fix, unit}` is recorded, naming both profiles, `opencode authentication failed` and the fix (renew the key the profiles read), and `l4 yolo resume` with a reason goes on
+
+#### SCN-YOLO-92 (+) A cooling profile still waits for its reset · L4-YOLO-035
+- **Given** a unit parked in `waiting_capacity` because the only profile hit a rate limit that resets in 40 minutes
+- **When** the plan step runs before the reset
+- **Then** the plan waits (`unit_waiting_capacity`), starts no run, and does not stop
 
 ### 23.21 Experience graph (KG)
 

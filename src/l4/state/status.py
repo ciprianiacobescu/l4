@@ -58,6 +58,7 @@ from l4.state.ledger import (
 )
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Phase
 from l4.state.next_step import label_for, next_step, reason
+from l4.state.parks import FixPark, fix_parks
 from l4.state.pending import merge_ledgers, read_pending
 from l4.state.review import AfterHandoff, SpecEdit, after_handoff, spec_edit_since_harness
 from l4.vcs.errors import GitError
@@ -130,6 +131,7 @@ class UnitSnapshot:
     spec_edit: SpecEdit | None = None  # a person's spec push after the harness's last commit (L4-OPS-014)
     last_activity: Activity | None = None  # the newest ledger event (L4-OPS-020)
     open_run: OpenRun | None = None  # a run that started and has no end recorded (L4-OPS-020)
+    fix_parks: tuple[FixPark, ...] = ()  # the trailing parks only a fix ends, no work between them (L4-YOLO-035)
 
     @property
     def feedback_counts(self) -> dict[str, int]:
@@ -232,6 +234,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         spec_edit=edit,
         last_activity=last,
         open_run=open_run,
+        fix_parks=fix_parks(read.events),
     )
 
 

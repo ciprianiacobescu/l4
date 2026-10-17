@@ -274,6 +274,14 @@ def test_resume_of_a_waiting_plan_goes_when_capacity_is_back(world, monkeypatch,
     assert world.l4("resume", "p1", "--reason", "back", "--no-run") == 0
 
 
+def test_resume_after_capacity_needs_fix_is_allowed(world, monkeypatch, capsys):
+    """SCN-YOLO-91: the cause is gone once a probe succeeds, so the resume goes and the next run probes."""
+    active_world(world, ev("unit.dispatched", unit=B), ev("plan.stopped", reason="capacity_needs_fix", unit=B))
+    phases(monkeypatch, **{"openspec__add-b": "waiting_capacity"})
+    assert world.l4("resume", "p1", "--reason", "key renewed", "--no-run") == 0
+    assert fold_plan("p1", world.events()).status == "active"
+
+
 def test_resume_of_an_active_plan_is_refused(world, capsys):
     active_world(world)
     assert "p1 is active: only a stopped or waiting plan resumes" in resume(world, capsys)

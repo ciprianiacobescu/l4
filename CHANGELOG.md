@@ -24,6 +24,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   version, `current` or `old`, and edited files. Doctor row SKL-003 warns about an installed skill older than `l4`, and
   `l4 init` names the command (L4-SKL-003).
 
+### Fixed
+- A delivery plan no longer starts a run every minute for a unit that waits for capacity. A plan step that dispatches a
+  unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same profiles with none cooling
+  (an expired provider key, a missing binary) stops the plan with `capacity_needs_fix`; the stop names the profiles,
+  their failures and the fix, and `l4 yolo resume` goes on after it (L4-YOLO-035). A park with a cooling profile still
+  waits for its reset.
+
 ## 0.4.13 (2026-10-17)
 
 ### Added
