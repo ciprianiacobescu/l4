@@ -25,6 +25,15 @@ def test_review_configuration_defaults():
     assert L4Config.model_validate({"yolo": {"review": {"accept_by_agents": True}}}).yolo.review.accept_by_agents
 
 
+def test_extend_by_agents_is_off_by_default_and_a_boolean():
+    """L4-YOLO-051: like `yolo.review.accept_by_agents`, a key a person pushes to the base branch."""
+    assert L4Config().yolo.extend_by_agents is False
+    assert L4Config.model_validate({"yolo": {"extend_by_agents": True}}).yolo.extend_by_agents is True
+    for bad in ("maybe", ["yes"], 2):
+        with pytest.raises(ValidationError):
+            L4Config.model_validate({"yolo": {"extend_by_agents": bad}})
+
+
 @pytest.mark.parametrize(
     "bad",
     [{"accept_after_rounds": 0}, {"max_file_chars": 999}, {"max_folder_chars": 999}, {"max_dependency_chars": -1}],

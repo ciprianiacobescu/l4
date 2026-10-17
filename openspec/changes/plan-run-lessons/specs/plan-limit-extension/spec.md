@@ -6,11 +6,10 @@ an agent cannot.
 ## ADDED Requirements
 
 ### Requirement: L4-YOLO-050 A limit of an active plan is raised without waiting for the stop
-`l4 yolo resume PLAN --reason TEXT --extend-…` on an `active` plan SHALL record `plan.extended{by, actor, reason,
-extend, limits_before, limits_after}` and nothing else: the plan stays active, nothing is resumed, no run starts. The
-limits in force (L4-YOLO-014) SHALL include it. No `--extend-…`, or one that changes no limit in force, SHALL be
-refused (exit 2) naming the options or the limit. `l4 yolo status` SHALL list the extensions and name the option in an
-active plan's `Next:` line.
+`l4 yolo resume PLAN --reason TEXT --extend-…` on an `active` plan SHALL record `plan.extended{by, actor, marker,
+agent_key, reason, extend, limits_before, limits_after}` and nothing else: no resume, no run. The limits in force
+(L4-YOLO-014) SHALL include it. No `--extend-…`, or one that changes no limit, SHALL be refused (exit 2). `l4 yolo
+status` SHALL list the extensions and name the option in an active plan's `Next:` line.
 
 #### Scenario: SCN-YOLO-130 (+) A run limit of an active plan is raised before the stop
 - **GIVEN** an active plan `p1` with `max_runs` 90, 82 runs used and three units left
@@ -53,11 +52,20 @@ active plan's `Next:` line.
 
 ### Requirement: L4-YOLO-051 Raising a plan's limit is a person's decision
 Every `--extend-…` of `l4 yolo resume`, on an active, waiting or stopped plan, SHALL be refused (exit 2, nothing
-written) when `l4.actor.actor` says the caller is an agent, and the refusal SHALL name the command a person runs.
-`plan.extended` SHALL record the actor and its marker. A resume without an `--extend-…` keeps its rule.
+written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` on the base
+branch (default `false`). The refusal SHALL name the command a person runs and the key. The event SHALL record the
+actor, its marker and `agent_key` (whether the key allowed it).
 
 #### Scenario: SCN-YOLO-134 (−) An agent cannot raise a limit
 - **GIVEN** the plan `p1` while it is active, and the same plan seeded again stopped with `limit_runs`
 - **WHEN** `l4 yolo resume p1 --reason TEXT --extend-runs 5` runs on each with `CLAUDECODE=1` in the environment
 - **THEN** each exits 2 with `raising a plan's limits is a person's decision` and a `Fix:` line that names the command
-  for a person, and nothing is written
+  for a person and the key `yolo.extend_by_agents`, and nothing is written
+
+#### Scenario: SCN-YOLO-141 (+) With the key, an agent raises a limit and the event says so
+- **GIVEN** `yolo.extend_by_agents: true` in `.l4/config.yaml` on the base branch, an active plan `p1` and, in turn, the
+  same plan stopped with `limit_runs`
+- **WHEN** an agent (`CLAUDECODE=1`, no terminal) runs `l4 yolo resume p1 --reason TEXT --extend-runs 20`
+- **THEN** on the active plan `plan.extended` is recorded, on the stopped plan `plan.resumed` is recorded, each with
+  `actor: agent`, `marker: CLAUDECODE`, `agent_key: true` and `extend: {runs: 20}`; with the key `false`, or absent,
+  the refusal of SCN-YOLO-134 stands

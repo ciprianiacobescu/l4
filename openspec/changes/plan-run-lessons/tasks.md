@@ -125,7 +125,7 @@ Every task follows these rules:
   `plan.extended{extend: {runs: 20}}`, a charge of 90 runs: `reached` is None, and `effective_limits(...).runs == 110`).
 - [x] 7.2 Code: `src/l4/yolo/state.py`: `plan.extended` in `fold_plan` (design D7) and a line about it in the module
   docstring.
-- [ ] 7.3 Tests, `tests/unit/yolo/test_yolo_commands_manage.py`. First add
+- [x] 7.3 Tests, `tests/unit/yolo/test_yolo_commands_manage.py`. First add
   `monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)` (the key is off in those worlds, L4-YOLO-051) to
   every existing test that passes an `--extend-…` and expects it to work or to reach a limit message (`test_a_cost_limit_needs_more_money`,
   `test_an_extension_that_does_not_clear_the_usage_is_refused`, `test_the_runs_limit`,
@@ -148,14 +148,14 @@ Every task follows these rules:
   extension (`plan.resumed` with the same fields); a person's events say `agent_key: false`; the key `false` keeps the
   refusal, whose `Fix:` names the key; `tests/unit/yolo/test_yolo_contract.py`: the key is `False` by default and a
   bool (SCN-YOLO-141 is the key scenario).
-- [ ] 7.4 Code: `src/l4/config/schema.py`: `YoloCfg.extend_by_agents: bool = False`; `src/l4/yolo/commands.py`: `run_resume` (the active-plan path, the no-op refusals and the output of
+- [x] 7.4 Code: `src/l4/config/schema.py`: `YoloCfg.extend_by_agents: bool = False`; `src/l4/yolo/commands.py`: `run_resume` (the active-plan path, the no-op refusals and the output of
   design D7; the person check of D8 after `_extend` and before `store.read()`), `_describe` (`extensions`), `_render`
   (the `extended:` lines), `_next_line` (the active text of D7); `src/l4/cli.py`: the help of `yolo resume` becomes
   `Resume a stopped or waiting delivery plan once the cause is gone, or raise a limit of an active one (--extend-…).`
 
 ## 8. After an answer (L4-YOLO-052, L4-YOLO-053)
 
-- [ ] 8.1 Tests. `tests/unit/yolo/test_yolo_cycle_planner.py` (or a new `test_yolo_cycle_still_waits.py`), with
+- [x] 8.1 Tests. `tests/unit/yolo/test_yolo_cycle_planner.py` (or a new `test_yolo_cycle_still_waits.py`), with
   `yolo_cycle_world`'s `snapshot`: `still_waits` is true for `awaiting_human` with an open question, false once
   `l4.planner.answers_unblock` is patched to return `("Q-001",)` (as `test_yolo_cycle_integration.py` does), false for
   `implementing`; `commands.answered_units([...])` holds exactly the `awaiting_human`/`clarifying` units for which
@@ -170,13 +170,13 @@ Every task follows these rules:
   SCN-YOLO-140 (answered: the `Next:` line has `the answers of openspec:add-b are pushed and the next run reads them`,
   `l4 yolo resume p1 --reason TEXT` and the `how_to_start` text of the world's forge). `test_resume_waits_for_the_questions`
   keeps passing.
-- [ ] 8.2 Code: `src/l4/yolo/cycle.py`: `ACTIONABLE` and `still_waits` (design D9), used by `_live` and `_cause_gone`
+- [x] 8.2 Code: `src/l4/yolo/cycle.py`: `ACTIONABLE` and `still_waits` (design D9), used by `_live` and `_cause_gone`
   with no change of behaviour; `src/l4/yolo/commands.py`: `_Units.answered`, `answered_units(snapshots)`, filled in
   `_read_units`; `resume_blocker(..., answered=...)` and its refusal text; `run_resume` and `_describe` pass
   `units.answered`; `_next_line(..., unit_phase=..., answered=..., start=...)` with the two texts of design D10
   (`start` from `l4.state.retry.how_to_start(ctx.app, ctx.cfg, ctx.target)`).
 
-- [ ] 8.3 Tests (owner decisions 6 and 8), `tests/unit/yolo/test_yolo_commands_manage.py`, with a helper
+- [x] 8.3 Tests (owner decisions 6 and 8), `tests/unit/yolo/test_yolo_commands_manage.py`, with a helper
   `halted_for(monkeypatch, unit, reason)` that wraps `commands._read_units` and sets `units.halt_reasons[unit]`:
   SCN-YOLO-143 (plan stopped with `unit_escalated`, the unit `escalated` with `judge_view_rejected`: the refusal and the
   `Next:` line name `l4 restart --unit` and `--replace` before `l4 retry --unit`, and the line ends with `then l4 yolo
@@ -184,7 +184,7 @@ Every task follows these rules:
   (the status of the waiting plan whose wait detail is `(open: Q-003)` shows it while the question is open, and `waiting:
   unit_awaiting_human: the answer is recorded and the next run reads it` in the text and in `--json` once the unit is
   answered; an answer for another unit changes nothing).
-- [ ] 8.4 Code: `src/l4/yolo/commands.py`: `_Units.halt_reasons`, `resume_blocker(..., halt_reasons=...)` (design D11),
+- [x] 8.4 Code: `src/l4/yolo/commands.py`: `_Units.halt_reasons`, `resume_blocker(..., halt_reasons=...)` (design D11),
   `ANSWER_RECORDED` and the `wait_detail` of `_describe` (design D12).
 
 ## 9. Docs

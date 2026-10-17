@@ -105,6 +105,20 @@ MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: au
 ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
 MAX_WAIT_DETAIL = 1_000
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+ACTIONABLE = _ACTIONABLE
+
+
+def still_waits(snap: UnitSnapshot) -> bool:
+    """The unit waits for a person or for capacity with nothing to run: the rule of the plan step (`_live`,
+    `_cause_gone`), of `l4 yolo resume` and of `l4 yolo status` (L4-YOLO-052). The phase is a wait phase, not a finished
+    one, and the unit's next action is not one a run can take (an answered question makes it `implement` or
+    `verify`)."""
+    from l4.planner import facts_of, next_action  # the planner is imported late: it imports this module
+
+    phase = snap.state.phase or ""
+    return phase in WAIT_PHASES and phase not in FINISHED_PHASES and next_action(facts_of(snap))[0] not in _ACTIONABLE
+
+
 MAX_TIDY = 5  # branch deletions of earlier merges in one plan step (L4-YOLO-033)
 _REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
 _NEVER_HELD = frozenset({"merged", "archived"})  # phases `yolo.hold` leaves alone
@@ -1113,7 +1127,7 @@ class _Step:
             ended = not_started_pending(ctx.read.events, current)
             if ended is not None and self._unit_action(snap) in _ACTIONABLE:
                 return self._not_started(ctx, snap, ended)
-            if phase not in FINISHED_PHASES and phase in WAIT_PHASES and self._unit_action(snap) not in _ACTIONABLE:
+            if still_waits(snap):
                 return self._wait(ctx, phase, current, snap)
         pending = merged_not_integrated(plan, state, self._phases())  # R10: every merged unit is post-checked first
         for unit in pending:
@@ -1238,7 +1252,7 @@ class _Step:
         if snap is None:
             return f"the cause is gone: {unit or 'the current unit'} is not among the units of the target"
         phase = snap.state.phase or ""
-        if phase in WAIT_PHASES and phase not in FINISHED_PHASES and self._unit_action(snap) not in _ACTIONABLE:
+        if still_waits(snap):
             return None
         return f"the cause is gone: {unit} is {phase or 'not started'}"
 

@@ -806,6 +806,7 @@ class YoloCfg(_Strict):
     review: YoloReviewCfg = Field(default_factory=YoloReviewCfg)
     merge: YoloMergeCfg = Field(default_factory=YoloMergeCfg)
     hold: list[str] = Field(default_factory=list)
+    extend_by_agents: bool = False  # an agent may raise a plan's limits with `l4 yolo resume --extend-…` (L4-YOLO-051)
 
     @field_validator("hold")
     @classmethod

@@ -14,9 +14,10 @@ Status: design, 2026-10-17. Harness at 0.4.14. Markers: **[V]** verified in the 
 5. What still holds is a `judge view: …` hold. It never becomes a fix unit; a reject escalates with
    `judge_view_rejected`, whose way out is split-and-restart or accept-and-retry (D5, D6).
 6. `l4 yolo resume --extend-…` on an active plan writes `plan.extended` and nothing else (D7).
-7. Every `--extend-…` is a person's: an agent is refused (D8).
+7. Every `--extend-…` is a person's: an agent is refused unless `yolo.extend_by_agents` is true on the base branch (D8).
 8. `l4 yolo resume` and `l4 yolo status` read the plan step's own "still waits" predicate (D9).
-9. The `Next:` line of a plan that waits for an answer says how to answer, or that the next run reads it (D10).
+9. The `Next:` line of a plan that waits for an answer says how to answer, or that the next run reads it; after the
+   answer the wait line shows the live reason (D10).
 10. The consumer repository's unit needs no repair: the 0.4.14 hold text is never raised again [I].
 
 ## 1. Current state
@@ -280,7 +281,7 @@ and the event say plainly that nothing resumed.
   nothing written) when an option changes nothing: `resume: <plan> has no cost limit: --extend-cost changes nothing`,
   `… has no run limit: --extend-runs changes nothing`, `… has no deadline: --extend-deadline sets none`,
   `--extend-deadline <ISO> is not later than the deadline in force <ISO>`. `--extend-attempts` always raises.
-- then `_append(store, [_event("plan.extended", by=ctx.who(), actor=who[0], marker=who[1], reason=…,
+- then `_append(store, [_event("plan.extended", by=ctx.who(), actor=who[0], marker=who[1], agent_key=<bool>, reason=…,
   extend=extend.as_data(), limits_before=…, limits_after=…)], read.head)`, where a limits dict is `{"cost_usd",
   "runs", "attempts", "deadline"}` (`attempts` = `max_unit_attempts` plus the `*` extension; `deadline` as
   `%Y-%m-%dT%H:%M:%SZ` or None). No run is started, whatever `--no-run` says.
@@ -293,20 +294,28 @@ data.get("extend"))`; nothing else (status, wait and stop fields, `stale_merges`
 ignored. `effective_limits`, `reached`, `resume_allows` and `_live_usage` need no change.
 
 `l4 yolo status`: `_describe` adds `extensions` (each `plan.extended` after the latest `plan.activated`: `at`, `by`,
-`actor`, `reason`, `extend`, `limits_before`, `limits_after`); `_render` prints one line each,
-`  extended: runs 90 -> 110 by alex@example.com (person): three units left`. The `Next:` of an active plan becomes
+`actor`, `agent_key`, `reason`, `extend`, `limits_before`, `limits_after`); `_render` prints one line each,
+`  extended: runs 90 -> 110 by alex@example.com (person): three units left` (`(agent, yolo.extend_by_agents)` when the
+key let an agent). The `Next:` of an active plan becomes
 `nothing: CI advances the plan at each run (l4 yolo resume <plan> --reason TEXT --extend-runs N raises a limit before
 it is reached; l4 yolo cancel <plan> --reason TEXT stops it)`.
 
-### D8 Raising a limit is a person's decision (L4-YOLO-051)
+### D8 Raising a limit is a person's decision, unless the base branch says otherwise (L4-YOLO-051)
 
 Today it is a documented rule only [V]. From this change, `run_resume` checks `l4.actor.actor(app.environ,
 _stdin_tty())` whenever an `--extend-…` is given, on an active, waiting or stopped plan, after `_extend` has validated
-the values and before `store.read()`: an agent gets exit 2,
+the values and before `store.read()`. A person goes on. An agent goes on only when `yolo.extend_by_agents` is `true`
+in `.l4/config.yaml` at `origin/<base>` [owner decision 1]: the key is a bool in `YoloCfg` (`L4Config.yolo`), default
+`false`, read like `yolo.review.accept_by_agents` (`accept.target_full_config`, which fetches nothing itself: the
+command syncs `origin` first; the base branch's file, never the working tree or a unit branch; absent or invalid file:
+the default). Otherwise exit 2, nothing written:
 `resume: raising a plan's limits is a person's decision (<marker> is set | stdin is not a terminal)` and
-`Fix: a person runs: l4 yolo resume <plan> --reason "..." <the same --extend-… options>`. Nothing is written. A resume
-without `--extend-…` keeps today's rule. No configuration key lets an agent extend [G; open question]. The recorded
-`actor` and `marker` make the audit show who raised a limit.
+`Fix: a person runs: l4 yolo resume <plan> --reason "..." <the same --extend-… options>; or set yolo.extend_by_agents:
+true in .l4/config.yaml on the base branch (a pushed change a person can see)`. A resume without `--extend-…` keeps
+today's rule. `plan.extended`, and a `plan.resumed` that carries an `extend`, record `actor`, `marker` and
+`agent_key` (true only when an agent extended because the key allowed it), so the audit shows who raised a limit and
+under which rule. Documented where the other two keys are (SPEC configuration listing, runbook, `docs/yolo-mode.md`,
+the skill's `operate.md`, CHANGELOG).
 
 ### D9 One "still waits" predicate for the step, the resume and the status (L4-YOLO-052)
 
@@ -346,6 +355,20 @@ run that reads the answer, so no resume is needed after it`. The `waiting_capaci
 
 `l4 questions answer` keeps its output (`run started on <base>`, `Next: l4 status --unit U`).
 
+### D11 A plan stopped on a unit with its own way out names it first [owner decision 6]
+
+`resume_blocker(..., halt_reasons=…)` (`_Units.halt_reasons`: unit id to the `halt_reason` of its snapshot): for a plan
+stopped with `unit_escalated` on a unit in phase `escalated`, `way_out(unit, halt_reason)` (D6) is the blocker's message
+tail and its `fix` (so the `Next:` line reads `<way out>, then l4 yolo resume PLAN --reason TEXT`) when it is not
+None (`judge_view_rejected`, and `no_convertible_finding`, whose own `l4 status` line already says the same); any other
+cause keeps `run l4 retry --unit U first`. A `halted` unit keeps it too.
+
+### D12 The wait line after an answer [owner decision 8]
+
+`_describe` sets `wait_detail` to `ANSWER_RECORDED = "the answer is recorded and the next run reads it"` when the plan
+waits and its current unit is in `_Units.answered` (D9), in the text and in `--json`; while the question is open the
+detail recorded with `plan.waiting` stands.
+
 ## 3. Risks
 
 - **Cost.** A diff over the cap now costs up to 8 judge calls a round; before, it cost one call and a person's answer
@@ -358,7 +381,7 @@ run that reads the answer, so no resume is needed after it`. The `waiting_capaci
 - **Two judges in one round.** After a limit in the middle of the parts, the parts have different profiles. Both are
   independent of the implementers; the report names the last one and `judge_parts` names each [G].
 - **The person check refuses a person without a terminal** (a script, a pipe on stdin). The refusal says to run it
-  from a terminal; `| tee` on stdout stays a person's command (`l4.actor`) [V].
+  from a terminal, or to set `yolo.extend_by_agents`; `| tee` on stdout stays a person's command (`l4.actor`) [V].
 - **The new hold ids.** The `judge view: …` texts hash to new `H-` ids, so an answer given to the 0.4.14 hold does not
   carry over; that hold is never raised again, so nothing waits on it [I].
 - **The consumer repository's unit.** Its next round on 0.4.16 judges in parts; the rejected old hold is not raised
@@ -376,23 +399,27 @@ run that reads the answer, so no resume is needed after it`. The `waiting_capaci
 - **Merging worst-first, as `pick_verdicts` does inside one reply.** Every criterion one part cannot see would be
   `insufficient_evidence` (D3).
 
-## 5. Open questions for the owner
+## 5. Decisions of the owner (were open questions)
 
-1. **Who may raise a limit.** D8 enforces "a person only" for every `--extend-…` (active, waiting and stopped plans),
-   which changes today's behaviour for an agent that ran `l4 yolo resume --extend-…` against the docs. Should it apply
-   only to the new active-plan path, or should a key (like `yolo.review.accept_by_agents`) let agents extend?
-2. **`resume --extend-…` or `l4 yolo extend`.** D7 keeps one command; say if the separate verb is wanted.
-3. **The limits of the parts.** 120000 characters a part and 8 parts are constants. A key under `verifier` for either?
-4. **The discarded-reply hold.** `the judge's reply was discarded (…)` is an `other` hold whose question still asks for
-   a `WHEN … THEN …`, the same trap as the length hold. Make it a `judge_view`-like hold in a next change?
-5. **Lock files and generated files.** A large `uv.lock` or `pnpm-lock.yaml` now holds as `judge_view` every round
-   its diff is over one part. List such files by name and size instead of showing them?
-6. **The plan's stop line for an escalated unit.** `l4 yolo status` of a plan stopped with `unit_escalated` still says
-   `l4 retry --unit U` first; for `judge_view_rejected` (and `no_convertible_finding`) the unit's own way out comes
-   first. Change `resume_blocker` to name `way_out` in a next change?
-7. **A negative scenario for L4-VER-040.** `openspec/config.yaml` asks for a (+) and a (−) scenario per requirement;
-   L4-VER-040 has only SCN-VER-130 (+), because SCN-VER-130..139 are all used. A (−) needs an id outside this
-   change's reservation.
-8. **The stale wait detail.** After an answer is pushed, `l4 yolo status` still prints the `waiting: …` detail recorded
-   when the plan began to wait (`… (open: Q-003)`), one line above a `Next:` that says the answers are pushed. Read the
-   live reason there too?
+1. **Who may raise a limit.** A person only, for every `--extend-…` (active, waiting and stopped plans), with a config
+   key `yolo.extend_by_agents` (bool, default `false`) that lets an agent extend, like `yolo.review.accept_by_agents`
+   and `clarifier.answer_by_agents`. The event records the actor and whether the key allowed it (D7, D8).
+2. **`resume --extend-…` or `l4 yolo extend`.** `l4 yolo resume --extend-…` on an active plan, as designed (D7). No
+   separate command.
+3. **The limits of the parts.** 120000 characters a part and 8 parts stay constants.
+4. **The discarded-reply hold.** Out of scope; one line in the follow-ups below.
+5. **Lock files.** Included: ten lock files are one line each for the judge, never diffed, never a hold (D2, L4-VER-045,
+   SCN-VER-140..142, 144).
+6. **The plan's stop line for an escalated unit.** Included for `judge_view_rejected` (and, with the same function,
+   `no_convertible_finding`): D11, L4-YOLO-055, SCN-YOLO-143.
+7. **A negative scenario for L4-VER-040.** SCN-VER-143, from the ids SCN-VER-140..144 that the owner reserved.
+8. **The stale wait detail.** Included: D12, L4-YOLO-054, SCN-YOLO-142.
+
+SCN-VER-140..144 are used (140, 142, 144 and 141 for L4-VER-045 and L4-VER-043, 143 for L4-VER-040). The scenarios the
+owner's decisions added outside that reservation are SCN-YOLO-141 (the key), SCN-YOLO-142 and SCN-YOLO-143.
+
+## 6. Follow-ups (not in this change)
+
+- The hold `the judge's reply was discarded (…)` is an `other` hold whose question still asks for a `WHEN … THEN …`, the
+  same trap as the old length hold: a reject with a scenario makes a fix unit that cannot make the judge answer. A next
+  change can make it a `judge_view`-like hold (a person's decision, no fix unit).

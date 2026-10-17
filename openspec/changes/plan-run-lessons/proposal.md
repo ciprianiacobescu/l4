@@ -57,12 +57,19 @@ Three lessons from a delivery plan on a consumer repository (harness 0.4.11 to 0
   and nothing else: no resume, no run. Without an `--extend-…` the refusal names the four options; an extension that
   changes no limit is refused. `l4 yolo status` lists the extensions.
 - **Raising a limit is a person's decision** (L4-YOLO-051): every `--extend-…` of `l4 yolo resume`, on any plan, is
-  refused for an agent (`l4.actor.actor`), with the command a person runs. Today this rule is only written in the docs.
+  refused for an agent (`l4.actor.actor`), with the command a person runs, unless `yolo.extend_by_agents` is true on
+  the base branch (default false, like `yolo.review.accept_by_agents`); the event records the actor and whether the key
+  allowed it. Today this rule is only written in the docs.
+- **A plan stopped on a unit with its own way out names it** (L4-YOLO-055): `l4 yolo status` and the refusal of
+  `l4 yolo resume` of a plan stopped with `unit_escalated` on a unit escalated with `judge_view_rejected` say the unit's
+  way out before `l4 retry`.
+- **The wait line is live after the answer** (L4-YOLO-054): `l4 yolo status` shows `the answer is recorded and the next
+  run reads it` instead of the detail recorded when the plan began to wait (`open: Q-…`).
 - **After an answer, the hints say what happens, and the resume does not refuse it** (L4-YOLO-052, L4-YOLO-053):
   `l4 yolo resume` and `l4 yolo status` decide with the plan step's own predicate (`still_waits`), so a waiting plan
   whose answers are pushed resumes; the refusal for an open question says the plan continues by itself after the
   answer; the `Next:` line says how to answer, or that the next run reads the answer and how to start it.
-- **Docs.** `docs/SPEC.md` (the ten requirements, their scenarios, §2.1, §10.2, L4-VER-018, L4-OPS-022,
+- **Docs.** `docs/SPEC.md` (the eleven requirements, their scenarios, §2.1, §10.2, L4-VER-018, L4-OPS-022,
   L4-YOLO-013/014, the change row), `docs/runbook.md` (§7.1, §7.3, §12.3, §12.4), `docs/yolo-mode.md`, the skill's
   `references/operate.md`, `CHANGELOG.md` under `## 0.4.16 (unreleased)`.
 
@@ -70,7 +77,7 @@ Not in this change:
 - a configuration key for the part size or the number of parts (both are constants, as the cap is today);
 - special handling of generated files other than the lock files named in D2 (a large one is a `judge_view` hold that a
   person accepts);
-- the hold `the judge's reply was discarded (…)`, whose question still asks for a `WHEN … THEN …` (open question);
+- the hold `the judge's reply was discarded (…)`, whose question still asks for a `WHEN … THEN …` (a follow-up, design §6);
 - the `waiting_capacity` refusal of `l4 yolo resume` (unchanged).
 
 ## Capabilities
@@ -80,7 +87,8 @@ Not in this change:
 - `judge-diff`: what the judge's diff holds, judging it in parts, merging the parts, and the holds on the judge's
   view (L4-VER-040 to L4-VER-045).
 - `plan-limit-extension`: raising a limit of an active plan, audited, by a person (L4-YOLO-050, L4-YOLO-051).
-- `plan-answer-hints`: the resume and the hints of a plan that waits for an answer (L4-YOLO-052, L4-YOLO-053).
+- `plan-answer-hints`: the resume and the hints of a plan that waits for an answer, the live wait line after the answer,
+  and the stop line of a plan stopped on a unit with its own way out (L4-YOLO-052 to L4-YOLO-055).
 
 ### Modified Capabilities
 
@@ -96,7 +104,7 @@ including the sentences of L4-VER-018, L4-OPS-022, L4-YOLO-013 and L4-YOLO-014 t
   (`hold_kind`, `_hold_question`, `_hold_finding`), `src/l4/verifier/fixunit.py` (`_candidates`),
   `src/l4/verifier/fixloop.py` (`decide_fix`), `src/l4/state/review.py` (a public name for the channel list),
   `src/l4/state/next_step.py`, `src/l4/orchestrator.py`, `src/l4/ci/resume_label.py`.
-- `src/l4/yolo/state.py` (`plan.extended` in the fold), `src/l4/yolo/commands.py` (`run_resume`, `resume_blocker`,
+- `src/l4/config/schema.py` (`yolo.extend_by_agents`), `src/l4/yolo/state.py` (`plan.extended` in the fold), `src/l4/yolo/commands.py` (`run_resume`, `resume_blocker`,
   `_read_units`, `_next_line`, `_describe`, `_render`), `src/l4/yolo/cycle.py` (`still_waits`, a refactor with no
   change of behaviour), `src/l4/cli.py` (help text of `yolo resume`).
 - Tests under `tests/unit/verifier/`, `tests/unit/state/`, `tests/unit/ci/`, `tests/unit/yolo/`.

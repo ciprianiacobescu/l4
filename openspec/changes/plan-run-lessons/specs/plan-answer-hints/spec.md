@@ -43,3 +43,25 @@ start command).
 - **THEN** its `Next:` line says that the answers of the unit are pushed and the next run reads them, that the plan then
   continues by itself, and how to start that run now: `l4 yolo resume p1 --reason TEXT`, or the forge's start command
   (`gh workflow run l4.yml --ref <base>` on GitHub)
+
+### Requirement: L4-YOLO-054 After an answer, the wait line shows the live reason
+With the answers of the current unit pushed, the wait detail that `l4 yolo status` prints (text and `--json`) SHALL be
+the live reason (the answer is recorded and the next run reads it), not the detail recorded when the plan began to wait.
+
+#### Scenario: SCN-YOLO-142 (+) After the answer the wait line shows the live reason
+- **GIVEN** the plan of SCN-YOLO-137, whose wait was recorded with the detail `(open: Q-003)`
+- **WHEN** `l4 yolo status p1` runs while Q-003 is open, and again once its answer is pushed
+- **THEN** the first shows the recorded detail; the second shows `waiting: unit_awaiting_human: the answer is recorded
+  and the next run reads it` and no `open: Q-003`
+
+### Requirement: L4-YOLO-055 A plan stopped on a unit with its own way out names that way first
+For a plan stopped with `unit_escalated` on a unit whose escalation has its own way out (`l4.state.next_step.way_out`:
+`judge_view_rejected`, `no_convertible_finding`), the `Next:` line of `l4 yolo status` and the refusal of
+`l4 yolo resume` SHALL name that way out, not `l4 retry --unit U` first. Any other cause keeps its text.
+
+#### Scenario: SCN-YOLO-143 (−) A plan stopped on a unit escalated with judge_view_rejected names the unit's way out first
+- **GIVEN** a plan stopped with `unit_escalated` on a unit whose phase is `escalated` with the cause
+  `judge_view_rejected`
+- **WHEN** `l4 yolo status` and `l4 yolo resume --reason TEXT` run
+- **THEN** the `Next:` line and the refusal name splitting the change (`l4 restart`) or replacing the answer (`--replace`)
+  before `l4 retry --unit U`, and for a unit escalated for another cause the refusal still says `run l4 retry --unit U first`

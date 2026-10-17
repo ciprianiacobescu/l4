@@ -30,7 +30,7 @@ import logging
 import shutil
 import sys
 import tempfile
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -53,7 +53,8 @@ from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
 from l4.specs.detect import collect_units
 from l4.specs.providers import providers_for
-from l4.state.retry import fetch_unit_refs, start_run_line
+from l4.state.next_step import way_out
+from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
 from l4.state.status import Activity, OpenRun, discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
@@ -62,7 +63,7 @@ from l4.yolo import findings as fnd
 from l4.yolo import judge_sandbox
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.coverage import coverage_findings
-from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches
+from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches, still_waits
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import Found, new_draft, update_draft
 from l4.yolo.limits import (
@@ -113,6 +114,7 @@ REPORT_FILE = "report.md"
 _MOVED = "the plan moved: run the command again"
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
 _HOLDING = ("active", "waiting", "stopped")
+ANSWER_RECORDED = "the answer is recorded and the next run reads it"  # the live reason of a wait whose answer is pushed
 
 
 def _now() -> datetime:
@@ -219,6 +221,9 @@ class _Units:
     phases: dict[str, str | None] = field(default_factory=dict)
     costs: dict[str, float] = field(default_factory=dict)  # unit id -> the cost its own ledger shows (this attempt)
     activity: dict[str, tuple[Activity | None, OpenRun | None]] = field(default_factory=dict)  # unit id -> (L4-OPS-020)
+    # the units in awaiting_human or clarifying whose answers are pushed and no run has read (L4-YOLO-052)
+    answered: set[str] = field(default_factory=set)
+    halt_reasons: dict[str, str | None] = field(default_factory=dict)  # unit id -> the code its stop recorded
 
 
 @contextlib.contextmanager
@@ -241,6 +246,14 @@ def _workspace(ctx: _Ctx, rev: str) -> Iterator[tuple[Path, Git]]:
         ctx.git.run("worktree", "prune", check=False)
 
 
+def answered_units(snapshots: Iterable[Any]) -> set[str]:
+    """The ids of the units in `awaiting_human` or `clarifying` that no longer wait (`cycle.still_waits`): their answers
+    are pushed and no run has read them (L4-YOLO-052)."""
+    return {
+        s.ref.id for s in snapshots if (s.state.phase or "") in ("awaiting_human", "clarifying") and not still_waits(s)
+    }
+
+
 def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> _Units:
     with _workspace(ctx, rev) as (path, git):
         found = discover(ctx.cfg, git, providers_for(ctx.cfg, path, ctx.app.environ))
@@ -248,7 +261,13 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
         phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
         activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}
-    return _Units(infos, phases, costs, activity)
+        answered = answered_units(snapshot for _, snapshot in found)
+        halts = {  # the code of a stop, for the units a plan can be stopped on (L4-YOLO-055)
+            snapshot.ref.id: snapshot.state.halt_reason
+            for _, snapshot in found
+            if snapshot.state.phase in ("halted", "escalated")
+        }
+    return _Units(infos, phases, costs, activity, answered, halts)
 
 
 def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
@@ -436,16 +455,23 @@ def resume_blocker(
     target_present: bool = True,
     now: datetime | None = None,
     live: PlanState | None = None,
+    answered: Collection[str] = (),
+    halt_reasons: Mapping[str, str | None] | None = None,
 ) -> Blocker | None:
     """The cause that is still there, per design D10's table; None when a resume may go. `live`: the state with the
-    figures the plan step checks the limits on (`_live_usage`); the ledger's `state` when not given."""
+    figures the plan step checks the limits on (`_live_usage`); the ledger's `state` when not given. `answered`: the
+    units whose answers are pushed and no run has read (L4-YOLO-052); `halt_reasons`: the code each stopped unit's
+    ledger recorded (a unit with its own way out is not told `l4 retry` first)."""
     review_again = f"l4 yolo review {plan_id}, then l4 yolo activate {plan_id} --reason TEXT"
     if state.status == "waiting":
         unit = state.current
         phase = phases.get(unit) if unit else None
         if phase in ("awaiting_human", "clarifying"):
+            if unit in answered:  # the answer is pushed: no cause is left, the resume starts the run that reads it
+                return None
             return Blocker(
-                f"{unit} is still {phase}: answer its questions first (l4 questions --unit {unit})",
+                f"{unit} is still {phase}: answer its questions first (l4 questions --unit {unit}); a waiting plan "
+                "continues by itself at the run that reads the answer, so no resume is needed after it",
                 f"answer the questions of {unit} (l4 questions --unit {unit})",
             )
         if phase == "waiting_capacity":
@@ -468,6 +494,11 @@ def resume_blocker(
     if reason in ("unit_halted", "unit_escalated") and unit:
         phase = phases.get(unit)
         if phase in ("halted", "escalated"):
+            own = way_out(unit, (halt_reasons or {}).get(unit)) if phase == "escalated" else None
+            if (
+                own is not None
+            ):  # a unit escalated for a reason with its own way out: the retry alone repeats the verdict
+                return Blocker(f"{unit} is still {phase}: {own}", own)
             return Blocker(
                 f"{unit} is still {phase}: run l4 retry --unit {unit} first", f"l4 retry --unit {unit} --reason TEXT"
             )
@@ -1075,21 +1106,111 @@ def _extend(cost: float | None, runs: int | None, attempts: int | None, deadline
     return Extend(cost, runs, attempts, when)
 
 
+_EXTEND_OPTIONS = "--extend-cost USD, --extend-runs N, --extend-attempts N or --extend-deadline ISO"
+
+
+def _extend_words(cost: float | None, runs: int | None, attempts: int | None, deadline: str | None) -> str:
+    """The `--extend-…` options as the caller gave them, for the command a person runs."""
+    given = (("cost", cost), ("runs", runs), ("attempts", attempts), ("deadline", deadline))
+    return " ".join(f"--extend-{name} {value:g}" if isinstance(value, float) else f"--extend-{name} {value}"
+                    for name, value in given if value is not None)  # fmt: skip
+
+
+def _may_extend(ctx: _Ctx, plan_id: str, words: str) -> bool:
+    """L4-YOLO-051: raising a plan's limits is a person's decision. A person may; an agent only when
+    `yolo.extend_by_agents` is true in `.l4/config.yaml` on the base branch (read from origin, never the working tree).
+    Returns whether the key was what allowed it; raises (exit 2, nothing written) otherwise."""
+    kind, marker = accepting.actor(ctx.app.environ, _stdin_tty())
+    if kind == "person":
+        return False
+    if _branch_on_origin(ctx, ctx.target):
+        _sync(ctx, who="resume")
+        full = accepting.target_full_config(ctx.git, ctx.target_ref)
+        if full is not None and full.yolo.extend_by_agents:
+            return True
+    why = f"{marker} is set" if marker else "stdin is not a terminal"
+    raise L4Exit(
+        ExitCode.USAGE_ERROR,
+        f"resume: raising a plan's limits is a person's decision ({why})\n"
+        f'Fix: a person runs: l4 yolo resume {plan_id} --reason "..." {words}; or set yolo.extend_by_agents: true in '
+        ".l4/config.yaml on the base branch (a pushed change a person can see)",
+    )
+
+
+def _limits_data(state: PlanState, fallback: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The limits in force as the events record them: `cost_usd`, `runs`, `attempts` (`max_unit_attempts` plus the
+    extension for every unit) and `deadline` (`%Y-%m-%dT%H:%M:%SZ` or None)."""
+    limits = effective_limits(state, fallback)
+    return {
+        "cost_usd": limits.cost_usd, "runs": limits.runs, "attempts": limits.attempts_of(""),
+        "deadline": limits.deadline.astimezone(UTC).strftime(_ISO) if limits.deadline else None,
+    }  # fmt: skip
+
+
+_ISO = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _extension_refusal(plan_id: str, extend: Extend, before: Mapping[str, Any]) -> str | None:
+    """Why an extension of an active plan changes no limit in force, or None (L4-YOLO-050)."""
+    if extend.cost is not None and before["cost_usd"] is None:
+        return f"{plan_id} has no cost limit: --extend-cost changes nothing"
+    if extend.runs is not None and before["runs"] is None:
+        return f"{plan_id} has no run limit: --extend-runs changes nothing"
+    if extend.deadline is not None:
+        if before["deadline"] is None:
+            return f"{plan_id} has no deadline: --extend-deadline sets none"
+        asked = extend.deadline.astimezone(UTC).strftime(_ISO)
+        if asked <= before["deadline"]:
+            return f"--extend-deadline {asked} is not later than the deadline in force {before['deadline']}"
+    return None
+
+
+def _changes(before: Mapping[str, Any], after: Mapping[str, Any]) -> str:
+    """`runs 90 -> 110; cost $10.00 -> $15.00`: one `name old -> new` per limit that changed."""
+
+    def show(name: str, value: Any) -> str:
+        if name == "cost_usd":
+            return _money(value)
+        return "none" if value is None and name == "deadline" else "unlimited" if value is None else str(value)
+
+    names = {"cost_usd": "cost", "runs": "runs", "attempts": "attempts", "deadline": "deadline"}
+    return "; ".join(
+        f"{label} {show(key, before[key])} -> {show(key, after[key])}"
+        for key, label in names.items()
+        if before[key] != after[key]
+    )
+
+
 def run_resume(
     app: AppContext, *, plan: str, reason: str, extend_cost: float | None = None, extend_runs: int | None = None,
     extend_attempts: int | None = None, extend_deadline: str | None = None, no_run: bool = False,
 ) -> ExitCode:  # fmt: skip
     """`plan.resumed{by, reason, extend}` from `stopped` or `waiting`, refused while the cause is still there (design
-    D10's table), then a run on the target."""
+    D10's table), then a run on the target. On an `active` plan only an `--extend-…` goes: it records `plan.extended`
+    and nothing else (L4-YOLO-050). Every `--extend-…` is a person's, or an agent's when `yolo.extend_by_agents` is
+    true on the base branch (L4-YOLO-051)."""
     if not reason.strip():
         raise L4Exit(ExitCode.USAGE_ERROR, "resume: --reason must say why")
     plan_id = _plan_id(plan)
     extend = _extend(extend_cost, extend_runs, extend_attempts, extend_deadline)
     ctx = _open(app)
+    extending = bool(extend.as_data())
+    by_key = (
+        _may_extend(ctx, plan_id, _extend_words(extend_cost, extend_runs, extend_attempts, extend_deadline))
+        if extending
+        else False
+    )
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
     store = ctx.store(plan_id)
     read = store.read()
     state = fold_plan(plan_id, read.events)
-    if state.status not in ("stopped", "waiting"):
+    if state.status == "active" and not extending:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"resume: {plan_id} is active: only a stopped or waiting plan resumes; to raise a limit of the active "
+            f"plan, pass {_EXTEND_OPTIONS}",
+        )
+    if state.status not in ("active", "stopped", "waiting"):
         raise L4Exit(
             ExitCode.USAGE_ERROR, f"resume: {plan_id} is {state.status}: only a stopped or waiting plan resumes"
         )
@@ -1103,18 +1224,47 @@ def run_resume(
         parsed = file.plan if file else None
         units = _read_units(ctx, rev, parsed.unit_ids() if parsed else [], intake=False)
         phases = units.phases
+    if state.status == "active":
+        return _extend_active(ctx, store, read, state, parsed, extend, who, by_key, reason.strip())
     live = None
     if on_origin and state.stop_reason and state.stop_reason.startswith("limit_"):
         live = _live_usage(ctx, state, read.events, units, state.stop_unit or state.current)  # what the step checks
     blocker = resume_blocker(
-        plan_id, state, read.events, parsed, phases, extend, target_present=on_origin, now=_now(), live=live
-    )
+        plan_id, state, read.events, parsed, phases, extend, target_present=on_origin, now=_now(), live=live,
+        answered=units.answered, halt_reasons=units.halt_reasons,
+    )  # fmt: skip
     if blocker is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"resume: {blocker.message}")
-    _append(store, [_event("plan.resumed", by=ctx.who(), reason=reason.strip(), extend=extend.as_data())], read.head)
+    data: dict[str, Any] = {"by": ctx.who(), "reason": reason.strip(), "extend": extend.as_data()}
+    if extending:  # who raised the limits, and whether the key let an agent (L4-YOLO-051)
+        data.update(actor=who[0], marker=who[1], agent_key=by_key)
+    _append(store, [_event("plan.resumed", **data)], read.head)
     ctx.say(f"{plan_id}: resumed")
     if not no_run:
         ctx.say(start_run_line(ctx.app, ctx.cfg))
+    return ExitCode.OK
+
+
+def _extend_active(
+    ctx: _Ctx, store: PlanStore, read: PlanRead, state: PlanState, parsed: Plan | None, extend: Extend,
+    who: tuple[str, str | None], by_key: bool, reason: str,
+) -> ExitCode:  # fmt: skip
+    """`plan.extended` on an active plan: the limits change, the plan does not (L4-YOLO-050)."""
+    fallback = parsed.limits.model_dump(mode="json") if parsed else None
+    before = _limits_data(state, fallback)
+    refusal = _extension_refusal(state.plan_id, extend, before)
+    if refusal is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"resume: {refusal}")
+    after_state = state.model_copy(deep=True)
+    apply_extend(after_state, extend.as_data())
+    after = _limits_data(after_state, fallback)
+    event = _event(
+        "plan.extended", by=ctx.who(), actor=who[0], marker=who[1], agent_key=by_key, reason=reason,
+        extend=extend.as_data(), limits_before=before, limits_after=after,
+    )  # fmt: skip
+    _append(store, [event], read.head)
+    ctx.say(f"{state.plan_id}: limits raised on the active plan (plan.extended): {_changes(before, after)}")
+    ctx.say("nothing resumed and no run started: CI advances the plan at its next run")
     return ExitCode.OK
 
 
@@ -1130,7 +1280,10 @@ def run_report(app: AppContext, *, plan: str) -> ExitCode:
 # --- l4 yolo status ------------------------------------------------------------------------------------------------
 
 
-def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker: Blocker | None) -> str:
+def _next_line(
+    plan_id: str, state: PlanState, view: ReviewView | None, blocker: Blocker | None, *,
+    unit_phase: str | None = None, answered: bool = False, start: str = "",
+) -> str:  # fmt: skip
     status = state.status
     if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the cause first
         return (
@@ -1171,13 +1324,28 @@ def _next_line(plan_id: str, state: PlanState, view: ReviewView | None, blocker:
             f"prints) and l4 retry --unit {unit} --reason TEXT; when a finding needs no handling, l4 yolo waive "
             f"{plan_id} F-... --reason TEXT (audited); the plan goes on by itself once none is open"
         )
+    if status == "waiting" and unit_phase == "awaiting_human" and state.current:  # L4-YOLO-053
+        unit = state.current
+        if answered:
+            return (
+                f"nothing: the answers of {unit} are pushed and the next run reads them; the plan then continues by "
+                f"itself (to start that run now: l4 yolo resume {plan_id} --reason TEXT, or {start})"
+            )
+        return (
+            f"answer the questions of {unit}: l4 questions --unit {unit}, then l4 questions answer Q-NNN --unit {unit} "
+            "--text TEXT (it pushes the answer and starts a run); the plan continues by itself at the run that reads "
+            "the answer, no resume is needed"
+        )
     if status in ("waiting", "stopped"):
         resume = f"l4 yolo resume {plan_id} --reason TEXT"
         if blocker and blocker.fix.startswith(resume.split(" --")[0]):
             return blocker.fix  # a limit: the fix is the resume itself, with the flag
         return f"{blocker.fix}, then {resume}" if blocker else resume
     if status == "active":
-        return f"nothing: CI advances the plan at each run (l4 yolo cancel {plan_id} --reason TEXT stops it)"
+        return (
+            f"nothing: CI advances the plan at each run (l4 yolo resume {plan_id} --reason TEXT --extend-runs N raises "
+            f"a limit before it is reached; l4 yolo cancel {plan_id} --reason TEXT stops it)"
+        )
     if status == "completed":
         return f"the plan is complete: l4 yolo report {plan_id}; promotion is yours"
     return "none: the plan is cancelled"
@@ -1212,6 +1380,9 @@ def _describe(
     used = state.used
     if rev is not None and state.status in ("active", "waiting", "stopped") and state.current:
         used = _live_usage(ctx, state, read.events, units, state.current).used  # the figures the step checks
+    extensions = _extensions(read.events)
+    if extensions:
+        out["extensions"] = extensions
     out["usage"] = {
         "cost_usd": used.cost_usd, "cost_limit": limits.cost_usd, "runs": used.runs,
         "runs_limit": limits.runs,
@@ -1270,10 +1441,38 @@ def _describe(
         live = None
         if rev is not None and (state.stop_reason or "").startswith("limit_"):
             live = _live_usage(ctx, state, read.events, units, state.stop_unit or state.current)
-        blocker = resume_blocker(pid, state, read.events, plan, units.phases, Extend(), now=_now(), live=live)
-    out["next"] = _next_line(pid, state, view, blocker)
+        blocker = resume_blocker(
+            pid, state, read.events, plan, units.phases, Extend(), now=_now(), live=live,
+            answered=units.answered, halt_reasons=units.halt_reasons,
+        )  # fmt: skip
+    current_answered = state.status == "waiting" and state.current in units.answered
+    if current_answered and out.get("wait_detail"):  # the detail recorded at the wait is stale once the answer is in
+        out["wait_detail"] = ANSWER_RECORDED
+    out["next"] = _next_line(
+        pid, state, view, blocker, unit_phase=units.phases.get(state.current) if state.current else None,
+        answered=current_answered, start=how_to_start(ctx.app, ctx.cfg, ctx.target) if current_answered else "",
+    )  # fmt: skip
     out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
     return out
+
+
+def _extensions(events: Sequence[PlanEvent]) -> list[dict[str, Any]]:
+    """The `plan.extended` events after the latest `plan.activated` (L4-YOLO-050), oldest first."""
+    since = max((i for i, e in enumerate(events) if e.type == "plan.activated"), default=-1)
+    return [
+        {
+            "at": e.at,
+            "by": e.data.get("by"),
+            "actor": e.data.get("actor"),
+            "agent_key": bool(e.data.get("agent_key")),
+            "reason": e.data.get("reason"),
+            "extend": e.data.get("extend") or {},
+            "limits_before": e.data.get("limits_before") or {},
+            "limits_after": e.data.get("limits_after") or {},
+        }
+        for e in events[since + 1 :]
+        if e.type == "plan.extended"
+    ]
 
 
 def _activity_of(
@@ -1337,6 +1536,11 @@ def _render(d: dict[str, Any]) -> str:
         lines.append(f"  stopped: {stop['reason']}{unit}" + (f": {stop['detail']}" if stop.get("detail") else ""))
     if d.get("wait"):
         lines.append(f"  waiting: {d['wait']}" + (f": {d['wait_detail']}" if d.get("wait_detail") else ""))
+    for x in d.get("extensions", []):
+        names = ("cost_usd", "runs", "attempts", "deadline")
+        before, after = ({k: v.get(k) for k in names} for v in (x["limits_before"], x["limits_after"]))
+        via = ", yolo.extend_by_agents" if x["agent_key"] else ""
+        lines.append(f"  extended: {_changes(before, after)} by {x['by']} ({x['actor']}{via}): {x['reason']}")
     lines += [f"  waived: {w['finding']} by {w['by']} ({w['actor']}): {w['reason']}" for w in d.get("waived", [])]
     if d.get("units"):
         lines.append("  units:")
