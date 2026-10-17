@@ -3336,7 +3336,7 @@ findings on the same criterion); tasks cite finding and criterion IDs. The fix u
 findings with the human's decisions first ("Decided by human in Q-NNN: <reason>"), so a length cut on a long finding
 never drops a decision and leaves the implementer an open question it must not decide. A decision is kept whole up to 1,200 characters (the finding's own detail is what is cut). A test chore (a rejected coverage hold) whose task begins with a decision that calls the code wrong must add tests that assert the decision: a failing test is not kept and is reported `blocked` with a technical question naming the test and the decision, and tests that all pass against that code get one retry reason naming the decision (attempt 1 only). A finding with `spec_gap: true` produces, before
 its task, an **ADDED** regression requirement with a scenario (OpenSpec: `## ADDED Requirements` →
-`### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). Fix units
+`### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). The parent requirement is the cited criterion's, else the parent's only one. When a person rejected a finding that cites no criterion with a `WHEN … THEN …` and the parent has several requirements, the scenario SHALL go under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, as a feedback item's does (L4-FBK-004): the person's scenario is never dropped. A judge's spec-gap suggestion that no person asked for gets no such requirement. Fix units
 never use MODIFIED/REMOVED/RENAMED deltas (the parent's requirements are not in the base specs until the parent is
 archived, L4-OSP-006). The task of a rejected **coverage** hold is a test chore (`test_chores` in `.l4/fix.json`): its prompt
 says to add tests that run the changed code the hold names; its step may add test files and append new tests to the unit's
@@ -5139,6 +5139,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 28 | `answer-accepted-findings` | a unit whose PASS came from an accepted hold merges by itself again: a round resumed at aggregation records the judge's answers to the accepted findings of the round it reuses (L4-VER-017); a valid judge reply that leaves out an asked accepted or feedback id gets one more call that names the ids, and a broken second reply keeps the first verdict (L4-VER-017); and `l4 yolo waive PLAN FINDING --reason TEXT` lets a person (or an allowed agent) waive an accepted finding on record, so the harness merges the unit through its guarded merge, with a `Next:` line that names retry, feedback and waive for `accepted_finding_open` (L4-YOLO-031; `openspec/changes/answer-accepted-findings/`) | the consumer repository's unit that waited with `accepted_finding_open`, after the upgrade |
 | 29 | `check-already-satisfied` | an already-satisfied task writes no copy of tests that exist: a red step that adds no test and reports `already_satisfied by <task>` with its `criteria_ids` is confirmed by the passing tests that already trace them, and earlier-red evidence holds for tests in a class (L4-IMP-003); the judge answers, for each task ticked as already satisfied, whether its own text is done, and a no is a major judge finding for a person (L4-VER-018); an implementer step that writes a token shape (a test fixture) loses the attempt with advice to build the value from parts, before any gate or commit, instead of halting the unit at the push (L4-SEC-008; `openspec/changes/check-already-satisfied/`) | the consumer repository's next units, after the upgrade |
 | 30 | `resolve-workspace-imports` | the modules a test imports are found under every import root: the repository root, `src`, every directory named `src`, and every directory with a `pyproject.toml`, `setup.py` or `setup.cfg` and its `src`, so the zero-value run, the head stubs of run (b), the audit sampling and the proof of tests people wrote can vary a uv workspace member's modules (L4-IMP-025; `openspec/changes/resolve-workspace-imports/`) | the consumer repository's next units, after the upgrade |
+| 31 | `home-rejected-findings` | a finding a person rejected with a `WHEN … THEN …` and no criterion becomes a fix task even when the parent has several requirements: its scenario goes under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, so a rejected "ticked as already satisfied, but its text is not done" finding (L4-VER-018) no longer escalates the unit with `no_convertible_finding` (L4-VER-006; `openspec/changes/home-rejected-findings/`) | the consumer repository's escalated unit, after the upgrade |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7305,6 +7306,16 @@ scenario is a spec defect (§26).
 - **Given** the prompt of SCN-VER-72 and two valid replies that both leave `satisfied` out
 - **When** the judge runs
 - **Then** the second call names `satisfied 3.1`, the round has the minor finding `the judge did not say whether task 3.1 is done`, and no major one names 3.1
+
+#### SCN-VER-76 (+) A rejected finding with no criterion gets a requirement of its own · L4-VER-006
+- **Given** a parent with three requirements in two capabilities, and the major finding `task 2.3 is ticked as already satisfied, but its text is not done` (no criterion) that a person rejected in Q-007 with `WHEN mintmory index-tree --help is shown THEN …`
+- **When** the fix unit is planned
+- **Then** it has one task for the finding, the ADDED requirement `task 2.3 is ticked as already satisfied, but its text is not done — finding <id>` in the first capability by name holds the scenario, Q-007 is consumed, and nothing is left not converted
+
+#### SCN-VER-77 (−) A judge's spec gap with no criterion still needs one requirement · L4-VER-006
+- **Given** a PASS with `verifier.fix_minor_findings` on, a parent with two requirements, and a judge's minor spec-gap finding with no criterion that no person rejected
+- **When** the fix unit is planned
+- **Then** it has no task, and the finding is listed as not converted (`a scenario for it needs a requirement and the parent has several`)
 
 ### 23.9.1 Human feedback (FBK)
 
