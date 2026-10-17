@@ -674,6 +674,8 @@ sandbox:                           # isolation of agents AND gate commands from 
     pip: {path: "$L4_CACHE/units/{unit}/cache/pip", env: PIP_CACHE_DIR}
     npm: {path: "$L4_CACHE/units/{unit}/cache/npm", env: npm_config_cache}
     go: {path: "$L4_CACHE/units/{unit}/cache/go", env: GOMODCACHE}
+    gobuild: {path: "$L4_CACHE/units/{unit}/cache/gobuild", env: GOCACHE}
+    pnpm: {path: "$L4_CACHE/units/{unit}/cache/pnpm", env: pnpm_config_store_dir}   # pnpm 9-10 read npm_config_store_dir: set to the same path
     playwright: {path: "$L4_CACHE/shared/ms-playwright", env: PLAYWRIGHT_BROWSERS_PATH, read_only: true}
   credential_paths:                # per adapter, mounted read-write ONLY into that profile's agent sandbox and hidden
                                    # (tmpfs / /dev/null) from every other sandbox; a user entry replaces only that
@@ -899,6 +901,9 @@ ci:
                                    # schedule. `l4 upgrade` re-renders the workflow, so change it here (L4-ACT-004)
   upload_artifacts: true           # false: the generated GitHub workflows have no upload-artifact step (a public
                                    # repository: any signed-in user can download the `l4-out` artifact)
+  toolchains: {}                   # GitHub: setup steps before L4 for the gates' toolchains (L4-CI-005), each with exactly
+                                   # one of version / version_file (pnpm: version): {go: {version_file: go.work},
+                                   # node: {version: "22"}, pnpm: {version: "11"}}; GitLab: the image provides them
 
 yolo:
   profiles: {}                     # name -> gate kinds (setup, build, lint, typecheck, test, e2e, extra:<name>) that a plan's

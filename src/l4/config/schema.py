@@ -19,6 +19,7 @@ from pydantic import (
     StringConstraints,
     ValidationError,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -671,6 +672,50 @@ def _cron(value: str) -> str:
     return value
 
 
+def _toolchain_file(value: str) -> str:
+    """A repository-relative file read by the setup action (`go.work`, `.nvmrc`)."""
+    pure = PurePosixPath(value)
+    if not value or pure.is_absolute() or ".." in pure.parts or "\n" in value or '"' in value:
+        raise ValueFree("a version file must be a relative path inside the repository, without '..'")
+    return value
+
+
+class ToolchainCfg(_Strict):
+    """One toolchain the L4 job provides (L4-CI-005): exactly one of `version` and `version_file`."""
+
+    version: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")] | None = None
+    version_file: Annotated[str, AfterValidator(_toolchain_file)] | None = None
+
+    @model_serializer(mode="wrap")
+    def _without_unset(self, handler: Any) -> dict[str, Any]:
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
+class PnpmCfg(_Strict):
+    version: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")]
+
+
+class ToolchainsCfg(_Strict):
+    """`ci.toolchains` (L4-CI-005): the toolchains the generated GitHub job sets up before L4, for gates of Go and
+    TypeScript code. Unset entries are left out of the dump, so the default dumps as `{}`."""
+
+    go: ToolchainCfg | None = None
+    node: ToolchainCfg | None = None
+    pnpm: PnpmCfg | None = None
+
+    @model_validator(mode="after")
+    def _one_source(self) -> "ToolchainsCfg":
+        for name in ("go", "node"):
+            entry = getattr(self, name)
+            if entry is not None and (entry.version is None) == (entry.version_file is None):
+                raise ValueFree(f"ci.toolchains.{name}: give exactly one of version and version_file")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _without_unset(self, handler: Any) -> dict[str, Any]:
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
 class CiCfg(_Strict):
     platform: Literal["auto", "github", "gitlab", "local"] = "auto"
     max_parallel_units: int = Field(default=2, ge=1)
@@ -688,6 +733,8 @@ class CiCfg(_Strict):
     # whether the generated GitHub workflow uploads `.l4-out` (prompts and agent transcripts, secrets masked) as the
     # artifact `l4-out`; on a public repository any signed-in user can download it, so set false there
     upload_artifacts: bool = True
+    # the toolchains the generated GitHub job sets up before L4 (L4-CI-005); GitLab renders nothing
+    toolchains: ToolchainsCfg = Field(default_factory=ToolchainsCfg)
 
 
 class PriceEntry(_Strict):

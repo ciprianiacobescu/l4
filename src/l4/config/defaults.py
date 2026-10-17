@@ -66,6 +66,8 @@ CACHES = {
     "pip": ("$L4_CACHE/units/{unit}/cache/pip", "PIP_CACHE_DIR", False),
     "npm": ("$L4_CACHE/units/{unit}/cache/npm", "npm_config_cache", False),
     "go": ("$L4_CACHE/units/{unit}/cache/go", "GOMODCACHE", False),
+    "gobuild": ("$L4_CACHE/units/{unit}/cache/gobuild", "GOCACHE", False),
+    "pnpm": ("$L4_CACHE/units/{unit}/cache/pnpm", "pnpm_config_store_dir", False),
     "playwright": ("$L4_CACHE/shared/ms-playwright", "PLAYWRIGHT_BROWSERS_PATH", True),
 }  # name -> (path, env var, read_only)
 

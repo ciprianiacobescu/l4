@@ -7,9 +7,9 @@ Every task follows these rules:
 
 ## 1. Configuration (L4-CI-005)
 
-- [ ] 1.1 Tests: `ci.toolchains` loads `go`/`node`/`pnpm` with `version` or `version_file`; SCN-CI-21; the new default
+- [x] 1.1 Tests: `ci.toolchains` loads `go`/`node`/`pnpm` with `version` or `version_file`; SCN-CI-21; the new default
   caches `gobuild` and `pnpm`.
-- [ ] 1.2 `CiCfg.toolchains` in `config/schema.py`, the cache defaults in `config/defaults.py`, SPEC §3.2.
+- [x] 1.2 `CiCfg.toolchains` in `config/schema.py`, the cache defaults in `config/defaults.py`, SPEC §3.2.
 
 ## 2. Workflow and gate environment (L4-CI-005)
 
