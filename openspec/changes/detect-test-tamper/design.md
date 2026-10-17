@@ -126,8 +126,8 @@ non-autouse fixture only new tests request, a widened import line and a repeated
 
 Not covered, on purpose: fixtures and hooks in `conftest.py` and other test-support files. Red may change those
 (L4-IMP-002), a shared fixture often grows for a new feature, and a rule there would refuse honest work. They stay with
-the step-1 content scan, the red-to-green freeze, the support-file AST rule for opened files (L4-IMP-016), and, for the
-audit, D8. Open question 1 asks whether the AST rule should cover every changed support file.
+the step-1 content scan, the red-to-green freeze, the support-file AST rule (L4-IMP-016 rule 3, extended to every changed
+support file by D11 on the owner's decision) and, for the audit, D8.
 
 ### D3 A moved test is the same definition in a new place (L4-IMP-047)
 
@@ -242,7 +242,7 @@ New module `src/l4/verifier/support_base.py`:
   `tdd.test_support_globs` (which holds its `extra_` entries) and are not under a `.l4/` directory. Runner configuration
   (`tdd.runner_config_files`: `pyproject.toml`, `setup.cfg`, `package.json`, …) is **not** reverted: those files carry
   dependencies and build settings the run needs, and their test-runner sections are already held by the red-to-green
-  freeze and the step-1 `addopts` scan (open question 2).
+  freeze and the step-1 `addopts` scan (owner decision 2, section 5).
 - `support_plan(git, cfg, base_sha, head, integrity) -> SupportPlan`: `fallback` is true only when `integrity` is given
   and its check named `content scan` has status `ok`; `why_not` is `step 1's content scan did not read them: <its note>`
   (status `skipped`) or `step 1 did not run` (no report).
@@ -302,6 +302,23 @@ The base run is unchanged (the merge-base checkout already has the base support 
   step note ends with `support files at the base: <n>` when the plan had changes.
 - **Step 5:** the Generated UI tests rows say `support: base|head` when the plan had changes.
 
+### D11 Step 1: a support file may not patch the unit's code for every test (L4-VER-037)
+
+`integrity.check_scan` already ran rule 3 of `opened.check_opened` on the paths a `task.unfrozen` names. It now also runs
+it on every changed (not deleted) `.py` file that matches `tdd.test_support_globs` outside the unit directories, as
+`opened.new_patches(before, after, modules)`: the patches and assignments of a symbol of a production module the unit
+changed (`unit_modules`) that `after` has and `before` did not, each as `(target, blocking)`. **Blocking** unless the node
+sits inside a fixture that is not autouse and that no autouse fixture requests (its parameters, transitively): module
+level, a class body, an autouse fixture, a fixture an autouse fixture requests, a plain function and a hook all block,
+because they run for every test or their use is unknown. A blocking hit joins the hits of the content scan (so the
+`[test-infra]` exemption and the people's-commits listing of L4-SEC-004 apply as for every other hit): `<path>: patches
+<target>, which the unit changed, for every test`. The others are listed in `Outcome.mocked` /
+`IntegrityReport.mocked_support` (`<path>: patches <target> in a fixture a test requests`, note `(+n fixture patch(es) of
+the unit's code, listed)`), and verification.md shows them under `## Fixtures that patch the unit's code when a test
+requests them (L4-VER-037)`. Python only, as the rest of the scan. Known limit: a patch that the AST rule cannot name
+(`vars(module)["f"] = g`, a computed attribute) is not seen; the audit's run without the unit's support files (D8) is
+the second line, and SCN-VER-112 uses exactly that form.
+
 ## 3. Contracts
 
 - `tamper.facts_of(source: str) -> dict[str, Facts] | None` with `Facts(parts: tuple[str, ...], lines: tuple[int, ...],
@@ -319,6 +336,8 @@ The base run is unchanged (the merge-base checkout already has the base support 
   `GeneratedOutcome.support`; `verify.generated{…, support}`. No schema under `src/l4/schema/` describes the audit or
   generated rows of `verdict.json` [V: only `outcome.schema.json` is there]; whatever rebuilds these records from a
   stored round must accept a row without the new keys (an older round) and one with them.
+- `opened.new_patches(before, after, modules) -> list[(target, blocking)]`; `Outcome.mocked`, `IntegrityReport.mocked_support`
+  (D11).
 - Finding titles: `a pre-existing test was changed`, `a pre-existing test was deleted` (kept),
   `a red step changed a test that an earlier step wrote`.
 
@@ -326,27 +345,27 @@ The base run is unchanged (the merge-base checkout already has the base support 
 
 - Other languages: the comparison reads Python; a changed non-Python test file keeps today's checks (names and skip
   markers are Python too). Same as the content scan [U].
-- Fixtures in `conftest.py` and support files (D2) and runner configuration (D8): see open questions 1 and 2.
+- Fixtures in `conftest.py` and support files (D2, D11) and runner configuration (D8): owner decisions 1 and 2.
 - The closure may refuse an honest red that edits a helper or constant an old test also uses. The retry text says how to
-  avoid it (a new name). If live runs show it often, the owner can narrow D2 (open question 4); the rule is never relaxed
+  avoid it (a new name). If live runs show it often, the owner can narrow D2 (decision 4 keeps it strict for now); the rule is never relaxed
   silently in a fixture.
 - `--continue-on-collection-errors` is a pytest option. The audit writes pytest tests only (the step is `not_run` for
   other code, `ladder._no_python`), so it is set only there.
 - `support_at_base` edits the worktree for the length of a run. A killed verifier can leave it edited; the verifier
   starts every round from a fresh worktree at the unit head (L4-VER-001), so nothing reaches a commit.
 
-## 5. Open questions for the owner
+## 5. Owner decisions on the open questions (applied)
 
-1. Should step 1's support-file AST rule (no patch of the unit's changed symbols, L4-IMP-016 rule 3) run on every changed
-   support file, not only opened ones? The reviewer calls it the full fix for verifier-6, since the audit covers only
-   `audit_sample_ratio` of the criteria. It can refuse honest mocks of the unit's own functions in a shared fixture.
-2. Should the audit also revert the pytest-only runner files (`pytest.ini`, `.pytest.ini`, `pytest.toml`,
-   `.pytest.toml`)? An `ini` `usefixtures` line is not caught by the `addopts` scan.
-3. Add the weakened-test case and the conditional-conftest case to the eval seed set (changes `seed_set_sha256`), so
-   SC-03's tampering subset holds them?
-4. If the closure (D2) refuses honest red steps in live runs, narrow it to fixtures and autouse/module hooks, or keep it?
-5. `CHANGELOG.md` has no `## 0.4.15` section; this change writes under `## 0.4.16 (unreleased)` as asked. Which change
-   owns 0.4.15, and does a docs test expect the top section to be the next version?
+1. **The support-file AST rule covers every changed test-support file** (D11, L4-VER-037): an autouse fixture or
+   module-level code that patches a production symbol the unit changed is a blocker; a fixture a test requests by name
+   (an ordinary mock) is listed.
+2. **The audit does not revert pytest-only runner files** (`pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`,
+   `tox.ini`, `setup.cfg`, `pyproject.toml`): another change of the same release (`guard-harness-writes`) guards runner
+   configuration in red and green. `support_plan` leaves every `tdd.runner_config_files` path out (D8).
+3. **No eval seed-set change.** The regression tests of this change are the tampering cases.
+4. **The in-file closure (D2) stays strict as designed.**
+5. **0.4.15 is another change (the MCP server).** This change's `CHANGELOG.md` entries are under `## 0.4.16
+   (unreleased)`; a released section is never edited.
 
 ## Appendix A: the reproductions
 

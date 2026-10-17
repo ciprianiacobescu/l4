@@ -97,8 +97,9 @@ SHALL restore each byte for byte afterwards, also after an error. The run SHALL 
 file. Runner configuration files SHALL not be reverted. With no support change the run is as before.
 
 #### Scenario: SCN-VER-112 (−) The broken code is held when the unit's conftest is set aside
-- **GIVEN** the verifier-6 reproduction: red adds `tests/conftest.py` with an autouse fixture that swaps
-  `apply_discount` for a correct one while `CODES` is not empty, and green ships `return amount`
+- **GIVEN** the verifier-6 reproduction written so that step 1's AST rule (L4-VER-037) does not see it (the autouse
+  fixture patches through `vars()`): red adds `tests/conftest.py` with an autouse fixture that swaps `apply_discount`
+  for a correct one while `CODES` is not empty, and green ships `return amount`
 - **WHEN** the unit is verified with `audit_sample_ratio: 0.5`
 - **THEN** the audit record SHALL be `failed` with `support: "base"`, its criterion SHALL be held, and the verdict SHALL
   not be PASS
@@ -167,7 +168,8 @@ at the merge base SHALL be unchanged, and `verify.generated` SHALL carry `suppor
 ### Requirement: L4-VER-036 A person sees how each verifier test ran
 `verify.audit` SHALL carry `support` (`base`, `head` or `unchanged`) and `support_files`, and verification.md's Audit
 table SHALL show a `Support` column. verification.md SHALL list the pre-existing test changes that L4-VER-031 allowed
-under `## Pre-existing tests changed with an allowance (L4-VER-031)`.
+under `## Pre-existing tests changed with an allowance (L4-VER-031)` and the fixtures of L4-VER-037 that patch the
+unit's code on request.
 
 #### Scenario: SCN-VER-120 (+) verification.md says how each audit test ran and lists the allowed changes
 - **GIVEN** a round with one audit test run at the base support, one that fell back, and one allowed `[test-infra]`
@@ -182,15 +184,38 @@ under `## Pre-existing tests changed with an allowance (L4-VER-031)`.
 - **THEN** `## Rejected audit tests` SHALL list the criterion with the reason that starts with `it does not run with the
   unit's support files at the base` and names the content scan's note
 
+### Requirement: L4-VER-037 Step 1 blocks a support file that patches the unit's code for every test
+Step 1 SHALL check every changed Python test-support file, not only an opened one, for a new patch or assignment of a
+symbol of a production module the unit changed (L4-IMP-016 rule 3). One that runs for every test, or whose use is
+unknown, SHALL be a content-scan blocker; one inside a fixture that a test requests by name SHALL be listed. A person's
+commit and a `[test-infra]` task SHALL be handled as for every other content-scan hit.
+
+#### Scenario: SCN-VER-124 (−) An autouse fixture that patches the unit's code is a blocker
+- **GIVEN** a unit that changed `src/pytdd/pricing.py` and added `tests/conftest.py` with an autouse fixture that
+  swaps `pytdd.pricing.apply_discount` (the verifier-6 reproduction as the reviewer wrote it)
+- **WHEN** step 1 runs
+- **THEN** the content scan SHALL fail with `tests/conftest.py: patches pytdd.pricing.apply_discount.__code__, which the
+  unit changed, for every test`, and the ladder SHALL stop before step 2
+
+#### Scenario: SCN-VER-125 (+) A fixture a test requests by name is listed
+- **GIVEN** the same unit with `tests/conftest.py` holding a plain `@pytest.fixture` that monkeypatches
+  `pytdd.pricing.apply_discount`, which no autouse fixture requests
+- **WHEN** step 1 runs
+- **THEN** it SHALL raise no finding and list `tests/conftest.py: patches pytdd.pricing.apply_discount in a fixture a
+  test requests` under `Fixtures that patch the unit's code when a test requests them`; module-level code, a fixture
+  an autouse fixture requests and a plain function SHALL block like an autouse fixture
+
 ## MODIFIED Requirements
 
 ### Requirement: L4-VER-002 Ladder
 Steps run in order; a hard failure in steps 0–3 stops the ladder with `FAIL` (evidence collected so far is still
-written). Each step is resumable (L4-VER-011). In the step table of docs/SPEC.md §10.2 three cells change and every
+written). Each step is resumable (L4-VER-011). In the step table of docs/SPEC.md §10.2 three cells change (and one clause of row 1's content scan, below) and every
 other cell stays as it is. Row 1 (integrity): the clause "no deleted/skipped/weakened pre-existing tests (diff
 analysis)" SHALL read "no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an
 earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name
-(L4-VER-030..032; people's changes and allowed ones are listed)". Row 4a: the sentence "Audit and generated tests run with
+(L4-VER-030..032; people's changes and allowed ones are listed)". Row 1, content scan: "the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes" SHALL read
+"the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file (L4-VER-037) and stays
+[U] for other languages". Row 4a: the sentence "Audit and generated tests run with
 the unit's added or changed support files reverted to their base versions where they still collect; otherwise with them,
 provided the step-1 content scan of those files is clean" SHALL read "Audit tests, and their zero-value run, run with the
 unit's added, changed or deleted test-support files at their base versions, past other files' collection errors

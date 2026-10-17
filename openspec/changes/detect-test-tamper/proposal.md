@@ -28,6 +28,8 @@ section 1, re-run in this worktree):
   (`a pre-existing test was changed` / `…deleted`) unless `tests.superseded`, a `[test-infra]` task or a `task.unfrozen`
   of the same task allows it; people's changes are listed. A later red commit that changes a test an earlier step of the
   unit wrote is a blocker too.
+- **Step 1, support files** (L4-VER-037): an autouse fixture or module-level code in any changed test-support file that
+  patches a symbol of a module the unit changed is a blocker; a fixture a test requests by name is listed.
 - **Step 4a and step 5's head run** (L4-VER-033..036): the unit's added, changed or deleted test-support files are put at
   their base versions for the run and restored byte for byte; a test that does not run that way runs with them only
   when step 1's content scan is `ok`, else it is rejected. `verify.audit`, `verify.generated` and verification.md say
@@ -40,8 +42,8 @@ section 1, re-run in this worktree):
   `verifier/integrity.py` (`check_tests`), `verifier/types.py`, `verifier/audit.py`, `verifier/generate.py`,
   `verifier/ladder.py`, `verifier/report.py`. Tests under `tests/unit/implementer/` and `tests/unit/verifier/`, the
   reviewer's four reproductions among them.
-- Spec: L4-IMP-045..048 and L4-VER-030..036 added; L4-IMP-006 and L4-VER-002 (rows 1, 4a, 5) modified;
-  SCN-IMP-260..277, SCN-VER-100..123.
+- Spec: L4-IMP-045..048 and L4-VER-030..037 added; L4-IMP-006 and L4-VER-002 (rows 1, 4a, 5) modified;
+  SCN-IMP-260..277, SCN-VER-100..125.
 - Behaviour a consumer sees: a red attempt that edits an existing test now fails and is retried; a unit whose branch
   weakened a pre-existing test fails step 1 (a person restores the test on the unit branch); an audit test that relied
   on the unit's own `conftest.py` is held or rejected instead of accepted. Nothing changes for a unit that leaves its

@@ -132,6 +132,10 @@ class IntegrityReport:
     unfrozen: list[str] = field(default_factory=list)  # frozen tests a human answer unfroze for green (M1.10)
     human_suppressions: list[str] = field(default_factory=list)  # inline suppressions a person's commit wrote (W-D6)
     human_scan: list[str] = field(default_factory=list)  # content-scan hits only people's commits introduced (W-D6)
+    allowed_tests: list[str] = field(default_factory=list)  # pre-existing test changes an allowance covers (L4-VER-031)
+    mocked_support: list[str] = field(
+        default_factory=list
+    )  # fixtures a test requests that patch the unit's code (listed)
 
     @property
     def blocked(self) -> bool:
@@ -172,6 +176,8 @@ class AuditRecord:
     test_path: str = ""
     tests: tuple[str, ...] = ()
     reason: str = ""
+    support: str = ""  # how it ran: base (support files at the base), head (with them) or unchanged (L4-VER-036)
+    support_files: tuple[str, ...] = ()  # the support files reverted for a `base` run, the unit's for a `head` run
 
 
 GenStatus = Literal[
@@ -199,6 +205,7 @@ class GeneratedOutcome:
     head: RunOutcome | None = None
     tests: tuple[str, ...] = ()  # accepted: the ids of the new file's tests in the head report (the evidence)
     sha256: str = ""  # accepted: of the file as written, so that a later round can tell it is still ours
+    support: str = ""  # the head run: base (the unit's support files at the base), head (with them) or unchanged
 
     @property
     def accepted(self) -> bool:
