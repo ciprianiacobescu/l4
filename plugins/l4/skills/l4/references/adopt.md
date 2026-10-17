@@ -22,7 +22,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.12   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.13   # or @<sha>
 l4 --version
 ```
 
@@ -31,9 +31,9 @@ l4 --version
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.12 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.13 [--dependabot] [--s1 laya|jev|none]
 # a private harness, and a public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.12
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.13
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -42,7 +42,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.12`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.13`; that line
   is the only pin.
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -75,7 +75,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.12`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.13`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -170,8 +170,23 @@ implementer:
   Keep one judge of another vendor, here `codex-judge`.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
-- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.12`) before you
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.13`) before you
   edit the config: the schema is strict.
+
+## 4c. A polyglot repository
+
+The L4 job installs Python, uv and the agent CLIs, nothing else. For Go or TypeScript gates set `ci.toolchains`
+(`l4 init` proposes it from `go.work`/`go.mod`, `.nvmrc`/`engines.node` and `packageManager: pnpm@X`), then run
+`l4 upgrade`, which puts pinned `actions/setup-go`, `actions/setup-node` and `pnpm/action-setup` steps before L4:
+
+```yaml
+ci:
+  toolchains: {go: {version_file: go.work}, node: {version: "22"}, pnpm: {version: "11"}}
+```
+
+Then write the gates for those languages (`go test ./...`, `pnpm test`). With `go` set, gates run with
+`GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`; the Go and pnpm caches are per unit. `l4 doctor --adoption` (TOOL-001)
+names a gate command whose tool is not on the PATH. On GitLab the runner image must provide the toolchains.
 
 ## 5. Upgrades
 

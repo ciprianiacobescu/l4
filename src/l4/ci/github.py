@@ -21,6 +21,11 @@ HOSTED_RUNNER = "ubuntu-24.04"
 # one number for `timeout-minutes` and the job env `L4_JOB_TIMEOUT_MINUTES` the soft deadline reads (L4-GHP-003)
 JOB_TIMEOUT_MINUTES = 180
 CACHE_ACTION = "actions/cache/{op}@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0"
+# The toolchain setup actions of `ci.toolchains` (L4-CI-005), pinned like CACHE_ACTION: the full commit sha of the
+# release tag in the comment (an annotated tag is peeled to its commit: `git ls-remote <repo> 'refs/tags/<tag>^{}'`).
+SETUP_GO_ACTION = "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0"
+SETUP_NODE_ACTION = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0"
+SETUP_PNPM_ACTION = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0"
 # Only user-local tool directories. Never a credential path (`l4.config.defaults.CREDENTIAL_PATHS`): the login of
 # opencode and kiro-cli lives under ~/.local/share/<tool>, so those two directories are left out on purpose.
 CACHE_PATHS = (
@@ -200,6 +205,37 @@ def _hosted_blocks(cfg: L4Config) -> dict[str, str]:
     }
 
 
+def _toolchain_steps(cfg: L4Config) -> str:
+    """The setup steps of `ci.toolchains`, in the order go, node, pnpm, before the L4 steps (L4-CI-005). The actions'
+    own dependency caches stay off: L4's per-unit caches serve the gates. Nothing without `ci.toolchains`."""
+    tools = cfg.ci.toolchains
+    steps: list[str] = []
+
+    def source(entry, key: str, file_key: str) -> str:
+        return (
+            f"{key}: {json.dumps(entry.version)}"
+            if entry.version is not None
+            else f"{file_key}: {json.dumps(entry.version_file)}"
+        )
+
+    if tools.go is not None:
+        steps.append(
+            f"      - name: set up Go\n        uses: {SETUP_GO_ACTION}\n        with:\n"
+            f"          {source(tools.go, 'go-version', 'go-version-file')}\n          cache: false"
+        )
+    if tools.node is not None:
+        steps.append(
+            f"      - name: set up Node\n        uses: {SETUP_NODE_ACTION}\n        with:\n"
+            f"          {source(tools.node, 'node-version', 'node-version-file')}"
+        )
+    if tools.pnpm is not None:
+        steps.append(
+            f"      - name: set up pnpm\n        uses: {SETUP_PNPM_ACTION}\n        with:\n"
+            f"          version: {json.dumps(tools.pnpm.version)}"
+        )
+    return "\n".join(steps)
+
+
 def render_github_ci(cfg: L4Config) -> str:
     tags = list(cfg.ci.runner_tags)
     hosted = not tags
@@ -218,6 +254,7 @@ def render_github_ci(cfg: L4Config) -> str:
         "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
         "CREDENTIAL_ENV": "\n".join(f"      {name}: ${{{{ secrets.{name} }}}}" for name in credential_secrets(cfg)),
         "HARNESS_KEY": _harness_key_step(cfg),
+        "TOOLCHAINS": _toolchain_steps(cfg),
         "HOSTED_ENV": "", "HOSTED_SETUP": "", "HOSTED_SAVE": "",
         **(_hosted_blocks(cfg) if hosted else {}),
     }  # fmt: skip
@@ -337,6 +374,7 @@ def render_github_action_ci(cfg: L4Config, pin: ActionPin) -> str:
             "UPLOAD": _upload_step(cfg),
             "ENVIRONMENT": _environment_block(cfg.ci.github_environment),
             "CREDENTIAL_ENV": "\n".join(f"      {n}: ${{{{ secrets.{n} }}}}" for n in credential_secrets(cfg)),
+            "TOOLCHAINS": _toolchain_steps(cfg),
             "ACTION_STEP": _action_step(cfg, pin, hosted=hosted),
             "CLIS_SAVE": _clis_save_step(hosted),
             "LAYA_SAVE": _laya_save_step(cfg, hosted),

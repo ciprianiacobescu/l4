@@ -6,6 +6,7 @@ installs it); every other extra is listed as not installed and `--all-extras` is
 (`embed` pulls torch) must not become every runner's setup. Other ecosystems keep the M0 gates and a TODO.
 """
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +34,7 @@ class Proposal:
     todos: tuple[str, ...] = ()  # one `# TODO:` line each, at the top of the config
     notes: tuple[str, ...] = ()  # what init tells the human
     extras_not_installed: tuple[str, ...] = field(default=())
+    toolchains: dict = field(default_factory=dict)  # the proposed `ci.toolchains` (L4-CI-005)
 
 
 def detect_python(repo: Path) -> PythonEco:
@@ -96,3 +98,45 @@ def propose_gates(eco: PythonEco) -> Proposal:
         notes.append("coverage.py is not installed by gates.setup: diff coverage will be recorded `not_run`")
     gates = {"setup": [setup], "test": dict(M0_GATES["test"]), "lint": lint}
     return Proposal(gates, tuple(todos), tuple(notes), others)
+
+
+def _package_json(repo: Path) -> dict:
+    try:
+        data = json.loads((repo / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def detect_toolchains(repo: Path) -> dict:
+    """The proposed `ci.toolchains` (L4-CI-005) from what the repository says about its toolchains, at its root: Go
+    from `go.work` or else `go.mod` (`version_file`), Node from `.nvmrc` (`version_file`) or else `package.json`
+    `engines.node` (`version`), pnpm from `packageManager: "pnpm@X"` (`version: X`, a `+sha` suffix dropped).
+    Nothing is proposed for what the files do not name."""
+    found: dict = {}
+    for name in ("go.work", "go.mod"):
+        if (repo / name).is_file():
+            found["go"] = {"version_file": name}
+            break
+    package = _package_json(repo)
+    engines = package.get("engines")
+    node = engines.get("node") if isinstance(engines, dict) else None
+    if (repo / ".nvmrc").is_file():
+        found["node"] = {"version_file": ".nvmrc"}
+    elif isinstance(node, str) and node.strip():
+        found["node"] = {"version": node.strip()}
+    manager = package.get("packageManager")
+    if isinstance(manager, str) and manager.startswith("pnpm@") and manager[5:].split("+")[0]:
+        found["pnpm"] = {"version": manager[5:].split("+")[0]}
+    return found
+
+
+def toolchain_todos(toolchains: dict) -> tuple[str, ...]:
+    if not toolchains:
+        return ()
+    names = ", ".join(toolchains)
+    return (
+        f"ci.toolchains sets up {names} before L4 in the GitHub workflow (GitLab: the image must provide them); "
+        "the gates below are the Python defaults: add the gates of the other languages (gates.setup, build, lint, "
+        "test)",
+    )

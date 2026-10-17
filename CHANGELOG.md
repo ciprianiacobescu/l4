@@ -6,6 +6,29 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.13 (2026-10-17)
+
+### Added
+- `ci.toolchains` provides the toolchains a polyglot repository's gates need. The generated GitHub workflow (action,
+  copy and plain forms) sets up Go, Node and pnpm before L4 with `actions/setup-go`, `actions/setup-node` and
+  `pnpm/action-setup`, pinned by commit sha and with their own dependency caches off; each entry takes exactly one of
+  `version` and `version_file` (pnpm: `version`). Without it the workflow is unchanged. New default caches `gobuild`
+  (`GOCACHE`) and `pnpm` (the store directory); with a `go` entry the gates run with `GOTOOLCHAIN=local` and
+  `GOFLAGS=-mod=readonly`. Doctor row TOOL-001 names a gate command whose first word is not on the gate PATH (a warning
+  in `l4 doctor --adoption`, an error in a CI run), and `l4 init` proposes `ci.toolchains` from `go.work`/`go.mod`,
+  `.nvmrc`/`engines.node` and `packageManager: pnpm@X`.
+
+### Fixed
+- A repository that adopts L4 with finished Kiro specs is no longer stopped by them. Doctor's SPEC-002 was an error and
+  intake rejected the unit for history L4 never runs: a done leaf without a `_Requirements:_` line, or with a
+  reference no criterion has, a `## Task Dependency Graph` whose block is a mermaid diagram, a whole-requirement
+  reference such as `_Requirements: 1_`, `## Requirement N` with `### Acceptance Criteria` (one heading level higher
+  than `### Requirement N` with `#### Acceptance Criteria`), and a number inside a word such as `ADR-0014.8` or
+  `AC3`. Now a done leaf's missing or unresolvable link and a graph block that is not JSON are warnings (the tasks run
+  in document order); a pending leaf keeps its rule, and a JSON graph that is wrong stays an error. A reference `N`
+  resolves when requirement `N` has criteria, both heading levels are read, and a number counts as a reference only
+  when it stands alone. SPEC-004 lists the pending leaves only.
+
 ## 0.4.12 (2026-10-17)
 
 ### Changed

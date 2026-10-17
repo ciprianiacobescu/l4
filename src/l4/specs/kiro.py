@@ -50,7 +50,8 @@ KIRO_TASK_RE = re.compile(r"^(\s*)([-*+])\s+\[([ xX\-~])\](\\?\*?)\s+(.+)$")  # 
 _NUMBER = re.compile(r"^(\d+(?:\.\d+)*)\.?(?=\s|$)")
 _LOOKS_LIKE_TASK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s*\[[^\]]*\]")
 _REQUIREMENTS = re.compile(r"_Requirements:\s*([^_\n]*)_")
-_REF = re.compile(r"\d+(?:\.\d+)*")
+# a reference stands alone: not inside a word or a dotted name (`ADR-0014.8`, `AC3`), L4-KSP-006
+_REF = re.compile(r"(?<![\w.\-])\d+(?:\.\d+)*(?!\w)")
 _GRAPH_HEADING = re.compile(r"^##\s+Task Dependency Graph\s*$", re.MULTILINE)
 _NEXT_SECTION = re.compile(r"^##\s", re.MULTILINE)
 _JSON_FENCE = re.compile(r"^```json[ \t]*\r?\n(.*?)^```", re.MULTILINE | re.DOTALL)
@@ -179,39 +180,46 @@ class Waves:
 def parse_waves(text: str, known: Collection[str] | None = None) -> tuple[Waves | None, str | None]:
     """(waves, why-not). No graph section: (None, None). A section that is not a valid graph: (None, reason). With
     `known` (the task keys), a task id that names no task makes the graph invalid."""
+    waves, why, _ = _read_graph(text, known)
+    return waves, why
+
+
+def _read_graph(text: str, known: Collection[str] | None) -> tuple[Waves | None, str | None, bool]:
+    """`parse_waves` and whether a reason is that the block is not JSON at all (L4-KSP-006): no ```json fence, or a
+    fence that does not parse. Any other reason is a JSON graph that is wrong."""
     heading = _GRAPH_HEADING.search(text)
     if heading is None:
-        return None, None
+        return None, None, False
     rest = text[heading.end() :]
     following = _NEXT_SECTION.search(rest)
     section = rest[: following.start()] if following else rest
     fence = _JSON_FENCE.search(section)
     if fence is None:
-        return None, "no ```json block under the heading"
+        return None, "no ```json block under the heading", True
     try:
         document = json.loads(fence.group(1))
     except ValueError as exc:
-        return None, f"the JSON does not parse ({exc})"
+        return None, f"the JSON does not parse ({exc})", True
     waves = document.get("waves") if isinstance(document, dict) else None
     if not isinstance(waves, list):
-        return None, 'the JSON has no "waves" list'
+        return None, 'the JSON has no "waves" list', False
     by_task: dict[str, int] = {}
     seen_ids: set[int] = set()
     for wave in waves:
         wave_id = wave.get("id") if isinstance(wave, dict) else None
         ids = wave.get("tasks") if isinstance(wave, dict) else None
         if not isinstance(wave_id, int) or isinstance(wave_id, bool) or wave_id in seen_ids:
-            return None, "a wave has no integer id, or its id repeats"
+            return None, "a wave has no integer id, or its id repeats", False
         if not isinstance(ids, list) or not all(isinstance(t, str) for t in ids):
-            return None, f"wave {wave_id} has no list of task ids"
+            return None, f"wave {wave_id} has no list of task ids", False
         seen_ids.add(wave_id)
         for task_id in ids:
             if task_id in by_task:
-                return None, f"task {task_id} is in two waves"
+                return None, f"task {task_id} is in two waves", False
             if known is not None and task_id not in known:
-                return None, f"wave {wave_id} names task {task_id}, which is not in tasks.md"
+                return None, f"wave {wave_id} names task {task_id}, which is not in tasks.md", False
             by_task[task_id] = wave_id
-    return Waves(by_task), None
+    return Waves(by_task), None, False
 
 
 def read_waves(text: str, known: Collection[str] | None = None) -> Waves | None:
@@ -484,7 +492,12 @@ class KiroProvider:
         return bool(tags & {k.lower() for k in self._exempt})
 
     def leaves_without_requirements(self, unit: UnitRef) -> list[Task]:
-        """SPEC-004: required leaves with no `_Requirements:_` link that are not TDD-exempt. A chore of a fix unit is
+        """SPEC-004: the pending required leaves with no `_Requirements:_` link that are not TDD-exempt; a done leaf is
+        finished history, which validation only warns about (L4-KSP-006)."""
+        return [t for t in self._unlinked(unit) if not t.done]
+
+    def _unlinked(self, unit: UnitRef) -> list[Task]:
+        """Required leaves with no `_Requirements:_` link that are not TDD-exempt, done or not. A chore of a fix unit is
         the harness's own (its finding id is in the marker's `chores`), so it needs no link whatever the configured
         exempt kinds are (L4-FBK-008)."""
         directory = self.unit_dir(unit)
@@ -518,20 +531,22 @@ class KiroProvider:
             if _LOOKS_LIKE_TASK.match(body) and not KIRO_TASK_RE.match(body):
                 found.append(ValidationIssue(grammar, "tasks.md", "not a task under Kiro's grammar", line.number))
         tasks = parse_kiro_tasks(data)
-        _, why = parse_waves(text, {t.key for t in tasks})
-        if why:
-            found.append(ValidationIssue("ERROR", "tasks.md", f"invalid Task Dependency Graph: {why}"))
+        _, why, not_json = _read_graph(text, {t.key for t in tasks})
+        if why:  # a block that is not JSON (a diagram) is read in document order, as the reader does (L4-KSP-006)
+            found.append(
+                ValidationIssue("WARNING" if not_json else "ERROR", "tasks.md", f"invalid Task Dependency Graph: {why}")
+            )
         aliases = {c.alias for c in self.criteria(unit)}
         for task in tasks:
             for ref in task.links:
-                if f"Req {ref}" not in aliases:
+                if f"Req {ref}" not in aliases and not any(a.startswith(f"Req {ref}.") for a in aliases):
                     hint = _form_hint(ref, aliases)
                     message = f"task {task.key} cites _Requirements: {ref}_, which no criterion has{hint}"
-                    found.append(ValidationIssue("ERROR", "tasks.md", message, task.line))
+                    found.append(ValidationIssue("WARNING" if task.done else "ERROR", "tasks.md", message, task.line))
         level: Literal["ERROR", "WARNING"] = "ERROR" if self._enforce else "WARNING"
-        for task in self.leaves_without_requirements(unit):
+        for task in self._unlinked(unit):
             message = f"task {task.key} has no _Requirements:_ line and is not TDD-exempt"
-            found.append(ValidationIssue(level, "tasks.md", message, task.line))
+            found.append(ValidationIssue("WARNING" if task.done else level, "tasks.md", message, task.line))
         return found
 
 
