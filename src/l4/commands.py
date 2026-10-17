@@ -94,6 +94,7 @@ OWNING_CHANGE: dict[str, str] = {
             "yolo review",
             "yolo findings",
             "yolo accept",
+            "yolo waive",
             "yolo activate",
             "yolo status",
             "yolo cancel",

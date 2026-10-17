@@ -19,10 +19,8 @@ SECTION_2_1 = {
 }  # fmt: skip
 
 EXTRA = {"s1"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
-YOLO = {
-    f"yolo {w}"
-    for w in ("draft", "check", "review", "findings", "accept", "activate", "status", "cancel", "resume", "report")
-}  # yolo-mode D6
+YOLO_WORDS = ("draft", "check", "review", "findings", "accept", "waive", "activate", "status", "cancel", "resume")
+YOLO = {f"yolo {w}" for w in (*YOLO_WORDS, "report")}  # yolo-mode D6; waive: L4-YOLO-031
 EXTRA |= YOLO
 
 # minimal valid argv per command, including options that are required
@@ -61,6 +59,7 @@ ARGV = {
     "yolo review": ["yolo", "review", "p1"],
     "yolo findings": ["yolo", "findings", "p1"],
     "yolo accept": ["yolo", "accept", "p1", "openspec:a", "--reason", "go"],
+    "yolo waive": ["yolo", "waive", "p1", "F-0a1b2c", "--reason", "go"],
     "yolo activate": ["yolo", "activate", "p1", "--reason", "go"],
     "yolo status": ["yolo", "status"],
     "yolo cancel": ["yolo", "cancel", "p1", "--reason", "why"],
