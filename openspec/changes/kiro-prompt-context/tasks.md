@@ -241,7 +241,7 @@ Every task follows these rules:
 
 ## 7. Docs
 
-- [ ] 7.1 `docs/SPEC.md`:
+- [x] 7.1 `docs/SPEC.md`:
   - **§4.5:** the L4-KSP-003 sentence of the MODIFIED text, and L4-KSP-010..014 as `**L4-KSP-01n**` paragraphs after
     L4-KSP-006, each with the requirement text of this change.
   - **§7.2:** the L4-IMP-003 sentence (`For a Kiro leaf, the cited criteria SHALL be …`).
@@ -264,7 +264,7 @@ Every task follows these rules:
   - **§23.7:** SCN-IMP-280..299 in the house form (`#### SCN-IMP-280 (+) Title · L4-IMP-004`, then `- **Given**` /
     `- **When**` / `- **Then**` / `- **And**`), with the text of this change's scenarios.
   - `python scripts/check_spec.py docs/SPEC.md` passes (no uncovered requirement, no duplicate scenario).
-- [ ] 7.2 The other docs:
+- [x] 7.2 The other docs:
   - **`CHANGELOG.md` under `## 0.4.16 (unreleased)`** (create the heading above the newest section if it is missing):
     - Added: steering as data; the cut list and `prompt.truncated`; the dry-run, status and doctor lines; the
       per-profile budget.

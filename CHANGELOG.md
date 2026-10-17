@@ -6,6 +6,49 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (unreleased)
+
+### Added
+- Kiro steering reaches the implementer as data. The harness reads `.kiro/steering/*.md` on the host and puts each file
+  that applies under `# Project conventions` as an `<l4:data>` block, by its Kiro front matter: none or `always`
+  (always), `fileMatch` (a pattern matches a path of the task or of the unit branch), `manual` (the task, the
+  requirements or the design names it as `#<file>`) and `auto` (after the others, when the budget has room). An
+  OpenSpec unit gets the `context` of `openspec/config.yaml` the same way, never its `rules`. The sandbox masks stay,
+  and `~/.kiro/steering` is never read. `implementer.include_agents_md: true` adds the repository root's `AGENTS.md`
+  as a convention (never `CLAUDE.md`).
+- Nothing is cut silently any more. A source that is cut by the budget or not read (over 262,144 bytes, a symbolic link,
+  a file that is not regular) is named under `# Not shown in full` with its path, the characters shown and the lines
+  left out, and the run records `prompt.truncated`. `prompt.rendered` records `budget_tokens`, `budget_source` and the
+  steering decisions.
+- `l4 run --dry-run` prints per unit the budget, each steering decision and each cut. `l4 status --unit` prints the
+  last `Prompt cut:` and `--json` has `prompt_cut`. Doctor SPEC-004 warns when the next task's prompt would cut a source.
+- A profile may set `context_budget_tokens` for its own steps, for a small local model in a fallback chain.
+- The step-9 judge gets each done task's whole block (detail bullets included) and is asked whether the diff does what
+  each task's text says; `verifier.judge_context_budget_tokens` (48000) bounds its spec text in the implementer's
+  priority order, and a spec file it did not see whole is named to it.
+
+### Changed
+- Every implementer prompt carries each criterion's full text and the task's whole block from `tasks.md` (the enclosing
+  headings, the parent tasks' lines, the detail bullets and the `_Requirements:_` line), never cut. The rest of the
+  budget is filled in a fixed order by whole sections: conventions (at most half), the requirements narrative, the
+  design and the proposal, the sections the task names first.
+- `implementer.context_budget_tokens` rises from 24000 to 32000.
+- The clarifier's documents are chosen by the same builder, order and cut list (`clarifier@5`).
+- Step 1's declared scope reads a Kiro unit's `requirements.md` and `bugfix.md`.
+- Templates `contract@12` (conventions, the cut list), `red@11` (every listed criterion needs a new test or an earlier
+  proof) and `judge@10` (the cut-list rule, the done-tasks block).
+
+### Fixed
+- Requirements and the criteria text no longer disappear behind a long `design.md` (a Kiro unit whose design was 125,492
+  characters lost its `requirements.md` to the budget).
+- A spec file over 262,144 bytes was dropped from the implementer's and the judge's prompt without a word; it is now read
+  up to the limit and named, and the judge holds the round.
+- A Kiro leaf's cited criteria were not required in red: a red step that tested one of `_Requirements: 1.1, 1.2_` passed,
+  and the no-new-test path ticked such a leaf without proving the other. Red now fails with a reason that names the
+  criterion and the line; a criterion that an earlier red already proved needs no copy (review finding implementer-5).
+- A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
+  item `2.1` both counted; they resolve against the fix unit's own items.
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

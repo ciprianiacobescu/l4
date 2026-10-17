@@ -57,3 +57,4 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
 - `references/plan.md`: making and updating a delivery plan: `l4 yolo draft`, evidence for each dependency, the
   validator, `l4 yolo check`, and what to hand to a person.
 - `references/spec.md`: writing a spec for L4 so that it passes the readiness review on the first try.
+- `references/kiro.md`: what a Kiro unit's prompt carries (criteria text, task block, steering) and how to see and fix a cut.
