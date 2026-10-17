@@ -7,6 +7,7 @@ M1: implementer-tdd-loop's other formats (playwright-json, pytest-json, tap) com
 
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -124,6 +125,26 @@ def _status(case: ET.Element) -> tuple[Status, str, str, str]:
             kind_type = (child.get("type") or "") if status in ("failed", "error") else ""
             return status, message, detail[-MAX_DETAIL_CHARS:], kind_type
     return "passed", "", "", ""
+
+
+_WORSE = {"error": 3, "failed": 2, "passed": 1, "skipped": 0}
+
+
+def merge_reports(reports: Sequence[TestReport]) -> TestReport:
+    """One report of several (L4-GAT-005: a test gate that runs several suites lists one report each). A test id that
+    two reports hold keeps the worse result (error, failed, passed, skipped), so a failure is never hidden by a
+    second run of the same test; the collection errors of every report are kept, each once."""
+    if len(reports) == 1:
+        return reports[0]
+    tests: dict[str, TestCase] = {}
+    errors: list[str] = []
+    for report in reports:
+        for test_id, case in report.tests.items():
+            held = tests.get(test_id)
+            if held is None or _WORSE[case.status] > _WORSE[held.status]:
+                tests[test_id] = case
+        errors += [e for e in report.collection_errors if e not in errors]
+    return TestReport(tests, errors)
 
 
 def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:

@@ -234,6 +234,10 @@ repository then holds only `.l4/config.yaml`, `.github/workflows/l4.yml` and the
 vendored code, no `harness.commit`. The `uses:` line of the workflow is the only pin. Pick the form that fits the
 repository:
 
+- **A public harness repository (the published one): no key, for any repository.** Adopt with
+  `l4 init --ci github --action --harness-ref v0.4.10`. The adopting repository's Actions policy must allow actions
+  from other repositories (Settings > Actions > General: "Allow all actions", or an allow-list that names the harness).
+  The two forms below are for a harness repository that is private.
 - **A private repository of the same owner as the harness: no key.**
   1. In the harness repository, open Settings > Actions > Access and choose "Accessible from repositories owned by …".
      Anyone who can push a workflow to a private repository of that owner can then read the harness through the
@@ -247,8 +251,8 @@ repository:
      `uses: <owner>/<harness>/.github/actions/l4@<sha> # v0.4.10`. A ref that resolves to nothing is exit 2. Use
      `--action-repo OWNER/REPO` only when `l4` runs from a checkout or was not installed from the harness repository:
      a checkout has no install origin, and `init` then exits 2.
-- **A public repository, or one of another owner: a copy of the action and a deploy key.** GitHub never lets a public
-  repository use a private action.
+- **A public repository, or one of another owner, with a private harness: a copy of the action and a deploy key.**
+  GitHub never lets a public repository use a private action.
   1. Adopt with the copy:
      ```bash
      l4 init --ci github --action --action-copy --harness-ref v0.4.10
