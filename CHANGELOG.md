@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.7 (unreleased)
+## 0.4.7 (2026-10-17)
 
 ### Fixed
 - A unit whose verification passed because a person accepted a hold is merged again by a `merge: auto` plan. The hold
