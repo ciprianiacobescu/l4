@@ -34,10 +34,13 @@ same output.
   real path inside the worktree, which is resolved before the gate, so a link that the repository itself commits keeps
   working. `restore_to_base` removes a link at or above the path, checks a former directory out whole, and passes `-r`
   to `git rm --cached`. It can no longer crash a run.
-- **A planted link fails the attempt, never the run** (L4-SEC-021). The harness removes the link itself and records
-  `guard.violation{phase: gate, rule: "planted link"}`. It writes nothing through the link, and no exception leaves a
-  `finally`. The attempt is discarded before its commit, with a reason that names the path, and the next prompt says
-  what happened. In the verifier, a planted link is a blocker.
+- **A planted link halts the unit, never crashes the run** (L4-SEC-021, owner decision 1). The harness removes the link
+  itself and records `guard.violation{phase: gate, rule: "planted link"}`. It writes nothing through the link, and no
+  exception leaves a `finally`. The attempt is discarded, and the unit halts at once with the code `planted_link`, like
+  a secret in a push, with the links and their targets in `breaker.tripped`. A failed restore (`restore failed`) only
+  fails the attempt. In the verifier, both are a blocker.
+- **No step commits a link that points outside the worktree** (L4-SEC-020 part e, owner decision 3): red, green and fix
+  chores fail the attempt before the commit, unless the base holds the same link.
 - **Gate and runner configuration are put back** (L4-IMP-040, L4-IMP-006 MODIFIED). "Gate configuration" and "runner
   configuration" now have exact definitions: the gate files at any depth, the gate and runner sections of
   `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the script entries that the gate commands run. After
@@ -47,7 +50,7 @@ same output.
 - **A task can be allowed to change configuration, and the permission is recorded** (L4-IMP-041). The task needs a
   human-written `[config]` or `[test-infra]` tag (as today), or a person's answer that names the file
   (`task.config_opened`, with the rules of L4-IMP-015). The red-to-green freeze of runner sections stays in place, and
-  no tag or answer lifts it.
+  no tag or answer lifts it. A new pytest `markers` entry is no change (owner decision 5).
 - **The masked agent folders are protected paths** (L4-SEC-004 MODIFIED, L4-SEC-002 list). `.hermes/**`,
   `.kiro/hooks/**` and `.kiro/prompts/**` join the contract list. A drift test makes sure that every directory the
   sandbox masks is protected.
@@ -62,10 +65,12 @@ same output.
 - A new `src/l4/implementer/gateconfig.py`; `src/l4/implementer/unfreeze.py` (`config_opened`);
   `src/l4/config/defaults.py` and `schema.py` (`tdd.extra_gate_config_globs`, new defaults);
   `src/l4/verifier/integrity.py` (`check_gate_config`), `types.py`, `evidence.py`, `report.py`.
-- `src/l4/security/protected.py` (three globs).
+- `src/l4/security/protected.py` (four globs), `src/l4/sandbox/base.py` and `scripts/runner/sandbox-probe.sh`
+  (`.kiro/skills`); `src/l4/orchestrator.py` and `src/l4/verifier/fixloop.py` (the `planted_link` halt);
+  `src/l4/agents/fake.py` (`Step.links`).
 - Tests under `tests/unit/` (the reviewer's reproductions, ported with their assertions inverted).
 - `docs/SPEC.md` (L4-SEC-020, L4-SEC-021, L4-IMP-040, L4-IMP-041; L4-SEC-002, L4-SEC-004 and L4-IMP-006 (3) amended;
-  §3.2; the §10.2 step-1 row; SCN-SEC-40..53, SCN-IMP-240..253; the change row), `docs/runbook.md`,
+  §3.2; the §10.2 step-1 row; SCN-SEC-40..56, SCN-IMP-240..258; L4-OPS-005 gains the code `planted_link`; the change row), `docs/runbook.md`,
   `docs/architecture.md`, `CHANGELOG.md` under `## 0.4.16 (unreleased)`.
 - Behaviour a consumer can notice: a red step that edits runner sections, or a step that edits gate configuration,
   without a tag or an answer, now has that file put back (`guard.violation`). A test suite that replaces a source

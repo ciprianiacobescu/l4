@@ -6,6 +6,34 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (unreleased)
+
+### Fixed
+- A test that replaced a source directory with a link to a directory outside the repository made the harness write
+  there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
+  operation of the harness after agent code ran now refuses a link on its path, removes the link and writes nothing
+  through it. The unit halts with the code `planted_link` and the ledger names each link and where it pointed. A guard
+  that used to crash on such a replaced directory (`git rm` without `-r`) can no longer crash a run.
+- A step can no longer pass a gate by editing the configuration the gate reads. Before, a green step that added
+  `ignore_errors = True` to `mypy.ini`, or a red step that added `ignore = ["ALL"]` to `[tool.ruff]` or `addopts =
+  "-p plugin"` to the pytest section of `pyproject.toml`, kept the change and had it committed. `tdd.gate_config_globs`
+  now takes effect.
+- The folders the sandbox masks (`.hermes`, `.kiro/hooks`, `.kiro/prompts`, and now `.kiro/skills`) are protected paths:
+  what a step or a test run wrote there used to be committed.
+
+### Changed
+- Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
+  sections of `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the scripts the gate commands run). After
+  every agent step, and after every gate run, a change to them is put back to the step's base unless the task has a
+  `[config]` or `[test-infra]` tag or a person's answer names the file (`task.config_opened`). The whole file goes back, so
+  a dependency added in the same file must be written again. A red or green step may still add a pytest marker. Runner
+  configuration is never changed in green. The verifier's step 1 checks the same rule on the commits.
+- A step that leaves a symbolic link which points outside the worktree (an absolute target or a `..` escape) fails its
+  attempt before the commit, in red, green and fix chores, unless the base held the same link.
+- New default gate globs: `pyrightconfig.json`, `pylintrc`, `.eslintignore`, `.prettierrc*`, `.prettierignore`,
+  `biome.json`, `biome.jsonc`; `.coveragerc` is runner configuration. The new key `tdd.extra_gate_config_globs` adds
+  globs without restating the defaults.
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

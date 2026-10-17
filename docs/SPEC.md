@@ -647,15 +647,20 @@ tdd:
   test_support_globs: ["**/conftest.py", "**/fixtures/**", "**/__mocks__/**", "**/mocks/**", "**/testdata/**",
                        "**/test-setup.*", "**/setupTests.*", "**/tests/helpers/**", "**/test/helpers/**"]
                                    # red MAY create or change these; frozen from the red commit to the green commit
-  runner_config_files: ["pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg",
-                        "pyproject.toml", "package.json", "jest.config.*", "vitest.config.*", "playwright.config.*",
-                        "karma.conf.*", ".mocharc.*"]
-                                   # only their test-runner SECTIONS are frozen red→green (L4-IMP-002)
+  runner_config_files: ["pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", ".coveragerc", "tox.ini",
+                        "setup.cfg", "pyproject.toml", "package.json", "jest.config.*", "vitest.config.*",
+                        "playwright.config.*", "karma.conf.*", ".mocharc.*"]
+                                   # only their test-runner SECTIONS are frozen red→green (L4-IMP-002); changed by a step
+                                   # only with a human [test-infra] tag or a person's answer, never in green (L4-IMP-040)
   gate_config_globs: ["tsconfig*.json", ".eslintrc*", "eslint.config.*", "mypy.ini", ".mypy.ini", "ruff.toml",
                       ".ruff.toml", ".flake8", ".pylintrc", ".golangci.*", ".semgrepignore", ".gitleaksignore",
-                      ".gitleaks.toml"]  # plus gate sections of pyproject/package.json; human [config] tag only (L4-IMP-006)
+                      ".gitleaks.toml", "pyrightconfig.json", "pylintrc", ".eslintignore", ".prettierrc*",
+                      ".prettierignore", "biome.json", "biome.jsonc"]
+                                   # plus gate sections of pyproject/package.json; put back after every step and every
+                                   # gate run unless a human [config]/[test-infra] tag or an answer opens it (L4-IMP-040/041)
   extra_test_globs: []             # appended to test_globs: a list key that is set REPLACES its defaults, these ADD (L4-CFG-001)
   extra_test_support_globs: []     # appended to test_support_globs
+  extra_gate_config_globs: []      # appended to gate_config_globs (L4-CFG-001)
 
 odd:                               # operational design domain (intake checks, L4-ODD-*)
   allowed_paths: ["**"]
@@ -2138,9 +2143,10 @@ SHALL end the step as an agent limit does (L4-AVL-006). A kiro-cli or command st
 and the contract list, which includes the whole spec root `openspec/**` and `.kiro/specs/**` except the run's own ledger,
 so a criterion an agent copied into the archived specs or a sibling change never stays) and record `guard.violation`; (2) flag changes to pre-existing test files (deleted tests,
 added skip markers such as `.skip`/`xit`/`@pytest.mark.skip`/`t.Skip`, removed or loosened assertions) as
-`guard.test_tamper` for the verifier; (3) revert changes to gate configuration — files matching
-`tdd.gate_config_globs` and the gate sections of manifests (pyproject `[tool.mypy*]`/`[tool.ruff*]`/`[tool.pylint*]`,
-package.json `eslintConfig`) — unless the task carries a human-written `[config]` or `[test-infra]` tag; (4) run the
+`guard.test_tamper` for the verifier; (3) revert changes to gate and runner configuration as L4-IMP-040 defines them (files
+matching `tdd.gate_config_globs`, the gate and runner sections of manifests, the script entries the gate commands run),
+after the agent step and after every gate run, unless L4-IMP-041 opens the file for the task (a human-written `[config]` or
+`[test-infra]` tag, or a person's answer that names the file); (4) run the
 redaction filter over every file the harness itself writes; (5) detect test tamper per test function on the AST (a
 trailing newline is not tamper) [V, spikes/02]; (6) treat adapter permission rules as no freeze: shell redirects write
 files under `Edit(./**)` [V, spikes/01], so the hash freeze and revert are mandatory for every adapter;
@@ -2173,6 +2179,45 @@ attempt starts with none), the ledger keeps the plain reason (`task.attempt_fail
 any `<l4:data>` text, and the prompt is redacted as a whole (L4-OBS-002). The run ledger's own restore (`rule: "run
 ledger"`) is not a note. [V, live M1.6 job 5537: Codex sent the same file three times because the rejection text
 showed the lint output of the rebuilt file and nothing of the guard's change.]
+
+**L4-IMP-040 Gate and runner configuration is put back.** *Gate configuration* is, at any depth, the files matching
+`tdd.gate_config_globs` or `tdd.extra_gate_config_globs` (seven globs were added: `pyrightconfig.json`, `pylintrc`,
+`.eslintignore`, `.prettierrc*`, `.prettierignore`, `biome.json`, `biome.jsonc`), and the lint and type-check sections of
+manifests (`pyproject.toml` `[tool.mypy*]`, `[tool.ruff*]`, `[tool.pylint*]`, `[tool.pyright*]`, `[tool.black*]`,
+`[tool.isort*]`, `[tool.flake8*]`, `[tool.bandit*]` and the other tools of the design; their `setup.cfg` and `tox.ini`
+forms; `package.json` `eslintConfig`, `eslintIgnore`, `prettier`, `stylelint`). *Runner configuration* is `pytest.ini`,
+`.pytest.ini`, `pytest.toml`, `.pytest.toml`, `.coveragerc` and every `tdd.runner_config_files` entry that is no manifest,
+and the runner sections of the manifests (`[tool.pytest*]`, `[tool.coverage*]`, `[tool:pytest]`, `[pytest]`,
+`[coverage:*]`, `jest`, `mocha`, `nyc`, `c8`, `ava`, `scripts.test`). The entries that a gate command resolves to (a
+repository script file it runs, `Makefile`, `justfile`, `tox.ini`, `[tool.poe]`, the `package.json` `scripts` entries `X`,
+`preX`, `postX`) are gate configuration for the build, lint, typecheck and extra gates and runner configuration for the
+test and e2e gates; the resolver is bounded (`sh -c`, `uv run`, `npx`, `make`, `just`, `tox`, `poe`, `npm`/`pnpm`/`yarn`).
+Every other section of a manifest (dependencies, project metadata) and the lock files stay free. Guarded sections are
+compared parsed (TOML, INI, JSON), so a comment or a key order is no change, and a file that parses at one end only is
+changed in every guarded section. After every agent step (red, green, single) a change against the step base that
+L4-IMP-041 does not allow puts the WHOLE file back to the step base (a new file is removed), recorded as
+`guard.violation{phase, rule: "gate configuration" | "runner configuration", path, sections, why, action, task,
+attempt}` and carried to the next attempt's prompt, which names the file and the section and says that a dependency added
+in the same file must be written again without touching them. In green, runner configuration is always put back (the
+red-to-green freeze of L4-IMP-002). A red or green step MAY add entries to pytest's `markers` list; removing or changing an
+entry, and any other runner key, is a change. After every gate run, in the implementer and in the verifier, any
+configuration that differs from its content just before the gate is put back to it (`phase: gate`, `where: <gate>`), and
+no tag or answer lifts that. The verifier's step 1 makes a blocker of a harness commit between base and head that changed
+a guarded file or section, unless L4-IMP-041 allowed it for that unit, task and phase; a change that only people's commits
+made is listed in `verification.md` under "Gate and runner configuration changed by humans" (SCN-IMP-240 to
+SCN-IMP-249, SCN-IMP-254 to SCN-IMP-258).
+
+**L4-IMP-041 A tag or a person's answer opens configuration for one task.** Gate configuration MAY change in a step of a
+task whose title carries a human-written `[config]` or `[test-infra]` tag, or for which a person's answer opens the file.
+Runner configuration MAY change in red and in a fix chore when the task carries `[test-infra]` or an answer opens the
+file, and never in green. The red scope (L4-IMP-002) still decides what red may change. An answer opens a configuration
+file that exists at the step base under the rules of L4-IMP-015: Status `answered` or `accepted` by a human (never
+`answered-by-clarifier`), recorded in the ledger with the digest of its text as it is now, a question that is no verdict
+question and blocks the task or an ancestor, an answer that names the file (an `accepted` suggestion only a file the
+question names too), and at most three files per question. The harness records `task.config_opened{task, phase, paths,
+question, answer_sha256, kept}` before the agent step; in green a manifest opens for its gate sections only and a
+runner-only file is listed in `kept` with the reason `the runner sections are frozen from red to green (L4-IMP-002)`
+(SCN-IMP-250 to SCN-IMP-253).
 
 **L4-IMP-016** An opened support file cannot replace the code under test. After the green agent step, and before the frozen files are put back, the harness SHALL check each `.py` file that is
 open in that attempt. For a file opened by task text (L4-IMP-014) all three rules MUST hold. For a file unfrozen by a
@@ -3051,7 +3096,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | Step | Name | Requirement |
 |---|---|---|
 | 0 | preconditions | done-gate passes; branch contains base head (else merge first, §12.3); unit validates strict |
-| 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
+| 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), and runner sections changed by no red commit without `[test-infra]` or an answer (L4-IMP-040), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered* |
@@ -3820,7 +3865,7 @@ failure to close the old PR is logged (`close it by hand`) and does not fail the
 
 **L4-OPS-005** Each `phase.changed` into `halted` or `escalated` MUST carry `reason` (a code) and `detail` (the text a
 person reads); the fold keeps both (`halt_reason`, `halt_detail`). The codes are, for `halted`: `max_task_attempts`,
-`unselectable_task`, `baseline_failed`, `secret_in_push`, `fix_records`; for `escalated`: `fix_rounds_exhausted`,
+`unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records`; for `escalated`: `fix_rounds_exhausted`,
 `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`,
 `verifier_errors`. The note headline, `exit_reason` and the log line `[l4] run: <unit> <phase>: <detail>` use `detail`.
 An escalation at the fix-round limit says `fix rounds used <n>/<m>`; no other cause says that no fix round is left. An
@@ -4987,7 +5032,8 @@ injected `$CODEX_HOME/AGENTS.md` despite `--ignore-user-config --ignore-rules`].
 **project** `.claude/settings.json` hooks is moot for the implementer (it runs with no settings source, and the
 sandbox masks `<wt>/.claude`: HB-X1 [V live]); the protected-path guard (L4-IMP-006) covers the rest. A profile may opt in to repo config with `options.allow_repo_config: true`.
 Repository **guidance files** (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.agents/**`, `.kiro/steering/**`,
-`.opencode/**`, `opencode.jsonc`) are loaded by the CLIs as instructions, outside the `<l4:data>` blocks. Under L4 no
+`.opencode/**`, `opencode.jsonc`, and the folders the sandbox masks: `.hermes/**`, `.kiro/hooks/**`, `.kiro/prompts/**`,
+`.kiro/skills/**`) are loaded by the CLIs as instructions, outside the `<l4:data>` blocks. Under L4 no
 adapter loads them (table in §8.3, "Repository guidance under L4"). Those written by members are trusted like spec
 files (L4-SEC-003); those written by an agent step are protected paths (L4-SEC-004). **Residual:** a CLI that is
 not *loading* a file can still *read* it with its file tools (Codex may open `AGENTS.md`): that is allowed, the file is
@@ -5011,7 +5057,10 @@ the branch is merged, is a protected path like the unit's own. The contract list
 `.Claude/settings.json` are what a CLI opens as `AGENTS.md` and `.claude/settings.json` on a case-insensitive file
 system); `odd.forbidden_paths` keep their case. Code an agent wrote and a gate runs (a test, or production code the
 tests import) is the agent's too: a protected path it changes at any depth (`src/pkg/CLAUDE.md`, a migration) MUST be
-put back after the gate, with `guard.violation{phase: gate}`, before anything is committed. Changed
+put back after the gate, with `guard.violation{phase: gate}`, before anything is committed. Every directory that the
+sandbox covers with a tmpfs (L4-SEC-005, `sandbox.base.GUIDANCE_DIRS`, mirrored in `scripts/runner/sandbox-probe.sh`) is on
+the contract list, `.hermes/**`, `.kiro/hooks/**`, `.kiro/prompts/**` and `.kiro/skills/**` included, and a test fails
+when the two lists differ (SCN-SEC-50 to SCN-SEC-53). Changed
 by a human on the unit branch, they are allowed but the PR body MUST list them. Authorship is per commit: a protected
 path counts as changed by a human only when every commit of the unit's range that touches it is not the harness's
 (author = the bot identity and a non-empty `L4-Run` trailer); a path a harness commit touched too stays a violation.
@@ -5033,8 +5082,8 @@ kinds of sandbox (bubblewrap with `--unshare-pid --proc /proc`, a container, or 
   `.git` read-only, an **empty home**, no credential paths and no credential env vars at all; network allowed unless
   `gates.network: none`.
 Both kinds (HB-X1; the gate runs agent-written code) cover, after every bind, each **existing** one of `.claude`,
-`.agents`, `.codex`, `.opencode`, `.hermes`, `.kiro/steering`, `.kiro/agents`, `.kiro/settings`, `.kiro/hooks` and
-`.kiro/prompts` of the worktree with a tmpfs: no switch of Codex removes the repository skill roots, and these are
+`.agents`, `.codex`, `.opencode`, `.hermes`, `.kiro/steering`, `.kiro/agents`, `.kiro/settings`, `.kiro/hooks`,
+`.kiro/prompts` and `.kiro/skills` of the worktree with a tmpfs: no switch of Codex removes the repository skill roots, and these are
 contract-protected paths an agent step has no use for. A missing path is skipped (bwrap cannot create a mount point under
 a read-only root, and would create the directory in the real worktree), and so is a symlink (bwrap resolves it:
 `.claude -> /etc` would cover `/etc`; residual: a guidance directory committed as a symlink to another directory of
@@ -5122,6 +5171,39 @@ so that no file holds the whole shape: the harness refuses to push one.` The att
 (L4-IMP-017 escalation, the attempt limits). The contract template says the same rule up front. The push scan of
 L4-SEC-007 stays: it is the last net for what the step check does not see (a gate or a harness step that writes a file).
 Residual: a deleted file, a symlink, a binary file and a new file over 2,000,000 bytes add nothing to the step check.
+
+**L4-SEC-020 Harness file operations in a worktree never follow a link.** After agent-written code has run in a worktree
+(an agent step or a gate), every read, write and removal that the harness makes there MUST refuse a path with a symbolic
+link at any component below the worktree root, and MUST never follow one: the variant writes and restores of the
+zero-value runs and of the run at the red commit's code, their report restores, the removal of earlier reports, the
+bytecode removal, the production guard, the red scope and the audit (`l4.fsutil`: `read_inside`, `write_inside`,
+`unlink_inside`, `linked_component`, `remove_link`). The check is made at the moment of the operation, relative to
+directory descriptors opened without following links (`O_NOFOLLOW`), never as a check before the gate. A file is written
+as a new file in its own directory and renamed over its name, so a symbolic link, a hard link or a FIFO in its place
+neither receives the bytes nor blocks the harness. A link at the end of a path to be removed is removed itself. A file
+that the harness varies is taken by its real path inside the worktree, resolved before the gate: a link the repository
+commits (`src/app -> ../lib/app`) keeps working, and a target whose real path is outside the worktree or under the test
+globs is not varied. `restore_to_base` removes a link at or above its path, checks a path that was a directory at the
+base out as that whole directory, and runs `git rm -r --cached` for a path that is new, so a directory a link replaced
+cannot make a guard raise. Before the commit of every red, green and fix-chore attempt the harness MUST refuse a symbolic
+link that differs from the step base and points outside the worktree (an absolute target, or one that climbs above the
+root), unless the base holds the same link: `guard.violation{phase, rule: "link outside worktree", path, action:
+refused, target}`, the attempt is discarded and fails with a reason that names each link. A link that stays inside the
+worktree is not refused (SCN-SEC-40 to SCN-SEC-45, SCN-SEC-48, SCN-SEC-55, SCN-SEC-56).
+
+**L4-SEC-021 A planted link is removed, recorded and halts the unit; nothing is written through it.** A symbolic link
+found on the path of an operation of L4-SEC-020 after a gate, at or above a production path in red's production guard,
+or on a gate's report path MUST be removed itself and recorded as `guard.violation{phase: gate, rule: "planted link",
+path, action: removed, where, target, points_to}`, and the write MUST be made once more into a real directory. A write
+that still fails, or whose sha256 read-back differs, is recorded as `rule: "restore failed"`. No exception leaves a
+restore. A recorded `planted link` halts the unit at once, as a secret in a push does (L4-SEC-007): the attempt's changes
+are discarded, `PlantedLink` ends the step (never out of a `finally`), `breaker.tripped{reason: "planted_link", task,
+links: [{path, points_to, where}]}` is recorded and the unit takes the halted edge with the code `planted_link` and a
+detail that begins `task <k>: a gate run put a symbolic link at <paths>`; the fix loop halts the same way. A recorded
+`restore failed` fails the attempt before its commit, with a reason that names the paths, and the run goes on to the next
+attempt. In the verifier a recorded refusal is a blocker (`a gate run planted a symbolic link in the worktree`, or `could
+not restore a file after a gate run`) and the round ends FAIL (SCN-SEC-41, SCN-SEC-46, SCN-SEC-47, SCN-SEC-49,
+SCN-SEC-54).
 
 ---
 
@@ -5271,6 +5353,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 37 | `check-worktree` | `l4 yolo check PLAN --worktree` admits the plan files and the units of the working tree before the push and reports `uncovered` and `covered_twice` as `validate_plan.py` does; the hints of `l4 yolo draft` and of the worktree review name it (L4-YOLO-034; `openspec/changes/check-worktree/`) | a plan author on a feature branch: run it before the push |
 | 38 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
 | 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
+| 40 | `guard-harness-writes` | no harness write follows a link a gate planted, and a planted link halts the unit (L4-SEC-020, L4-SEC-021); no step commits a link that points outside the worktree; gate and runner configuration is defined exactly, put back after every agent step and every gate run, and opened only by a human tag or answer, with a pytest marker allowed (L4-IMP-040, L4-IMP-041, L4-IMP-006 (3)); the folders the sandbox masks, `.kiro/skills` included, are protected paths (L4-SEC-004); `openspec/changes/guard-harness-writes/` | the ported reproductions pass; a consumer repository's red step that edits `[tool.ruff]` has it put back |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6833,6 +6916,133 @@ scenario is a spec defect (§26).
 - **When** a test runs `list(numbers())` against the zero-value variant
 - **Then** both give `[]`
 
+#### SCN-IMP-240 (−) Green's `ignore_errors = True` in `mypy.ini` is put back before the typecheck gate · L4-IMP-006, L4-IMP-040
+- **Given** a typecheck gate that fails on the green code unless `mypy.ini` holds `ignore_errors = True`, and a green
+  step that writes the implementation and that line, in a task without a tag
+- **When** `run_green` runs
+- **Then** `mypy.ini` is back to its content at the red commit before any gate runs, the ledger has
+  `guard.violation{phase: green, rule: "gate configuration", path: mypy.ini, action}`, the typecheck gate fails, and the
+  green commit is not made
+
+#### SCN-IMP-241 (−) Red's `[tool.ruff.lint] ignore = ["ALL"]` puts `pyproject.toml` back to the base · L4-IMP-040
+- **Given** a red step, in a task without a tag, that adds a test, a stub, and `[tool.ruff.lint] ignore = ["ALL"]` to
+  `pyproject.toml`, and a lint gate that fails on the red test unless that ignore is there
+- **When** `run_red` runs
+- **Then** `pyproject.toml` equals the base before any gate runs, `guard.violation{phase: red, rule: "gate
+  configuration", path: pyproject.toml, sections: ["tool.ruff"]}` is recorded, the lint gate fails, and no red commit
+  carries the ignore
+
+#### SCN-IMP-242 (−) Red cannot plant a pytest plugin through `addopts` · L4-IMP-040
+- **Given** a red step that adds `addopts = "-p l4hooks"` to `[tool.pytest.ini_options]` and a root module `l4hooks.py`
+  that holds only a stub, and a green step that fills `l4hooks.py` with a hook that turns failures into passes and
+  leaves `pricing.py` as the stub
+- **When** red and then green run
+- **Then** `pyproject.toml` is back to the base after red with a `runner configuration` violation that names
+  `tool.pytest`, and green fails because the red tests still fail against the stub
+
+#### SCN-IMP-243 (−) A test that rewrites `ruff.toml` while the test gate runs does not loosen the lint gate · L4-IMP-040
+- **Given** a red test that, when the test gate runs it, appends `ignore = ["ALL"]` to `ruff.toml`
+- **When** the test gate finishes and the static gates run
+- **Then** `ruff.toml` holds its bytes from before the test gate, `guard.violation{phase: gate, rule: "gate
+  configuration", path: ruff.toml, where: test}` is recorded, and the lint gate judges the original settings
+
+#### SCN-IMP-244 (−) A script that a gate command runs is gate configuration · L4-IMP-040
+- **Given** `gates.lint: ["npm run lint"]` and `gates.typecheck: ["sh scripts/typecheck.sh"]`, and a green step that
+  changes `scripts.lint` in `package.json` to `exit 0` and empties `scripts/typecheck.sh`
+- **When** the agent-step guard runs
+- **Then** `package.json` and `scripts/typecheck.sh` are back to the red commit, and each has a `gate configuration`
+  violation, with the section `scripts.lint` named for `package.json`
+
+#### SCN-IMP-245 (+) Red's new test dependency stays · L4-IMP-040
+- **Given** a red step that adds `pytest-mock` to `[dependency-groups] dev` in `pyproject.toml` and updates `uv.lock`,
+  and touches no guarded section
+- **When** the agent-step guard and the red scope run
+- **Then** both changes stay, and no `gate configuration` or `runner configuration` violation is recorded
+
+#### SCN-IMP-246 (−) A configuration file in a subdirectory counts · L4-IMP-040
+- **Given** a green step that adds `packages/api/ruff.toml` and changes `packages/api/pyproject.toml` `[tool.mypy]`
+- **When** the agent-step guard runs
+- **Then** `packages/api/ruff.toml` is removed, `packages/api/pyproject.toml` is back to the red commit, and both
+  have violations
+
+#### SCN-IMP-247 (+) A comment-only edit of a guarded section is no change · L4-IMP-040
+- **Given** a green step that only adds a comment line inside `[tool.ruff]` of `pyproject.toml` and reorders two of its
+  keys
+- **When** the agent-step guard runs
+- **Then** the file keeps the step's edit and no violation is recorded
+
+#### SCN-IMP-248 (−) Green's runner change is put back even with `[test-infra]` · L4-IMP-040
+- **Given** a task titled `1.2 [test-infra] Make the async tests run` whose green step adds `asyncio_mode = "auto"` to
+  `[tool.pytest.ini_options]`
+- **When** the agent-step guard runs in green
+- **Then** `pyproject.toml` is back to the red commit with a `runner configuration` violation, because the red-to-green
+  freeze holds for every task
+
+#### SCN-IMP-249 (−) The verifier blocks a harness commit that loosened `[tool.mypy]`, and lists a person's change · L4-IMP-040
+- **Given** a unit branch on which a harness green commit of a task without a tag changed `[tool.mypy]` of
+  `pyproject.toml`, and a person's commit changed `ruff.toml`
+- **When** the verifier's step 1 runs
+- **Then** the `gate configuration` sub-check fails with a blocker that names `pyproject.toml (tool.mypy)` and the
+  commit, and `verification.md` lists `ruff.toml` under "Gate and runner configuration changed by humans"
+
+#### SCN-IMP-250 (+) A `[config]` task may change `ruff.toml` in green · L4-IMP-041
+- **Given** a task titled `2.1 [config] Raise the line length to 120` whose green step changes `line-length` in
+  `ruff.toml`
+- **When** the agent-step guard runs and the verifier checks the commits
+- **Then** the change stays, no violation is recorded, and the verifier's `gate configuration` sub-check passes
+
+#### SCN-IMP-251 (+) A person's answer that names `pyproject.toml` opens it for the task's red step · L4-IMP-041
+- **Given** a red step that asked `Q-003` (technical, blocking task 1.1): "the async tests need `asyncio_mode = "auto"`
+  in pyproject.toml", and a person's answer `yes, add it to pyproject.toml`, recorded with its digest
+- **When** the task's next red attempt adds `asyncio_mode = "auto"` to `[tool.pytest.ini_options]`
+- **Then** `task.config_opened{task: "1.1", phase: red, paths: ["pyproject.toml"], question: "Q-003"}` is recorded
+  before the agent step, the change stays, and the verifier accepts the red commit
+
+#### SCN-IMP-252 (−) A clarifier's answer, an answer for another task and an edited answer open nothing · L4-IMP-041
+- **Given** three answers that name `mypy.ini`: one `answered-by-clarifier`, one to a question that blocks task 2.1
+  only, and one whose text a person edited after the ledger recorded its digest
+- **When** green of task 1.1 changes `mypy.ini`
+- **Then** no `task.config_opened` is recorded and `mypy.ini` is put back with a `gate configuration` violation
+
+#### SCN-IMP-253 (−) An answer cannot open runner configuration for green · L4-IMP-041
+- **Given** a person's answer to a green question of task 1.1 that names `pytest.ini`
+- **When** green runs
+- **Then** `task.config_opened` lists `pytest.ini` under `kept` with `the runner sections are frozen from red to green
+  (L4-IMP-002)`, and a green change to `pytest.ini` is put back
+
+#### SCN-IMP-254 (+) Red may register a new pytest marker without a tag · L4-IMP-040
+- **Given** a red step, in a task without a tag, that adds `markers = ["slow: slow tests"]` to
+  `[tool.pytest.ini_options]` of `pyproject.toml`, for a test it writes
+- **When** the agent-step guard and the verifier's step 1 run
+- **Then** the change stays and is committed, no violation is recorded, and the verifier's `gate configuration`
+  sub-check passes
+
+#### SCN-IMP-255 (+) Green may register a new pytest marker too · L4-IMP-040
+- **Given** a base whose `markers` list holds `slow: slow tests`, and a green step, in a task without a tag, that
+  adds `db: needs a database` to the list
+- **When** the agent-step guard runs in green and the verifier checks the commits
+- **Then** the change stays, no violation is recorded, and neither the guard nor the verifier's red-to-green freeze
+  sees a change
+
+#### SCN-IMP-256 (−) A removed or changed marker is put back · L4-IMP-040
+- **Given** a green step that empties the `markers` list, and another that rewrites `slow: slow tests` as
+  `slow: ignore this`
+- **When** the agent-step guard runs
+- **Then** `pyproject.toml` is back to the red commit with a `runner configuration` violation naming `tool.pytest`
+
+#### SCN-IMP-257 (−) A new marker together with another runner key is put back whole · L4-IMP-040
+- **Given** a red step, in a task without a tag, that adds a marker and `asyncio_mode = "auto"` in the same file
+- **When** the agent-step guard runs
+- **Then** the whole file is back to the base, marker included, and one `runner configuration` violation is recorded
+
+#### SCN-IMP-258 (+) The retry note says which file went back, why, and how to redo a dependency · L4-IMP-040
+- **Given** a red attempt that added a test dependency and a `[tool.ruff.lint] ignore` to `pyproject.toml` and failed
+  its lint gate
+- **When** the next attempt's prompt is built
+- **Then** its previous-attempt block carries ``- `pyproject.toml` (gate configuration) restored: changed tool.ruff``
+  and the advice that the whole file was put back to the step's base and that a dependency added in the same file must
+  be written again without touching those sections
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -8333,6 +8543,126 @@ scenario is a spec defect (§26).
   `user_per_profile`
 - **When** `l4 doctor --ci`
 - **Then** SANDBOX-001 fails (exit 3) explaining that one OS user per profile is needed in user mode.
+
+#### SCN-SEC-40 (−) The zero-value restore writes nothing through a linked package directory · L4-SEC-020
+- **Given** a test gate command that replaces `src/pytdd` with a link to a directory outside the worktree before it
+  runs the tests
+- **When** `zeroed_run` varies `src/pytdd/pricing.py` and the gate runs
+- **Then** no file is created or changed in the outside directory, the link is gone, `src/pytdd/pricing.py` holds its
+  original bytes in a real directory, and `guard.violation{phase: gate, rule: "planted link", path: src/pytdd}` is
+  recorded
+
+#### SCN-SEC-41 (−) A link planted during the vacuity run halts the unit, and nothing is written outside · L4-SEC-021
+- **Given** a red step whose test gate command replaces `src/pytdd` with a link to an outside directory only while the
+  stub module holds no `NotImplementedError` (during run (b))
+- **When** `run_red` runs
+- **Then** it discards the attempt and raises `PlantedLink`, whose message starts with `a gate run put a symbolic link at
+  src/pytdd` and names the link record, with no `GitError`; the outside directory holds no `pricing.py`, `src/pytdd` is a
+  directory again, the worktree is clean, and the ledger has `guard.violation{rule: "planted link", path: src/pytdd}`
+
+#### SCN-SEC-42 (−) The restore at the red commit's code puts the agent's file nowhere outside · L4-SEC-020
+- **Given** a green change that adds `src/pytdd/evil.pth` with content the agent chose, and a test gate command that
+  replaces `src/pytdd` with a link to an outside directory
+- **When** `run_with_code_of` swaps the production files to the red commit, runs the gate and puts them back
+- **Then** the outside directory holds no `evil.pth`, and a `planted link` violation is recorded
+
+#### SCN-SEC-43 (−) A linked `.l4-out` receives no report and loses no file · L4-SEC-020
+- **Given** a test gate that wrote `.l4-out/junit.xml` in run (a), and a gate command that then replaces `.l4-out` with
+  a link to an outside directory that already holds a `junit.xml`
+- **When** `zeroed_run` restores the reports, and the next gate removes the earlier reports before it starts
+- **Then** the outside `junit.xml` keeps its bytes and is not removed, `.l4-out` is a real directory again, a `planted
+  link` violation names `.l4-out`, and a gate run on its own (`run_gate` of the gate runner) with a linked report path fails
+  with `report path .l4-out/junit.xml has a symbolic link at .l4-out` before its command runs
+
+#### SCN-SEC-44 (−) A hard link or a FIFO in place of a varied file neither receives the bytes nor hangs the restore · L4-SEC-020
+- **Given** a gate command that replaces `src/pytdd/pricing.py` with a hard link to a file outside the worktree, and in
+  a second case with a FIFO
+- **When** the zero-value restore puts the original back
+- **Then** the outside file keeps its bytes, the restore returns within the test's timeout, and
+  `src/pytdd/pricing.py` is a regular file with the original bytes
+
+#### SCN-SEC-45 (−) A package directory that an agent step replaced with a link is put back without an error · L4-SEC-020
+- **Given** a red agent step that replaces `src/pytdd` (a directory at the base) with a link to an outside directory
+- **When** the red scope guard and the production guard run
+- **Then** no `GitError` is raised, `src/pytdd` is a directory with its base content, the outside directory is
+  unchanged, and the attempt ends with an outcome, not an exception
+
+#### SCN-SEC-46 (−) The production guard removes a link that a gate put in place of a production directory · L4-SEC-021
+- **Given** red's guarded production files under `src/pytdd`, and a test gate command that replaces `src/pytdd` with a
+  link to an outside directory that holds a `pricing.py`
+- **When** `ProductionGuard.check("test run")` runs
+- **Then** the outside `pricing.py` keeps its bytes, the link is gone, `src/pytdd` holds the base files and red's
+  guarded versions, and both a `planted link` violation and the `gate-mutated-production` notes are recorded
+
+#### SCN-SEC-47 (−) A link planted during the verifier's discrimination run is a blocker · L4-SEC-021
+- **Given** a unit whose test code, run by the verifier's `test-extra-zero` gate, replaces its package directory with a
+  link to an outside directory
+- **When** the verifier runs step 4 and aggregates
+- **Then** nothing is written outside, the round's findings hold a blocker `a gate run planted a symbolic link in the
+  worktree` that names the path, and the verdict is FAIL
+
+#### SCN-SEC-48 (+) A link the repository commits still works, and a test's own links count for nothing · L4-SEC-020
+- **Given** a repository that commits `src/app` as a link to `../lib/app` inside the worktree, and a test that creates
+  a link under its own `tmp_path`
+- **When** the zero-value run varies the module the test imports through `src/app`
+- **Then** `lib/app/core.py` is varied and put back byte for byte, and no `planted link` or `restore failed` is
+  recorded
+
+#### SCN-SEC-49 (−) A failed restore fails the attempt and the next attempt is told · L4-SEC-021
+- **Given** a red attempt whose test gate command replaces `src/pytdd/pricing.py` with a directory, so that the
+  zero-value restore cannot put the file back, recorded as `restore failed`
+- **When** the red attempt ends and the next red attempt's prompt is built
+- **Then** its previous-attempt block carries ``- `src/pytdd/pricing.py` (restore failed) refused`` and the advice that
+  tests must not replace, delete or lock source files, and `task.attempt_failed.reason` in the ledger is the plain
+  reason without the note
+
+#### SCN-SEC-50 (−) What an agent step writes under the masked Kiro and Hermes folders is removed · L4-SEC-004
+- **Given** an agent step that creates `.hermes/hooks/on_start.json`, `.kiro/hooks/run-on-save.kiro.hook`,
+  `.kiro/prompts/review.md` and `.kiro/skills/l4/SKILL.md`, none of which exist at the step base
+- **When** the agent-step guard runs
+- **Then** all four files are gone, each has a `guard.violation` with its rule (`.hermes/**`, `.kiro/hooks/**`,
+  `.kiro/prompts/**`, `.kiro/skills/**`) and `action: removed`, and `git add -A` stages none of them
+
+#### SCN-SEC-51 (−) What a gate run writes there is removed too · L4-SEC-004
+- **Given** a gate whose command writes the four files of SCN-SEC-50
+- **When** the gate guards run after the gate
+- **Then** all four files are gone and each has a `guard.violation` with `phase: gate`
+
+#### SCN-SEC-52 (+) Every directory the sandbox masks is a protected path · L4-SEC-004, L4-SEC-005
+- **Given** `GUIDANCE_DIRS` of `l4.sandbox.base` and the `m0_guidance` list of `scripts/runner/sandbox-probe.sh`
+- **When** the drift test runs
+- **Then** both lists name the same directories, and for each directory `d`, `ProtectedSet().match(f"{d}/x")` names a
+  rule
+
+#### SCN-SEC-53 (+) A person's commit to `.kiro/hooks` on the unit branch is listed, not reverted · L4-SEC-004
+- **Given** a unit branch on which only a person's commit added `.kiro/hooks/lint.kiro.hook` and
+  `.kiro/skills/l4/SKILL.md`
+- **When** the verifier's protected-path check runs
+- **Then** the files stay, no blocker is raised, and `verification.md` lists it under "Protected paths changed by
+  humans"
+
+#### SCN-SEC-54 (−) The halted unit carries the evidence for a person · L4-SEC-021
+- **Given** a unit whose red test gate plants a link at `src/pytdd` that points to an outside directory
+- **When** `l4 run` runs the unit
+- **Then** the unit is halted (exit 13) after one agent step with `phase.changed{to: halted, reason: planted_link}`, the
+  ledger holds `breaker.tripped{reason: planted_link, links: [{path: "src/pytdd", points_to: <the outside directory>,
+  where}]}` and the `guard.violation` of the link, the detail starts with `task 1.1: a gate run put a symbolic link at
+  src/pytdd`, nothing is written outside, and a fix unit's loop halts the same way
+
+#### SCN-SEC-55 (−) A link to the outside is refused in red, green and a fix chore · L4-SEC-020
+- **Given** a red step that adds `tests/data` as a link to `/tmp`, a green step that adds `notes` as a link to an
+  outside directory, and a fix chore that adds `vendor` as a link to one
+- **When** the step has passed its gates and is about to be committed
+- **Then** each attempt fails with a reason that starts `the step left a symbolic link that points outside the worktree:
+  <path> -> <target>`, a `guard.violation{rule: "link outside worktree"}` is recorded with the phase, the worktree is
+  back at the base, and no commit is made
+
+#### SCN-SEC-56 (+) A link inside the worktree, and one the base already held, are not refused · L4-SEC-020
+- **Given** a red step that adds `tests/alias.py` as a link to `test_discount.py`, and a repository whose base commit
+  holds `vendor` as a link to an outside directory that a step leaves as it is
+- **When** the step has passed its gates and is about to be committed
+- **Then** no `link outside worktree` violation is recorded and the commit is made; the same name pointing to another
+  outside target is refused
 
 ### 23.16 Non-functional (NFR)
 

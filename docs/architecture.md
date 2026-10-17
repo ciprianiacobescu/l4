@@ -308,7 +308,11 @@ Key mechanics ([SPEC §7](SPEC.md#7-implementer)):
 * **Post-step guards.** After every agent step the harness diffs the worktree: protected files (`tasks.md`
   structure, `questions.md`, `.l4/`, CI files, agent configuration such as `.claude/**` or `opencode.json`,
   harness-owned memories) are restored and the violation logged; deletion/skip/weakening of pre-existing tests is
-  flagged for the verifier.
+  flagged for the verifier. Gate and runner configuration (lint, type-check and
+  pytest settings, the scripts the gates run) is put back to the step's base after every agent step and every gate run
+  unless a tag or a person's answer opens it. A symbolic link that a gate plants in the worktree is removed and halts the
+  unit: the harness's own restores never write through a link, and no step commits a link that points outside the
+  worktree.
 * **Closing the TDD loopholes.** The red phase may touch test paths, test-support files and test-only dev
   dependencies, plus **signature-only stubs** (not-implemented bodies) so that tests for brand-new symbols compile and
   fail individually. Red is valid only if every new test fails, and also fails *by assertion* against **zero-value

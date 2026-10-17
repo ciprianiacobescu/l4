@@ -1,7 +1,8 @@
 ## Purpose
 
 Agent-written code that a gate runs can never make the harness read, write or delete a file outside the worktree, and
-can never stop a run with an error. The folders the sandbox masks are protected paths like every other agent
+can never stop a run with an error. A link that such code plants in the worktree halts the unit for a person to look at,
+and no step commits a link that points outside the worktree. The folders the sandbox masks are protected paths like every other agent
 configuration folder.
 
 ## MODIFIED Requirements
@@ -10,7 +11,8 @@ configuration folder.
 The harness SHALL revert any change made by an agent to a protected path, meaning the contract list plus
 `odd.forbidden_paths`, and MUST record the change as `guard.violation`. The contract list SHALL cover the CI files,
 `.l4/**`, the agent configuration paths, the repository guidance files and directories of L4-SEC-002, and
-`.serena/memories/harness/**`. The guidance paths SHALL include `.hermes/**`, `.kiro/hooks/**` and `.kiro/prompts/**`.
+`.serena/memories/harness/**`. The guidance paths SHALL include `.hermes/**`, `.kiro/hooks/**`, `.kiro/prompts/**` and
+`.kiro/skills/**`.
 Every directory that the sandbox covers with a tmpfs (L4-SEC-005, `sandbox.base.GUIDANCE_DIRS`, mirrored in
 `scripts/runner/sandbox-probe.sh`) SHALL be on the contract list. What an agent step or a gate run writes there SHALL
 therefore be removed or restored by both the agent-step guard and the gate guards before anything is committed. A test
@@ -22,16 +24,16 @@ SHALL fail when the two lists differ.
 - **THEN** both files are restored to their pre-step content and two `guard.violation` events are logged
 
 #### Scenario: SCN-SEC-50 (−) What an agent step writes under the masked Kiro and Hermes folders is removed
-- **GIVEN** an agent step that creates `.hermes/hooks/on_start.json`, `.kiro/hooks/run-on-save.kiro.hook` and
-  `.kiro/prompts/review.md`, none of which exist at the step base
+- **GIVEN** an agent step that creates `.hermes/hooks/on_start.json`, `.kiro/hooks/run-on-save.kiro.hook`,
+  `.kiro/prompts/review.md` and `.kiro/skills/l4/SKILL.md`, none of which exist at the step base
 - **WHEN** the agent-step guard runs
-- **THEN** all three files are gone, each has a `guard.violation` with its rule (`.hermes/**`, `.kiro/hooks/**`,
-  `.kiro/prompts/**`) and `action: removed`, and `git add -A` stages none of them
+- **THEN** all four files are gone, each has a `guard.violation` with its rule (`.hermes/**`, `.kiro/hooks/**`,
+  `.kiro/prompts/**`, `.kiro/skills/**`) and `action: removed`, and `git add -A` stages none of them
 
 #### Scenario: SCN-SEC-51 (−) What a gate run writes there is removed too
-- **GIVEN** a gate whose command writes the three files of SCN-SEC-50
+- **GIVEN** a gate whose command writes the four files of SCN-SEC-50
 - **WHEN** the gate guards run after the gate
-- **THEN** all three files are gone and each has a `guard.violation` with `phase: gate`
+- **THEN** all four files are gone and each has a `guard.violation` with `phase: gate`
 
 #### Scenario: SCN-SEC-52 (+) Every directory the sandbox masks is a protected path
 - **GIVEN** `GUIDANCE_DIRS` of `l4.sandbox.base` and the `m0_guidance` list of `scripts/runner/sandbox-probe.sh`
@@ -40,9 +42,10 @@ SHALL fail when the two lists differ.
   rule
 
 #### Scenario: SCN-SEC-53 (+) A person's commit to `.kiro/hooks` on the unit branch is listed, not reverted
-- **GIVEN** a unit branch on which only a person's commit added `.kiro/hooks/lint.kiro.hook`
+- **GIVEN** a unit branch on which only a person's commit added `.kiro/hooks/lint.kiro.hook` and
+  `.kiro/skills/l4/SKILL.md`
 - **WHEN** the verifier's protected-path check runs
-- **THEN** the file stays, no blocker is raised, and `verification.md` lists it under "Protected paths changed by
+- **THEN** the files stay, no blocker is raised, and `verification.md` lists it under "Protected paths changed by
   humans"
 
 ## ADDED Requirements
@@ -72,7 +75,7 @@ restores, the removal of earlier reports, the bytecode removal, the production g
   a link to an outside directory that already holds a `junit.xml`
 - **WHEN** `zeroed_run` restores the reports, and the next gate removes the earlier reports before it starts
 - **THEN** the outside `junit.xml` keeps its bytes and is not removed, `.l4-out` is a real directory again, a `planted
-  link` violation names `.l4-out`, and a gate run on its own (`gates.runner.run_gate`) with a linked report path fails
+  link` violation names `.l4-out`, and a gate run on its own (`run_gate` of the gate runner) with a linked report path fails
   with `report path .l4-out/junit.xml has a symbolic link at .l4-out` before its command runs
 
 ### Requirement: L4-SEC-020 A write replaces the name and is checked when it is made (part b)
@@ -111,6 +114,27 @@ the base (`git rm -r --cached`), so that a directory a link replaced cannot make
 - **THEN** no `GitError` is raised, `src/pytdd` is a directory with its base content, the outside directory is
   unchanged, and the attempt ends with an outcome, not an exception
 
+### Requirement: L4-SEC-020 No step commits a link that points outside the worktree (part e)
+Before the commit of every red, green and fix-chore attempt, the harness SHALL refuse a symbolic link that differs from
+the step base and points outside the worktree (an absolute target, or one that climbs above the root), unless the base
+holds the same link. It SHALL record `guard.violation{rule: "link outside worktree"}` and fail the attempt with a reason
+that names each link. A link that stays inside the worktree SHALL NOT be refused.
+
+#### Scenario: SCN-SEC-55 (−) A link to the outside is refused in red, green and a fix chore
+- **GIVEN** a red step that adds `tests/data` as a link to `/tmp`, a green step that adds `notes` as a link to an
+  outside directory, and a fix chore that adds `vendor` as a link to one
+- **WHEN** the step has passed its gates and is about to be committed
+- **THEN** each attempt fails with a reason that starts `the step left a symbolic link that points outside the worktree:
+  <path> -> <target>`, a `guard.violation{rule: "link outside worktree"}` is recorded with the phase, the worktree is
+  back at the base, and no commit is made
+
+#### Scenario: SCN-SEC-56 (+) A link inside the worktree, and one the base already held, are not refused
+- **GIVEN** a red step that adds `tests/alias.py` as a link to `test_discount.py`, and a repository whose base commit
+  holds `vendor` as a link to an outside directory that a step leaves as it is
+- **WHEN** the step has passed its gates and is about to be committed
+- **THEN** no `link outside worktree` violation is recorded and the commit is made; the same name pointing to another
+  outside target is refused
+
 ### Requirement: L4-SEC-021 A planted link is removed and recorded, and nothing is written through it (part a)
 A symbolic link found on the path of an operation of L4-SEC-020 after a gate, at or above a production path in red's
 production guard, or on a gate's report path SHALL be removed itself and recorded as `guard.violation{phase: gate, rule:
@@ -125,25 +149,35 @@ leave a restore.
 - **THEN** the outside `pricing.py` keeps its bytes, the link is gone, `src/pytdd` holds the base files and red's
   guarded versions, and both a `planted link` violation and the `gate-mutated-production` notes are recorded
 
-### Requirement: L4-SEC-021 A refused write fails the implementer attempt before its commit (part b)
-A recorded `planted link` or `restore failed` SHALL fail the implementer attempt before its commit: its changes are
-discarded, its reason names the paths and says that a test may create links only in its own temporary directory, and
-the next attempt's prompt carries the guard note. The run SHALL go on to the next attempt or step.
+### Requirement: L4-SEC-021 A planted link halts the unit at once, a failed restore fails the attempt (part b)
+A recorded `planted link` SHALL halt the unit at once, as a secret in a push does: the attempt is discarded, then
+`breaker.tripped{reason: "planted_link", task, links}` is recorded and the unit takes the halted edge with the code
+`planted_link`, in the implementer and in the fix loop. A recorded `restore failed` SHALL fail the attempt before its
+commit, with a reason that names the paths, and the run SHALL go on to the next attempt.
 
-#### Scenario: SCN-SEC-41 (−) A link planted during the vacuity run fails the red attempt, and the run goes on
+#### Scenario: SCN-SEC-41 (−) A link planted during the vacuity run halts the unit, and nothing is written outside
 - **GIVEN** a red step whose test gate command replaces `src/pytdd` with a link to an outside directory only while the
   stub module holds no `NotImplementedError` (during run (b))
 - **WHEN** `run_red` runs
-- **THEN** it returns a failed `RedOutcome` and raises nothing (no `GitError`), the outside directory holds no
-  `pricing.py`, `src/pytdd` is a directory again, the ledger has `guard.violation{rule: "planted link", path:
-  src/pytdd}`, and the reason starts with `a gate run put a symbolic link at src/pytdd`
+- **THEN** it discards the attempt and raises `PlantedLink`, whose message starts with `a gate run put a symbolic link at
+  src/pytdd` and names the link record, with no `GitError`; the outside directory holds no `pricing.py`, `src/pytdd` is a
+  directory again, the worktree is clean, and the ledger has `guard.violation{rule: "planted link", path: src/pytdd}`
 
-#### Scenario: SCN-SEC-49 (+) The next attempt is told what happened
-- **GIVEN** a red attempt that failed for a planted link at `src/pytdd`
-- **WHEN** the next red attempt's prompt is built
-- **THEN** its previous-attempt block carries ``- `src/pytdd` (planted link) removed`` and the advice to create links
-  only under the test's own temporary directory, and `task.attempt_failed.reason` in the ledger is the plain reason
-  without the note
+#### Scenario: SCN-SEC-49 (−) A failed restore fails the attempt and the next attempt is told
+- **GIVEN** a red attempt whose test gate command replaces `src/pytdd/pricing.py` with a directory, so that the
+  zero-value restore cannot put the file back, recorded as `restore failed`
+- **WHEN** the red attempt ends and the next red attempt's prompt is built
+- **THEN** its previous-attempt block carries ``- `src/pytdd/pricing.py` (restore failed) refused`` and the advice that
+  tests must not replace, delete or lock source files, and `task.attempt_failed.reason` in the ledger is the plain
+  reason without the note
+
+#### Scenario: SCN-SEC-54 (−) The halted unit carries the evidence for a person
+- **GIVEN** a unit whose red test gate plants a link at `src/pytdd` that points to an outside directory
+- **WHEN** `l4 run` runs the unit
+- **THEN** the unit is halted (exit 13) after one agent step with `phase.changed{to: halted, reason: planted_link}`, the
+  ledger holds `breaker.tripped{reason: planted_link, links: [{path: "src/pytdd", points_to: <the outside directory>,
+  where}]}` and the `guard.violation` of the link, the detail starts with `task 1.1: a gate run put a symbolic link at
+  src/pytdd`, nothing is written outside, and a fix unit's loop halts the same way
 
 ### Requirement: L4-SEC-021 In the verifier a refused write is a blocker (part c)
 A `planted link` or `restore failed` recorded while the verifier runs a unit's code SHALL add a blocker finding that

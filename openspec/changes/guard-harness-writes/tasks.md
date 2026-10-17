@@ -59,7 +59,7 @@ Every task follows these rules:
 
 In every task of this group: no exception may leave a `finally`, and an `UnsafeFile` goes to `wb.refused_write`.
 
-- [ ] 3.1 Port reproduction 1 (`zeroed_run`) into `tests/unit/implementer/test_planted_links.py` (new), with the
+- [x] 3.1 Port reproduction 1 (`zeroed_run`) into `tests/unit/implementer/test_planted_links.py` (new), with the
   assertions inverted. This is SCN-SEC-40. The test asserts that the outside directory is unchanged, that `src/pytdd`
   is a real directory holding the original `pricing.py`, that a `planted link` violation names `src/pytdd`, and that
   nothing raises. Then, in `src/l4/implementer/discrimination.py`:
@@ -70,16 +70,16 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   - write the variant and the restore with `_put`;
   - do the sha256 read-back with `read_inside`, and send a mismatch to `wb.refused_write` (`restore failed`) instead
     of raising `RuntimeError`.
-- [ ] 3.2 Port reproduction 3 (`run_with_code_of` with `evil.pth`) into the same file, with the assertions inverted.
+- [x] 3.2 Port reproduction 3 (`run_with_code_of` with `evil.pth`) into the same file, with the assertions inverted.
   This is SCN-SEC-42. Then make the same changes to `red_code_in_place`: canonical targets, `read_inside` originals,
   `_put` for the swap and the restore, and `unlink_inside` for the set-aside of a module that green added.
-- [ ] 3.3 Port reproduction 4 (the report restore through a linked `.l4-out`) into the same file, with the
+- [x] 3.3 Port reproduction 4 (the report restore through a linked `.l4-out`) into the same file, with the
   assertions inverted. This is the first half of SCN-SEC-43. Also test that `_drop_bytecode` under a linked
   `__pycache__` removes the link and no outside `.pyc`. Then:
   - make the report restores of `zeroed_run` and `run_with_code_of` use `read_inside` for what they keep, and `_put` /
     `unlink_inside` to put it back;
   - make `_drop_bytecode` take `(root, rel)` and work on directory descriptors (D3).
-- [ ] 3.4 In the same file, test SCN-SEC-44:
+- [x] 3.4 In the same file, test SCN-SEC-44:
   - the gate command replaces `src/pytdd/pricing.py` with a hard link to an outside file; in a second test, with a
     FIFO (`mkfifo`);
   - `zeroed_run` returns within 10 s and the outside file keeps its bytes.
@@ -91,7 +91,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
     `wb.unsafe` is empty.
 
   Fix what fails, in `discrimination.py` only.
-- [ ] 3.5 Tests in `tests/unit/gates/test_runner_links.py` (new), for the second half of SCN-SEC-43:
+- [x] 3.5 Tests in `tests/unit/gates/test_runner_links.py` (new), for the second half of SCN-SEC-43:
   - `gates.runner.run_gate` with `.l4-out` linked to an outside directory that holds `junit.xml` fails with `report
     path .l4-out/junit.xml has a symbolic link at .l4-out`. The command never ran: assert that a marker file it would
     create is absent. The outside `junit.xml` keeps its bytes.
@@ -107,11 +107,11 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
 
 ## 4. `restore_to_base`, the production guard and the step checks (L4-SEC-020, L4-SEC-021; D4, D5)
 
-- [ ] 4.1 Add `links: Mapping[str, str]` to the fake adapter's `Step` in `src/l4/agents/fake.py`. It maps a
+- [x] 4.1 Add `links: Mapping[str, str]` to the fake adapter's `Step` in `src/l4/agents/fake.py`. It maps a
   worktree-relative path to a link target and is applied after `writes` and `deletes`: a file or directory at the
   path is removed first, then `os.symlink(target, path)` runs. Test it in `tests/unit/agents/test_fake.py` (a file,
   a directory and a missing path replaced by a link).
-- [ ] 4.2 Unit tests of `restore_to_base` in `tests/unit/implementer/test_restore_links.py` (new):
+- [x] 4.2 Unit tests of `restore_to_base` in `tests/unit/implementer/test_restore_links.py` (new):
   - a linked directory that was a tree at the base comes back whole;
   - a new linked path is removed and leaves no index entries;
   - a link at the path, where the base had a link, comes back as the base's link;
@@ -123,37 +123,51 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   `existed` parameter, and update its callers: `enforce_red_scope` (three calls), `ProductionGuard.check`, and
   `tdd.py` (the unused-stub restore). In `enforce_red_scope`, write the rebuilt file with `write_inside` and handle an
   `UnsafeFile` from it as D5 says.
-- [ ] 4.3 In `test_restore_links.py`, test SCN-SEC-46: build `ProductionGuard(wb, base)` after a fake red step, run a
+- [x] 4.3 In `test_restore_links.py`, test SCN-SEC-46: build `ProductionGuard(wb, base)` after a fake red step, run a
   gate whose command replaces `src/pytdd` with a link to an outside directory that holds `pricing.py`, then call
   `guard.check("test run")` directly, and assert everything the scenario says. Then test SCN-SEC-41: port
-  reproduction 2 with inverted assertions. `run_red` returns a failed `RedOutcome` whose reason starts with `a gate
-  run put a symbolic link at src/pytdd`, raises nothing, writes no outside `pricing.py`, and leaves `src/pytdd` a
-  directory. Then change `ProductionGuard` in `src/l4/implementer/stubs.py` as D5 says (`_read` → `read_inside`, the
-  link collection through `wb.refused_write`, `write_inside` for guarded files). In `tdd.run_red`, make
-  `tampered(where)` check `wb.unsafe_reason()` first: `discard_changes`, then a failed `RedOutcome` with that reason.
-- [ ] 4.4 Tests in `test_restore_links.py`:
+  reproduction 2 with inverted assertions. `run_red` raises `PlantedLink` (owner decision 1: the
+  unit halts) whose message starts with `a gate run put a symbolic link at src/pytdd`, writes no outside `pricing.py`, and leaves `src/pytdd` a directory and the
+  worktree clean. Then change `ProductionGuard` in `src/l4/implementer/stubs.py` as D5 says (`_read` → `read_inside`, the
+  link collection through `wb.refused_write`, `write_inside` for guarded files). In `tdd.py`, add `PlantedLink` and
+  `stop_on_unsafe` (D4, owner decision 1) and make `tampered(where)` run `guard.check` and then `stop_on_unsafe`.
+- [x] 4.4 Tests in `test_restore_links.py`:
   - green: a fake green whose code makes the `test-at-red` gate plant a link. Use a gate condition on the swapped
-    content, as reproduction 2 does. The test is unfrozen by a human answer so that `fails_at_red` runs, following
-    `tests/unit/implementer/test_unfreeze.py`. `run_green` fails with the D4 reason and makes no commit.
-  - single: a fix chore whose test gate plants a link fails before its commit.
-  - SCN-SEC-49: a red script of two steps, where the gate plants the link once only (a marker file under
-    `tmp_path`). The second request's prompt (`bench.adapter.requests[1].prompt`) holds ``- `src/pytdd` (planted
-    link) removed`` and the advice text. The `task.attempt_failed` reason holds no note text.
+    content and a marker file under `tmp_path`, as reproduction 2 does. The test is unfrozen by a human answer so that
+    `fails_at_red` runs (`tests/unit/implementer/test_tdd_green.py`). `run_green` raises `PlantedLink` and makes no
+    commit.
+  - single: a tests chore whose discrimination run plants a link raises `PlantedLink` before its commit.
+  - SCN-SEC-49: a gate that replaces `src/pytdd/pricing.py` with a directory during run (b) is `restore failed`: the
+    first attempt fails, the run goes on, and the second request's prompt
+    (`bench.adapter.requests[1].prompt`) holds ``- `src/pytdd/pricing.py` (restore failed) refused`` and the advice
+    text. The `task.attempt_failed` reason holds no note text.
 
-  Then add `or wb.unsafe_reason()` as the last term of `run_green`'s reason chain, and `reason = reason or
-  wb.unsafe_reason()` before `if reason:` in `run_single` (`src/l4/implementer/tdd.py`).
-- [ ] 4.5 Tests in `tests/unit/verifier/test_planted_links_verifier.py` (new), following
+  Then add `reason = stop_on_unsafe(wb) or reason` before `if reason:` in `run_green` and in `run_single`
+  (`src/l4/implementer/tdd.py`).
+- [x] 4.5 Tests in `tests/unit/verifier/test_planted_links_verifier.py` (new), following
   `tests/unit/verifier/test_ladder_evidence.py`, for SCN-SEC-47: the unit's code plants a link during the verifier's
   `test-extra-zero` gate. The findings hold the blocker that names the path, the verdict is FAIL, and nothing is
   written outside. Also test that an audit test file under a planted link is not removed through it: the outside file
   stays. Then use `unlink_inside` for the three removals in `src/l4/verifier/audit.py`, routing an `UnsafeFile` to
   `wb.refused_write`. In `src/l4/verifier/ladder.py` `verify_unit`, add the D4 blocker when `wb.unsafe` is not
-  empty, before `_finalize` and before the `else` branch's `aggregate_unit`.
+  empty, before `_finalize` and before the `else` branch's `aggregate_unit`. The test calls the verifier's
+  `discriminate_extra` and `_unsafe_findings` on a workbench, not a whole `l4 run`.
+- [x] 4.6 The halt (owner decision 1; D4, SCN-SEC-54). Tests: in `tests/unit/orchestrator/test_halt_codes.py`, `l4 run`
+  with a gate that plants the link ends in exit 13, `phase.changed{reason: planted_link}`, `breaker.tripped{reason:
+  planted_link, links}` and one agent request. Then catch `PlantedLink` in `orchestrator._implement` (the halt code
+  `planted_link`, the evidence in `breaker.tripped`) and in `verifier/fixloop.py` (`FixOutcome.code`), and read the code
+  in `Orchestrator._fix`.
+- [x] 4.7 No committed link that points outside the worktree (owner decision 3; D11, SCN-SEC-55, SCN-SEC-56). Tests in
+  `tests/unit/implementer/test_outside_links.py` (new), with the fake adapter's `links`: red (an absolute link under a
+  test path, and a `..` escape), green and a fix chore fail with the reason and a `guard.violation`, no commit is made;
+  a relative link inside the worktree and a link the base holds pass. Then add `escaping_links` to `stubs.py`,
+  `outside_links_reason` and its three call sites to `tdd.py`, and `_ADVICE["link outside worktree"]` to `guardnotes.py`.
 
 ## 5. The masked agent folders are protected (L4-SEC-004; D10)
 
-- [ ] 5.1 Port `r3_protected_guard.py` to `tests/unit/security/test_protected_guidance_dirs.py` (new), with the
-  `make_repo` / `git_for` fixtures of `tests/unit/conftest.py`:
+- [x] 5.1 Port `r3_protected_guard.py` to `tests/unit/security/test_protected_guidance_dirs.py` (new), with the
+  `make_repo` / `git_for` fixtures of `tests/unit/conftest.py` (the plant list holds `.kiro/skills/l4/SKILL.md` too,
+  owner decision 4):
   - SCN-SEC-50: `revert_protected` removes the three agent-written files, each with its rule, and `git add -A`
     stages none.
   - SCN-SEC-51: `snapshot_protected` → plant → `restore_protected` + `revert_unsnapshotted` removes them.
@@ -162,12 +176,14 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   - SCN-SEC-53: `check_protected` on a branch where only a person's commit added `.kiro/hooks/lint.kiro.hook` lists
     it in `Outcome.human` and raises no blocker. Use `tests/unit/verifier/_integrity_helpers.py`.
 
-  Then add `".hermes/**"`, `".kiro/hooks/**"` and `".kiro/prompts/**"` to `CONTRACT_PROTECTED_GLOBS` in
-  `src/l4/security/protected.py`, with a comment that names `sandbox.base.GUIDANCE_DIRS`.
+  Then add `".hermes/**"`, `".kiro/hooks/**"`, `".kiro/prompts/**"` and `".kiro/skills/**"` to
+  `CONTRACT_PROTECTED_GLOBS` in `src/l4/security/protected.py`, with a comment that names
+  `sandbox.base.GUIDANCE_DIRS`; add `.kiro/skills` to `GUIDANCE_DIRS` and to `m0_guidance` of
+  `scripts/runner/sandbox-probe.sh`; list `skills` in the Kiro test of `tests/unit/sandbox/test_bwrap_argv.py`.
 
 ## 6. What gate and runner configuration is (L4-IMP-040; D6)
 
-- [ ] 6.1 Tests in `tests/unit/config/test_gate_config_globs.py` (new):
+- [x] 6.1 Tests in `tests/unit/config/test_gate_config_globs.py` (new):
   - the new default entries of `tdd.gate_config_globs` and `.coveragerc` in `tdd.runner_config_files`;
   - `tdd.extra_gate_config_globs` is appended once, after a set `gate_config_globs` too;
   - an unknown key is still refused.
@@ -176,11 +192,13 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   `src/l4/config/schema.py` (`_merge_extras`). `tests/unit/config/test_schema.py` compares the defaults with the
   §3.2 YAML of `docs/SPEC.md`, so in the same task, update the `tdd:` block of §3.2 in `docs/SPEC.md`: the new globs,
   `.coveragerc`, and `extra_gate_config_globs: []` with a comment. Run `tests/unit/config/test_schema.py` too.
-- [ ] 6.2 Tests in `tests/unit/implementer/test_gateconfig.py` (new), covering `GateConfig.of`, `kinds`,
+- [x] 6.2 Tests in `tests/unit/implementer/test_gateconfig.py` (new), covering `GateConfig.of`, `kinds`,
   `view` and `changed` (design D6):
   - each table row of D6, with one file each;
   - SCN-IMP-246: `packages/api/ruff.toml` and `packages/api/pyproject.toml` `[tool.mypy]` count;
   - SCN-IMP-247: a comment line and a key reorder inside `[tool.ruff]` give no changed section;
+  - the `markers` exception (owner decision 5): an added entry is no change in `pyproject.toml`, `pytest.ini`, `setup.cfg`
+    and `tox.ini`; a removed or changed entry, or `asyncio_mode` or `addopts` next to a new one, is;
   - a file that stops parsing counts as changed;
   - dependency sections and `uv.lock` are free;
   - D6.1 for `npm run lint`, `pnpm test`, `sh scripts/typecheck.sh`, `.venv/bin/python -m pytest`, `make lint`,
@@ -192,7 +210,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
 
 ## 7. The configuration guard (L4-IMP-040, L4-IMP-006; D7)
 
-- [ ] 7.1 Port reproductions (a), (b) and (c) from `test_verify_impl3_config.py` into
+- [x] 7.1 Port reproductions (a), (b) and (c) from `test_verify_impl3_config.py` into
   `tests/unit/implementer/test_gate_config_guard.py` (new), with the assertions inverted: SCN-IMP-240, SCN-IMP-241,
   SCN-IMP-242. In the same file, add SCN-IMP-26: green changes `tsconfig.json` `"strict"` and `.gitleaksignore`, and
   both are put back. Then:
@@ -202,17 +220,18 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   - add `_ADVICE["gate configuration"]` and `_ADVICE["runner configuration"]` (D7 texts) to `guardnotes.py`;
   - remove `revert_gate_config` and the runner-section item from the M1 line of the `src/l4/implementer/guards.py`
     docstring.
-- [ ] 7.2 In `test_gate_config_guard.py`, add tests for:
+- [x] 7.2 In `test_gate_config_guard.py`, add tests for:
   - SCN-IMP-244 through `run_green`, with `gates.lint: ["npm run lint"]` and `gates.typecheck: ["sh
     scripts/typecheck.sh"]`;
   - SCN-IMP-245;
   - SCN-IMP-246 and SCN-IMP-247 through `run_green` (the violations and the kept edit);
-  - SCN-IMP-248;
+  - SCN-IMP-248 (with `asyncio_mode`, not a marker), SCN-IMP-254 through SCN-IMP-257 (the `markers` exception), and
+    SCN-IMP-258 (the retry note names the file and the section and says how to redo a dependency);
   - one violation per kind when a step changes both `[tool.ruff]` and `[tool.pytest.ini_options]`;
   - the guard note: the second attempt's prompt (`bench.adapter.requests[1].prompt`) names the file and the section.
 
   Fix what fails, in `gateconfig.py` and `tdd.py` only.
-- [ ] 7.3 Tests in `tests/unit/implementer/test_gate_config_gate_run.py` (new):
+- [x] 7.3 Tests in `tests/unit/implementer/test_gate_config_gate_run.py` (new):
   - SCN-IMP-243, with a red test that appends to `ruff.toml` when it runs, and a lint gate that passes only on the
     loosened file;
   - a gate that adds a new `mypy.ini` has it removed;
@@ -224,7 +243,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
 
 ## 8. Opening configuration for a task (L4-IMP-041; D8)
 
-- [ ] 8.1 Tests in `tests/unit/implementer/test_config_opened.py` (new):
+- [x] 8.1 Tests in `tests/unit/implementer/test_config_opened.py` (new):
   - SCN-IMP-250: a `[config]` task in green keeps its `ruff.toml` change;
   - SCN-IMP-251: a person's answer opens `pyproject.toml` for red, and `task.config_opened` is recorded before the
     agent step with the fields of L4-IMP-041;
@@ -240,7 +259,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
 
 ## 9. The verifier checks configuration on the commits (L4-IMP-040; D9)
 
-- [ ] 9.1 Tests in `tests/unit/verifier/test_integrity_gate_config.py` (new), with
+- [x] 9.1 Tests in `tests/unit/verifier/test_integrity_gate_config.py` (new), with
   `tests/unit/verifier/_integrity_helpers.py`:
   - SCN-IMP-249, the blocker half;
   - a `[config]` task's green commit passes;
@@ -252,7 +271,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   Then add `check_gate_config` (D9), `Outcome.human_config` and its `CHECKS` row (after `content scan`) to
   `src/l4/verifier/integrity.py`. In the module docstring, drop "gate configuration and script entries (2.9)" from
   "Not built".
-- [ ] 9.2 Tests in the same file for the listing half of SCN-IMP-249:
+- [x] 9.2 Tests in the same file for the listing half of SCN-IMP-249:
   - `run_integrity` fills `IntegrityReport.human_config`;
   - `verification.md` has the `## Gate and runner configuration changed by humans (allowed, listed: L4-IMP-040)`
     section with the person's change;
@@ -264,7 +283,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
 
 ## 10. Docs
 
-- [ ] 10.1 `docs/SPEC.md`, then run `python scripts/check_spec.py docs/SPEC.md` (it must print no problem):
+- [x] 10.1 `docs/SPEC.md`, then run `python scripts/check_spec.py docs/SPEC.md` (it must print no problem):
   - §18, after L4-SEC-008: `**L4-SEC-020**` and `**L4-SEC-021**`, with the text of `specs/security/spec.md`.
   - L4-SEC-002's guidance list: add `.hermes/**`, `.kiro/hooks/**`, `.kiro/prompts/**`.
   - L4-SEC-004: the contract list sentence of the MODIFIED requirement.
@@ -290,7 +309,7 @@ In every task of this group: no exception may leave a `finally`, and an `UnsafeF
   - The §21 change table: a row `guard-harness-writes` after the last row present, numbered one more than it, with
     the delivered text and the exit criteria "the ported reproductions pass; a consumer repository's red step that
     edits `[tool.ruff]` has it put back".
-- [ ] 10.2 Write `CHANGELOG.md` under `## 0.4.16 (unreleased)`. If that section is missing, create it above the
+- [x] 10.2 Write `CHANGELOG.md` under `## 0.4.16 (unreleased)`. If that section is missing, create it above the
   newest section. Add "Fixed" entries for the three findings, in consumer terms, and a "Changed" entry: red's runner
   sections and every step's gate configuration are put back unless the task has a tag or a person's answer; new
   default globs; `tdd.extra_gate_config_globs`. Then:

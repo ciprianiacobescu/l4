@@ -100,11 +100,19 @@ carried to the next attempt's prompt. In green, runner configuration SHALL alway
   carries the ignore
 
 #### Scenario: SCN-IMP-248 (−) Green's runner change is put back even with `[test-infra]`
-- **GIVEN** a task titled `1.2 [test-infra] Register the slow marker` whose green step adds `markers` to
+- **GIVEN** a task titled `1.2 [test-infra] Make the async tests run` whose green step adds `asyncio_mode = "auto"` to
   `[tool.pytest.ini_options]`
 - **WHEN** the agent-step guard runs in green
 - **THEN** `pyproject.toml` is back to the red commit with a `runner configuration` violation, because the red-to-green
   freeze holds for every task
+
+#### Scenario: SCN-IMP-258 (+) The retry note says which file went back, why, and how to redo a dependency
+- **GIVEN** a red attempt that added a test dependency and a `[tool.ruff.lint] ignore` to `pyproject.toml` and failed
+  its lint gate
+- **WHEN** the next attempt's prompt is built
+- **THEN** its previous-attempt block carries ``- `pyproject.toml` (gate configuration) restored: changed tool.ruff``
+  and the advice that the whole file was put back to the step's base and that a dependency added in the same file must
+  be written again without touching those sections
 
 ### Requirement: L4-IMP-040 Configuration is put back after every gate run (part f)
 After every gate run, in the implementer and in the verifier, any gate or runner configuration that differs from its
@@ -129,6 +137,37 @@ file, and runner configuration never in a green commit. A change that only peopl
 - **WHEN** the verifier's step 1 runs
 - **THEN** the `gate configuration` sub-check fails with a blocker that names `pyproject.toml (tool.mypy)` and the
   commit, and `verification.md` lists `ruff.toml` under "Gate and runner configuration changed by humans"
+
+### Requirement: L4-IMP-040 A new pytest marker is no change (part h)
+A red or green step MAY add entries to pytest's `markers` list (`pytest.ini`, `tox.ini` `[pytest]`, `setup.cfg`
+`[tool:pytest]`, `[tool.pytest.ini_options]`) without a tag or an answer. Removing or changing an entry, and any other
+runner key (`asyncio_mode`, `addopts`, plugins), SHALL remain a change that needs a `[test-infra]` tag or an answer in
+red, and is never allowed in green.
+
+#### Scenario: SCN-IMP-254 (+) Red may register a new pytest marker without a tag
+- **GIVEN** a red step, in a task without a tag, that adds `markers = ["slow: slow tests"]` to
+  `[tool.pytest.ini_options]` of `pyproject.toml`, for a test it writes
+- **WHEN** the agent-step guard and the verifier's step 1 run
+- **THEN** the change stays and is committed, no violation is recorded, and the verifier's `gate configuration`
+  sub-check passes
+
+#### Scenario: SCN-IMP-255 (+) Green may register a new pytest marker too
+- **GIVEN** a base whose `markers` list holds `slow: slow tests`, and a green step, in a task without a tag, that
+  adds `db: needs a database` to the list
+- **WHEN** the agent-step guard runs in green and the verifier checks the commits
+- **THEN** the change stays, no violation is recorded, and neither the guard nor the verifier's red-to-green freeze
+  sees a change
+
+#### Scenario: SCN-IMP-256 (−) A removed or changed marker is put back
+- **GIVEN** a green step that empties the `markers` list, and another that rewrites `slow: slow tests` as
+  `slow: ignore this`
+- **WHEN** the agent-step guard runs
+- **THEN** `pyproject.toml` is back to the red commit with a `runner configuration` violation naming `tool.pytest`
+
+#### Scenario: SCN-IMP-257 (−) A new marker together with another runner key is put back whole
+- **GIVEN** a red step, in a task without a tag, that adds a marker and `asyncio_mode = "auto"` in the same file
+- **WHEN** the agent-step guard runs
+- **THEN** the whole file is back to the base, marker included, and one `runner configuration` violation is recorded
 
 ### Requirement: L4-IMP-041 A tag or a person's answer opens configuration for one task (part a)
 Gate configuration SHALL be allowed to change in a step of a task whose title carries a human-written `[config]` or

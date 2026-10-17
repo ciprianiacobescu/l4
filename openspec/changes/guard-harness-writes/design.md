@@ -9,9 +9,10 @@ cited place or run in this worktree; **[I]** inferred, meaning it follows from t
    in `l4.fsutil`. These primitives walk the path with directory descriptors and never follow a link (`O_NOFOLLOW` on
    every component). A file is written as a new file and then renamed over its name. A link on the path raises
    `LinkedPath`. The caller records it, removes the link and writes once more. No exception leaves a `finally` (D1–D4).
-2. A recorded `planted link` or `restore failed` fails the implementer attempt at the next check before its commit. The
-   attempt's changes are discarded and the reason names the link. In the verifier, the record is a blocker. The run
-   always goes on (D4).
+2. A recorded `planted link` halts the unit at once, like `secret_in_push`: the attempt is discarded, `PlantedLink` is
+   raised (never out of a `finally`), and the orchestrator trips `breaker.tripped{reason: planted_link}` with the
+   evidence and halts the unit for a person (owner decision 1, D4). A recorded `restore failed` fails the implementer
+   attempt at the next check before its commit. In the verifier, both are a blocker. The run always goes on (D4).
 3. `restore_to_base` removes links at or above its path, checks out a former directory whole, and runs `git rm -r
    --cached` for a path that is new. `ProductionGuard.check` records a link at a production path instead of crashing
    (D5).
@@ -20,8 +21,9 @@ cited place or run in this worktree; **[I]** inferred, meaning it follows from t
    *section* differs, compared parsed (D7). Changes are allowed by a `[config]` or `[test-infra]` tag, or by a person's
    answer (`task.config_opened`). The red-to-green runner freeze is never lifted (D8). The verifier checks the same rule
    on the commits (D9).
-5. `.hermes/**`, `.kiro/hooks/**` and `.kiro/prompts/**` are added to the contract list. A drift test keeps every
-   directory in `sandbox.base.GUIDANCE_DIRS` protected (D10).
+5. `.hermes/**`, `.kiro/hooks/**`, `.kiro/prompts/**` and `.kiro/skills/**` are added to the contract list, and
+   `.kiro/skills` to `sandbox.base.GUIDANCE_DIRS` (owner decision 4). A drift test keeps every directory in
+   `GUIDANCE_DIRS` protected (D10).
 
 ## 1. Current state (0.4.14)
 
@@ -171,45 +173,60 @@ repaired tree never passes for a clean one.
 
 `Workbench` gets these members:
 
-- `unsafe: list[UnsafeWrite]`, where `UnsafeWrite(path, rule, where)` is a frozen dataclass. The field sits next to
+- `unsafe: list[UnsafeWrite]`, where `UnsafeWrite(path, rule, where, link, target)` is a frozen dataclass. The field sits next to
   `guard_notes`. `run_task` clears both at the start of every attempt.
-- `refused_write(exc: UnsafeFile, *, path: str, where: str) -> None`:
-  - for a `LinkedPath`, it calls `remove_link(self.worktree, exc.link)` and emits `guard.violation{phase: "gate",
-    rule: "planted link", path: exc.link, action: "removed", where, target: path}`;
+- `refused_write(exc: UnsafeFile, *, path: str, where: str, root: Path | None = None) -> None` (`root`: the checkout the
+  gate ran in, the worktree by default):
+  - for a `LinkedPath`, it reads the link's target, calls `remove_link(root, exc.link)` and emits
+    `guard.violation{phase: "gate", rule: "planted link", path: exc.link, action: "removed", where, target: path,
+    points_to}`;
   - for any other `UnsafeFile`, it emits `guard.violation{phase: "gate", rule: "restore failed", path, action:
     "refused", where, why: str(exc)}`;
   - it appends an `UnsafeWrite` in both cases. The same link is recorded once per attempt. Every event carries `path`
     and `rule`, so `guardnotes.note_of` turns it into a note for the next prompt.
-- `unsafe_reason() -> str`: `""` when `unsafe` is empty. Otherwise it returns: `a gate run put a symbolic link at
-  <path>[, <path>…] (on the path of a file the harness restores); the harness removed it and wrote nothing through it.
-  Nothing of this attempt is kept: a test may create links only in its own temporary directory (pytest's tmp_path),
-  never in the worktree.` For `restore failed` only, it returns `the harness could not put <path> back after a gate run
-  (<why>). Nothing of this attempt is kept.` At most 5 paths, then `(+N more)`.
+- `unsafe_reason() -> str`: `""` when `unsafe` is empty. For a planted link it returns: `a gate run put a symbolic link
+  at <path>[, <path>…] (on the path of a file the harness restores); the harness removed it and wrote nothing through it.
+  Nothing of this attempt is kept`. For `restore failed` only, it returns `the harness could not put <path> back after a
+  gate run. Nothing of this attempt is kept`. At most 5 paths, then `(+N more)`.
+- `planted_links() -> list[UnsafeWrite]`: the `planted link` records, with `link` and `target`.
 
-Where the reason fails the step (each site calls `wb.discard_changes()` first and returns a failed outcome):
+Where the record ends the attempt. Each site calls `wb.discard_changes()` first. A `planted link` (owner decision 1)
+raises `PlantedLink`; `restore failed` returns a failed outcome with `unsafe_reason()`. `tdd.stop_on_unsafe(wb)` does
+both:
 
 | Step | Site |
 |---|---|
-| red (`tdd.run_red`) | First line of `tampered(where)`. It runs after every gate stage: the test run, the pre-satisfied confirmation, the base run, the restored test run, the vacuity check, the static gates, and before both commits (red and already-satisfied). |
-| green (`tdd.run_green`) | The `reason = reason or _undiscriminating(...) or worse_static_gates(...)` chain gets `or wb.unsafe_reason()` as its last term, which runs after `fails_at_red`. |
-| single (`tdd.run_single`) | `reason = reason or wb.unsafe_reason()` on the line before `if reason:`, after `_discriminating_tests`. |
-| verifier (`ladder.verify_unit`) | When `wb.unsafe` is not empty, before `_finalize` and before the `else` branch's `aggregate_unit`, add one `Finding(Severity.BLOCKER, title, detail, "deterministic")` (the `integrity._blocker` shape) with the title `a gate run planted a symbolic link in the worktree` (or `could not restore a file after a gate run`) and the paths in the detail. The round ends FAIL. |
+| red (`tdd.run_red`) | `tampered(where)` runs `guard.check(where)` and then `stop_on_unsafe`. It runs after every gate stage: the test run, the pre-satisfied confirmation, the base run, the restored test run, the vacuity check, the static gates, and before both commits (red and already-satisfied). |
+| green (`tdd.run_green`) | `reason = stop_on_unsafe(wb) or reason` after the `reason or _undiscriminating(...) or worse_static_gates(...)` chain, so that it also covers `fails_at_red`. |
+| single (`tdd.run_single`) | `reason = stop_on_unsafe(wb) or reason` after `_discriminating_tests`. |
+| verifier (`ladder.verify_unit`) | When `wb.unsafe` is not empty, before `_finalize` and before the `else` branch's `aggregate_unit`, add one `Finding(Severity.BLOCKER, title, detail, "deterministic")` with the title `a gate run planted a symbolic link in the worktree` (or `could not restore a file after a gate run`) and the paths in the detail. The round ends FAIL; the verifier has no attempt to halt. |
+
+`PlantedLink(reason, links)` sits beside `BaselineFailed` in `tdd.py`. `orchestrator._implement` catches it next to
+`BaselineFailed`, appends `breaker.tripped{reason: "planted_link", task, links: [{path, points_to, where}]}` (at most 20
+links) and calls `_halt("planted_link", f"task {task}: {exc}")`. The paths are at the front of the detail because the
+`phase.changed` keeps 300 characters. `fixloop` catches it next to its `BaselineFailed` and returns
+`FixOutcome("halt", reason, code="planted_link")`, which `Orchestrator._fix` turns into the same halt code. The code
+`planted_link` joins the `halted` codes of L4-OPS-005, the table of `docs/runbook.md` and its §7.2.
 
 What a person sees:
 
-- the `guard.violation` events in the ledger;
-- `task.attempt_failed.reason` (above), and the existing warning line `<task>: red attempt N failed on <profile>:
-  …`;
-- after `max_task_attempts`, the halt reason with the same text;
+- the `guard.violation` events and `breaker.tripped{links}` in the ledger, where each link carries its target
+  (`points_to`, read before the harness removed it);
+- the halt reason in `l4 status`, the note on the pull request and `exit_reason`, with the paths at the front;
+- for `restore failed`, `task.attempt_failed.reason` and, after `max_task_attempts`, the halt reason;
 - in the verifier, a FAIL whose `verification.md` lists the blocker.
 
-The next attempt's prompt carries the guard note with the new `_ADVICE` entries:
+The next attempt's prompt after a `restore failed` carries the guard note with the new `_ADVICE` entries (a planted link
+halts, so its entry only serves a guard note that is built before the halt):
 
 - `"planted link"`: "A test run replaced a directory or file of the worktree with a symbolic link. The harness never
   writes through one: it removed the link and discarded the attempt. Create links only under the test's own temporary
   directory (`tmp_path`)."
 - `"restore failed"`: "The harness could not put a file back after a test run changed it. Tests must not replace,
   delete or lock source files."
+- `"link outside worktree"` (D11): "A symbolic link that points outside the repository (an absolute target, or `..`
+  above the root) is never committed: the harness discarded the step. Keep the link out of the work, or point it at a
+  path inside the repository."
 
 ## D5. `restore_to_base` and the production guard
 
@@ -262,6 +279,17 @@ does), so `packages/api/ruff.toml` counts.
 | gate | `tdd.gate_config_globs` + `tdd.extra_gate_config_globs` | `pyproject.toml`: `tool.mypy*`, `tool.ruff*`, `tool.pylint*`, `tool.pyright*`, `tool.basedpyright*`, `tool.black*`, `tool.isort*`, `tool.flake8*`, `tool.bandit*`, `tool.pydocstyle*`, `tool.codespell*`. `setup.cfg`, `tox.ini`: `mypy`, `mypy-*`, `flake8`, `pylint*`, `isort`, `pycodestyle`, `pydocstyle`, `bandit`. `package.json`: `eslintConfig`, `eslintIgnore`, `prettier`, `stylelint` | resolved from `gates.build`, `gates.lint`, `gates.typecheck` and `gates.extra[*].command` |
 | runner | `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`, `.coveragerc`, and each `tdd.runner_config_files` entry that is not `pyproject.toml`, `setup.cfg`, `tox.ini` or `package.json` (`jest.config.*`, `vitest.config.*`, `playwright.config.*`, `karma.conf.*`, `.mocharc.*`) | `pyproject.toml`: `tool.pytest*`, `tool.coverage*`. `setup.cfg`: `tool:pytest`, `coverage:*`. `tox.ini`: `pytest`, `coverage:*`. `package.json`: `jest`, `mocha`, `nyc`, `c8`, `ava`, `scripts.test` | resolved from `gates.test.command` and `gates.e2e.command` |
 | free | lock files (`stubs.LOCKFILES`) and every other file | every other section: `project`, `dependency-groups`, `build-system`, `tool.uv`, `tool.poetry`, `dependencies`, `devDependencies`, `scripts` entries no gate command runs, `tool.poe` when no gate command runs `poe`, and the rest | — |
+
+**The `markers` exception (owner decision 5).** `pytest.ini`, `.pytest.ini`, `pytest.toml` and `.pytest.toml` are not
+compared as bytes: they are parsed (INI, TOML) section by section, so that the pytest settings can be compared the way
+the manifests' are. For a pytest section (`[pytest]`, `[tool:pytest]`, `tool.pytest` with its `ini_options`) the view
+of the step base and the view after are the same when every key but `markers` is equal and the base's `markers`
+entries, taken as a set, are all still there (an INI `markers` value is one entry per line, a TOML value a list). So
+adding an entry is no change; removing one, changing one (it is a removal and an addition) or touching any other key
+(`asyncio_mode`, `addopts`, plugins) is. The same comparison serves the guard (D7), the post-gate restore, the
+verifier's step 1 (D9) and the red-to-green freeze of `check_freeze`, which now asks `GateConfig.changed` for the
+`runner` kind instead of comparing whole `[tool.pytest*]` tables, so that a marker green registered is not a blocker one
+round later.
 
 New defaults for `tdd.gate_config_globs`: `pyrightconfig.json`, `pylintrc`, `.eslintignore`, `.prettierrc*`,
 `.prettierignore`, `biome.json`, `biome.jsonc`. New default for `tdd.runner_config_files`: `.coveragerc`. The new key
@@ -412,26 +440,49 @@ that changed them without `[test-infra]` or an answer is a harness commit the ru
 
 ## D10. The masked agent folders are protected paths
 
-- `.hermes/**`, `.kiro/hooks/**` and `.kiro/prompts/**` are added to `CONTRACT_PROTECTED_GLOBS`. They sit beside
-  `.kiro/agents/**` and `.kiro/settings/**`, and the comment names `GUIDANCE_DIRS`.
+- `.hermes/**`, `.kiro/hooks/**`, `.kiro/prompts/**` and `.kiro/skills/**` are added to `CONTRACT_PROTECTED_GLOBS`. They
+  sit beside `.kiro/agents/**` and `.kiro/settings/**`, and the comment names `GUIDANCE_DIRS`.
+- `.kiro/skills` is added to `GUIDANCE_DIRS` (owner decision 4: it is a Kiro guidance root, and `l4 skills install
+  --project` writes `.kiro/skills/l4`) and to `m0_guidance` of `scripts/runner/sandbox-probe.sh`, so the sandbox masks it
+  and the drift test covers it. A person installs the skill (`l4 skills install`, outside any step), so a step has no use
+  for the folder. The existing `test_bwrap_argv` test of the Kiro folders lists `skills` too.
 - `anchored_roots()` derives the gate snapshot roots from the globs, so the gate guards cover the new paths with no
   other change [V, read: `protected.py:92-97`].
 - A drift test asserts `ProtectedSet().match(f"{d}/x") is not None` for every `d` of `GUIDANCE_DIRS`. It also asserts
   that `m0_guidance` of `scripts/runner/sandbox-probe.sh` lists the same directories. The existing `test_probe_parity`
   pattern is in `tests/unit/sandbox/`.
 - The generic guard note `_GENERIC` already names "agent configuration".
-- In SPEC, L4-SEC-002's guidance list gains the three paths, so that L4-SEC-002, L4-SEC-004 and L4-SEC-005 agree.
+- In SPEC, L4-SEC-002's guidance list gains the four paths, and L4-SEC-005's list of masked folders `.kiro/skills`, so
+  that L4-SEC-002, L4-SEC-004 and L4-SEC-005 agree.
+
+## D11. No step commits a link that points outside the worktree (owner decision 3)
+
+`stubs.escaping_links(wb, base) -> list[tuple[str, str]]` lists, for every path of `changed_paths(git, base)` that is a
+symbolic link now (`lstat`), the `(path, target)` pairs where the target is absolute, or climbs above the root once it is
+joined to the link's directory and normalized. A link that `base` holds at that path with the same target (`git ls-tree`
+mode `120000`, blob text) is left out. `tdd.outside_links_reason(wb, base, phase)` emits one `guard.violation{phase,
+rule: "link outside worktree", path, action: "refused", target, why}` per link and returns the reason `the step left a
+symbolic link that points outside the worktree: <path> -> <target>[, …] … nothing of this attempt is kept` (at most 5
+links, then `(+N more)`). It runs once per attempt, after every gate and before the commit:
+
+| Step | Site |
+|---|---|
+| red | before the red commit and before the already-satisfied commit, after `tampered(...)`: `wb.discard_changes()` and a failed `RedOutcome` |
+| green | `reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")` |
+| single | the same line with `"single"` |
+
+It is not inside `Workbench.commit`, because it has to produce a failed outcome, not an exception. A refusal is an
+attempt failure, not a halt: the link is the step's own, and the next prompt carries the guard note (D4). A link that
+stays inside the worktree is not refused, and neither is a link a gate planted at a production path that stays inside
+(the restores of L4-SEC-020 refuse to write through it, D1). `Step.links` of the fake adapter is the test lever.
 
 ## Residual risks
 
 - Under `NoSandbox` (macOS, local development only, L4-NFR-005) the gate itself can still write anywhere. This change
   protects the harness's own writes, not the gate's.
-- A link that an agent step creates (not a gate) and that the step commits, for example in green, is not refused by
-  this change. Red scope already removes production links in red. See open question 3.
-- Green and a fix chore have no production guard. A link that a gate plants at a production path during green's own
-  test gate is caught only if a harness write later passes through it (the run at the red code, the report restore).
-  Otherwise `git add -A` commits it. The harness never writes through it, but the branch then carries a link that may
-  point outside the worktree. See open question 3.
+- A link that stays inside the worktree and that a step or a gate puts in place of a production directory is not
+  refused in green and in a fix chore, which have no production guard. The harness never writes through it (D1), and
+  a link that leaves the worktree is refused before every commit (D11).
 - The script resolver (D6.1) sees only the listed command shapes. A gate that runs a script through another tool, for
   example `nox`, `invoke`, `bazel` or a wrapper binary, is not resolved, and its script is free.
 - The whole-file revert can cost an attempt when a step mixes a dependency change with a gate-section change.
@@ -440,6 +491,8 @@ that changed them without `[test-infra]` or an answer is a harness commit the ru
 
 - Repair-and-continue for a planted link, without failing the attempt: a test that ran `rm -rf src/pytdd` would pass
   once the harness healed the tree.
+- Failing one attempt for a planted link and halting only after `max_task_attempts`: the owner chose to halt at once
+  (decision 1), because code that plants links is evidence for a person, not a mistake to retry.
 - Raising `LinkedPath` out of the `finally` and catching it in `run_task`: a `finally` that raises replaces the
   exception in flight, and today's `RuntimeError` there already has no catcher.
 - Section-level splicing of TOML (see D7).
@@ -448,17 +501,18 @@ that changed them without `[test-infra]` or an answer is a harness commit the ru
 - A full-tree link sweep after every gate: false positives (bazel's convenience links, `node_modules/.pnpm`) and no
   gain over the walk on the paths the harness actually writes.
 
-## Open questions for the owner
+## Owner decisions (answers to the open questions of the first draft)
 
-1. Should a planted link halt the unit at once (a breaker, as `secret_in_push` does) rather than count as one failed
-   attempt (three in a row halt with `max_task_attempts`)? This design fails the attempt.
-2. Is the whole-file revert of a manifest acceptable, or is section-level splicing worth the complexity?
-3. Should a link that points outside the worktree (or is absolute), whether an agent step or a gate made it, be
-   refused in every phase before the commit, for example by a check of the staged links in `Workbench.commit`? Today
-   only red scope (agent step) and the red production guard (gates) remove production links. Green and fix chores
-   commit them.
-4. `.kiro/skills/**` is a Kiro guidance root (docs/research/01). `l4 skills install --project` writes `.kiro/skills/l4`.
-   Should it be masked and protected as well? It is not in `GUIDANCE_DIRS`, so the drift test does not force it.
-5. Are the new defaults acceptable (seven gate globs and `.coveragerc` as runner configuration)? Is a red step's
-   runner change (a registered marker, `asyncio_mode`) needing `[test-infra]` or an answer acceptable for consumer
-   repositories?
+1. **A planted link halts the unit at once**, like `secret_in_push` (D4: `PlantedLink`, `breaker.tripped{reason:
+   planted_link}`, halt code `planted_link`). Applied with group 4. `restore failed` was not named by the decision and
+   stays an attempt failure; it is the one reading made by the implementation, and the verifier keeps the blocker.
+2. Putting the whole configuration file back is accepted (D7). The retry note says which file went back and why, and
+   that a dependency change in the same file must be made again without the configuration change (D7 advice,
+   SCN-IMP-258). Applied with group 7.
+3. **Every phase refuses to commit a link that points outside the worktree** unless the base holds the same link (D11,
+   L4-SEC-020 part e). Applied with group 4.
+4. `.kiro/skills/**` is masked in the sandbox and protected, like the other guidance folders; the drift test covers it
+   (D10). Applied with group 5.
+5. The defaults stand (the seven gate globs, `.coveragerc` as runner configuration), with ONE narrow exception: a red
+   or green step may add entries to pytest's `markers` list without a tag or an answer (D6, SCN-IMP-254..257).
+   Applied with groups 6, 7 and 9.
