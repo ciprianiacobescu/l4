@@ -111,3 +111,24 @@ def test_a_repository_without_pyproject_keeps_the_m0_gates_and_a_todo(target: Pa
     text = next(f for f in plan.files if f.path == ".l4/config.yaml").data.decode()
     assert yaml.safe_load(text)["gates"]["setup"] == ["uv sync --frozen"]
     assert "# TODO: no pyproject.toml" in text
+
+
+def test_l4_init_proposes_ci_toolchains_from_the_repository_files(target: Path, harness_repo: Path, git_environ):
+    """L4-CI-005: go.work, .nvmrc and packageManager pnpm@X become `ci.toolchains`, with a TODO about the gates."""
+    (target / "go.work").write_text("go 1.26\n")
+    (target / ".nvmrc").write_text("22\n")
+    (target / "package.json").write_text('{"packageManager": "pnpm@11.0.9"}')
+    plan = plan_init(target, git_environ, force=False, harness=harness_repo)
+    text = next(f.data.decode() for f in plan.files if f.path == ".l4/config.yaml")
+    assert yaml.safe_load(text)["ci"]["toolchains"] == {
+        "go": {"version_file": "go.work"},
+        "node": {"version_file": ".nvmrc"},
+        "pnpm": {"version": "11.0.9"},
+    }
+    assert any("ci.toolchains" in todo for todo in plan.todos)
+
+
+def test_l4_init_proposes_no_toolchains_for_a_python_repository(target: Path, harness_repo: Path, git_environ):
+    plan = plan_init(target, git_environ, force=False, harness=harness_repo)
+    text = next(f.data.decode() for f in plan.files if f.path == ".l4/config.yaml")
+    assert "toolchains" not in yaml.safe_load(text)["ci"]

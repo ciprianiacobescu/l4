@@ -672,6 +672,10 @@ def _cron(value: str) -> str:
     return value
 
 
+# a version, a range (`>=22`, `^22.1.0`, `22.x`) or an alias (`lts/*`): one line, no quote or colon
+_TOOL_VERSION = r"^[A-Za-z0-9<>=^~][A-Za-z0-9._+<>=^~ *|/-]{0,63}$"
+
+
 def _toolchain_file(value: str) -> str:
     """A repository-relative file read by the setup action (`go.work`, `.nvmrc`)."""
     pure = PurePosixPath(value)
@@ -683,7 +687,7 @@ def _toolchain_file(value: str) -> str:
 class ToolchainCfg(_Strict):
     """One toolchain the L4 job provides (L4-CI-005): exactly one of `version` and `version_file`."""
 
-    version: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")] | None = None
+    version: Annotated[str, StringConstraints(pattern=_TOOL_VERSION)] | None = None
     version_file: Annotated[str, AfterValidator(_toolchain_file)] | None = None
 
     @model_serializer(mode="wrap")
@@ -692,7 +696,7 @@ class ToolchainCfg(_Strict):
 
 
 class PnpmCfg(_Strict):
-    version: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")]
+    version: Annotated[str, StringConstraints(pattern=_TOOL_VERSION)]
 
 
 class ToolchainsCfg(_Strict):
