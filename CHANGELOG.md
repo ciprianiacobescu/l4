@@ -6,6 +6,31 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.14 (2026-10-17)
+
+### Added
+- `l4 yolo check <plan> --worktree` checks a delivery plan before the push, with the installed `l4`. It reads the plan
+  files and the units from the working tree, runs the admission of `l4 yolo check`, and adds the checks across all plan
+  files that only `scripts/validate_plan.py` ran (`uncovered`, `covered_twice`). It prints the findings, the order and the
+  budget warnings, writes nothing, and exits 0 or 2. `l4 yolo draft` and `l4 yolo review --worktree` name it in their
+  hints. The script stays for an agent or a CI step without the harness, and a parity test holds the two together.
+- `l4 skills install` puts the `l4` skill into the skill folder of every coding agent, with no network and no clone:
+  the skill now ships inside the wheel and the sdist. User scope writes `~/.claude/skills/l4`, `~/.agents/skills/l4`
+  (and `~/.codex/skills/l4` when that folder exists), `~/.config/opencode/skills/l4` and `~/.kiro/skills/l4`;
+  `--project` writes `.claude/`, `.agents/`, `.opencode/` and `.kiro/` `skills/l4` in the repository. `--agent auto`
+  (the default) takes the agents whose home folder or CLI (`claude`, `codex`, `opencode`, `kiro-cli`) is present. Each
+  copy has a manifest `.l4-skill.json`; a rerun updates an untouched copy, refuses an edited one (exit 2) unless
+  `--force`, and never follows a symbolic link. `--dry-run` prints the plan. `l4 skills status` lists the copies with
+  version, `current` or `old`, and edited files. Doctor row SKL-003 warns about an installed skill older than `l4`, and
+  `l4 init` names the command (L4-SKL-003).
+
+### Fixed
+- A delivery plan no longer starts a run every minute for a unit that waits for capacity. A plan step that dispatches a
+  unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same profiles with none cooling
+  (an expired provider key, a missing binary) stops the plan with `capacity_needs_fix`; the stop names the profiles,
+  their failures and the fix, and `l4 yolo resume` goes on after it (L4-YOLO-035). A park with a cooling profile still
+  waits for its reset.
+
 ## 0.4.13 (2026-10-17)
 
 ### Added

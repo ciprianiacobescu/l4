@@ -1717,13 +1717,17 @@ class _Step:
                 self._line(ctx.plan_id, f"{unit} ({phase or 'not started'}) has nothing to run now")
                 return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
             return self._wait(ctx, phase or "not_started", unit, snap)  # it cannot run and cannot be adopted (#2)
+        parked = phase == "waiting_capacity"
+        if parked and (needs_fix := self._capacity_needs_fix(ctx, snap)) is not None:
+            return self._stop(ctx, "capacity_needs_fix", needs_fix, unit)
         if (limit := self._limit_reached(ctx, unit)) is not None:
             return self._stop(ctx, limit[0], limit[1], limit[2], charge=unit)
         # the charge first: the fold gives a new attempt its own stale retry when it sees the dispatch (D8)
         self._write(ctx, self._dispatch_events(ctx, unit, snap, adopted=adopt))
         if not adopt:
             self._line(ctx.plan_id, f"dispatched {unit} ({phase or 'not started'})")
-            return self._result(frozenset({unit}), start_next_run=True, plan_id=ctx.plan_id)
+            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035)
+            return self._result(frozenset({unit}), start_next_run=not parked, plan_id=ctx.plan_id)
         self._line(ctx.plan_id, f"adopted {unit} ({phase}): it is past implementation")
         if plan.merge == "auto":  # a person merges under `merge: human`; the plan waits for it as for any current unit
             merged = self._merge(ctx, snap)
@@ -1732,6 +1736,24 @@ class _Step:
             if unit in self._merge_not_ready:
                 return self._wait_merge(ctx, unit)
         return self._result(frozenset({unit}), start_next_run=False, plan_id=ctx.plan_id)
+
+    def _capacity_needs_fix(self, ctx: _Ctx, snap: UnitSnapshot) -> str | None:
+        """The stop detail when the unit's two latest parks since the plan last went on (activated or resumed) were both
+        fix-only for the same unusable profiles with no work between them (L4-YOLO-035), else None."""
+        since = max(
+            (t for e in ctx.read.events if e.type in ("plan.activated", "plan.resumed") and (t := _at(e)) is not None),
+            default=None,
+        )
+        parks = [p for p in snap.fix_parks if since is None or p.ts > since]
+        if len(parks) < 2 or parks[-1].names != parks[-2].names:
+            return None
+        last = parks[-1]
+        lines = "; ".join(f"{name} ({step}): {reason}" for name, step, reason in last.profiles)
+        return (
+            f"{snap.ref.id} waits for capacity and no profile of the {last.role} chain is cooling, so only a fix ends "
+            f"the wait: {lines}. Renew the secret the profile reads (for example OPENCODE_API_KEY), or install the "
+            f"binary; then l4 yolo resume {ctx.plan_id} --reason TEXT"
+        )
 
     def _dispatch_events(self, ctx: _Ctx, unit: str, snap: UnitSnapshot, *, adopted: bool = False) -> list[PlanEvent]:
         """The charge of the attempt and `unit.dispatched`; `adopted`: the unit was already past implementation."""
@@ -1882,6 +1904,13 @@ def failed_plan_step(
         if s.ref.id in held
     }
     return PlanStep(allow=frozenset(s.ref.id for _, s in found if s.ref.id not in held), refusals=refusals)
+
+
+def _at(event: PlanEvent) -> datetime | None:
+    try:
+        return datetime.fromisoformat(event.at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _last(events: Sequence[PlanEvent], kind: str, unit: str | None = None) -> PlanEvent | None:

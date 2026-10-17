@@ -26,13 +26,13 @@ from l4.specs.providers import providers_for
 from l4.state.status import discover
 from l4.vcs.names import unit_branch
 from l4.yolo import accept, findings, judge_sandbox, worktree
-from l4.yolo.admit import admit, done_units
+from l4.yolo.admit import done_units
 from l4.yolo.commands import (
+    _admit_worktree,
     _append,
     _entry_of,
     _event,
     _findings_text,
-    _held,
     _money,
     _open,
     _plan_id,
@@ -46,7 +46,7 @@ from l4.yolo.commands import (
 from l4.yolo.cycle import REVIEW_KEY, review_batches
 from l4.yolo.digest import RevisionMissing, plan_digest
 from l4.yolo.model import Plan, PlanEvent, ReviewResult, Verdict
-from l4.yolo.plans import archived_at, plan_files, unit_infos
+from l4.yolo.plans import plan_files, unit_infos
 from l4.yolo.readiness import PROMPT_VERSION, FreshRefused, delivered_on_target, review_plan_costed
 from l4.yolo.state import fold_plan
 
@@ -286,20 +286,11 @@ def run_review_worktree(
             ExitCode.USAGE_ERROR,
             f"review: --fresh names {', '.join(unknown)}, which is not a unit or a batch (batch:<id>) of {plan_id}",
         )
-    found = discover(ctx.cfg, ctx.git, providers_for(ctx.cfg, ctx.app.repo, ctx.app.environ))
-    infos = unit_infos(ctx.app.repo, found, parsed.known_ids(), check_intake=True)
+    result = _admit_worktree(ctx, parsed, plan_id, state, rev)
+    found, infos, admission, archived = result.found, result.infos, result.admission, result.archived
     phases = {snapshot.ref.id: snapshot.state.phase for _, snapshot in found}
-    archived = archived_at(ctx.git, rev, ctx.cfg)
-    admission = admit(
-        parsed,
-        known_units=infos,
-        cfg=ctx.cfg,
-        held=_held(ctx, plan_id, state),
-        state=state,
-        archived=archived,
-    )
     if not admission.ok:
-        ctx.say(f"{plan_id}: not admitted, nothing to review (run l4 yolo check {plan_id})")
+        ctx.say(f"{plan_id}: not admitted, nothing to review (run l4 yolo check {plan_id} --worktree)")
         _print_findings(ctx, _findings_text(admission, plan_id))
         return ExitCode.USAGE_ERROR
     paths = [file.path, *dict.fromkeys(infos[u].folder for u in parsed.unit_ids() if u in infos)]
