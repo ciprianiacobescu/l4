@@ -6,6 +6,31 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (unreleased)
+
+### Fixed
+- A red step that weakened, rewrote or shadowed a test that already existed (a second `def` of its name, a helper, a
+  constant, a fixture or an autouse fixture it uses in its file) used to be committed and judged green. It now fails its
+  attempt with `red changed tests that existed before this step: <path>::<name> (<why>)`, nothing is committed, and the
+  retry prompt says what to do. A `[test-infra]` task and the stale tests of a reopened task are exempt
+  (L4-IMP-045..048).
+- Step 1 never saw a weakened pre-existing test: a unit whose test went from `== 3.75` to `is not None` and whose code
+  then returned a wrong value passed. It now compares each test that exists at the base per test on the AST, by file and
+  qualified name, and a harness commit that changes or deletes one is the blocker `a pre-existing test was changed` or
+  `a pre-existing test was deleted`; a later red commit that changes a test an earlier step wrote is a blocker too.
+  People's changes and the ones a `[test-infra]` task, a `task.unfrozen` or a `tests.superseded` event allows are listed
+  in `verification.md` (L4-VER-030..032).
+- A deleted test was hidden when any other changed test file defined a test of the same name, whatever its body, and a
+  person's deletion was not listed either. A test now counts as moved only when the same definition appears under a new
+  file or name (L4-IMP-047, L4-VER-030, L4-VER-031).
+- Audit tests ran with the unit's own `conftest.py` in place, so an autouse fixture could make the audit of broken code
+  pass. Audit tests, their zero-value run and a generated UI test's head run now use the unit's added, changed or
+  deleted test-support files at their base versions, and run with them only when step 1's content scan read them and
+  found nothing; the Audit table of `verification.md` has a `Support` column, and `verify.audit` and
+  `verify.generated` carry `support` (L4-VER-033..036).
+- Step 1 now also blocks a test-support file that patches code the unit changed in module-level code or an autouse
+  fixture (it used to check only the files a task opened); a fixture a test requests by name is listed (L4-VER-037).
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

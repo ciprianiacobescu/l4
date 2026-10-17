@@ -977,6 +977,29 @@ example a rejected hold (`the diff is longer than 120000 characters`) whose reas
    this way (L4-QMD-006: change it by hand). An agent may not do it unless `clarifier.answer_by_agents` is true.
    Then retry the unit (step 3).
 
+#### 7.3.2 Escalated by a test or support-file blocker of step 1
+
+Step 1 (integrity) fails the unit, and the same finding comes back in every fix round, when a harness commit changed the
+tests it must not touch. `verification.md` lists the test as `<path>::<name> (<why>)` under `## Findings`. A fix unit
+cannot restore a test (the test-path freeze), so the unit escalates after the repeated finding.
+
+| Finding | What it means | What to do |
+|---|---|---|
+| `a pre-existing test was changed` | A test that exists at the base was changed or bound again by a harness commit: its body, decorators or parametrisation, a fixture, helper, constant or mark it uses in its file, or a second `def` of its name. | Restore the test on the unit branch in your own commit: `git checkout <base> -- <path>`. If the change is wanted, make it in your own commit after the restore (a person's change is listed, not blocked). |
+| `a pre-existing test was deleted` | A test that exists at the base is gone, and no test with the same definition appears under another name or file. | The same restore. A test that moved with its definition is not deleted. |
+| `a red step changed a test that an earlier step wrote` | A later red commit changed a test that an earlier task of the unit wrote. | The same restore, from the red commit of the earlier task: `git checkout <sha> -- <path>`. |
+| `a construct that can change what the tests report`, with `patches <symbol>, which the unit changed, for every test` | A test-support file (`conftest.py`, a fixture file, a helper) patches code the unit changed in module-level code or in an autouse fixture. | Remove the patch, or move it into a fixture that a test requests by name. A fixture a test requests is listed under `## Fixtures that patch the unit's code when a test requests them`, not blocked. |
+
+Then push and retry the unit (section 7.2). A `[test-infra]` task, a `task.unfrozen` for the same task and a
+`tests.superseded` event (a reopened task's stale test) are allowed and listed under `## Pre-existing tests changed with
+an allowance`.
+
+The Audit table of `verification.md` has a `Support` column. `base`: the audit test ran with the unit's own test-support
+files at their base versions, which is the normal case when the unit changed any. `head`: it needed them and ran with
+them, which the harness allows only when step 1's content scan read them and found nothing. `-`: the unit changed no
+support file. An audit test that does not run at the base and cannot fall back is a minor finding, `an audit test was
+rejected`, with `it does not run with the unit's support files at the base` and the reason from the scan.
+
 ### 7.4 `waiting_capacity`: no agent is available
 
 **Causes:**
