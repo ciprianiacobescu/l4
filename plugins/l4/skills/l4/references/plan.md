@@ -168,7 +168,9 @@ active file alone. Only one plan is active on a target, so a person activates th
 
 ## Never
 
-- Activate, resume or cancel a plan for a person. Those are their decisions.
+- Activate, resume or cancel a plan for a person. Those are their decisions. Raising a plan's limit with
+  `l4 yolo resume --extend-…` is one too, unless `yolo.extend_by_agents` is true in `.l4/config.yaml` on the base branch:
+  otherwise print the command for the person.
 - Write `refs/l4/plans/*`. It is the harness's ledger.
 - Set `merge: auto` unless the person asked and `forge.merge_policy` is `auto`.
 - Weaken or delete a requirement or scenario to silence a check or fit a budget. Fix a spec when the validator or the

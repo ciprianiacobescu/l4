@@ -753,9 +753,15 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - To tell the fix what is wrong, end the reason with a sentence `WHEN … THEN …`. Write `WHEN` and `THEN` in capital
   letters. Everything after `THEN` to the end of the answer is the THEN clause. The fix must make the scenario true.
   The scenario is required for a rejected finding that has no criterion, and for a rejected hold of any kind other
-  than scope or coverage (for example `the diff is longer than 120000 characters`). That hold becomes a behaviour
+  than scope, coverage or judge view (for example `diff coverage: not measured: …`). That hold becomes a behaviour
   finding with the scenario as its task. Without the scenario the unit escalates, and the question of such a hold
   says so: it does not promise a fix unit.
+- A hold `judge view: …` (harness 0.4.16 and later) says the judge could not see all of the diff: one file longer than
+  one part (120000 characters), or a diff that needs more than 8 parts. A diff of several files is judged in parts, so
+  most large diffs raise no hold; lock files (`uv.lock`, `package-lock.json`, …) are one line each and never raise
+  one. Answer `accept` when you checked the files the hold names yourself. A `reject` stops the unit
+  (`judge_view_rejected`, [7.3.2](#732-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
+  `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which
   requirement each id is.
 - A finding `task <key> is ticked as already satisfied, but its text is not done` (harness 0.4.8 and later): the
@@ -949,7 +955,7 @@ message tells you the correct flag. A retry has no such rule.
 #### 7.3.1 Escalated with no convertible finding
 
 Cause `no_convertible_finding`. The round failed on a finding of a person that no fix task can be derived from: for
-example a rejected hold (`the diff is longer than 120000 characters`) whose reason has no `WHEN … THEN …`. `l4 status
+example a rejected hold (`diff coverage: not measured: …`) whose reason has no `WHEN … THEN …`. `l4 status
 --unit <unit>` ends with `Next:` and names the way out. **A retry alone repeats the same verdict.**
 
 1. Read `verification.md` and the `not converted` lines. Decide what the rejection asks for in the code.
@@ -976,6 +982,28 @@ example a rejected hold (`the diff is longer than 120000 characters`) whose reas
    refuses an answered question (exit 2) and its `Fix:` line names the flag. A clarification answer cannot be replaced
    this way (L4-QMD-006: change it by hand). An agent may not do it unless `clarifier.answer_by_agents` is true.
    Then retry the unit (step 3).
+
+#### 7.3.2 Escalated with `judge_view_rejected`
+
+Cause `judge_view_rejected` (L4-VER-044). A person rejected a hold `judge view: …`: the judge could not see all of the
+diff. A fix unit cannot shrink a diff, so no task is made from the reject, whatever its reason says, and the unit
+escalates. `l4 status --unit <unit>`, the refusal of `l4 run --unit` and the sticky note name the way out and none names
+`l4 feedback add`. **A retry alone repeats the same hold.**
+
+1. Split the change into smaller units: move part of the work to another spec or unit, then
+   `l4 restart --unit <unit> --reason "<why>"`. The new diff is judged in parts and needs no hold.
+2. Or, once you checked the files that the hold names, replace the answer with an accept (the audited override), then
+   retry the unit:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "accept I read <files>" --replace
+   l4 retry --unit <unit> --reason "<why>"
+   ```
+
+   An agent may not do it unless `clarifier.answer_by_agents` is true.
+
+A plan stopped on the unit (`unit_escalated`) shows the same way out in the `Next:` line of `l4 yolo status`, before the
+retry and the `l4 yolo resume`.
 
 ### 7.4 `waiting_capacity`: no agent is available
 
@@ -1800,7 +1828,11 @@ unit.
 
 > **NOTE:** The usage is never reset. A resume, a restart of a unit and a new activation keep the cost, the runs and the
 > attempts that the plan used. The harness charges each attempt of a unit on its own. A restart starts a new attempt and
-> does not remove the cost of the attempts before it. The attempts of a unit count from the activation. A restart before the plan does not count. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
+> does not remove the cost of the attempts before it. The attempts of a unit count from the activation. A restart before the plan does not count. To give the plan more, use an option `--extend-…` of `l4 yolo resume`. An active plan takes the same option before it stops
+> (`plan.extended`, nothing else changes: the plan is not resumed and no run starts), so a person who sees the plan run out
+> does not wait for the stop. Raising a limit is a person's decision: an agent is refused, unless `yolo.extend_by_agents`
+> is `true` in `.l4/config.yaml` on the base branch (default `false`). The event records who raised the limit and whether
+> the key allowed it.
 
 > **CAUTION:** For `unit_rejected` and `inputs_changed`, the new activation uses the new spec. If you do not want the
 > plan to continue, use `l4 yolo cancel <plan-id> --reason "<why>"`.
@@ -1813,7 +1845,7 @@ reason.
 
 | Wait reason | Cause | What to do |
 |---|---|---|
-| The current unit is `awaiting_human` | A question waits for a person. | Answer it ([7.1](#71-awaiting_human-a-question-waits-for-you)). |
+| The current unit is `awaiting_human` | A question waits for a person. | Answer it with `l4 questions answer` ([7.1](#71-awaiting_human-a-question-waits-for-you)); it pushes the answer and starts a run. The plan continues by itself at the run that reads the answer, so no resume is needed. Once the answer is pushed, `l4 yolo status` says so, and `l4 yolo resume` starts that run at once. While a question is open, a resume is refused. |
 | The current unit is `clarifying` | The clarifier works on a question. | Do nothing. The next run continues. |
 | The current unit is `waiting_capacity` | No agent is available ([7.4](#74-waiting_capacity-no-agent-is-available)). | Correct the cause, or `l4 retry --unit <unit> --reason "<why>"`. |
 | `waits for <unit> (not integrated)` | A unit that this unit needs is not in the target yet, or its profile did not pass. | With `merge: human`, merge the PR of that unit into the target. Then wait for the next run. |

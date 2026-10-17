@@ -189,7 +189,7 @@ Every task follows these rules:
 
 ## 9. Docs
 
-- [ ] 9.1 `docs/SPEC.md`:
+- [x] 9.1 `docs/SPEC.md`:
   - the eleven requirements as Part I paragraphs in SPEC's form (`**L4-VER-040 <title>.** <text>`), with the text of this
     change's specs: L4-VER-040..045 after L4-VER-018, L4-YOLO-050..055 after L4-YOLO-035;
   - the scenarios in Part II, in SPEC's form (`#### SCN-VER-130 (+) <title> · L4-VER-040`, then `- **Given**`,
@@ -216,7 +216,7 @@ Every task follows these rules:
     `openspec/changes/plan-run-lessons/`, exit criteria `the consumer repository's next plan run: a unit over the cap
     judged in parts; a limit raised while the plan is active; a resume after an answer`.
   Then `.venv/bin/python scripts/check_spec.py docs/SPEC.md` reports no uncovered requirement and no undefined ref.
-- [ ] 9.2 `docs/runbook.md`: §7.1 (the verdict-question bullet that names `the diff is longer than 120000 characters`
+- [x] 9.2 `docs/runbook.md`: §7.1 (the verdict-question bullet that names `the diff is longer than 120000 characters`
   as the example: the example goes, and a bullet says a `judge view:` hold is accepted when you checked the files it
   names, and a reject stops the unit: split the change; no `WHEN … THEN …` makes a fix unit of it); §7.3.1 (the example
   `the diff is longer than 120000 characters` goes); a new §7.3.2 "Escalated with judge_view_rejected" (cause, the two

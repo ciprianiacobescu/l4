@@ -6,6 +6,47 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (unreleased)
+
+### Added
+- `yolo.extend_by_agents` (default `false`) in `.l4/config.yaml` on the base branch lets an agent raise a plan's limits
+  with `l4 yolo resume --extend-…`, like `yolo.review.accept_by_agents` does for `l4 yolo accept`. The event
+  (`plan.extended`, or `plan.resumed` that extends) records the actor, its marker and whether the key allowed it
+  (L4-YOLO-051).
+- `l4 yolo status` lists the extensions of a plan (`extended: runs 90 -> 110 by <who> (person): <why>`).
+
+### Fixed
+- A diff over 120000 characters no longer holds the unit every round. The judge now reads it in parts: whole files,
+  ordered so that a test sits next to the code it is named after, at most 8 parts of at most 120000 characters, one judge
+  call each, and the replies are merged into one verdict (a `fail` of any part wins, then a `pass`). A diff within the
+  cap keeps its one prompt. The prompt template is `judge@10`; `verdict.json` lists `judge_parts` and `verification.md`
+  says `judged in N parts` (L4-VER-041, L4-VER-042).
+- The judge's diff leaves out the harness's bookkeeping, named once: every `.l4/` file, `.serena/memories/harness/**`, and
+  the `verification.md`, `questions.md` and `feedback.md` of each unit folder of the family (L4-VER-040). Lock files
+  (`uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`,
+  `composer.lock`, `Gemfile.lock`) are shown as one line each (path, old and new size, lines added and removed) and never
+  hold the unit (L4-VER-045).
+- What the judge still cannot see (one file longer than one part, a diff that needs more than 8 parts) is a hold
+  `judge view: …` of its own kind. Its question says what `accept` and `reject` mean and asks for no `WHEN … THEN …`. A
+  rejected one is a human finding no fix task is derived from: the unit escalates with `judge_view_rejected`, and
+  `l4 status`, the refusal of `l4 run --unit`, the sticky note and a plan stopped on the unit name the way out (split the
+  change and `l4 restart`, or `--replace` with an accept and `l4 retry`). Before, a reject with a `WHEN … THEN …` made a
+  fix unit that could not shrink the diff, and the same hold came back every round (L4-VER-043, L4-VER-044,
+  L4-YOLO-055).
+- After `l4 questions answer`, `l4 yolo resume` no longer refuses a plan whose answer is pushed and not yet read, and
+  `l4 yolo status` says what happens: while a question is open, how to answer and that the plan continues by itself at
+  the run that reads the answer; once the answer is pushed, that the next run reads it and how to start it now. The
+  wait line shows the live reason, not the stale `open: Q-…` detail. The plan step, the resume and the status decide with
+  one rule (L4-YOLO-052, L4-YOLO-053, L4-YOLO-054).
+
+### Changed
+- `l4 yolo resume PLAN --reason TEXT --extend-…` on an **active** plan raises the limit and records `plan.extended`; it
+  resumes nothing and starts no run. Before, it was refused until the plan stopped. Without an `--extend-…` the refusal
+  names the four options, and an extension that changes no limit is refused (L4-YOLO-050).
+- Every `--extend-…` of `l4 yolo resume` is a person's decision: an agent is refused, with the command a person runs,
+  unless `yolo.extend_by_agents` is true on the base branch. Before, the rule was only written in the docs
+  (L4-YOLO-051).
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

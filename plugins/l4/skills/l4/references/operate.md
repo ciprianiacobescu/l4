@@ -64,6 +64,11 @@ push. The harness reads only answers whose Status says they are submitted.
 - The answer's **first word** must be `accept` or `reject` (any case), then your reason.
 - A `reject` fails that criterion and starts a fix round. To pin down exactly what is wrong, end the reason with a
   `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true.
+- A hold `judge view: …` means the judge could not see all of the diff (a file longer than one part, or more than 8
+  parts). Never answer it with a `WHEN … THEN …`: no fix unit can shrink a diff. `accept` only after a person checked
+  the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
+  `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
+  accept, then `l4 retry`).
 - Before rejecting, check that the criterion id in the question is the one you mean (`verification.md` maps ids to
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
@@ -135,7 +140,9 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
   The plan file is frozen too: an edit of it, or of a unit spec, stops an active plan with `inputs_changed`.
 - `l4 yolo status [PLAN] [--json]`: state, units, usage against limits, stop reason, `Next:`.
 - `l4 yolo cancel PLAN --reason "…"`: no new dispatch or merge, for good.
-- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: after the cause of a
+- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: on an active plan
+  an `--extend-…` raises the limit (`plan.extended`) and resumes nothing; raising a limit is a person's, so an agent
+  prints the command for the person unless `yolo.extend_by_agents` is true on the base branch. After the cause of a
   stop is gone (`l4 retry` the unit first for `unit_halted` / `unit_escalated`; `unit_missing` clears when the unit
   folder is back). `inputs_changed` and `unit_rejected` need `review` and `activate` again. Usage is never reset: a
   restart is a new attempt and its cost is added. A `waiting` plan continues by itself when the cause is gone.
