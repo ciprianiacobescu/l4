@@ -25,6 +25,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
 from l4.forge.urls import ForgeUrls, app_forge_urls
+from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.tasks import required
 from l4.specs.base import Framework, SpecProvider, Task, UnitRef, UnknownUnit, parse_unit_id
 from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile
@@ -131,6 +132,7 @@ class UnitSnapshot:
     spec_edit: SpecEdit | None = None  # a person's spec push after the harness's last commit (L4-OPS-014)
     last_activity: Activity | None = None  # the newest ledger event (L4-OPS-020)
     open_run: OpenRun | None = None  # a run that started and has no end recorded (L4-OPS-020)
+    events: tuple[LedgerEvent, ...] = ()  # the ledger events read (for `status --events`)
     fix_parks: tuple[FixPark, ...] = ()  # the trailing parks only a fix ends, no work between them (L4-YOLO-035)
 
     @property
@@ -234,6 +236,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
         spec_edit=edit,
         last_activity=last,
         open_run=open_run,
+        events=tuple(read.events),
         fix_parks=fix_parks(read.events),
     )
 
@@ -547,13 +550,90 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+MAX_VERIFICATION_BYTES = 1024 * 1024
+
+
+def _check_read_flags(
+    unit: str | None, events: bool, event_type: str | None, last: int | None, verification: bool
+) -> None:
+    """`--events` and `--verification` read one unit; `--type` and `--last` filter events (exit 2 otherwise)."""
+    if events and verification:
+        raise L4Exit(ExitCode.USAGE_ERROR, "status: --events and --verification are one of two readings; use one")
+    if (events or verification) and not unit:
+        raise L4Exit(ExitCode.USAGE_ERROR, "status: --events and --verification need --unit")
+    if (event_type is not None or last is not None) and not events:
+        raise L4Exit(ExitCode.USAGE_ERROR, "status: --type and --last need --events")
+    if last is not None and last < 1:
+        raise L4Exit(ExitCode.USAGE_ERROR, "status: --last must be 1 or more")
+
+
+def _events_text(unit: str, row: UnitSnapshot, event_type: str | None, last: int | None, as_json: bool) -> str:
+    if row.corrupt:
+        raise L4Exit(ExitCode.INTERNAL_ERROR, f"{unit}: ledger corrupt: {row.corrupt}")
+    chosen = [e for e in row.events if event_type is None or e.type == event_type]
+    shown = chosen[-last:] if last else chosen
+    if as_json:
+        rows = [
+            {"ts": e.ts.strftime(TS_FORMAT), "run_id": e.run_id, "seq": e.seq, "type": e.type, **e.data} for e in shown
+        ]
+        document = {"schema": "l4/events@1", "unit": unit, "total": len(chosen), "shown": len(shown), "events": rows}
+        return json.dumps(document, indent=2, ensure_ascii=False)
+    lines = [
+        " ".join(
+            [
+                e.ts.strftime(TS_FORMAT),
+                e.run_id,
+                f"#{e.seq}",
+                e.type,
+                *(f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in e.data.items()),
+            ]
+        )
+        for e in shown
+    ]
+    return "\n".join(lines) if lines else f"{unit}: no such events"
+
+
+def _verification_text(app: AppContext, cfg: L4Config, row: UnitSnapshot) -> str:
+    """The unit's `verification.md` from the same source as its ledger: the branch on origin, else the working tree."""
+    name = "verification.md"
+    missing = f"{row.ref.id}: no verification.md ({row.source})"
+    try:
+        folder = row.ref.path.resolve().relative_to(app.repo.resolve()).as_posix()
+    except ValueError:
+        return missing
+    if row.source == "branch":
+        git = Git(app.repo, environ=app.environ)
+        tracking = f"refs/remotes/{REMOTE}/{unit_branch(row.ref.id, cfg.forge.branch_prefix)}"
+        blobs = regular_blobs(git, tracking, f"{folder}/{name}", MAX_VERIFICATION_BYTES)
+        return git.run_bytes("cat-file", "blob", blobs[0].oid).decode("utf-8", "replace") if blobs else missing
+    try:
+        return read_regular_file(row.ref.path / name, limit=MAX_VERIFICATION_BYTES).decode("utf-8", "replace")
+    except (UnsafeFile, OSError):
+        return missing
+
+
 def run_status(
-    app: AppContext, *, unit: str | None, as_json: bool, rebuild: bool, clock: Callable[[], datetime] = _utcnow
+    app: AppContext,
+    *,
+    unit: str | None,
+    as_json: bool,
+    rebuild: bool,
+    events: bool = False,
+    event_type: str | None = None,
+    last: int | None = None,
+    verification: bool = False,
+    clock: Callable[[], datetime] = _utcnow,
 ) -> ExitCode:
     if rebuild:
         raise L4Exit(ExitCode.USAGE_ERROR, "status: --rebuild not yet implemented (M1: state-vcs-locks 1.19)")
+    _check_read_flags(unit, events, event_type, last, verification)
     app, cfg = load_app_config(app)  # schema errors: exit 2, nothing else runs
     rows = snapshots(app, cfg, (unit,) if unit else (), tolerate_denied=True)
+    if events or verification:
+        row = rows[0]
+        text = _events_text(row.ref.id, row, event_type, last, as_json) if events else _verification_text(app, cfg, row)
+        click.echo(app.redactor.redact_text(text), nl=not text.endswith("\n"))
+        return ExitCode.OK
     urls = app_forge_urls(app, cfg)
     now = clock()
     from l4.yolo.commands import plan_lines  # here: the plan commands import this module

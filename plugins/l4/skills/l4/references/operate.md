@@ -143,3 +143,16 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
 
 While a plan is active, `l4 run --unit U` exits 13 for a unit that is not the current one. A unit in a plan file on the
 base branch stays held (`held by plan <id> (<status>)`), a cancelled plan included, until it is removed from the file.
+
+## From an IDE (`l4 mcp`)
+
+When the repository's MCP server is configured (`l4 mcp install --client <name> --repo <path>`), the same operations
+are tools: `l4_status` (a unit's cause and next step), `l4_unit_events` (`type: task.attempt_failed` shows why attempts
+failed), `l4_verification`, `l4_questions` / `l4_question` / `l4_question_answer`, `l4_retry`, `l4_plan_check`
+(`worktree: true` before the push), `l4_plan_review`, `l4_plan_findings`, `l4_plan_status`, `l4_plan_resume`. They run the
+CLI commands as an agent, so an agent still cannot answer a verdict question unless `clarifier.answer_by_agents` allows
+it. With several repositories, every tool takes `repo` (folder name or path). Activating or cancelling a plan is not a
+tool: a person runs `l4 yolo activate <plan> --reason "…"`.
+`--project` entries find their repository differently per client (Claude Code `CLAUDE_PROJECT_DIR`; VS Code, OpenCode and
+Codex the workspace; Cursor `--repo ${workspaceFolder}`); Kiro has no project scope (use `--repo PATH`); a worktree is
+served only by a session started inside it, else by a user-scope entry with `--repo`.

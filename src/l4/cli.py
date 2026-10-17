@@ -1,6 +1,7 @@
 """The click shell: parses options, builds the AppContext, delegates to `commands.dispatch`."""
 
 import contextlib
+import math
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -71,6 +72,45 @@ in the environment, or standard input that is not a terminal) may write only a q
 clarifier.auto_accept_kinds whose answer names no frozen path, unless clarifier.answer_by_agents is true on the \
 base branch."""
 )
+
+
+MCP_SERVE_HELP = (
+    "Serve L4 to an MCP client over stdio: tools to manage delivery plans and debug units.\n\n"
+    "Started by the client (see `l4 mcp install`), not by hand. Every tool runs the l4 command it names in a "
+    "repository this instance serves (--repo), as an agent (AI_AGENT=l4-mcp), so the rules of the CLI for agents "
+    "hold. Only protocol messages go to standard output; logs go to standard error."
+)
+
+
+MCP_CLIENTS = ("claude-code", "cursor", "vscode", "kiro", "codex", "opencode")
+MCP_INSTALL_HELP = (
+    "Write the MCP configuration of a client. A user configuration starts `l4 mcp serve --repo <repository>`; "
+    "--project (a file you commit) starts `l4 mcp serve` with no path, so each clone and worktree serves its own "
+    "folder.\n\n"
+    "Merges into the file, keeps every other server and the keys you added to the entry, writes atomically, refuses a "
+    "file that does not parse, an entry of that name that serves another repository (use --name) and, with --project, "
+    "a symlink in the repository. One "
+    "entry per repository in a user configuration (l4-<folder>); --project writes the repository's own file. "
+    "claude-code at user scope prints the documented `claude mcp add` command instead; vscode has --project only."
+)
+
+
+class _FiniteFloat(click.ParamType):
+    """A float that is neither NaN nor infinite (`float("nan")` parses, and compares false with every limit)."""
+
+    name = "float"
+
+    def convert(self, value: Any, param: click.Parameter | None, ctx: click.Context | None) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            self.fail(f"{value!r} is not a valid float.", param, ctx)
+        if not math.isfinite(number):
+            self.fail(f"{value!r} is not a finite number.", param, ctx)
+        return number
+
+
+FINITE_FLOAT = _FiniteFloat()
 
 
 def _opt(*names: str, **kw: Any) -> click.Option:
@@ -156,6 +196,10 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     ]),
     "status": ("Show units, phases, open questions, last verdict and cool-downs.", lambda: [
         _unit(), _flag("--json", "as_json"), _flag("--rebuild", "rebuild", help=NYI),
+        _flag("--events", "events", help="With --unit: the unit's ledger events (read only; --json: l4/events@1)."),
+        _opt("--type", "event_type", help="With --events: only events of this type, for example task.attempt_failed."),
+        _opt("--last", "last", type=int, help="With --events: only the newest N events."),
+        _flag("--verification", "verification", help="With --unit: print the unit's verification.md."),
     ]),
     "probe": ("Run availability probes.", lambda: [
         click.Argument(["profiles"], nargs=-1), _opt("--role", "role"), _flag("--json", "as_json"),
@@ -251,7 +295,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "resume": ("Leave halted/escalated and reset breaker counters (members only).", lambda: [
         _unit(True), _opt("--reason", "reason", required=True, help=REASON_HELP),
         _opt("--extend-iterations", "extend_iterations", type=int, help=NYI),
-        _opt("--extend-cost", "extend_cost", type=float, help=NYI),
+        _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help=NYI),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
         _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
@@ -320,13 +364,28 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "yolo resume": ("Resume a stopped or waiting delivery plan once the cause is gone.", lambda: [
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
-        _opt("--extend-cost", "extend_cost", type=float, help="Raise the cost limit by this many dollars."),
+        _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help="Raise the cost limit by this many dollars."),
         _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
         _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
         _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
     "yolo report": ("Print the report of a delivery plan.", lambda: [click.Argument(["plan"])]),
+    "mcp serve": (MCP_SERVE_HELP, lambda: [
+        _opt("--repo", "repos", multiple=True, type=click.Path(path_type=Path),
+             help="A repository to serve (repeatable): a git repository with .l4/config.yaml. Several: every tool "
+                  "takes a `repo` argument naming one. Default: the working directory, when it is such a repository."),
+    ]),
+    "mcp install": (MCP_INSTALL_HELP, lambda: [
+        _opt("--client", "client", required=True, type=click.Choice(MCP_CLIENTS),
+             help="The MCP client whose configuration to write."),
+        _flag("--project", "project", help="Write the repository's own configuration file (entry named l4), not the "
+                                           "user's."),
+        _opt("--repo", "target_repo", type=click.Path(path_type=Path),
+             help="The repository the server serves (default: the repository of the working directory)."),
+        _opt("--name", "entry", help="The entry name (default: l4 with --project, else l4-<repository folder>)."),
+        _flag("--dry-run", "dry_run", help="Print what would be written; write nothing."),
+    ]),
     "setup gitlab": ("Make the GitLab project ready for the harness: token, secrets, schedule, runner check.", lambda: [
         _opt("--project", "project", required=True, help="Project id or path (group/name)."),
         _opt("--api-base", "api_base", help="GitLab API base (default: forge.gitlab.api_url, else from `origin`)."),
@@ -485,6 +544,7 @@ _GROUPS = {
     "setup": click.Group("setup", help="Forge setup."),
     "feedback": click.Group("feedback", help=feedback_help.GROUP_HELP),
     "yolo": click.Group("yolo", help="Delivery plans: ordered units, a readiness review, one activation."),
+    "mcp": click.Group("mcp", help="L4 as an MCP server for IDEs and agents."),
     "skills": click.Group("skills", help="The l4 skill for coding agents."),
     "kg": click.Group("kg", help="Read the recorded history across units (manual; nothing reaches an agent)."),
 }

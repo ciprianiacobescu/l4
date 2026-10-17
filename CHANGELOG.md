@@ -6,6 +6,43 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.15 (2026-10-18)
+
+### Added
+- `l4 mcp serve [--repo PATH]...` makes L4 an MCP server over stdio (newline-delimited JSON-RPC 2.0, protocol revision
+  2025-11-25; no new runtime dependency). Its tools manage delivery plans and debug units: `l4_status`, `l4_doctor`,
+  `l4_plan_status`, `l4_plan_check`, `l4_plan_findings`, `l4_plan_report`, `l4_questions`, `l4_question`,
+  `l4_unit_events`, `l4_verification` (read) and `l4_plan_draft`, `l4_plan_review`, `l4_question_answer`, `l4_retry`,
+  `l4_plan_resume` (write). Each tool runs the `l4` command it names in a repository the instance was started for, as an
+  agent (`AI_AGENT=l4-mcp`), so every CLI rule for agents holds; `l4 yolo activate`, `cancel` and `l4 run` are not
+  tools. Several `--repo` give every tool a required `repo` argument; a repository that was not named is refused.
+- `l4 mcp install --client claude-code|cursor|vscode|kiro|codex|opencode [--project] [--repo PATH] [--name NAME]
+  [--dry-run]` writes the client's documented MCP configuration (one entry per repository, other servers kept, atomic,
+  an unparseable file refused).
+- `l4 status --unit U --events [--type T] [--last N] [--json]` and `--verification` read a unit's ledger events and
+  `verification.md`. The tool `l4_plan_check` runs 0.4.14's `l4 yolo check PLAN --worktree` before the push.
+
+### Fixed
+- `l4 resume` and `l4 yolo resume` refuse `--extend-cost` of `nan` or `inf` with a usage error (exit 2); the MCP tools
+  refuse a non-finite number the same way.
+- `l4 mcp serve`: a timed-out or cancelled call now kills its whole process group after the grace period, also when
+  the command itself exited and a descendant ignored SIGTERM; the protocol is read and written as UTF-8 under any
+  locale (a non-UTF-8 locale used to kill the server on `tools/list`); progress notifications carry a rising
+  `progress` value; `initialize` and each tool name the served repositories, so a client with several instances can
+  tell them apart.
+- `l4 mcp install --client claude-code` prints the `claude mcp add` line shell-quoted, so a path with a space works.
+- `l4 mcp serve`: the tool commands run with `python -P`, so a file of the served repository named `yaml.py`,
+  `click.py` or an `l4` package can no longer run in place of a dependency; a stopped call's process group keeps its
+  grace period after the command exited, so a descendant can clean up before it is killed; no progress notification
+  follows the response of its call.
+- `l4 mcp install --project` writes what each client can use: Cursor `--repo ${workspaceFolder}` (Cursor documents no
+  working directory for servers), VS Code, OpenCode, Codex and Claude Code `l4 mcp serve` (they start in the project
+  or set `CLAUDE_PROJECT_DIR`); Kiro, which documents neither, is refused with a hint to use the user scope. A Codex
+  entry lists `forge.token_env` of `.l4/config.yaml` (else the default `L4_FORGE_TOKEN`) under `env_vars`, because Codex
+  starts a server with an allowlisted environment. An existing user-scope entry whose `--repo` is a client variable is
+  refused like another repository's entry instead of being rewritten. The quickstart says a project file serves a
+  worktree only for a session started inside it (Claude Code desktop worktree sessions use the main checkout's file).
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

@@ -22,6 +22,7 @@ l4 = "l4.cli:main"
 [dependency-groups]
 dev = [
     "coverage>=7.16.2",
+    "mcp>=1.2",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
