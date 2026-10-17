@@ -1,6 +1,7 @@
 """The click shell: parses options, builds the AppContext, delegates to `commands.dispatch`."""
 
 import contextlib
+import math
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -92,6 +93,24 @@ MCP_INSTALL_HELP = (
     "entry per repository in a user configuration (l4-<folder>); --project writes the repository's own file. "
     "claude-code at user scope prints the documented `claude mcp add` command instead; vscode has --project only."
 )
+
+
+class _FiniteFloat(click.ParamType):
+    """A float that is neither NaN nor infinite (`float("nan")` parses, and compares false with every limit)."""
+
+    name = "float"
+
+    def convert(self, value: Any, param: click.Parameter | None, ctx: click.Context | None) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            self.fail(f"{value!r} is not a valid float.", param, ctx)
+        if not math.isfinite(number):
+            self.fail(f"{value!r} is not a finite number.", param, ctx)
+        return number
+
+
+FINITE_FLOAT = _FiniteFloat()
 
 
 def _opt(*names: str, **kw: Any) -> click.Option:
@@ -276,7 +295,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "resume": ("Leave halted/escalated and reset breaker counters (members only).", lambda: [
         _unit(True), _opt("--reason", "reason", required=True, help=REASON_HELP),
         _opt("--extend-iterations", "extend_iterations", type=int, help=NYI),
-        _opt("--extend-cost", "extend_cost", type=float, help=NYI),
+        _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help=NYI),
         _opt("--extend-fix-rounds", "extend_fix_rounds", type=int),
         _opt("--extend-feedback-rounds", "extend_feedback_rounds", type=int),
     ]),
@@ -345,7 +364,7 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
     "yolo resume": ("Resume a stopped or waiting delivery plan once the cause is gone.", lambda: [
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
-        _opt("--extend-cost", "extend_cost", type=float, help="Raise the cost limit by this many dollars."),
+        _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help="Raise the cost limit by this many dollars."),
         _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
         _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
         _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),

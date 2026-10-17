@@ -99,3 +99,17 @@ def test_console_log_format_json(install_handler, repo, capsys):
     assert main(["status", "--repo", str(repo), "--log-format", "json"], environ={}) == 14
     line = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
     assert line["msg"] == "nope" and line["level"] == "ERROR"
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "Infinity"])
+def test_f9_a_non_finite_extend_cost_is_a_usage_error(install_handler, repo, capsys, value):
+    calls = install_handler("yolo resume", lambda app, **kw: ExitCode.OK)
+    code = main(["yolo", "resume", "p1", "--reason", "r", f"--extend-cost={value}", "--repo", str(repo)], environ=ENV)
+    assert code == 2 and calls == []
+    assert "extend-cost" in capsys.readouterr().err
+
+
+def test_f9_a_finite_extend_cost_still_reaches_the_command(install_handler, repo):
+    calls = install_handler("yolo resume", lambda app, **kw: ExitCode.OK)
+    code = main(["yolo", "resume", "p1", "--reason", "r", "--extend-cost=2.5", "--repo", str(repo)], environ=ENV)
+    assert code == 0 and calls[0]["kwargs"]["extend_cost"] == 2.5
