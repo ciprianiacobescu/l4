@@ -73,7 +73,7 @@ from l4.implementer.guards import (
 )
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
-from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
+from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
     RESULT_SCHEMA,
@@ -90,6 +90,7 @@ from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
+from l4.implementer.unit_context import prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
@@ -602,9 +603,9 @@ def _accepted(wb: Workbench) -> tuple[tuple[str, str], ...]:
     return (("accepted review findings", block),) if block else ()
 
 
-def _lessons(wb: Workbench, task: Task) -> Injection:
+def _lessons(wb: Workbench, task: Task, changed: Sequence[str] | None = None) -> Injection:
     """The lessons that apply to the task, as a data block (SPEC L4-MEM-003); one `lessons.injected` event when any."""
-    paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()])
+    paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()] if changed is None else changed)
     injection = inject_for_task(wb.worktree, wb.cfg.memory, paths, writer=wb, redact=wb.redactor.redact_text)
     for problem in injection.skipped:
         log.warning("%s: lessons: %s", wb.ref.id, problem.message)
@@ -624,18 +625,26 @@ def _prompt(
     unfreeze: Unfreeze | None = None,
     adds_tests: bool = False,
     stale: StaleTests | None = None,
+    attempt: int = 1,
 ) -> str:
     answers = _answers(wb, task)
-    lessons = _lessons(wb, task)
+    changed = [*wb.branch_changed_files(), *wb.changed_files()]
+    lessons = _lessons(wb, task, changed)
+    own = getattr(wb.provider, "own_tasks", wb.provider.tasks)  # a fix unit's tasks.md holds its own tasks only
+    inputs = prompt_inputs(
+        root=wb.worktree, provider=wb.provider, ref=wb.ref, task=task, tasks=own(wb.ref), changed=changed,
+        cfg=wb.cfg, profile_name=wb.selected.profile_name, profile=wb.selected.profile,
+    )  # fmt: skip
     redact = wb.redactor.redact_text
     note = retry_note(_ledger_events(wb), task.key, wb.event_context.get("fix_unit"), redact=redact)  # D11
     ctx = PromptContext(
         unit_id=wb.ref.id, adapter=wb.selected.profile.adapter or "", task_key=task.key, task_title=task.title,
-        task_links=task.links,
-        sources=collect_sources(wb.ref.path), criteria=tuple(wb.provider.criteria(wb.ref)),
+        task_links=task.links, source_files=inputs.source_files, conventions=inputs.conventions,
+        task_block=inputs.task_block, unit_rel=inputs.unit_rel, budget_source=inputs.budget_source,
+        criteria=inputs.criteria, own_criteria=inputs.own_criteria,
         gate_command=wb.cfg.gates.test.command, previous_failure=previous_failure,
         result_path=Path(RESULT_ALIAS_PATH) if wb.impl.capabilities().schema_mode == "prompt_contract" else None,
-        context_budget_tokens=wb.cfg.implementer.context_budget_tokens,
+        context_budget_tokens=inputs.budget_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
         e2e_dir=e2e_test_dir(wb.cfg.gates.e2e, wb.worktree) if e2e_configured(wb.cfg) else None,
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
@@ -658,10 +667,16 @@ def _prompt(
     wb.emit(
         "prompt.rendered", role=role, task=task.key, sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         template_version=rendered.template_version, sources=list(rendered.sources),
+        budget_tokens=rendered.budget_tokens, budget_source=inputs.budget_source, steering=inputs.steering,
         answers=[{"id": qid, "answer_sha256": digest} for qid, digest in answers.consumed],  # L4-QMD-006
         lessons=list(lessons.ids),
         **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),
     )  # fmt: skip
+    if rendered.cuts:  # L4-IMP-052: what the prompt does not show whole, by path
+        wb.emit(
+            "prompt.truncated", role=role, task=task.key, attempt=attempt, budget_tokens=rendered.budget_tokens,
+            sources=[c.as_dict() for c in rendered.cuts],
+        )  # fmt: skip
     return text
 
 
@@ -682,7 +697,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"

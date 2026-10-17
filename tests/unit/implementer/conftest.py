@@ -20,7 +20,7 @@ from l4.vcs.git import Git
 from l4.vcs.names import UnitNames
 from l4.vcs.worktree import WorktreeManager
 
-from .._kiro_probe import PROBE_IDS, probe_tree
+from .._kiro_probe import PROBE_IDS, UNIT_REL, probe_tree
 from ..conftest import UNIT, TddRepo
 
 RUN_ID = "r-20261003T1312Z-7f3a"
@@ -157,7 +157,10 @@ def make_bench(tdd_repo: TddRepo) -> Callable[..., Bench]:
 KIRO_UNIT = "kiro:tip-calc"
 
 
-def to_kiro(tdd_repo: TddRepo, *, long_design: bool = False, steering: dict[str, str] | None = None) -> None:
+def to_kiro(
+    tdd_repo: TddRepo, *, long_design: bool = False, steering: dict[str, str] | None = None,
+    tasks_text: str | None = None,
+) -> None:  # fmt: skip
     """Turn the py_tdd repository into the probe's: its OpenSpec change gives way to `.kiro/specs/tip-calc/` and
     `.kiro/steering/tech.md`, committed on `main` and pushed (the worktree of the bench starts from there)."""
     repo, git = tdd_repo.repo, Git(tdd_repo.repo, environ=tdd_repo.environ)
@@ -165,6 +168,8 @@ def to_kiro(tdd_repo: TddRepo, *, long_design: bool = False, steering: dict[str,
     probe_tree(repo, long=long_design)
     for name, text in (steering or {}).items():
         (repo / ".kiro" / "steering" / name).write_text(text)
+    if tasks_text is not None:
+        (repo / UNIT_REL / "tasks.md").write_text(tasks_text)
     git.run("add", "-A")
     git.run("commit", "-q", "-m", "the kiro probe")
     git.push("origin", ["main"])
@@ -177,9 +182,9 @@ def make_kiro_bench(tdd_repo: TddRepo) -> Callable[..., Bench]:
 
     def make(
         script: list[Step], *, implementer: dict | None = None, long_design: bool = False,
-        steering: dict[str, str] | None = None, **gates: object,
+        steering: dict[str, str] | None = None, tasks_text: str | None = None, **gates: object,
     ) -> Bench:  # fmt: skip
-        to_kiro(tdd_repo, long_design=long_design, steering=steering)
+        to_kiro(tdd_repo, long_design=long_design, steering=steering, tasks_text=tasks_text)
         return build_bench(tdd_repo, script, KIRO_UNIT, implementer=implementer, frameworks=["kiro"], **gates)
 
     return make

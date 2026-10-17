@@ -150,7 +150,7 @@ Every task follows these rules:
 
 ## 3. The run
 
-- [ ] 3.1 `tdd._prompt` uses the one builder and records the decisions (L4-IMP-052, L4-IMP-053, L4-KSP-010).
+- [x] 3.1 `tdd._prompt` uses the one builder and records the decisions (L4-IMP-052, L4-IMP-053, L4-KSP-010).
   - Tests in `tests/unit/implementer/test_prompt_context_run.py`, with the Kiro bench of task 1.4, failing first:
     - **SCN-IMP-285, run part:** `prompt.truncated` right after `prompt.rendered`, with `role`, `task`, `attempt`,
       `budget_tokens` and the one source.
