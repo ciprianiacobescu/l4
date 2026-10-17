@@ -65,6 +65,7 @@ from l4.state.fold import UnitState
 from l4.state.status import UnitSnapshot
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
+from l4.vcs.names import archive_branch, unit_branch
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
@@ -92,6 +93,7 @@ from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_c
 from l4.yolo.report import render_report
 from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
+from l4.yolo.tidy import branch_tips, tidy_archive_branch, tidy_unit_branch
 
 log = logging.getLogger("l4.yolo.cycle")
 
@@ -103,6 +105,7 @@ MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: au
 ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
 MAX_WAIT_DETAIL = 1_000
 _ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+MAX_TIDY = 5  # branch deletions of earlier merges in one plan step (L4-YOLO-033)
 _REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
 _NEVER_HELD = frozenset({"merged", "archived"})  # phases `yolo.hold` leaves alone
 _BEFORE_ACTIVATION = ("new", "refused", "admitted", "reviewed")
@@ -1094,6 +1097,7 @@ class _Step:
             )
         if (unit := self._inputs_changed(ctx)) is not None:
             return self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after the activation", unit)
+        self._tidy(ctx)
         current = state.current if state.current in plan.unit_ids() else None  # a unit out of the plan is nobody's
         if (limit := self._limit_reached(ctx, current)) is not None:
             return self._stop(ctx, limit[0], limit[1], limit[2])
@@ -1425,13 +1429,99 @@ class _Step:
         if out.status == "stale":
             return self._stale(ctx, snap, out.detail)
         assert out.head is not None and out.pr is not None
-        if not confirm_merged(forge, self.git, self.cfg, out.pr, out.head, wait_s=self.confirm_wait_s):
-            log.warning("%s: %s was pushed to %s, but the target does not show it as its tip", unit, out.head[:10],
+        landed = out.landed or out.head  # the squash commit, or the head a fast-forward pushed
+        if not confirm_merged(forge, self.git, self.cfg, out.pr, landed, wait_s=self.confirm_wait_s):
+            log.warning("%s: %s landed on %s, but the target does not show it as its tip", unit, landed[:10],
                         self.target)  # fmt: skip
-        merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=out.head)]
+        merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=landed,
+                              method=self.cfg.yolo.merge.method, raced=out.raced)]  # fmt: skip
         self._write(ctx, merged, facts=True)
-        self._line(ctx.plan_id, f"{unit} merged into {self.target} at {out.head[:10]}")
-        return self._integrate(ctx, unit, snap, via_merge=out.head)
+        self._line(ctx.plan_id, f"{unit} merged into {self.target} at {landed[:10]}")
+        self._delete_after_merge(ctx, unit, forge, out.head, out.pr)
+        if out.raced:
+            self._line(ctx.plan_id, f"warning: {unit}: the target moved while the forge merged; the post-merge check "
+                                    f"of {landed[:10]} decides")  # fmt: skip
+        return self._integrate(ctx, unit, snap, via_merge=landed, reviewed=out.head)
+
+    def _delete_after_merge(self, ctx: _Ctx, unit: str, forge: Forge, head: str, pr: int) -> None:
+        """L4-YOLO-033: the merged unit's branch goes, its verified head kept at `refs/l4/merged/...`, once the forge
+        shows the pull request merged (the squash call's answer, or the pull request itself for a fast-forward: GitHub
+        closes an open pull request whose branch is deleted, so an unconfirmed one waits for `_tidy`)."""
+        if not self.cfg.yolo.merge.delete_branches:
+            return
+        try:
+            if self.cfg.yolo.merge.method != "squash" and forge.get_pr(pr).state != "merged":
+                return
+            done = tidy_unit_branch(
+                self.app, self.cfg, self.git, unit, unit_branch(unit, self.cfg.forge.branch_prefix), head
+            )
+        except (ForgeError, ForgeUnavailable) as exc:
+            log.info("%s: the branch is not deleted yet: %s", unit, self.app.redactor.redact_text(str(exc)))
+            return
+        if done is not None:
+            self._record_tidy(ctx, [done])
+
+    def _record_tidy(self, ctx: _Ctx, done: Sequence[tuple[str, dict[str, object]]]) -> None:
+        """`unit.branch_deleted` / `unit.branch_kept` (an identical `branch_kept` is not written twice)."""
+        events = []
+        for kind, data in done:
+            last = _last(ctx.read.events, kind, str(data.get("unit")))
+            if kind == "unit.branch_kept" and last is not None and last.data == {**last.data, **data}:
+                continue
+            events.append(self._event(kind, **data))
+            what = "deleted" if kind == "unit.branch_deleted" else f"kept ({data.get('reason')})"
+            self._line(ctx.plan_id, f"{data.get('unit')}: branch {data.get('branch')} {what}")
+        if events:
+            self._write(ctx, events, facts=True)
+
+    def _tidy(self, ctx: _Ctx) -> None:
+        """D7: the branches of the plan's integrated units that an earlier step or an earlier harness left: one
+        `ls-remote`, then for a unit whose branch is still at its recorded merged head and whose pull request the forge
+        shows merged the keep ref and the leased delete, and for its archive branch whose archive pull request is
+        merged and whose tip is that pull request's head the leased delete; at most `MAX_TIDY` per step. Nothing here
+        stops the plan."""
+        if not self.cfg.yolo.merge.delete_branches or ctx.file.plan is None:
+            return
+        try:
+            self._tidy_earlier(ctx)
+        except (ForgeError, ForgeUnavailable, GitError) as exc:
+            log.warning(
+                "plan %s: old branches were not cleaned: %s", ctx.plan_id, self.app.redactor.redact_text(str(exc))
+            )
+
+    def _tidy_earlier(self, ctx: _Ctx) -> None:
+        prefix = self.cfg.forge.branch_prefix
+        wanted = []  # (unit, head, pr, unit branch, archive branch)
+        for unit in ctx.file.plan.unit_ids():  # type: ignore[union-attr]
+            merged = _last(ctx.read.events, "unit.merged", unit)
+            head = str(merged.data.get("head") or "") if merged and unit in ctx.state.integrated else ""
+            if not head:
+                continue
+            wanted.append((unit, head, merged.data.get("pr"), unit_branch(unit, prefix), archive_branch(unit, prefix)))  # type: ignore[union-attr]
+        if not wanted:
+            return
+        tips = branch_tips(self.app, self.cfg, self.git)
+        forge, done, left = None, [], MAX_TIDY
+        for unit, head, pr, branch, archive in wanted:
+            if left <= 0:
+                break
+            if tips.get(branch) == head and pr is not None:
+                forge = forge or self._forge_for_merge()
+                if forge.get_pr(int(str(pr))).state == "merged":
+                    left -= 1
+                    if (result := tidy_unit_branch(self.app, self.cfg, self.git, unit, branch, head)) is not None:
+                        done.append(result)
+            if left > 0 and archive in tips:
+                forge = forge or self._forge_for_merge()
+                merged_prs = [p for p in forge.list_prs(archive, "merged") if p.head_branch == archive]
+                if any(p.head_sha == tips[archive] for p in merged_prs):
+                    left -= 1
+                    if (
+                        result := tidy_archive_branch(self.app, self.cfg, self.git, unit, archive, tips[archive])
+                    ) is not None:
+                        done.append(result)
+        if done:
+            self._record_tidy(ctx, done)
 
     def _merge_requested(self, ctx: _Ctx, unit: str, to_be: MergeOutcome) -> bool:
         """The `before_push` of the guarded merge (D8, R5): read the plan ref again and push only while the plan is
@@ -1471,10 +1561,13 @@ class _Step:
         self._line(ctx.plan_id, f"{unit}: the target moved, verifying again")
         return self._result(frozenset(), start_next_run=True, plan_id=ctx.plan_id)
 
-    def _integrate(self, ctx: _Ctx, unit: str, snap: UnitSnapshot, *, via_merge: str | None) -> PlanStep:
+    def _integrate(
+        self, ctx: _Ctx, unit: str, snap: UnitSnapshot, *, via_merge: str | None, reviewed: str | None = None
+    ) -> PlanStep:
         """The unit's acceptance profile on the merged target revision, then `unit.integrated` and its receipt (D9,
-        D12), or `plan.stopped{postcheck_failed}`. `via_merge`: the head this step pushed; None for a merge by a person
-        (the PR merge commit is not in the unit's state, so the target tip is checked)."""
+        D12), or `plan.stopped{postcheck_failed}`. `via_merge`: the commit this step landed on the target (the pushed
+        head, or the squash commit; `reviewed` is the verified head); None for a merge by a person (the PR merge commit
+        is not in the unit's state, so the target tip is checked)."""
         assert ctx.file.plan is not None
         plan, state = ctx.file.plan, ctx.state
         entry = next((u for u in plan.units() if u.id == unit), None)
@@ -1509,13 +1602,14 @@ class _Step:
         integrated_at = result.revision or revision or ""
         charged = self._charged(ctx, unit, snap)
         events = [*before, post, self._event("unit.integrated", unit=unit, revision=integrated_at), charged]
-        receipt = self._receipt(ctx, unit, snap, integrated_at, via_merge, result)
+        receipt = self._receipt(ctx, unit, snap, integrated_at, via_merge, result, reviewed)
         self._write(ctx, events, receipt=receipt, facts=True)
         self._line(ctx.plan_id, f"{unit} integrated at {integrated_at[:10]}")
         return self._result(frozenset(), start_next_run=True, plan_id=ctx.plan_id)
 
     def _receipt(
-        self, ctx: _Ctx, unit: str, snap: UnitSnapshot, revision: str, head: str | None, result: ProfileResult
+        self, ctx: _Ctx, unit: str, snap: UnitSnapshot, revision: str, head: str | None, result: ProfileResult,
+        reviewed: str | None = None,
     ) -> dict[str, object]:  # fmt: skip
         merged = _last(ctx.read.events, "unit.merged", unit)
         merge_commit = head or (str(merged.data.get("merge_commit")) if merged else None) or revision
@@ -1528,7 +1622,7 @@ class _Step:
             "plan_digest": ctx.state.plan_digest,
             "spec_digest": ctx.state.digests.get(unit),
             "pr": (merged.data.get("pr") if merged else None) or snap.state.pr,
-            "reviewed_head": snap.review.head if snap.review is not None else head,
+            "reviewed_head": snap.review.head if snap.review is not None else (reviewed or head),
             "merge_commit": merge_commit,
             "integrated_revision": revision,
             "postcheck": result.status,

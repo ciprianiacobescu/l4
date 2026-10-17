@@ -109,6 +109,7 @@ from l4.vcs.locks import Busy, LocalFileLease
 from l4.vcs.names import UnitNames, unit_branch
 from l4.vcs.push import LOCK_REF_PREFIX, PushRejected
 from l4.vcs.repokey import repository_key
+from l4.yolo.tidy import tidy_archive_branch
 
 if TYPE_CHECKING:
     from l4.orchestrator import UnitRunResult
@@ -1004,11 +1005,34 @@ class Sweeper:
         if not outcome_text:
             run.event("archive.merged", head=head, number=pr.number)
             log.info("%s: archive MR !%s merged by the harness (fast-forward to %s)", unit, pr.number, str(head)[:10])
+            self._delete_archive_branch(unit, pr, branch, str(head))
             return SweepAction(unit, "archive_merged", pr.url)
         reason = self.app.redactor.redact_text(outcome_text)[:500]
         run.event("archive.failed", reason=reason, **self._inputs(ref))
         log.warning("%s: archive MR !%s was not merged by the harness: %s", unit, pr.number, reason)
         return SweepAction(unit, "archive_failed", reason)
+
+    def _delete_archive_branch(self, unit: str, pr: PullRequest, branch: str, head: str) -> None:
+        """After `archive.merged`, with `yolo.merge.delete_branches` on (squash-and-delete D8, L4-YOLO-033): the archive
+        branch is deleted under a lease on the head that was merged, once the forge shows the MR merged (an open MR
+        whose branch is deleted is closed on GitHub). A forge that has not caught up, or a lease that fails, leaves the
+        branch; the plan step deletes it later (D7). Never an error: the archive is merged."""
+        if not self.cfg.yolo.merge.delete_branches:
+            return
+        try:
+            if self.forge.get_pr(pr.number).state != "merged":
+                log.info("%s: archive MR !%s is not shown as merged yet: %s stays for now", unit, pr.number, branch)
+                return
+            done = tidy_archive_branch(self.app, self.cfg, self.git, unit, branch, head)
+        except ForgeAuthError:
+            raise
+        except ForgeError as exc:
+            log.info("%s: the archive branch is not deleted yet: %s", unit, self.app.redactor.redact_text(str(exc)))
+            return
+        if done is not None:
+            kind, data = done
+            what = "deleted" if kind == "unit.branch_deleted" else f"kept ({data.get('reason')})"
+            log.info("%s: archive branch %s %s", unit, branch, what)
 
     def _record(
         self, ref: UnitRef, result: ArchiveResult, run: _UnitRun, recorded: bool, pr: PullRequest | None = None

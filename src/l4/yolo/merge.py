@@ -1,29 +1,43 @@
-"""The guarded merge of a plan unit (design D8, L4-YOLO-008): the harness lands a verified unit on the target branch
-with one fast-forward push of the unit head, never with a forge merge call and never forced.
+"""The guarded merge of a plan unit (design D8, L4-YOLO-008; squash-and-delete D3, L4-YOLO-032): the harness lands a
+verified unit on the target branch, by default as one squash commit made by the forge's own merge call pinned to the
+verified head (`yolo.merge.method: squash`), or with one fast-forward push of the unit head (`fast-forward`), never
+forced.
 
 `merge_guarded` checks the preconditions in order (the unit is `in_review` with a PASS, no question and no feedback
 open; no person's commit after the hand-off; the PR exists, is open and is aimed at the target; the head equals the
 `ls-remote` tip of the unit branch and, when the forge shows it, the PR head sha (R5); the target tip is an ancestor
 of the head). Each failure is `not_ready` (or `stale` for the last) and pushes nothing. Then, when the caller gave a
 `before_push` callback, it is called with the outcome-to-be and a False answer pushes nothing (`not_ready`, "the plan
-no longer allows the merge": the plan step records `unit.merge_requested` there, under its lease, R5). Then it pushes
-`<head>:refs/heads/<target>`. The freshness of head and base is enforced by the git server, not by the read before the
-push: a target that moved in between is refused as a non-fast-forward and is `stale`; any other refusal (a protected
-branch, a push rule, a permission) is `refused` and carries the forge's message, redacted.
+no longer allows the merge": the plan step records `unit.merge_requested` there, under its lease, R5). Then, with
+`fast-forward`, it pushes `<head>:refs/heads/<target>`. The freshness of head and base is enforced by the git server,
+not by the read before the push: a target that moved in between is refused as a non-fast-forward and is `stale`; any
+other refusal (a protected branch, a push rule, a permission) is `refused` and carries the forge's message, redacted.
+With `squash` it calls `Forge.merge_pr(pr, sha=head, ...)`: the forge answers `head_moved` (`not_ready`, the next run
+reads again) or `refused`, or merges. That call has no guard on the target, so the landed commit is compared with what
+was read: its parent is the tip read and its tree is the head's tree, else `MergeOutcome.raced` is set and the
+post-merge check (L4-YOLO-009) of the landed commit decides.
 
 The function writes no ledger: the caller records `unit.merge_requested` and `unit.merged`. `confirm_merged` asks
-whether the target holds the head (it is the tip, or an ancestor of it when the target moved on after the push) and
-waits, best effort, for the forge to mark the PR merged.
+whether the target holds the landed commit (it is the tip, or an ancestor of it when the target moved on after the
+merge) and waits, best effort, for the forge to mark the PR merged.
 `guarded_push` is the push guard alone, shared with the archive branch (`postmerge.merge_archive_guarded`).
 """
 
 import logging
+import re
 import time
 from collections.abc import Callable
 
 from l4.config.schema import L4Config
 from l4.context import AppContext
-from l4.forge.base import Forge, ForgeError, ForgeUnavailable, PullRequest, fetch_auth_config
+from l4.forge.base import (
+    Forge,
+    ForgeAuthError,
+    ForgeError,
+    ForgeUnavailable,
+    PullRequest,
+    fetch_auth_config,
+)
 from l4.forge.gitlab import push_auth_config
 from l4.state.feedback_view import item_views
 from l4.state.status import UnitSnapshot
@@ -91,7 +105,7 @@ def push_fast_forward(
         return MergeOutcome("stale", head, before, pr, f"the target {target} moved before the push: {_first(app, exc)}")
     except GitError as exc:
         return MergeOutcome("refused", head, before, pr, f"the push to {target} was refused: {_first(app, exc)}")
-    return MergeOutcome("merged", head, before, pr, f"{target} fast-forwarded to {head}")
+    return MergeOutcome("merged", head, before, pr, f"{target} fast-forwarded to {head}", landed=head)
 
 
 def _first(app: AppContext, exc: GitError) -> str:
@@ -108,20 +122,83 @@ def guarded_push(
     *,
     pr: int | None = None,
     before_push: Callable[[MergeOutcome], bool] | None = None,
+    land: Callable[[str], MergeOutcome] | None = None,
 ) -> MergeOutcome:
     """The target tip must be an ancestor of `head` (`stale` if not, `not_ready` if the target is missing). Then
     `before_push`, when given, is called with the outcome-to-be (`merged`, with `target_before` known); False means do
-    not push (`not_ready`, "the plan no longer allows the merge", R5). Then `push_fast_forward`."""
+    not push (`not_ready`, "the plan no longer allows the merge", R5). Then `land(tip)` (the squash merge), or
+    `push_fast_forward` when none is given."""
     tip = remote_tip(git, cfg, app.environ, target)
     if tip is None:
         return _not_ready(f"the target branch {target} does not exist on origin", head=head, pr=pr)
     if not _is_ancestor(git, cfg, app.environ, tip, head):
         return MergeOutcome("stale", head, tip, pr, f"the target {target} ({tip[:10]}) is not in the unit head")
     if before_push is not None:
-        to_be = MergeOutcome("merged", head, tip, pr, f"{target} would be fast-forwarded to {head}")
+        how = "fast-forwarded" if land is None else "squash-merged"
+        to_be = MergeOutcome("merged", head, tip, pr, f"{target} would be {how} to {head}")
         if not before_push(to_be):
             return _not_ready(NO_LONGER_ALLOWED, head=head, pr=pr)
+    if land is not None:
+        return land(tip)
     return push_fast_forward(app, cfg, git, head, target, before=tip, pr=pr)
+
+
+_SKIP_CI = re.compile(r"\s*\[(?:skip ci|ci skip)\]\s*", re.IGNORECASE)
+
+
+def squash_message(title: str, pr: int, unit: str, commits: int, head: str, run_id: str) -> tuple[str, str]:
+    """The squash commit's title and body (squash-and-delete D5): the PR title without `[skip ci]` / `[ci skip]` and
+    with ` (#<pr>)`; the body says what was squashed and carries the trailers a person can search for. No `[skip ci]`:
+    the target's own CI should see the change."""
+    cleaned = _SKIP_CI.sub(" ", title).strip() or unit
+    body = (
+        f"Squash of {unit}: {commits} commit{'' if commits == 1 else 's'}, verified head {head}.\n\n"
+        f"L4-Unit: {unit}\nL4-Verified-Head: {head}\nL4-Run: {run_id}"
+    )
+    return f"{cleaned} (#{pr})", body
+
+
+def squash_merge(
+    app: AppContext, cfg: L4Config, git: Git, forge: Forge, pr: PullRequest, unit: str, head: str, tip: str
+) -> MergeOutcome:
+    """The forge's squash merge pinned to `head`, with the message of `squash_message`. `head_moved` is `not_ready`;
+    a refusal (or a token the forge turns down) is `refused` with the forge's message. After `merged` the landed commit
+    is read: a parent other than `tip`, or a tree other than the head's, means a person's push landed between the read
+    and the merge (`raced`)."""
+    target = cfg.forge.base_branch
+    _have(git, cfg, app.environ, head)
+    counted = git.run("rev-list", "--count", f"{tip}..{head}", check=False).stdout.strip()
+    title, body = squash_message(pr.title, pr.number, unit, int(counted) if counted.isdigit() else 0, head, app.run_id)
+    try:
+        call = forge.merge_pr(pr.number, sha=head, title=title, message=body)
+    except ForgeAuthError as exc:
+        return MergeOutcome(
+            "refused", head, tip, pr.number, f"the forge refused the merge: {app.redactor.redact_text(str(exc))}"
+        )
+    if call.status == "head_moved":
+        return _not_ready(
+            f"the pull request head moved before the merge ({app.redactor.redact_text(call.detail)}): "
+            "the next run reads it again",
+            head=head, pr=pr.number,
+        )  # fmt: skip
+    if call.status == "refused" or not call.sha:
+        detail = app.redactor.redact_text(call.detail) or "no reason given"
+        return MergeOutcome("refused", head, tip, pr.number, f"the squash merge into {target} was refused: {detail}")
+    landed = call.sha
+    _have(git, cfg, app.environ, landed)
+    parent = git.run("rev-parse", "--verify", "-q", f"{landed}^", check=False).stdout.strip()
+    tree = git.run("rev-parse", "--verify", "-q", f"{landed}^{{tree}}", check=False).stdout.strip()
+    expected = git.run("rev-parse", "--verify", "-q", f"{head}^{{tree}}", check=False).stdout.strip()
+    raced = not parent or parent != tip or not tree or tree != expected
+    if raced:
+        log.warning(
+            "!%s: the squash commit %s has parent %s and tree %s; the tip read was %s and the head's tree is %s: "
+            "the target moved while the forge merged",
+            pr.number, landed[:10], parent[:10] or "?", tree[:10] or "?", tip[:10], expected[:10] or "?",
+        )  # fmt: skip
+    return MergeOutcome(
+        "merged", head, tip, pr.number, f"{target} squash-merged as {landed}", landed=landed, raced=raced
+    )
 
 
 def _unit_head(git: Git, snapshot: UnitSnapshot, cfg: L4Config) -> str | None:
@@ -159,11 +236,11 @@ def merge_guarded(
     reread: bool = True,
     waited_head: str | None = None,
 ) -> MergeOutcome:
-    """The preconditions in order, then `guarded_push` (see the module docstring). `before_push` is called last, with
-    the outcome-to-be, and False stops the merge without a push (R5). `sleep` waits between the reads of a PR whose
-    head the forge shows late (tests pass a no-op). The plan step asks again for that head only when it would record
-    the wait for the first time: `reread` False (a preview) or `waited_head`, the unit head a `merge_not_ready` wait
-    is already recorded for, equal to the head to merge, reads the forge once."""
+    """The preconditions in order, then `guarded_push` with the squash merge or the push (see the module docstring).
+    `before_push` is called last, with the outcome-to-be, and False stops the merge without a push (R5). `sleep`
+    waits between the reads of a PR whose head the forge shows late (tests pass a no-op). The plan step asks again for
+    that head only when it would record the wait for the first time: `reread` False (a preview) or `waited_head`, the
+    unit head a `merge_not_ready` wait is already recorded for, equal to the head to merge, reads the forge once."""
     target = cfg.forge.base_branch
     if (why := _readiness(snapshot)) is not None:
         return _not_ready(why)
@@ -208,7 +285,13 @@ def merge_guarded(
         return _not_ready(
             f"the pull request head {forge_head[:10]} is not the head to merge {head[:10]}", head=head, pr=pr.number
         )
-    return guarded_push(app, cfg, git, head, target, pr=pr.number, before_push=before_push)
+    if cfg.yolo.merge.method == "fast-forward":
+        return guarded_push(app, cfg, git, head, target, pr=pr.number, before_push=before_push)
+    unit = snapshot.ref.id
+    return guarded_push(
+        app, cfg, git, head, target, pr=pr.number, before_push=before_push,
+        land=lambda tip: squash_merge(app, cfg, git, forge, pr, unit, head, tip),
+    )  # fmt: skip
 
 
 def _find_pr(forge: Forge, snapshot: UnitSnapshot, cfg: L4Config) -> PullRequest | None:
@@ -230,9 +313,10 @@ def confirm_merged(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> bool:
-    """True when origin's target holds `head`: it is the tip, or an ancestor of the tip when the target moved on after
-    the push (review #18, R5). That is the proof. It then waits up to `wait_s` for the forge to show the PR as
-    merged; a forge that has not caught up is logged, not an error."""
+    """True when origin's target holds `head` (the landed commit: the unit head of a fast-forward, the squash commit of
+    a squash): it is the tip, or an ancestor of the tip when the target moved on after the merge (review #18, R5).
+    That is the proof. It then waits up to `wait_s` for the forge to show the PR as merged; a forge that has not
+    caught up is logged, not an error."""
     target = cfg.forge.base_branch
     tip = remote_tip(git, cfg, git.env, target)
     if tip is None:

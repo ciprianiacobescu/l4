@@ -167,6 +167,7 @@ class PostMergeArchiver:
         self._changes = f"{root}/changes"
         self._specs = f"{root}/specs"
         self._push_config = push_auth_config(cfg, app.environ)
+        self._fetch_config = fetch_config
         self._worktrees = WorktreeManager(
             git,
             base_branch=cfg.forge.base_branch,
@@ -201,6 +202,8 @@ class PostMergeArchiver:
             return ArchiveResult("pending", first, f"archive MR !{first.number} ({first.head_branch}) is open")
         if self._remote_has(names.archive_branch):
             return self._resume(names)
+        if self._folder_archived(ref):
+            return ArchiveResult("archived", detail=f"{ref.id} is no longer under {self._changes} on the base branch")
         try:
             return self._build(ref, names, iteration)
         except (ArchiveRefused, ArchiveFailed, ArchiveBlocked, LedgerCorrupt) as exc:
@@ -236,6 +239,20 @@ class PostMergeArchiver:
     def _remote_has(self, branch: str) -> bool:
         out = self._git.run("ls-remote", "origin", f"refs/heads/{branch}", config=self._push_config).stdout
         return bool(out.strip())
+
+    def _folder_archived(self, ref: UnitRef) -> bool:
+        """The unit's folder is no longer on the base: its archive merged and the archive branch is gone, so there is
+        nothing to build (a worktree per sweep for every merged unit otherwise). False when the base cannot be read."""
+        base = self._cfg.forge.base_branch
+        tracking = f"refs/remotes/origin/{base}"
+        try:
+            self._git.fetch("origin", refspecs=(f"+refs/heads/{base}:{tracking}",), config=self._fetch_config)
+        except GitError:
+            return False
+        if self._git.rev_parse(tracking) is None:
+            return False
+        folder = f"{tracking}:{self._changes}/{ref.name}"
+        return not self._git.run("rev-parse", "--verify", "--quiet", folder, check=False).stdout.strip()
 
     def _resume(self, names: UnitNames) -> ArchiveResult:
         """The branch was pushed but the MR was not opened (a crash or a network error between the two): open it. A

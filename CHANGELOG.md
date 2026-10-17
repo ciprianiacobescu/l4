@@ -6,6 +6,24 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.12 (2026-10-17)
+
+### Changed
+- A delivery plan with `merge: auto` now squash-merges each verified unit by default, and deletes the merged branches.
+  Behaviour change on upgrade: the harness used to push the unit head to the target as a fast-forward and never deleted a
+  branch. Now it calls the forge's merge, pinned to the verified head, so the target gets one commit (the PR title and
+  ` (#<pr>)`, with the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run`; `unit.merged` records `merge_commit`,
+  `method` and `raced`), and, once the forge shows the PR merged, it keeps the verified head at
+  `refs/l4/merged/<framework>/<name>` and deletes the unit branch under a lease (and the archive branch after the archive
+  merge). A branch a person pushed to after the merge stays (`unit.branch_kept`); a plan step also cleans up to five
+  branches of earlier merges. The lock ref is not deleted. The forge's token must be allowed to merge PRs; a forge that
+  refuses a squash stops the plan with `merge_refused`. To keep the old behaviour set `yolo.merge.method: fast-forward`
+  and `yolo.merge.delete_branches: false`. The evidence link in a PR body now names the head commit, not the branch
+  (L4-YOLO-008, L4-YOLO-032, L4-YOLO-033).
+- The archive step no longer builds a worktree for a merged unit whose folder is already archived on the base.
+- The hand-off refreshes the PR body's evidence link only while the body is still the harness's own; a body a person
+  edited stays.
+
 ## 0.4.11 (2026-10-17)
 
 ### Fixed

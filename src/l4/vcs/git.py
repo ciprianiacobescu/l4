@@ -14,6 +14,8 @@ from l4.vcs.errors import GitError
 from l4.vcs.push import (
     PushRejected,
     build_branch_push_args,
+    build_delete_args,
+    build_keep_args,
     build_lease_push_args,
     build_push_args,
     build_restart_args,
@@ -210,6 +212,17 @@ class Git:
                 with contextlib.suppress(Exception):
                     self.on_push(branch, expected or None, new)
         return done
+
+    def push_delete(
+        self, remote: str, branch: str, expect: str, *, config: Sequence[tuple[str, str]] = ()
+    ) -> GitResult:
+        """Delete a branch on the remote only if it still holds `expect` (squash-and-delete D6); `PushRejected` when the
+        lease is lost. git also removes the local remote-tracking ref."""
+        return self._push(build_delete_args(remote, branch, expect), config, is_lost_lease)
+
+    def push_keep(self, remote: str, sha: str, ref: str, *, config: Sequence[tuple[str, str]] = ()) -> GitResult:
+        """Create `ref` (under `refs/l4/merged/`) at `sha`; `PushRejected` when it exists already."""
+        return self._push(build_keep_args(remote, sha, ref), config, is_lost_lease)
 
     def restart_push(
         self,
