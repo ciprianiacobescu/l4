@@ -138,6 +138,8 @@ CLASSIFIED = {
     "gates/dryrun.py": OTHER, "gates/e2e_launch.py": OTHER, "gates/runner.py": "the project's own test gates",
     "init/action.py": "`git ls-remote` for a harness ref (adoption-kit)",
     "llm/system_one.py": "the local System-One model server", "memory/serena.py": "the Serena MCP server",
+    "mcp/repos.py": "`git rev-parse` to find a served repository's root (L4-MCP-005)",
+    "mcp/tools.py": "starts `l4` itself as a child (`python -P -m l4`); that process takes the lock like any other",
     "s1/canary.py": OTHER, "sandbox/bwrap.py": OTHER, "sandbox/select.py": OTHER, "setup/gitlab.py": OTHER,
     "sim/runner.py": "starts the simulator child", "specs/openspec.py": OTHER, "state/environment.py": OTHER,
     "vcs/git.py": OTHER,
