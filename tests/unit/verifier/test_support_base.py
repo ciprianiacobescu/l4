@@ -219,13 +219,15 @@ def test_the_runner_keeps_the_support_files_and_helpers_but_not_the_units_test_m
         "e2e/conftest.py": "import pytest\n",
         "e2e/helpers.py": "X = 1\n",
         "e2e/test_cart.py": "def test_cart():\n    assert 1\n",
+        "e2e/test_utils.py": "def fetch():\n    return 1\n",  # named like a test module, defines no test
         "e2e/cart.spec.ts": "export {};\n",
         "tests/fixtures/factory.py": "X = 1\n",
     }
-    plan, *_ = unit_plan(tmp_path, git_environ, {"a.txt": "1\n"}, edits)
-    assert {p for p, _ in runner_support(plan, L4Config()).changes} == {
+    plan, repo, *_ = unit_plan(tmp_path, git_environ, {"a.txt": "1\n"}, edits)
+    assert {p for p, _ in runner_support(plan, L4Config(), Git(repo.path, environ=git_environ)).changes} == {
         "e2e/conftest.py",
         "e2e/helpers.py",
+        "e2e/test_utils.py",
         "tests/fixtures/factory.py",
     }
-    assert runner_support(plan, L4Config()).base_sha == plan.base_sha
+    assert runner_support(plan, L4Config(), Git(repo.path, environ=git_environ)).base_sha == plan.base_sha

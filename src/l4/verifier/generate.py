@@ -16,6 +16,7 @@ M1: verifier 3.2 (`flaky_repeats`), 3.3 (the synthetic baseline), 3.7/3.8 (audit
 
 import contextlib
 import hashlib
+import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +27,7 @@ from l4.implementer.tdd import RoleLimit
 from l4.implementer.workbench import Workbench
 from l4.llm.agent_judge import LLMBackend
 from l4.memory.curate import UI_GAP_TITLE
+from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.verifier.e2e_trace import e2e_coverage
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
@@ -112,35 +114,61 @@ def _outcome(statuses: Collection[str]) -> RunOutcome:
     return "pass" if "passed" in statuses and "failed" not in statuses else "fail"
 
 
+_PY_FRAME = re.compile(r'^\s*File "([^"]+)", line \d+')
+
+
+def _server_failure(wb: Workbench, log_path: Path | None) -> str:
+    """What the server's own output says about why it did not start: the deepest traceback frame that is a tracked file
+    of the worktree outside the test and support globs, and the last error line. Empty when the log says nothing."""
+    if log_path is None:
+        return ""
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace")[-100_000:].splitlines()
+    except OSError:
+        return ""
+    root, tdd = wb.worktree.resolve(), wb.cfg.tdd
+    deepest = ""
+    for line in lines:
+        if (m := _PY_FRAME.match(line)) is None:
+            continue
+        path = Path(m.group(1))
+        try:
+            rel = (path.resolve() if path.is_absolute() else (root / path).resolve()).relative_to(root).as_posix()
+        except ValueError:
+            continue
+        tracked = wb.git.run("ls-files", "--error-unmatch", "--", rel, check=False).returncode == 0
+        if tracked and not any(glob_match(g, rel) for g in (*tdd.test_globs, *tdd.test_support_globs)):
+            deepest = rel
+    error = next((ln.strip() for ln in reversed(lines) if re.match(r"^[A-Za-z_.]*(Error|Exception|Exit)\b", ln)), "")
+    return ": ".join(part for part in (deepest, error) if part)
+
+
 def _head_run(
     wb: Workbench, criterion: Criterion, cap: int, support: SupportPlan, rel: str
 ) -> tuple[E2eRun | None, dict[str, str], str, str]:
     """The head run (L4-VER-035, design D16): with the e2e runner's own support files the unit changed at their base
-    versions (never added app data, never the unit's other test files: only the generated file `rel` is collected), and
-    with them in place only when step 1's content scan read them. A server that does not start in the reverted run is a
-    run that did not happen. Returns (the run, the traced tests, how it ran, why not); `how` is "" when the run could
-    not be made the way the rule says."""
-    plan = runner_support(support, wb.cfg)
+    versions (never added app data, never the unit's other test files: only the generated file `rel` is collected, on
+    every step-5 run). There is no run with the unit's files in place: a run that cannot be made so (the server does
+    not start, a test errors, none ran) holds the criterion. Returns (the run, the traced tests, how it ran, why not);
+    `how` is "" when the run could not be made the way the rule says."""
+    plan = runner_support(support, wb.cfg, wb.git)
+    env = collect_only_env([rel])
     if not plan.changes:
-        run = run_e2e(wb, name="e2e-head")
+        run = run_e2e(wb, name="e2e-head", extra_env=env)
         return run, _traced(criterion, run.report, cap), "unchanged", ""
-    cause = ""
+    reverted = ", ".join(path for path, _ in plan.changes)
     with support_at_base(wb, plan.base_sha, plan):
         try:
-            run = run_e2e(wb, name="e2e-head", extra_env=collect_only_env([rel]))
-            found = _traced(criterion, run.report, cap)
-            if found and "error" not in found.values():
-                return run, found, "base", ""
-            cause = "a test of the file errored" if found else "no test of the new file ran"
+            run = run_e2e(wb, name="e2e-head", extra_env=env)
         except ServerNotReady as exc:
-            run, found = None, {}
-            cause = f"the app does not start with the unit's support files at the base ({exc})"
-    if not support.fallback:
-        what = cause if run is None else f"it does not run with the unit's support files at the base ({cause})"
-        why = f"{what}, and a run with them needs step 1's content scan to have read them: {support.why_not}"
-        return run, found, "", why
-    run = run_e2e(wb, name="e2e-head-support")
-    return run, _traced(criterion, run.report, cap), "head", ""
+            where = _server_failure(wb, exc.log_path)
+            why = f"the app does not start without the unit's test and support files (reverted: {reverted})"
+            return None, {}, "", f"{why}: {where}" if where else why
+        found = _traced(criterion, run.report, cap)
+    if found and "error" not in found.values():
+        return run, found, "base", ""
+    cause = "a test of the file errored" if found else "no test of the new file ran"
+    return run, found, "", f"it does not run without the unit's test and support files ({reverted}): {cause}"
 
 
 def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: SupportPlan = NO_SUPPORT) -> _Verdict:
@@ -150,10 +178,12 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: Sup
     while the head can is about the unit (it adds the app), not the harness: `base_unservable`. A head server that
     never gets ready raises (exit 1)."""
     cap = wb.cfg.verifier.max_criteria_per_test
+    rel = test_path("e2e", criterion.id)
+    env = collect_only_env([rel])
     try:
-        at_base = run_e2e(wb, base, name="e2e-base")
+        at_base = run_e2e(wb, base, name="e2e-base", extra_env=env)
     except ServerNotReady as exc:
-        run_e2e(wb, name="e2e-head")  # raises when the head is not served either: then it is the harness's fault
+        run_e2e(wb, name="e2e-head", extra_env=env)  # raises when the head is not served either: the harness's fault
         return _Verdict("base_unservable", f"the merge-base app cannot be served ({exc})")
     found = _traced(criterion, at_base.report, cap)
     if not found:
@@ -167,7 +197,7 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: Sup
         bad = sorted(i for i, status in found.items() if status == "error")
         reason = f"the test errors at the merge base, which proves nothing: {', '.join(bad[:3])}"
         return _Verdict("base_error", reason, base="error")
-    at_head, found, how, why = _head_run(wb, criterion, cap, support, test_path("e2e", criterion.id))
+    at_head, found, how, why = _head_run(wb, criterion, cap, support, rel)
     if not how or at_head is None:
         return _Verdict("uncollectable", _short(why), base="fail")
     if not found:

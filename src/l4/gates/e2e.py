@@ -44,8 +44,9 @@ _PYTEST_VALUE_OPTIONS = frozenset({
 class ServerNotReady(L4Exit):
     """The server never became ready: exit 1, unless the caller can tell it is about the tree (step 5 at the base)."""
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, log_path: Path | None = None) -> None:
         super().__init__(ExitCode.INTERNAL_ERROR, message)
+        self.log_path = log_path  # the gate log of the run that never got ready: the server's own output is in it
 
 
 @dataclass(frozen=True)
@@ -158,7 +159,7 @@ def run_e2e(
     result = run_gate_at(wb, tree, spec, network=False, extra_env=extra_env)
     marker = _read(tree, NOT_READY_RELPATH, limit=64)
     if result.exit_code == NOT_READY and marker == str(NOT_READY):
-        raise ServerNotReady(f"gates.e2e: the server was not ready (see {result.log_path.name})")
+        raise ServerNotReady(f"gates.e2e: the server was not ready (see {result.log_path.name})", result.log_path)
     if result.exit_code == NO_COMMAND and marker == str(NO_COMMAND):
         raise _refuse(f"command cannot be started (see {result.log_path.name})")
     return E2eRun(result, _read(tree, SNAPSHOT_RELPATH, limit=SNAPSHOT_LIMIT))

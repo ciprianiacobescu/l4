@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.implementer.discrimination import _drop_bytecode
+from l4.implementer.tamper import facts_of
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.vcs.git import Git
@@ -40,6 +41,7 @@ class SupportPlan:
     fallback: bool = False
     why_not: str = ""
     base_sha: str = ""
+    head_sha: str = ""
 
 
 NO_SUPPORT = SupportPlan()  # the plan of a unit that changed no support file: runs are as before
@@ -87,20 +89,28 @@ def unit_test_plan(git: Git, cfg: L4Config, base_sha: str, head: str, integrity:
             continue
         changes.append((path, letter))
     fallback, why = _readable(integrity)
-    return SupportPlan(tuple(sorted(changes)), fallback, why, base_sha)
+    return SupportPlan(tuple(sorted(changes)), fallback, why, base_sha, head)
 
 
-def runner_support(plan: SupportPlan, cfg: L4Config) -> SupportPlan:
-    """The part of a plan that step 5's head run reverts (design D16): the e2e runner's own support files. The unit's
-    other test files stay but are not collected. A test-glob file whose name does not look like a test module counts as
-    support (a helper under `e2e/`)."""
+def runner_support(plan: SupportPlan, cfg: L4Config, git: Git) -> SupportPlan:
+    """The part of a plan that step 5's head run reverts (design D16): the e2e runner's own support files. A test-glob
+    `.py` file counts as support when it defines no test (`tamper.facts_of`, as `integrity._is_support` does: a helper
+    named `test_utils.py` is one); the unit's real test files stay but are not collected. Another language's test-glob
+    file is support when its name does not look like a test module."""
     support = cfg.tdd.test_support_globs
-    keep = tuple(
-        (path, status)
-        for path, status in plan.changes
-        if any(glob_match(g, path) for g in support) or not _TESTISH.search(PurePosixPath(path).name)
-    )
-    return SupportPlan(keep, plan.fallback, plan.why_not, plan.base_sha)
+    keep = []
+    for path, status in plan.changes:
+        if any(glob_match(g, path) for g in support):
+            keep.append((path, status))
+        elif path.endswith(".py"):
+            rev = plan.base_sha if status == "D" else plan.head_sha
+            shown = git.run("show", f"{rev}:{path}", check=False) if rev else None
+            found = facts_of(shown.stdout) if shown is not None and shown.returncode == 0 else None
+            if not found or not any(f.test for f in found.values()):
+                keep.append((path, status))
+        elif not _TESTISH.search(PurePosixPath(path).name):
+            keep.append((path, status))
+    return SupportPlan(tuple(keep), plan.fallback, plan.why_not, plan.base_sha, plan.head_sha)
 
 
 def support_plan(git: Git, cfg: L4Config, base_sha: str, head: str, integrity: IntegrityReport | None) -> SupportPlan:

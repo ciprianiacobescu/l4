@@ -6,7 +6,7 @@ from l4.config.schema import L4Config
 from l4.verifier.support_base import SupportPlan
 from l4.verifier.types import IntegrityCheck, IntegrityReport
 
-from ..implementer.conftest import make_bench  # noqa: F401
+from ..implementer.conftest import make_bench  # noqa: F401,F811
 from .test_generate import GOOD, WRONG, Writer, code, run_one
 from .test_generate import web as web  # noqa: F401  (the fixture)
 
@@ -48,7 +48,7 @@ def test_an_honest_units_generated_test_is_accepted_with_the_base_support_files(
     assert done.accepted and done.support == "base"
 
 
-WB = SimpleNamespace(cfg=L4Config())
+WB = SimpleNamespace(cfg=L4Config(), git=None)
 
 
 def fake_head(monkeypatch, traced):
@@ -73,24 +73,18 @@ def fake_head(monkeypatch, traced):
     return generate, runs
 
 
-def test_a_test_that_errors_at_the_base_support_runs_with_it_only_after_a_clean_scan(monkeypatch):  # SCN-VER-119
-    generate, runs = fake_head(monkeypatch, [{"t": "error"}, {"t": "passed"}])
-    plan = SupportPlan((("e2e/conftest.py", "A"),), True, "", "base")
-    _, found, how, why = generate._head_run(WB, None, 1, plan, "e2e/test_l4_c_x.py")
-    assert (how, why, found) == ("head", "", {"t": "passed"})
-    assert runs == ["revert", "e2e-head", "restore", "e2e-head-support"]
+def test_a_test_that_errors_without_the_units_runner_support_is_held_whatever_the_scan_says(monkeypatch):  # SCN-VER-135
+    generate, runs = fake_head(monkeypatch, [{"t": "error"}, {"t": "error"}])
+    for fallback in (True, False):
+        runs.clear()
+        plan = SupportPlan((("e2e/conftest.py", "A"),), fallback, "step 1's content scan did not read them: no", "base")
+        _, _, how, why = generate._head_run(WB, None, 1, plan, "e2e/test_l4_c_x.py")
+        assert how == "" and runs == ["revert", "e2e-head", "restore"]  # never a run with the unit's files in place
+        assert why.startswith("it does not run without the unit's test and support files (e2e/conftest.py)")
+        assert "a test of the file errored" in why
 
 
-def test_without_a_clean_scan_that_test_is_uncollectable_with_the_reason(monkeypatch):  # SCN-VER-119
-    generate, runs = fake_head(monkeypatch, [{"t": "error"}])
-    plan = SupportPlan((("e2e/conftest.py", "A"),), False, "step 1's content scan did not read them: no", "base")
-    _, _, how, why = generate._head_run(WB, None, 1, plan, "e2e/test_l4_c_x.py")
-    assert how == "" and runs == ["revert", "e2e-head", "restore"]
-    assert why.startswith("it does not run with the unit's support files at the base (a test of the file errored)")
-    assert why.endswith("step 1's content scan did not read them: no")
-
-
-# --- the amendment (design D16): app data stays, a server that does not start takes the fallback rule ----------
+# --- the amendment (design D16): app data stays, a server that does not start holds the criterion ---------------
 
 
 def with_app(web, raw, edit):
@@ -132,18 +126,100 @@ def needs_the_units_conftest(root):
     (root / "e2e/conftest.py").write_text("import pytest\n")
 
 
-def test_a_server_that_needs_the_units_runner_support_takes_the_fallback_rule(web, raw):  # SCN-VER-135
+def test_a_server_that_needs_the_units_runner_support_holds_the_criterion(web, raw):  # SCN-VER-135
     from l4.verifier.support_base import unit_test_plan
 
     bench, base = with_app(web, raw, needs_the_units_conftest)
     bench.wb.cfg.gates.e2e.serve.timeout = "3s"
-    ok = IntegrityReport(checks=[IntegrityCheck("content scan", "ok", "clean")])
-    plan = unit_test_plan(bench.wb.git, bench.wb.cfg, base, "HEAD", ok)
-    done = run_one(web, Writer(code(GOOD), code(GOOD), code(GOOD)), support=plan)
-    assert done.accepted and done.support == "head"
-    skipped = IntegrityReport(checks=[IntegrityCheck("content scan", "skipped", "not checked: python only")])
-    plan = unit_test_plan(bench.wb.git, bench.wb.cfg, base, "HEAD", skipped)
-    done = run_one(web, Writer(code(GOOD), code(GOOD), code(GOOD)), support=plan)
-    assert done.status == "uncollectable"
-    assert done.reason.startswith("the app does not start with the unit's support files at the base")
-    assert "step 1's content scan did not read them" in done.reason
+    for status, note in (("ok", "clean"), ("skipped", "not checked: python only")):
+        report = IntegrityReport(checks=[IntegrityCheck("content scan", status, note)])
+        plan = unit_test_plan(bench.wb.git, bench.wb.cfg, base, "HEAD", report)
+        done = run_one(web, Writer(code(GOOD), code(GOOD), code(GOOD)), support=plan)
+        assert done.status == "uncollectable"  # held in both cases: there is no run with the unit's files in place
+        assert done.reason.startswith("the app does not start without the unit's test and support files")
+        assert "e2e/conftest.py" in done.reason
+
+
+# --- second review M1, M2: the reproductions of rt2/test_rv_step5.py, with the fixed behaviour ------------
+
+from pathlib import Path  # noqa: E402
+
+from l4.verifier.playwright import base_checkout  # noqa: E402
+
+from .._web_bench import web_bench  # noqa: E402
+from .._web_helpers import stage  # noqa: E402
+from .test_generate import CRITERION  # noqa: E402
+
+OK_SCAN = IntegrityReport(checks=[IntegrityCheck("content scan", "ok", "clean")])
+
+
+def commit_all(raw, root, message):
+    raw(root, "add", "-A")
+    raw(root, "commit", "-q", "-m", message)
+    return raw(root, "rev-parse", "HEAD").strip()
+
+
+def staged(bench, raw, base_extra):
+    root: Path = bench.wb.worktree
+    stage(root)
+    (root / ".gitignore").write_text(".venv/\n.l4-out/\n__pycache__/\ntest-results/\n")
+    for rel, text in base_extra.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    base = commit_all(raw, root, "base: the cart app")
+    (root / "app.py").write_text((root / "app.py").read_text().replace("3 items", "4 items"))
+    commit_all(raw, root, "head: four items")
+    return root, base
+
+
+def judge_wrong(bench, base, plan, test_code=WRONG):
+    from l4.verifier.generate import generate_ui_test
+
+    with base_checkout(bench.wb, base) as tree:
+        return generate_ui_test(
+            bench.wb, Writer(code(test_code), code(test_code), code(test_code)), CRITERION, tree,
+            ui_diff="+ four", snapshot="<p>4 items</p>", support=plan,
+        )  # fmt: skip
+
+
+def test_an_app_that_imports_a_reverted_code_file_holds_the_criterion(make_bench, raw):  # noqa: F811  SCN-VER-135, review M2
+    from l4.verifier.support_base import unit_test_plan
+
+    bench = web_bench(make_bench)
+    bench.wb.cfg.verifier.independence = "none"
+    bench.wb.cfg.gates.e2e.serve.timeout = "3s"
+    root, base = staged(bench, raw, {})
+    (root / "fixtures").mkdir()
+    (root / "fixtures/seed.py").write_text("COUNT = 4\n")
+    (root / "app.py").write_text("import fixtures.seed  # noqa: F401\n" + (root / "app.py").read_text())
+    (root / "e2e/conftest.py").write_text(LIAR)
+    commit_all(raw, root, "unit: seed module and a conftest")
+    plan = unit_test_plan(bench.wb.git, bench.wb.cfg, base, "HEAD", OK_SCAN)
+    done = judge_wrong(bench, base, plan)
+    assert done.status == "uncollectable" and done.support == ""  # not accepted through the liar conftest
+    assert "fixtures/seed.py" in done.reason and "app.py" in done.reason
+    assert (root / "e2e/conftest.py").read_text() == LIAR  # restored
+
+
+UTILS = (
+    "import os\nimport urllib.request\n\n\ndef fetch(path):\n"
+    "    return urllib.request.urlopen(os.environ['L4_E2E_BASE_URL'] + path).read().decode()\n"
+)
+UTILS_LIAR = "def fetch(path):\n    return '<p data-testid=\"item-count\">9 items</p>'\n"
+CONFTEST_PAGE = (
+    "import pytest\nfrom test_utils import fetch\n\n\n@pytest.fixture\ndef page_text():\n    return fetch('/')\n"
+)
+WRONG_FIXTURE = "def test_shows_nine_items(page_text):\n    assert '9 items' in page_text\n"
+
+
+def test_a_helper_named_like_a_test_module_is_reverted(make_bench, raw):  # noqa: F811  SCN-VER-119, review M1
+    from l4.verifier.support_base import unit_test_plan
+
+    bench = web_bench(make_bench)
+    bench.wb.cfg.verifier.independence = "none"
+    root, base = staged(bench, raw, {"e2e/test_utils.py": UTILS, "e2e/conftest.py": CONFTEST_PAGE})
+    (root / "e2e/test_utils.py").write_text(UTILS_LIAR)
+    commit_all(raw, root, "unit: the helper")
+    plan = unit_test_plan(bench.wb.git, bench.wb.cfg, base, "HEAD", OK_SCAN)
+    done = judge_wrong(bench, base, plan, WRONG_FIXTURE)
+    assert done.status == "fails_at_head" and done.support == "base"
