@@ -1502,11 +1502,18 @@ def run_green(
     manifest = red.manifest
     if unfreeze.paths:  # these frozen files are named by a human answer or by the task's own text: the task's to change
         manifest = replace(manifest, files={p: f for p, f in manifest.files.items() if p not in unfreeze.paths})
-    if human.paths:
+    people = Unfreeze(tuple(g for g in human.grants if g.reason == "human_answer"), human.kept)
+    if people.paths:
         wb.emit(
-            "task.unfrozen", task=task.key, paths=list(human.paths), reason="human_answer", question=human.question,
-            answer_sha256=human.answer_sha256, red_sha=red.manifest.red_sha,
-            kept=[{"path": p, "why": why} for p, why in human.kept],
+            "task.unfrozen", task=task.key, paths=list(people.paths), reason="human_answer", question=people.question,
+            answer_sha256=people.answer_sha256, red_sha=red.manifest.red_sha,
+            kept=[{"path": p, "why": why} for p, why in people.kept],
+        )  # fmt: skip
+    for grant in (g for g in human.grants if g.reason == "delegate_answer"):  # L4-DLG-014: its own label
+        wb.emit(
+            "task.unfrozen", task=task.key, paths=list(grant.paths), reason="delegate_answer", question=grant.question,
+            answer_sha256=grant.answer_sha256, by="delegate", profile=grant.profile, model=grant.model,
+            red_sha=red.manifest.red_sha,
         )  # fmt: skip
     if named.paths or named.kept:  # `kept` is recorded even when nothing opens: it is the only place that says why
         wb.emit(
@@ -1762,7 +1769,9 @@ def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tupl
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is not None:
         scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-        human = unfrozen(file.questions, _answer_events(wb), scope, manifest)
+        human = unfrozen(
+            file.questions, _answer_events(wb), scope, manifest, delegate_unfreeze=wb.cfg.delegate.unfreeze
+        )
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None
