@@ -221,7 +221,7 @@ The harness tries to keep that work too:
 What this means on a **GitHub-hosted runner**: each job runs on a new machine. The snapshot ref is in the clone of the
 old machine. The next job does not see it. So the uncommitted work of the killed step is lost, and the step starts
 over from the last pushed commit. On a self-hosted runner that keeps the same clone between jobs, the snapshot can
-survive. I inferred that last sentence from the code; I did not test it.
+survive. That last point is read from the code and is not tested.
 
 Two more things are local:
 
@@ -350,7 +350,8 @@ instead, the push to `l4/**` starts a run. That run still takes the harness and 
 ## 9. Swimlane diagrams
 
 The lanes are, from left to right: the person, `origin` base branch, `origin` unit branch, `origin` lock ref, the CI job,
-the agent in its sandbox, and the PR. GitHub renders the Mermaid blocks.
+the agent in its sandbox, and the PR. The `refs/l4` lane holds the unit's lock ref (the pending ledger) and the plan ref
+(`refs/l4/plans/<plan-id>`). GitHub renders the Mermaid blocks.
 
 ### Diagram A: the normal life of a unit
 
@@ -360,7 +361,7 @@ sequenceDiagram
     participant P as Person (local clone on base)
     participant B as origin: base branch
     participant U as origin: unit branch l4/…
-    participant L as origin: lock ref
+    participant L as origin: refs/l4 (lock and plan refs)
     participant C as CI: l4 job (harness from base)
     participant A as Agent (sandbox)
     participant R as PR/MR
@@ -401,7 +402,7 @@ sequenceDiagram
     participant P as Person (local clone on base)
     participant B as origin: base branch
     participant U as origin: unit branch l4/…
-    participant L as origin: lock ref
+    participant L as origin: refs/l4 (lock and plan refs)
     participant C as CI: l4 job (harness from base)
     participant A as Agent (sandbox)
     participant R as PR/MR
@@ -438,7 +439,7 @@ sequenceDiagram
 In each row, `S` is the lane that sends. `>` is the lane that receives. `*` is a lane that only has a note.
 
 ```
-step  PERSON  BASE  UNIT  LOCK  CI   AGENT  PR   what happens
+step  PERSON  BASE  UNIT  REFS  CI   AGENT  PR   what happens   (REFS = refs/l4: lock ref and plan ref)
  1     .      .     *     .     S    .      >    run halts task 2.1: note on PR, exit 13
  2     S      .     >     .     .    .      .    l4 retry --no-run: commit "chore retry [skip ci]"
  3     S      .     .     >     .    .      .    l4 yolo resume --no-run: plan.resumed on refs/l4/plans/release-1
