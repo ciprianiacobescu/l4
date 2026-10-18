@@ -174,3 +174,28 @@ def test_appending_to_an_earlier_reds_file_is_no_change(tmp_path, git_environ): 
     repo.write({"tests/test_discount.py": DISCOUNT + "\n\ndef test_more():\n    assert 2\n"})
     head = repo.commit("red 1.2", task="1.2", tdd="red")
     assert check_tests(repo.context(base, head, tasks=[(UNIT, task("1.1")), (UNIT, task("1.2"))])).findings == []
+
+
+GO = (
+    'package cart\n\nimport "testing"\n\nfunc TestTotal(t *testing.T) {\n'
+    '\tif Total([]float64{1.25, 2.5}) != 3.75 {\n\t\tt.Fatal("total")\n\t}\n}\n'
+)
+GO_WEAK = 'package cart\n\nimport "testing"\n\nfunc TestTotal(t *testing.T) {\n\t_ = Total([]float64{1.25, 2.5})\n}\n'
+TS = (
+    "import { total } from '../src/cart';\n\n"
+    "test('adds prices', () => {\n  expect(total([1.25, 2.5])).toBe(3.75);\n});\n"
+)
+TS_WEAK = "import { total } from '../src/cart';\n\ntest('adds prices', () => {\n  expect(true).toBe(true);\n});\n"
+PY = "def test_other():\n    assert 1 + 1 == 2\n"
+
+
+def test_weakened_go_and_typescript_tests_are_named_as_checked_by_the_run(tmp_path, git_environ):  # SCN-VER-137
+    base_files = {"cart/cart_test.go": GO, "web/cart.test.ts": TS, "tests/test_other.py": PY}
+    repo, base = new_repo(tmp_path, git_environ, base_files)
+    repo.write({"cart/cart_test.go": GO_WEAK, "web/cart.test.ts": TS_WEAK})
+    out = check_tests(repo.context(base, repo.commit("red", task="1.1", tdd="red")))
+    assert not out.findings
+    assert out.note == "no Python test file changed; 2 other test file(s) are checked by the run of pre-existing tests"
+    repo.write({"tests/test_other.py": PY + "\n\ndef test_new():\n    assert True\n"})
+    out = check_tests(repo.context(base, repo.commit("red 2", task="1.2", tdd="red")))
+    assert not out.findings and "2 other test file(s) are checked by the run of pre-existing tests" in out.note

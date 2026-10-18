@@ -64,6 +64,7 @@ class Outcome:
     human_scan: list[str] = field(default_factory=list)  # content-scan hits only people's commits introduced: listed
     allowed_tests: list[str] = field(default_factory=list)  # pre-existing test changes an allowance covers: listed
     mocked: list[str] = field(default_factory=list)  # patches of the unit's code a support fixture makes on request
+    base_tests: dict[str, Any] | None = None  # the passed ids of the base's run (L4-VER-038), kept for later rounds
 
 
 def _blocker(title: str, detail: str, severity: Severity = Severity.BLOCKER) -> Finding:
@@ -276,6 +277,13 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
     globs = ctx.cfg.tdd.test_globs
     changed = {p: s for p, s in _changed(ctx.git, ctx.base_sha, ctx.head_sha).items() if p.endswith(".py")}
     files = {p: s for p, s in changed.items() if _matches(globs, p) and not _in_unit_dirs(ctx, p)}
+    others = sorted(
+        p for p, s in _changed(ctx.git, ctx.base_sha, ctx.head_sha).items()
+        if not p.endswith(".py") and _matches(globs, p) and not _in_unit_dirs(ctx, p) and s != "A"
+    )  # fmt: skip
+    elsewhere = f"{len(others)} other test file(s) are checked by the run of pre-existing tests"
+    if not files and others:
+        return Outcome(note=f"no Python test file changed; {elsewhere}", skipped=True)
     if not files:
         return Outcome(note="no test file changed", skipped=True)
     found: list[Tampered] = []
@@ -289,9 +297,13 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
         for t in compare(path, before, after):
             found.append(t)
             if t.kind == "deleted":
-                gone[path, t.name] = was[t.name].definition
+                gone[path, t.name] = (was[t.name].definition, was[t.name].closure)
         if after is not None and (now := facts_of(after)):
-            added |= {(path, n): f.definition for n, f in now.items() if f.test and not (n in was and was[n].test)}
+            added |= {
+                (path, n): (f.definition, f.closure)
+                for n, f in now.items()
+                if f.test and not (n in was and was[n].test)
+            }
         markers = scan.skip_markers(after or "") - scan.skip_markers(before)
         for name in sorted(markers):
             who = _introducers(ctx, path, lambda b, a, n=name: scan.skip_markers(a)[n] > scan.skip_markers(b)[n])
@@ -332,6 +344,8 @@ def check_tests(ctx: IntegrityContext) -> Outcome:
     if later:
         findings.append(_blocker("a red step changed a test that an earlier step wrote", _listed(later)))
     extra = f" (+{len(human)} by humans, listed)" if human else ""
+    if others:
+        extra += f"; {elsewhere}"
     if allowed:
         extra += f" (+{len(allowed)} allowed, listed)"
     if replaced:
@@ -370,9 +384,13 @@ def _later_red_changes(ctx: IntegrityContext) -> list[str]:
                     continue
                 found.append(t)
                 if t.kind == "deleted":
-                    gone[path, t.name] = was[t.name].definition
+                    gone[path, t.name] = (was[t.name].definition, was[t.name].closure)
             if after is not None and (now := facts_of(after)):
-                added |= {(path, n): f.definition for n, f in now.items() if f.test and not (n in was and was[n].test)}
+                added |= {
+                    (path, n): (f.definition, f.closure)
+                    for n, f in now.items()
+                    if f.test and not (n in was and was[n].test)
+                }
         away = moved(gone, added)
         hits += [
             f"{t.path}::{t.name} (task {commit.task}, red commit {commit.sha[:10]}: {t.why})"
@@ -633,6 +651,17 @@ def _opened_patches(ctx: IntegrityContext, changed: Mapping[str, str]) -> list[s
     return hits
 
 
+def _is_support(ctx: IntegrityContext, path: str, source: str) -> bool:
+    """A test-support file for the scan: one of `tdd.test_support_globs`, or a `.py` file of `tdd.test_globs` that
+    defines no test (a helper module under `tests/`, L4-VER-039; a file that does not parse counts too)."""
+    if _matches(ctx.cfg.tdd.test_support_globs, path):
+        return True
+    if not _matches(ctx.cfg.tdd.test_globs, path):
+        return False
+    found = facts_of(source)
+    return not found or not any(f.test for f in found.values())
+
+
 def check_scan(ctx: IntegrityContext) -> Outcome:
     """Result-manipulating constructs in the unit's changed test-support and runner-config files, a mention of the
     coverage plugin or its output directory in any changed Python file (M1.6: such code can rewrite the diff-coverage
@@ -648,7 +677,7 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
 
     def found_in(path: str, before: str, after: str) -> list[str]:
         found: list[str] = []
-        if path.endswith(".py") and _matches(tdd.test_support_globs, path):
+        if path.endswith(".py") and _is_support(ctx, path, after):
             found = sorted(set(scan.result_hooks(after)) - set(scan.result_hooks(before)))
             found += [
                 f"patches {target}, which the unit changed, for every test"
@@ -679,7 +708,10 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
     mocked = [
         f"{path}: patches {target} in a fixture a test requests"
         for path in sorted(changed)
-        if path.endswith(".py") and _matches(tdd.test_support_globs, path) and path not in exempt and modules
+        if path.endswith(".py")
+        and _is_support(ctx, path, _text(git, ctx.head_sha, path))
+        and path not in exempt
+        and modules
         for target, blocking in new_patches(_text(git, ctx.base_sha, path), _text(git, ctx.head_sha, path), modules)
         if not blocking
     ]
@@ -890,16 +922,22 @@ CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
 def run_integrity(ctx: IntegrityContext) -> IntegrityReport:
     report = IntegrityReport()
     for name, check in CHECKS:
-        out = check(ctx)
-        status = "failed" if any(f.blocking for f in out.findings) else "skipped" if out.skipped else "ok"
-        report.checks.append(IntegrityCheck(name, status, out.note))  # type: ignore[arg-type]
-        report.findings.extend(out.findings)
-        report.declared.extend(out.declared)
-        report.human_protected.extend(out.human)
-        report.human_tests.extend(out.human_tests)
-        report.human_suppressions.extend(out.human_suppressions)
-        report.human_scan.extend(out.human_scan)
-        report.allowed_tests.extend(out.allowed_tests)
-        report.mocked_support.extend(out.mocked)
-        report.unfrozen.extend(out.unfrozen)
+        record_outcome(report, name, check(ctx))
     return report
+
+
+def record_outcome(report: IntegrityReport, name: str, out: Outcome) -> None:
+    """Add one sub-check's row, findings and listings to the report."""
+    status = "failed" if any(f.blocking for f in out.findings) else "skipped" if out.skipped else "ok"
+    report.checks.append(IntegrityCheck(name, status, out.note))  # type: ignore[arg-type]
+    report.findings.extend(out.findings)
+    if out.base_tests is not None:
+        report.base_tests = out.base_tests
+    report.declared.extend(out.declared)
+    report.human_protected.extend(out.human)
+    report.human_tests.extend(out.human_tests)
+    report.human_suppressions.extend(out.human_suppressions)
+    report.human_scan.extend(out.human_scan)
+    report.allowed_tests.extend(out.allowed_tests)
+    report.mocked_support.extend(out.mocked)
+    report.unfrozen.extend(out.unfrozen)

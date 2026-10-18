@@ -87,6 +87,7 @@ from l4.state.lifecycle import Trigger
 from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
+from l4.verifier import base_tests
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
@@ -114,7 +115,7 @@ from l4.verifier.feedback import (
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
 from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
 from l4.verifier.generate import generate_ui_tests
-from l4.verifier.integrity import IntegrityContext, run_integrity
+from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrity
 from l4.verifier.judge import (
     CriterionVerdict,
     JudgePrompt,
@@ -142,7 +143,7 @@ from l4.verifier.selection import (
     seat_of,
     select_judge,
 )
-from l4.verifier.support_base import support_plan
+from l4.verifier.support_base import unit_test_plan
 from l4.verifier.traceability import (
     PROOF_HUMAN,
     apply_adequacy,
@@ -465,6 +466,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         tasks = [(u.id, t) for u, t in family_tasks(wb.provider, wb.ref)]
         ctx = IntegrityContext(wb.git, wb.cfg, base_sha, head, events, tasks, _unit_dirs(wb), wb.ref.id)
         result.integrity = run_integrity(ctx)
+        ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
+        record_outcome(result.integrity, base_tests.ROW, ran)
         findings.extend(result.integrity.findings)
         blocking = [f.title for f in result.integrity.findings if f.blocking]
         note = "; ".join(blocking) or f"{len(result.integrity.checks)} sub-checks"
@@ -817,7 +820,7 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
 
     def body() -> tuple[bool, str]:
         assert vc.audit_writer is not None
-        support = support_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity)
+        support = unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity)
         out = run_audit(
             wb, vc.audit_writer(), {c.id: c for c in criteria}, chosen, skipped, base_sha=base_sha,
             head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit, support=support,
@@ -897,7 +900,7 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
         out = generate_ui_tests(
             wb, vc.ui_writer(), plan.gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
-            support=support_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
+            support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
         )  # fmt: skip
         result.generated = out.outcomes
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
