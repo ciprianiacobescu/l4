@@ -109,6 +109,7 @@ def test_no_ci_on_h_merges_on_record_by_default(world):
     step = world.step({"a": snap})
     (data,) = merged(world)
     assert data["ci"] == "not_run" and "ci_jobs" not in data
+    assert "yolo.merge.require_ci" in (world.forge.note(1) or "")  # the same warning is a note on the merged PR
     assert any(
         head[:10] in action and "no CI of the repository ran" in action and "yolo.merge.require_ci" in action
         for action in step.actions
