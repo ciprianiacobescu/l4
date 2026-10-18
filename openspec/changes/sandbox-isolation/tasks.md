@@ -238,14 +238,17 @@ Every task follows these rules:
 
 ## 5. Doctor `SANDBOX-003` (L4-SEC-038)
 
-- [ ] 5.1 Tests: `tests/unit/doctor/test_checks_sandbox_003.py`: `test_a_readable_canary_fails` (SCN-SEC-96, with a
+- [x] 5.1 Tests: `tests/unit/doctor/test_checks_sandbox_003.py`: `test_a_readable_canary_fails` (SCN-SEC-96, with a
   fake runner as `tests/unit/doctor/test_checks_sandbox.py` uses, printing `L4-READ:<home canary>` for the agent kind:
   fails, names the path and `agent`, the result text holds no canary marker, no canary file is left), and
   `test_skipped_without_a_bwrap_sandbox` (SCN-SEC-98: `sandbox.mode: none` with `allow_none`, and no bwrap on PATH, each
-  skip with a reason naming the cause). Live: `test_the_real_argv_passes` (SCN-SEC-97, `@requires_bwrap`, with `HOME`
+  skip with a reason naming the cause), and `test_setup_paths_is_a_warning_row_whenever_it_is_set` (SCN-PRV-105, owner
+  decision Q1: row `SANDBOX-004`, a `fail` of severity warn while `sandbox.setup_paths` is set, a pass when empty, no
+  path in the message, exit code unchanged). Live: `test_the_real_argv_passes` (SCN-SEC-97, `@requires_bwrap`, with `HOME`
   and `L4_CACHE` under `/var/tmp`).
-- [ ] 5.2 Code: `src/l4/doctor/checks_sandbox.py`: `_sandbox_003` and `SANDBOX_003 = register(Check("SANDBOX-003",
-  "The sandboxes hide the home and the runner cache", "error", _sandbox_003))` as design D10 says. Verify: 5.1 files,
+- [x] 5.2 Code: `src/l4/doctor/checks_sandbox.py`: `_sandbox_003` and `SANDBOX_003 = register(Check("SANDBOX-003",
+  "The sandboxes hide the home and the runner cache", "error", _sandbox_003))` as design D10 says, and
+  `SANDBOX_004` (`_sandbox_004`, owner decision Q1) beside it. Verify: 5.1 files,
   `tests/unit/doctor/`.
 
 ## 6. Docs

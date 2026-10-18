@@ -1,7 +1,4 @@
-import os
-import shutil
-import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -41,15 +38,3 @@ def make_spec(tmp_path: Path) -> Callable[..., SandboxSpec]:
 
     make.cache = lambda name, read_only=False: CacheMount(tmp_path / "cache" / name, f"{name.upper()}_CACHE", read_only)  # type: ignore[attr-defined]
     return make
-
-
-@pytest.fixture
-def var_tmp_dir() -> Iterator[Path]:
-    """A fresh directory under /var/tmp, removed afterwards; the test is skipped when /var/tmp is not writable."""
-    if not (Path("/var/tmp").is_dir() and os.access(Path("/var/tmp"), os.W_OK)):
-        pytest.skip("/var/tmp is not writable")
-    path = Path(tempfile.mkdtemp(prefix="l4-live-", dir=Path("/var/tmp"))).resolve()
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)

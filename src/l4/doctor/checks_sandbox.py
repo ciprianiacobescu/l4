@@ -1,5 +1,6 @@
 """SANDBOX-002 (HB-1, SPEC L4-SEC-005): no container-daemon socket is reachable from the bwrap sandboxes. Registered
-at import.
+at import. SANDBOX-003 (L4-SEC-038) proves the home and the runner cache are hidden; SANDBOX-004 (L4-SEC-033) warns
+while `sandbox.setup_paths` hands a registry login to setup code.
 
 `--ro-bind / /` does not stop `connect()` on a unix socket, so a runner user in group `docker` reached
 `/var/run/docker.sock` (root on the host) from inside the sandbox. The check runs a tiny probe with the real base argv
@@ -8,9 +9,18 @@ unshared (a gate with `gates.network: none`), and FAILS when a socket is visible
 check; the full SANDBOX-001 (credentials, ancestor environment) is separate.
 """
 
+import secrets
+import shutil
+from pathlib import Path
+
+from l4.config.defaults import cache_root
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
-from l4.sandbox.bwrap import base_flags
+from l4.exitcodes import L4Exit
+from l4.sandbox.base import SandboxSpec, expand_credential_paths, gate_sandbox_spec
+from l4.sandbox.bwrap import BwrapSandbox, base_flags
+from l4.sandbox.env import build_agent_env, build_gate_env
+from l4.sandbox.home import spec_paths
 
 CLEAN = "L4-SOCKETS-OK"
 REACHABLE = "L4-SOCKETS-REACHABLE:"
@@ -81,3 +91,113 @@ def _sandbox_002(ctx: DoctorContext) -> CheckResult:
 
 
 SANDBOX_002 = register(Check("SANDBOX-002", "No daemon socket reachable from the sandboxes", "error", _sandbox_002))
+
+
+# --- SANDBOX-003: the home and the runner cache are hidden (L4-SEC-038) ----------------------------------------------
+
+READ = "L4-READ:"
+DONE = "L4-CANARY-DONE"
+READ_SCRIPT = f'for f; do [ -r "$f" ] && echo "{READ}$f"; done; echo {DONE}'
+
+
+def _canaries(home: Path, cache: Path, token: str) -> list[Path]:
+    """A file in the home outside every credential path, a credential file in another unit's step directory, and a lock
+    file. Each holds a random marker only, never anything that was in the user's files."""
+    return [
+        home / f".l4-canary-{token}",
+        cache / "units" / f"l4-canary-{token}" / "x" / "y" / "agent-tmp" / "credential",
+        cache / "locks" / f"l4-canary-{token}.lock",
+    ]
+
+
+def _sandbox_003(ctx: DoctorContext) -> CheckResult:
+    if ctx.cfg.sandbox.mode not in ("auto", "bwrap"):
+        return CheckResult("skip", f"sandbox.mode is {ctx.cfg.sandbox.mode}: not a bwrap sandbox")
+    bwrap = ctx.which("bwrap")
+    if not bwrap:
+        return CheckResult("skip", "bwrap was not found on PATH (the sandbox is unavailable, so nothing runs in it)")
+    home = Path(ctx.env["HOME"]) if ctx.env.get("HOME") else Path.home()
+    try:
+        cache = cache_root(ctx.env, repo=ctx.repo)
+    except L4Exit as exc:
+        return CheckResult("fail", str(exc))
+    if not home.is_dir():
+        return CheckResult("fail", "HOME is not an existing directory: the sandbox cannot hide it")
+    token = secrets.token_hex(6)
+    canaries = _canaries(home, cache, token)
+    base = cache / "doctor" / f"sandbox-003-{token}"
+    worktree, tmp_dir, git_dir = base / "wt", base / "tmp", base / "git"
+    try:
+        for directory in (worktree, tmp_dir, git_dir):
+            directory.mkdir(parents=True, mode=0o700)
+        for canary in canaries:
+            canary.parent.mkdir(parents=True, exist_ok=True)
+            canary.write_text(secrets.token_hex(16))
+        logins = expand_credential_paths(ctx.cfg.sandbox.credential_paths, home)
+        chain = ctx.cfg.roles.implementer
+        adapter = ctx.cfg.profiles[chain[0]].adapter if chain and chain[0] in ctx.cfg.profiles else "codex"
+        sandbox = BwrapSandbox(bwrap)
+        for kind in ("gate", "agent"):
+            tools, _ = spec_paths(
+                ctx.env, home=home, cache_root=cache, kind=kind, sandbox_cfg=ctx.cfg.sandbox, credential_paths=logins,
+                forbid=(worktree, base),
+            )  # fmt: skip
+            if kind == "gate":
+                spec = gate_sandbox_spec(
+                    worktree=worktree, git_common_dir=git_dir, tmp_dir=tmp_dir, home=home,
+                    configured_credential_paths=ctx.cfg.sandbox.credential_paths, caches=(), network=True,
+                    cache_root=cache, tool_paths=tools, builds_env=False,
+                )  # fmt: skip
+                env = build_gate_env(ctx.env, spec)
+            else:
+                spec = SandboxSpec(
+                    "agent", worktree, git_dir, tmp_dir, home, logins, adapter=adapter, network=True,
+                    cache_root=cache, tool_paths=tools,
+                )  # fmt: skip
+                env = build_agent_env(ctx.env, spec)
+            wrapped = sandbox.wrap(["/bin/sh", "-c", READ_SCRIPT, "sh", *map(str, canaries)], spec, env)
+            done = ctx.run(wrapped.argv, timeout=PROBE_TIMEOUT_S, env=wrapped.env)
+            lines = done.stdout.strip().splitlines()
+            readable = [line.removeprefix(READ) for line in lines if line.startswith(READ)]
+            if DONE not in lines:
+                detail = (done.stderr.strip().splitlines() or [f"exit {done.returncode}"])[-1][:200]
+                return CheckResult("fail", f"the canary probe did not run in the {kind} sandbox: {detail}")
+            if readable:
+                return CheckResult(
+                    "fail",
+                    f"the {kind} sandbox can read a file it must not see: {', '.join(readable)}",
+                    "the bwrap argv must cover the home and the runner cache with a tmpfs and bind back only the tool "
+                    "paths (l4.sandbox.bwrap, l4.sandbox.home); a tool that is missing inside the sandbox goes into "
+                    "sandbox.tool_paths",
+                )
+    finally:
+        for canary in canaries:
+            canary.unlink(missing_ok=True)
+        shutil.rmtree(cache / "units" / f"l4-canary-{token}", ignore_errors=True)
+        shutil.rmtree(base, ignore_errors=True)
+    return CheckResult(
+        "pass",
+        "the gate and the agent sandbox read none of the canaries (home, another unit's directory, lock directory)",
+    )
+
+
+SANDBOX_003 = register(Check("SANDBOX-003", "The sandboxes hide the home and the runner cache", "error", _sandbox_003))
+
+
+# --- SANDBOX-004: setup_paths is a registry login in reach of setup code (owner decision Q1) --------------------------
+
+
+def _sandbox_004(ctx: DoctorContext) -> CheckResult:
+    if not ctx.cfg.sandbox.setup_paths:
+        return CheckResult("pass", "sandbox.setup_paths is empty: no login is bound into a setup gate")
+    return CheckResult(
+        "fail",
+        f"sandbox.setup_paths binds {len(ctx.cfg.sandbox.setup_paths)} path(s), read-only, into the sandbox of every "
+        "gates.setup command: a registry login there is in reach of setup code an agent can influence (a build hook, "
+        "a postinstall script)",
+        "keep it to a token that can only read packages; remove the entry when the project needs no private registry",
+        severity="warn",
+    )
+
+
+SANDBOX_004 = register(Check("SANDBOX-004", "sandbox.setup_paths hands a login to setup code", "warn", _sandbox_004))

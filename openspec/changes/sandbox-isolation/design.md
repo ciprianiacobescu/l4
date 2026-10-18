@@ -141,6 +141,12 @@ placeholder home, so no environment is needed). The checks that need the environ
 runner cache and an absolute entry that overlaps a credential path once `~` is expanded, are made where the paths are
 expanded: `l4.sandbox.home.tool_paths()` and `home.setup_paths()` raise `L4Exit(USAGE_ERROR)` naming the key, at the
 first sandbox spec of the run.
+**Owner decision Q1: the key stays, as an explicit opt-in, and doctor warns whenever it is set.** A new row `SANDBOX-004`
+(`doctor/checks_sandbox.py`, severity warn, the default scopes `ci` and `local`: `doctor --adoption` shows no `SANDBOX-` row) is
+a `fail` of severity `warn` while `sandbox.setup_paths` is non-empty: "a registry login there is in reach of setup code an
+agent can influence", with the hint to use a read-only token or drop the entry. It is independent of bwrap (SANDBOX-003 is
+skipped without it), never echoes a path, and never changes an exit code (SCN-PRV-105). The runbook and the SPEC say
+the same.
 Why `setup_paths` exists: today a setup gate reads `~/.npmrc` through `--ro-bind / /`; the empty home would break a
 consumer with a private registry and leave only `sandbox.mode: none`. It is setup-only because setup is the one gate
 that downloads; code an agent influences still runs there (a build hook, a `postinstall` script), which is residual R2.
@@ -309,7 +315,10 @@ canaries (`$HOME/.l4-canary-<hex>`, `<cache_root>/units/l4-canary-<hex>/x/y/agen
 L4-CANARY-DONE'` through `BwrapSandbox.wrap` in each kind, and removes the canaries and the probe directory in a
 `finally`. A readable canary fails (exit 3) with the path and the kind; a probe that does not print the done marker fails
 with its last stderr line. It never prints a canary's content (the canaries hold a random marker only). It is the live
-half of the regression tests on a real runner; SANDBOX-001 stays as specified and unbuilt.
+half of the regression tests on a real runner; SANDBOX-001 stays as specified and unbuilt. Where the unit tests use a fake
+runner, the same function ran under a real bwrap 0.8.0 in a privileged container: it passed with the real argv and failed
+closed, naming all three canaries, with the two tmpfs removed from the argv. `SANDBOX-004` (Q1) sits beside it in the same
+module.
 
 ## 4. What changes where
 
@@ -343,8 +352,8 @@ half of the regression tests on a real runner; SANDBOX-001 stays as specified an
 
 ## 6. Open questions for the owner
 
-- Q1: `sandbox.setup_paths` hands a registry login to code the agent can influence during setup (R2). Keep the key, or
-  require such projects to stay on `sandbox.mode: none`?
+- Q1 (decided by the owner): keep `sandbox.setup_paths` as an explicit opt-in; doctor `SANDBOX-004` warns whenever it is
+  set (D5), and the docs say so.
 - Q2: close R3 in a follow-up by mounting the caches read-only in agent and test-gate sandboxes (the agent gets a private
   scratch cache for its own `uv add`), or by giving the verifier a fresh copy of the project seed as its uv cache?
 - Q3: record sandbox-security-6 as fixed by this change (the lock directories are under hidden roots), or keep its own

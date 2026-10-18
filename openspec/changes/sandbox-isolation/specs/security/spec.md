@@ -89,6 +89,11 @@ that names the key, never the path.
 - **WHEN** the configuration is loaded
 - **THEN** loading fails with exit 2 naming `sandbox.tool_paths`, and the message does not contain the path
 
+#### Scenario: SCN-PRV-105 (+) Doctor warns while setup_paths is set
+- **GIVEN** `sandbox.setup_paths: ["~/.npmrc"]`, with or without bwrap on the machine
+- **WHEN** doctor runs
+- **THEN** `SANDBOX-004` is reported as a warning that a registry login is in reach of setup code, the path is not echoed, and the exit code is unchanged; with `setup_paths: []` the row passes
+
 ### Requirement: L4-SEC-034 Every per-unit directory carries the repository key
 Per-unit directories under `$L4_CACHE` SHALL include the repository key of L4-WTR-001: `units/<key>/<fw>/<name>` for
 the step temp directories, `excludes`, the agents' raw streams and the merge-base checkout,
