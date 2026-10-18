@@ -44,8 +44,7 @@ investigator reproduced it with the 0.4.14 library against a clone (the evidence
   `zero.kept`.
 - **Proof rules** (L4-IMP-002, L4-IMP-062). A setup-phase assertion counts as a failure on the zero values when the
   asserting fixture is in a test or support file the unit added or changed; elsewhere it is inconclusive. A criterion
-  whose every test reads a dependency and no project code is recorded as **discrimination not applicable**
-  (`via: not_applicable`), and the judge sees the label.
+  whose every test imports no project module and reads a dependency is **held for a person**, never passed.
 - **The base run confirms or says nothing** (L4-IMP-003). Only the zero-value run can show that a test does not
   discriminate; a base run that cannot run a candidate leaves it inconclusive.
 - **An inconclusive check never counts against the agent** (L4-IMP-063, L4-IMP-017). When every unconfirmed criterion

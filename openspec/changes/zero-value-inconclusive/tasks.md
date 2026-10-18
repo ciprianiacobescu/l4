@@ -650,3 +650,11 @@ Every task follows these rules:
 - [x] 10.4 H1: a proof from any pass of the keep loop counts; m1: the keep rule reads module-level calls of pre-existing
   test-support modules (L4-IMP-061). Tests: `test_zero_keep_applied.py`.
 - [x] 10.5 Docs: SPEC (L4-ADO-011, L4-IMP-060..062, SCN-ADO-35, SCN-IMP-307), CHANGELOG, design, specs.
+
+## 11. Round-3 review fixes
+
+- [x] 11.1 N3: nothing passes as `not_applicable` any more; a criterion whose every test is dependency only is inconclusive
+  and held with a `harness` question (L4-IMP-062). Tests: `test_dependency_only.py` (the 28 cells and the runtime case).
+- [x] 11.2 N1c, N1d: the innermost own frame decides; a unit-added `conftest.py` that stops pytest is the agent's failure
+  (L4-IMP-060). Tests: `test_zero_value_causes.py`.
+- [x] 11.3 Docs: SPEC (L4-IMP-062, SCN-IMP-306, SCN-IMP-307, the step list), CHANGELOG, design D9, proposal, specs.

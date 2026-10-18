@@ -13,9 +13,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   a plan review the held units ran. Only the units a plan plans (a batch's units) follow the plan; an excluded unit that
   `yolo.hold` matches stays `held by yolo.hold`, and `l4 plan` / `l4 yolo status` say so. The coverage check still counts a held
   unit as covered (L4-ADO-011).
-- Round-2 review of the zero-value work (L4-IMP-061, L4-IMP-062): a dependency pin is recognised only for a distribution that
-  is not the repository's own, named as a whole token with a version beside it in the criterion's text, and compared by the
-  test; a missing test is the agent's (no proof) whenever its own test module failed at a statement that is not an import;
+- Review of the zero-value work (L4-IMP-060..062): a missing test is the agent's (no proof) when the innermost frame of
+  its own files is not an import of other code (also a `conftest.py` the unit added that stops pytest);
   the keep loop reads module-level calls of pre-existing test-support modules, and a test that failed by assertion in any
   pass counts as a proof.
 - The GitHub setup action installs the harness again with `source: action` (the default for a published
@@ -61,11 +60,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   decide holds the chore the same way. An agent may answer only where
   `clarifier.answer_by_agents` is true on the base branch; its answer is recorded `by: agent` and labelled
   `agent_override`, never as a person's (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009).
-- A criterion whose every test reads a dependency's version with a literal distribution name that the criterion's text
-  names, and uses no project code (also none reached by `importorskip`, `import_module`, `__import__` or
-  `getfixturevalue`), is recorded as discrimination not applicable (`via: not_applicable`), and the judge sees the
-  label; the audit samples at most two criteria per round, so the label, not the audit, is the guarantee
-  (L4-IMP-062, L4-VER-051).
+- A criterion whose every test imports no project module and reads a dependency's version (a version pin) is no longer
+  passed: it is inconclusive ("its tests import no project module: the zero-value check cannot judge them"), the task is
+  held with a `harness` question, and nothing is recorded `via: not_applicable` any more (old ledgers are still read). A
+  person's `accept` counts it (L4-IMP-062).
 - `gate.finished` and `task.attempt_failed` carry an `excerpt` of at most 600 characters (the `E` lines and the deepest
   repository location, redacted) in the committed ledger, for a repository that uploads no job artifacts
   (L4-IMP-064).

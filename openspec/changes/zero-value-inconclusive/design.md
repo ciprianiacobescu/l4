@@ -63,7 +63,7 @@ task already satisfied (a preservation criterion passes at the base by design). 
 | inconclusive | anything else, or skipped | inconclusive (held) |
 | nothing to vary, or no project module | proof | confirmed |
 | nothing to vary, or no project module | anything else, or skipped | refuted, as today |
-| not applicable (D9) | (not run) | not applicable |
+| dependency only (D9) | (not run) | inconclusive: held for a person |
 
 A *skipped* base run (manifest changed, symlink, no unit base) was not made, so it is not classified; its reason is
 kept in the message as today (open question 1).
@@ -136,18 +136,14 @@ answer: a confirmed criterion is confirmed, a refuted one fails the attempt. `ch
 override is never evidence for a later task's earlier-red confirmation. `retry` needs nothing from the harness: the
 answer unblocks the task, and its text reaches the red prompt as any answer does (L4-CLR-006).
 
-**D9. Discrimination not applicable.** Per test, not per file (the version-pin test of row 3.1 shares its file with
-tests that import project code). A test is *dependency-only* when its function, parametrize lists and defaults use no
-name bound to a module inside the repository (project or test helper), no name bound by a module-level definition of
-its file other than a constant, take no fixture other than pytest's built-ins (`tmp_path`, `tmp_path_factory`,
-`monkeypatch`, `capsys`, `capsysbinary`, `capfd`, `capfdbinary`, `caplog`, `recwarn`, `request`, `pytestconfig`) and the
-names of its own `parametrize`, reach no project code by a string (`pytest.importorskip`, `importlib.import_module`,
-`__import__`, `request.getfixturevalue`, `sys.modules`), and read a dependency's version: a call of
-`importlib.metadata.version`, `.distribution` or `.metadata` with a LITERAL distribution name, or
-`<dependency>.__version__`, where the criterion's text names that dependency (review M2: a bare read of a dependency
-ticked any criterion). `assert 1 + 1 == 2`, `json.loads("1") == 1` and `assert pytest.__version__` under a criterion
-about something else stay not discriminating. A criterion whose every candidate is dependency-only gets `proof: pre_satisfied, via:
-not_applicable` with its tests as `discriminating`, runs no variant run, and is labelled for the judge (L4-VER-051).
+**D9. A dependency check is held, never passed (round 3).** A test is *dependency-only* when its function, parametrize lists and defaults use no
+name bound to a module inside the repository, no module-level definition of its file other than a constant, no fixture beyond pytest's built-ins and
+its own `parametrize`, reach no project code by a string, and read a dependency's version with a literal name. `depcheck.dependency_only` is now only a
+CLASSIFIER: a criterion whose every candidate it accepts is `inconclusive` ("its tests import no project module: the zero-value check cannot judge
+them") and takes the existing hold with a `harness` question; every other criterion with no project import is refuted as on 0.4.15. Neither is a
+pass, so the precision of the heuristic decides the message a person sees, not whether an agent's test is believed (rounds 1-3 kept finding test
+shapes, `version(x) != ""`, `version(x) == version(x)`, that no static rule could tell from a pin). `not_applicable` is never written; readers keep
+accepting it in old ledgers (L4-VER-051).
 Step 4a samples pre-satisfied criteria first but audits at most `MAX_AUDIT_PER_ROUND` (2) per round and is off without
 a verifier agent: the label is the guarantee, the audit is not.
 

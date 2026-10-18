@@ -53,27 +53,26 @@ failing production module, and run again: at most twice, recording `zero.kept`.
 - **WHEN** the harness keeps and reruns
 - **THEN** it runs the gate three times in all, records two `zero.kept`, and the candidates are inconclusive
 
-### Requirement: L4-IMP-062 Discrimination is not applicable to a dependency check
-A pre-satisfied criterion whose every candidate test reads a dependency's version with a literal distribution name that
-the criterion's text names, and uses no project code (also none reached by a string), SHALL be recorded
-`proof: pre_satisfied, via: not_applicable`, with no variant run for it. Any other test SHALL stay not discriminating.
+### Requirement: L4-IMP-062 A dependency check is held, never passed
+A pre-satisfied criterion whose every candidate test is dependency only (it imports no project module and reads a
+dependency's version) SHALL be inconclusive, with no variant run: the task is held with a `harness` question and
+nothing is recorded `via: not_applicable`. Any other test with no project import SHALL stay not discriminating.
 
-#### Scenario: SCN-IMP-306 (+) A version pin is recorded as not applicable
+#### Scenario: SCN-IMP-306 (+) A version pin is held for a person, never passed
 - **GIVEN** a criterion that names the installed `pytest` version, and a candidate `def
-  test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") == pytest.__version__` in a test
-  file whose other tests import `pytdd`
+  test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") == pytest.__version__`; and the shapes
+  `version(x) != ""`, `version(x) == version(x)` under a criterion that only contains `45.0` or the word `release`
 - **WHEN** the pre-satisfied confirmation runs
-- **THEN** its criterion is recorded with `via: not_applicable`, `criterion.pre_satisfied` carries the same `via`, and
-  no variant run varies anything for it
+- **THEN** each criterion is inconclusive, no variant run varies anything, nothing is recorded `via: not_applicable`,
+  and the task is held with a `harness` question
 
 #### Scenario: SCN-IMP-307 (−) A test that reads no dependency is still not discriminating
 - **GIVEN** a candidate `def test_x(): assert 1 + 1 == 2`, another `def test_y(): assert json.loads("1") == 1`, a
   third `def test_z(): assert pytest.__version__` tagged with a criterion about `apply_discount`, and a fourth that
   reaches `pytdd` through `importlib.import_module("pytdd")` beside a `version("pytest")` read
 - **WHEN** the pre-satisfied confirmation runs
-- **THEN** no criterion is not applicable, and all fail red as `not discriminating`; so does a read of the repository's
-  own distribution, one whose name is only part of another token or has no version beside it in the criterion's text,
-  and one whose version is tested for truth rather than compared
+- **THEN** none is passed: the tests that import no project module are held for a person, the others fail red as
+  `not discriminating`
 
 ## MODIFIED Requirements
 

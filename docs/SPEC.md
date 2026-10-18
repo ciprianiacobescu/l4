@@ -1769,10 +1769,9 @@ pending leaves of one parent into one step.
      message listing the inconclusive criteria apart as `inconclusive: <id> (<reason>)`, so the retry is not told to
      fix what it cannot). Only when every unconfirmed criterion is inconclusive is the task held, with a harness
      question (L4-IMP-063): no attempt is used.
-   - A criterion whose every test reads a dependency and no project code (a version pin) is **not applicable**: it is
-     recorded `via: not_applicable` and no run varies anything for it (L4-IMP-062): its tests read a dependency's version with a literal
-     name that the criterion's text names, and nothing else. A criterion about the interpreter
-     (`sys.version_info`) reads only the standard library, so it stays not discriminating when pre-satisfied.
+   - A criterion whose every test imports no project module and reads a dependency (a version pin) is **never passed**: it is
+     inconclusive ("its tests import no project module: the zero-value check cannot judge them"), so the task is held with a
+     harness question and no run varies anything for it (L4-IMP-062). Only a person's `accept` counts it.
    - Unconfirmed ones fail red (`not discriminating`).
    - If every cited criterion is pre-satisfied, the task follows `already_satisfied` (L4-IMP-003).
    - The zero-value run is the harness's own write: it never counts as a gate run that moved production files. Each
@@ -2474,15 +2473,13 @@ module-level statements of a production or pre-existing test-support module whos
 cause, functions}`. [V: the same halt: `@telemetry.traced("…")` applied in a class body received `None`:
 `TypeError: 'NoneType' object is not callable`.]
 
-**L4-IMP-062** Discrimination is not applicable to a dependency check. A pre-satisfied criterion whose every candidate test calls
-`importlib.metadata.version`, `distribution` or `metadata` with a LITERAL distribution name that the criterion's text names as a whole token with a version beside it (a version or pin word, or a `1.2` number), that is none of
-the repository's own distributions (every `[project].name` of its `pyproject.toml` files), and COMPARES the version (`==`, `<`, `in`, `startswith`; not its truth)
-(or reads `<that dependency>.__version__` the same way), and uses no project code, no repository helper, no definition of its file beyond a constant, no fixture
-beyond pytest's built-ins and its own `parametrize`, and no code reached by a string (`pytest.importorskip`, `importlib.import_module`,
-`__import__`, `request.getfixturevalue`, `sys.modules`) SHALL be recorded `proof: pre_satisfied, via: not_applicable`, with no variant run for
-it, and the judge sees the label (L4-VER-051). Any other test SHALL stay not discriminating: `assert 1 + 1 == 2`, `json.loads("1") == 1`, and
-a read of a dependency (`assert pytest.__version__`) under a criterion about something else. [V: the same unit: a test that pins a
-dependency's version passes on the zero values and at the base alike, so no check could ever confirm its criterion.]
+**L4-IMP-062** A dependency check is held for a person, never passed. A pre-satisfied criterion whose every candidate test is *dependency only* (its function uses no name
+bound to a repository module, no definition of its file beyond a constant, no fixture beyond pytest's built-ins and its own `parametrize`, no code reached by a string
+(`importorskip`, `import_module`, `__import__`, `getfixturevalue`, `sys.modules`), and reads a dependency's version with a literal name) SHALL be inconclusive with the reason
+"its tests import no project module: the zero-value check cannot judge them", with no variant run: the task is held with a `harness` question (L4-IMP-063) and nothing is ever
+recorded `via: not_applicable` (old ledgers that carry it are still read). A person may `accept`; an agent only where `clarifier.answer_by_agents` is true. The classifier only chooses the message: any other test
+with no project import stays refuted (`not discriminating`) as on 0.4.15, so neither outcome is a pass and its precision is no safety rule. [V: a consumer repository, task 3.1: a test that pins
+a dependency's version passes on the zero values and at the base alike; round-3 review: no static rule on the test's shape could tell a pin from `version(x) != ""`.]
 
 **L4-IMP-063** An inconclusive check holds the task with a harness question. When every unconfirmed criterion of a red
 step (the pre-satisfied check, or run (b)), or every corrected test of `test-at-red`, is inconclusive, the harness SHALL
@@ -7050,20 +7047,22 @@ scenario is a spec defect (§26).
 - **Then** the green attempt is not counted, the task is held by a harness question with `check: at_red` that names
   the corrected tests, and the red commit stays
 
-#### SCN-IMP-306 (+) A version pin is recorded as not applicable · L4-IMP-062
+#### SCN-IMP-306 (+) A version pin is held for a person, never passed · L4-IMP-062
 - **Given** a criterion that names the installed `pytest` version, and a candidate `def
   test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") == pytest.__version__` in a test
-  file whose other tests import `pytdd`
+  file whose other tests import `pytdd`; and the shapes `version(x) != ""`, `version(x) == version(x)`,
+  `Version(v) >= Version("0")` under a criterion that only contains `45.0` or the word `release`
 - **When** the pre-satisfied confirmation runs
-- **Then** its criterion is recorded with `via: not_applicable`, `criterion.pre_satisfied` carries the same `via`, and
-  no variant run varies anything for it
+- **Then** each criterion is inconclusive ("its tests import no project module: the zero-value check cannot judge
+  them"), no variant run varies anything, nothing is recorded `via: not_applicable`, and the task is held with a
+  `harness` question
 
 #### SCN-IMP-307 (−) A test that reads no dependency is still not discriminating · L4-IMP-062
 - **Given** a candidate `def test_x(): assert 1 + 1 == 2`, another `def test_y(): assert json.loads("1") == 1`, a
   third `def test_z(): assert pytest.__version__` tagged with a criterion about `apply_discount`, and a fourth that
   reaches `pytdd` through `importlib.import_module("pytdd")` beside a `version("pytest")` read
 - **When** the pre-satisfied confirmation runs
-- **Then** no criterion is not applicable, and all fail red as `not discriminating`; so does a read of the repository's own distribution, one whose name is only part of another token or has no version beside it in the criterion's text, and one whose version is tested for truth rather than compared
+- **Then** none is passed: the tests that import no project module are held for a person, the others fail red as `not discriminating`
 
 ## MODIFIED Requirements
 
