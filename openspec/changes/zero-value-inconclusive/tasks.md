@@ -76,7 +76,7 @@ Every task follows these rules:
 
 ## 2. The classifier and keep-going (L4-IMP-060, D1, D4)
 
-- [ ] 2.1 The classifier, pure.
+- [x] 2.1 The classifier, pure.
   - Tests first, `tests/unit/implementer/test_variant.py`, with hand-built `TestReport`, `TestCase` and
     `GateResult` values (a `log_path` in `tmp_path`), `own_files={"tests/test_spans.py"}` and `Redactor({})`:
     - `test_scn_imp_300_a_report_with_collection_errors_and_no_test_is_inconclusive`: 45 collection errors whose
@@ -117,7 +117,7 @@ Every task follows these rules:
       refuted (all its tests).
     - Every reason is cut at `MAX_REASON`, then passed through `redact`.
 
-- [ ] 2.2 Keep-going on every variant run; `run_with_code_of` returns the gate result.
+- [x] 2.2 Keep-going on every variant run; `run_with_code_of` returns the gate result.
   - Tests first, in `tests/unit/implementer/test_base_run.py`:
     - `test_scn_imp_301_the_base_run_goes_on_past_an_unrelated_test_that_imports_an_added_module`: `commit_head` with
       `PRICING: HEAD_PRICING`, `src/pytdd/middleware.py` (`def wrap(x: int) -> int:\n    return x\n`) and

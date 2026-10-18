@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from l4.agents.fake import Step
+from l4.gates.runner import GateResult
 from l4.implementer import base_run, tdd
 from l4.implementer.base_run import confirmed_by_base_run
-from l4.implementer.discrimination import PreSatisfied, unit_base
+from l4.implementer.discrimination import PreSatisfied, run_with_code_of, unit_base
 from l4.implementer.tdd import run_red
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Task
@@ -196,3 +197,41 @@ def test_the_worktree_is_byte_identical_after_the_base_run(make_bench, monkeypat
         assert bool(got.confirmed) == (mode == "confirmed"), got
     assert snapshot(bench.wb.worktree) == before
     assert porcelain(bench) == status
+
+
+MIDDLEWARE = "src/pytdd/middleware.py"
+MIDDLEWARE_SRC = "def wrap(x: int) -> int:\n    return x\n"
+TEST_MIDDLEWARE = "tests/test_middleware.py"
+TEST_MIDDLEWARE_SRC = "from pytdd.middleware import wrap\n\n\ndef test_wrap():\n    assert wrap(1) == 1\n"
+
+
+def test_scn_imp_301_the_base_run_goes_on_past_an_unrelated_test_that_imports_an_added_module(make_bench, zero, based):
+    """The base run sets the added module aside, so an unrelated test file that imports it fails collection; without
+    --continue-on-collection-errors pytest collected nothing (exit 2) and the base run confirmed nothing."""
+    bench: Bench = make_bench([step()])
+    commit_head(
+        bench,
+        {PRICING: HEAD_PRICING, MIDDLEWARE: MIDDLEWARE_SRC, TEST_MIDDLEWARE: TEST_MIDDLEWARE_SRC},
+    )
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "already_satisfied", outcome.reason
+    proof = bench.events("task.red_ok")[-1]["criteria"][KNOWN]
+    assert proof["via"] == "base_run" and proof["discriminating"] == [NEW_ID]
+
+
+def test_run_with_code_of_returns_the_gate_result(make_bench):
+    bench: Bench = make_bench([])
+    tdd.run_setup(bench.wb)
+    commit_head(
+        bench,
+        {PRICING: HEAD_PRICING, MIDDLEWARE: MIDDLEWARE_SRC, TEST_MIDDLEWARE: TEST_MIDDLEWARE_SRC},
+    )
+    (bench.wb.worktree / "tests" / "test_new.py").write_text(FAILS_AT_BASE)
+    base = unit_base(bench.wb)
+    paths, why = base_run._plan(bench.wb, base)
+    assert why == "" and MIDDLEWARE in paths
+    got = run_with_code_of(bench.wb, base, paths, name="test-base-run")
+    assert isinstance(got, GateResult)
+    assert got.report is not None
+    assert "tests.test_middleware" in got.report.collection_errors
+    assert NEW_ID in got.report.tests

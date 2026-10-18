@@ -121,7 +121,8 @@ def confirmed_by_base_run(
     paths, why = _plan(wb, base)
     if why:
         return BaseRunResult(base_sha=base, reason=f"base run skipped: {why}")
-    tests = run_with_code_of(wb, base, paths, name="test-base-run")  # restores by sha256, reports put back
+    gate = run_with_code_of(wb, base, paths, name="test-base-run")  # restores by sha256, reports put back
+    tests = gate.report.tests if gate.report is not None else {}
     if not tests:
         return BaseRunResult(base_sha=base, reason="base run skipped: the gate wrote no readable report")
     confirmed: dict[str, tuple[str, ...]] = {}

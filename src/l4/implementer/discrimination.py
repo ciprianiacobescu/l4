@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer.stubs import _is_inside, has_stub, zero_value_variant
@@ -28,6 +29,10 @@ from l4.security.protected import glob_match
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
 PROOF_RED_ASSERTION = "red_assertion"
+# every variant run goes on past a collection error (L4-IMP-060): a variant that breaks one module's import, or a base
+# run that sets an added module aside, must not stop pytest before it runs the others (harmless for a gate that is not
+# pytest: it ignores the variable)
+KEEP_GOING = {"PYTEST_ADDOPTS": "--continue-on-collection-errors"}
 _ROOTS = ("", "src")  # where an import is always looked up inside the repository
 _PROJECT_FILES = ("pyproject.toml", "setup.py", "setup.cfg")  # their directory is an import root (L4-IMP-025)
 
@@ -101,7 +106,7 @@ def zeroed_run(wb: Workbench, name: str, paths: Sequence[str], *, public: bool) 
         with zero_values_in_place(wb, paths, public=public) as varied:
             if not varied:
                 return None
-            return wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+            return wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING)
     finally:
         for report in reports:
             if report in kept:
@@ -163,7 +168,8 @@ def fails_at_red(
     a skipped id, one the report does not hold (its module did not import the red code) and every id of a run that
     wrote no report are returned. Empty: every id still fails at red. The reports the gate writes are put back as the
     real run left them."""
-    tests = run_with_code_of(wb, red_sha, paths, name=name, extra_env=extra_env)
+    gate = run_with_code_of(wb, red_sha, paths, name=name, extra_env=extra_env)
+    tests = gate.report.tests if gate.report is not None else {}
     return [i for i in ids if i not in tests or tests[i].status not in ("failed", "error")]
 
 
@@ -174,21 +180,27 @@ def run_with_code_of(
     *,
     name: str,
     extra_env: Mapping[str, str] | None = None,
-) -> dict[str, TestCase]:
-    """The test gate's cases with the production files swapped to their content at `sha` (`red_code_in_place`); empty
-    when the run wrote no report. The reports the gate writes are put back as the real run left them."""
+) -> GateResult:
+    """The test gate with the production files swapped to their content at `sha` (`red_code_in_place`), going on past
+    collection errors; the gate result tells no report, no test and a missing id apart. The reports the gate writes
+    are put back as the real run left them."""
     reports = [wb.worktree / r for r in wb.cfg.gates.test.reports]
     kept = {r: r.read_bytes() for r in reports if r.is_file() and not r.is_symlink()}
     try:
         with red_code_in_place(wb, sha, paths):
-            gate = wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
+            gate = wb.run_gate(
+                name,
+                wb.cfg.gates.test.command,
+                reports=wb.cfg.gates.test.reports,
+                extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
+            )
     finally:
         for report in reports:
             if report in kept:
                 report.write_bytes(kept[report])
             else:
                 report.unlink(missing_ok=True)
-    return dict(gate.report.tests) if gate.report is not None else {}
+    return gate
 
 
 @dataclass(frozen=True)
@@ -508,10 +520,10 @@ def discriminate_extra(wb: Workbench, tests: Sequence[str], base_sha: str) -> Ex
     production = production_changes(wb, base_sha)
     if rest and production:
         runs += 1
-        # a module the unit added is set aside at the base: its own tests then fail to import, and pytest would stop
-        # the whole run at the first collection error; the others must still run, and those ids fail closed
-        keep_going = {"PYTEST_ADDOPTS": "--continue-on-collection-errors"}
-        at_base = run_with_code_of(wb, base_sha, production, name="test-extra-base", extra_env=keep_going)
+        # a module the unit added is set aside at the base: its own tests then fail to import; the others must still
+        # run (run_with_code_of goes on past collection errors), and those ids fail closed
+        base_gate = run_with_code_of(wb, base_sha, production, name="test-extra-base")
+        at_base = base_gate.report.tests if base_gate.report is not None else {}
         accepted |= {t: "base" for t in rest if fails_on_zero(at_base.get(t))}
         reasons = {
             t: ERROR_AT_BASE
