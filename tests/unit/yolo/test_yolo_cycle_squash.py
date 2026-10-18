@@ -61,7 +61,7 @@ def test_scn_yolo_76_a_verified_unit_is_squash_merged_and_recorded_with_the_land
     landed = world.tip()
     assert landed != head and world.git.run("rev-parse", f"{landed}^").stdout.strip() == tip
     assert last(world, "unit.merged") == {
-        "unit": A, "head": head, "pr": 1, "merge_commit": landed, "method": "squash", "raced": False,
+        "unit": A, "head": head, "pr": 1, "merge_commit": landed, "method": "squash", "raced": False, "ci": "green",
     }  # fmt: skip
     assert world.forge.squashes == 1 and state(world).merged[A] == landed
 
@@ -87,7 +87,7 @@ def test_scn_yolo_78_fast_forward_stays_an_option(world):
     world.step(snaps)
     assert world.tip() == head and world.forge.squashes == 0
     assert last(world, "unit.merged") == {
-        "unit": A, "head": head, "pr": 1, "merge_commit": head, "method": "fast-forward", "raced": False,
+        "unit": A, "head": head, "pr": 1, "merge_commit": head, "method": "fast-forward", "raced": False, "ci": "green",
     }  # fmt: skip
     assert world.profile_calls == [(head, "all")]
     receipt = json.loads(world.store().read().files["receipts/openspec-a.json"])

@@ -7,7 +7,7 @@ import logging
 import pytest
 
 from l4.config.schema import L4Config
-from l4.forge.base import MergeCall
+from l4.forge.base import JobResult, MergeCall
 from l4.forge.local import LocalForge
 from l4.yolo.merge import confirm_merged, merge_guarded, squash_message
 
@@ -29,6 +29,9 @@ class ScriptedForge(LocalForge):
     def __init__(self, origin, answer: MergeCall | None = None, before=None) -> None:
         super().__init__(origin=origin)
         self.answer, self.before = answer, before
+
+    def list_pipeline_jobs(self, sha, *, settled=False):
+        return [JobResult("test", "", "success", False, 1, 1, "")]  # the repository's CI on H is green
 
     def merge_pr(self, number, *, sha, title, message):
         if self.before is not None:

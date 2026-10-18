@@ -29,9 +29,9 @@ Together they let a `merge: auto` plan land code that nobody verified, or code t
 - **A review edge comes before the merge** (L4-YOLO-041). If the planner gives an in-review unit work (red CI recorded
   on H, a commit after H), the plan dispatches the unit and does not merge it.
 - **The merge waits for the repository's CI on H** (L4-YOLO-042, L4-YOLO-043, L4-YOLO-013). If that CI is running,
-  red, not run or unreadable, the merge is `merge_not_ready` with a detail that says why and what clears it. A job red
-  on H and on the base does not block. `yolo.merge.require_ci` (default `true`) lets a repository whose hand-off pushes
-  start no CI merge on record. `unit.merged` records what the CI said.
+  red or unreadable, the merge is `merge_not_ready` with a detail that says why and what clears it. A job red on H and
+  on the base does not block. `yolo.merge.require_ci` (default `false`) decides only whether a hand-off commit that no
+  CI ran on waits (`true`) or merges on record with a warning (`false`). `unit.merged` records what the CI said.
 - **A GitHub check run is one job of one workflow** (L4-CI-010, L4-CI-011). Check runs are keyed by workflow file,
   event and job name, found through the commit's workflow runs and every attempt of each. Other apps are keyed by their
   slug. The base comparison matches `<workflow file> / <job>`.
@@ -50,9 +50,9 @@ Together they let a `merge: auto` plan land code that nobody verified, or code t
 - Tests: the reviewer's reproductions ported under `tests/unit/yolo/` and `tests/unit/ci/`, with their assertions turned
   around. The test worlds now record H and give it a green CI job by default. `FakeGitHub` serves workflow runs.
 - Docs: `docs/SPEC.md` (L4-ARC-008, L4-YOLO-008, L4-YOLO-013, L4-YOLO-032, L4-YOLO-040..043, L4-CI-002,
-  L4-CI-010..012, SCN-YOLO-100..119, SCN-CI-050..060, §3.2, §12.1, the change row), `docs/runbook.md`,
+  L4-CI-010..012, SCN-YOLO-100..120, SCN-CI-050..060, §3.2, §12.1, the change row), `docs/runbook.md`,
   `docs/yolo-mode.md`, `CHANGELOG.md`.
 - **Behaviour changes on upgrade.** A `merge: auto` plan no longer merges until the repository's CI on H is finished
-  and not red. On GitHub, a hand-off pushed with the workflow's `GITHUB_TOKEN` starts no CI, so the plan waits
-  (`merge_not_ready`) until the person gives the push a token that starts runs, or sets
-  `yolo.merge.require_ci: false`. GitHub job names in `ci.failed` gain their workflow file (`tests.yml / build`).
+  and not red. On GitHub, a hand-off pushed with the workflow's `GITHUB_TOKEN` starts no CI: by default the plan
+  merges anyway, on record (`ci: not_run`) with a warning, and a repository that wants its CI to gate the merge gives
+  the push a token that starts runs and sets `yolo.merge.require_ci: true`. GitHub job names in `ci.failed` gain their workflow file (`tests.yml / build`).

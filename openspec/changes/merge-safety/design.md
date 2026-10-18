@@ -134,12 +134,12 @@ text plus shas and job names, so it holds while nothing changes, and `_merge_wai
 | `failed`, `ci_heads[H] == "preexisting"` | `not_ready` | `... <keys>, red on the base too when the sweep recorded it and not red there now: l4 retry --unit <unit> verifies the unit again`. The sweep acts once per H, so only a person's retry ends this wait. |
 | `preexisting` | merge | `unit.merged{ci: preexisting, ci_jobs: [keys]}`, and the line `warning: <unit>: the repository CI on <H10> is red as on the base: <keys>` |
 | `green` | merge | `unit.merged{ci: green}` |
-| `not_run`, `yolo.merge.require_ci: true` (default) | `not_ready` | `no CI of the repository ran on the hand-off commit <H10> (<reason>): run the repository's CI on the unit branch or its pull request, or set yolo.merge.require_ci: false` |
-| `not_run`, `require_ci: false` | merge | `unit.merged{ci: not_run}`, and the line `warning: <unit>: no CI of the repository ran on <H10>; merged because yolo.merge.require_ci is false` |
+| `not_run`, `yolo.merge.require_ci: true` | `not_ready` | `no CI of the repository ran on the hand-off commit <H10> (<reason>): run the repository's CI on the unit branch or its pull request, or set yolo.merge.require_ci: false` |
+| `not_run`, `require_ci: false` (default) | merge | `unit.merged{ci: not_run}`, and the line `warning: <unit>: no CI of the repository ran on <H10>; merged because yolo.merge.require_ci is false`, in the plan report and as a note on the merged PR or MR (`upsert_sticky_note`, best effort) |
 
 `<keys>` is `", ".join(sorted(j.key for j in ci.failed))`. `MergeOutcome` gains `ci: str | None = None` and
 `ci_jobs: tuple[str, ...] = ()`. `merge_guarded` sets them on a `merged` outcome with `dataclasses.replace`, and
-`cycle._merge` writes them into `unit.merged`: `ci` always, `ci_jobs` only when it is not empty. `YoloMergeCfg` gains `require_ci: bool = True`. A wait chains no run
+`cycle._merge` writes them into `unit.merged`: `ci` always, `ci_jobs` only when it is not empty. `YoloMergeCfg` gains `require_ci: bool = False`: it decides only whether `not_run` blocks. Running, red (new on H) and unreadable CI block whatever the key. A wait chains no run
 (`_wait_merge`), so a plan waiting for CI goes on at the next trigger (the schedule, a push, a command).
 
 ### D6 GitHub check-run identity (`forge/github.py`, `forge/base.py`, `ci/repo_ci.py`)
@@ -195,7 +195,7 @@ reason texts:
 What changes on GitLab:
 
 - a hand-off commit with no pipeline job is `ci_not_run` in the sweep, where it was `ci_green` (only the printed line
-  changes, nothing was recorded for it), and it blocks a merge unless `require_ci` is false. GitLab creates a pipeline
+  changes, nothing was recorded for it), and it blocks a merge only with `require_ci: true`. GitLab creates a pipeline
   some seconds after a push, and "none yet" must not read as green for a merge;
 - the merge gate, H binding and review edge rules are the same as on GitHub (`merge_pr` with `sha` refuses a moved head
   with 409).
@@ -223,8 +223,9 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
   identity text" to "forge a commit on the harness's hidden lock ref"; it does not make it impossible.
 - **Merge latency.** A plan that waits for CI on H goes on at the next trigger. On GitHub and GitLab that is the
   30-minute schedule unless something else pushes, so a unit can take up to about 30 minutes longer to merge.
-- **Consumers whose hand-off push starts no CI** (GitHub with `GITHUB_TOKEN`) wait at every merge after the upgrade,
-  until they change the token or set `require_ci: false`. The CHANGELOG and the runbook say so.
+- **Consumers whose hand-off push starts no CI** (GitHub with `GITHUB_TOKEN`) merge as before after the upgrade, on
+  record (`ci: not_run`) with a warning. A repository that wants its CI to gate the merge gives the push a token that
+  starts runs and sets `require_ci: true`. The CHANGELOG and the runbook say so.
 - **`preexisting` merges.** A new failure inside a job that is already red on the base is not seen.
 - **GitLab merged-results pipelines** run on a merge ref with another sha. A project that runs only those has no job on
   H, which is `not_run`.
@@ -237,21 +238,22 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
   review until its budgets stop it. The order was already clock-based; `ready_head` makes a skew a loop, not only a
   stale display.
 
-## Open questions (for the owner)
+## Owner decisions
 
-1. **`yolo.merge.require_ci` default:** `true` (fail closed, as asked) blocks every auto merge of a GitHub consumer whose
-   hand-off is pushed with `GITHUB_TOKEN`. Keep `true`, or default to `false` with a warning?
-2. **Should `preexisting` CI on H block the merge?** This change merges it, following L4-ARC-002: not this unit's.
-3. **Wake the plan when CI on H finishes:** a `workflow_run: completed` trigger in the GitHub template, and a pipeline
-   event on GitLab, instead of the next schedule.
-4. **Harness commit signatures, or a ref only the bot can write,** to close the residual of D1.
-5. **Push and `pull_request` runs of one workflow are two jobs here.** The reviewer proposed collapsing them. Keep them
-   apart (fail closed), or collapse?
-6. **GitLab child pipelines:** a child pipeline's job can share a name with a parent job. Key those by the child
-   pipeline's trigger job?
-7. **A live check on GitHub:** does a re-run get a new check suite (it affects only cost: D6 reads the attempts either
-   way)? What `path` does a reusable or dynamic workflow run have?
-8. **A forged commit after H** now re-enters review and is verified (D2), like a person's push. The alternative is a
-   `merge_not_ready` wait that only a person ends.
-9. **Clock skew in the fold order** (see Risks): order `pr.ready` by the run's position in the lock-ref chain instead of
-   `ts`?
+1. **`yolo.merge.require_ci` defaults to `false`.** It decides only whether "no CI ran on H" blocks the merge. CI that is
+   red on H (and not red on the base), running or unreadable always blocks with `merge_not_ready`. With the default, a
+   merge with no CI run on H goes ahead, `unit.merged` records `ci: not_run`, and a warning line goes to the plan report
+   and the PR or MR note. With `true`, `not_run` waits.
+2. **Red on H that is also red on the base merges,** recorded `ci: preexisting` (L4-ARC-002), as designed.
+3. **A commit forged after H goes back to verification** (D2), like a person's push, as designed.
+4. **Push and `pull_request` runs of one workflow stay two jobs** (D6), as designed.
+
+## Follow-ups (not in this change)
+
+- Wake the plan when CI on H finishes: a `workflow_run: completed` trigger in the GitHub template and a pipeline event
+  on GitLab, instead of the next schedule.
+- Sign the harness's commits, or keep H in a ref only the bot can write, to close the lock-ref residual of D1.
+- GitLab child pipelines whose job reuses the name of a parent job: key those by the child pipeline's trigger job.
+- Ledger fold order under clock skew: order `pr.ready` by the run's position in the lock-ref chain instead of `ts`.
+- A live GitHub check, run by the orchestrator: whether a re-run gets a new check suite, and what `path` a reusable or
+  dynamic workflow run has.

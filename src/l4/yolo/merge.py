@@ -6,16 +6,17 @@ forced. H is the sha that `pr.ready{head}` recorded (L4-YOLO-040), never a branc
 `merge_guarded` checks the preconditions in order (the unit is `in_review` with a PASS, no question and no feedback
 open; no commit after H; H is recorded and is the branch head; no red CI recorded on H; the PR exists, is open and is
 aimed at the target; H equals the `ls-remote` tip of the unit branch and, when the forge shows it, the PR head sha
-(R5); the target tip is an ancestor of H). Each failure is `not_ready` (or `stale` for the last) and pushes nothing.
-Then, when the caller gave a `before_push` callback, it is called with the outcome-to-be and a False answer pushes
-nothing (`not_ready`, "the plan no longer allows the merge": the plan step records `unit.merge_requested` there, under
-its lease, R5). Then, with `fast-forward`, it pushes `<head>:refs/heads/<target>`. The freshness of head and base is
-enforced by the git server, not by the read before the push: a target that moved in between is refused as a
-non-fast-forward and is `stale`; any other refusal (a protected branch, a push rule, a permission) is `refused` and
-carries the forge's message, redacted. With `squash` it calls `Forge.merge_pr(pr, sha=head, ...)`: the forge answers
-`head_moved` (`not_ready`, the next run reads again) or `refused`, or merges. That call has no guard on the target, so
-the landed commit is compared with what was read: its parent is the tip read and its tree is the head's tree, else
-`MergeOutcome.raced` is set and the post-merge check (L4-YOLO-009) of the landed commit decides.
+(R5); the repository's CI on H allows the merge (L4-YOLO-042); the target tip is an ancestor of H). Each failure is
+`not_ready` (or `stale` for the last) and pushes nothing. Then, when the caller gave a `before_push` callback, it is
+called with the outcome-to-be and a False answer pushes nothing (`not_ready`, "the plan no longer allows the merge":
+the plan step records `unit.merge_requested` there, under its lease, R5). Then, with `fast-forward`, it pushes
+`<head>:refs/heads/<target>`. The freshness of head and base is enforced by the git server, not by the read before the
+push: a target that moved in between is refused as a non-fast-forward and is `stale`; any other refusal (a protected
+branch, a push rule, a permission) is `refused` and carries the forge's message, redacted. With `squash` it calls
+`Forge.merge_pr(pr, sha=head, ...)`: the forge answers `head_moved` (`not_ready`, the next run reads again) or
+`refused`, or merges. That call has no guard on the target, so the landed commit is compared with what was read: its
+parent is the tip read and its tree is the head's tree, else `MergeOutcome.raced` is set and the post-merge check
+(L4-YOLO-009) of the landed commit decides.
 
 The function writes no ledger: the caller records `unit.merge_requested` and `unit.merged`. `confirm_merged` asks
 whether the target holds the landed commit (it is the tip, or an ancestor of it when the target moved on after the
@@ -27,7 +28,9 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from dataclasses import replace
 
+from l4.ci.handoff_ci import read_handoff_ci
 from l4.config.schema import L4Config
 from l4.context import AppContext
 from l4.forge.base import (
@@ -37,8 +40,10 @@ from l4.forge.base import (
     ForgeUnavailable,
     PullRequest,
     fetch_auth_config,
+    forge_platform,
 )
 from l4.forge.gitlab import push_auth_config
+from l4.forge.urls import origin_url
 from l4.state.feedback_view import item_views
 from l4.state.status import UnitSnapshot
 from l4.vcs.authorship import SHA, commit_records, is_harness_strict
@@ -222,6 +227,55 @@ def _recorded_head(snapshot: UnitSnapshot) -> tuple[str | None, str | None]:
     return h, None
 
 
+def _ci_gate(
+    app: AppContext, cfg: L4Config, git: Git, forge: Forge, snapshot: UnitSnapshot, head: str, pr: PullRequest
+) -> tuple[MergeOutcome | None, str, tuple[str, ...]]:
+    """The repository's CI on H (L4-YOLO-042, L4-YOLO-043), read as the sweep reads it. A `not_ready` outcome, or
+    `(None, ci, ci_jobs)` when the merge may go on: `green`, `preexisting` (with the keys of the jobs red on the base
+    too) or `not_run` (only when `yolo.merge.require_ci` is false). Running, red (new on H) and unreadable CI always
+    block. Every detail is fixed text with shas and job names, so it holds while nothing changes."""
+    h10, unit, known = head[:10], snapshot.ref.id, {"head": head, "pr": pr.number}
+    try:
+        base = git.rev_parse(f"refs/remotes/origin/{cfg.forge.base_branch}")
+        platform = forge_platform(cfg, app.environ, origin_url(app.repo, app.environ))
+        read = read_handoff_ci(forge, head, base, platform)
+    except (ForgeError, ForgeUnavailable) as exc:
+        first = app.redactor.redact_text((str(exc).splitlines() or [type(exc).__name__])[0])
+        return _not_ready(f"the repository CI of the hand-off commit {h10} could not be read: {first}", **known), "", ()
+    if read.status == "running":
+        base_note = " (the base head's CI is unfinished)" if read.reason else ""
+        return (
+            _not_ready(
+                f"the repository CI is still running on the hand-off commit {h10}{base_note}: "
+                "the plan merges when it is green",
+                **known,
+            ), "", (),
+        )  # fmt: skip
+    if read.status == "failed":
+        keys = ", ".join(sorted(j.key for j in read.failed))
+        if snapshot.state.ci_heads.get(head) == "preexisting":
+            how = (
+                "; the sweep recorded red jobs on the base too and these are not red there now: "
+                f"l4 retry --unit {unit} verifies the unit again"
+            )
+        else:
+            how = ": the next sweep records it and the unit is verified again"
+        return _not_ready(f"the repository CI failed on the hand-off commit {h10}: {keys}{how}", **known), "", ()
+    if read.status == "not_run":
+        if cfg.yolo.merge.require_ci:
+            return (
+                _not_ready(
+                    f"no CI of the repository ran on the hand-off commit {h10} ({read.reason}): run the "
+                    "repository's CI on the unit branch or its pull request, or set yolo.merge.require_ci: false",
+                    **known,
+                ), "", (),
+            )  # fmt: skip
+        return None, "not_run", ()
+    if read.status == "preexisting":
+        return None, "preexisting", tuple(sorted(j.key for j in read.preexisting))
+    return None, "green", ()
+
+
 def _readiness(snapshot: UnitSnapshot) -> str | None:
     """Precondition 1: why the unit is not ready to merge, None when it is."""
     state = snapshot.state
@@ -308,13 +362,18 @@ def merge_guarded(
         return _not_ready(
             f"the pull request head {forge_head[:10]} is not the head to merge {head[:10]}", head=head, pr=pr.number
         )
+    blocked, ci, ci_jobs = _ci_gate(app, cfg, git, forge, snapshot, head, pr)
+    if blocked is not None:
+        return blocked
     if cfg.yolo.merge.method == "fast-forward":
-        return guarded_push(app, cfg, git, head, target, pr=pr.number, before_push=before_push)
-    unit = snapshot.ref.id
-    return guarded_push(
-        app, cfg, git, head, target, pr=pr.number, before_push=before_push,
-        land=lambda tip: squash_merge(app, cfg, git, forge, pr, unit, head, tip),
-    )  # fmt: skip
+        out = guarded_push(app, cfg, git, head, target, pr=pr.number, before_push=before_push)
+    else:
+        unit = snapshot.ref.id
+        out = guarded_push(
+            app, cfg, git, head, target, pr=pr.number, before_push=before_push,
+            land=lambda tip: squash_merge(app, cfg, git, forge, pr, unit, head, tip),
+        )  # fmt: skip
+    return replace(out, ci=ci, ci_jobs=ci_jobs) if out.status == "merged" else out
 
 
 def _find_pr(forge: Forge, snapshot: UnitSnapshot, cfg: L4Config) -> PullRequest | None:

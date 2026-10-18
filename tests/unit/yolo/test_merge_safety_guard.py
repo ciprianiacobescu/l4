@@ -60,7 +60,7 @@ def test_the_squash_merge_is_pinned_to_the_recorded_h(tmp_path):
     assert L4Config.model_validate({"version": 1}).yolo.merge.method == "squash"
     world.step({"a": world.in_review("a", head)})
     merged = [e for e in world.events() if e.type == "unit.merged"]
-    assert len(merged) == 1 and merged[0].data["head"] == head
+    assert len(merged) == 1 and merged[0].data["head"] == head and merged[0].data["ci"] == "green"
     assert world.forge.get_pr(1).head_sha == head
     landed = merged[0].data["merge_commit"]
     assert sh(world.origin, "rev-parse", f"{landed}^{{tree}}") == sh(world.origin, "rev-parse", f"{head}^{{tree}}")

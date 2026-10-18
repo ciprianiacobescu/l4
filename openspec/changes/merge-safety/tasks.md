@@ -180,8 +180,8 @@ Every task follows these rules:
 
 ## 6. The merge waits for the repository's CI on H (L4-YOLO-042, L4-YOLO-043, L4-YOLO-013, design D5, D9)
 
-- [ ] 6.1 Fixtures, then tests first.
-  - `tests/unit/config/test_schema_yolo_merge.py`: `yolo.merge.require_ci` defaults to `True`, `false` is accepted,
+- [x] 6.1 Fixtures, then tests first.
+  - `tests/unit/config/test_schema_yolo_merge.py`: `yolo.merge.require_ci` defaults to `False`, `true` is accepted,
     and `"maybe"` is refused with the loader's message.
   - Fixtures:
     - `LocalForge.script_jobs(..., replace=False)`: with `replace=True` it drops the jobs already scripted for that
@@ -206,8 +206,11 @@ Every task follows these rules:
     - `test_a_job_red_on_h_and_on_the_base_does_not_hold_the_merge` (SCN-YOLO-115): `("lint", "failed")` on H and on
       the base head. The unit is merged with `ci == "preexisting"` and `ci_jobs == ["lint"]`, and one of
       `step.actions` contains `red as on the base: lint`.
-    - `test_no_ci_on_h_waits_and_names_the_fix` (SCN-YOLO-116): `ci=None`. There is no `unit.merged`, and the detail
-      contains `no CI of the repository ran on the hand-off commit` and `yolo.merge.require_ci: false`.
+    - `test_require_ci_true_waits_for_a_ci_and_names_the_fix` (SCN-YOLO-116): `yolo.merge.require_ci: true` (the
+      `make_cfg` form of SCN-YOLO-118 below) and `ci=None`. There is no `unit.merged`, and the detail contains
+      `no CI of the repository ran on the hand-off commit` and `yolo.merge.require_ci: false`.
+    - `test_red_ci_on_h_blocks_even_when_no_ci_is_required` (SCN-YOLO-120): `require_ci: false` and `("test",
+      "failed")` on H, `("test", "success")` on the base head. There is no `unit.merged`.
     - `test_a_preexisting_record_now_red_on_h_alone_names_the_retry` (SCN-YOLO-119):
       `world.in_review("a", head, ci_heads={head: "preexisting"}, ci=(("lint", "failed"),))` and
       `("lint", "success")` on the base head. There is no `unit.merged`, and the detail contains `lint` and
@@ -215,22 +218,21 @@ Every task follows these rules:
     - `test_unreadable_ci_is_not_green` (SCN-YOLO-117): `world.step(..., forge=...)` with a `LocalForge` subclass
       whose `list_pipeline_jobs` raises `ForgeError("HTTP 502", status=502)`. There is no `unit.merged`, and the
       detail contains `could not be read`.
-    - `test_require_ci_false_merges_on_record` (SCN-YOLO-118): `world.cfg = make_cfg(forge={...}, yolo={"merge":
-      {"require_ci": False}})`, as `test_yolo_cycle_squash.py` sets `fast-forward`, and `ci=None`. The
-      unit is merged with `ci == "not_run"`, and one of `step.actions` contains `head[:10]` and
+    - `test_no_ci_on_h_merges_on_record_by_default` (SCN-YOLO-118): the default configuration and `ci=None`. The unit
+      is merged with `ci == "not_run"` (and no `ci_jobs`), and one of `step.actions` contains `head[:10]` and
       `yolo.merge.require_ci`.
     - `test_a_fast_forward_merge_records_h_and_green_ci` (SCN-YOLO-105, plan side): `fast-forward` set as
       `test_yolo_cycle_squash.py::test_scn_yolo_78_fast_forward_stays_an_option` sets it. `unit.merged` has `head == merge_commit == H` and `ci == "green"`, and
       `world.tip() == H`.
     - In `test_the_squash_merge_is_pinned_to_the_recorded_h` (SCN-YOLO-106, task 2.1), add that `unit.merged` has
       `ci == "green"`.
-- [ ] 6.2 Code.
+- [x] 6.2 Code.
   - `src/l4/config/schema.py`: `YoloMergeCfg.require_ci`.
   - `src/l4/yolo/model.py`: `MergeOutcome.ci` and `.ci_jobs`.
   - `src/l4/yolo/merge.py`: `_ci_gate` with the details of D5's table, called at D3 step 5, and the outcome set with
     `dataclasses.replace`.
   - `src/l4/yolo/cycle.py` `_merge`: `unit.merged` gets `ci` (always) and `ci_jobs` (only when not empty), plus the
-    two warning lines of D5. The tests that compare a whole `unit.merged` (for example
+    warning lines of D5 (for `not_run` also a best-effort note on the merged PR or MR, `upsert_sticky_note`). The tests that compare a whole `unit.merged` (for example
     `test_yolo_cycle_squash.py::test_scn_yolo_78_fast_forward_stays_an_option`) gain `"ci": "green"`.
   - `src/l4/forge/local.py`: `script_jobs(replace=)`.
   - Run: the files of 6.1, `tests/unit/yolo`, `tests/unit/config/test_schema_yolo_merge.py`, `tests/unit/ci`,
@@ -271,11 +273,11 @@ Every task follows these rules:
   - **L4-CI-002.** In the bullet on hand-off pushes with `GITHUB_TOKEN`, "With no check run at the hand-off commit"
     becomes "With no check run at the hand-off commit, or none but the harness's own `l4` job", and the bullet cites
     L4-CI-012.
-  - **§3.2.** Under `yolo.merge`, add `require_ci: true` with the comment `# false: a hand-off commit no CI ran on may
-    be merged, recorded as ci: not_run (L4-YOLO-043)`.
+  - **§3.2.** Under `yolo.merge`, add `require_ci: false` with the comment `# true: a hand-off commit no CI ran on waits for one;
+    false: it is merged, recorded as ci: not_run (L4-YOLO-043)`.
   - **§12.1.** The `pr.ready` entry says that `head` is folded as `ready_head` (L4-ARC-008). The `ci.failed` entry
     says that a GitHub job is named `<workflow file> / <job>` (L4-CI-011).
-  - **Scenarios.** SCN-YOLO-100..119 go after SCN-YOLO-92 in §23.20, and SCN-CI-050..060 go after SCN-CI-16 in §23.13.
+  - **Scenarios.** SCN-YOLO-100..120 go after SCN-YOLO-92 in §23.20, and SCN-CI-050..060 go after SCN-CI-16 in §23.13.
     Use SPEC form: `#### SCN-… (±) Title · L4-…`, `- **Given**`, `- **When**`, `- **Then**`, with the delta's text and
     the requirement each belongs to. SCN-YOLO-100 also cites L4-YOLO-041.
   - **§3.2 and rule 3 of `scripts/check_spec.py`.** Every config key in backticks must be in §3.2, so add
@@ -286,20 +288,23 @@ Every task follows these rules:
   - **The change table of §21.** Add a row after the last row present. At 0.4.14 the last row is 39, so this one is 40
     unless another change added a row: `merge-safety`, what it does in
     one sentence with the ids, `openspec/changes/merge-safety/`, and the live check "a consumer repository's
-    `merge: auto` plan after the upgrade: a hand-off push that starts no CI now waits; set
-    `yolo.merge.require_ci: false` or give the push a token that starts runs".
+    `merge: auto` plan after the upgrade: a hand-off push that starts no CI is now merged on
+    record (`ci: not_run`) with a warning; give the push a token that starts runs and set `yolo.merge.require_ci: true`
+    to make the CI gate the merge".
 - [ ] 7.2 The other docs.
   - `docs/runbook.md`, the `merge_not_ready` row: list the new details (no recorded H, a head that is not H, CI
-    running, red, not run, unreadable) and their fixes (wait for the CI; `l4 retry --unit`; give the hand-off push a
-    token that starts runs or set `yolo.merge.require_ci: false`; check the token's `checks: read` and `actions: read`).
+    running, red, unreadable, and not run when `yolo.merge.require_ci` is true) and their fixes (wait for the CI; `l4
+    retry --unit`; give the hand-off push a token that starts runs or set `yolo.merge.require_ci: false`; check the
+    token's `checks: read` and `actions: read`).
   - `docs/yolo-mode.md`: the merge paragraph (about line 164) says that the merge lands the recorded H after the
     repository's CI on it, and the waits paragraph (about line 286) lists the new causes.
   - `CHANGELOG.md`: under `## 0.4.16 (unreleased)` at the top. Create the heading above the newest section unless it
     is already there.
     - `### Fixed`: the four findings in a consumer's words.
     - `### Changed`:
-      - a plan merge waits for the repository's CI on H, with `yolo.merge.require_ci` and the `GITHUB_TOKEN`
-        consequence;
+      - a plan merge waits for the repository's CI on H (running, red, unreadable); `yolo.merge.require_ci` (default
+        `false`) decides whether a hand-off commit that no CI ran on waits too, and the `GITHUB_TOKEN` consequence:
+        by default it is merged on record (`ci: not_run`) with a warning;
       - GitHub job names in `ci.failed` are `<workflow file> / <job>`;
       - a GitLab H with no pipeline job is `ci_not_run`.
   - Run: `python scripts/check_spec.py docs/SPEC.md`, the docs tests under `tests/unit` that read SPEC.md, the runbook

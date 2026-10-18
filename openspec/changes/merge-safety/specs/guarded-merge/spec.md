@@ -72,7 +72,8 @@ ci, ci_jobs}`. The other rules of L4-YOLO-032 stay.
 A `merge: auto` plan SHALL wait with `merge_not_ready`, the unit and the detail, recorded once while the detail holds
 and starting no run, while its current unit's merge is not ready: no open PR, a PR aimed at another branch, a PR head
 that is not the branch tip, no recorded H, a branch head that is not H, or CI on H running, red and not yet recorded,
-not run, or unreadable. It SHALL go on by itself when the cause is gone; the other rules of L4-YOLO-013 stay.
+or unreadable, or not run when `yolo.merge.require_ci` is true. It SHALL go on by itself when the cause is gone; the
+other rules of L4-YOLO-013 stay.
 
 #### Scenario: SCN-YOLO-107 (−) A merge that waits for CI is recorded once and chains no run
 - **GIVEN** the wait of SCN-YOLO-112 on record
@@ -119,8 +120,8 @@ guarded merge. The guarded merge SHALL itself be `not_ready` when the unit's rec
 ### Requirement: L4-YOLO-042 The merge waits for the repository's CI on H
 Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H with the reader of the sweep's CI
 duty (L4-CI-012). `running`, `failed` and a read error SHALL be `not_ready` with a detail that names H and, for
-`failed`, the jobs; `green` and `preexisting` SHALL go on; `not_run` SHALL be `not_ready` naming the fix unless
-`yolo.merge.require_ci` is false. `unit.merged` SHALL record `ci`, and for `preexisting` the jobs as `ci_jobs`.
+`failed`, the jobs; `green` and `preexisting` SHALL go on; `not_run` SHALL go on too unless `yolo.merge.require_ci` is true
+(L4-YOLO-043), when it SHALL be `not_ready` naming the fix. `unit.merged` SHALL record `ci`, and for `preexisting` the jobs as `ci_jobs`.
 
 #### Scenario: SCN-YOLO-112 (−) CI still running on H holds the merge
 - **GIVEN** a unit in review with a PASS at its recorded H, whose job `test` is running on H
@@ -145,9 +146,9 @@ duty (L4-CI-012). `running`, `failed` and a read error SHALL be `not_ready` with
 - **THEN** the unit is merged, `unit.merged{ci: preexisting, ci_jobs: [lint]}` is recorded, and a warning line names
   `lint`
 
-#### Scenario: SCN-YOLO-116 (−) No CI ran on H: the plan waits and names the fix
-- **GIVEN** a unit in review with a PASS at its recorded H, with no job of the project on H and no `yolo.merge`
-  configuration
+#### Scenario: SCN-YOLO-116 (−) require_ci true: no CI ran on H, the plan waits and names the fix
+- **GIVEN** a unit in review with a PASS at its recorded H, with no job of the project on H and
+  `yolo.merge.require_ci: true`
 - **WHEN** the plan step runs
 - **THEN** nothing is merged, and the wait says that no CI of the repository ran on H and names
   `yolo.merge.require_ci: false`
@@ -163,13 +164,20 @@ duty (L4-CI-012). `running`, `failed` and a read error SHALL be `not_ready` with
 - **WHEN** the plan step runs
 - **THEN** nothing is merged, and the wait names `lint` and `l4 retry --unit openspec:a`
 
-### Requirement: L4-YOLO-043 A hand-off commit that no CI ran on merges only by configuration
-The configuration SHALL have `yolo.merge.require_ci` (default `true`). With `false`, a `not_run` CI on H SHALL NOT block
-the merge: the plan step SHALL merge, record `unit.merged{ci: not_run}` and print a warning line that names H, while
-`running`, `failed` and a read error SHALL still block it.
+### Requirement: L4-YOLO-043 Whether a hand-off commit that no CI ran on is merged is configured
+The configuration SHALL have `yolo.merge.require_ci` (default `false`): whether a `not_run` CI on H blocks the merge.
+Running, red (new on H) and unreadable CI SHALL block whatever its value. With `false`, `not_run` SHALL NOT block: the
+plan step SHALL merge, record `unit.merged{ci: not_run}` and warn in the plan report and on the merged PR or MR. With
+`true`, it SHALL be `not_ready`, naming `yolo.merge.require_ci: false`.
 
-#### Scenario: SCN-YOLO-118 (+) require_ci false merges a hand-off commit that no CI ran on, on record
-- **GIVEN** the unit of SCN-YOLO-116 and `yolo.merge.require_ci: false`
+#### Scenario: SCN-YOLO-118 (+) By default a hand-off commit that no CI ran on is merged, on record
+- **GIVEN** the unit of SCN-YOLO-116 with no `yolo.merge` configuration
 - **WHEN** the plan step runs
-- **THEN** the unit is merged, `unit.merged{ci: not_run}` is recorded, and a warning line names H and
+- **THEN** the unit is merged, `unit.merged{ci: not_run}` is recorded, and a warning line in the plan report names H and
   `yolo.merge.require_ci`
+
+#### Scenario: SCN-YOLO-120 (−) require_ci false still waits for red CI on H
+- **GIVEN** `yolo.merge.require_ci: false` and a unit in review with a PASS at its recorded H, whose job `test` failed
+  on H and is green on the base, with no `ci.failed` recorded
+- **WHEN** the plan step runs
+- **THEN** nothing is merged, and the wait names `test`

@@ -1435,15 +1435,37 @@ class _Step:
         if not confirm_merged(forge, self.git, self.cfg, out.pr, landed, wait_s=self.confirm_wait_s):
             log.warning("%s: %s landed on %s, but the target does not show it as its tip", unit, landed[:10],
                         self.target)  # fmt: skip
+        extra = {"ci_jobs": list(out.ci_jobs)} if out.ci_jobs else {}
         merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=landed,
-                              method=self.cfg.yolo.merge.method, raced=out.raced)]  # fmt: skip
+                              method=self.cfg.yolo.merge.method, raced=out.raced, ci=out.ci, **extra)]  # fmt: skip
         self._write(ctx, merged, facts=True)
         self._line(ctx.plan_id, f"{unit} merged into {self.target} at {landed[:10]}")
+        self._ci_warning(ctx, forge, unit, out)
         self._delete_after_merge(ctx, unit, forge, out.head, out.pr)
         if out.raced:
             self._line(ctx.plan_id, f"warning: {unit}: the target moved while the forge merged; the post-merge check "
                                     f"of {landed[:10]} decides")  # fmt: skip
         return self._integrate(ctx, unit, snap, via_merge=landed, reviewed=out.head)
+
+    def _ci_warning(self, ctx: _Ctx, forge: Forge, unit: str, out: MergeOutcome) -> None:
+        """A merge that went ahead without a green CI on H says so: a warning line in the plan report for a CI that
+        was red as on the base, and for a hand-off commit no CI ran on a line in the report and a note on the merged
+        PR/MR (L4-YOLO-042, L4-YOLO-043)."""
+        h10 = (out.head or "")[:10]
+        if out.ci == "preexisting":
+            keys = ", ".join(out.ci_jobs)
+            self._line(ctx.plan_id, f"warning: {unit}: the repository CI on {h10} is red as on the base: {keys}")
+        elif out.ci == "not_run":
+            why = f"no CI of the repository ran on {h10}; merged because yolo.merge.require_ci is false"
+            self._line(ctx.plan_id, f"warning: {unit}: {why}")
+            note = (
+                f"### Merged without a repository CI\n\nNo CI of the repository ran on `{h10}`; the plan merged it "
+                "because `yolo.merge.require_ci` is false."
+            )
+            try:
+                forge.upsert_sticky_note(int(out.pr or 0), note)
+            except (ForgeError, ForgeUnavailable) as exc:
+                log.info("%s: the PR note was not written: %s", unit, self.app.redactor.redact_text(str(exc)))
 
     def _delete_after_merge(self, ctx: _Ctx, unit: str, forge: Forge, head: str, pr: int) -> None:
         """L4-YOLO-033: the merged unit's branch goes, its verified head kept at `refs/l4/merged/...`, once the forge

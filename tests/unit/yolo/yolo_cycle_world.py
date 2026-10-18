@@ -261,7 +261,13 @@ class CycleWorld:
             tasks=[Task("1.1", "1.1", "do it", False, " ", 0, 1, 2)],
         )  # fmt: skip
 
-    def in_review(self, name: str, head: str, **state) -> UnitSnapshot:
+    def in_review(
+        self, name: str, head: str, *, ci: Sequence[tuple] | None = (("test", "success"),), **state
+    ) -> UnitSnapshot:
+        """A unit in review with a PASS at the recorded H `head`. Unless `ci` is None, the repository's CI on `head` is
+        scripted as `ci` (one green job by default), replacing any earlier script for that sha."""
+        if ci is not None:
+            self.forge.script_jobs(head, list(ci), replace=True)
         fields = {"unit": unit_id(name), "phase": "in_review", "pr": "local://forge/pull/1", "ready_head": head,
                   "last_verdict": LastVerdict(round=1, verdict="PASS", findings=0), **state}  # fmt: skip
         ref = UnitRef(Framework.OPENSPEC, name, self.repo / "openspec" / "changes" / name)
