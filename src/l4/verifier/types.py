@@ -283,6 +283,10 @@ class VerifyResult:
     prompt_template: str = ""  # `judge@<version>` of the prompt the judge was sent
     # a diff judged in parts (L4-VER-041): per part `{part, files, chars, profile, calls, reply, prompt_sha256}`
     judge_parts: list[dict[str, Any]] = field(default_factory=list)
+    judge_files: list[list[Any]] = field(
+        default_factory=list
+    )  # `[part, path, characters]` of every file (0: not judged)
+    hold_views: dict[str, dict[str, Any]] = field(default_factory=dict)  # `judge view:` hold -> {sha, paths} (M1)
     cost_usd: float | None = None
     tests: dict[str, str] = field(default_factory=dict)  # test id -> status, from the step 3 report
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it

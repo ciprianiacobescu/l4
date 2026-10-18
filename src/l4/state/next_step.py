@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 NO_CONVERTIBLE_FINDING = "no_convertible_finding"  # `phase.changed{to: escalated, reason}` of the fix loop (L4-OPS-022)
 JUDGE_VIEW_REJECTED = "judge_view_rejected"  # a person rejected a hold on the judge's view of the diff (L4-VER-044)
+UNCONVERTED_AND_JUDGE_VIEW = "no_convertible_finding_and_judge_view_rejected"  # both causes in one round (L4-VER-044)
 CONTINUES = "nothing: the harness continues at the next run"
 RUNBOOK_CORRUPT = "see docs/runbook.md section 7.9"
 CORRUPT_PHASE = "corrupt"  # `l4.state.status.CORRUPT_PHASE`: a status value, not a lifecycle phase
@@ -48,6 +49,11 @@ def way_out(unit: str, halt_reason: str | None) -> str | None:
         return feedback_way_out(unit)
     if halt_reason == JUDGE_VIEW_REJECTED:
         return judge_view_way_out(unit)
+    if halt_reason == UNCONVERTED_AND_JUDGE_VIEW:  # each cause keeps its own way out
+        return (
+            f"two causes. For the finding no fix task can be derived from: {feedback_way_out(unit)}. "
+            f"For the hold on the judge's view: {judge_view_way_out(unit)}"
+        )
     return None
 
 

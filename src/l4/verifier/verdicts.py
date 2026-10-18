@@ -59,6 +59,19 @@ def text_sha256(criterion: Criterion) -> str:
     return hashlib.sha256(normalise(criterion.text).encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class HoldView:
+    """What a `judge view:` hold covers: `sha` binds a person's accept to the head blob of every file the hold covers
+    and to the full list of files the judge did not see (the hold's text names at most five), `paths` is that list.
+    The hold's id stays the hash of its text; the accept is void when this content changes (review M1)."""
+
+    sha: str
+    paths: tuple[str, ...]
+
+
+QUESTION_MAX_PATHS = 100  # the unseen files a hold's question lists; the rest are in verification.md
+
+
 def hold_id(text: str) -> str:
     """The target of a hold's verdict question: `H-` and eight hex digits of the hold's text."""
     return "H-" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
@@ -257,6 +270,13 @@ def settle_holds(
             quoted = [f for f in findings if (settled := settled_by(f)) is not None and settled[0] == hold]
             out.append(_hold_finding(hold, verdict, quoted))
     return out
+
+
+def hold_sha256(hold: str, views: Mapping[str, Mapping[str, Any]] | None = None) -> str:
+    """The hash a person's accept of `hold` is bound to: the content hash of a `judge view:` hold (`HoldView.sha`), else
+    the hash of the hold's id as before."""
+    view = (views or {}).get(hold)
+    return str(view["sha"]) if view else finding_sha256(hold_id(hold))
 
 
 def finding_sha256(finding_id: str) -> str:
@@ -537,7 +557,7 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
-def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> NewQuestion:
+def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), paths: Sequence[str] = ()) -> NewQuestion:
     judged = [
         line
         for f in quoted
@@ -563,9 +583,16 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> 
             else "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit "
             "can be made."
         )
+    listed = []
+    if paths:
+        shown = [f"- {p}" for p in paths[:QUESTION_MAX_PATHS]]
+        more = len(paths) - QUESTION_MAX_PATHS
+        tail = [f"- and {more} more unseen files: see verification.md"] if more > 0 else []
+        listed = ["", f"The files the judge did not see ({len(paths)}):", *shown, *tail]
     context = "\n".join(
         [
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",
+            *listed,
             *judged,
             "",
             answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
@@ -592,6 +619,7 @@ def raise_verdict_questions(
     redactor: Redactor,
     holds: Sequence[str] = (),
     covers: Mapping[str, Collection[str]] | None = None,
+    hold_views: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
@@ -624,8 +652,9 @@ def raise_verdict_questions(
     for hold in holds:
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
-            batch.append(_hold_question(hold, round_no, quoted))
-            targets.append((hold_id(hold), finding_sha256(hold_id(hold)), [f.id for f in quoted]))
+            view = (hold_views or {}).get(hold)
+            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else ()))
+            targets.append((hold_id(hold), hold_sha256(hold, hold_views), [f.id for f in quoted]))
     ids = raise_questions(unit_dir, unit_name, batch, redactor=redactor)
     titles = question_titles(unit_dir) if ids else {}
     for qid, (target, sha, quoted_ids) in zip(ids, targets, strict=True):

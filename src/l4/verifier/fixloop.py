@@ -56,7 +56,7 @@ from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, fee
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING
+from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -516,8 +516,16 @@ def repeated_failure(unit_dir: Path, git: Git, events: Sequence[LedgerEvent], re
 
 def _no_task_cause(findings: Sequence[Finding]) -> tuple[str, str]:
     """Why a failed round with no fix group escalates: a person rejected a hold on the judge's view of the diff (a fix
-    unit cannot shrink it, L4-VER-044), else no finding can be converted (L4-OPS-022)."""
-    if any(f.title == JUDGE_VIEW_REJECTED_TITLE for f in findings):
+    unit cannot shrink it, L4-VER-044), or no finding can be converted (L4-OPS-022), or both: each way out is named."""
+    view = any(f.title == JUDGE_VIEW_REJECTED_TITLE for f in findings)
+    others = any(f.source == "human" and f.blocking and f.title != JUDGE_VIEW_REJECTED_TITLE for f in findings)
+    if view and others:
+        return (
+            "a person rejected a hold on the judge's view of the diff (a fix unit cannot shrink the diff), and "
+            "another finding of a person cannot be converted into a fix task",
+            UNCONVERTED_AND_JUDGE_VIEW,
+        )
+    if view:
         return (
             "a person rejected a hold on the judge's view of the diff: a fix unit cannot shrink the diff",
             JUDGE_VIEW_REJECTED,

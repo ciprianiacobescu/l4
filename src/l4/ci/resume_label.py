@@ -12,7 +12,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from l4.forge.base import LabelEvent
-from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, way_out
+from l4.state.next_step import JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW, way_out
 
 DEVELOPER = 30  # GitLab's access level for Developer (members with Write access on GitHub)
 
@@ -92,7 +92,7 @@ def halted_section(
     why = " ".join(reason.split())[:300]
     label = retry_label(label)
     command = f"`l4 retry --unit {unit} --reason TEXT`"
-    if phase == "escalated" and reason_code == NO_CONVERTIBLE_FINDING:
+    if phase == "escalated" and reason_code in (NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW):
         return "\n".join([
             f"### Escalated: {why}",
             "",

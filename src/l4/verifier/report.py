@@ -179,6 +179,9 @@ def feedback_lines(events: Sequence[LedgerEvent], round_no: int) -> list[str]:
     return list(found.values())
 
 
+MAX_REPORT_FILES = 2000  # files by part that verification.md lists
+
+
 def render_verification_md(result: VerifyResult) -> str:
     lines = [
         f"# Verification: {_flat(result.unit, 120)}: {result.verdict.value} (round {result.round})",
@@ -213,6 +216,15 @@ def render_verification_md(result: VerifyResult) -> str:
     if result.gates:
         lines += ["", "## Gates", "", "| Gate | Status | Command | Log |", "|---|---|---|---|"]
         lines += [f"| {g.name} | {g.status} | `{_cell(g.command)}` | {_cell(g.log or '-')} |" for g in result.gates]
+    if result.judge_files and (result.judge_parts or any(row[0] == 0 for row in result.judge_files)):
+        shown = result.judge_files[:MAX_REPORT_FILES]
+        lines += ["", "## Files by part", ""]
+        lines += [
+            (f"- part {n}: " if n else "- no part (not judged): ") + f"{_flat(path, 300)} ({chars} characters)"
+            for n, path, chars in shown
+        ]
+        if len(result.judge_files) > len(shown):
+            lines.append(f"- (+{len(result.judge_files) - len(shown)} more files)")
     if result.integrity is not None:
         lines += ["", "## Integrity", "", "| Check | Status | Note |", "|---|---|---|"]
         lines += [f"| {_cell(c.name)} | {c.status} | {_cell(c.note)} |" for c in result.integrity.checks]
@@ -338,6 +350,8 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "judge_reply": result.judge_reply,
         "judge_replies": dict(result.judge_replies),
         "judge_parts": [dict(row) for row in result.judge_parts],
+        "judge_files": [list(row) for row in result.judge_files],
+        "hold_views": {hold: dict(view) for hold, view in result.hold_views.items()},
         "profiles": {"judge": result.judge_profile, "implementer": list(result.implementer_profiles)},
         "judge_model": result.judge_model,
         "independence": result.independence.to_json() if result.independence else None,

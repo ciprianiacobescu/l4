@@ -32,6 +32,8 @@ import pytest  # noqa: E402
 
 from l4.vcs.git import Git  # noqa: E402
 from l4.verifier import diffparts  # noqa: E402
+
+dp = diffparts
 from l4.verifier.diffparts import DiffEntry, group_key, judge_parts, list_entries, pack  # noqa: E402
 
 
@@ -180,7 +182,10 @@ def test_scn_ver_140_a_lock_file_is_one_line_with_its_sizes_and_line_counts_and_
     found = {e.paths[-1]: e for e in list_entries(git, base, head, [])}
     lock = found["uv.lock"]
     assert lock.lock and not found["src/app/a.py"].lock
-    assert lock.text == f"lock file uv.lock: {len(old)} -> {len(new)} bytes, +30000 -0 lines (not diffed)\n"
+    assert lock.text == (
+        f"lock file uv.lock: {len(old)} -> {len(new)} bytes, +30000 -0 lines, 0 touch a source field, hosts: none "
+        "(not diffed)\n"
+    )
     assert "added-1 =" not in lock.text
     packed = judge_parts(git, base, head, [])
     assert len(packed.parts) == 1 and not packed.parts[0].cut and packed.unseen == ()
@@ -196,7 +201,9 @@ def test_every_listed_lock_file_is_one_line_in_any_folder(scratch, name):
     base = commit({"README.md": "r\n"}, "base")
     head = commit({name: "a\nb\n"}, "work")
     (only,) = list_entries(git, base, head, [])
-    assert only.lock and only.text == f"lock file {name}: 0 -> 4 bytes, +2 -0 lines (not diffed)\n"
+    assert only.lock and only.text == (
+        f"lock file {name}: 0 -> 4 bytes, +2 -0 lines, 0 touch a source field, hosts: none (not diffed)\n"
+    )
 
 
 def test_scn_ver_142_a_file_named_like_a_lock_but_not_on_the_list_is_diffed(scratch):
@@ -214,4 +221,114 @@ def test_scn_ver_144_a_deleted_lock_file_is_one_line_too(scratch):
     head = commit({"Cargo.lock": None, "src/main.rs": "fn main() {}\n"}, "work")
     found = {e.paths[-1]: e for e in list_entries(git, base, head, [])}
     assert found["Cargo.lock"].lock
-    assert found["Cargo.lock"].text == "lock file Cargo.lock: 6 -> 0 bytes, +0 -3 lines (not diffed)\n"
+    assert found["Cargo.lock"].text == (
+        "lock file Cargo.lock: 6 -> 0 bytes, +0 -3 lines, 0 touch a source field, hosts: none (not diffed)\n"
+    )
+
+
+# ---- review N3: what is a lock file, and what its line shows ---------------------------------------------------------
+
+
+def test_attack_a_source_file_renamed_to_a_lock_name_is_diffed_not_hidden(scratch):
+    git, commit = scratch
+    code = "def check(user):\n    return user.is_admin\n" + "".join(f"line {i}\n" for i in range(20))
+    base = commit({"src/auth/guard.py": code, "src/auth/use.py": "from .guard import check\n"}, "base")
+    sh(git.repo, "mv", "src/auth/guard.py", "src/auth/go.sum")
+    head = commit({}, "head")
+    found = {e.paths[-1]: e for e in list_entries(git, base, head, [])}
+    renamed = found["src/auth/go.sum"]
+    assert not renamed.lock and renamed.paths == ("src/auth/guard.py", "src/auth/go.sum")
+    assert "rename from src/auth/guard.py" in renamed.text
+
+
+def test_a_lock_file_renamed_to_a_lock_file_is_one_line_that_shows_the_old_path(scratch):
+    git, commit = scratch
+    base = commit({"old/yarn.lock": "".join(f"pkg{i}\n" for i in range(30))}, "base")
+    (git.repo / "new").mkdir()
+    sh(git.repo, "mv", "old/yarn.lock", "new/yarn.lock")
+    head = commit({}, "head")
+    (only,) = list_entries(git, base, head, [])
+    assert only.lock and only.text.startswith("lock file new/yarn.lock (renamed from old/yarn.lock): ")
+
+
+def test_the_lock_line_counts_source_fields_and_names_the_hosts(scratch):
+    git, commit = scratch
+    base = commit(
+        {"package-lock.json": '{\n "a": {\n  "resolved": "https://registry.npmjs.org/a/-/a-1.tgz"\n }\n}\n'}, "base"
+    )
+    head = commit(
+        {"package-lock.json": '{\n "a": {\n  "resolved": "https://evil.example.net/a-1.tgz",\n'
+                              '  "integrity": "sha512-xx"\n }\n}\n'}, "work"
+    )  # fmt: skip
+    (only,) = list_entries(git, base, head, [])
+    assert only.lock
+    assert "3 touch a source field" in only.text  # the old resolved line, the new one and the integrity line
+    assert "hosts: evil.example.net, registry.npmjs.org" in only.text and only.text.endswith("(not diffed)\n")
+
+
+# ---- review M3: one git diff for the content, a bounded listing ------------------------------------------------------
+
+
+def test_listing_many_files_runs_a_constant_number_of_git_diffs(scratch):
+    git, commit = scratch
+    base = commit({"README.md": "r\n"}, "base")
+    head = commit({f"gen/f{i}.txt": f"{i}\n" for i in range(40)}, "head")
+    git.history.clear()
+    found = list_entries(git, base, head, [])
+    assert len(found) == 40 and all(
+        f"+{i}" in next(e.text for e in found if e.paths == (f"gen/f{i}.txt",)) for i in (0, 39)
+    )
+    diffs = [argv for argv in git.history if "diff" in argv]
+    assert len(diffs) <= 3, len(diffs)  # the name-status listing and the one diff (a lock file would add its own)
+
+
+def test_an_entry_dropped_from_retention_is_fetched_again_when_it_lands_in_a_part(scratch, monkeypatch):
+    git, commit = scratch
+    base = commit({"README.md": "r\n"}, "base")
+    head = commit({f"gen/f{i}.txt": f"{i}\n" * 50 for i in range(6)}, "head")
+    monkeypatch.setattr(dp, "MAX_PART_CHARS", 2000)
+    monkeypatch.setattr(dp, "RETAIN_PARTS", 1)  # keep the text of about one part only
+    packed = judge_parts(git, base, head, [])
+    shown = [e for part in packed.parts for e in part.entries]
+    assert shown and all(e.text.startswith("diff --git") and e.chars == len(e.text) for e in shown)
+
+
+def test_the_listing_is_capped_and_says_where_the_rest_is():
+    entries = [E2(f"gen/f{i:03d}.py", 100) for i in range(250)]
+    packed = pack(entries)
+    lines, more = dp.part_listing(packed)
+    assert len(lines) == dp.LISTING_MAX_LINES == 200 and more == 50
+    assert lines[0][1] == "gen/f000.py"
+    assert dp.listing_chars(packed) > 0
+
+
+def E2(path: str, n: int) -> DiffEntry:
+    return DiffEntry((path,), "x" * n)
+
+
+def test_the_listing_counts_in_the_part_budget(monkeypatch):
+    monkeypatch.setattr(dp, "MAX_PART_CHARS", 1000)
+    entries = [E2(f"src/m{i}.py", 400) for i in range(4)]  # 2 per part without a listing
+    assert [len(p.entries) for p in pack(entries).parts] == [2, 2]
+    assert [len(p.entries) for p in pack(entries, reserve=300).parts] == [1, 1, 1, 1]  # 1000 - 300 holds one
+
+
+# ---- review M2: a test lands next to the code it imports -------------------------------------------------------------
+
+
+def test_a_test_not_named_after_the_module_is_packed_with_the_module_it_imports():
+    code = E2("src/app/report.py", 60_000)
+    test = DiffEntry(("tests/test_api_flow.py",), "+from app.report import totals\n" + "x" * 39_000)
+    big = E2("src/app/models.py", 100_000)
+    packed = pack([code, test, big])
+    together = [{e.paths[-1] for e in part.entries} for part in packed.parts]
+    assert {"src/app/report.py", "tests/test_api_flow.py"} in together
+    assert pack([big, test, code]) == packed  # the order of the input does not matter
+
+
+def test_an_import_of_a_module_not_in_the_diff_changes_nothing():
+    test = DiffEntry(("tests/test_api_flow.py",), "+import os\n+from other.thing import x\n")
+    code = E2("src/app/report.py", 10)
+    assert dp.group_key("tests/test_api_flow.py") == "api_flow"
+    packed = pack([code, test])
+    assert [e.paths[-1] for e in packed.parts[0].entries] == ["tests/test_api_flow.py", "src/app/report.py"]

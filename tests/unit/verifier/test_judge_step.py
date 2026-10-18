@@ -309,27 +309,27 @@ def test_a_diff_within_the_cap_is_one_call_with_no_part_heading(make_bench, monk
 def test_scn_ver_135_eleven_files_need_more_than_eight_parts_and_the_hold_names_what_was_not_seen(
     make_bench, monkeypatch
 ):
-    files = {f"src/app/f{n:02d}.py": _body(f"f{n:02d}", 40) for n in range(11)}
+    files = {f"src/app/f{n:02d}.py": _body(f"f{n:02d}", 150) for n in range(11)}
     probe = make_bench([]).wb
-    wb, result, run, judge = parts_bench(make_bench, monkeypatch, files, *replies(probe, 8), cap=1000)
+    wb, result, run, judge = parts_bench(make_bench, monkeypatch, files, *replies(probe, 8), cap=3000)
     assert len(judge.calls) == 8 and run.judged is not None
     (hold,) = [h for h in result.holds if h.startswith("judge view:")]
     assert hold == (
-        "judge view: the diff needs more than 8 parts of 1000 characters: the judge did not see "
+        "judge view: the diff needs more than 8 parts of 3000 characters: the judge did not see "
         "`src/app/f08.py`, `src/app/f09.py`, `src/app/f10.py`"
     )
     assert "src/app/f08.py" in judge.calls[0][0].content  # the file list names the files no part shows
 
 
 def test_the_hold_for_unseen_files_names_five_paths_and_counts_the_rest(make_bench, monkeypatch):
-    files = {f"src/app/f{n:02d}.py": _body(f"f{n:02d}", 40) for n in range(10)}
+    files = {f"src/app/f{n:02d}.py": _body(f"f{n:02d}", 150) for n in range(10)}
     probe = make_bench([]).wb
-    _, result, _, _ = parts_bench(make_bench, monkeypatch, files, *replies(probe, 2), cap=1000, limit=2)
+    _, result, _, _ = parts_bench(make_bench, monkeypatch, files, *replies(probe, 2), cap=3000, limit=2)
     (hold,) = [h for h in result.holds if h.startswith("judge view:")]
     assert hold.endswith(
         "`src/app/f02.py`, `src/app/f03.py`, `src/app/f04.py`, `src/app/f05.py`, `src/app/f06.py` (+3 more)"
     )
-    assert "needs more than 2 parts of 1000 characters" in hold
+    assert "needs more than 2 parts of 3000 characters" in hold
 
 
 def test_scn_ver_136_a_part_whose_reply_is_discarded_discards_the_judge_verdict(make_bench, monkeypatch):
@@ -367,5 +367,41 @@ def test_scn_ver_141_a_lock_file_beside_small_files_is_one_call_with_one_line_an
     wb, result, run, judge = parts_bench(make_bench, monkeypatch, files, *replies(probe, 1), cap=3000)
     assert len(judge.calls) == 1 and "part 1 of" not in judge.calls[0][0].content
     text = judge.calls[0][0].content
-    assert "lock file uv.lock: 0 -> " in text and "+2000 -0 lines (not diffed)" in text and "lock_1999" not in text
+    assert (
+        "lock file uv.lock: 0 -> " in text
+        and "+2000 -0 lines, 0 touch a source field" in text
+        and "lock_1999" not in text
+    )
     assert not [h for h in result.holds if "diff" in h]
+
+
+def test_review_m1_the_step_records_the_binding_and_the_full_unseen_list(make_bench, monkeypatch):
+    from l4.verifier.report import render_verification_md, verdict_json
+
+    files = {f"src/app/f{n:02d}.py": _body(f"f{n:02d}", 150) for n in range(11)}
+    probe = make_bench([]).wb
+    wb, result, run, judge = parts_bench(make_bench, monkeypatch, files, *replies(probe, 8), cap=3000)
+    (hold,) = [h for h in result.holds if h.startswith("judge view:")]
+    view = result.hold_views[hold]
+    assert len(view["sha"]) == 64 and view["paths"] == ["src/app/f08.py", "src/app/f09.py", "src/app/f10.py"]
+    other = wb.git.run("rev-parse", f"{result.head_sha}:src/app/f08.py").stdout.strip()
+    assert other and view["sha"] != hold  # bound to blobs, not to the text
+    text = render_verification_md(result)
+    assert "## Files by part" in text and "part 1: src/app/f00.py" in text
+    assert "no part (not judged): src/app/f10.py" in text
+    assert verdict_json(result)["hold_views"][hold]["paths"] == view["paths"]
+
+
+def test_review_m3_the_listing_of_a_part_prompt_is_capped(make_bench, monkeypatch):
+    from l4.verifier import diffparts
+
+    monkeypatch.setattr(diffparts, "LISTING_MAX_LINES", 3)
+    probe = make_bench([]).wb
+    _, result, _, judge = parts_bench(make_bench, monkeypatch, FOUR, *replies(probe, 2))
+    first = judge.calls[0][0].content
+    import re
+
+    block = re.search(r'<l4:data kind="diff parts">\n(.*?)\n</l4:data>', first, flags=re.S)
+    assert block is not None and "+1 more files: see verification.md" in block.group(1)
+    assert "tests/test_report.py" not in block.group(1)
+    assert len(result.judge_files) == 4  # the full list is kept for verification.md

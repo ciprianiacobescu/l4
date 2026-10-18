@@ -356,6 +356,7 @@ class PartView:
     index: int
     count: int
     listing: tuple[tuple[int, str, int], ...]
+    more: int = 0  # files the (capped) listing leaves out; verification.md lists them
 
 
 def _part_rules(part: PartView) -> str:
@@ -364,11 +365,13 @@ def _part_rules(part: PartView) -> str:
         f"This change's diff is longer than one prompt holds, so it is judged in {n} parts and this prompt shows part "
         f"{k}. Every\nfile is listed below with its part; only the files of part {k} are shown. Judge only what this "
         f"part and the gate\nreport show:\n"
-        f'- A criterion whose code or test is not in this part: answer insufficient_evidence with the reasoning "'
-        f'{NOT_IN_PART}". Never answer fail for it.\n'
+        f'- A criterion whose code is not in this part: answer insufficient_evidence with the reasoning "'
+        f'{NOT_IN_PART}". Never answer fail for it. A criterion whose code is in this part is judged here, '
+        "whichever part holds its test.\n"
         "- A fail must cite code shown in this part.\n"
         "- A feedback, accepted or satisfied item whose code is not in this part: answer false, with evidence that "
         f'starts with "{NOT_IN_PART}".\n'
+        "- A test whose code is not in this part: leave it out of test_adequacy.\n"
     )
 
 
@@ -377,6 +380,8 @@ def _part_listing(part: PartView) -> str:
         (f"part {n}: " if n else "no part (not judged): ") + f"{path} ({chars} characters)"
         for n, path, chars in part.listing
     ]
+    if part.more:
+        lines.append(f"+{part.more} more files: see verification.md")
     return '<l4:data kind="diff parts">\n' + defuse("\n".join(lines)) + "\n</l4:data>"
 
 

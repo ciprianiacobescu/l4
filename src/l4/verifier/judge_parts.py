@@ -32,14 +32,30 @@ def _criteria(replies: Sequence[JudgeVerdict]) -> list[CriterionVerdict]:
     return merged
 
 
+def _rank(item: TestAdequacy) -> int:
+    """2: inadequate for a reason of its own; 1: adequate; 0: inadequate only for want of sight (not in this part)."""
+    if item.adequate:
+        return 1
+    return 0 if _seen_elsewhere(item.reason) else 2
+
+
 def _adequacy(replies: Sequence[JudgeVerdict]) -> list[TestAdequacy]:
+    """Per `(test, criterion)` the first entry of the highest rank: a part that cannot see a test cannot mark it
+    inadequate (review N6), and a test any part calls inadequate with a reason of its own is inadequate."""
     found: dict[tuple[str, str], TestAdequacy] = {}
     for reply in replies:
         for item in reply.test_adequacy:
             key = (item.test, item.criterion)
-            if key not in found or (found[key].adequate and not item.adequate):
+            if key not in found or _rank(item) > _rank(found[key]):
                 found[key] = item
-    return list(found.values())
+    return [_sighted(item) for item in found.values()]
+
+
+def _sighted(item: TestAdequacy) -> TestAdequacy:
+    """A test nobody saw is not called inadequate: the blind part's `adequate: false` is not a finding."""
+    if not item.adequate and _seen_elsewhere(item.reason):
+        return item.model_copy(update={"adequate": True})
+    return item
 
 
 def _findings(replies: Sequence[JudgeVerdict]) -> list[Any]:

@@ -544,3 +544,18 @@ def test_a_feedback_only_plan_consumes_the_rejected_judge_view_question():
     r.findings = [human, _feedback_finding()]
     plan = plan_fix_unit([], r, [v], ordinal=1, fix_minor=False)
     assert plan.feedback_only and len(plan.not_converted) == 1 and plan.consumed == ["Q-004"]
+
+
+def test_review_n7_a_judge_view_reject_beside_another_unconvertible_reject_names_each_way_out():
+    from l4.state.next_step import feedback_way_out, judge_view_way_out, way_out
+    from l4.verifier.fixloop import _no_task_cause
+
+    view = Finding(Severity.MAJOR, JUDGE_VIEW_REJECTED_TITLE, "d", "human", id="H-1")
+    other = Finding(Severity.MAJOR, "Rejected hold: diff coverage: not measured", "d", "human", id="H-2")
+    why, code = _no_task_cause([view, other])
+    assert code == "no_convertible_finding_and_judge_view_rejected"
+    assert "judge's view" in why and "cannot be converted" in why
+    both = way_out("openspec:x", code)
+    assert both is not None and feedback_way_out("openspec:x") in both and judge_view_way_out("openspec:x") in both
+    assert _no_task_cause([view])[1] == "judge_view_rejected"  # alone: its own way out only
+    assert _no_task_cause([other])[1] == "no_convertible_finding"

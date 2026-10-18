@@ -151,3 +151,15 @@ def test_a_list_every_part_left_out_stays_none_and_a_list_one_part_has_is_kept()
     assert merged.feedback is None and merged.accepted is None and merged.satisfied is None
     kept = merge_part_verdicts([verdict(), verdict(feedback=[{"id": "FB-001", "addressed": True, "evidence": "e"}])])
     assert [f.id for f in kept.feedback or []] == ["FB-001"] and kept.accepted is None
+
+
+def test_a_part_that_cannot_see_a_test_cannot_mark_it_inadequate():
+    """Review N6: the not-in-this-part filter of the feedback items applies to the adequacy of a test too."""
+    ok_ = {"test": "tests/test_t.py::t", "criterion": C2, "adequate": True, "reason": "asserts the total"}
+    blind = {**ok_, "adequate": False, "reason": "Not in this part: the body of the test is elsewhere"}
+    for order in ((ok_, blind), (blind, ok_)):
+        merged = merge_part_verdicts([verdict(test_adequacy=[order[0]]), verdict(test_adequacy=[order[1]])])
+        (item,) = merged.test_adequacy
+        assert item.adequate is True and item.reason == "asserts the total"
+    only_blind = merge_part_verdicts([verdict(test_adequacy=[blind]), verdict(test_adequacy=[blind])])
+    assert only_blind.test_adequacy[0].adequate is True  # nobody saw it: it is not called inadequate

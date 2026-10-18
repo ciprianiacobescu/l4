@@ -92,7 +92,15 @@ from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_fin
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
 from l4.verifier.conventions import test_conventions
-from l4.verifier.diffparts import DiffPart, DiffParts, bookkeeping_pathspecs, judge_parts
+from l4.verifier.diffparts import (
+    DiffPart,
+    DiffParts,
+    blob_ids,
+    bookkeeping_pathspecs,
+    file_rows,
+    judge_parts,
+    part_listing,
+)
 from l4.verifier.evidence import (
     commit_verifier_tests,
     read_verdict,
@@ -177,6 +185,7 @@ from l4.verifier.ui_step import (
     with_generated,
 )
 from l4.verifier.verdicts import (
+    HoldView,
     apply_finding_verdicts,
     carry_rejects,
     consume_verdicts,
@@ -184,6 +193,7 @@ from l4.verifier.verdicts import (
     finding_sha256,
     hold_covers,
     hold_id,
+    hold_sha256,
     raise_verdict_questions,
     regressions,
     settle_holds,
@@ -736,7 +746,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     wb, result = vc.wb, run.result
     current = {c.id: text_sha256(c) for c in criteria}
     current |= {f.id: finding_sha256(f.id) for f in result.findings if f.source == "judge" and f.blocking}
-    current |= {hold_id(h): finding_sha256(hold_id(h)) for h in result.holds}
+    current |= {hold_id(h): hold_sha256(h, result.hold_views) for h in result.holds}
     effective = effective_verdicts(events, current)
     result.findings, effective = carry_rejects(
         result.findings, effective, events, lambda n, target: stored_finding(read_verdict(wb.ref.path, n), target)
@@ -1015,8 +1025,11 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
         parts = judge_parts(wb.git, base_sha, result.head_sha, _unit_dirs(wb))
         result.holds.extend(_judge_view_holds(parts))
         many = len(parts.parts) > 1
-        listing = tuple((p.index, path, len(e.text)) for p in parts.parts for e in p.entries for path in e.paths[-1:])
-        listing += tuple((0, path, chars) for path, chars in zip(parts.unseen, parts.unseen_chars, strict=True))
+        listing, more = part_listing(parts)
+        result.judge_files = [list(row) for row in file_rows(parts)]
+        blobs = blob_ids(wb.git, result.head_sha, _covered(parts))
+        views = _hold_views(parts, lambda path: blobs.get(path, "missing"))
+        result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
         shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
         prompts = [
             build_judge_prompt(
@@ -1025,7 +1038,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
                 owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
                 round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted, satisfied=satisfied,
-                part=PartView(part.index, len(shown), listing) if many else None,
+                part=PartView(part.index, len(shown), listing, more) if many else None,
             )
             for part in shown
         ]  # fmt: skip
@@ -1047,7 +1060,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             outcomes.append(judged.reply)
             if many:
                 result.judge_parts.append(
-                    {"part": part.index, "files": len(part.entries), "chars": len(part.text),
+                    {"part": part.index, "files": len(part.entries), "chars": len(part.text), "reserve": parts.reserve,
                      "profile": vc.judge_profile, "calls": judged.calls, "reply": judged.reply,
                      "prompt_sha256": prompt.sha256}
                 )  # fmt: skip
@@ -1093,12 +1106,16 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     _step(vc, run, "9", "judge", judge_body)
 
 
-def _judge_view_holds(parts: DiffParts) -> list[str]:
-    """The holds on what the judge could not see of the diff (L4-VER-043): a file cut to one part, and files in no part
-    judged. No character count of the diff is in them, so a small change of size does not make a new hold."""
+def _view_holds(parts: DiffParts) -> list[tuple[str, tuple[str, ...]]]:
+    """Each hold on the judge's view (L4-VER-043) with every file it covers: a file cut to one part, and the files in no
+    part judged (all of them: the text names five). No character count of the diff is in a text, so a small change of
+    size does not make a new hold."""
     holds = [
-        f"judge view: the diff of `{part.entries[0].paths[-1]}` is longer than one part ({diffparts.MAX_PART_CHARS} "
-        "characters): the judge saw only its start"
+        (
+            f"judge view: the diff of `{part.entries[0].paths[-1]}` is longer than one part "
+            f"({diffparts.MAX_PART_CHARS} characters): the judge saw only its start",
+            (part.entries[0].paths[-1],),
+        )
         for part in parts.parts
         if part.cut
     ]
@@ -1106,10 +1123,31 @@ def _judge_view_holds(parts: DiffParts) -> list[str]:
         named = ", ".join(f"`{path}`" for path in parts.unseen[:MAX_HOLD_PATHS])
         more = f" (+{len(parts.unseen) - MAX_HOLD_PATHS} more)" if len(parts.unseen) > MAX_HOLD_PATHS else ""
         holds.append(
-            f"judge view: the diff needs more than {diffparts.MAX_JUDGE_PARTS} parts of {diffparts.MAX_PART_CHARS} "
-            f"characters: the judge did not see {named}{more}"
+            (
+                f"judge view: the diff needs more than {diffparts.MAX_JUDGE_PARTS} parts of "
+                f"{diffparts.MAX_PART_CHARS} characters: the judge did not see {named}{more}",
+                tuple(parts.unseen),
+            )
         )
     return holds
+
+
+def _judge_view_holds(parts: DiffParts) -> list[str]:
+    return [text for text, _ in _view_holds(parts)]
+
+
+def _covered(parts: DiffParts) -> list[str]:
+    return [path for _, paths in _view_holds(parts) for path in paths]
+
+
+def _hold_views(parts: DiffParts, blob_of: Callable[[str], str]) -> dict[str, HoldView]:
+    """The content a person's accept of each hold is bound to: the head blob of every file the hold covers and the full
+    list of unseen files (review M1). The hold's id stays the hash of its text."""
+    views = {}
+    for text, paths in _view_holds(parts):
+        covered = "\n".join(f"{path}\t{blob_of(path)}" for path in paths)
+        views[text] = HoldView(hashlib.sha256(f"{text}\0{covered}".encode()).hexdigest(), paths)
+    return views
 
 
 def _task_text(wb: Workbench) -> Callable[[Task], str]:
@@ -1282,6 +1320,7 @@ def _ask_verdicts(
         services.ref.path, services.ref.name, outcomes=result.criteria, criteria=criteria, trace=result.trace,
         findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
+        hold_views=result.hold_views,
     )  # fmt: skip
     if (section := verdict_section(ctx, consumed)) is not None:
         ctx.shared["notes"] = (section,)
