@@ -192,3 +192,85 @@ def test_a_log_that_names_no_frame_is_unknown(tmp_path, git_environ):
     assert import_failure("no collection section here\n", STEM, wb) == ("unknown", "")
     section = f"__ ERROR collecting tests/{STEM}.py __\nE   something odd\n"
     assert import_failure(section, STEM, wb) == ("unknown", "")
+
+
+# --- second review M3: the audit file goes where the test command collects ----------------
+
+
+def test_an_honest_unit_with_a_narrowed_test_command_gets_its_audit_test_collected(
+    run_l4, valid_spec, with_verifier, tdd_repo, raw
+):  # SCN-VER-115, review M3 (rt2/test_rv_audit_scope.py)
+    from l4.agents.fake import Step
+
+    from ..conftest import FIXTURE, TEST_COMMAND
+    from ..implementer.conftest import STUB, TESTS, UNKNOWN, result
+    from ..orchestrator.conftest import new_origin_main
+    from .test_ladder_depth import AUDIT_KNOWN
+
+    (tdd_repo.repo / "tests/unit").mkdir(parents=True)
+    (tdd_repo.repo / "tests/test_pricing.py").unlink()
+    new_origin_main(tdd_repo, raw, {"tests/unit/test_pricing.py": (FIXTURE / "tests/test_pricing.py").read_text()})
+    red = Step(
+        writes={"tests/unit/test_discount.py": TESTS, "src/pytdd/pricing.py": STUB},
+        structured=result(
+            "red", tests_added=["tests/unit/test_discount.py::test_known_code"], criteria_ids=[KNOWN, UNKNOWN]
+        ),
+    )
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    run = run_l4(
+        [red, green_step(), writer_step(cid, AUDIT_KNOWN), JUDGE],
+        test={"command": TEST_COMMAND + " tests/unit"},
+        **config,
+    )
+    [audit] = run.events("verify.audit")
+    assert audit["status"] == "accepted" and audit["path"].startswith("tests/unit/test_l4_audit_c_")
+    assert run.outcome["units"][0]["verdict"] == "PASS"
+
+
+def test_the_audit_directory_follows_the_test_command(tmp_path):  # SCN-VER-115
+    from types import SimpleNamespace
+
+    from l4.verifier.audit import audit_directory
+
+    (tmp_path / "tests/unit").mkdir(parents=True)
+    (tmp_path / "spec").mkdir()
+    (tmp_path / "spec/test_x.py").write_text("")
+
+    def wb(command):
+        return SimpleNamespace(
+            worktree=tmp_path, cfg=SimpleNamespace(gates=SimpleNamespace(test=SimpleNamespace(command=command)))
+        )
+
+    assert audit_directory(wb("python -m pytest -q -p no:cacheprovider tests/unit")) == "tests/unit"
+    assert audit_directory(wb("pytest -k slow -m 'not x' tests/unit/ -q")) == "tests/unit"
+    assert audit_directory(wb("pytest spec/test_x.py")) == "spec"
+    assert audit_directory(wb("pytest tests/missing")) == "tests"
+    assert audit_directory(wb("pytest")) == "tests"
+    assert audit_directory(wb("pytest ../outside")) == "tests"
+    assert audit_directory(wb("make test")) == "tests"
+
+
+def test_an_audit_file_the_test_command_does_not_collect_is_a_configuration_rejection_not_a_hold(
+    tmp_path, monkeypatch
+):  # SCN-VER-115
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.gates.junit import TestReport
+    from l4.verifier.audit import AuditOutcome, _judge_written
+
+    cid = "C-0a1b2c3d"
+    rel = f"src/other/test_l4_audit_c_{cid.removeprefix('C-')}_r1.py"
+    (tmp_path / "src/other").mkdir(parents=True)
+    (tmp_path / rel).write_text("def test_x():\n    pass\n")
+    cfg = L4Config(gates={"test": {"command": "pytest tests/unit", "reports": ["junit.xml"]}})
+    wb = SimpleNamespace(
+        worktree=tmp_path, cfg=cfg,
+        run_gate=lambda *a, **k: SimpleNamespace(report=TestReport(), log_path=tmp_path / "none.log", reason=""),
+    )  # fmt: skip
+    out = AuditOutcome()
+    _judge_written(wb, {cid: rel}, 1, out)  # no support change: one plain run that never saw the file
+    [record] = out.records
+    assert record.status == "rejected" and "`pytest tests/unit`" in record.reason and rel in record.reason
+    assert not (tmp_path / rel).exists() and [f.title for f in out.findings] == ["an audit test was rejected"]

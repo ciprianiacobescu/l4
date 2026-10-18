@@ -26,13 +26,15 @@ review of a failing audit test (5.5, 5.6), the verifier red commit.
 import hashlib
 import math
 import re
+import shlex
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from l4.agents.factory import RoleUnavailable
 from l4.gates.dryrun import narrow_ruff_paths
+from l4.gates.e2e import _PYTEST_VALUE_OPTIONS
 from l4.gates.runner import GateResult
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
@@ -75,6 +77,36 @@ def choose(
     count = max(1, math.ceil(ratio * len(covered)))
     ordered = [e.criterion for e in pre] + [e.criterion for e in rest][: max(count - len(pre), 0)]
     return ordered[:MAX_AUDIT_PER_ROUND], ordered[MAX_AUDIT_PER_ROUND:]
+
+
+def audit_directory(wb: Workbench) -> str:
+    """Where the audit file is written: the first path argument of `gates.test.command` (a directory, or the parent of
+    a file) that exists in the worktree and stays inside it, else `tests`. A command narrowed to `tests/unit` would
+    never collect a file under `tests/`."""
+    try:
+        words = shlex.split(wb.cfg.gates.test.command)
+    except ValueError:
+        return "tests"
+    start = next((i for i, w in enumerate(words) if PurePosixPath(w).name == "pytest"), None)
+    if start is None:
+        return "tests"
+    skip = False
+    for word in words[start + 1 :]:
+        if skip:
+            skip = False
+            continue
+        if word.startswith("-"):
+            skip = word in _PYTEST_VALUE_OPTIONS
+            continue
+        path = PurePosixPath(word.split("::", 1)[0])
+        if path.is_absolute() or ".." in path.parts or str(path) in ("", "."):
+            continue
+        target = wb.worktree / path
+        if target.is_dir():
+            return path.as_posix()
+        if target.is_file() and str(path.parent) not in ("", "."):
+            return path.parent.as_posix()
+    return "tests"
 
 
 def _changed_files(wb: Workbench, base_sha: str, head: str) -> list[str]:
@@ -169,9 +201,10 @@ def run_audit(
     conventions = test_conventions(wb.git, base_sha, wb.cfg)  # the base only: L4-VER-002a forbids the unit's tests
     changed = _changed_files(wb, base_sha, head)
     written: dict[str, str] = {}
+    folder = audit_directory(wb)
     for cid in chosen:
         criterion = criteria[cid]
-        near = test_path("audit", cid, round_no=round_no)
+        near = test_path("audit", cid, round_no=round_no, directory=folder)
         blocks = [*sources, *spec_blocks(wb), *_style_blocks(wb, base_sha, changed, near, conventions)]
         retry_reason: str | None = None
         for _ in range(2):  # an invalid reply is retried once, with the reason
@@ -188,7 +221,7 @@ def run_audit(
         if reply.status in ("limit", "error"):
             raise RoleUnavailable("verifier_agent", reply.detail or "the audit writer cannot answer")
         if reply.status == "ok" and reply.test is not None:
-            rel = test_path("audit", cid, round_no=round_no)
+            rel = test_path("audit", cid, round_no=round_no, directory=folder)
             write_test_file(wb.worktree, rel, reply.test.code)
             written[cid] = rel
             continue
@@ -310,6 +343,11 @@ def import_failure(log_text: str, stem: str, wb: Workbench) -> tuple[Literal["pr
     return "own", ""
 
 
+def _not_collected(wb: Workbench, rel: str) -> str:
+    """The configuration problem: the run gave no id and no collection error for the audit file."""
+    return f"the test command `{wb.cfg.gates.test.command}` does not collect the audit test file {rel}"
+
+
 def _hold(out: AuditOutcome, wb: Workbench, cid: str, rel: str, label: str, files: tuple[str, ...], why: str) -> None:
     out.records.append(AuditRecord(cid, "failed", rel, (), why, label, files))
     (wb.worktree / rel).unlink(missing_ok=True)
@@ -333,6 +371,9 @@ def _judge_without_result(
     for cid, rel in rest.items():
         stem = _stem(cid, round_no)
         errored = report is not None and any(stem in e for e in report.collection_errors)
+        if not errored and report is not None:
+            _reject(wb, out, cid, rel, "rejected", _not_collected(wb, rel), label="base", files=files)
+            continue
         if not errored:
             _hold(out, wb, cid, rel, "base", files, "the audit run gave no result for the audit test")
             continue
@@ -384,7 +425,14 @@ def _judge_run(
         elif collected is not None and interrupted and not ids and not broken:
             deferred[cid] = rel  # pytest stops at a collection error: this file never ran, so it runs again below
         elif broken or not ids:
-            why = "the audit test could not be collected" if report is not None else f"no report ({gate.reason})"
+            collected_nowhere = report is not None and not any(stem in e for e in report.collection_errors)
+            why = (
+                _not_collected(wb, rel)
+                if collected_nowhere
+                else "the audit test could not be collected"
+                if report is not None
+                else f"no report ({gate.reason})"
+            )
             _reject(wb, out, cid, rel, "rejected", why, label=label, files=files)
         elif statuses & {"failed", "error"}:
             failing = next(i for i in ids if report.tests[i].status in ("failed", "error"))  # type: ignore[union-attr]
@@ -465,7 +513,7 @@ def _retry_collected(
     """The writer gets the collection error once (live wave D, W-D2). A test that still cannot be collected, or no
     test at all, is rejected: a minor finding, never a held criterion or a question."""
     for cid, (error, code) in collected.items():
-        rel = test_path("audit", cid, round_no=round_no)
+        rel = test_path("audit", cid, round_no=round_no, directory=audit_directory(wb))
         criterion = criteria[cid]
         reply = request_test(
             writer, kind="audit", criterion_id=cid, criterion_text=f"{criterion.alias}\n{criterion.text}",
