@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
 from l4.ci.github import WORKFLOW_RELPATH
-from l4.ci.repo_ci import all_skipped, blocked_jobs, considered, evaluate_ci, red_jobs, unfinished
+from l4.ci.repo_ci import all_skipped, blocked_jobs, considered, evaluate_ci, red_jobs, resolve_twins, unfinished
 from l4.forge.base import UNFINISHED, JobResult
 
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`
@@ -78,16 +78,17 @@ def _in_window(ready_at: datetime | None, now: datetime) -> bool:
     return now - ready_at < WINDOW
 
 
-def _can_start_ci(forge: object, base_branch: str | None) -> bool:
-    """False only when GitHub shows that nothing can be on its way: no workflow but the harness's own, and no check
-    that the base branch requires (m7). Anything unknown keeps the window."""
+def _can_start_ci(forge: JobSource, base: str | None, required: list[str]) -> bool:
+    """False only when GitHub shows that nothing can be on its way: no workflow but the harness's own, no check that the
+    base branch requires, and no CI on the base head, as a workflow, an app's check run or a commit status (m7, X2).
+    Anything unknown keeps the window."""
     files = getattr(forge, "workflow_files", None)
-    if base_branch is None or files is None:  # only a forge that can list its workflows (GitHub) is asked
+    if files is None or required:
         return True
     listed = files()
     if listed is None or any(f != WORKFLOW_FILE for f in listed):
         return True
-    return bool(_required(forge, base_branch)[0])
+    return bool(base and considered(forge.list_pipeline_jobs(base)))
 
 
 def _required(forge: object, base_branch: str | None) -> tuple[list[str], bool]:
@@ -108,7 +109,7 @@ def read_handoff_ci(
     """`ready_at` is the time of the recorded `pr.ready` (None: unknown, so no window); `base_branch` names the branch
     whose required checks GitHub lists (only a forge that has `required_checks` is asked). The base head's jobs are read
     only when H has a red job: that is the only time the comparison matters."""
-    jobs = list(forge.list_pipeline_jobs(head))
+    jobs = resolve_twins(list(forge.list_pipeline_jobs(head)))
     if unfinished(jobs):
         return HandoffCi("running", head, _unfinished_reason(jobs))
     now = now or datetime.now(UTC)
@@ -118,9 +119,13 @@ def read_handoff_ci(
             reason = NO_PIPELINE_JOB if platform != "github" else (ONLY_HARNESS_JOB if jobs else NO_CHECK_RUN)
         else:
             reason = ALL_SKIPPED
-        if window and _can_start_ci(forge, base_branch):
-            return HandoffCi("running", head, NOT_CREATED_YET)
-        return HandoffCi("not_run", head, reason)
+        names, unreadable = _required(forge, base_branch)
+        warning = REQUIRED_UNREADABLE if unreadable else ""
+        if window and _can_start_ci(forge, base, names):
+            return HandoffCi("running", head, NOT_CREATED_YET, warning=warning)
+        if missing := ", ".join(n for n in names if n not in {j.name for j in jobs}):
+            return HandoffCi("unreported", head, missing, warning=warning)  # a required check, and nothing reported
+        return HandoffCi("not_run", head, reason, warning=warning)
     base_jobs = list(forge.list_pipeline_jobs(base, settled=True)) if base and red_jobs(jobs) else []
     verdict = evaluate_ci(jobs, base_jobs)
     if verdict.status == "running":

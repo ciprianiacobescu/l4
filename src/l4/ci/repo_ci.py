@@ -12,7 +12,7 @@ back for ever.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from l4.forge.base import UNFINISHED, JobResult
@@ -46,18 +46,34 @@ def red_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) 
     return [j for j in _considered(jobs, ignore) if j.status == "failed" and not j.allow_failure]
 
 
+def resolve_twins(jobs: Sequence[JobResult]) -> list[JobResult]:
+    """A cancelled job whose workflow file and name also ran under another event (the push run that its pull_request
+    twin cancelled): a twin that ran to `success` or `failed` supersedes it and counts as that result; when the twins
+    only skipped, nothing ran and the cancelled job counts as skipped. Otherwise it stays cancelled (L4-CI-013)."""
+    out: list[JobResult] = []
+    for job in jobs:
+        twins = [
+            j
+            for j in jobs
+            if job.workflow and (j.workflow, j.name) == (job.workflow, job.name) and j.event != job.event
+        ]
+        if job.status != "canceled" or not twins:
+            out.append(job)
+        elif any(t.status in ("success", "failed") for t in twins):
+            continue
+        elif any(t.status == "skipped" for t in twins):
+            out.append(replace(job, status="skipped"))
+        else:
+            out.append(job)
+    return out
+
+
 def blocked_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
     """Jobs that neither passed nor failed: cancelled, or held for a person (`manual`, which includes GitHub's
     `action_required`, and not allowed to fail). They block a merge but are not a fix round: nothing in the code is
-    wrong (L4-CI-013). A cancelled job whose workflow file and name have a finished job under another event is
-    superseded by it (the push run that its pull_request twin cancelled): the twin's result counts."""
-    kept = _considered(jobs, ignore)
-    finished = {(j.workflow, j.name) for j in kept if j.workflow and j.status not in UNFINISHED | {"canceled"}}
+    wrong (L4-CI-013). Resolve the twins first (`resolve_twins`)."""
     return [
-        j
-        for j in kept
-        if (j.status == "canceled" and not (j.workflow and (j.workflow, j.name) in finished))
-        or (j.status == "manual" and not j.allow_failure)
+        j for j in _considered(jobs, ignore) if j.status == "canceled" or (j.status == "manual" and not j.allow_failure)
     ]
 
 

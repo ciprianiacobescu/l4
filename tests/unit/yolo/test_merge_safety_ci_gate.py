@@ -267,3 +267,20 @@ def test_a_repository_that_cannot_start_any_ci_does_not_wait_for_the_window(worl
     forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
     world.step({"a": snap}, forge=forge)
     assert [m["ci"] for m in merged(world)] == ["not_run"]
+
+
+@pytest.mark.parametrize("require_ci", [False, True])
+def test_a_cancelled_push_run_with_a_skipped_twin_is_not_green(world, require_ci):
+    """X1 (SCN-YOLO-123): not_run, so merged on record by default and waiting with `require_ci: true`."""
+    configure(world, require_ci=require_ci)
+    twins = (
+        ("build", "canceled", {"workflow": "tests.yml", "event": "push"}),
+        ("build", "skipped", {"workflow": "tests.yml", "event": "pull_request"}),
+    )
+    head, snap = ready(world, ci=twins)
+    world.step({"a": snap})
+    if require_ci:
+        assert "unit.merged" not in world.kinds()
+        assert "no CI of the repository ran" in waits(world)[-1].data["detail"]
+    else:
+        assert [m["ci"] for m in merged(world)] == ["not_run"]

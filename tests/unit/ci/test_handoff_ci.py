@@ -228,3 +228,36 @@ def test_a_repository_that_cannot_start_any_ci_has_no_window():
     assert (
         read_handoff_ci(unknown, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "running"
     )
+
+
+def test_a_cancelled_job_is_superseded_only_by_a_twin_that_ran():
+    """X1: a twin that succeeded or failed supersedes it (it counts as that result); a skipped twin: nothing ran."""
+    push = JobResult("build", "", "canceled", False, 1, 1, "", workflow="tests.yml", event="push")
+
+    def twin(status):
+        return JobResult("build", "", status, False, 2, 2, "", workflow="tests.yml", event="pull_request")
+
+    assert read_handoff_ci(Jobs({"h": [push, twin("success")]}), "h", "b", "github").status == "green"
+    assert read_handoff_ci(Jobs({"h": [push, twin("failed")], "b": []}), "h", "b", "github").status == "failed"
+    skipped = read_handoff_ci(Jobs({"h": [push, twin("skipped")]}), "h", "b", "github")
+    assert skipped.status == "not_run" and skipped.reason == ALL_SKIPPED
+    with_other = read_handoff_ci(Jobs({"h": [push, twin("skipped"), job("lint")]}), "h", "b", "github")
+    assert with_other.status == "green"  # another job ran; the skipped build counts as skipped
+
+
+def test_a_ci_on_the_base_head_keeps_the_window_and_none_loses_it():
+    """X2: the shortcut needs a base head with no project job."""
+    inside = NOW - timedelta(minutes=2)
+    quiet = Required({"b": [job("build")]}, required=[], files=["l4.yml"])
+    assert read_handoff_ci(quiet, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "running"
+    bare = Required({}, required=[], files=["l4.yml"])
+    assert read_handoff_ci(bare, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "not_run"
+
+
+def test_required_checks_with_no_job_on_h_block_after_the_window():
+    """X4"""
+    forge = Required({}, required=["build"], files=["l4.yml", "tests.yml"])
+    late = read_handoff_ci(forge, "h", "b", "github", base_branch="main", ready_at=NOW - timedelta(hours=1), now=NOW)
+    assert late.status == "unreported" and late.reason == "build"
+    soon = read_handoff_ci(forge, "h", "b", "github", base_branch="main", ready_at=NOW - timedelta(minutes=1), now=NOW)
+    assert soon.status == "running"

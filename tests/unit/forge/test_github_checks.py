@@ -355,3 +355,68 @@ def test_one_ci_read_with_a_red_job_is_bounded(github, forge):
     read = read_handoff_ci(forge, SHA, base, "github", base_branch="main")
     calls = len(github.requests) - before
     assert read.status == "failed" and calls <= 20, calls
+
+
+def _job_of(github, run, name, conclusion, suite, sha=SHA):
+    check = github.add_check_run(sha, name, "completed", conclusion, suite=suite, app="github-actions")
+    github.add_job(run["id"], check)
+
+
+def test_a_cancelled_push_run_whose_pull_request_twin_was_skipped_is_not_run(github, forge):
+    """X1 (SCN-CI-061): the double-run guard skips `build` on the PR run, a shared concurrency group cancels the push
+    run: nothing ran `build`, so H is `not_run`, never green."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    push = github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    pr = github.add_workflow_run(SHA, "tests.yml", "pull_request", suite=2)
+    _job_of(github, push, "build", "cancelled", 1)
+    _job_of(github, pr, "build", "skipped", 2)
+    read = read_handoff_ci(forge, SHA, "b" * 40, "github", base_branch="main")
+    assert read.status == "not_run" and not read.blocked
+
+
+def test_a_cancelled_push_run_alone_still_blocks(github, forge):
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    push = github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    _job_of(github, push, "build", "cancelled", 1)
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github", base_branch="main").status == "blocked"
+
+
+def test_a_ci_app_on_the_base_keeps_the_window(github, forge):
+    """X2 (SCN-CI-064): only `l4.yml` and nothing required, but a CI app reports on the base head."""
+    from datetime import UTC, datetime, timedelta
+
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    now = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+    base = "b" * 40
+    github.workflows = ["l4.yml"]
+    github.add_check_run(base, "build", "completed", "success", suite=50, app="circleci-checks")
+    read = read_handoff_ci(forge, SHA, base, "github", base_branch="main", ready_at=now - timedelta(minutes=1), now=now)
+    assert read.status == "running"
+    github.check_runs.clear()
+    github.add_status(base, "ci/jenkins", "success")
+    read = read_handoff_ci(forge, SHA, base, "github", base_branch="main", ready_at=now - timedelta(minutes=1), now=now)
+    assert read.status == "running"
+    github.statuses.clear()
+    github.add_status(base, "l4/add-x", "pending")  # the harness's own status is no CI
+    read = read_handoff_ci(forge, SHA, base, "github", base_branch="main", ready_at=now - timedelta(minutes=1), now=now)
+    assert read.status == "not_run"
+
+
+def test_a_required_check_with_no_job_at_all_blocks_after_the_window(github, forge):
+    """X4 (SCN-CI-064): a push made with GITHUB_TOKEN started nothing and `build` is required."""
+    from datetime import UTC, datetime, timedelta
+
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    now = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+    github.workflows = ["l4.yml", "tests.yml"]
+    github.rules = [
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "build"}]}}
+    ]
+    read = read_handoff_ci(
+        forge, SHA, "b" * 40, "github", base_branch="main", ready_at=now - timedelta(hours=1), now=now
+    )
+    assert read.status == "unreported" and read.reason == "build"
