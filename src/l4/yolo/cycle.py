@@ -1452,7 +1452,11 @@ class _Step:
         was red as on the base, and for a hand-off commit no CI ran on a line in the report and a note on the merged
         PR/MR (L4-YOLO-042, L4-YOLO-043)."""
         h10 = (out.head or "")[:10]
-        if out.ci == "preexisting":
+        if out.warning:
+            self._line(ctx.plan_id, f"warning: {unit}: {out.warning}")
+        if out.ci == "unknown":
+            self._line(ctx.plan_id, f"warning: {unit}: the pull request was merged at {h10}, not at the verified head")
+        elif out.ci == "preexisting":
             keys = ", ".join(out.ci_jobs)
             self._line(ctx.plan_id, f"warning: {unit}: the repository CI on {h10} is red as on the base: {keys}")
         elif out.ci == "not_run":

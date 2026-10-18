@@ -135,18 +135,96 @@ def test_every_skipped_job_also_waits_out_the_window():
 
 
 class Required(Jobs):
-    def required_checks(self, branch: str) -> list[str]:
-        return ["build", "lint"]
+    def __init__(self, table, required=("build", "lint"), unreadable=False, files=None):
+        super().__init__(table)
+        self.required, self.unreadable, self.files = list(required), unreadable, files
+
+    def required_checks(self, branch: str):
+        return self.required, self.unreadable
+
+    def workflow_files(self):
+        return self.files
 
 
-def test_a_required_check_not_yet_reported_is_running_then_not_run():
-    """F2: a required status check of the base branch that H has not reported yet is CI that is still to come."""
+def test_a_required_check_not_yet_reported_is_running_then_a_blocker():
+    """F2, m1 (SCN-CI-064): within the window it is CI still to come; after it the merge stays blocked, whatever
+    `require_ci` says, because GitHub refuses a merge without the check."""
     forge = Required({"h": [job("build")]})
     soon = read_handoff_ci(forge, "h", "b", "github", base_branch="main", ready_at=NOW - timedelta(minutes=2), now=NOW)
     assert soon.status == "running" and "lint" in soon.reason
     late = read_handoff_ci(forge, "h", "b", "github", base_branch="main", ready_at=NOW - timedelta(hours=1), now=NOW)
-    assert late.status == "not_run" and "lint" in late.reason
+    assert late.status == "unreported" and "lint" in late.reason
     done = read_handoff_ci(
         Required({"h": [job("build"), job("lint")]}), "h", "b", "github", base_branch="main", now=NOW
     )
     assert done.status == "green"
+
+
+def test_required_checks_that_could_not_be_read_are_a_warning_not_a_verdict():
+    """m2: a 403 from every endpoint leaves the verdict to the jobs and says so."""
+    forge = Required({"h": [job("build")]}, required=[], unreadable=True)
+    read = read_handoff_ci(forge, "h", "b", "github", base_branch="main", now=NOW)
+    assert read.status == "green" and "required checks" in read.warning and "could not be read" in read.warning
+
+
+def test_a_cancelled_job_with_a_finished_twin_under_another_event_does_not_block():
+    """m3: the push run cancelled by its pull_request twin (concurrency group); the twin's result counts."""
+    push = JobResult("build", "", "canceled", False, 1, 1, "", workflow="tests.yml", event="push")
+    twin = JobResult("build", "", "success", False, 2, 2, "", workflow="tests.yml", event="pull_request")
+    assert read_handoff_ci(Jobs({"h": [push, twin]}), "h", "b", "github").status == "green"
+    red = JobResult("build", "", "failed", False, 2, 2, "", workflow="tests.yml", event="pull_request")
+    assert read_handoff_ci(Jobs({"h": [push, red], "b": []}), "h", "b", "github").status == "failed"
+    alone = read_handoff_ci(Jobs({"h": [push]}), "h", "b", "github")
+    assert alone.status == "blocked"
+    other = JobResult("build", "", "success", False, 2, 2, "", workflow="docs.yml", event="pull_request")
+    assert read_handoff_ci(Jobs({"h": [push, other]}), "h", "b", "github").status == "blocked"  # not the same workflow
+
+
+def test_the_wait_names_the_unfinished_jobs_at_most_five():
+    """m4"""
+    running = [job(f"j{i}", "running") for i in range(7)]
+    read = read_handoff_ci(Jobs({"h": running}), "h", "b", "gitlab")
+    assert read.status == "running" and read.reason == "unfinished: j0, j1, j2, j3, j4, +2"
+    one = read_handoff_ci(Jobs({"h": [job("test", "running")]}), "h", "b", "gitlab")
+    assert one.reason == "unfinished: test"
+
+
+def test_the_base_is_read_only_when_h_has_a_red_job():
+    """M1"""
+    reads: list[str] = []
+
+    class Spy(Jobs):
+        def list_pipeline_jobs(self, sha, *, settled=False):
+            reads.append(sha)
+            return super().list_pipeline_jobs(sha, settled=settled)
+
+    read_handoff_ci(Spy({"h": [job("test")]}), "h", "b", "github")
+    assert reads == ["h"]
+    reads.clear()
+    read_handoff_ci(Spy({"h": [job("test", "failed")]}), "h", "b", "github")
+    assert reads == ["h", "b"]
+
+
+def test_a_ready_time_in_the_future_is_clamped_or_ignored():
+    """Nit: a few minutes ahead (a fast clock) is the read time; far ahead (forged) is no window at all."""
+    near = read_handoff_ci(Jobs({}), "h", "b", "github", ready_at=NOW + timedelta(minutes=3), now=NOW)
+    assert near.status == "running"
+    far = read_handoff_ci(Jobs({}), "h", "b", "github", ready_at=NOW + timedelta(days=365), now=NOW)
+    assert far.status == "not_run"
+
+
+def test_a_repository_that_cannot_start_any_ci_has_no_window():
+    """m7: no workflow but `l4.yml`, nothing required, no status on H: nothing can be on its way."""
+    inside = NOW - timedelta(minutes=2)
+    bare = Required({}, required=[], files=["l4.yml"])
+    assert read_handoff_ci(bare, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "not_run"
+    other = Required({}, required=[], files=["l4.yml", "tests.yml"])
+    assert read_handoff_ci(other, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "running"
+    required = Required({}, required=["build"], files=["l4.yml"])
+    assert (
+        read_handoff_ci(required, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "running"
+    )
+    unknown = Required({}, required=[], files=None)
+    assert (
+        read_handoff_ci(unknown, "h", "b", "github", base_branch="main", ready_at=inside, now=NOW).status == "running"
+    )

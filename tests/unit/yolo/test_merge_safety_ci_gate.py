@@ -212,3 +212,58 @@ def test_ci_not_created_yet_waits_inside_the_window(world):
     old = datetime.now(UTC) - timedelta(minutes=11)
     world.step({"a": world.in_review("a", head, ci=None, ready_at=old)})
     assert [m["ci"] for m in merged(world)] == ["not_run"]
+
+
+class Requires(MergingForge):
+    """A forge whose base branch requires `lint`, which H has not reported (`unreadable`: no endpoint could be read)."""
+
+    required: list[str] = ["lint"]
+    unreadable = False
+
+    def required_checks(self, branch):
+        return self.required, self.unreadable
+
+
+@pytest.mark.parametrize("require_ci", [False, True])
+def test_an_unreported_required_check_blocks_after_the_window_whatever_require_ci_says(world, require_ci):
+    """m1 (SCN-YOLO-126): never `not_run`, never the "no CI of the repository ran" warning."""
+    configure(world, require_ci=require_ci)
+    head, snap = ready(world)
+    forge = Requires(origin=world.origin)
+    forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
+    forge.script_jobs(head, [("test", "success")])
+    step = world.step({"a": snap}, forge=forge)
+    assert "unit.merged" not in world.kinds()
+    detail = waits(world)[-1].data["detail"]
+    assert "the required check lint has not reported on" in detail and "GitHub will refuse the merge" in detail
+    assert not any("no CI of the repository ran" in action for action in step.actions)
+
+
+def test_required_checks_that_could_not_be_read_are_said_once_in_the_report(world):
+    """m2 (SCN-YOLO-127)"""
+    head, snap = ready(world)
+    forge = Requires(origin=world.origin)
+    forge.required, forge.unreadable = [], True
+    forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
+    forge.script_jobs(head, [("test", "success")])
+    step = world.step({"a": snap}, forge=forge)
+    assert [m["ci"] for m in merged(world)] == ["green"]
+    assert sum("required checks" in action and "could not be read" in action for action in step.actions) == 1
+
+
+def test_a_running_wait_names_the_unfinished_jobs(world):
+    """m4"""
+    head, snap = ready(world, ci=(("test", "running"), ("lint", "pending")))
+    world.step({"a": snap})
+    assert "unfinished: lint, test" in waits(world)[-1].data["detail"]
+
+
+def test_a_repository_that_cannot_start_any_ci_does_not_wait_for_the_window(world):
+    """m7 (SCN-YOLO-128): the local forge defines no workflow, requires nothing and has no status: not_run at once."""
+    head, snap = ready(world, ci=None, ready_at=datetime.now(UTC) - timedelta(minutes=1))
+    forge = Requires(origin=world.origin)
+    forge.required = []
+    forge.workflow_files = lambda: ["l4.yml"]
+    forge.create_pr("l4/openspec/a", "main", "[l4] a", "b", draft=False)
+    world.step({"a": snap}, forge=forge)
+    assert [m["ci"] for m in merged(world)] == ["not_run"]

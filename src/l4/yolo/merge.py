@@ -241,11 +241,12 @@ def _recorded_head(snapshot: UnitSnapshot) -> tuple[str | None, str | None]:
 
 def _ci_gate(
     app: AppContext, cfg: L4Config, git: Git, forge: Forge, snapshot: UnitSnapshot, head: str, pr: PullRequest
-) -> tuple[MergeOutcome | None, str, tuple[str, ...]]:
+) -> tuple[MergeOutcome | None, str, tuple[str, ...], str]:
     """The repository's CI on H (L4-YOLO-042, L4-YOLO-043), read as the sweep reads it. A `not_ready` outcome, or
-    `(None, ci, ci_jobs)` when the merge may go on: `green`, `preexisting` (with the keys of the jobs red on the base
-    too) or `not_run` (only when `yolo.merge.require_ci` is false). Running, red (new on H) and unreadable CI always
-    block. Every detail is fixed text with shas and job names, so it holds while nothing changes."""
+    `(None, ci, ci_jobs, warning)` when the merge may go on: `green`, `preexisting` (with the keys of the jobs red on
+    the base too) or `not_run` (only when `yolo.merge.require_ci` is false). Running, red (new on H), cancelled or held,
+    a required check that H has not reported, and unreadable CI always block. Every detail is fixed text with shas and
+    job names, so it holds while nothing changes."""
     h10, unit, known = head[:10], snapshot.ref.id, {"head": head, "pr": pr.number}
     try:
         base = git.rev_parse(f"refs/remotes/origin/{cfg.forge.base_branch}")
@@ -255,24 +256,27 @@ def _ci_gate(
         )
     except (ForgeError, ForgeUnavailable) as exc:
         first = app.redactor.redact_text((str(exc).splitlines() or [type(exc).__name__])[0])
-        return _not_ready(f"the repository CI of the hand-off commit {h10} could not be read: {first}", **known), "", ()
+        text = f"the repository CI of the hand-off commit {h10} could not be read: {first}"
+        return _not_ready(text, **known), "", (), ""
+    said = f"; {read.warning}" if read.warning else ""
+
+    def stop(text: str) -> tuple[MergeOutcome, str, tuple[str, ...], str]:
+        return _not_ready(text + said, **known), "", (), ""
+
     if read.status == "running":
         base_note = f" ({read.reason})" if read.reason else ""
-        return (
-            _not_ready(
-                f"the repository CI is still running on the hand-off commit {h10}{base_note}: "
-                "the plan merges when it is green",
-                **known,
-            ), "", (),
-        )  # fmt: skip
+        return stop(
+            f"the repository CI is still running on the hand-off commit {h10}{base_note}: "
+            "the plan merges when it is green"
+        )
+    if read.status == "unreported":
+        return stop(
+            f"the required check {read.reason} has not reported on the hand-off commit {h10}; "
+            "GitHub will refuse the merge until it does"
+        )
     if read.status == "blocked":
         keys = ", ".join(sorted(j.key for j in read.blocked))
-        return (
-            _not_ready(
-                f"the repository CI has a cancelled or held job on the hand-off commit {h10}: {keys}: re-run it",
-                **known,
-            ), "", (),
-        )  # fmt: skip
+        return stop(f"the repository CI has a cancelled or held job on the hand-off commit {h10}: {keys}: re-run it")
     if read.status == "failed":
         keys = ", ".join(sorted(j.key for j in read.failed))
         if snapshot.state.ci_heads.get(head) == "preexisting":
@@ -282,20 +286,17 @@ def _ci_gate(
             )
         else:
             how = ": the next sweep records it and the unit is verified again"
-        return _not_ready(f"the repository CI failed on the hand-off commit {h10}: {keys}{how}", **known), "", ()
+        return stop(f"the repository CI failed on the hand-off commit {h10}: {keys}{how}")
     if read.status == "not_run":
         if cfg.yolo.merge.require_ci:
-            return (
-                _not_ready(
-                    f"no CI of the repository ran on the hand-off commit {h10} ({read.reason}): run the "
-                    "repository's CI on the unit branch or its pull request, or set yolo.merge.require_ci: false",
-                    **known,
-                ), "", (),
-            )  # fmt: skip
-        return None, "not_run", ()
+            return stop(
+                f"no CI of the repository ran on the hand-off commit {h10} ({read.reason}): run the "
+                "repository's CI on the unit branch or its pull request, or set yolo.merge.require_ci: false"
+            )
+        return None, "not_run", (), read.warning
     if read.status == "preexisting":
-        return None, "preexisting", tuple(sorted(j.key for j in read.preexisting))
-    return None, "green", ()
+        return None, "preexisting", tuple(sorted(j.key for j in read.preexisting)), read.warning
+    return None, "green", (), read.warning
 
 
 def _readiness(snapshot: UnitSnapshot) -> str | None:
@@ -384,7 +385,7 @@ def merge_guarded(
         return _not_ready(
             f"the pull request head {forge_head[:10]} is not the head to merge {head[:10]}", head=head, pr=pr.number
         )
-    blocked, ci, ci_jobs = _ci_gate(app, cfg, git, forge, snapshot, head, pr)
+    blocked, ci, ci_jobs, warning = _ci_gate(app, cfg, git, forge, snapshot, head, pr)
     if blocked is not None:
         return blocked
     if cfg.yolo.merge.method == "fast-forward":
@@ -395,7 +396,11 @@ def merge_guarded(
             app, cfg, git, head, target, pr=pr.number, before_push=before_push,
             land=lambda tip: squash_merge(app, cfg, git, forge, pr, unit, head, tip),
         )  # fmt: skip
-    return replace(out, ci=ci, ci_jobs=ci_jobs) if out.status == "merged" else out
+    if out.status != "merged":
+        return out
+    if out.head != head:  # a person merged the PR at another head: the verdict on H says nothing about it
+        return replace(out, ci="unknown", ci_jobs=(), warning=warning)
+    return replace(out, ci=ci, ci_jobs=ci_jobs, warning=warning)
 
 
 def _find_pr(forge: Forge, snapshot: UnitSnapshot, cfg: L4Config) -> PullRequest | None:

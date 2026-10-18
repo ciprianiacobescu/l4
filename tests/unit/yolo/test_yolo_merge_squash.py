@@ -175,3 +175,4 @@ def test_a_pr_a_person_merged_at_another_head_records_the_head_actually_merged(w
     out = merge(world, forge)
     assert out.status == "merged" and out.raced is True and out.landed == x
     assert out.head == x != world.head
+    assert out.ci == "unknown" and out.ci_jobs == ()  # H's CI verdict says nothing about X (SCN-YOLO-124)

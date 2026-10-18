@@ -14,11 +14,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
-from l4.ci.repo_ci import all_skipped, blocked_jobs, considered, evaluate_ci, unfinished
-from l4.forge.base import JobResult
+from l4.ci.github import WORKFLOW_RELPATH
+from l4.ci.repo_ci import all_skipped, blocked_jobs, considered, evaluate_ci, red_jobs, unfinished
+from l4.forge.base import UNFINISHED, JobResult
 
-HandoffStatus = Literal["running", "green", "failed", "preexisting", "not_run", "blocked"]
+WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`
 
+HandoffStatus = Literal["running", "green", "failed", "preexisting", "not_run", "blocked", "unreported"]
+
+MAX_NAMED = 5  # unfinished jobs named in a wait
+MAX_SKEW = timedelta(
+    minutes=5
+)  # how far ahead of the read a `pr.ready` time may be and still be taken as the read time
+REQUIRED_UNREADABLE = "the required checks of the base branch could not be read"
 WINDOW = timedelta(minutes=10)  # how long after the hand-off "no CI yet" may still be CI that is being created (F2)
 
 # L4-GHP-008: never green. A push made with the workflow's GITHUB_TOKEN starts no run.
@@ -47,6 +55,44 @@ class HandoffCi:
     failed: tuple[JobResult, ...] = ()  # red on H, not on the base
     preexisting: tuple[JobResult, ...] = ()  # red on H and on the base
     blocked: tuple[JobResult, ...] = ()  # cancelled or held: re-run them
+    warning: str = ""  # a limit of the read that the person should hear of (the required checks were unreadable)
+
+
+def _unfinished_reason(jobs: Sequence[JobResult]) -> str:
+    """The keys of the unfinished jobs, at most five, then `+K`: what the wait is for (m4)."""
+    keys = sorted(j.key for j in considered(jobs) if j.status in UNFINISHED)
+    shown = keys[:MAX_NAMED]
+    more = f", +{len(keys) - MAX_NAMED}" if len(keys) > MAX_NAMED else ""
+    return f"unfinished: {', '.join(shown)}{more}"
+
+
+def _in_window(ready_at: datetime | None, now: datetime) -> bool:
+    """Whether the hand-off was less than `WINDOW` ago. A time a little ahead of the read (a fast clock) is the read
+    time; one far ahead (forged) is no time at all: the effect of a bad `pr.ready` is bounded."""
+    if ready_at is None:
+        return False
+    if ready_at > now:
+        if ready_at - now > MAX_SKEW:
+            return False
+        ready_at = now
+    return now - ready_at < WINDOW
+
+
+def _can_start_ci(forge: object, base_branch: str | None) -> bool:
+    """False only when GitHub shows that nothing can be on its way: no workflow but the harness's own, and no check
+    that the base branch requires (m7). Anything unknown keeps the window."""
+    files = getattr(forge, "workflow_files", None)
+    if base_branch is None or files is None:  # only a forge that can list its workflows (GitHub) is asked
+        return True
+    listed = files()
+    if listed is None or any(f != WORKFLOW_FILE for f in listed):
+        return True
+    return bool(_required(forge, base_branch)[0])
+
+
+def _required(forge: object, base_branch: str | None) -> tuple[list[str], bool]:
+    ask = getattr(forge, "required_checks", None)
+    return ask(base_branch) if ask is not None and base_branch is not None else ([], False)
 
 
 def read_handoff_ci(
@@ -60,37 +106,36 @@ def read_handoff_ci(
     now: datetime | None = None,
 ) -> HandoffCi:
     """`ready_at` is the time of the recorded `pr.ready` (None: unknown, so no window); `base_branch` names the branch
-    whose required checks GitHub's rules list (only a forge that has `required_checks` is asked)."""
+    whose required checks GitHub lists (only a forge that has `required_checks` is asked). The base head's jobs are read
+    only when H has a red job: that is the only time the comparison matters."""
     jobs = list(forge.list_pipeline_jobs(head))
     if unfinished(jobs):
-        return HandoffCi("running", head)
-    in_window = ready_at is not None and (now or datetime.now(UTC)) - ready_at < WINDOW
+        return HandoffCi("running", head, _unfinished_reason(jobs))
+    now = now or datetime.now(UTC)
+    window = _in_window(ready_at, now)
     if not considered(jobs) or all_skipped(jobs):
         if not considered(jobs):
             reason = NO_PIPELINE_JOB if platform != "github" else (ONLY_HARNESS_JOB if jobs else NO_CHECK_RUN)
         else:
             reason = ALL_SKIPPED
-        return HandoffCi("running", head, NOT_CREATED_YET) if in_window else HandoffCi("not_run", head, reason)
-    verdict = evaluate_ci(jobs, list(forge.list_pipeline_jobs(base, settled=True)) if base else [])
+        if window and _can_start_ci(forge, base_branch):
+            return HandoffCi("running", head, NOT_CREATED_YET)
+        return HandoffCi("not_run", head, reason)
+    base_jobs = list(forge.list_pipeline_jobs(base, settled=True)) if base and red_jobs(jobs) else []
+    verdict = evaluate_ci(jobs, base_jobs)
     if verdict.status == "running":
         return HandoffCi("running", head, BASE_RUNNING)
     if verdict.status == "failed":
         return HandoffCi("failed", head, "", verdict.failed, verdict.preexisting)
+    names, unreadable = _required(forge, base_branch)
+    warning = REQUIRED_UNREADABLE if unreadable else ""
     if held := blocked_jobs(jobs):
-        return HandoffCi("blocked", head, "", blocked=tuple(held), preexisting=verdict.preexisting)
-    missing = _missing_required(forge, jobs, platform, base_branch)
-    if missing:
-        names = ", ".join(missing)
-        if in_window:
-            return HandoffCi("running", head, f"the required check {names} has not been reported on it yet")
-        return HandoffCi("not_run", head, f"the required check {names} was never reported on it")
-    return HandoffCi(verdict.status, head, "", (), verdict.preexisting)
-
-
-def _missing_required(forge: object, jobs: Sequence[JobResult], platform: str, base_branch: str | None) -> list[str]:
-    """The base branch's required status checks (GitHub) that H has reported neither as a check run nor as a status."""
-    ask = getattr(forge, "required_checks", None)
-    if platform != "github" or base_branch is None or ask is None:
-        return []
+        return HandoffCi("blocked", head, "", blocked=tuple(held), preexisting=verdict.preexisting, warning=warning)
     reported = {j.name for j in jobs}
-    return [name for name in ask(base_branch) if name not in reported]
+    if missing := ", ".join(n for n in names if n not in reported):
+        if window:
+            return HandoffCi(
+                "running", head, f"the required check {missing} has not been reported on it yet", warning=warning
+            )
+        return HandoffCi("unreported", head, missing, warning=warning)
+    return HandoffCi(verdict.status, head, "", (), verdict.preexisting, warning=warning)

@@ -853,6 +853,10 @@ class Sweeper:
                 return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running{why}")
             if read.status == "not_run":
                 return SweepAction(snapshot.ref.id, "ci_not_run", f"H {short}: {read.reason}")
+            if read.status == "unreported":
+                return SweepAction(
+                    snapshot.ref.id, "ci_blocked", f"H {short}: the required check {read.reason} has not reported"
+                )
             if read.status == "blocked":
                 keys = ", ".join(j.key for j in read.blocked)
                 return SweepAction(snapshot.ref.id, "ci_blocked", f"H {short}: cancelled or held: {keys}: re-run it")

@@ -38,7 +38,7 @@ def test_check_runs_of_sha_become_job_results(github, forge):
     jobs = {j.name: j for j in forge.list_pipeline_jobs(SHA)}
     assert {n: j.status for n, j in jobs.items()} == {
         "lint": "success", "test": "success", "build": "running", "docs": "pending", "deploy": "canceled",
-        "optional": "skipped", "gate": "failed", "approve": "failed",  # action_required needs a person: not a pass (F1)
+        "optional": "skipped", "gate": "failed", "approve": "manual",  # action_required: held for a person (m6)
     }  # fmt: skip
     assert jobs["test"].pipeline_id == 78 and jobs["test"].allow_failure is False and jobs["test"].stage == ""
     assert isinstance(jobs["lint"], JobResult) and jobs["lint"].web_url.startswith("https://github.test/")
@@ -78,17 +78,11 @@ def _tests_and_docs(github: FakeGitHub) -> None:
     github.add_check_run(SHA, "build", "completed", "success", suite=2, app="github-actions")
 
 
-@pytest.mark.parametrize("new_suite", [False, True])
-def test_a_rerun_collapses_whether_or_not_it_has_a_new_suite(github, forge, new_suite):
-    """SCN-CI-052: attempt 1 failed, attempt 2 passed; one job `tests.yml / test`, the newest attempt."""
-    if new_suite:
-        github.add_workflow_run(SHA, "tests.yml", "push", suite=32, run_id=900, attempts=(31,))
-        github.add_check_run(SHA, "test", "completed", "failure", suite=31, app="github-actions")
-        github.add_check_run(SHA, "test", "completed", "success", suite=32, app="github-actions")
-    else:
-        github.add_workflow_run(SHA, "tests.yml", "push", suite=31, run_id=900, attempts=(31,))
-        github.add_check_run(SHA, "test", "completed", "failure", suite=31, app="github-actions")
-        github.add_check_run(SHA, "test", "completed", "success", suite=31, app="github-actions")
+def test_a_rerun_collapses_to_its_newest_attempt(github, forge):
+    """SCN-CI-052: attempt 1 failed, attempt 2 passed in the same check suite (a re-run keeps its suite): one job."""
+    github.add_workflow_run(SHA, "tests.yml", "push", suite=31, run_id=900, attempts=(31,))
+    github.add_check_run(SHA, "test", "completed", "failure", suite=31, app="github-actions")
+    github.add_check_run(SHA, "test", "completed", "success", suite=31, app="github-actions")
     (job,) = forge.list_pipeline_jobs(SHA)
     assert job.key == "tests.yml / test" and job.status == "success"
 
@@ -143,21 +137,12 @@ def test_an_actions_check_run_whose_workflow_is_not_found_is_keyed_by_its_suite(
     assert {j.workflow for j in forge.list_pipeline_jobs(SHA)} == {"tests.yml", "suite-7"}
 
 
-def test_an_unreadable_attempt_drops_only_its_suite(github, forge):
-    """An attempt read that gives 403 leaves that attempt's check runs keyed by suite (fail closed)."""
-    github.add_workflow_run(SHA, "tests.yml", "push", suite=32, run_id=900, attempts=(31,))
-    github.add_check_run(SHA, "test", "completed", "failure", suite=31, app="github-actions")
-    github.add_check_run(SHA, "test", "completed", "success", suite=32, app="github-actions")
-    github.attempts_status = 403
-    assert {j.workflow for j in forge.list_pipeline_jobs(SHA)} == {"suite-31", "tests.yml"}
-
-
 @pytest.mark.parametrize(
     ("conclusion", "status"),
     [
         ("success", "success"), ("neutral", "skipped"), ("skipped", "skipped"),
         ("failure", "failed"), ("timed_out", "failed"), ("startup_failure", "failed"),
-        ("action_required", "failed"), ("stale", "failed"), ("cancelled", "canceled"),
+        ("action_required", "manual"), ("stale", "failed"), ("cancelled", "canceled"),
     ],
 )  # fmt: skip
 def test_a_conclusion_is_a_pass_a_failure_or_a_cancellation(github, forge, conclusion, status):
@@ -228,28 +213,41 @@ def test_a_superseded_execution_of_a_job_is_dropped_by_the_latest_jobs_listing(g
     assert job.status == "success" and job.job_id == new["id"]
 
 
-def test_required_checks_come_from_the_branch_rules(github, forge):
-    """F2 (SCN-CI-064): the base branch's required status checks, from the rules, else from the classic protection."""
+def test_required_checks_come_from_the_rules_the_branch_and_the_classic_protection(github, forge):
+    """F2, m2 (SCN-CI-064): the required status checks of the base branch from the three places GitHub keeps them."""
     github.rules = [
         {"type": "pull_request", "parameters": {}},
         {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "build"}]}},
     ]
-    assert forge.required_checks("main") == ["build"]
+    assert forge.required_checks("main") == (["build"], False)
     github.rules = None
-    github.protection = {"contexts": ["lint"], "checks": [{"context": "lint"}, {"context": "test"}]}
-    assert forge.required_checks("main") == ["lint", "test"]
+    github.branch = {"protected": True, "protection": {"required_status_checks": {"contexts": ["lint"], "checks": [
+        {"context": "lint"}, {"context": "test"}]}}}  # fmt: skip
+    assert forge.required_checks("main") == (["lint", "test"], False)
+    github.branch = None
+    github.protection = {"contexts": ["unit"], "checks": [{"context": "unit"}]}
+    assert forge.required_checks("main") == (["unit"], False)  # the classic endpoint when the branch read gives nothing
     github.protection = None
-    assert forge.required_checks("main") == []  # no rules and no protection: nothing required, not an error
+    assert forge.required_checks("main") == ([], False)  # nothing required, not an error
 
 
-def test_required_checks_that_cannot_be_read_are_not_fatal(github, forge):
+def test_required_checks_that_every_endpoint_refuses_are_reported_unreadable(github, forge):
+    """m2: a 403 from every endpoint is not fatal, but the caller is told."""
     github.rules_status = 403
-    assert forge.required_checks("main") == []
+    github.branch_status = 403
+    assert forge.required_checks("main") == ([], True)
+
+
+def test_the_workflow_files_of_the_repository_are_listed(github, forge):
+    github.workflows = ["l4.yml", "tests.yml"]
+    assert forge.workflow_files() == ["l4.yml", "tests.yml"]
+    github.workflows_status = 403
+    assert forge.workflow_files() is None
 
 
 @pytest.mark.parametrize(
     ("conclusion", "verdict"),
-    [("cancelled", "blocked"), ("action_required", "failed"), ("stale", "failed"), ("timed_out", "failed")],
+    [("cancelled", "blocked"), ("action_required", "blocked"), ("stale", "failed"), ("timed_out", "failed")],
 )
 def test_the_reader_does_not_call_a_job_that_did_not_pass_green(github, forge, conclusion, verdict):
     """The review's R1 (SCN-CI-061): the only project job was cancelled, needs action or went stale."""
@@ -289,3 +287,71 @@ def test_a_failed_job_named_l4_in_another_workflow_is_a_project_job(github, forg
     github.add_check_run(SHA, "l4", "completed", "failure", suite=2, app="github-actions")
     github.add_check_run(SHA, "lint", "completed", "success", suite=2, app="github-actions")
     assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "green"
+
+
+def test_a_check_run_of_another_app_that_needs_action_blocks_and_opens_no_fix_round(github, forge):
+    """m6 (L4-CI-013): action_required (a CLA, an app's approval) is a person's to do, not a code fix."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    github.add_check_run(SHA, "test", "completed", "success", suite=1, app="github-actions")
+    github.add_check_run(SHA, "cla", "completed", "action_required", suite=9, app="cla-bot")
+    read = read_handoff_ci(forge, SHA, "b" * 40, "github")
+    assert read.status == "blocked" and [j.key for j in read.blocked] == ["cla-bot / cla"] and not read.failed
+
+
+def test_check_runs_are_read_with_filter_all(github, forge):
+    """m5: the default listing keeps one check run per name and suite and would hide a same-name twin."""
+    github.add_check_run(SHA, "test", "completed", "success", suite=1)
+    forge.list_pipeline_jobs(SHA)
+    listings = [query for _, path, query, _ in github.requests if path.endswith("/check-runs")]
+    assert listings[-1].get("filter") == "all"
+
+
+def _quiet_base(github, l4_runs: int = 48) -> str:
+    """H: one workflow with two jobs and the skipped `l4` run; the base: one CI run and a day of scheduled `l4.yml`
+    runs (the review's N9)."""
+    base = "b" * 40
+    run = github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    for name in ("build", "test"):
+        github.add_job(
+            run["id"], github.add_check_run(SHA, name, "completed", "success", suite=1, app="github-actions")
+        )
+    ours = github.add_workflow_run(SHA, "l4.yml", "push", suite=2)
+    github.add_job(ours["id"], github.add_check_run(SHA, "l4", "skipped", None, suite=2, app="github-actions"))
+    there = github.add_workflow_run(base, "tests.yml", "push", suite=10)
+    github.add_job(
+        there["id"], github.add_check_run(base, "build", "completed", "success", suite=10, app="github-actions")
+    )
+    for i in range(l4_runs):
+        r = github.add_workflow_run(base, "l4.yml", "schedule", suite=100 + i)
+        github.add_job(
+            r["id"], github.add_check_run(base, "l4", "completed", "success", suite=100 + i, app="github-actions")
+        )
+    github.rules = []
+    return base
+
+
+def test_one_ci_read_of_a_green_commit_makes_few_calls(github, forge):
+    """M1 (SCN-CI-069): the jobs of `l4.yml` runs are never listed and the base is read only when H has a red job.
+    The review counted 110 calls for this read."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    base = _quiet_base(github)
+    before = len(github.requests)
+    read = read_handoff_ci(forge, SHA, base, "github", base_branch="main")
+    calls = len(github.requests) - before
+    assert read.status == "green" and calls <= 10, calls
+
+
+def test_one_ci_read_with_a_red_job_is_bounded(github, forge):
+    """M1: a red job makes the base comparison read the base too, still without the jobs of its `l4.yml` runs."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    base = _quiet_base(github)
+    github.add_check_run(SHA, "lint", "completed", "failure", suite=1, app="github-actions")
+    github.add_job(github.workflow_runs[0]["id"], github.check_runs[-1])
+    before = len(github.requests)
+    read = read_handoff_ci(forge, SHA, base, "github", base_branch="main")
+    calls = len(github.requests) - before
+    assert read.status == "failed" and calls <= 20, calls

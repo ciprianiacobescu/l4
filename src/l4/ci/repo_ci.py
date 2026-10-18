@@ -47,10 +47,17 @@ def red_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) 
 
 
 def blocked_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
-    """Jobs that neither passed nor failed: cancelled, or held for a person (`manual` and not allowed to fail). They
-    block a merge ("re-run it") but are not a fix round: nothing in the code is wrong (L4-CI-013)."""
+    """Jobs that neither passed nor failed: cancelled, or held for a person (`manual`, which includes GitHub's
+    `action_required`, and not allowed to fail). They block a merge but are not a fix round: nothing in the code is
+    wrong (L4-CI-013). A cancelled job whose workflow file and name have a finished job under another event is
+    superseded by it (the push run that its pull_request twin cancelled): the twin's result counts."""
+    kept = _considered(jobs, ignore)
+    finished = {(j.workflow, j.name) for j in kept if j.workflow and j.status not in UNFINISHED | {"canceled"}}
     return [
-        j for j in _considered(jobs, ignore) if j.status == "canceled" or (j.status == "manual" and not j.allow_failure)
+        j
+        for j in kept
+        if (j.status == "canceled" and not (j.workflow and (j.workflow, j.name) in finished))
+        or (j.status == "manual" and not j.allow_failure)
     ]
 
 

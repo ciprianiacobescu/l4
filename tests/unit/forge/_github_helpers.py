@@ -37,6 +37,10 @@ class FakeGitHub:
     rules: list[dict] | None = None  # the answer of rules/branches/:branch (None: 404)
     rules_status: int = 200
     protection: dict | None = None  # the answer of the classic required_status_checks endpoint (None: 404)
+    branch: dict | None = None  # the answer of GET branches/:branch (None: 404), e.g. {"protection": {...}}
+    branch_status: int = 200
+    workflows: list[str] = field(default_factory=list)  # the workflow files the repository defines
+    workflows_status: int = 200
     logs: dict[int, str] = field(default_factory=dict)  # check run id -> the text behind the log redirect
     redirect_to: str = "https://logs.example.test/blob"  # where `actions/jobs/:id/logs` sends the client
     issue_events: dict[int, list[dict]] = field(default_factory=dict)  # issue number -> /issues/:n/events entries
@@ -168,6 +172,15 @@ class FakeGitHub:
             if self.rules_status != 200 or self.rules is None:
                 return httpx.Response(self.rules_status if self.rules_status != 200 else 404, json={"message": "x"})
             return httpx.Response(200, json=self.rules)
+        if re.fullmatch(rf"/repos/{REPO}/branches/[^/]+", path):
+            if self.branch_status != 200 or self.branch is None:
+                return httpx.Response(self.branch_status if self.branch_status != 200 else 404, json={"message": "x"})
+            return httpx.Response(200, json=self.branch)
+        if path == f"/repos/{REPO}/actions/workflows":
+            if self.workflows_status != 200:
+                return httpx.Response(self.workflows_status, json={"message": "x"})
+            found = [{"path": f".github/workflows/{name}", "state": "active"} for name in self.workflows]
+            return self._page(request, found, "workflows")
         if re.fullmatch(rf"/repos/{REPO}/branches/[^/]+/protection/required_status_checks", path):
             if self.protection is None:
                 return httpx.Response(404, json={"message": "Branch not protected"})

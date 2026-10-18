@@ -69,8 +69,8 @@ _PR_REFUSED = (
 )
 _CHECK_CONCLUSIONS = {
     "success": "success", "neutral": "skipped", "skipped": "skipped",  # the passes
-    "failure": "failed", "timed_out": "failed", "startup_failure": "failed", "action_required": "failed",
-    "stale": "failed",  # red: a job that did not pass is not green (L4-CI-013)
+    "failure": "failed", "timed_out": "failed", "startup_failure": "failed", "stale": "failed",  # red (L4-CI-013)
+    "action_required": "manual",  # held for a person (a CLA, an approval): blocks, opens no fix round
     "cancelled": "canceled",  # neither: the merge blocks until the job is re-run
 }  # fmt: skip
 _STATUS_STATES = {"success": "success", "failure": "failed", "error": "failed", "pending": "pending"}
@@ -421,7 +421,7 @@ class GitHubForge:
         `settled` reads every check run (`filter=all`) and keeps a key's newest finished one when it has one."""
         path = f"/repos/{self._repo}/commits/{quote(sha, safe='')}/check-runs"
         runs = sorted(
-            self._pages(path, {"filter": "all"} if settled else None, key="check_runs"),
+            self._pages(path, {"filter": "all"}, key="check_runs"),  # the default keeps one run per name and suite
             key=lambda run: int(run["id"]), reverse=True,
         )  # fmt: skip
         workflow_runs, suites = self._workflow_runs(sha)
@@ -430,7 +430,7 @@ class GitHubForge:
         for run in runs:
             identity = self._identity_of(run, suites)
             key_id = 0
-            if identity.run_id is not None:
+            if identity.run_id is not None and identity.workflow != WORKFLOW_FILE:  # the harness's runs: never listed
                 if identity.run_id not in jobs_of:
                     jobs_of[identity.run_id] = self._run_jobs(identity.run_id)
                 known = jobs_of[identity.run_id]
@@ -478,10 +478,9 @@ class GitHubForge:
         return suites.get(suite) or _Suite(f"suite-{suite if suite is not None else 'unknown'}", "", None)  # type: ignore[arg-type]
 
     def _workflow_runs(self, sha: str) -> tuple[list[dict[str, Any]], dict[int, "_Suite"]]:
-        """The workflow runs of `sha`, and check suite id -> (workflow file, event, run id) for every attempt of each (a
-        re-run may or may not get a new check suite: both are covered). A listing the token may not read gives nothing
-        with one warning, an attempt it may not read drops only that attempt's suite: the check runs then keep their
-        own keys."""
+        """The workflow runs of `sha`, and check suite id -> (workflow file, event, run id). A re-run keeps its check
+        suite, so no attempt is read. A listing the token may not read gives nothing, with one warning: the check runs
+        then keep their own keys."""
         found: dict[int, _Suite] = {}
         base = f"/repos/{self._repo}/actions/runs"
         try:
@@ -496,13 +495,6 @@ class GitHubForge:
             identity = _Suite(file, str(run.get("event") or ""), int(run["id"]) if "id" in run else None)
             if isinstance(run.get("check_suite_id"), int):
                 found[run["check_suite_id"]] = identity
-            for attempt in range(1, int(run.get("run_attempt") or 1)):
-                try:
-                    earlier = self._request("GET", f"{base}/{int(run['id'])}/attempts/{attempt}").json()
-                except (ForgeAuthError, ForgeNotFound):
-                    continue
-                if isinstance(earlier, dict) and isinstance(earlier.get("check_suite_id"), int):
-                    found[earlier["check_suite_id"]] = identity
         return runs, found
 
     def _run_jobs(self, run_id: int) -> tuple[set[int], set[int]] | None:
@@ -535,29 +527,53 @@ class GitHubForge:
             if not str(item.get("context") or "").startswith("l4/") and item.get("context")
         ]
 
-    def required_checks(self, branch: str) -> list[str]:
-        """The status checks that the branch rules require, else the classic branch protection (a repository that has
-        neither, or a token that may not read them, requires nothing that this can see: not an error)."""
+    def required_checks(self, branch: str) -> tuple[list[str], bool]:
+        """(the status checks that the base branch requires, whether none of the endpoints could be read). They come
+        from the branch rules, the branch itself (its `protection`, readable with read access) and, when that gives
+        nothing, the classic protection endpoint. A 403 or 404 is not fatal: what cannot be seen requires nothing here,
+        and the caller is told when every answer was a 403 (m2)."""
         names: list[str] = []
-        try:
-            rules = self._request("GET", f"/repos/{self._repo}/rules/branches/{quote(branch, safe='')}").json()
-        except (ForgeAuthError, ForgeNotFound):
-            rules = None
+        answered = refused = 0
+        quoted = quote(branch, safe="")
+
+        def get(path: str) -> Any:
+            nonlocal answered, refused
+            try:
+                body = self._request("GET", path).json()
+            except ForgeAuthError:
+                refused += 1
+                return None
+            except ForgeNotFound:
+                return None
+            answered += 1
+            return body
+
+        rules = get(f"/repos/{self._repo}/rules/branches/{quoted}")
         for rule in rules if isinstance(rules, list) else []:
             if isinstance(rule, dict) and rule.get("type") == "required_status_checks":
                 for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
                     names.append(str(check.get("context") or ""))
-        if not names:
-            try:
-                protection = self._request(
-                    "GET", f"/repos/{self._repo}/branches/{quote(branch, safe='')}/protection/required_status_checks"
-                ).json()
-            except (ForgeAuthError, ForgeNotFound):
-                protection = None
-            if isinstance(protection, dict):
-                names += [str(c) for c in protection.get("contexts") or []]
-                names += [str((c or {}).get("context") or "") for c in protection.get("checks") or []]
-        return [n for n in dict.fromkeys(names) if n]
+        info = get(f"/repos/{self._repo}/branches/{quoted}")
+        if isinstance(info, dict):
+            protection = (info.get("protection") or {}).get("required_status_checks") or {}
+        else:
+            protection = get(f"/repos/{self._repo}/branches/{quoted}/protection/required_status_checks")
+        if isinstance(protection, dict):
+            names += [str(c) for c in protection.get("contexts") or []]
+            names += [str((c or {}).get("context") or "") for c in protection.get("checks") or []]
+        return [n for n in dict.fromkeys(names) if n], answered == 0 and refused > 0
+
+    def workflow_files(self) -> list[str] | None:
+        """The active workflow files of the repository (`l4.yml`, `tests.yml`); None when they cannot be read."""
+        try:
+            items = list(self._pages(f"/repos/{self._repo}/actions/workflows", key="workflows"))
+        except (ForgeAuthError, ForgeNotFound):
+            return None
+        return [
+            str(item.get("path") or "").removeprefix(WORKFLOWS_DIR)
+            for item in items
+            if isinstance(item, dict) and item.get("state", "active") == "active"
+        ]
 
     @staticmethod
     def _job(run: dict[str, Any], identity: tuple[str, str] = ("", "")) -> JobResult:
