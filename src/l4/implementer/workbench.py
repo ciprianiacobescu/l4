@@ -165,6 +165,7 @@ class Workbench:
     guard_notes: list[GuardNote] = field(default_factory=list)  # what the guards put back since `run_task` cleared it
     activated_digest: str | None = None  # the unit folder's digest frozen at the plan's activation (plan step), if any
     activated_plan: str | None = None  # the plan that froze it
+    held_removals: list[str] = field(default_factory=list)  # saved held steps (L4-IMP-065) the next step commit deletes
 
     def __post_init__(self) -> None:
         for sub in ("agent-tmp", "gate-tmp"):
@@ -371,6 +372,9 @@ class Workbench:
         if paths:
             self.git.run("add", "--", *paths, self.ledger_rel)
         else:
+            for rel in self.held_removals:  # a replayed or spent held step goes with the commit that used it
+                (self.worktree / rel).unlink(missing_ok=True)
+            self.held_removals.clear()
             self.git.run("add", "-A", config=self.exclude_config)
         profile = self.selected.profile
         agent = f"{self.selected.profile_name}/{profile.model}" if profile.model else self.selected.profile_name

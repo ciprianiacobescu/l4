@@ -15,9 +15,9 @@ from l4.implementer.loop import run_task
 from l4.specs.questions import QuestionsFile, QuestionStatus, answer_sha256
 
 from .conftest import IMPL, KNOWN, Bench, red_step, result
-from .test_earlier_red import NEW, NEW_ID, TASK, new_step
+from .test_earlier_red import NEW, NEW_ID, OLD, TASK, commit_old, new_step
 from .test_held_answers import answer
-from .test_held_check import held_bench, zero_says
+from .test_held_check import held_bench, no_test, zero_says
 from .test_tdd_green import CORRECTED, answer_naming, two_test_red
 from .test_tdd_green import TASK as GREEN_TASK
 
@@ -181,20 +181,19 @@ def test_scn_imp_324_an_agent_write_to_the_held_path_is_put_back(make_bench):
 
 
 def test_scn_imp_325_the_question_shows_the_redacted_source_of_each_test_cut_to_forty_lines(make_bench, monkeypatch):
-    body = f"    # key = {TOKEN}\n" + "".join(f"    assert total([2.0, 2.0]) == 4.0  # {n}\n" for n in range(60))
-    long_test = NEW.replace("    assert total([2.0, 2.0]) == 4.0\n", body)
+    """An already-satisfied claim names a test that was committed earlier, so its text was never scanned for secrets."""
+    body = f"    # key = {TOKEN}\n" + "".join(f"    assert total([1.0, 2.0]) == 3.0  # {n}\n" for n in range(60))
+    long_old = OLD.replace("    assert total([1.0, 2.0]) == 3.0\n", body)
     zero_says(monkeypatch)
-    bench = held_bench(
-        make_bench, [Step(writes={"tests/test_new.py": long_test}, structured=result("red", criteria_ids=[KNOWN]))]
-    )
+    bench: Bench = make_bench([no_test()])
+    commit_old(bench, text=long_old)
     assert run_task(bench.wb, TASK).status == "blocked"
     text = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
-    assert "def test_new_total" in text and TOKEN not in text and "[redacted" in text.lower()
+    assert "def test_old_total" in text and TOKEN not in text and TOKEN[:12] not in text
     shown = [line for line in text.splitlines() if "assert total" in line]
     assert 0 < len(shown) <= 40
-    assert "cut" in text and "more lines" in text
-    patch_text = patch_of(bench).read_bytes().decode()
-    assert "# 59" in patch_text  # the patch keeps everything; only the question is cut
+    assert "[cut: " in text and "more lines]" in text
+    assert patch_of(bench).read_bytes() == b""  # nothing changed in the step: the patch is empty, the result is kept
 
 
 def test_scn_imp_326_a_later_agent_step_is_told_which_tests_are_accepted(make_bench, monkeypatch, raw):
@@ -208,15 +207,14 @@ def test_scn_imp_326_a_later_agent_step_is_told_which_tests_are_accepted(make_be
 
     monkeypatch.setattr(tdd, "worse_static_gates", worse)
     outcome = run_task(bench.wb, TASK)
+    # attempt 1 replayed the saved step and failed a gate; attempt 2 is an agent step, told which tests are accepted
     assert len(bench.events("held.replayed")) == 1 and len(bench.events("task.attempt_failed")) == 1
-    assert len(bench.adapter.requests) == 1, outcome.reason  # the replay failed a gate; the next attempt is an agent
-    # the agent step of attempt 2 carries the block (the fake adapter script has the renamed step for it)
-    outcome = run_task(bench.wb, TASK)
+    assert len(bench.adapter.requests) == 2, outcome.reason
     prompt = bench.adapter.requests[-1].prompt
-    assert len(bench.adapter.requests) == 2 and 'source="accepted tests"' in prompt
+    assert 'source="accepted tests"' in prompt
     block = prompt.split('source="accepted tests"', 1)[1].split("</l4:data>", 1)[0]
     assert NEW_ID in block and "def test_new_total" in block and "unchanged" in block
-    assert outcome.status in ("done", "blocked")
+    assert "same name" in block and "covers only them" in block
 
 
 # --- the other held checks ----------------------------------------------------------------------------------------

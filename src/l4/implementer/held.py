@@ -28,6 +28,7 @@ from l4.state.ledger import read_ledger
 
 Check = Literal["pre_satisfied", "vacuity", "at_red", "tests"]
 MAX_SHOWN_TESTS = 10
+MAX_SOURCE_LINES = 40  # lines of one test a question shows
 MAX_SUBJECTS = 50  # criteria or tests a `question.raised` event names
 _LABEL = {
     "pre_satisfied": "pre-satisfied",
@@ -53,6 +54,9 @@ class HeldCheck:
     reason: str
     runs: tuple[str, ...] = ()
     kept: tuple[str, ...] = ()
+    patch: bytes | None = None  # the step's changes (`git diff --binary`), saved before they were discarded
+    result: str = ""  # the agent's result for that step, as JSON
+    sources: tuple[tuple[str, str], ...] = ()  # (test id, its redacted, cut source) of the tests the question names
 
     @property
     def subjects(self) -> tuple[str, ...]:
@@ -65,6 +69,32 @@ class HeldCheck:
         criteria = self.criteria if self.check in _TEST_SUBJECTS else tuple(c for c in self.criteria if c in keep)
         tests = tuple(t for t in self.tests if t in keep) if self.check in _TEST_SUBJECTS else self.tests
         return replace(self, criteria=criteria, tests=tests)
+
+
+def _source_lines(held: HeldCheck) -> list[str]:
+    """The tests the person accepts, as they are in the saved step (redacted and cut when the hold was taken)."""
+    if not held.sources:
+        return []
+    lines = ["", f"Source of the tests (redacted; at most {MAX_SOURCE_LINES} lines each):"]
+    for test, text in held.sources:
+        lines += [f"{test}:", *(f"    {line}" for line in text.splitlines())]
+    return lines
+
+
+def _accept_lines(held: HeldCheck) -> list[str]:
+    if held.patch is None:
+        return [
+            "`accept: <why>` counts these on the evidence of the real run: the next run does the step again, and "
+            "when the check cannot decide again, the claim is taken (the verifier and the judge see that it was "
+            "accepted). A criterion that the check shows not to discriminate still fails the attempt."
+        ]
+    return [
+        "`accept: <why>` counts these on the evidence of the real run, for exactly the step you see here: the harness "
+        "saved the step's changes on the unit branch, and the next run applies them, with every guard and gate an "
+        "agent's changes get, instead of starting an agent. When the check cannot decide again, the claim is taken "
+        "(the verifier and the judge see that it was accepted). A criterion that the check shows not to discriminate "
+        "still fails the attempt."
+    ]
 
 
 def held_question(held: HeldCheck, criteria: Mapping[str, Criterion], asked: str) -> NewQuestion:
@@ -80,10 +110,9 @@ def held_question(held: HeldCheck, criteria: Mapping[str, Criterion], asked: str
             "Runs: " + (", ".join(held.runs) or "none"),
             "Kept real: " + (", ".join(held.kept) or "nothing"),
             f"Tests: {shown or 'none'}",
+            *_source_lines(held),
             "",
-            "`accept: <why>` counts these on the evidence of the real run: the next run does the red step again, and "
-            "when the check cannot decide again, the claim is taken (the verifier and the judge see that it was "
-            "accepted). A criterion that the check shows not to discriminate still fails the attempt.",
+            *_accept_lines(held),
             "`retry: <note>` runs the check again, for example after an L4 upgrade; the note reaches the agent.",
             "A person answers; an agent only where `clarifier.answer_by_agents` is true on the base branch.",
         ]

@@ -21,6 +21,7 @@ from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.held import MAX_SUBJECTS, HeldCheck, held_question
+from l4.implementer.held_patch import write_held
 from l4.implementer.result import ResultQuestion
 from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
@@ -142,9 +143,10 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     [qid] = raise_questions(wb.ref.path, wb.ref.name, [question], redactor=wb.redactor)
     redact = wb.redactor.redact_text
     tests = list(held.tests[:MAX_SUBJECTS])
+    saved, digests = write_held(wb, held)  # the step's changes, kept for an `accept` to replay (L4-IMP-065)
     wb.emit(
         "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
-        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests,
+        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **digests,
     )  # fmt: skip
     wb.emit(
         "check.inconclusive", task=task.key, phase=held.phase, check=held.check, criteria=list(held.criteria),
@@ -153,7 +155,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     )  # fmt: skip
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
-        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}"],
+        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}", *saved],
     )  # fmt: skip
     wb.push()
     return [qid]
