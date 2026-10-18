@@ -103,16 +103,22 @@ def _applied_names(wb: Workbench, paths: Sequence[str]) -> frozenset[str]:
 
 @contextmanager
 def zero_values_in_place(
-    wb: Workbench, paths: Sequence[str], *, public: bool, keep: Mapping[str, Collection[str]] | None = None
+    wb: Workbench,
+    paths: Sequence[str],
+    *,
+    public: bool,
+    keep: Mapping[str, Collection[str]] | None = None,
+    annotation: bool = True,
 ) -> Iterator[ZeroScope]:
     """Replace the zero-value variants of `paths` (relative to the worktree) for the duration of the block and
     yield the scope (the paths that were varied). `public`: every public function and method; else only the red
-    stubs. `keep`: path -> qualnames of functions that stay real (L4-IMP-061)."""
+    stubs. `keep`: path -> qualnames of functions that stay real (L4-IMP-061); `annotation` False leaves out the keep of
+    callable-returning functions the varied modules apply at import time."""
     originals: dict[Path, bytes] = {}
     zeroed: dict[str, tuple[str, ...]] = {}
     kept: dict[str, tuple[str, ...]] = {}
     seen: set[tuple[int, int]] = set()
-    applied = _applied_names(wb, paths) if public else frozenset()
+    applied = _applied_names(wb, paths) if public and annotation else frozenset()
     try:
         for relative in paths:
             target = wb.worktree / relative
@@ -161,6 +167,9 @@ class ZeroRun:
     kept: dict[str, tuple[str, ...]]  # path -> qualnames the tracebacks asked to keep real
     reruns: int
     own: frozenset[str] = frozenset()  # the test and support files the unit added or changed (D6)
+    proved: frozenset[str] = (
+        frozenset()
+    )  # candidates that failed by assertion in ANY pass (H1: more code zeroed still proves)
 
 
 def _inconclusive_texts(run: VariantRun, candidates: Collection[str], real: TestReport | None,
@@ -199,6 +208,8 @@ def zeroed_run(
     keep: dict[str, tuple[str, ...]] = {}
     own = own_test_files(wb)
     reruns = 0
+    proved: set[str] = set()
+    annotation_kept = False
     try:
         while True:
             with zero_values_in_place(wb, paths, public=public, keep=keep) as scope:
@@ -209,12 +220,14 @@ def zeroed_run(
                 )
             run = variant.classify(gate, real, redact=wb.redactor.redact_text)
             if reruns == 0 and any(scope.kept.values()):
+                annotation_kept = True
                 wb.emit("zero.kept", gate=name, rerun=0, cause="annotation", functions=_listed(scope.kept))
-            result = ZeroRun(gate, run, dict(keep), reruns, own)
+            proved |= _proofs(run, candidates, real, own)
+            result = ZeroRun(gate, run, dict(keep), reruns, own, frozenset(proved))
             if not public or reruns >= MAX_KEEP_RERUNS:
-                return result
+                return _with_plain_pass(wb, name, paths, real, candidates, own, result, annotation_kept)
             collection, setup = _inconclusive_texts(run, candidates, real, own)
-            from_collection = called_names("\n".join(collection)) | _failing_module_calls(wb, collection)
+            from_collection = called_names("\n".join(collection)) | _failing_module_calls(wb, collection, own)
             from_setup = called_names("\n".join(setup))
             room = MAX_KEPT - sum(len(v) for v in keep.values())
             wanted = [
@@ -224,7 +237,7 @@ def zeroed_run(
                 if qual.rsplit(".", 1)[-1] in from_collection | from_setup and qual not in keep.get(path, ())
             ][: max(room, 0)]
             if not wanted:
-                return result
+                return _with_plain_pass(wb, name, paths, real, candidates, own, result, annotation_kept)
             for path, qual, _ in wanted:
                 keep[path] = (*keep.get(path, ()), qual)
             reruns += 1
@@ -239,9 +252,34 @@ def zeroed_run(
                 report.unlink(missing_ok=True)
 
 
-def _failing_module_calls(wb: Workbench, tracebacks: Sequence[str]) -> frozenset[str]:
-    """The names called by module-level statements of the production modules a collection traceback passes through: the
-    failing line often reads a value an earlier statement computed (`_CFG = load()` then `RATE = _CFG["rate"]`)."""
+def _proofs(run: VariantRun, candidates: Collection[str], real: TestReport | None, own: frozenset[str]) -> set[str]:
+    return {t for t in candidates if variant.test_outcome(run, t, real, own)[0] == "proof"}
+
+
+def _with_plain_pass(wb: Workbench, name: str, paths: Sequence[str], real: TestReport | None,
+                     candidates: Collection[str], own: frozenset[str], result: ZeroRun,
+                     annotation_kept: bool) -> ZeroRun:  # fmt: skip
+    """H1: a function kept real because its annotation says it returns a callable and a varied module applies it can
+    be the very subject of a candidate (a decorator factory under test). While a candidate has no proof and the first
+    pass kept something by annotation, one more pass with nothing kept by annotation counts for the proofs only: a
+    test that fails by assertion with more code zeroed is still a zero-value failure, as in 0.4.15."""
+    if not annotation_kept or all(t in result.proved for t in candidates):
+        return result
+    with zero_values_in_place(wb, paths, public=True, keep=result.kept, annotation=False) as scope:
+        if not scope:
+            return result
+        gate = wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING)
+    run = variant.classify(gate, real, redact=wb.redactor.redact_text)
+    proved = result.proved | _proofs(run, candidates, real, own)
+    return ZeroRun(result.gate, result.run, result.kept, result.reruns, own, frozenset(proved))
+
+
+def _failing_module_calls(
+    wb: Workbench, tracebacks: Sequence[str], own: frozenset[str] = frozenset()
+) -> frozenset[str]:
+    """The names called by module-level statements of the modules a collection traceback passes through, production and
+    pre-existing test-support modules alike but not the unit's own files (`own`): the failing line often reads a value
+    an earlier statement computed (`_CFG = load()` then `RATE = _CFG["rate"]`)."""
     names: set[str] = set()
     for text in tracebacks:
         for line in text.splitlines():
@@ -250,7 +288,7 @@ def _failing_module_calls(wb: Workbench, tracebacks: Sequence[str]) -> frozenset
                 continue
             relative = found.group("path")
             target = wb.worktree / relative
-            if _is_test_path(wb, relative) or not _is_inside(wb.worktree, target) or not target.is_file():
+            if relative in own or not _is_inside(wb.worktree, target) or not target.is_file():
                 continue
             try:
                 names |= import_time_names(target.read_text(encoding="utf-8"))
@@ -422,7 +460,9 @@ def vacuity_check(
     proofs: dict[str, tuple[str, ...]] = {}
     vacuous: dict[str, tuple[str, ...]] = {}
     inconclusive: dict[str, str] = {}
-    for criterion, result in variant.judge(zero.run, tracing, real, zero.own, redact=wb.redactor.redact_text).items():
+    for criterion, result in variant.judge(
+        zero.run, tracing, real, zero.own, redact=wb.redactor.redact_text, proved=zero.proved
+    ).items():
         if result.state == "confirmed":
             proofs[criterion] = result.tests
         elif result.state == "refuted":
@@ -667,7 +707,9 @@ def confirm_pre_satisfied(
     confirmed: dict[str, tuple[str, ...]] = {}
     refuted: dict[str, tuple[str, ...]] = {}
     inconclusive: dict[str, str] = {}
-    for criterion, result in variant.judge(zero.run, rest, real, zero.own, redact=wb.redactor.redact_text).items():
+    for criterion, result in variant.judge(
+        zero.run, rest, real, zero.own, redact=wb.redactor.redact_text, proved=zero.proved
+    ).items():
         if result.state == "confirmed":
             confirmed[criterion] = result.tests
         elif result.state == "refuted":
@@ -728,7 +770,7 @@ def discriminate_extra(
     if zero is not None:
         runs += 1 + zero.reruns
         for test in wanted:
-            outcome, why = variant.test_outcome(zero.run, test, real, own, redact=redact)
+            outcome, why = variant.test_outcome(zero.run, test, real, own, redact=redact, proved=zero.proved)
             if outcome == "proof":
                 accepted[test] = PROOF_ZERO_VALUE
             elif outcome == "inconclusive":

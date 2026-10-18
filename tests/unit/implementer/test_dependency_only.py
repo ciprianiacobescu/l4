@@ -156,11 +156,11 @@ import pytest
 
 class TestPins:
     def test_pin(self):
-        assert importlib.metadata.version("pytest")
+        assert importlib.metadata.version("pytest") == "8.3.0"  # round 2 (L4-IMP-062): the version is compared
 
 
 def test_dependency_attribute():
-    assert pytest.__version__
+    assert pytest.__version__ == "8.3.0"
 """
     bench = staged(make_bench, source)
     assert only(bench, "tests.test_pins.TestPins::test_pin")
@@ -253,3 +253,52 @@ def test_a2_tests_that_run_project_code_by_name_are_not_dependency_only(make_ben
     run_setup(bench.wb)
     for name in ("test_importorskip", "test_import_module", "test_dunder_import", "test_request_fixture"):
         assert not only(bench, f"tests.test_bypass::{name}"), name
+
+
+# --- round-2 review N3: a pin needs a dependency of its own, a version in the text, a comparison ---
+def one(bench: Bench, dist: str, text: str, compare: str = ' == "1.0"') -> bool:
+    name = "test_probe_" + dist.replace("-", "_")
+    (bench.wb.worktree / "tests" / f"{name}.py").write_text(
+        f'import importlib.metadata\n\n\ndef test_probe():\n    assert importlib.metadata.version("{dist}"){compare}\n'
+    )
+    return depcheck.dependency_only(bench.wb, f"tests.{name}::test_probe", import_roots(bench.wb), text)
+
+
+def test_n3_the_project_s_own_distribution_is_no_dependency(make_bench):
+    bench = staged(make_bench, PIN)
+    text = "pytdd 1.0 version: `pytdd.pricing.apply_discount(50.0, 'SAVE10')` is called"
+    assert one(bench, "pytdd", text) is False
+    assert depcheck.own_distributions(bench.wb) == frozenset({"pytdd"})
+
+
+def test_n3_the_name_must_be_a_whole_token(make_bench):
+    bench = staged(make_bench, PIN)
+    assert one(bench, "mcp", "the client of `mintmory-history-mcp` pins version 1.2 of nothing") is False
+    assert one(bench, "distro", "the distribution list of version 1.2 is exported") is False
+    assert one(bench, "pytest", "pytest is pinned to version 1.0") is True
+
+
+def test_n3_the_text_must_give_a_version(make_bench):
+    bench = staged(make_bench, PIN)
+    assert one(bench, "packaging", "the packaging fee is discounted") is False
+    assert one(bench, "packaging", "packaging is pinned at 24.1") is True
+    assert one(bench, "pytest", "the tool pytest 8.3 is the runner") is True
+
+
+def test_n3_the_test_must_compare_the_version(make_bench):
+    bench = staged(make_bench, PIN)
+    text = "pytest version 8 is pinned"
+    assert one(bench, "pytest", text, "") is False  # truth of the version pins nothing
+    assert one(bench, "pytest", text, ".startswith('8.')") is True
+    assert one(bench, "pytest", text, " >= '8'") is True
+
+
+def test_n3_a_dependency_s_dunder_version_is_compared_too(make_bench):
+    bench = staged(make_bench, PIN)
+    path = bench.wb.worktree / "tests" / "test_dunder.py"
+    path.write_text("import pytest\n\n\ndef test_probe():\n    assert pytest.__version__\n")
+    assert (
+        depcheck.dependency_only(bench.wb, "tests.test_dunder::test_probe", import_roots(bench.wb), PIN_TEXT) is False
+    )
+    path.write_text("import pytest\n\n\ndef test_probe():\n    assert pytest.__version__ == '8.3.0'\n")
+    assert depcheck.dependency_only(bench.wb, "tests.test_dunder::test_probe", import_roots(bench.wb), PIN_TEXT) is True

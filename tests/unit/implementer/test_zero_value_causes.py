@@ -157,3 +157,75 @@ def test_an_accept_covers_the_same_test_again(make_bench, monkeypatch, raw):
     answer(bench, raw, "accept: the check is broken")
     assert run_task(bench.wb, TASK).status == "done"
     assert len(bench.events("check.accepted")) == 1
+
+
+# --- round-2 review N1: the cause is the agent's OWN test-module frame, not the deepest repository frame ---------
+PRE_EXISTING_FRAME = (
+    "tests/test_spans.py:9: in <module>\n    require(_ready())\ntests/helpers.py:3: in require\n    assert value\n"
+    "E   AssertionError: not ready\n"
+)
+
+
+def test_n1_a_failing_statement_that_is_not_an_import_is_the_agents_whatever_the_deepest_frame(tmp_path):
+    report = TestReport({OTHER.id: OTHER}, ["tests.test_spans"], {"tests.test_spans": PRE_EXISTING_FRAME})
+    assert outcome(tmp_path, report) == ("none", "")
+    assert outcome(tmp_path, report, zero_value=False)[0] == "inconclusive"  # the base run only confirms
+
+
+def test_n1_a_failing_import_statement_stays_inconclusive(tmp_path):
+    trace = (
+        "tests/test_spans.py:1: in <module>\n    from pytdd.api import app\nsrc/pytdd/api.py:4: in <module>\n"
+        "E   ValueError: x\n"
+    )
+    report = TestReport({OTHER.id: OTHER}, ["tests.test_spans"], {"tests.test_spans": trace})
+    assert outcome(tmp_path, report)[0] == "inconclusive"
+
+
+def commit_base(tdd_repo, raw, files: dict[str, str]) -> None:
+    root = tdd_repo.repo
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    raw(root, "add", "-A")
+    raw(root, "commit", "-q", "-m", "base")
+    raw(root, "push", "-q", "origin", "main")
+    raw(root, "fetch", "-q", "origin")
+
+
+def trap_module(import_line: str, call: str) -> Step:
+    text = f"""\
+import pytest
+
+{import_line}
+from pytdd import total
+
+
+def _ready():
+    return total([50.0])
+
+
+{call}(_ready())
+
+
+@pytest.mark.l4("{KNOWN}")
+def test_known_code():
+    pass
+"""
+    return Step(writes={"tests/test_trap.py": text}, structured=result("red", criteria_ids=[KNOWN]))
+
+
+def test_n1a_a_pre_existing_test_helper_that_asserts_fails_the_attempt(make_bench, tdd_repo, raw):
+    commit_base(tdd_repo, raw, {"tests/helpers.py": 'def require(value):\n    assert value, "not ready"\n'})
+    bench: Bench = make_bench([trap_module("from helpers import require", "require")])
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "failed" and out.reason.startswith(f"not discriminating: {KNOWN}"), out.reason
+    assert bench.events("question.raised") == []
+
+
+def test_n1b_a_pre_existing_private_production_helper_that_raises_fails_the_attempt(make_bench, tdd_repo, raw):
+    private = 'def _require(value):\n    if not value:\n        raise RuntimeError("not ready")\n'
+    commit_base(tdd_repo, raw, {"src/pytdd/checks.py": private})
+    bench: Bench = make_bench([trap_module("from pytdd.checks import _require", "_require")])
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "failed" and out.reason.startswith(f"not discriminating: {KNOWN}"), out.reason
+    assert bench.events("question.raised") == []

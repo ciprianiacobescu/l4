@@ -6,8 +6,10 @@ only*: its function, its `parametrize` lists and its defaults use no name bound 
 (project or test helper), no name bound by a module-level definition of its file other than a constant, no fixture
 other than pytest's built-ins and the names of its own `parametrize`, no project code reached by a string
 (`pytest.importorskip`, `importlib.import_module`, `__import__`, `request.getfixturevalue`, `sys.modules`), and it reads
-a dependency's version with a LITERAL distribution name that the criterion's text names: a call of
-`importlib.metadata.version` / `distribution` / `metadata`, or `<dependency>.__version__`. `assert 1 + 1 == 2`,
+a dependency's version with a LITERAL distribution name that the criterion's text names as a whole token with a
+version next to it, COMPARED (`==`, `<`, `in`, `startswith`...) rather than tested for truth, and that is none of the
+repository's own distributions: a call of `importlib.metadata.version` / `distribution` / `metadata`, or
+`<dependency>.__version__`. `assert 1 + 1 == 2`,
 `json.loads("1") == 1` and `assert pytest.__version__` under a criterion about something else stay not discriminating.
 
 Pure static analysis of the test's file; a file or a function that cannot be found or parsed is not dependency only.
@@ -17,6 +19,7 @@ import ast
 import builtins
 import re
 import sys
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -37,6 +40,58 @@ _RELATIVE = "."  # a binding to a module of the repository, by a relative import
 def _normal(text: str) -> str:
     """Lower case, with every `-`, `_` and `.` as one `-`: `typing_extensions` names `typing-extensions`."""
     return re.sub(r"[-_.]+", "-", text.lower())
+
+
+_VERSION_WORD = re.compile(r"\b(?:version|versions|pin|pinned|pins|release)\b|\bv?\d+\.\d+")
+WINDOW = 80  # characters around the dependency's name in which the criterion must speak of a version
+
+
+def own_distributions(wb: Workbench) -> frozenset[str]:
+    """The (normalised) `[project].name` of every `pyproject.toml` in the worktree: the repository's own packages are
+    installed in its environment too, and a read of their version pins nothing a dependency could break (L4-IMP-062)."""
+    listed = wb.git.run("ls-files", "-z", "--cached", "--others", "--exclude-standard", check=False).stdout
+    names: set[str] = set()
+    for path in filter(None, listed.split("\0")):
+        if path.rsplit("/", 1)[-1] != "pyproject.toml":
+            continue
+        try:
+            data = tomllib.loads((wb.worktree / path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        project = data.get("project")
+        if isinstance(project, dict) and isinstance(project.get("name"), str):
+            names.add(_normal(project["name"]))
+    return frozenset(names)
+
+
+def names_a_version(text: str, dependency: str) -> bool:
+    """Does the criterion's text name `dependency` as a whole token and speak of a version next to it (a version or pin
+    word, or a `1.2` number within `WINDOW` characters)? `mcp` is not in `mintmory-history-mcp`; `packaging` in a
+    sentence about a packaging fee has no version next to it."""
+    parts = [re.escape(part) for part in re.split(r"[-_.]+", dependency.lower()) if part]
+    if not parts:
+        return False
+    pattern = r"(?<![\w-])" + r"[-_.]".join(parts) + r"(?![\w-]|\.[A-Za-z_])"
+    lowered = text.lower()
+    for found in re.finditer(pattern, lowered):
+        near = lowered[max(found.start() - WINDOW, 0) : found.end() + WINDOW]
+        if _VERSION_WORD.search(near):
+            return True
+    return False
+
+
+def _compared(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Is the version read an operand of a comparison (`==`, `<`, `in`, a packaging.version comparison) or the receiver
+    of `startswith`? Testing its truth pins nothing."""
+    current: ast.AST | None = node
+    while current is not None and not isinstance(current, ast.stmt):
+        parent = parents.get(current)
+        if isinstance(parent, ast.Compare):
+            return True
+        if isinstance(parent, ast.Attribute) and parent.attr in ("startswith", "endswith"):
+            return True
+        current = parent
+    return False
 
 
 def _chain(node: ast.expr) -> list[str] | None:
@@ -172,9 +227,10 @@ def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str], criterion
     params = [a.arg for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs] if a.arg not in ("self", "cls")]
     if any(p not in BUILTIN_FIXTURES and p not in names for p in params):
         return False
-    named = _normal(criterion_text)
+    own = own_distributions(wb)
     reads_pin = False
     scanned: list[ast.AST] = [*fn.body, *fn.args.defaults, *[d for d in fn.args.kw_defaults if d is not None], *values]
+    parents = {child: parent for root in scanned for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
     for root in scanned:
         for node in ast.walk(root):
             if isinstance(node, ast.Import | ast.ImportFrom):
@@ -191,9 +247,13 @@ def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str], criterion
                     if (
                         isinstance(first, ast.Constant)
                         and isinstance(first.value, str)
-                        and _normal(first.value) in named
+                        and _normal(first.value) not in own
+                        and names_a_version(criterion_text, first.value)
+                        and _compared(node, parents)
                     ):
-                        reads_pin = True  # a literal distribution name that the criterion names
+                        reads_pin = (
+                            True  # a literal name the criterion gives a version, compared; not the project's own
+                        )
                     else:
                         return False
             if isinstance(node, ast.Attribute) and _chain(node) == ["sys", "modules"]:
@@ -206,8 +266,9 @@ def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str], criterion
                     and target.split(".")[0] not in sys.stdlib_module_names
                     and not _repository(wb, target, roots, near)
                 ):
-                    if _normal(target.split(".")[0]) in named:
-                        reads_pin = True  # `<dependency>.__version__` for a dependency the criterion names
+                    top = target.split(".")[0]
+                    if _normal(top) not in own and names_a_version(criterion_text, top) and _compared(node, parents):
+                        reads_pin = True  # `<dependency>.__version__` of a dependency the criterion gives a version
                     else:
                         return False
             if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):

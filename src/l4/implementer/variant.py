@@ -20,7 +20,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from l4.gates.collection import deepest_location, first_error_line
+from l4.gates.collection import deepest_location, first_error_line, own_statement
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult
 
@@ -95,7 +95,11 @@ def _absent(
     if zero_value:
         if error is None:
             return "none", ""  # the module collected and the id is gone: collection-time code read a production answer
-        where = deepest_location(run.report.collection_details.get(error, ""))
+        detail = run.report.collection_details.get(error, "")
+        statement = own_statement(detail, own_files)
+        if statement is not None and not statement.startswith(("import ", "from ")):
+            return "none", ""  # the unit's own test module failed at a statement that is not an import: its own doing
+        where = deepest_location(detail)
         if where is not None and where[0] in own_files:
             return "none", ""
     if run.reason:
@@ -116,9 +120,13 @@ def test_outcome(
     *,
     redact: Callable[[str], str] | None = None,
     zero_value: bool = True,
+    proved: Collection[str] = (),
 ) -> tuple[Outcome, str]:
     """`zero_value`: the run varies production code (the zero-value runs). The base run only confirms and passes False:
-    there a test it could not run stays inconclusive whatever the cause."""
+    there a test it could not run stays inconclusive whatever the cause. `proved`: tests that failed by assertion in
+    another pass of the same variant (H1); they are a proof whatever this pass shows."""
+    if test_id in proved:
+        return "proof", ""
     if run.report is None:
         return "inconclusive", run.reason
     case = run.report.tests.get(test_id)
@@ -155,10 +163,14 @@ def judge(
     *,
     redact: Callable[[str], str] | None = None,
     zero_value: bool = True,
+    proved: Collection[str] = (),
 ) -> dict[str, CriterionResult]:
     results: dict[str, CriterionResult] = {}
     for criterion, tests in candidates.items():
-        outcomes = [(t, *test_outcome(run, t, real, own_files, redact=redact, zero_value=zero_value)) for t in tests]
+        outcomes = [
+            (t, *test_outcome(run, t, real, own_files, redact=redact, zero_value=zero_value, proved=proved))
+            for t in tests
+        ]
         proving = tuple(t for t, outcome, _ in outcomes if outcome == "proof")
         undecided = [(t, why) for t, outcome, why in outcomes if outcome == "inconclusive"]
         if proving:

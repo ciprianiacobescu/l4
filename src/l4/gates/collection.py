@@ -4,7 +4,7 @@ committed ledger keeps. Pure text work shared by the implementer and the verifie
 redact what they emit)."""
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 COLLECTION_LINE = re.compile(r"^(E\s+.+|\w*(?:Error|Exception)\b.*)$")
@@ -66,6 +66,23 @@ def deepest_location(text: str) -> tuple[str, int] | None:
         if m is not None and in_repository(m.group("path")):
             found = (m.group("path"), int(m.group("line")))
     return found
+
+
+def own_statement(text: str, own_files: Collection[str]) -> str | None:
+    """The source line a traceback shows under its first frame in one of `own_files` (the outermost frame the unit's own
+    test module has), stripped of the `>` marker; None when the traceback has no such frame or shows no line."""
+    lines = text.splitlines()
+    for i, raw in enumerate(lines):
+        found = LOCATION.match(raw.strip())
+        if found is None or found.group("path") not in own_files:
+            continue
+        for follow in lines[i + 1 :]:
+            code = follow.strip().removeprefix(">").strip()
+            if not code or _MARKERS_ONLY.match(code):
+                continue
+            return None if LOCATION.match(follow.strip()) or COLLECTION_LINE.match(code) else code
+        return None
+    return None
 
 
 def called_names(text: str) -> frozenset[str]:

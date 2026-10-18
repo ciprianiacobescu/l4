@@ -109,3 +109,59 @@ def test_k1_two_statement_import_time_code_is_not_held(make_bench, tdd_repo, raw
     kept = bench.events("zero.kept")
     assert [(k["rerun"], k["cause"]) for k in kept] == [(1, "collection")]
     assert kept[0]["functions"] == ["src/pytdd/config.py::load"]
+
+
+# --- round-2 review H1: a decorator factory that is the criterion's subject, applied by a changed module ---
+TELEMETRY = (
+    "from collections.abc import Callable\n\n\n"
+    "def traced(name: str) -> Callable:\n"
+    "    def wrap(fn):\n        fn.span = name\n        return fn\n\n    return wrap\n"
+)
+STORE = (
+    "from pytdd import telemetry\n\n\nclass Store:\n"
+    '    @telemetry.traced("store.add")\n    def add(self, x):\n        return x\n'
+)
+TRACED_TEST = f"""\
+import pytest
+
+from pytdd.telemetry import traced
+
+
+@pytest.mark.l4("{KNOWN}")
+def test_traced_names_the_span():
+    wrap = traced("x")
+    assert wrap is not None
+    assert wrap(lambda: 1).span == "x"
+"""
+
+
+def test_h1_a_decorator_factory_under_test_is_a_proof_from_a_pass_that_keeps_nothing_by_annotation(
+    make_bench, tdd_repo, raw
+):
+    from .test_zero_value_causes import commit_base
+
+    commit_base(tdd_repo, raw, {"src/pytdd/telemetry.py": TELEMETRY, "src/pytdd/store.py": STORE})
+    step = Step(writes={"tests/test_traced.py": TRACED_TEST}, structured=result("red", criteria_ids=[KNOWN]))
+    bench: Bench = make_bench([step])
+    wb = bench.wb
+    (wb.worktree / "src/pytdd/store.py").write_text(STORE + "\n\nVERSION = 2\n")  # an earlier task changed store.py
+    wb.git.run("add", "src/pytdd/store.py")
+    wb.commit("feat: 0.9", task="0.9", attempt=1, phase="green", tdd="green")
+    out = run_red(wb, TASK, attempt=1)
+    assert out.status == "already_satisfied", (out.status, out.reason)
+
+
+def test_m1_the_keep_loop_reads_module_level_calls_of_a_pre_existing_test_support_module(make_bench):
+    from l4.implementer.discrimination import _failing_module_calls
+
+    bench: Bench = make_bench([])
+    (bench.wb.worktree / "tests").mkdir(exist_ok=True)
+    (bench.wb.worktree / "tests/helpers.py").write_text("from pytdd import total\n\nVALUE = total([1.0])\n")
+    (bench.wb.worktree / "tests/test_mine.py").write_text("from pytdd import total\n\nMINE = total([2.0])\n")
+    trace = (
+        "tests/helpers.py:3: in <module>\n    VALUE = total([1.0])\ntests/test_mine.py:3: in <module>\n    MINE = x\n"
+    )
+    assert _failing_module_calls(bench.wb, [trace]) == frozenset({"total"})
+    assert (
+        _failing_module_calls(bench.wb, [trace], frozenset({"tests/helpers.py", "tests/test_mine.py"})) == frozenset()
+    )
