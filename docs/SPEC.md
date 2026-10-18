@@ -5199,8 +5199,9 @@ repository key of L4-WTR-001 (sandbox-security-1): `units/<key>/<fw>/<name>` for
 `gate-tmp`), `excludes`, the agents' raw streams and the merge-base checkout; `pending-unpublished/<key>/<fw>/<name>`;
 and `{unit}` in `sandbox.caches` is `<key>/<fw>/<name>`, so every existing configuration is keyed with no edit. The
 harness MUST NOT write or remove anything of the earlier layout (`units/<fw>/<name>`, `pending-unpublished/<fw>/<name>`),
-except that it moves a run file of it whose `run.started` names a commit of this repository to the keyed directory and
-publishes it as usual; any other run file stays and is named in one warning per run. A new keyed uv cache is new and gets
+except that it moves a run file of it that belongs to this repository to the keyed directory and publishes it as usual (it
+records this repository's key in `run.started`, or, written before 0.4.16, a CI link whose project path is the path of
+`origin`; the commits a file names prove nothing, every clone has them); any other run file stays and is named in one warning per run. A new keyed uv cache is new and gets
 the project's seed copy.
 
 **L4-SEC-035 Gates that do not build the environment cannot change it.** The gate sandbox of any command other than
@@ -9916,7 +9917,7 @@ scenario is a spec defect (§26).
 - **Then** B's unpublished files are empty and nothing is pushed for A's run
 
 #### SCN-SEC-84 (+) A run file of the earlier layout is adopted only by its own repository · L4-SEC-034
-- **Given** two run files in `pending-unpublished/openspec/add-login`, one whose `run.started` names a commit of this repository and one whose commits are not here
+- **Given** two run files in `pending-unpublished/openspec/add-login`, one whose `run.started` records this repository's key and one that records another key, and a clone of this repository that has every commit either file names
 - **When** the run starts
 - **Then** the first is moved to the keyed directory and published, the second is left in place, and one warning names its directory
 

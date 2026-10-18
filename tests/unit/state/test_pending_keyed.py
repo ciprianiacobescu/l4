@@ -3,12 +3,10 @@ project's lock ref, and a file of the earlier layout is adopted only by the repo
 
 import json
 import logging
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 from l4.state.pending import adopt_legacy, keep_unpublished, unpublished_files
-from l4.vcs.git import Git
 from l4.vcs.names import UnitNames
 
 UNIT = "openspec:add-login"
@@ -35,38 +33,24 @@ def test_another_projects_unpublished_file_is_not_published(tmp_path: Path):  # 
     assert list(seen) == ["r-20261017T1200Z-aaaa"]
 
 
-def _repo(tmp_path: Path) -> tuple[Git, str]:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
-    for args in (
-        ["init", "-q", "-b", "main"],
-        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"],
-    ):
-        subprocess.run(["git", "-C", str(repo), *args], check=True, env=env, capture_output=True)
-    git = Git(repo, environ=env)
-    return git, git.run("rev-parse", "HEAD").stdout.strip()
-
-
-def _run_file(directory: Path, run_id: str, base: str) -> Path:
+def _run_file(directory: Path, run_id: str, **fields: object) -> Path:
     path = directory / f"{run_id}.jsonl"
-    line = {"ts": "2026-10-17T12:00:00Z", "run_id": run_id, "unit": UNIT, "seq": 1, "type": "run.started", "base": base}
-    path.write_text(json.dumps(line) + "\n")
+    path.write_text(json.dumps({"type": "run.started", "run_id": run_id, "seq": 1, **fields}) + "\n")
     return path
 
 
 def test_a_legacy_run_file_is_adopted_only_by_its_repository(tmp_path: Path, caplog):  # SCN-SEC-84
-    git, head = _repo(tmp_path)
+    """Changed with L4-SEC-034 (review F3): the file's recorded repository key decides, not the commits it names."""
     legacy = tmp_path / "cache" / "pending-unpublished" / "openspec" / "add-login"
     legacy.mkdir(parents=True)
-    mine = _run_file(legacy, "r-20261017T1200Z-aaaa", head)
-    other = _run_file(legacy, "r-20261017T1201Z-bbbb", "0123456789abcdef0123456789abcdef01234567")
+    mine = _run_file(legacy, "r-20261017T1200Z-aaaa", repository_key="proj-0123456789", base="a" * 40)
+    other = _run_file(legacy, "r-20261017T1201Z-bbbb", repository_key="other-9999999999", base="a" * 40)
     keyed = tmp_path / "cache" / "pending-unpublished" / "proj-0123456789" / "openspec" / "add-login"
     with caplog.at_level(logging.WARNING, logger="l4.pending"):
-        moved = adopt_legacy(legacy, keyed, git)
+        moved = adopt_legacy(legacy, keyed, repo_key="proj-0123456789", repo_path=None)
     assert [p.name for p in moved] == [mine.name]
     assert (keyed / mine.name).is_file() and not mine.exists()
     assert other.is_file() and not (keyed / other.name).exists()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1 and str(legacy) in warnings[0] and warnings[0].startswith("1 ")
-    assert "0123456789abcdef" not in warnings[0]
+    assert "a" * 40 not in warnings[0]

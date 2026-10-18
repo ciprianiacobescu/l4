@@ -24,6 +24,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import read_regular_file
@@ -103,30 +104,43 @@ def unpublished_files(directory: Path) -> dict[str, Path]:
     }
 
 
-def _started_commits(path: Path) -> list[str]:
-    """The commit ids the file's `run.started` names (its base and head); none when the file says nothing usable."""
+def _run_started(path: Path) -> dict[str, Any]:
+    """The first line of a run file when it is a `run.started`, else {}."""
     try:
         first = read_regular_file(path, limit=MAX_LEDGER_FILE_BYTES).split(b"\n", 1)[0]
         body = json.loads(first)
     except (OSError, ValueError):
-        return []
-    if not isinstance(body, dict) or body.get("type") != "run.started":
-        return []
-    return [v for k in ("base", "head") if isinstance(v := body.get(k), str) and re.fullmatch(r"[0-9a-f]{40,64}", v)]
+        return {}
+    return body if isinstance(body, dict) and body.get("type") == "run.started" else {}
 
 
-def adopt_legacy(legacy_dir: Path, keyed_dir: Path, git: Git) -> list[Path]:
-    """The run files of the earlier, unkeyed layout (`pending-unpublished/<fw>/<name>`) that belong to this
-    repository move to `keyed_dir`: one is adopted when a commit its `run.started` names is a commit of `git`. Any
-    other stays where it is (it may be another project's) and is named in one warning, never by content. Returns the
-    files moved, at their new place (L4-SEC-034)."""
+_CI_PROJECT = re.compile(r"^https?://[^/]+/(?P<path>.+?)/(?:-/|actions/)")
+
+
+def belongs_to(path: Path, *, repo_key: str, repo_path: str | None) -> bool:
+    """Whether a run file of the earlier layout was written for this repository (L4-SEC-034). A file records the
+    repository key in its `run.started` (since 0.4.16); an older one is proven only by the project path of its CI link
+    (`https://<forge>/group/project/-/pipelines/N` or `.../actions/runs/N`; the host is scrubbed in the file) equal to
+    the path of this repository's `origin`. The commits a file names prove nothing: every clone has the history."""
+    body = _run_started(path)
+    recorded = body.get("repository_key")
+    if isinstance(recorded, str):
+        return recorded == repo_key
+    link = body.get("ci_url")
+    match = _CI_PROJECT.match(link) if isinstance(link, str) else None
+    return bool(match and repo_path and match.group("path") == repo_path)
+
+
+def adopt_legacy(legacy_dir: Path, keyed_dir: Path, *, repo_key: str, repo_path: str | None) -> list[Path]:
+    """The run files of the earlier, unkeyed layout (`pending-unpublished/<fw>/<name>`) that belong to this repository
+    (`belongs_to`) move to `keyed_dir`. Any other stays where it is (it may be another project's) and is named in one
+    warning, never by content. Returns the files moved, at their new place (L4-SEC-034)."""
     if not legacy_dir.is_dir():
         return []
     moved: list[Path] = []
     left = 0
     for path in unpublished_files(legacy_dir).values():
-        commits = _started_commits(path)
-        if any(git.run("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0 for sha in commits):
+        if belongs_to(path, repo_key=repo_key, repo_path=repo_path):
             keyed_dir.mkdir(parents=True, exist_ok=True)
             target = keyed_dir / path.name
             if target.exists():  # the keyed copy of the same run is the one this repository wrote
@@ -138,7 +152,7 @@ def adopt_legacy(legacy_dir: Path, keyed_dir: Path, git: Git) -> list[Path]:
             left += 1
     if left:
         log.warning(
-            "%d unpublished run files of the earlier layout in %s belong to no commit of this repository; "
+            "%d unpublished run files of the earlier layout in %s belong to no repository we can prove is this one; "
             "they are kept and never published",
             left, legacy_dir,
         )  # fmt: skip

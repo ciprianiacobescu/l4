@@ -35,8 +35,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ### Changed
 - Per-unit directories under `$L4_CACHE` carry the repository key (`units/<key>/<fw>/<name>`). Caches start empty once
   after the upgrade (a new `uv` cache gets the project's seed copy); the old `units/<fw>/<name>` directories can be
-  deleted by hand. A run file of the earlier `pending-unpublished` layout is published by the repository whose commits it
-  names; any other is kept and named in one warning.
+  deleted by hand. A run file of the earlier `pending-unpublished` layout is published by the repository it records (its key, or the
+  project path of its CI link); any other, a local run included, is kept and named in one warning.
 - A project environment (`.venv`, `node_modules`) that an agent step or a gate changed is removed and built again by the
   next `gates.setup`; the verifier builds its own. A project without `gates.setup` therefore builds its environment in
   every gate: set `gates.setup`. A test gate that writes into `node_modules` other than `.cache` and `.vite` fails

@@ -1621,8 +1621,9 @@ These limits make operation more difficult. Know them before you start.
 - Per-unit directories under `$L4_CACHE` carry the repository key (0.4.16): `units/<key>/<fw>/<name>`,
   `pending-unpublished/<key>/<fw>/<name>`. A cache starts empty once after the upgrade, and the old
   `units/<fw>/<name>` directories can be deleted by hand; the harness never touches them. A run file of the earlier
-  `pending-unpublished/<fw>/<name>` layout is published by the repository whose commits it names; any other stays and
-  a warning names its directory and the count.
+  `pending-unpublished/<fw>/<name>` layout is published by the repository it records (its key, or the project path of its
+  CI link); any other, a run you made locally included, stays and a warning names its directory and the count: move
+  such a file into the keyed directory by hand to have it published.
 - The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
   sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 

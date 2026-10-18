@@ -28,8 +28,9 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
   harness's gate plugins, `~/.serena` for agents); new keys `sandbox.tool_paths` (both kinds) and `sandbox.setup_paths`
   (setup gates only, for a registry login) bind more, read-only, and refuse any path that is or holds a login.
 - **Keyed per-unit directories** (L4-SEC-034): `$L4_CACHE/units/<key>/<fw>/<name>`, `{unit}` in `sandbox.caches` =
-  `<key>/<fw>/<name>`, `pending-unpublished/<key>/<fw>/<name>`; a run file of the earlier layout is adopted only when its
-  commits are in this repository, otherwise kept and named in a warning.
+  `<key>/<fw>/<name>`, `pending-unpublished/<key>/<fw>/<name>`; a run file of the earlier layout is adopted only when it records
+  this repository's key (or, before the key was recorded, its CI link names this project), otherwise kept and named in a
+  warning.
 - **The project environment cannot carry a plant into a verdict** (L4-SEC-035..037): gates other than `gates.setup` see
   `.venv` and `node_modules` read-only (their `.cache`/`.vite` start empty); after every successful setup the harness
   records a manifest of the environment, and after every agent step and every other gate a changed, new or unverified

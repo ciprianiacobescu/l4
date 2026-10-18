@@ -51,14 +51,16 @@ Every task follows these rules:
     reads `services.names.unpublished_dir` (call it on an orchestrator built by the existing orchestrator test world in
     `tests/unit/orchestrator/`, or assert on a minimal fake `services` if that world cannot be pointed at two projects).
   - `test_a_legacy_run_file_is_adopted_only_by_its_repository` (SCN-SEC-84): in `<cache>/pending-unpublished/openspec/
-    add-login/` put `r-20261017T1200Z-aaaa.jsonl` whose first line is a `run.started` naming this repository's HEAD sha
-    (in the fields `run.started` really carries: read `LedgerWriter.open` and its caller for the base/head keys) and
-    `r-20261017T1201Z-bbbb.jsonl` naming a sha that is not in the repository; `adopt_legacy(legacy_dir, keyed_dir, git)`
-    moves the first into `keyed_dir`, leaves the second, and logs exactly one warning (caplog) naming `legacy_dir` and
-    the count 1, never a file's content.
+    add-login/` put a run file whose first line is a `run.started` recording this repository's `repository_key` and one
+    recording another key; `adopt_legacy(legacy_dir, keyed_dir, repo_key=, repo_path=)` moves the first into `keyed_dir`,
+    leaves the second, and logs exactly one warning (caplog) naming `legacy_dir` and the count 1, never a file's content.
+    `tests/unit/state/test_adopt_legacy_identity.py` (review F3, ported from the reviewer's clone reproduction): a clone
+    that has every commit a legacy file names does not adopt it; a file without a key is adopted by the project path of
+    its `ci_url` only.
 - [x] 1.4 Code: `src/l4/state/pending.py`: `keep_unpublished(directory, run_file)`, `unpublished_files(directory)`,
-  `adopt_legacy(legacy_dir, keyed_dir, git) -> list[Path]` (a file is adopted when a commit sha of its `run.started`
-  passes `git cat-file -e <sha>^{commit}`; unreadable or unknown: left). `src/l4/orchestrator.py`: `_unpublished` and
+  `adopt_legacy(legacy_dir, keyed_dir, *, repo_key, repo_path) -> list[Path]` (a file is adopted when its `run.started`
+  records `repository_key` equal to ours, or has no key and a `ci_url` whose project path is `repo_path`; the commits it
+  names prove nothing). `run.started` gains `repository_key`. `src/l4/orchestrator.py`: `_unpublished` and
   `_publish_pending` pass `s.names.unpublished_dir` (lines 1245, 1275); `_publish_unpublished` first adopts from
   `cache_root(...) / UNPUBLISHED_DIR / fw / name` and prints the one warning of design D8 when files are left.
   `src/l4/state/restart.py:273` removes `names.unpublished_dir` (and never the legacy directory). Verify: the 1.3 file,

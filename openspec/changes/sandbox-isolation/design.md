@@ -290,13 +290,17 @@ misses an edited RECORD-listed file (`_pytest/runner.py`). The manifest needs ne
 - `verifier/basemerge._excludes` uses `ctx.services.names.unit_cache / "excludes"` (`basemerge.py:66-67`).
 - `state/pending.py`: `keep_unpublished(directory, run_file)` and `unpublished_files(directory)` take the keyed directory;
   `orchestrator.py:1245,1275` pass `s.names.unpublished_dir`; `state/restart.py:273` removes the keyed one.
-- Migration of `pending-unpublished/<fw>/<name>` (the earlier layout): `pending.adopt_legacy(legacy_dir, keyed_dir, git)`
-  runs before `_publish_unpublished`; a legacy `<run-id>.jsonl` whose `run.started` names a commit (its base or head) that
-  `git cat-file -e` finds in this repository is moved into the keyed directory and published as usual; any other is left
-  in place and named in one warning line per run (`[l4] <n> unpublished run files of the earlier layout in <dir> belong
-  to no commit of this repository; they are kept and never published`). A wrong adoption needs another project with the
-  same unit name whose run recorded a commit of this repository: a fork, which shares the history it would be published
-  into [I]. Everything else of the earlier layout (`units/<fw>/<name>`) is never read, written or removed (as
+- Migration of `pending-unpublished/<fw>/<name>` (the earlier layout): `pending.adopt_legacy(legacy_dir, keyed_dir,
+  repo_key=, repo_path=)` runs before `_publish_unpublished`. **A run file belongs to a repository by what it records,
+  never by the commits it names** (review F3: every clone has the shared history, so commit presence adopts another
+  project's file): `run.started` carries `repository_key` since 0.4.16 (`orchestrator.py`, `LedgerWriter.open`), and a
+  file is adopted when that equals this repository's key. A file written before that has no key; it is adopted only when
+  the project path of its `ci_url` (`https://<forge>/group/project/-/pipelines/N`, `.../actions/runs/N`; the host is
+  scrubbed in the file) equals the path of this repository's `origin`. A local run without a CI link, and any file that
+  records another key or path, stays in place and is named in one warning per run (`<n> unpublished run files of the
+  earlier layout in <dir> belong to no repository we can prove is this one; they are kept and never published`); the
+  operator moves such a file by hand. The cost is that a failed publish of a local run made before the upgrade is not
+  retried automatically. Everything else of the earlier layout (`units/<fw>/<name>`) is never read, written or removed (as
   L4-WTR-001 does for the earlier lock paths); a new keyed uv cache is new, so it gets the project's seed copy.
 
 ### D9. Key and credential files (L4-PRV-040, L4-PRV-041)

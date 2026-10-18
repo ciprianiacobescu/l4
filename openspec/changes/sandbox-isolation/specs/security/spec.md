@@ -98,8 +98,8 @@ that names the key, never the path.
 Per-unit directories under `$L4_CACHE` SHALL include the repository key of L4-WTR-001: `units/<key>/<fw>/<name>` for
 the step temp directories, `excludes`, the agents' raw streams and the merge-base checkout,
 `pending-unpublished/<key>/<fw>/<name>`, and `{unit}` in `sandbox.caches` = `<key>/<fw>/<name>`. The harness MUST NOT
-write or remove anything of the earlier layout, except that it moves a run file of it whose commits are in this
-repository to the keyed directory and publishes it.
+write or remove anything of the earlier layout, except that it moves a run file of it that records this
+repository's key to the keyed directory and publishes it.
 
 #### Scenario: SCN-SEC-81 (−) Two projects with the same unit name share no directory
 - **GIVEN** two repositories with different `origin` URLs, one runner cache, and a unit `openspec:add-login` in each
@@ -117,7 +117,7 @@ repository to the keyed directory and publishes it.
 - **THEN** B's unpublished files are empty and nothing is pushed for A's run
 
 #### Scenario: SCN-SEC-84 (+) A run file of the earlier layout is adopted only by its own repository
-- **GIVEN** two run files in `pending-unpublished/openspec/add-login`, one whose `run.started` names a commit of this repository and one whose commits are not here
+- **GIVEN** two run files in `pending-unpublished/openspec/add-login`, one whose `run.started` records this repository's key and one that records another key, and a clone of this repository that has every commit either file names
 - **WHEN** the run starts
 - **THEN** the first is moved to the keyed directory and published, the second is left in place, and one warning names its directory
 

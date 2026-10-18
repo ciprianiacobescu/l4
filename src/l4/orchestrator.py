@@ -112,7 +112,7 @@ from l4.vcs.git import Git, GitError
 from l4.vcs.locks import LocalFileLease, acquire_for_run
 from l4.vcs.merge import BaseMergeConflict
 from l4.vcs.names import UNPUBLISHED_DIR, UnitNames
-from l4.vcs.repokey import repository_key
+from l4.vcs.repokey import normalize_remote, repository_key
 from l4.vcs.secretscan import SecretInPush, outgoing_secrets
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.worktree import WorktreeManager
@@ -1254,9 +1254,11 @@ class Orchestrator:
         """The tails that earlier runs could not publish (the lock ref refused the push) exist nowhere else, so they
         go first. A failure here is only logged: this run's own publish reports a lock ref that cannot be written."""
         s = self.services
+        origin = origin_url(s.app.repo, s.app.environ)
+        repo_path = normalize_remote(origin).partition("/")[2] if origin else None
         adopt_legacy(
             cache_root(s.app.environ, repo=s.app.repo) / UNPUBLISHED_DIR / s.ref.framework.value / s.ref.name,
-            s.names.unpublished_dir, s.git,
+            s.names.unpublished_dir, repo_key=s.names.repo_key, repo_path=repo_path or None,
         )  # fmt: skip
         for run_id, path in self._unpublished().items():
             try:
@@ -1447,7 +1449,8 @@ def run_unit_in_worktree(
         summary = step_summary_for(app.environ)  # the GitHub job summary: one line for each task that ends (L4-OBS-005)
         return LedgerWriter.open(
             unit_dir, ref.id, app.run_id, redactor=app.redactor, command="run", branch=names.branch,
-            base=tree.head, source=tree.source, iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
+            repository_key=names.repo_key, base=tree.head, source=tree.source,
+            iteration=snapshot.state.iteration + 1,  # this run's own count (P6)
             observers=[trace, *([summary] if summary else [])], file_filter=app_forge_urls(app, cfg).scrub,
             **run_environment(app.environ),
         )  # fmt: skip
