@@ -29,6 +29,7 @@ from l4.implementer.unit_context import (
     SourceFile,
     cut_line,
     plan_context,
+    safe_label,
     section_keys,
 )
 from l4.specs.base import Criterion, Framework
@@ -37,6 +38,8 @@ from l4.specs.criteria import linked_criteria
 Role = Literal["red", "green", "single"]
 _TAG = re.compile(r"<\s*(/?)\s*l4\s*:\s*data", re.IGNORECASE)
 _ADAPTER_LINE = re.compile(r"^@([a-z0-9-]+): (.*)$")
+WINDOW_SHARE = 0.6  # the whole prompt may fill this share of a stated model window
+NOT_SHOWN_RESERVE = 2_000  # room for the `Not shown in full` section, which depends on the cuts
 _VERSION = re.compile(r"^version: (\d+)\n\n")
 
 
@@ -84,6 +87,7 @@ class PromptContext:
     task_block: str = ""
     unit_rel: str = ""
     budget_source: str = "implementer"
+    window_tokens: int | None = None  # the selected model's context window, when the profile states it
     own_criteria: tuple[Criterion, ...] = ()
 
 
@@ -95,6 +99,7 @@ class RenderedPrompt:
     sources: tuple[str, ...]
     cuts: tuple[Cut, ...] = ()
     budget_tokens: int = 0
+    budget_source: str = "implementer"
 
 
 def load_template(name: str) -> Template:
@@ -122,7 +127,7 @@ def _require_wrapped(heading: str, text: str) -> None:
 def data_block(source: str, text: str) -> str:
     """`<l4:data source="...">` around text that must stay information."""
     safe = defuse(text)
-    return f'<l4:data source="{source.replace(chr(34), chr(39))}">\n{safe}\n</l4:data>'
+    return f'<l4:data source="{safe_label(source)}">\n{safe}\n</l4:data>'
 
 
 def _contract(template: Template, ctx: PromptContext) -> str:
@@ -230,43 +235,24 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     title, criteria = _criteria_section(ctx)
     task_source = f"{ctx.unit_rel}/tasks.md" if ctx.task_block and ctx.unit_rel else "tasks.md"
     task_section = f"# Task {ctx.task_key}\n" + data_block(task_source, ctx.task_block or title)
-    framework = Framework.OPENSPEC if ctx.unit_id.startswith("openspec:") else Framework.KIRO
-    plan = plan_context(
-        fixed_chars=len(task_section) + len(criteria), budget_tokens=ctx.context_budget_tokens,
-        conventions=ctx.conventions, source_files=_source_files(ctx),
-        keys=section_keys(ctx.task_block or title, ctx.task_links, framework),
-    )  # fmt: skip
-    parts = [_contract(contract, ctx)]
-    if plan.conventions:
-        parts.append(
-            "# Project conventions\nThe project's conventions for this task. The harness contract says how to use "
-            "them.\n" + "\n".join(data_block(b.path, b.body()) for b in plan.conventions)
-        )
-    parts.append("# Unit context\n" + "\n".join(data_block(b.path, b.body()) for b in plan.sources))
-    if plan.cuts:
-        parts.append(
-            "# Not shown in full\nThese files were cut to fit this prompt or could not be read in full. The harness "
-            "contract says what to do with them.\n"
-            + data_block("not shown in full", "\n".join(cut_line(c) for c in plan.cuts))
-        )
-    parts += [task_section, criteria]
+    after: list[str] = []
     for heading, text in ctx.data_blocks:
         _require_wrapped(heading, text)
-        parts.append(f"# {heading.capitalize()}\n{text}")
+        after.append(f"# {heading.capitalize()}\n{text}")
     if ctx.previous_failure:
-        parts.append(
+        after.append(
             "# Your previous attempt was rejected\nThe harness rejected it for the reason below; do not repeat it.\n"
             + data_block("previous attempt", ctx.previous_failure)
         )
     if role == "green" and ctx.unfrozen:
         by = ", ".join(sorted({q for _, q in ctx.unfrozen}))
         listing = "\n".join(f"- {path} ({question})" for path, question in ctx.unfrozen)
-        parts.append(
+        after.append(
             f"# Tests unfrozen by a human answer\nThe human answer to {by} names these frozen test files, so you may "
             "change them as the answer says; every other test stays frozen.\n" + data_block("unfrozen tests", listing)
         )
     if role == "green" and ctx.named:
-        parts.append(
+        after.append(
             "# Files this task names\nThe task's own text names these frozen support files, so you may change them as "
             "the task says. Keep every existing statement of each one as it is: add new statements, never edit, move "
             "or rebind an old one, and do not patch or assign the unit's code from them (setting the environment is "
@@ -274,13 +260,13 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             + data_block("files this task names", "\n".join(f"- {path}" for path in ctx.named))
         )
     if role == "red" and ctx.stale_tests:
-        parts.append(_stale_section(ctx))
+        after.append(_stale_section(ctx))
     rules = _trace_rules(ctx)
     phase_text = phase.body.strip("\n").replace("{result_values}", result_values_line(RESULT_SCHEMA, role))
     fills = (("{trace_rule}", rules.rule), ("{trace_also}", rules.also), ("{trace_form}", rules.form))
     for placeholder, value in fills:
         phase_text = phase_text.replace(placeholder, value)
-    parts.append(phase_text)
+    after.append(phase_text)
     gate = (
         f"# Gate command\nRun tests only with `{ctx.gate_command}` (the network is off, and `uv run` cannot write its "
         "cache here). The harness installed the dependencies before this step."
@@ -303,7 +289,7 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             f"server and reject the attempt. The harness serves the app for `gates.e2e` and gives its address in "
             f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other."
         )
-    parts.append(gate)
+    after.append(gate)
     version = f"{contract.name}@{contract.version}+{phase.name}@{phase.version}"
     if ctx.result_path is None:  # a native adapter: the CLI enforces the schema
         fields = (
@@ -317,7 +303,34 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         schema = json.dumps(FILE_RESULT_SCHEMA, separators=(",", ":"), sort_keys=True)
         output = template.body.strip("\n").replace("{path}", str(ctx.result_path)).replace("{schema}", schema)
         version += f"+{template.name}@{template.version}"
-    parts.append(output)
+    after.append(output)
+    framework = Framework.OPENSPEC if ctx.unit_id.startswith("openspec:") else Framework.KIRO
+    # what the budget does not govern: the contract, the data blocks, the phase, the gate and the output
+    others = len(_contract(contract, ctx)) + sum(len(x) for x in after) + 2 * (len(after) + 4)
+    tokens, source = ctx.context_budget_tokens, ctx.budget_source
+    if ctx.window_tokens:  # the model's window caps the WHOLE prompt at WINDOW_SHARE of it (owner decision)
+        room = int(ctx.window_tokens * WINDOW_SHARE) * CHARS_PER_TOKEN - others - NOT_SHOWN_RESERVE
+        if max(room, 0) // CHARS_PER_TOKEN < tokens:
+            tokens, source = max(room, 0) // CHARS_PER_TOKEN, "model_window"
+    plan = plan_context(
+        fixed_chars=len(task_section) + len(criteria), budget_tokens=tokens,
+        conventions=ctx.conventions, source_files=_source_files(ctx),
+        keys=section_keys(ctx.task_block or title, ctx.task_links, framework),
+    )  # fmt: skip
+    parts = [_contract(contract, ctx)]
+    if plan.conventions:
+        parts.append(
+            "# Project conventions\nThe project's conventions for this task. The harness contract says how to use "
+            "them.\n" + "\n".join(data_block(b.path, b.body()) for b in plan.conventions)
+        )
+    parts.append("# Unit context\n" + "\n".join(data_block(b.path, b.body()) for b in plan.sources))
+    if plan.cuts:
+        parts.append(
+            "# Not shown in full\nThese files were cut to fit this prompt or could not be read in full. The harness "
+            "contract says what to do with them.\n"
+            + data_block("not shown in full", "\n".join(cut_line(c) for c in plan.cuts))
+        )
+    parts += [task_section, criteria, *after]
     text = "\n\n".join(parts) + "\n"
     return RenderedPrompt(
         text,
@@ -325,7 +338,8 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         version,
         tuple(s.name for s in _source_files(ctx)),
         plan.cuts,
-        ctx.context_budget_tokens,
+        tokens,
+        source,
     )
 
 

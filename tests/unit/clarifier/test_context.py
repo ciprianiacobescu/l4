@@ -196,3 +196,15 @@ def test_spec_and_document_blocks_number_their_lines_so_a_cited_line_resolves(re
     assert "that prefix is not part of the file" in SYSTEM and "spec or code block" in SYSTEM
     ref = Citation(ref="design.md#L3-L4", quote="The rate is stored in basis points.", claim="c")
     assert resolve_citation(ref, [tmp_path]).ok  # the numbers the model saw are the file's
+
+
+def test_the_line_number_prefixes_are_charged_to_the_documents_share(repo, git_for):
+    """Review minor 5: the rendered documents (with `<n>: ` before each line) fit half of the budget."""
+    from l4.implementer.unit_context import CHARS_PER_TOKEN, SourceFile
+
+    text = "".join(f"short line {n}\n" for n in range(6000))  # short lines: the prefixes are a large share
+    docs = [SourceFile("design.md", ".kiro/specs/u/design.md", text, len(text))]
+    b = builder(repo, git_for, tokens=4000)
+    user = b.build_prompt(view(), documents=docs, base_specs=[], answered="", code=[]).user
+    spec = user[user.index('<l4:data kind="spec"') : user.index("</l4:data>", user.index('<l4:data kind="spec"'))]
+    assert len(spec) <= 4000 * CHARS_PER_TOKEN // 2

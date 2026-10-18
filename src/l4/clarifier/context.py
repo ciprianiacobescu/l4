@@ -195,7 +195,7 @@ class ContextBuilder:
         ]  # the archived specs come last, as the proposal does
         plan = plan_context(
             fixed_chars=0, budget_tokens=max(self._tokens // DOCUMENT_SHARE, 1), conventions=(), source_files=files,
-            keys=section_keys(f"{question.title}\n{question.context}", (), Framework.KIRO),
+            keys=section_keys(f"{question.title}\n{question.context}", (), Framework.KIRO), numbered=True,
         )  # fmt: skip
         spec_blocks = [
             _data("spec", b.path, b.body(numbered=True)) for b in plan.sources

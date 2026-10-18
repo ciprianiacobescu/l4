@@ -17,7 +17,7 @@ from typing import Any, Literal
 from l4.config.schema import L4Config, Profile
 from l4.fsutil import MAX_SOURCE_BYTES as MAX_SOURCE_BYTES  # the one limit, shown here too
 from l4.fsutil import UnsafeFile, read_regular_file, read_regular_prefix
-from l4.specs.base import Criterion, Framework, Task, UnitRef
+from l4.specs.base import SAFE_NAME, Criterion, Framework, Task, UnitRef
 from l4.specs.criteria import own_criteria
 from l4.specs.kiro import _REF
 from l4.specs.markers import MAX_TASKS_BYTES
@@ -25,7 +25,17 @@ from l4.specs.steering import SteeringDecision, decide_steering, openspec_contex
 from l4.specs.tasks_text import _FENCE, _HEADING, enclosing_headings, task_text
 
 CHARS_PER_TOKEN = 4  # [I] a rough estimate; the budget only bounds the prompt, it does not meter it
-Reason = Literal["", "oversize", "symlink", "not_regular"]
+Reason = Literal["", "oversize", "symlink", "not_regular", "bad_name"]
+_UNSAFE_LABEL = re.compile(r'[\x00-\x1f\x7f<>"]')
+NOT_READ = ("symlink", "not_regular", "bad_name")  # reasons for which nothing of the file was read
+
+
+def safe_label(text: str) -> str:
+    """A path as a label in a prompt or on a console: no control character, quote or angle bracket, so that a name in
+    the repository cannot forge a data block, a heading or a terminal sequence."""
+    return _UNSAFE_LABEL.sub("?", text)
+
+
 # the files of a unit, in the order they are read; the prompt shows them in the order of `KIND_ORDER` below
 UNIT_FILES = ("proposal.md", "design.md", "requirements.md", "bugfix.md")
 
@@ -69,9 +79,10 @@ def _read_one(path: Path, name: str, repo: Path) -> SourceFile | None:
         return None
     except (UnsafeFile, OSError):
         return SourceFile(name, rel, "", 0, "not_regular")
-    return SourceFile(
-        name, rel, data.decode("utf-8", errors="replace"), size, "oversize" if size > MAX_SOURCE_BYTES else ""
-    )
+    text = data.decode("utf-8", errors="replace")
+    if size > MAX_SOURCE_BYTES:  # the read ends mid-line: the fragment is not shown, the cut starts at its line
+        text = text[: text.rfind("\n") + 1]
+    return SourceFile(name, rel, text, size, "oversize" if size > MAX_SOURCE_BYTES else "")
 
 
 def read_sources(unit_dir: Path, repo: Path) -> tuple[SourceFile, ...]:
@@ -89,10 +100,19 @@ def read_sources(unit_dir: Path, repo: Path) -> tuple[SourceFile, ...]:
         return (*found, SourceFile("specs", _rel(specs, repo), "", 0, "symlink"))
     if stat.S_ISDIR(info.st_mode):
         for directory in sorted(specs.iterdir(), key=lambda p: p.name):
-            if directory.is_dir() and not directory.is_symlink():
-                one = _read_one(directory / "spec.md", f"specs/{directory.name}/spec.md", repo)
-                if one is not None:
-                    found.append(one)
+            if directory.is_symlink():
+                found.append(
+                    SourceFile(
+                        f"specs/{safe_label(directory.name)}", safe_label(_rel(directory, repo)), "", 0, "symlink"
+                    )
+                )
+            elif not directory.is_dir():
+                continue
+            elif not SAFE_NAME.match(directory.name):  # the name becomes a data block's source
+                label = safe_label(directory.name)
+                found.append(SourceFile(f"specs/{label}", safe_label(_rel(directory, repo)), "", 0, "bad_name"))
+            elif (one := _read_one(directory / "spec.md", f"specs/{directory.name}/spec.md", repo)) is not None:
+                found.append(one)
     return tuple(found)
 
 
@@ -281,12 +301,13 @@ def _ranges(omitted: Sequence[tuple[int, int | None]]) -> str:
 
 def cut_line(cut: Cut) -> str:
     """One line of `# Not shown in full` (design D4)."""
-    if cut.reason in ("symlink", "not_regular"):
-        return f"- {cut.path}: not read ({cut.reason})"
+    path = safe_label(cut.path)
+    if cut.reason in NOT_READ:
+        return f"- {path}: not read ({cut.reason})"
     if cut.reason == "oversize":
-        head = f"- {cut.path}: {min(cut.total_bytes, MAX_SOURCE_BYTES)} of {cut.total_bytes} bytes read (oversize)"
+        head = f"- {path}: {min(cut.total_bytes, MAX_SOURCE_BYTES)} of {cut.total_bytes} bytes read (oversize)"
     else:
-        head = f"- {cut.path}: {cut.shown_chars} of {cut.total_chars} characters shown (budget)"
+        head = f"- {path}: {cut.shown_chars} of {cut.total_chars} characters shown (budget)"
     if not cut.readable:
         return f"{head}; not readable in this step's sandbox"
     return f"{head}; not shown: {_ranges(cut.omitted)}" if cut.omitted else head
@@ -294,11 +315,12 @@ def cut_line(cut: Cut) -> str:
 
 def cut_summary(cut: Cut) -> str:
     """The short form of a cut for the dry run: the path and how much of it is shown."""
-    if cut.reason in ("symlink", "not_regular"):
-        return f"{cut.path} not read ({cut.reason})"
+    path = safe_label(cut.path)
+    if cut.reason in NOT_READ:
+        return f"{path} not read ({cut.reason})"
     if cut.reason == "oversize":
-        return f"{cut.path} {min(cut.total_bytes, MAX_SOURCE_BYTES)} of {cut.total_bytes} bytes read (oversize)"
-    return f"{cut.path} {cut.shown_chars} of {cut.total_chars} characters shown (budget)"
+        return f"{path} {min(cut.total_bytes, MAX_SOURCE_BYTES)} of {cut.total_bytes} bytes read (oversize)"
+    return f"{path} {cut.shown_chars} of {cut.total_chars} characters shown (budget)"
 
 
 @dataclass(frozen=True)
@@ -366,8 +388,16 @@ class _Doc:
         self.size = [s.end - s.start + 1 for s in self.sections]
         self.overhead = len(f'<l4:data source="{name}">\n') + len("\n</l4:data>") + 1
         self.gaps = 0
+        self.numbered = False  # lines are rendered as `<n>: <line>`: the prefix is charged too (the clarifier)
         self.any = False
         self.cost = 0
+
+    def prefix(self, k: int, lines: int) -> int:
+        """The characters the line-number prefixes of the first `lines` lines of section `k` add."""
+        if not self.numbered:
+            return 0
+        first = self.sections[k].start
+        return sum(len(str(first + i)) + 2 for i in range(lines))
 
     def whole(self, k: int) -> bool:
         return self.taken[k] == self.size[k]
@@ -448,10 +478,10 @@ class _Doc:
 
     def cut(self) -> Cut | None:
         runs = self.runs()
-        if not runs and self.reason not in ("symlink", "not_regular"):
+        if not runs and self.reason not in NOT_READ:
             return None
-        reason = self.reason if self.reason in ("oversize", "symlink", "not_regular") else "budget"
-        readable = self.readable and reason not in ("symlink", "not_regular")
+        reason = self.reason if self.reason in ("oversize", *NOT_READ) else "budget"
+        readable = self.readable and reason not in NOT_READ
         return Cut(
             self.path, self.kind, reason, self.shown_chars(), len(self.text), self.total_bytes, tuple(runs), readable
         )  # fmt: skip
@@ -479,7 +509,7 @@ def _merged_sections(text: str) -> list[Section]:
 
 def _doc_of_source(source: SourceFile) -> _Doc:
     kind = source.kind or kind_of(source.name)
-    readable = source.reason not in ("symlink", "not_regular")
+    readable = source.reason not in NOT_READ
     return _Doc(
         source.path, source.name, source.text, kind, source.reason, source.total_bytes, readable,
         _merged_sections(source.text),
@@ -500,7 +530,7 @@ def _fill(docs: Sequence[_Doc], order: Sequence[tuple[_Doc, int]], room: int) ->
     left."""
     for doc, k in order:
         section = doc.sections[k]
-        chars = len(section.text)
+        chars = len(section.text) + doc.prefix(k, doc.size[k])
         cost = doc.marginal(k, chars, cut=False)
         if cost <= room:
             doc.take(k, doc.size[k], chars, cost)
@@ -511,7 +541,7 @@ def _fill(docs: Sequence[_Doc], order: Sequence[tuple[_Doc, int]], room: int) ->
             best = (0, 0, 0)
             used = 0
             for taken, line in enumerate(lines[:-1], 1):  # the last line is the whole piece: that did not fit
-                used += len(line)
+                used += len(line) + doc.prefix(k, taken) - doc.prefix(k, taken - 1)
                 partial = doc.marginal(k, used, cut=True)
                 if partial > room:
                     break
@@ -525,23 +555,26 @@ def _fill(docs: Sequence[_Doc], order: Sequence[tuple[_Doc, int]], room: int) ->
 
 def plan_context(
     *, fixed_chars: int, budget_tokens: int, conventions: Sequence[Convention], source_files: Sequence[SourceFile],
-    keys: Keys | None,
+    keys: Keys | None, numbered: bool = False,
 ) -> ContextPlan:  # fmt: skip
     """Fill the budget (`budget_tokens` of `CHARS_PER_TOKEN` characters, less `fixed_chars` already charged) in the
     fixed order of design D2: the conventions first, at most half the budget, then the requirements narrative, the
     design and the proposal, each by whole sections, the sections `keys` name first. Every piece is whole or cut at a
-    line boundary, and everything not shown is in `cuts`."""
+    line boundary, and everything not shown is in `cuts`. `numbered` charges the `<n>: ` prefix of each kept line."""
     budget = max(budget_tokens, 1) * CHARS_PER_TOKEN
-    return _plan(max(budget - fixed_chars, 0), budget // CONVENTIONS_SHARE, conventions, source_files, keys)
+    return _plan(max(budget - fixed_chars, 0), budget // CONVENTIONS_SHARE, conventions, source_files, keys, numbered)
 
 
 def _plan(
-    room: int, cap: int, conventions: Sequence[Convention], source_files: Sequence[SourceFile], keys: Keys | None
+    room: int, cap: int, conventions: Sequence[Convention], source_files: Sequence[SourceFile], keys: Keys | None,
+    numbered: bool = False,
 ) -> ContextPlan:  # fmt: skip
     convention_docs = [_doc_of_convention(c) for c in conventions]
     left = _fill(convention_docs, [(d, 0) for d in convention_docs if d.sections], min(room, cap))
     room -= min(room, cap) - left
     docs = [_doc_of_source(s) for s in source_files]
+    for d in docs:
+        d.numbered = numbered
     named = lambda d, k: keys is not None and is_named(d.sections[k].text, keys)  # noqa: E731
     by_kind = {kind: [d for d in docs if d.kind == kind] for kind in _RENDER_ORDER}
     order: list[tuple[_Doc, int]] = []

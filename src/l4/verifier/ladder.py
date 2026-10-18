@@ -60,7 +60,15 @@ from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport
 from l4.implementer.discrimination import discriminate_extra, file_of_test
 from l4.implementer.tdd import RoleLimit
-from l4.implementer.unit_context import MAX_SOURCE_BYTES, Cut, SourceFile, plan_context, read_sources
+from l4.implementer.unit_context import (
+    MAX_SOURCE_BYTES,
+    NOT_READ,
+    Cut,
+    SourceFile,
+    plan_context,
+    read_sources,
+    safe_label,
+)
 from l4.implementer.workbench import Workbench, clip_subject, make_workbench
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, LLMBackend, workbench_request_factory
 from l4.llm.system_one import SystemOneBackend, open_s1_backend
@@ -456,9 +464,9 @@ def _spec_holds(cuts: Sequence[Cut]) -> list[str]:
             holds.append(
                 f"the spec file {cut.path} is larger than {MAX_SOURCE_BYTES} bytes: the judge saw only its start"
             )
-        elif cut.reason in ("symlink", "not_regular"):
-            kind = "a symlink" if cut.reason == "symlink" else "not a regular file"
-            holds.append(f"the spec file {cut.path} is {kind}: the judge did not see it")
+        elif cut.reason in NOT_READ:
+            kind = {"symlink": "a symlink", "bad_name": "named unsafely"}.get(cut.reason, "not a regular file")
+            holds.append(f"the spec file {safe_label(cut.path)} is {kind}: the judge did not see it")
         elif cut.kind == "narrative":
             holds.append(f"the spec file {cut.path} was cut to fit the judge's budget: the judge saw only part of it")
     return holds
