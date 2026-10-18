@@ -78,7 +78,7 @@ ci, ci_jobs}`, where `head` is H, or the head a person merged the PR at (`raced`
 #### Scenario: SCN-YOLO-124 (−) A PR a person merged at another head records that head
 - **GIVEN** a squash merge pinned to H, and a person who pushes X and merges the PR at X before the forge answers
 - **WHEN** the plan step merges
-- **THEN** the forge answers "merged", the merge is `raced`, and `unit.merged{head}` is X, not H
+- **THEN** the forge answers "merged", the merge is `raced`, and `unit.merged` records X as `head` and `ci: unknown`, not H and its verdict
 
 ### Requirement: L4-YOLO-013 Stops, waits, cancel and resume
 A `merge: auto` plan SHALL wait with `merge_not_ready`, the unit and the detail, recorded once while the detail holds
@@ -131,8 +131,8 @@ guarded merge. The guarded merge SHALL itself be `not_ready` when the unit's rec
 
 ### Requirement: L4-YOLO-042 The merge waits for the repository's CI on H
 Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H as the sweep does (L4-CI-012).
-`running`, `failed`, `blocked` (a cancelled or held job, whatever `yolo.merge.require_ci` says) and a read error SHALL
-be `not_ready`, naming H and the jobs. `green` and `preexisting` SHALL go on, and `not_run` too unless
+`running`, `failed`, `blocked` (a cancelled or held job), an unreported required check and a read error SHALL be
+`not_ready` whatever `yolo.merge.require_ci` says, naming H and the jobs or the check. `green` and `preexisting` SHALL go on, and `not_run` too unless
 `yolo.merge.require_ci` is true (L4-YOLO-043). `unit.merged` SHALL record `ci`, and `ci_jobs` for `preexisting`.
 
 #### Scenario: SCN-YOLO-112 (−) CI still running on H holds the merge
@@ -210,3 +210,22 @@ plan step SHALL merge, record `unit.merged{ci: not_run}` and warn in the plan re
   on H and is green on the base, with no `ci.failed` recorded
 - **WHEN** the plan step runs
 - **THEN** nothing is merged, and the wait names `test`
+
+#### Scenario: SCN-YOLO-126 (−) A required check that H has not reported blocks after the window
+- **GIVEN** a base branch that requires `lint`, and a unit in review with a PASS at its recorded H that has not reported
+  it, more than ten minutes after the hand-off
+- **WHEN** the plan step runs, with `yolo.merge.require_ci` true and false
+- **THEN** nothing is merged, and the wait says that the required check `lint` has not reported on H and that GitHub
+  will refuse the merge until it does
+
+#### Scenario: SCN-YOLO-127 (+) Required checks that could not be read are said once
+- **GIVEN** a forge that answers 403 on every read of the base branch's required checks, and a green CI on H
+- **WHEN** the plan step merges
+- **THEN** the unit is merged, and the plan report says once that the required checks could not be read
+
+#### Scenario: SCN-YOLO-128 (−) A repository that cannot start any CI does not wait for the window
+- **GIVEN** a unit in review with a PASS at its recorded H, handed off a minute ago, in a repository with no workflow
+  but `l4.yml`, no required check and no status on H
+- **WHEN** the plan step runs
+- **THEN** the unit is merged at once with `ci: not_run`
+

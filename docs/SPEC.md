@@ -4365,7 +4365,7 @@ stop; the next run probes. A park with a profile cooling (a limit or credit with
 
 **L4-YOLO-041** A review edge comes before the merge. When the plan's current unit is in review with a PASS and the planner gives it work (a commit after H, a spec edit, rewritten history, or red repository CI recorded on H), the plan step SHALL dispatch the unit and SHALL NOT call the guarded merge. The guarded merge SHALL itself be `not_ready` when the unit's recorded `ci.failed` is for H.
 
-**L4-YOLO-042** The merge waits for the repository's CI on H. Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H as the sweep does (L4-CI-012). `running`, `failed`, `blocked` (a cancelled or held job, whatever `yolo.merge.require_ci` says) and a read error SHALL be `not_ready`, naming H and the jobs. `green` and `preexisting` SHALL go on, and `not_run` too unless `yolo.merge.require_ci` is true (L4-YOLO-043). `unit.merged` SHALL record `ci`, and `ci_jobs` for `preexisting`.
+**L4-YOLO-042** The merge waits for the repository's CI on H. Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H as the sweep does (L4-CI-012). `running`, `failed`, `blocked` (a cancelled or held job), an unreported required check and a read error SHALL be `not_ready` whatever `yolo.merge.require_ci` says, naming H and the jobs or the check. `green` and `preexisting` SHALL go on, and `not_run` too unless `yolo.merge.require_ci` is true (L4-YOLO-043). `unit.merged` SHALL record `ci`, and `ci_jobs` for `preexisting`.
 
 **L4-YOLO-043** Whether a hand-off commit that no CI ran on is merged is configured. The configuration SHALL have `yolo.merge.require_ci` (default `false`): whether a `not_run` CI on H blocks the merge. Running, red (new on H) and unreadable CI SHALL block whatever its value. With `false`, `not_run` SHALL NOT block: the plan step SHALL merge, record `unit.merged{ci: not_run}` and warn in the plan report and on the merged PR or MR. With `true`, it SHALL be `not_ready`, naming `yolo.merge.require_ci: false`.
 
@@ -4925,9 +4925,9 @@ rules are unchanged.
 
 **L4-CI-012** A hand-off commit that no job of the project ran on is not_run. The repository-CI duty SHALL be `not_run`, never green, when H has no job other than the ignored `l4` job, on every forge. Its reason SHALL say which case it is: no check run at all on GitHub (a push made with `GITHUB_TOKEN` starts none), only the harness's own `l4` job, or no pipeline job on GitLab. The sweep and the guarded merge SHALL read H's CI through one function, `read_handoff_ci`.
 
-**L4-CI-013** A job that did not pass is not green. The newest attempt of a project job SHALL pass on success, neutral or skipped, and SHALL be red on failure, timed_out, startup_failure, action_required or stale. A cancelled job, and a held manual job that may not fail, SHALL be `blocked`: neither green nor a fix round. Every project job skipped SHALL be `not_run`.
+**L4-CI-013** A job that did not pass is not green. The newest attempt of a project job SHALL pass on success, neutral or skipped, and SHALL be red on failure, timed_out, startup_failure or stale. A cancelled job, and a held job that a person must act on (`action_required`, a manual job that may not fail), SHALL be `blocked`: neither green nor a fix round. A cancelled job with a finished job of the same workflow file and name under another event SHALL count as that job. Every project job skipped SHALL be `not_run`.
 
-**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL read the workflow runs of H also when H has no check run, and a run not `completed` (the harness's own `l4.yml` aside) SHALL be running; a required status check of the base branch that H has not reported SHALL be running. On GitLab an unfinished pipeline SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`; before that it SHALL be running.
+**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`, unless the repository can start no CI. An unreported required check SHALL block the merge after the window.
 
 **L4-CI-015** Commit statuses are read and only the harness's own job is ignored. On GitHub the combined commit status of H SHALL be read as jobs, a failure or error red and pending running, except the harness's own `l4/*` contexts. Only the job `l4` of the workflow `l4.yml` SHALL be ignored as the harness's own.
 
@@ -8112,9 +8112,9 @@ scenario is a spec defect (§26).
 - **Then** it is `ci_failed` naming `tests.yml / build`
 
 #### SCN-CI-052 (+) A re-run collapses to its newest attempt · L4-CI-010
-- **Given** `tests.yml`'s job `test` failed in attempt 1 and passed in attempt 2 of the same workflow run, once with both attempts in one check suite and once in two
+- **Given** `tests.yml`'s job `test` failed in attempt 1 and passed in attempt 2 of the same workflow run, both in one check suite (a re-run keeps its suite)
 - **When** the check runs of H are listed
-- **Then** each time there is one job `tests.yml / test`, and it is `success`
+- **Then** there is one job `tests.yml / test`, and it is `success`
 
 #### SCN-CI-053 (−) A push run and a pull_request run of one workflow are two jobs · L4-CI-010
 - **Given** `tests.yml` ran on H for `push` (job `build` success) and for `pull_request` (job `build` failure)
@@ -8159,7 +8159,7 @@ scenario is a spec defect (§26).
 #### SCN-CI-061 (−) A cancelled, stale or action_required job is not green · L4-CI-013
 - **Given** a GitHub hand-off commit whose only project job concluded `cancelled`, `action_required` or `stale`
 - **When** the CI is read
-- **Then** the cancelled job is `blocked` and the other two are `failed`, never `green`
+- **Then** the cancelled and the `action_required` job are `blocked`, the stale job is `failed`, never `green`
 
 #### SCN-CI-062 (−) A queued workflow run with no check run yet is running · L4-CI-014
 - **Given** a GitHub hand-off commit with a queued workflow run and no check run
@@ -8174,7 +8174,7 @@ scenario is a spec defect (§26).
 #### SCN-CI-064 (−) A required check that H has not reported is running, then not_run · L4-CI-014
 - **Given** a base branch that requires the checks `build` and `lint`, and H with a passed `build` only
 - **When** the CI is read within ten minutes of the hand-off, and an hour after it
-- **Then** it is `running`, and then `not_run` naming `lint`
+- **Then** it is `running`, and then `unreported` naming `lint`, which blocks the merge
 
 #### SCN-CI-065 (−) An unfinished GitLab pipeline with no job yet is running · L4-CI-014
 - **Given** a GitLab hand-off commit whose pipeline is `created`, `pending` or `running` and lists no project job
@@ -8195,6 +8195,11 @@ scenario is a spec defect (§26).
 - **Given** a workflow run with one job and two check runs `Test Results` of one suite, one failed and one passed
 - **When** the check runs of H are listed
 - **Then** the failed one is listed and H is red
+
+#### SCN-CI-069 (+) One CI read makes few calls · L4-CI-015
+- **Given** a green GitHub hand-off commit with one workflow, and a base head with 48 scheduled `l4.yml` runs
+- **When** the CI is read
+- **Then** it makes at most ten API calls, lists no job of an `l4.yml` run, and reads the base head only when H has a red job
 
 ### 23.14 Doctor, dry-run, simulation (DOC, DRY, SIM)
 
@@ -9495,12 +9500,27 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-124 (−) A PR a person merged at another head records that head · L4-YOLO-032
 - **Given** a squash merge pinned to H, and a person who pushes X and merges the PR at X before the forge answers
 - **When** the plan step merges
-- **Then** the forge answers "merged", the merge is `raced`, and `unit.merged{head}` is X, not H
+- **Then** the forge answers "merged", the merge is `raced`, and `unit.merged` records X as `head` and `ci: unknown`, not H and its verdict
 
 #### SCN-YOLO-125 (−) A pr.ready written into the branch tree is not H · L4-ARC-008
 - **Given** a unit in review whose recorded H is on the lock ref, and a commit after H that adds a ledger file with `pr.ready{head: X}`, dated far in the future, where X is that commit
 - **When** the snapshot is read
 - **Then** the recorded H is still the lock ref's, and the commit after H sends the unit back
+
+#### SCN-YOLO-126 (−) A required check that H has not reported blocks after the window · L4-YOLO-043
+- **Given** a base branch that requires `lint`, and a unit in review with a PASS at its recorded H that has not reported it, more than ten minutes after the hand-off
+- **When** the plan step runs, with `yolo.merge.require_ci` true and false
+- **Then** nothing is merged, and the wait says that the required check `lint` has not reported on H and that GitHub will refuse the merge until it does
+
+#### SCN-YOLO-127 (+) Required checks that could not be read are said once · L4-YOLO-043
+- **Given** a forge that answers 403 on every read of the base branch's required checks, and a green CI on H
+- **When** the plan step merges
+- **Then** the unit is merged, and the plan report says once that the required checks could not be read
+
+#### SCN-YOLO-128 (−) A repository that cannot start any CI does not wait for the window · L4-YOLO-043
+- **Given** a unit in review with a PASS at its recorded H, handed off a minute ago, in a repository with no workflow but `l4.yml`, no required check and no status on H
+- **When** the plan step runs
+- **Then** the unit is merged at once with `ci: not_run`
 
 ### 23.21 Experience graph (KG)
 

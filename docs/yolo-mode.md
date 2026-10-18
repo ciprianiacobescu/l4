@@ -160,7 +160,9 @@ after it. It happens only when all of this is true:
 5. The target tip is contained in H.
 6. The repository's own CI on H (check runs, workflow runs, commit statuses and the base branch's required checks on
    GitHub; pipelines on GitLab) is not running, not red, has no cancelled or held job (re-run it) and is readable. CI
-   that is not created yet counts as running for ten minutes after the hand-off; only after that is "no CI" final. A job that is red on H and on the base does not
+   that is not created yet counts as running for ten minutes after the hand-off; only after that is "no CI" final (a
+   repository with no workflow but `l4.yml`, no required check and no status has no such wait). A required check of the base
+   branch that H has not reported blocks the merge, whatever `yolo.merge.require_ci` says. A job that is red on H and on the base does not
    block: the unit records `ci: preexisting`. If no CI ran on H at all, the merge goes ahead and `unit.merged` records
    `ci: not_run`, with a warning line in the plan report and a note on the merged PR; with `yolo.merge.require_ci:
    true` the plan waits for a CI instead. On GitHub a push made with the workflow's `GITHUB_TOKEN` starts no run, so a

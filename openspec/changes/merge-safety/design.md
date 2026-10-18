@@ -245,6 +245,16 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
   the run (a reporter's check run) and is keyed by its id, so it never hides or is hidden. A run whose jobs cannot be
   listed keeps the older rule (newest of a name).
 - **F7.** Only `l4` of the workflow `l4.yml` (or of no workflow, GitLab and old fakes) is the harness's own job.
+- **Round 2 (M1, m1-m7).** One read is cheap: `l4.yml` runs are never listed for jobs, the `/attempts/{n}` reads are
+  gone (a re-run keeps its check suite), check runs are listed with `filter=all`, and the base head is read only when
+  H has a red job (a typical read is 8 calls, a read with a red job 10, against 110). An unreported required check
+  is the status `unreported` after the window and blocks whatever `require_ci` says (m1); required checks come from
+  the rules, the branch and, when the branch read gives nothing, the classic endpoint, and a 403 from all of them is a
+  one-line warning (m2); a cancelled job with a finished twin of the same workflow file and name under another event is
+  superseded (m3); a wait names the unfinished job keys, five at most (m4); `action_required` is `manual`, so
+  `blocked` (m6); no window when the repository defines no workflow but `l4.yml`, requires nothing and H has no status
+  (m7); a `pr.ready` time a little ahead of the read is the read time, one more than five minutes ahead is ignored; a
+  merge raced by a person at another head records `ci: unknown`.
 - **The merged head.** A squash that comes back `raced` reads the merged PR's head; if a person merged it at another
   head, `unit.merged.head` is that head, not H.
 

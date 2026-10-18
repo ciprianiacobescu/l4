@@ -23,11 +23,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
   (L4-CI-012).
 
-- A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, a stale or
-  `action_required` run, a failed commit status, a workflow run still queued or in progress, an unfinished GitLab
-  pipeline and a required check that H has not reported are all read: cancelled or held jobs block the merge with
-  "re-run it", the others are red or running. "No CI" is final only ten minutes after the hand-off (L4-CI-013,
-  L4-CI-014, L4-CI-015). Only the harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general.
+- A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, an
+  `action_required` check (a person must act) and a stale run, a failed commit status, a workflow run still queued or in
+  progress, an unfinished GitLab pipeline and a required check that H has not reported are all read: cancelled or held
+  jobs block the merge with "re-run it" and open no fix round (a cancelled push run whose pull_request twin finished
+  does not block), a required check that never reports blocks it whatever `yolo.merge.require_ci` says, and the
+  others are red or running. "No CI" is final only ten minutes after the hand-off, unless the repository has no
+  workflow but `l4.yml`, requires no check and shows no status on H (L4-CI-013, L4-CI-014, L4-CI-015). Only the
+  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read now makes about ten API
+  calls, not more than a hundred: the jobs of `l4.yml` runs and the base head are read only when needed.
 - The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
   Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
   signed harness commits or a ref only the harness can write.
@@ -36,8 +40,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ### Changed
 - A plan merge waits for the repository's CI on H when it is running, red or unreadable. The new key
   `yolo.merge.require_ci` (default `false`) decides only whether a hand-off commit that no CI ran on waits too. With
-  the default it is merged as before, but `unit.merged` records `ci: not_run` and a warning goes to the plan report and
-  to a note on the merged PR or MR. A GitHub repository whose hand-off is pushed with the workflow's `GITHUB_TOKEN`
+  the default it is merged, after waiting up to ten minutes for a CI that may still be created (at once in a
+  repository that can start none), and `unit.merged` records `ci: not_run`; a warning goes to the plan report and to a
+  note on the merged PR or MR. A PR a person merged at another head records `ci: unknown`. A GitHub repository whose hand-off is pushed with the workflow's `GITHUB_TOKEN`
   (which starts no runs) that wants its CI to gate the merge gives the push a token that starts runs, such as a GitHub
   App, and sets `yolo.merge.require_ci: true`. A job red on H and on the base does not block: `unit.merged` records
   `ci: preexisting` and the job names.

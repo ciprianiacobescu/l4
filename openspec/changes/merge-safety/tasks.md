@@ -323,3 +323,12 @@ Every task follows these rules:
     `sweeper.py`, `merge.py`.
 - [x] 8.2 Docs: SPEC (L4-ARC-008, L4-YOLO-032, L4-YOLO-042, L4-CI-010, L4-CI-013..015, the scenarios), runbook,
   yolo-mode, CHANGELOG (the lock-ref residual, F3).
+
+## 9. Round 2 of the review (M1, m1-m7, the nits; design D10)
+
+- [x] 9.1 Tests first (23 failing before the code, among them the call counts 110 and 108), then code: `github.py`
+  (`filter=all`, no jobs of `l4.yml` runs, no attempts, `required_checks` as `(names, unreadable)`, `workflow_files`,
+  `action_required` as `manual`), `repo_ci.py` (twin rule), `handoff_ci.py` (base read only for a red job, `unreported`,
+  warning, window rules, unfinished job names), `merge.py`, `cycle.py`, `sweeper.py`, `model.py`. Tests:
+  `test_github_checks.py`, `test_handoff_ci.py`, `test_merge_safety_ci_gate.py`, `test_yolo_merge_squash.py`.
+- [x] 9.2 Docs: SPEC (L4-CI-013, L4-CI-014, L4-YOLO-042, SCN-YOLO-126..128, SCN-CI-069), CHANGELOG.
