@@ -796,14 +796,17 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
     (`l4 upgrade`) or fixed the cause. The saved patch is deleted, an agent step runs, and the note reaches it as an answer.
   - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run, for
     exactly the step you were shown. The question's Context lists every path the step changes, the source of each test it
-    names and the diff of every other changed file (redacted, at most 40 lines each); read all of it. The step's changes are saved on the unit branch as `<unit folder>/.l4/held/<task>-<check>.patch`
+    names and the diff of every changed path (redacted, at most 40 lines each; a cut says that the cut lines are replayed too and
+    where the whole patch is); read all of it. The step's changes are saved on the unit branch as `<unit folder>/.l4/held/<task>-<check>.patch`
     (L4-IMP-065). The next run starts **no agent** for that step: it applies the saved patch (checking its digest first),
     runs the guards, the gates and the same checks an agent's changes get, and when the check is inconclusive again for the
     tests it named, they count; the ledger records `held.replayed` and `via: human_override` (`agent_override` for an
     agent's answer) with the question and the digest of your answer, and the step's commit deletes the patch. If the patch
     is missing, its digest differs or it no longer applies (the branch moved), there is no override: a new question says
-    why. A later agent attempt of the task (after a gate failure) is told the accepted tests and to keep them unchanged. The accept
-    covers a named test only while its source is the one shown: the same name with another body is a new question.
+    why. The accept takes effect only through that replay: if the replay fails a gate (it counts as an attempt) or the check refutes a
+    criterion, the accept is used up, and a later step of the task that meets the same inconclusive check is held again with a
+    new question that shows the new step; the agent is told that the earlier accept covers nothing now. A reopened task drops
+    every earlier accept.
     A check that now shows a criterion not to discriminate still fails the attempt. The verifier and the judge see that
     the claim was accepted. A question that 0.4.16 raised has no saved patch: its accept works as before (one more agent
     step that must write the same tests).

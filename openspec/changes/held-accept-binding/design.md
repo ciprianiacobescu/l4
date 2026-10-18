@@ -51,15 +51,26 @@ agent's write is put back with `guard.violation`. A test fixes it in place.
   secret scan; the replay scans it again.
 - A branch that moved makes the patch not apply: a new question, never a pass.
 
-## Review round
+## Review rounds
 
-**D6. The accept binds to content.** `question.raised` carries `source_sha256`, the sha256 of each named test's exact
-source (a Python function with its decorators; for another language, the file from the line that names the test). An
-`Override` lists the tests whose current source differs (`changed`) and does not cover them, so the same name with another
-body is a new question. The override is not single-use. A question without digests keeps the rule by test id.
+**D6. An accept takes effect only through the replay (content digests dropped).** Round 1 bound the accept to a per-test
+source digest. Round 2 showed that no digest of "the test" can bind what the person saw: a module-level helper redefined in
+the test file, a new autouse fixture in a conftest, a second definition of the name, and test ids of other languages (no
+locatable source) all leave the digest equal while the behaviour changes. So content heuristics are gone from coverage
+(`source_sha256` stays in the event for audit). For a question that saved its step (`patch_sha256`) the accept applies only
+while that step is replayed (`Workbench.replay_question`); after the replay is used up (a failed gate, a refuted criterion)
+it covers nothing, and a later agent step that meets the same inconclusive check is held again with a new question that saves
+the new step. A replay that fails a gate counts as an attempt, so `max_task_attempts` bounds the cycle. A step produced by a
+replay that held again for another check records `carries` (the earlier question), because it is the same saved change and
+would otherwise loop between the two checks. A question of 0.4.16 (no `patch_sha256`) keeps the rule by test id. A
+`tasks.reopened` of the task drops every accept raised before it.
 
-**D7. The question shows everything the replay applies.** It lists every changed path, shows the source of the named tests
-and the diff of every other changed file, each redacted before it is cut to 40 lines. A step over 200 paths or 50 such
-files is not saved. The replay resets the environment setup as an agent step does, applies the verified bytes from
-standard input with git settings independent of the operator's configuration, requires both digests, and commits under the
-profile that wrote the step.
+**D7. The question shows everything the replay applies.** It lists every changed path and shows the redacted diff of every
+changed path (named test files included) next to the source of the named tests; a cut says that the cut lines are replayed too
+and names the patch path. A step over 200 paths or 50 files is not saved. The replay resets the environment setup, applies the
+verified bytes from standard input with git settings independent of the operator's configuration (`--unified=3`, no autocrlf),
+requires both digests, and commits under the profile that wrote the step.
+
+**D8. The `accepted tests` block** no longer claims coverage for a saved step: after a used-up replay it says that the earlier
+accept was for the earlier step only and a new step needs a new answer. For a question of 0.4.16 it still lists the tests
+and the rule to keep them unchanged.

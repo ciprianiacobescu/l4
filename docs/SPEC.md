@@ -2509,36 +2509,42 @@ executed no test SHALL NOT say `(expected: zero values must fail)`, and the arte
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
 
-**L4-IMP-065** A held step is kept, and an `accept` replays it. When a step is held with a harness question (`check`:
-`pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes, save them
-as `git diff --binary` of the step against its start, with the agent's result beside it, at
+**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. When a step is held with a harness question
+(`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
+save them as `git diff --binary --unified=3` of the step against its start, with the agent's result beside it, at
 `<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit; `question.raised`
-carries `patch_sha256`, `result_sha256`, the test ids and `source_sha256` (the sha256 of each named test's exact source). The
-question's Context SHALL list every path the patch changes (added, modified, deleted), show the source of each named test (the
-function with its decorators, at most 10 tests; for a test file that is not Python, the file from the line that names the test)
-and the diff of every other changed file, each redacted by the run's redactor before it is cut to 40 lines, a cut saying how
-many lines it dropped; a step too large to show in full (over 200 paths or 50 such files) is not saved. The accept covers a
-named test only while the test's source in the work tree has the recorded digest (the same name with another body is not
-covered: a new harness question shows the new body); a question without `source_sha256` (0.4.16) keeps the rule by test id, and
-the override is not single-use. When the run reaches the step of that task and the newest harness question of the task and check is
+carries `patch_sha256`, `result_sha256`, the test ids, `source_sha256` (the sha256 of each named test's source, for audit only)
+and `carries` (the question whose replay produced this step, if any). The question's Context SHALL list every path the patch
+changes (added, modified, deleted), show the source of each named test (at most 10 tests) and the diff of EVERY changed path,
+named test files included, each redacted by the run's redactor before it is cut to 40 lines; a cut SHALL say that the cut
+lines are replayed too and name the patch path where the whole change can be read, and the accept line SHALL say that `accept`
+replays exactly the saved change of N files (the whole patch being in that path). A step too large to show (over 200 paths or
+50 files) is not saved. When the run reaches the step of that task and the newest harness question of the task and check is
 answered `accept` by the rules of L4-IMP-063 (a person's answer, or an agent's where `clarifier.answer_by_agents` allows it,
 with its digest in the ledger), carries a `patch_sha256`, has not been replayed (`held.replayed{question}`) and no
 `unit.restarted` or `tasks.reopened` of the task follows it, the harness SHALL start no agent: it reads both files as regular
-files, checks their digests (both are required whenever `patch_sha256` is), checks that the patch applies (`git apply --check`) and
-applies the verified bytes (from standard input, with git settings that do not depend on the operator's configuration), and then does what it does after an
-agent returns (the environment setup runs again after the step, protected paths put back with `guard.violation`, the run ledger restored, the secret scan, which fails the step
-as an agent's would) and hands the saved result to the code that follows the step, so the scope guards, tamper checks, gates and
-checks are the ones an agent step's changes get. It records `held.replayed{question, task, check, patch_sha256, tests,
-sources}` after applying; the override covers the tests of the patch. A missing or unusable file, a digest that differs or a
-patch that does not apply SHALL give no override, no agent step and a new harness question (without a `patch_sha256`) whose Why
-says which. `retry` (or `dismissed`) SHALL delete both files in a commit before the agent step, whose prompt carries the note;
-a replay deletes them in the step's own commit; a restarted unit or a reopened task drops them. The replay is used once: a later
-attempt after a failed gate is an agent step, whose prompt carries the data block `accepted tests` (the ids and redacted source
-of the accepted tests, with the rule to keep them unchanged: an accept covers only them). `<unit folder>/.l4/held/` is a
-harness-owned path (`**/.l4/**`, L4-SEC-004): an agent's write to it is put back. A question raised by 0.4.16 has no
-`patch_sha256`: its accept works as before. [V: a consumer repository, a version-pin test held on one criterion: the accepted
-question named a test that checks the installed version, the next agent wrote the test again under another name, the
-accept did not cover it, and a second question was raised for the same criterion.]
+files, checks both digests (both are required), checks that the patch applies (`git apply --check`) and applies the verified
+bytes (from standard input; git settings of the operator, such as `diff.context` or `core.autocrlf`, do not change capture or
+apply), and then does what it does after an agent returns (the environment setup runs again, protected paths are put back with
+`guard.violation`, the run ledger is restored, the secret scan fails the step as an agent's would) and hands the saved result to
+the code that follows the step, so the scope guards, tamper checks, gates and checks are the ones an agent step's changes get.
+It records `held.replayed{question, task, check, patch_sha256, tests, sources}` after applying; the override covers the tests
+of the patch during that step. The accept of a question that saved its step takes effect ONLY through that replay (no content
+or digest rule widens it): once the replay is used up (it failed a gate, or the check refuted a criterion; a failed replay
+counts as an attempt as a failed agent step does, so `max_task_attempts` bounds the cycle), the accept covers nothing, and a
+later agent step that meets the same inconclusive check is held again with a NEW question that saves the new step. The one
+exception is a step that a replay produced and that held again for another check: its question records `carries` and
+the accept of the carried question applies to it again when that new question is accepted. A `tasks.reopened` of the task drops
+every accept raised before it, with or without a saved step. A missing or unusable file, a digest that differs or a patch that
+does not apply SHALL give no override, no agent step and a new harness question (without a `patch_sha256`) whose Why says which.
+`retry` (or `dismissed`) SHALL delete both files in a commit before the agent step, whose prompt carries the note; a replay
+deletes them in the step's own commit; a restarted unit or a reopened task drops them. An agent step of a task whose replay was
+used up carries the data block `accepted tests` with the notice that the earlier accept was for the earlier step only and a new
+step needs a new answer (for a question of 0.4.16 it lists the accepted tests and the rule to keep them unchanged).
+`<unit folder>/.l4/held/` is a harness-owned path (`**/.l4/**`, L4-SEC-004): an agent's write to it is put back. A question
+raised by 0.4.16 has no `patch_sha256`: its accept works as before, by test id. [V: a consumer repository, a version-pin test
+held on one criterion: the accepted question named a test that checks the installed version, the next agent wrote the test
+again under another name, the accept did not cover it, and a second question was raised for the same criterion.]
 
 ## 8. Agent and model factory
 
@@ -7219,25 +7225,25 @@ scenario is a spec defect (§26).
 - **Then** its Context shows the test function with the token redacted, at most 40 lines of it, and `[cut: N more
   lines]`
 
-#### SCN-IMP-326 (+) A later agent step is told which tests are accepted · L4-IMP-065
+#### SCN-IMP-326 (+) A later agent step is told the earlier accept is used up · L4-IMP-065
 - **Given** a task whose replay failed a gate after an accept
 - **When** the next attempt's agent step runs
-- **Then** its prompt holds the data block `accepted tests` with the ids, their source, and the rule to keep them
-  unchanged
+- **Then** its prompt holds the data block `accepted tests` saying that the earlier accept was for the earlier step only,
+  covers nothing now, and that a new step needs a new answer
 
-#### SCN-IMP-327 (−) The same name with another body is not covered · L4-IMP-065
+#### SCN-IMP-327 (−) A used-up accept covers nothing · L4-IMP-065
 - **Given** an accepted held step whose replay then failed a gate, and a later agent attempt that writes a test of the same
-  name with another body
+  name with another body (or a changed module-level helper, a new conftest, a second definition)
 - **When** the check is inconclusive again
-- **Then** the accept does not cover it, the task is held by a new question that shows the new body, and no proof has
-  `via: human_override`; the same holds for a task reopened by a changed criterion; a question of 0.4.16 (no digests) keeps
-  the rule by test id
+- **Then** the accept covers nothing and a new harness question saves and shows the new step; a replay that fails a gate counts
+  as an attempt, so `max_task_attempts` bounds the cycle; a task reopened after the question drops the accept (a question of 0.4.16
+  keeps the rule by test id until then)
 
 #### SCN-IMP-328 (+) The question shows every change the replay applies · L4-IMP-065
 - **Given** a held red step that also wrote a support file, or a held green step that also changed production code
 - **When** the question is raised
-- **Then** its Context lists every changed path, shows the diff of each file that is no named test, and says `replays exactly
-  these changes (N files)`
+- **Then** its Context lists every changed path, shows the redacted diff of every changed path (a cut says that the cut lines
+  are replayed too and names the patch path), and says `replays exactly the saved change of N files`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

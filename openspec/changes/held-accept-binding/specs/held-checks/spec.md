@@ -9,11 +9,13 @@ When a step is held with a harness question, the harness SHALL save the step's c
 patch at `<unit folder>/.l4/held/<task>-<check>.patch`, commit it with the questions commit, and record
 `patch_sha256`, `result_sha256`, the test ids and `source_sha256` (a digest of each named test's source) in
 `question.raised`. The question's Context SHALL list every path the patch changes, show the redacted source of each
-named test and the redacted diff of every other changed file, at most 40 lines each. When the next run reaches the step
+named test and the redacted diff of every changed path, at most 40 lines each; a cut says that the cut lines are replayed
+too and where the whole patch is. When the next run reaches the step
 and an `accept` of that question is recorded, the harness SHALL NOT start an agent: it SHALL verify both digests, apply
 the verified patch, run the guards, gates and checks of an agent step on it (the environment setup included), and record
-`held.replayed{question, task, check, patch_sha256}`. The accept SHALL cover a named test only while the digest of its
-source equals the recorded one. A missing patch, a digest that differs or a patch that does not apply SHALL give no
+`held.replayed{question, task, check, patch_sha256}`. The accept SHALL take effect only through that replay: once it is
+used up (a failed gate, a refuted criterion), it covers nothing, and a later step that meets the same inconclusive check is
+held again with a new question; a task reopened after the question drops it. A missing patch, a digest that differs or a patch that does not apply SHALL give no
 override and a new harness question that says why.
 
 #### Scenario: SCN-IMP-320 (+) An accept replays the held step without an agent
@@ -54,13 +56,13 @@ override and a new harness question that says why.
 - **THEN** its prompt holds a data block `accepted tests` with the ids, their source and the rule to keep them
   unchanged
 
-#### Scenario: SCN-IMP-327 (−) The same name with another body is not covered
+#### Scenario: SCN-IMP-327 (−) A used-up accept covers nothing
 - **GIVEN** an accepted held step whose replay failed a gate, and a later agent attempt that writes a test of the same
-  name with another body
+  name with another body, or changes a helper, a conftest or a second definition
 - **WHEN** the check is inconclusive again
-- **THEN** the accept does not cover it and a new harness question shows the new body
+- **THEN** the accept does not cover it and a new harness question saves and shows the new step
 
 #### Scenario: SCN-IMP-328 (+) The question shows every change the replay applies
 - **GIVEN** a held step that also wrote a support file or production code
 - **WHEN** the question is raised
-- **THEN** its Context lists every changed path and shows the diff of each file that is no named test
+- **THEN** its Context lists every changed path and shows the redacted diff of every changed path
