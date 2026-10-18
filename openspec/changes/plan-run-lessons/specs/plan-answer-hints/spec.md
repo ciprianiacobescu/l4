@@ -45,8 +45,15 @@ start command).
   (`gh workflow run l4.yml --ref <base>` on GitHub)
 
 ### Requirement: L4-YOLO-054 After an answer, the wait line shows the live reason
-With the answers of the current unit pushed, the wait detail that `l4 yolo status` prints (text and `--json`) SHALL be
+With the answers of the current unit pushed (the planner's own reason: an answer that unblocks a task, or verdict
+answers not consumed), the wait detail that `l4 yolo status` prints (text and `--json`) SHALL be
 the live reason (the answer is recorded and the next run reads it), not the detail recorded when the plan began to wait.
+
+#### Scenario: SCN-YOLO-146 (−) A clarifying unit with nothing answered is not described as answered
+- **GIVEN** a waiting plan whose current unit is `clarifying` with no recorded answer
+- **WHEN** `l4 yolo status` runs
+- **THEN** the wait line keeps the recorded detail and the `Next:` line does not say that the answer is recorded; once
+  an answer is recorded it does
 
 #### Scenario: SCN-YOLO-142 (+) After the answer the wait line shows the live reason
 - **GIVEN** the plan of SCN-YOLO-137, whose wait was recorded with the detail `(open: Q-003)`
@@ -65,3 +72,14 @@ For a plan stopped with `unit_escalated` on a unit whose escalation has its own 
 - **WHEN** `l4 yolo status` and `l4 yolo resume --reason TEXT` run
 - **THEN** the `Next:` line and the refusal name splitting the change (`l4 restart`) or replacing the answer (`--replace`)
   before `l4 retry --unit U`, and for a unit escalated for another cause the refusal still says `run l4 retry --unit U first`
+
+### Requirement: L4-YOLO-056 The next line of a waiting plan follows the unit's answer step
+For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
+`Next:` line of `l4 yolo status` SHALL give the step `l4 status --unit` gives (fix the answer, answer the question) and
+how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "accept ..." --replace`).
+
+#### Scenario: SCN-YOLO-147 (−) An answer that is not valid is not met with the plain answer instruction
+- **GIVEN** a waiting plan whose current unit has an answer that does not start with accept or reject
+- **WHEN** `l4 yolo status` runs
+- **THEN** its `Next:` line fixes that answer, names `--replace`, and says the plan continues by itself at the run that
+  reads the answer

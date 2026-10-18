@@ -10,7 +10,9 @@ Status: design, 2026-10-17. Harness at 0.4.14. Markers: **[V]** verified in the 
    bookkeeping list gains `questions.md`, `feedback.md` and `.serena/memories/harness/**` and is named once (D1).
 2. Parts are whole files, ordered so a test sits next to its code, packed up to 120000 characters, at most 8 (D2).
 3. One verdict from the parts: `fail` > `pass` > `not_verifiable` > `insufficient_evidence` per criterion (D3).
-4. A diff within the cap gets today's prompt, byte for byte; template `judge@10` (D2, D4).
+4. A diff within the cap gets one prompt with the same sections and rules as 0.4.14 and no part block; template `judge@10`. Its
+   files are listed in `(key, path)` order, not git's, and lock files are one line (review N4: it is not 0.4.14's text byte for
+   byte) (D2, D4).
 5. What still holds is a `judge view: …` hold. It never becomes a fix unit; a reject escalates with
    `judge_view_rejected`, whose way out is split-and-restart or accept-and-retry (D5, D6).
 6. `l4 yolo resume --extend-…` on an active plan writes `plan.extended` and nothing else (D7).
@@ -135,7 +137,7 @@ def judge_parts(git: Git, base: str, head: str, unit_dirs: Sequence[str]) -> Dif
   `MAX_PART_CHARS` (`cut: True`). After `MAX_JUDGE_PARTS` parts, the remaining entries are not packed: their paths are
   `unseen`.
 - **One part**: when the filtered diff is within `MAX_PART_CHARS` (or `pack` gives one part), the step builds today's
-  single prompt with no part heading, so the judge prompt of every unit under the cap is unchanged [G: the part block
+  single prompt with no part heading, so the judge prompt of every unit under the cap has no part block and the same sections [G: it is not 0.4.14's text byte for byte: the files come in `(key, path)` order and lock files are lines; the part block
   is added only when `part` is given to `build_judge_prompt`; task 4.1 pins the old text].
 - **The part prompt**: `build_judge_prompt(..., part: PartView | None = None)`; `PartView(index, count, listing)` with
   `listing: tuple[tuple[int, str, int], ...]` = (part number, path, characters) for every entry packed, then the unseen
@@ -368,6 +370,65 @@ cause keeps `run l4 retry --unit U first`. A `halted` unit keeps it too.
 `_describe` sets `wait_detail` to `ANSWER_RECORDED = "the answer is recorded and the next run reads it"` when the plan
 waits and its current unit is in `_Units.answered` (D9), in the text and in `--json`; while the question is open the
 detail recorded with `plan.waiting` stands.
+
+### D13 An accept is bound to the content the judge did not see (L4-VER-046, review M1)
+
+`diffparts.blob_ids(git, head, paths)` (a few `git ls-tree`) gives the head blob of each file a hold covers.
+`ladder._hold_views(parts, blob_of)` returns, per `judge view:` hold text, `HoldView(sha, paths)`: `paths` is every file
+the hold covers (the cut file, or ALL unseen files, not the five its text names), and `sha = sha256(text NUL
+"path TAB blob" lines)`. The hold id stays `hold_id(text)`. `VerifyResult.hold_views` keeps `{text: {sha, paths}}` (in
+`verdict.json` and restored on a reused round). `_finalize` builds `current[hold_id] = hold_sha256(hold, hold_views)` and
+`raise_verdict_questions(hold_views=...)` raises the question with that `text_sha256`, so an accept of other content is
+not in force (`effective_verdicts` compares the two) and the hold is asked again. A hold of another kind keeps
+`finding_sha256(hold_id)`. `_hold_question(paths=...)` lists every unseen file, at most `QUESTION_MAX_PATHS = 100`, then
+`and K more unseen files: see verification.md`.
+
+### D14 The listing is bounded and the content is read once (L4-VER-047, review M3)
+
+`list_entries` runs one `git diff --name-status -z -M` and one `git diff -M`, split at `^diff --git ` (the same count,
+else one diff per file). A lock file's line is made from its own block. The text kept per entry is at most
+`MAX_PART_CHARS + 1` characters and the text of the entries past `RETAIN_PARTS * MAX_PART_CHARS` characters is not kept,
+only its length (`DiffEntry.chars`); `_refill` fetches again, per file, the few that a part shows. `part_listing` lists
+at most `LISTING_MAX_LINES = 200` files and no more than 1/`LISTING_SHARE` (4) of a part's characters, then
+`+K more files: see verification.md` (`PartView.more`); `pack(reserve=listing_chars)` keeps that room free in every part
+(applied only to a diff of several parts). `verification.md` lists up to 2000 files by part (`## Files by part`) and
+`verdict.json` all (`judge_files`).
+
+### D15 A test lands with the code it imports (review M2) and a part judges the code it shows
+
+`pack` sorts by `(key, path)`: the key is the name key; for a test with no code of its name in the diff it is the key of the
+first module its added lines import that is in the diff (`from a.b import c`, `import a.b`, `from "./b"`, `require("./b")`:
+last segment, lower case). The part rule no longer says `code or test`: a criterion whose code the part does not show is
+`insufficient_evidence`; one whose code it shows is judged there, whichever part holds its test.
+
+### D16 Adequacy follows the sight of the part (review N6)
+
+A part that cannot see a test cannot call it inadequate: `judge_parts._rank` makes an entry with reason `not in this part`
+the weakest, a real `adequate: false` the strongest; a test only blind parts called inadequate is adequate. The part
+rules say: a test whose code is not in this part is left out of `test_adequacy`.
+
+### D17 The key is read from the plan's own target (review N1) and a cost is finite (review N2)
+
+`_plan_config(ctx, plan_id)` reads the plan file on the configured base branch; when its `target` is another branch, or
+the file is missing or invalid, an agent has no key (note: `the base branch X of the configuration differs from the
+plan's target Y`) and `.l4/config.yaml` is read at `origin/<plan.target>`. The same helper serves
+`yolo.review.accept_by_agents` (accept, findings, waive). `_extend` refuses a cost that is `nan`, `inf` or `-inf`.
+
+### D18 Lock files (review N3, refines owner decision 5)
+
+An entry is a lock file only when the old and the new base name are both in `LOCK_FILES`; a source file renamed to
+`go.sum` is diffed. The line names the old path of a rename and adds `N touch a source field` (changed lines that hold
+`resolved`, `registry`, `source`, `url`, `integrity`, `hash` or `checksum`) and `hosts: a, b` (distinct hosts of the URLs
+in those lines, at most 10).
+
+### D19 Answered units, the answer step, the extensions list, mixed rejects (review N5, N7)
+
+`answered_units` is the units in `awaiting_human` or `clarifying` that no longer wait AND whose facts hold
+`answers_unblock` or `verdicts_ready`: a clarifying unit with nothing answered is not "the answer is recorded".
+`answer_fix_of` gives, for a unit whose answer is invalid, dismissed or a draft, `l4 status`'s step plus the `--replace`
+command; `_next_line(answer_fix=...)` puts it first. `_extensions(events)` replays the fold: the `plan.extended` after
+the first activation and before the plan was final. `_no_task_cause` returns `no_convertible_finding_and_judge_view_rejected`
+when a rejected judge-view hold and another unconvertible human finding are in one round; `way_out` names both ways out.
 
 ## 3. Risks
 

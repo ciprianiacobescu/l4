@@ -42,7 +42,7 @@ Three lessons from a delivery plan on a consumer repository (harness 0.4.11 to 0
   sits next to the code it is named after, packed into parts of at most 120000 characters, at most 8 parts. Each part
   is one judge call with the round's prompt, the part's diff, a `part K of N` heading, the list of every file and the
   rules of a part. The replies are merged into one verdict with fixed rules (a `fail` beats a `pass`, a `pass` beats a
-  part that could not see the code). A diff within the cap gets the same prompt as before. Template `judge@10`.
+  part that could not see the code). A diff within the cap gets one prompt with the same sections and no part block (its files come in `(key, path)` order, so it is not 0.4.14's text byte for byte). Template `judge@10`.
 - **Lock files are one line** (L4-VER-045): `uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`,
   `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`, `composer.lock` and `Gemfile.lock` are shown to the judge as one
   line each (path, old and new size, lines added and removed), never diffed, and never cause a hold.
@@ -69,7 +69,7 @@ Three lessons from a delivery plan on a consumer repository (harness 0.4.11 to 0
   `l4 yolo resume` and `l4 yolo status` decide with the plan step's own predicate (`still_waits`), so a waiting plan
   whose answers are pushed resumes; the refusal for an open question says the plan continues by itself after the
   answer; the `Next:` line says how to answer, or that the next run reads the answer and how to start it.
-- **Docs.** `docs/SPEC.md` (the eleven requirements, their scenarios, §2.1, §10.2, L4-VER-018, L4-OPS-022,
+- **Docs.** `docs/SPEC.md` (the fifteen requirements, their scenarios, §2.1, §10.2, L4-VER-018, L4-OPS-022,
   L4-YOLO-013/014, the change row), `docs/runbook.md` (§7.1, §7.3, §12.3, §12.4), `docs/yolo-mode.md`, the skill's
   `references/operate.md`, `CHANGELOG.md` under `## 0.4.16 (unreleased)`.
 

@@ -234,3 +234,17 @@ Every task follows these rules:
 - [x] 9.3 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/verifier tests/unit/state tests/unit/ci
   tests/unit/yolo tests/unit/specs`, `.venv/bin/ruff check .`, `.venv/bin/python scripts/check_spec.py docs/SPEC.md` and
   `npx --yes @fission-ai/openspec@1.14.1 validate plan-run-lessons --strict`; all pass.
+
+## 10. Review fixes (adversarial review of the first delivery)
+
+- [x] 10.1 M1 (L4-VER-046, SCN-VER-145, SCN-VER-146): `tests/unit/verifier/test_hold_binding.py` (the attacks, flipped), `ladder._hold_views`,
+  `diffparts.blob_ids`, `verdicts.HoldView`, `hold_sha256`, `_hold_question(paths=)`, `raise_verdict_questions(hold_views=)`,
+  `VerifyResult.hold_views` in `verdict.json` and `restore_round`.
+- [x] 10.2 M3 (L4-VER-047, SCN-VER-147): one `git diff` for the content, retention and `_refill`, `part_listing` and
+  `reserve`, `PartView.more`, `## Files by part`, `judge_files`.
+- [x] 10.3 M2 and N6 (SCN-VER-148, SCN-VER-149): import key in `pack`, the part rules, `judge_parts._rank`.
+- [x] 10.4 N3 (SCN-VER-140, 142, 144 refined): both names lock names, the old path, source-field count and hosts.
+- [x] 10.5 N1, N2 (SCN-YOLO-144, SCN-YOLO-145): `_plan_config`, `_review_cfg`, `math.isfinite` in `_extend`.
+- [x] 10.6 N5, N7 (SCN-YOLO-146 to SCN-YOLO-149): `answered_units`, `answer_fix_of`, `_extensions`, `_no_task_cause`, and the
+  end-to-end test of SCN-YOLO-137 through `load_snapshot` (`tests/unit/state/test_answered_units_branch.py`).
+- [x] 10.7 N4 and the docs: design §0 and D2, proposal, SPEC (the new requirements and scenarios), runbook, CHANGELOG.

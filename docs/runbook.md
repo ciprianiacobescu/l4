@@ -759,7 +759,8 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - A hold `judge view: …` (harness 0.4.16 and later) says the judge could not see all of the diff: one file longer than
   one part (120000 characters), or a diff that needs more than 8 parts. A diff of several files is judged in parts, so
   most large diffs raise no hold; lock files (`uv.lock`, `package-lock.json`, …) are one line each and never raise
-  one. Answer `accept` when you checked the files the hold names yourself. A `reject` stops the unit
+  one. Answer `accept` when you checked the files the hold names yourself; the question lists every unseen file (the hold's
+  text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
   (`judge_view_rejected`, [7.3.2](#732-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which

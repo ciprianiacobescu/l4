@@ -3276,15 +3276,15 @@ harness's bookkeeping, given by one list (`bookkeeping_pathspecs`): every path u
 family. The file names SHALL come from the unit folder's channel list in `l4.state.review`. A file of those names
 outside the family's folders SHALL stay in the diff.
 
-**L4-VER-041 A diff longer than one prompt is judged in parts.** A diff (L4-VER-040) over 120000 characters SHALL be judged in parts, not cut: whole files, ordered so that a
-test sits next to the code it is named after, packed into at most 8 parts of at most 120000 characters each (a
-longer file alone, cut). Each part SHALL be one judge call: the round's prompt with the part's diff, a `part K of N`
-heading, the file list, and the rule that what the part does not show is `insufficient_evidence`, not `fail`. A diff
-within the cap SHALL keep its one prompt.
+**L4-VER-041 A diff longer than one prompt is judged in parts.** A diff (L4-VER-040) over 120000 characters SHALL be judged in parts, not cut: whole files, a test next to the code it
+is named after or imports, at most 8 parts of at most 120000 characters (a longer file alone, cut). Each part SHALL be
+one judge call: the round's prompt with the part's diff, `part K of N`, a capped file list, and the rule that a
+criterion whose code the part does not show is `insufficient_evidence`, not `fail`. A diff within the cap keeps one
+prompt.
 
 **L4-VER-042 The parts' replies are merged into one verdict.** The replies of the parts SHALL be merged into one verdict before anything reads it: per criterion a `fail` of any
-part, else a `pass`, else a `not_verifiable`, else `insufficient_evidence`; a test any part calls inadequate is
-inadequate; the findings of all parts without repeats; a feedback, accepted or satisfied item is true when a part says
+part, else a `pass`, else a `not_verifiable`, else `insufficient_evidence`; a test is inadequate when a part that sees
+it says so; the findings of all parts without repeats; a feedback, accepted or satisfied item is true when a part says
 true and no part says false with evidence other than `not in this part`. A part whose reply is discarded SHALL discard
 the round's judge verdict.
 
@@ -3299,9 +3299,19 @@ that no fix task is derived from, whatever its reason. A failed round with nothi
 with `judge_view_rejected`; `l4 status --unit`, the refusal of `l4 run --unit` and the sticky note SHALL name its way
 out (split the change, then `l4 restart`; or `accept` by `--replace`, then `l4 retry`), never `l4 feedback add`.
 
-**L4-VER-045 A lock file is one line for the judge, never a diff.** A lock file (`uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`,
-`Cargo.lock`, `composer.lock`, `Gemfile.lock`, in any folder) SHALL be shown to the judge as one line (its path, its old
-and new size, the lines added and removed), never diffed, and SHALL never cause a hold on the judge's view.
+**L4-VER-045 A lock file is one line for the judge, never a diff.** A file whose old and new base names are both lock files (`uv.lock`, `poetry.lock`, `Pipfile.lock`,
+`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`) SHALL be
+shown as one line, never diffed, and never cause a hold: path (and the old path of a rename), old and new size, lines
+added and removed, how many changed lines touch a source, registry or integrity field, and the hosts they name.
+
+**L4-VER-046 An accept of a hold on the judge's view is bound to what the judge did not see.** The hash an accept of a `judge view:` hold is bound to SHALL cover the hold's text, the head blob id of every file the
+hold covers and the full list of files the judge did not see; the hold's id stays the hash of its text. The accept is
+void when that content changes, and the hold is asked again. The question SHALL list every unseen file (at most 100,
+then a pointer to `verification.md`, which lists them all).
+
+**L4-VER-047 The file list of a part prompt is bounded and the content is read once.** The file list of every part prompt SHALL hold at most 200 files and then `+K more files: see verification.md`, which
+lists all of them; the room the list takes SHALL come out of the part's characters. The diff content of all files SHALL
+come from one `git diff` split at its `diff --git` lines, and the text of files that land in no part SHALL not be kept.
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -4388,13 +4398,15 @@ stop; the next run probes. A park with a profile cooling (a limit or credit with
 
 **L4-YOLO-050 A limit of an active plan is raised without waiting for the stop.** `l4 yolo resume PLAN --reason TEXT --extend-…` on an `active` plan SHALL record `plan.extended{by, actor, marker,
 agent_key, reason, extend, limits_before, limits_after}` and nothing else: no resume, no run. The limits in force
-(L4-YOLO-014) SHALL include it. No `--extend-…`, or one that changes no limit, SHALL be refused (exit 2). `l4 yolo
+(L4-YOLO-014) SHALL include it. No `--extend-…`, one that changes no limit and a cost that is not finite SHALL be
+refused (exit 2). `l4 yolo
 status` SHALL list the extensions and name the option in an active plan's `Next:` line.
 
 **L4-YOLO-051 Raising a plan's limit is a person's decision.** Every `--extend-…` of `l4 yolo resume`, on an active, waiting or stopped plan, SHALL be refused (exit 2, nothing
 written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` on the base
-branch (default `false`). The refusal SHALL name the command a person runs and the key. The event SHALL record the
-actor, its marker and `agent_key` (whether the key allowed it).
+branch (default `false`), read from the plan's own target branch, and not when the configuration's base branch is
+another than the plan's target. The refusal SHALL name the command a person runs and the key. The event SHALL record
+the actor, its marker and `agent_key`.
 
 **L4-YOLO-052 After an answer is pushed, the resume does not refuse it.** The plan step, `l4 yolo resume` and `l4 yolo status` SHALL decide by one predicate (`l4.yolo.cycle.still_waits`)
 whether the current `awaiting_human` or `clarifying` unit of a waiting plan still waits. When its answers are pushed
@@ -4407,13 +4419,17 @@ pushes the answer and starts a run) and that the plan continues by itself, namin
 pushed, that the next run reads them and how to start that run now (`l4 yolo resume PLAN --reason TEXT`, or the forge's
 start command).
 
-**L4-YOLO-054 After an answer, the wait line shows the live reason.** With the answers of the current unit pushed, the wait detail that `l4 yolo status` prints (text and `--json`) SHALL be
+**L4-YOLO-054 After an answer, the wait line shows the live reason.** With the answers of the current unit pushed (the planner's own reason: an answer that unblocks a task, or verdict
+answers not consumed), the wait detail that `l4 yolo status` prints (text and `--json`) SHALL be
 the live reason (the answer is recorded and the next run reads it), not the detail recorded when the plan began to wait.
 
 **L4-YOLO-055 A plan stopped on a unit with its own way out names that way first.** For a plan stopped with `unit_escalated` on a unit whose escalation has its own way out (`l4.state.next_step.way_out`:
 `judge_view_rejected`, `no_convertible_finding`), the `Next:` line of `l4 yolo status` and the refusal of
 `l4 yolo resume` SHALL name that way out, not `l4 retry --unit U` first. Any other cause keeps its text.
----
+
+**L4-YOLO-056 The next line of a waiting plan follows the unit's answer step.** For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
+`Next:` line of `l4 yolo status` SHALL give the step `l4 status --unit` gives (fix the answer, answer the question) and
+how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "accept ..." --replace`).
 
 ## 13. Memory and lessons
 
@@ -5335,7 +5351,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 37 | `check-worktree` | `l4 yolo check PLAN --worktree` admits the plan files and the units of the working tree before the push and reports `uncovered` and `covered_twice` as `validate_plan.py` does; the hints of `l4 yolo draft` and of the worktree review name it (L4-YOLO-034; `openspec/changes/check-worktree/`) | a plan author on a feature branch: run it before the push |
 | 38 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
 | 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
-| 40 | `plan-run-lessons` | a diff longer than one prompt is judged in parts of whole files and their replies merged, with the harness's bookkeeping and lock files left out, and what the judge cannot see is a `judge_view` hold that never becomes a fix unit (L4-VER-040 to L4-VER-045); a limit of an active plan is raised without waiting for the stop, by a person or, with `yolo.extend_by_agents`, an agent (L4-YOLO-050, L4-YOLO-051); `l4 yolo resume` and the hints after an answer say what happens, and a stopped plan names its unit's own way out (L4-YOLO-052 to L4-YOLO-055; `openspec/changes/plan-run-lessons/`) | the consumer repository's next plan run: a unit over the cap judged in parts; a limit raised while the plan is active; a resume after an answer |
+| 40 | `plan-run-lessons` | a diff longer than one prompt is judged in parts of whole files and their replies merged, with the harness's bookkeeping and lock files left out, and what the judge cannot see is a `judge_view` hold that never becomes a fix unit (L4-VER-040 to L4-VER-047); a limit of an active plan is raised without waiting for the stop, by a person or, with `yolo.extend_by_agents`, an agent (L4-YOLO-050, L4-YOLO-051); `l4 yolo resume` and the hints after an answer say what happens, and a stopped plan names its unit's own way out (L4-YOLO-052 to L4-YOLO-056; `openspec/changes/plan-run-lessons/`) | the consumer repository's next plan run: a unit over the cap judged in parts; a limit raised while the plan is active; a resume after an answer |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7581,7 +7597,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-131 (+) A diff of 202000 characters is judged in two parts, with no hold · L4-VER-041, L4-VER-042
 - **Given** a unit whose diff after L4-VER-040 is 202000 characters in six files, with diffs of 50000 (`src/app/export.py`), 30000 (`tests/test_export.py`), 12000 (`README.md`), 60000 (`src/app/report.py`), 40000 (`tests/test_report.py`) and 10000 (`src/app/util.py`) characters
 - **When** the judge step runs
-- **Then** the judge is called once per part for two parts, the first with `src/app/export.py`, `tests/test_export.py` and `README.md`, the second with `src/app/report.py`, `tests/test_report.py` and `src/app/util.py`; each prompt is headed `part K of 2`, lists all six files with their part and holds the rules of a part (what the part does not show is `insufficient_evidence` with the reasoning `not in this part`, never `fail`; a `fail` cites code of the part; an item not in the part is false with evidence that starts with `not in this part`); the same diff gives the same two parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`; `verification.md` says `judged in 2 parts`; the template is `judge@10`; and the round has no hold about the diff
+- **Then** the judge is called once per part for two parts, the first with `src/app/export.py`, `tests/test_export.py` and `README.md`, the second with `src/app/report.py`, `tests/test_report.py` and `src/app/util.py`; each prompt is headed `part K of 2`, lists all six files with their part and holds the rules of a part (a criterion whose code the part does not show is `insufficient_evidence` with the reasoning `not in this part`, never `fail`, and a criterion whose code it shows is judged there, whichever part holds its test; a test it does not show is left out of `test_adequacy`; a `fail` cites code of the part; an item not in the part is false with evidence that starts with `not in this part`); the same diff gives the same two parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`; `verification.md` says `judged in 2 parts`; the template is `judge@10`; and the round has no hold about the diff
 
 #### SCN-VER-132 (+) A criterion one part passes and another part cannot see is a pass · L4-VER-042
 - **Given** two part replies: part 1 says `pass` for C-1 with a citation and `addressed: true` for FB-001; part 2 says `insufficient_evidence` for C-1 with the reasoning `not in this part` and `addressed: false` for FB-001 with the evidence `not in this part`
@@ -7626,7 +7642,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-140 (+) A lock file is one line, never a diff · L4-VER-045
 - **Given** a unit whose diff changes `src/app/a.py` and `uv.lock`, the lock file by 30000 added lines
 - **When** the judge step lists the files of its diff
-- **Then** `uv.lock` is one entry whose text is `lock file uv.lock: <old> -> <new> bytes, +30000 -0 lines (not diffed)`, none of its lines is shown, and `src/app/a.py` is diffed as usual
+- **Then** `uv.lock` is one entry whose text is `lock file uv.lock: <old> -> <new> bytes, +30000 -0 lines, 0 touch a source field, hosts: none (not diffed)`, none of its lines is shown, and `src/app/a.py` is diffed as usual
 
 #### SCN-VER-141 (+) A lock file of 300000 characters makes no hold · L4-VER-043, L4-VER-045
 - **Given** a unit whose diff is two small files and a `uv.lock` whose own diff is 300000 characters
@@ -7636,7 +7652,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-142 (−) A file named like a lock file but not on the list is diffed · L4-VER-045
 - **Given** a unit whose diff adds `src/lock.py`, `docs/uv.lock.md` and `locks/notes.txt`
 - **When** the judge step lists the files of its diff
-- **Then** each is diffed in full, and none is shown as a lock file
+- **Then** each is diffed in full, and none is shown as a lock file; the same holds for a source file renamed to `go.sum`, whose diff shows the rename and its code, and a lock file renamed to a lock file is one line that names the old path
 
 #### SCN-VER-143 (−) A channel-named file outside the family's folders stays in the diff · L4-VER-040
 - **Given** a unit branch that changes `docs/questions.md`, and the `questions.md`, `feedback.md` and `.l4/ledger/r1.jsonl` of the unit's folder and of a folder that is no unit of the unit's family
@@ -7646,7 +7662,32 @@ scenario is a spec defect (§26).
 #### SCN-VER-144 (−) A deleted lock file is one line too · L4-VER-045
 - **Given** a unit whose diff deletes `Cargo.lock` of 6 bytes and 3 lines
 - **When** the judge step lists the files of its diff
-- **Then** it is one entry, `lock file Cargo.lock: 6 -> 0 bytes, +0 -3 lines (not diffed)`
+- **Then** it is one entry, `lock file Cargo.lock: 6 -> 0 bytes, +0 -3 lines, 0 touch a source field, hosts: none (not diffed)`; a `package-lock.json` whose `resolved` URL moves from `registry.npmjs.org` to another host shows the changed lines that touch a source field and both hosts
+
+#### SCN-VER-145 (−) An accept does not survive new content of the file it was given for · L4-VER-046
+- **Given** a round whose hold `judge view: the diff of `data/seed.json` is longer than one part …` a person accepted, and a next round whose `data/seed.json` has other content (the same hold text, so the same hold id)
+- **When** the next round settles its holds
+- **Then** the accept is not in force, the hold is unresolved and asked again, and an accept of unchanged content stays
+
+#### SCN-VER-146 (−) An accept does not survive a swapped unseen file the text does not name · L4-VER-046
+- **Given** an accepted hold that names five of seven unseen files (`(+2 more)`), and a next round in which one of the two files the text does not name is replaced by another
+- **When** the next round settles its holds
+- **Then** the hold text is the same, the accept is void, the hold is asked again, and its question lists all seven files, and for 500 files lists 100 and points at `verification.md`
+
+#### SCN-VER-147 (−) A diff of very many files has a bounded listing and a constant number of git diffs · L4-VER-047
+- **Given** a diff of 250 files in several parts
+- **When** the parts are listed and the prompts built
+- **Then** each prompt lists 200 files and `+50 more files: see verification.md`, `verification.md` lists all 250 by part, the packing left the list's characters free in every part, and listing the files ran a constant number of `git diff` calls
+
+#### SCN-VER-148 (+) A test lands with the code it imports · L4-VER-041
+- **Given** `src/app/report.py`, `src/app/models.py` of 100000 characters and `tests/test_api_flow.py`, which imports `app.report` and is named after no module
+- **When** the diff is packed in any input order
+- **Then** the test and `src/app/report.py` are in the same part, and a part that shows the code judges its criterion, whichever part holds the test
+
+#### SCN-VER-149 (−) A part that cannot see a test does not call it inadequate · L4-VER-042
+- **Given** part 1 calls the test T adequate and part 2, which does not show T, calls it inadequate with the reason `not in this part`
+- **When** the replies are merged
+- **Then** T is adequate, and a test inadequate for a reason of its own in any part that sees it stays inadequate
 
 ### 23.9.1 Human feedback (FBK)
 
@@ -9452,6 +9493,36 @@ scenario is a spec defect (§26).
 - **Given** a plan stopped with `unit_escalated` on a unit whose phase is `escalated` with the cause `judge_view_rejected`
 - **When** `l4 yolo status` and `l4 yolo resume --reason TEXT` run
 - **Then** the `Next:` line and the refusal name splitting the change (`l4 restart`) or replacing the answer (`--replace`) before `l4 retry --unit U`, and for a unit escalated for another cause the refusal still says `run l4 retry --unit U first`
+
+#### SCN-YOLO-144 (−) An agent cannot name its own branch as the base to turn the key on · L4-YOLO-051
+- **Given** an agent that pushes a branch `evil` whose `.l4/config.yaml` sets `yolo.extend_by_agents: true` (and `yolo.review.accept_by_agents: true`) and runs the command with a configuration whose base branch is `evil`
+- **When** it runs `l4 yolo resume p1 --reason TEXT --extend-runs 50`, and `l4 yolo waive p1 F-… --reason TEXT --yes`
+- **Then** each exits 2 saying that the base branch of the configuration differs from the plan's target, and nothing is written
+
+#### SCN-YOLO-145 (−) A cost that is not finite is refused · L4-YOLO-050
+- **Given** an active plan with a cost limit
+- **When** a person runs `l4 yolo resume p1 --reason TEXT --extend-cost nan`, then `inf`, then `-inf`
+- **Then** each exits 2 with `--extend-cost must be a finite number` (or `must be more than 0`) and nothing is written
+
+#### SCN-YOLO-146 (−) A clarifying unit with nothing answered is not described as answered · L4-YOLO-054
+- **Given** a waiting plan whose current unit is `clarifying` with no recorded answer
+- **When** `l4 yolo status` runs
+- **Then** the wait line keeps the recorded detail and the `Next:` line does not say that the answer is recorded; once an answer is recorded it does
+
+#### SCN-YOLO-147 (−) An answer that is not valid is not met with the plain answer instruction · L4-YOLO-056
+- **Given** a waiting plan whose current unit has an answer that does not start with accept or reject
+- **When** `l4 yolo status` runs
+- **Then** its `Next:` line fixes that answer, names `--replace`, and says the plan continues by itself at the run that reads the answer
+
+#### SCN-YOLO-148 (+) The extensions listed are the ones in force · L4-YOLO-050
+- **Given** a ledger with an extension before the activation, two after it with a re-activation between them, a cancel, and an extension after the cancel
+- **When** `l4 yolo status` lists the extensions and the ledger is folded
+- **Then** the two extensions after the activation are listed, in order, and their sum is the fold's extension
+
+#### SCN-YOLO-149 (−) A judge-view reject beside another unconvertible reject names each way out · L4-VER-044
+- **Given** a failed round with a rejected `judge view:` hold and another finding of a person that no fix task can be derived from
+- **When** the fix loop decides
+- **Then** the unit escalates with a cause that names both, and `l4 status --unit` gives the feedback way out and the way out of the hold on the judge's view
 
 ### 23.21 Experience graph (KG)
 

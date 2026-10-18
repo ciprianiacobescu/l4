@@ -8,7 +8,8 @@ an agent cannot.
 ### Requirement: L4-YOLO-050 A limit of an active plan is raised without waiting for the stop
 `l4 yolo resume PLAN --reason TEXT --extend-…` on an `active` plan SHALL record `plan.extended{by, actor, marker,
 agent_key, reason, extend, limits_before, limits_after}` and nothing else: no resume, no run. The limits in force
-(L4-YOLO-014) SHALL include it. No `--extend-…`, or one that changes no limit, SHALL be refused (exit 2). `l4 yolo
+(L4-YOLO-014) SHALL include it. No `--extend-…`, one that changes no limit and a cost that is not finite SHALL be
+refused (exit 2). `l4 yolo
 status` SHALL list the extensions and name the option in an active plan's `Next:` line.
 
 #### Scenario: SCN-YOLO-130 (+) A run limit of an active plan is raised before the stop
@@ -53,8 +54,9 @@ status` SHALL list the extensions and name the option in an active plan's `Next:
 ### Requirement: L4-YOLO-051 Raising a plan's limit is a person's decision
 Every `--extend-…` of `l4 yolo resume`, on an active, waiting or stopped plan, SHALL be refused (exit 2, nothing
 written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` on the base
-branch (default `false`). The refusal SHALL name the command a person runs and the key. The event SHALL record the
-actor, its marker and `agent_key` (whether the key allowed it).
+branch (default `false`), read from the plan's own target branch, and not when the configuration's base branch is
+another than the plan's target. The refusal SHALL name the command a person runs and the key. The event SHALL record
+the actor, its marker and `agent_key`.
 
 #### Scenario: SCN-YOLO-134 (−) An agent cannot raise a limit
 - **GIVEN** the plan `p1` while it is active, and the same plan seeded again stopped with `limit_runs`
@@ -69,3 +71,21 @@ actor, its marker and `agent_key` (whether the key allowed it).
 - **THEN** on the active plan `plan.extended` is recorded, on the stopped plan `plan.resumed` is recorded, each with
   `actor: agent`, `marker: CLAUDECODE`, `agent_key: true` and `extend: {runs: 20}`; with the key `false`, or absent,
   the refusal of SCN-YOLO-134 stands
+
+#### Scenario: SCN-YOLO-144 (−) An agent cannot name its own branch as the base to turn the key on
+- **GIVEN** an agent that pushes a branch `evil` whose `.l4/config.yaml` sets `yolo.extend_by_agents: true` (and
+  `yolo.review.accept_by_agents: true`) and runs the command with a configuration whose base branch is `evil`
+- **WHEN** it runs `l4 yolo resume p1 --reason TEXT --extend-runs 50`, and `l4 yolo waive p1 F-… --reason TEXT --yes`
+- **THEN** each exits 2 saying that the base branch of the configuration differs from the plan's target, and nothing is
+  written
+
+#### Scenario: SCN-YOLO-145 (−) A cost that is not finite is refused
+- **GIVEN** an active plan with a cost limit
+- **WHEN** a person runs `l4 yolo resume p1 --reason TEXT --extend-cost nan`, then `inf`, then `-inf`
+- **THEN** each exits 2 with `--extend-cost must be a finite number` (or `must be more than 0`) and nothing is written
+
+#### Scenario: SCN-YOLO-148 (+) The extensions listed are the ones in force
+- **GIVEN** a ledger with an extension before the activation, two after it with a re-activation between them, a
+  cancel, and an extension after the cancel
+- **WHEN** `l4 yolo status` lists the extensions and the ledger is folded
+- **THEN** the two extensions after the activation are listed, in order, and their sum is the fold's extension

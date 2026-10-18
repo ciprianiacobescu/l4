@@ -40,6 +40,17 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   one rule (L4-YOLO-052, L4-YOLO-053, L4-YOLO-054).
 
 ### Changed
+- A person's accept of a `judge view:` hold is bound to the head content of every file the hold covers and to the full list of
+  files the judge did not see (the hold's text names five): it is void, and the hold asked again, when that content changes. The
+  question lists every unseen file (L4-VER-046). The file list of a part prompt is capped at 200 files (then
+  `+K more files: see verification.md`, which lists them all) and the diff is read with one `git diff` (L4-VER-047). A test is
+  packed with the code it imports, a part that shows the code judges its criterion, and a part that cannot see a test cannot
+  call it inadequate. A lock file is a lock file only when its old and new names both are, and its line shows the changed lines
+  that touch a source field and the hosts they name (L4-VER-045).
+- The key `yolo.extend_by_agents` (and `yolo.review.accept_by_agents`) is read from the plan's own target branch; an agent that names
+  another base branch in its configuration has no key. `--extend-cost` must be finite. `l4 yolo status` lists the extensions the plan's
+  fold applied, follows the unit's answer step for an invalid, dismissed or draft answer, and describes a unit as answered only when an
+  answer is recorded (L4-YOLO-056). A rejected judge-view hold beside another unconvertible reject names both ways out.
 - `l4 yolo resume PLAN --reason TEXT --extend-…` on an **active** plan raises the limit and records `plan.extended`; it
   resumes nothing and starts no run. Before, it was refused until the plan stopped. Without an `--extend-…` the refusal
   names the four options, and an extension that changes no limit is refused (L4-YOLO-050).

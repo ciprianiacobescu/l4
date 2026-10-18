@@ -10,15 +10,15 @@ def read(*parts: str) -> str:
     return ROOT.joinpath(*parts).read_text(encoding="utf-8")
 
 
-def test_the_spec_has_the_eleven_requirements_and_their_scenarios_in_order() -> None:
+def test_the_spec_has_the_fifteen_requirements_and_their_scenarios_in_order() -> None:
     spec = read("docs", "SPEC.md")
-    for rid in (*[f"L4-VER-0{n}" for n in range(40, 46)], *[f"L4-YOLO-0{n}" for n in range(50, 56)]):
+    for rid in (*[f"L4-VER-0{n}" for n in range(40, 48)], *[f"L4-YOLO-0{n}" for n in range(50, 57)]):
         assert f"**{rid} " in spec, rid
     assert spec.index("**L4-VER-018 ") < spec.index("**L4-VER-040 ") < spec.index("**L4-VER-045 ")
     assert spec.index("**L4-YOLO-035** ") < spec.index("**L4-YOLO-050 ") < spec.index("**L4-YOLO-055 ")
-    for n in range(130, 145):
+    for n in range(130, 150):
         assert f"#### SCN-VER-{n} " in spec, n
-    for n in range(130, 144):
+    for n in range(130, 150):
         assert f"#### SCN-YOLO-{n} " in spec, n
     assert spec.index("#### SCN-VER-77 ") < spec.index("#### SCN-VER-130 ") < spec.index("### 23.9.1 Human feedback")
     assert "`yolo.extend_by_agents`" in spec and "extend_by_agents: false" in spec
