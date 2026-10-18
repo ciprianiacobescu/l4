@@ -90,3 +90,32 @@ def test_the_report_carries_the_listed_patches(tmp_path, git_environ):  # SCN-VE
     assert report.mocked_support == [
         "tests/conftest.py: patches pytdd.pricing.apply_discount in a fixture a test requests"
     ]
+
+
+HELPER_HOOK = "def pytest_runtest_setup(item):\n    pass\n"
+
+
+def test_a_helper_module_under_tests_with_no_test_is_read_as_support(tmp_path, git_environ):  # SCN-VER-129, SCN-VER-124
+    repo, base = new_repo(tmp_path, git_environ, BASE)
+    repo.write({"src/pytdd/pricing.py": PRICING_NEW, "tests/checks.py": HELPER_HOOK})
+    out = check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green")))
+    [finding] = out.findings
+    assert "tests/checks.py: pytest_runtest_setup: code around every test call" in finding.detail
+
+
+def test_the_patch_rule_runs_on_a_helper_module_too(tmp_path, git_environ):  # SCN-VER-124
+    helper = "import pytdd.pricing as p\n\np.apply_discount = lambda a, c: a\n"
+    repo, base = new_repo(tmp_path, git_environ, BASE)
+    repo.write({"src/pytdd/pricing.py": PRICING_NEW, "tests/checks.py": helper})
+    [finding] = check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings
+    assert "tests/checks.py: patches pytdd.pricing.apply_discount, which the unit changed, for every test" in (
+        finding.detail
+    )
+
+
+def test_a_file_with_a_test_is_not_read_as_support(tmp_path, git_environ):  # SCN-VER-129 control
+    repo, base = new_repo(tmp_path, git_environ, BASE)
+    repo.write(
+        {"src/pytdd/pricing.py": PRICING_NEW, "tests/test_hooks.py": HELPER_HOOK + "\n\ndef test_x():\n    pass\n"}
+    )
+    assert check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings == []

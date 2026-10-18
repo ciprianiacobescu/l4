@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 _REPORT_HOOKS = ("pytest_runtest_makereport", "pytest_report_teststatus", "pytest_runtest_logreport")
 _WRAPPED_HOOKS = ("pytest_runtest_call", "pytest_runtest_protocol")
+_PLAIN_CALL_HOOKS = ("pytest_runtest_call", "pytest_runtest_setup")  # a plain implementation runs around every test
+_REPLACING_ATTRIBUTES = ("obj", "runtest")  # `item.obj = f` / `item.runtest = f` replace a collected test
 _DESELECTING_CALLS = ("remove", "pop", "clear", "pytest_deselected")
 _SKIP_MARK = re.compile(
     r"(?:^|\.)mark\.(?:skip|skipif|xfail)\b|\bunittest\.(?:skip|skipIf|skipUnless|expectedFailure)\b"
@@ -73,13 +75,27 @@ def result_hooks(source: str) -> list[str]:
             found.append(f"{function.name}: rewrites what the run reports")
         elif function.name == "pytest_collection_modifyitems" and _deselects(function):
             found.append("pytest_collection_modifyitems: removes or skips collected tests")
+        elif function.name == "pytest_pyfunc_call":
+            found.append("pytest_pyfunc_call: runs or replaces the test function")
         elif function.name in _WRAPPED_HOOKS and _is_wrapper(function):
             found.append(f"{function.name}: a hook wrapper around the test call")
+        elif function.name in _PLAIN_CALL_HOOKS and not _is_wrapper(function):
+            found.append(f"{function.name}: code around every test call")
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Attribute) and t.attr == "exitstatus" for t in node.targets
-        ):
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.target]
+            if isinstance(node, ast.AnnAssign | ast.AugAssign)
+            else []
+        )
+        if any(isinstance(t, ast.Attribute) and t.attr == "exitstatus" for t in targets):
             found.append("assignment to exitstatus: decides the exit code of the run")
+        found += [
+            f"assignment to .{t.attr}: replaces a collected test"
+            for t in targets
+            if isinstance(t, ast.Attribute) and t.attr in _REPLACING_ATTRIBUTES
+        ]
     return found
 
 

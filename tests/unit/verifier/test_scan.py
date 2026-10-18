@@ -12,7 +12,10 @@ def test_hookwrapper_only_counts_when_it_wraps_the_test_call():
     wrapped = "import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_runtest_call(item):\n    yield\n"
     plain = "def pytest_runtest_call(item):\n    pass\n"
     other = "import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_sessionstart(session):\n    yield\n"
-    assert scan.result_hooks(wrapped) and not scan.result_hooks(plain) and not scan.result_hooks(other)
+    assert scan.result_hooks(wrapped) and not scan.result_hooks(other)
+    # L4-VER-039: a plain pytest_runtest_call is no longer harmless; its hit has its own text
+    assert scan.result_hooks(plain) == ["pytest_runtest_call: code around every test call"]
+    assert scan.result_hooks(wrapped) == ["pytest_runtest_call: a hook wrapper around the test call"]
 
 
 def test_a_source_that_does_not_parse_has_no_hits():
@@ -57,3 +60,23 @@ def test_added_lines_carry_their_line_numbers():
 def test_task_tags():
     assert scan.task_tags("Update the docs [Docs] and [test-infra]") == {"docs", "test-infra"}
     assert scan.task_tags("plain [ ] title") == frozenset()
+
+
+def test_hooks_that_replace_a_tests_call_are_hits():  # SCN-VER-129
+    assert scan.result_hooks("def pytest_pyfunc_call(pyfuncitem):\n    return True\n") == [
+        "pytest_pyfunc_call: runs or replaces the test function"
+    ]
+    assert scan.result_hooks("def pytest_runtest_setup(item):\n    pass\n") == [
+        "pytest_runtest_setup: code around every test call"
+    ]
+    modify = "def pytest_collection_modifyitems(items):\n    for item in items:\n        item.obj = lambda: None\n"
+    assert scan.result_hooks(modify) == ["assignment to .obj: replaces a collected test"]
+    assert scan.result_hooks("def f(item):\n    item.runtest = print\n") == [
+        "assignment to .runtest: replaces a collected test"
+    ]
+    wrapped = "import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_runtest_setup(item):\n    yield\n"
+    assert scan.result_hooks(wrapped) == []  # a wrapper of setup is not code around the call
+
+
+def test_an_attribute_that_is_not_obj_or_runtest_is_no_hit():  # SCN-VER-129 control
+    assert scan.result_hooks("def f(item):\n    item.name = 'x'\n    item.obj_count = 1\n") == []
