@@ -185,7 +185,8 @@ Before `unit.merge_requested` the guarded merge SHALL read the repository's CI o
 #### Scenario: SCN-YOLO-123 (−) Every project job skipped is not_run
 - **GIVEN** a unit in review with a PASS at its recorded H whose only job was skipped, past the window
 - **WHEN** the plan step runs with the default configuration
-- **THEN** the unit is merged with `ci: not_run`, not `ci: green`
+- **THEN** the unit is merged with `ci: not_run`, not `ci: green`; so is a cancelled push job whose pull_request twin
+  was skipped, and with `require_ci` true the plan waits
 
 #### Scenario: SCN-YOLO-119 (−) A job recorded as red on the base too, now red on H alone, names the retry
 - **GIVEN** a unit in review with a PASS at its recorded H, with `ci.preexisting{head: H, jobs: [lint]}` recorded, and

@@ -255,6 +255,10 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
   `blocked` (m6); no window when the repository defines no workflow but `l4.yml`, requires nothing and H has no status
   (m7); a `pr.ready` time a little ahead of the read is the read time, one more than five minutes ahead is ignored; a
   merge raced by a person at another head records `ci: unknown`.
+- **Round 3 (X1, X2, X4).** `resolve_twins` runs before every verdict: a cancelled job is superseded only by a twin that
+  ran to success or failed, and a cancelled job whose twins only skipped counts as skipped (so `all_skipped` and `not_run`
+  see it). The no-window shortcut also needs a base head with no project job (an app's check run or a status is CI), and
+  a required check with no job on H is `unreported` after the window.
 - **The merged head.** A squash that comes back `raced` reads the merged PR's head; if a person merged it at another
   head, `unit.merged.head` is that head, not H.
 

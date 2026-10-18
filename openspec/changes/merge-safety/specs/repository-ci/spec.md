@@ -94,21 +94,22 @@ through one function, `read_handoff_ci`.
   `ci_preexisting`, `not_run` and `ci_not_run`
 
 ### Requirement: L4-CI-013 A job that did not pass is not green
-The newest attempt of a project job SHALL pass on success, neutral or skipped, and SHALL be red on failure, timed_out,
-startup_failure or stale. A cancelled job, and a held job that a person must act on (`action_required`, a manual job
-that may not fail), SHALL be `blocked`: neither green nor a fix round. A cancelled job with a finished job of the same
-workflow file and name under another event SHALL count as that job. Every project job skipped SHALL be `not_run`.
+A project job's newest attempt SHALL pass on success, neutral or skipped, and be red on failure, timed_out,
+startup_failure or stale. A cancelled job and a held one (`action_required`, a manual job that may not fail) SHALL be
+`blocked`: neither green nor a fix round. A cancelled job counts as its twin under another event when that ran, and as
+skipped when the twins only skipped. Every project job skipped SHALL be `not_run`.
 
 #### Scenario: SCN-CI-061 (−) A cancelled, stale or action_required job is not green
 - **GIVEN** a GitHub hand-off commit whose only project job concluded `cancelled`, `action_required` or `stale`
 - **WHEN** the CI is read
-- **THEN** the cancelled and the `action_required` job are `blocked`, the stale job is `failed`, never `green`
+- **THEN** the cancelled and the `action_required` job are `blocked`, the stale job is `failed`, never `green`; a
+  cancelled push job whose pull_request twin was skipped is `not_run`
 
 ### Requirement: L4-CI-014 CI that may not exist yet is running
 On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an
 unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only
-ten minutes after the recorded `pr.ready`, unless the repository can start no CI. An unreported required check SHALL
-block the merge after the window.
+ten minutes after the recorded `pr.ready`, unless the repository can start no CI (no workflow but `l4.yml`, no required check, no CI on the base head). An
+unreported required check SHALL block the merge after the window, with or without a job.
 
 #### Scenario: SCN-CI-062 (−) A queued workflow run with no check run yet is running
 - **GIVEN** a GitHub hand-off commit with a queued workflow run and no check run
@@ -123,7 +124,8 @@ block the merge after the window.
 #### Scenario: SCN-CI-064 (−) A required check that H has not reported is running, then not_run
 - **GIVEN** a base branch that requires the checks `build` and `lint`, and H with a passed `build` only
 - **WHEN** the CI is read within ten minutes of the hand-off, and an hour after it
-- **THEN** it is `running`, and then `unreported` naming `lint`, which blocks the merge
+- **THEN** it is `running`, and then `unreported` naming `lint`, which blocks the merge; so does a required check when
+  H has no job at all, and a CI app on the base head keeps the window
 
 #### Scenario: SCN-CI-065 (−) An unfinished GitLab pipeline with no job yet is running
 - **GIVEN** a GitLab hand-off commit whose pipeline is `created`, `pending` or `running` and lists no project job

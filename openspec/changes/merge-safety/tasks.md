@@ -332,3 +332,9 @@ Every task follows these rules:
   warning, window rules, unfinished job names), `merge.py`, `cycle.py`, `sweeper.py`, `model.py`. Tests:
   `test_github_checks.py`, `test_handoff_ci.py`, `test_merge_safety_ci_gate.py`, `test_yolo_merge_squash.py`.
 - [x] 9.2 Docs: SPEC (L4-CI-013, L4-CI-014, L4-YOLO-042, SCN-YOLO-126..128, SCN-CI-069), CHANGELOG.
+
+## 10. Round 3 of the review (X1, X2, X4)
+
+- [x] 10.1 Tests first (8 failing), then code in `repo_ci.py` (`resolve_twins`) and `handoff_ci.py`; tests in
+  `test_github_checks.py`, `test_handoff_ci.py`, `test_merge_safety_ci_gate.py`.
+- [x] 10.2 Docs: the texts of L4-CI-013, L4-CI-014, SCN-CI-061, SCN-CI-064, SCN-YOLO-123; SPEC regenerated.

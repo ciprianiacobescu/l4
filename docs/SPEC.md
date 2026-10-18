@@ -4925,9 +4925,9 @@ rules are unchanged.
 
 **L4-CI-012** A hand-off commit that no job of the project ran on is not_run. The repository-CI duty SHALL be `not_run`, never green, when H has no job other than the ignored `l4` job, on every forge. Its reason SHALL say which case it is: no check run at all on GitHub (a push made with `GITHUB_TOKEN` starts none), only the harness's own `l4` job, or no pipeline job on GitLab. The sweep and the guarded merge SHALL read H's CI through one function, `read_handoff_ci`.
 
-**L4-CI-013** A job that did not pass is not green. The newest attempt of a project job SHALL pass on success, neutral or skipped, and SHALL be red on failure, timed_out, startup_failure or stale. A cancelled job, and a held job that a person must act on (`action_required`, a manual job that may not fail), SHALL be `blocked`: neither green nor a fix round. A cancelled job with a finished job of the same workflow file and name under another event SHALL count as that job. Every project job skipped SHALL be `not_run`.
+**L4-CI-013** A job that did not pass is not green. A project job's newest attempt SHALL pass on success, neutral or skipped, and be red on failure, timed_out, startup_failure or stale. A cancelled job and a held one (`action_required`, a manual job that may not fail) SHALL be `blocked`: neither green nor a fix round. A cancelled job counts as its twin under another event when that ran, and as skipped when the twins only skipped. Every project job skipped SHALL be `not_run`.
 
-**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`, unless the repository can start no CI. An unreported required check SHALL block the merge after the window.
+**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`, unless the repository can start no CI (no workflow but `l4.yml`, no required check, no CI on the base head). An unreported required check SHALL block the merge after the window, with or without a job.
 
 **L4-CI-015** Commit statuses are read and only the harness's own job is ignored. On GitHub the combined commit status of H SHALL be read as jobs, a failure or error red and pending running, except the harness's own `l4/*` contexts. Only the job `l4` of the workflow `l4.yml` SHALL be ignored as the harness's own.
 
@@ -8159,7 +8159,7 @@ scenario is a spec defect (§26).
 #### SCN-CI-061 (−) A cancelled, stale or action_required job is not green · L4-CI-013
 - **Given** a GitHub hand-off commit whose only project job concluded `cancelled`, `action_required` or `stale`
 - **When** the CI is read
-- **Then** the cancelled and the `action_required` job are `blocked`, the stale job is `failed`, never `green`
+- **Then** the cancelled and the `action_required` job are `blocked`, the stale job is `failed`, never `green`; a cancelled push job whose pull_request twin was skipped is `not_run`
 
 #### SCN-CI-062 (−) A queued workflow run with no check run yet is running · L4-CI-014
 - **Given** a GitHub hand-off commit with a queued workflow run and no check run
@@ -8174,7 +8174,7 @@ scenario is a spec defect (§26).
 #### SCN-CI-064 (−) A required check that H has not reported is running, then not_run · L4-CI-014
 - **Given** a base branch that requires the checks `build` and `lint`, and H with a passed `build` only
 - **When** the CI is read within ten minutes of the hand-off, and an hour after it
-- **Then** it is `running`, and then `unreported` naming `lint`, which blocks the merge
+- **Then** it is `running`, and then `unreported` naming `lint`, which blocks the merge; so does a required check when H has no job at all, and a CI app on the base head keeps the window
 
 #### SCN-CI-065 (−) An unfinished GitLab pipeline with no job yet is running · L4-CI-014
 - **Given** a GitLab hand-off commit whose pipeline is `created`, `pending` or `running` and lists no project job
@@ -9495,7 +9495,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-123 (−) Every project job skipped is not_run · L4-YOLO-042
 - **Given** a unit in review with a PASS at its recorded H whose only job was skipped, past the window
 - **When** the plan step runs with the default configuration
-- **Then** the unit is merged with `ci: not_run`, not `ci: green`
+- **Then** the unit is merged with `ci: not_run`, not `ci: green`; so is a cancelled push job whose pull_request twin was skipped, and with `require_ci` true the plan waits
 
 #### SCN-YOLO-124 (−) A PR a person merged at another head records that head · L4-YOLO-032
 - **Given** a squash merge pinned to H, and a person who pushes X and merges the PR at X before the forge answers
