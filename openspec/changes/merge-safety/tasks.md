@@ -110,7 +110,7 @@ Every task follows these rules:
 
 ## 4. A GitHub check run is one job of one workflow (L4-CI-010, L4-CI-011, design D6, D8)
 
-- [ ] 4.1 Tests first.
+- [x] 4.1 Tests first.
   - `tests/unit/forge/_github_helpers.py` `FakeGitHub`: `add_workflow_run`, `add_check_run(..., app=None)`, the two
     routes and `workflow_runs_status`, as D9 says.
   - `tests/unit/ci/test_check_run_identity.py`, ported from
@@ -142,7 +142,7 @@ Every task follows these rules:
   - `tests/unit/forge/test_gitlab_pipelines.py` (SCN-CI-057): two pipelines of one sha. The older has `test` failed and
     the newer has `test` success. There is one job, with `status == "success"`, `workflow == ""` and `key == "test"`.
     If the file has a test like this already, add the assertions to it.
-- [ ] 4.2 Code.
+- [x] 4.2 Code.
   - `src/l4/forge/base.py`: `JobResult.workflow`, `.event`, `.key`.
   - `src/l4/forge/github.py`: `list_pipeline_jobs`, `_workflow_suites`, and `_job` taking the identity, as D6 says.
   - `src/l4/ci/repo_ci.py`: `evaluate_ci` by `key`, and update the module docstring.
@@ -154,7 +154,7 @@ Every task follows these rules:
 
 ## 5. A hand-off commit that no job of the project ran on is not_run (L4-CI-012, L4-CI-002, design D5, D7, D8)
 
-- [ ] 5.1 Tests first.
+- [x] 5.1 Tests first.
   - `tests/unit/ci/test_check_run_identity.py`, the two `test_fvc4_*` ported:
     - `test_only_the_skipped_l4_job_is_not_run` (SCN-CI-058): `action.what == "ci_not_run"`,
       `its only check run is the harness's own l4 job` is in the detail, and `GITHUB_TOKEN` is not;
@@ -172,7 +172,7 @@ Every task follows these rules:
       `ci_green`, `ci_failed`, `ci_preexisting` and `ci_not_run`;
     - `test_the_not_run_reason_names_the_case`: on `github` with no job, the reason is `NO_CHECK_RUN`; on `github`
       with only `l4`, it is `ONLY_HARNESS_JOB`; on `gitlab` with no job, it is `NO_PIPELINE_JOB`.
-- [ ] 5.2 Code.
+- [x] 5.2 Code.
   - `src/l4/ci/handoff_ci.py` (new): `HandoffCi`, `read_handoff_ci`, and the three reasons, as D5 and D7 say.
   - `src/l4/ci/sweeper.py` `_ci_duty`: call it, map its statuses to today's action words, and import `NO_CHECK_RUN`
     from it (the name stays importable from `sweeper`).

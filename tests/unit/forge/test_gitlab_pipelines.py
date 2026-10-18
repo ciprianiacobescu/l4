@@ -33,6 +33,7 @@ def test_newest_pipeline_wins_per_job_name(gitlab: FakeGitLab, make_forge_client
     newest = gitlab.add_pipeline(SHA, [("test", "success")])  # the job was retried or rerun by a later pipeline
     jobs = {j.name: j for j in forge.list_pipeline_jobs(SHA)}
     assert jobs["test"].status == "success" and jobs["test"].pipeline_id == newest
+    assert len(jobs) == 2 and jobs["test"].workflow == "" and jobs["test"].key == "test"  # SCN-CI-057
     assert jobs["lint"].status == "success"  # only the older pipeline has it: it stays
 
 

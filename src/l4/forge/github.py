@@ -7,6 +7,7 @@ GraphQL mutation `markPullRequestReadyForReview`; REST has no endpoint for it.
 M1: forge-and-ci 2.9 rest (statuses, check runs, approvals, collaborator permission), 2.10 (workflow_dispatch).
 """
 
+import logging
 import os
 import re
 import time
@@ -39,10 +40,14 @@ from l4.forge.base import (
     post_once,
 )
 
+log = logging.getLogger("l4.forge.github")
+
 DEFAULT_API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 LABEL_COLOR = "6b7280"
 WORKFLOW_FILE = WORKFLOW_RELPATH.rsplit("/", 1)[-1]  # `l4.yml`: the one name the template and the dispatch share
+ACTIONS_APP = "github-actions"  # the `app.slug` of a check run that a workflow job made
+WORKFLOWS_DIR = ".github/workflows/"
 ACTIONS_BOT_LOGIN = "github-actions[bot]"  # who a job's GITHUB_TOKEN is; GET /user answers 403 for it
 ACTIONS_BOT_ID = 41898282  # GET /users/github-actions[bot], verified 2026-10-11
 MAX_RETRIES = 3
@@ -395,27 +400,76 @@ class GitHubForge:
     # --- the project's own CI: check runs ------------------------------------------------------------------------
 
     def list_pipeline_jobs(self, sha: str, *, settled: bool = False) -> list[JobResult]:
-        """The check runs of the commit, one per name (the newest), as `JobResult`s. The `l4` workflow's own run is
+        """The check runs of the commit as `JobResult`s, one per (workflow, event, name) (L4-CI-010): a check run of an
+        Actions job is keyed by its workflow file and the event of its workflow run, one of another app by the app's
+        slug, and only the newest check run of a key is kept, so a re-run replaces its earlier attempt and a failed job
+        of one workflow is not hidden behind a passing job of the same name in another. The `l4` workflow's own run is
         listed like any other; the caller ignores it. `settled` reads every run (`filter=all`, not only the latest of
-        each check suite) and keeps a name's newest finished one when it has one."""
-        newest: dict[str, JobResult] = {}
+        each check suite) and keeps a key's newest finished run when it has one."""
         path = f"/repos/{self._repo}/commits/{quote(sha, safe='')}/check-runs"
         runs = sorted(
             self._pages(path, {"filter": "all"} if settled else None, key="check_runs"),
             key=lambda run: int(run["id"]), reverse=True,
         )  # fmt: skip
+        suites = (
+            self._workflow_suites(sha)
+            if any(((run.get("app") or {}).get("slug")) == ACTIONS_APP for run in runs)
+            else {}
+        )
+        newest: dict[tuple[str, str, str], JobResult] = {}
         for run in runs:
-            job, name = self._job(run), str(run["name"])
-            if name not in newest or (settled and newest[name].status in UNFINISHED and job.status not in UNFINISHED):
-                newest[name] = job
+            job = self._job(run, self._identity_of(run, suites))
+            key = (job.workflow, job.event, job.name)
+            if key not in newest or (settled and newest[key].status in UNFINISHED and job.status not in UNFINISHED):
+                newest[key] = job
         return list(newest.values())
 
     @staticmethod
-    def _job(run: dict[str, Any]) -> JobResult:
+    def _identity_of(run: dict[str, Any], suites: Mapping[int, tuple[str, str]]) -> tuple[str, str]:
+        """(workflow, event) of a check run: an Actions job's workflow file and run event (a `suite-<id>` key when its
+        workflow run is not known, which cannot hide another job), another app's slug, or nothing for an old fake."""
+        slug = (run.get("app") or {}).get("slug")
+        if not slug:
+            return "", ""
+        if slug != ACTIONS_APP:
+            return str(slug), ""
+        suite = (run.get("check_suite") or {}).get("id")
+        return suites.get(suite) or (f"suite-{suite if suite is not None else 'unknown'}", "")  # type: ignore[arg-type]
+
+    def _workflow_suites(self, sha: str) -> dict[int, tuple[str, str]]:
+        """Check suite id -> (workflow file, event) for the workflow runs of `sha`, every attempt of each (a re-run may
+        or may not get a new check suite: both are covered). A listing the token may not read gives `{}` with one
+        warning, an attempt it may not read drops only that attempt's suite: the check runs then keep their own keys."""
+        found: dict[int, tuple[str, str]] = {}
+        base = f"/repos/{self._repo}/actions/runs"
+        try:
+            runs = list(self._pages(base, {"head_sha": sha}, key="workflow_runs"))
+        except (ForgeAuthError, ForgeNotFound):
+            log.warning("the workflow runs of %s could not be read: check runs are told apart by check suite", sha[:10])
+            return {}
+        for run in runs:
+            file = str(run.get("path") or "").removeprefix(WORKFLOWS_DIR).partition("@")[0]
+            if not file:
+                continue
+            identity = (file, str(run.get("event") or ""))
+            if isinstance(run.get("check_suite_id"), int):
+                found[run["check_suite_id"]] = identity
+            for attempt in range(1, int(run.get("run_attempt") or 1)):
+                try:
+                    earlier = self._request("GET", f"{base}/{int(run['id'])}/attempts/{attempt}").json()
+                except (ForgeAuthError, ForgeNotFound):
+                    continue
+                if isinstance(earlier, dict) and isinstance(earlier.get("check_suite_id"), int):
+                    found[earlier["check_suite_id"]] = identity
+        return found
+
+    @staticmethod
+    def _job(run: dict[str, Any], identity: tuple[str, str] = ("", "")) -> JobResult:
         suite = (run.get("check_suite") or {}).get("id")
         return JobResult(
             name=str(run["name"]), stage="", status=_check_status(run.get("status"), run.get("conclusion")),
             allow_failure=False, pipeline_id=suite, job_id=int(run["id"]), web_url=str(run.get("html_url") or ""),
+            workflow=identity[0], event=identity[1],
         )  # fmt: skip
 
     def job_log(self, job_id: int | str, max_lines: int = 40) -> JobLog:

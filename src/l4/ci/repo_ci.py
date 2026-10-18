@@ -1,12 +1,14 @@
 """What the project's own CI says about the hand-off commit H (forge-and-ci 2.44, L4-ARC-002 (d), SCN-ARC-14/19).
 
-Pure. The jobs are `l4.forge.base.JobResult`s of the commit (GitLab's status words; GitHub's check runs are mapped onto
-them). The harness's own job (`l4`) is ignored. A job is *red* when it failed and may not fail. Anything still
-unfinished defers the decision: a running pipeline is not a failure. A job that is red on H and on the base head is
-*pre-existing*, not this unit's; with no base pipeline, or none that has the job, it counts as new (a unit should not
-hand off red; the cost is at most one fix round per H, which `max_fix_rounds` bounds). A job red on H that has no
-finished attempt on the base head defers too; an earlier finished attempt there counts, so the base pipeline the sweep
-itself runs in (the `l4` job starts at once, beside the project's jobs) does not hold the decision back for ever.
+Pure. The jobs are `l4.forge.base.JobResult`s of the commit (GitLab's status words; GitHub's check runs are mapped
+onto them). A job is told apart from the same job on the base by its `key`: on GitHub `<workflow file> / <job>`
+(L4-CI-011), on GitLab its name. The harness's own job (`l4`) is ignored. A job is *red* when it failed and may not
+fail. Anything still unfinished defers the decision: a running pipeline is not a failure. A job that is red on H and
+on the base head is *pre-existing*, not this unit's; with no base pipeline, or none that has the job, it counts as new
+(a unit should not hand off red; the cost is at most one fix round per H, which `max_fix_rounds` bounds). A job red on
+H that has no finished attempt on the base head defers too; an earlier finished attempt there counts, so the base
+pipeline the sweep itself runs in (the `l4` job starts at once, beside the project's jobs) does not hold the decision
+back for ever.
 """
 
 from collections.abc import Sequence
@@ -50,10 +52,10 @@ def evaluate_ci(
     red = red_jobs(head_jobs, ignore)
     if not red:
         return CiVerdict("green")
-    named = {j.name for j in red}  # only the base jobs H's red jobs name can say whether they are new
-    if unfinished([j for j in base_jobs if j.name in named], ignore):
+    named = {j.key for j in red}  # only the base jobs H's red jobs name can say whether they are new
+    if unfinished([j for j in base_jobs if j.key in named], ignore):
         return CiVerdict("running")
-    base_red = {j.name for j in red_jobs(base_jobs, ignore)}
-    failed = tuple(j for j in red if j.name not in base_red)
-    preexisting = tuple(j for j in red if j.name in base_red)
+    base_red = {j.key for j in red_jobs(base_jobs, ignore)}
+    failed = tuple(j for j in red if j.key not in base_red)
+    preexisting = tuple(j for j in red if j.key in base_red)
     return CiVerdict("failed" if failed else "preexisting", failed, preexisting)
