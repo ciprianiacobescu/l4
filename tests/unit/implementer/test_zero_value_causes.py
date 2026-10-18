@@ -229,3 +229,75 @@ def test_n1b_a_pre_existing_private_production_helper_that_raises_fails_the_atte
     out = run_red(bench.wb, TASK, attempt=1)
     assert out.status == "failed" and out.reason.startswith(f"not discriminating: {KNOWN}"), out.reason
     assert bench.events("question.raised") == []
+
+
+# --- round-3 review N1c, N1d ------------------------------------------------------------
+TWO_OWN_FRAMES = (
+    "tests/test_spans.py:4: in <module>\n    import trap_support\n"
+    "tests/trap_support.py:9: in <module>\n    require(_ready())\n"
+    "tests/helpers.py:3: in require\n    assert value\nE   AssertionError: not ready\n"
+)
+
+
+def test_n1c_the_innermost_own_frame_decides(tmp_path):
+    own = frozenset({"tests/test_spans.py", "tests/trap_support.py"})
+    report = TestReport({OTHER.id: OTHER}, ["tests.test_spans"], {"tests.test_spans": TWO_OWN_FRAMES})
+    assert variant.test_outcome(run_of(tmp_path, report), T1, REAL, own) == ("none", "")
+    imported = TWO_OWN_FRAMES.replace("tests/trap_support.py:9: in <module>\n    require(_ready())\n", "")
+    report = TestReport({OTHER.id: OTHER}, ["tests.test_spans"], {"tests.test_spans": imported})
+    assert variant.test_outcome(run_of(tmp_path, report), T1, REAL, own)[0] == "inconclusive"
+
+
+def test_n1c_an_import_that_fails_with_no_deeper_frame_is_the_agents(tmp_path):
+    trace = "tests/test_spans.py:1: in <module>\n    import nowhere\nE   ModuleNotFoundError: No module named 'x'\n"
+    report = TestReport({OTHER.id: OTHER}, ["tests.test_spans"], {"tests.test_spans": trace})
+    assert outcome(tmp_path, report) == ("none", "")
+
+
+def test_n1c_an_own_helper_module_that_trips_a_pre_existing_helper_fails_the_attempt(make_bench, tdd_repo, raw):
+    commit_base(tdd_repo, raw, {"tests/helpers.py": 'def require(value):\n    assert value, "not ready"\n'})
+    support = (
+        "from helpers import require\nfrom pytdd import total\n\n\ndef _ready():\n    return total([50.0])\n\n\n"
+        "require(_ready())\n"
+    )
+    test = (
+        "import pytest\n\nimport trap_support  # noqa: F401\nfrom pytdd import total  # noqa: F401\n\n\n"
+        f'@pytest.mark.l4("{KNOWN}")\ndef test_known_code():\n    pass\n'
+    )
+    step = Step(
+        writes={"tests/trap_support.py": support, "tests/test_trap.py": test},
+        structured=result("red", criteria_ids=[KNOWN]),
+    )
+    bench: Bench = make_bench([step])
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "failed" and out.reason.startswith(f"not discriminating: {KNOWN}"), out.reason
+    assert bench.events("question.raised") == []
+
+
+def test_n1d_a_conftest_the_unit_added_that_stops_pytest_is_the_agents_failure(make_bench):
+    conftest = (
+        "from pytdd import total\n\n\ndef _ready():\n    return total([50.0])\n\n\n"
+        'if not _ready():\n    raise RuntimeError("not ready")\n'
+    )
+    test = (
+        "import pytest\n\nfrom pytdd import total  # noqa: F401\n\n\n"
+        f'@pytest.mark.l4("{KNOWN}")\ndef test_known_code():\n    pass\n'
+    )
+    step = Step(
+        writes={"tests/conftest.py": conftest, "tests/test_trap.py": test},
+        structured=result("red", criteria_ids=[KNOWN]),
+    )
+    bench: Bench = make_bench([step])
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "failed" and out.reason.startswith(f"not discriminating: {KNOWN}"), out.reason
+    assert bench.events("question.raised") == []
+
+
+def test_n1d_a_run_with_no_report_stays_inconclusive_when_no_own_conftest_is_named(tmp_path):
+    log = tmp_path / "gate.log"
+    log.write_text("ImportError while loading conftest '/repo/tests/conftest.py'.\nE   ImportError: x\n")
+    gate = GateResult("test-presatisfied", "fail", "exit code 4", 4, log, None)
+    run = variant.classify(gate, REAL, redact=Redactor({}).redact_text)
+    assert variant.test_outcome(run, T1, REAL, frozenset({"tests/test_spans.py"}))[0] == "inconclusive"
+    assert variant.test_outcome(run, T1, REAL, frozenset({"tests/conftest.py"})) == ("none", "")
+    assert variant.test_outcome(run, T1, REAL, frozenset({"tests/conftest.py"}), zero_value=False)[0] == "inconclusive"

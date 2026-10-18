@@ -32,7 +32,10 @@ from l4.security.protected import glob_match
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
 PROOF_RED_ASSERTION = "red_assertion"
-VIA_NOT_APPLICABLE = "not_applicable"  # discrimination does not apply: the tests check a dependency (L4-IMP-062)
+VIA_NOT_APPLICABLE = (
+    "not_applicable"  # read in old ledgers only; since round 3 nothing writes it as a pass (L4-IMP-062)
+)
+NO_PROJECT_IMPORT = "its tests import no project module: the zero-value check cannot judge them"
 # every variant run goes on past a collection error (L4-IMP-060): a variant that breaks one module's import, or a base
 # run that sets an added module aside, must not stop pytest before it runs the others (harmless for a gate that is not
 # pytest: it ignores the variable)
@@ -675,38 +678,40 @@ def confirm_pre_satisfied(
     the modules those tests import, and of the modules changed since the unit base, answering its zero value, at least
     one of a criterion's tests must fail by assertion, otherwise the criterion is not discriminating (refuted). A run
     that could not run the tests decides nothing: the criterion is inconclusive (L4-IMP-060). A criterion whose every
-    test checks a dependency and no project code is not applicable (L4-IMP-062)."""
+    test checks a dependency and no project code is held with a harness question, never passed (L4-IMP-062)."""
     from l4.implementer.depcheck import dependency_only
 
     if not candidates:
         return PreSatisfied()
     roots = import_roots(wb)
     texts = _criterion_texts(wb)
-    not_applicable = {
-        c: tuple(t)
+    # Round 3: `dependency_only` is only a CLASSIFIER, never a safety rule. A criterion whose every test it accepts goes
+    # to a person (inconclusive: the existing hold with a `harness` question); every other criterion with no project
+    # import is refuted as on 0.4.15. Neither outcome is a pass, so the heuristic's precision decides which message a
+    # person sees, not whether an agent's test is believed. Nothing is ever recorded `not_applicable` any more.
+    dependency = {
+        c: NO_PROJECT_IMPORT
         for c, t in candidates.items()
         if t and c in texts and all(dependency_only(wb, i, roots, texts[c]) for i in t)
     }
-    rest = {c: tuple(t) for c, t in candidates.items() if c not in not_applicable}
+    rest = {c: tuple(t) for c, t in candidates.items() if c not in dependency}
     if not rest:
-        return PreSatisfied(not_applicable=not_applicable)
+        return PreSatisfied(inconclusive=dependency)
     everything = sorted({t for tests in rest.values() for t in tests})
     scope = sorted(imported_modules(wb, everything) | _changed_modules(wb))
     if not scope:
-        return PreSatisfied(
-            {}, rest, "no project source module is imported by those tests", not_applicable=not_applicable
-        )
+        return PreSatisfied({}, rest, "no project source module is imported by those tests", inconclusive=dependency)
     zero = zeroed_run(wb, "test-presatisfied", scope, public=True, real=real, candidates=everything)
     if zero is None:
         return PreSatisfied(
             {},
             rest,
             "the zero-value run produced no readable report (nothing to vary)",
-            not_applicable=not_applicable,
+            inconclusive=dependency,
         )
     confirmed: dict[str, tuple[str, ...]] = {}
     refuted: dict[str, tuple[str, ...]] = {}
-    inconclusive: dict[str, str] = {}
+    inconclusive: dict[str, str] = dict(dependency)
     for criterion, result in variant.judge(
         zero.run, rest, real, zero.own, redact=wb.redactor.redact_text, proved=zero.proved
     ).items():
@@ -716,7 +721,7 @@ def confirm_pre_satisfied(
             refuted[criterion] = result.tests
         else:
             inconclusive[criterion] = result.reason
-    return PreSatisfied(confirmed, refuted, "", inconclusive, not_applicable, dict(zero.kept), zero.reruns)
+    return PreSatisfied(confirmed, refuted, "", inconclusive, {}, dict(zero.kept), zero.reruns)
 
 
 # --- tests no red record covers (M1.11 W6, decision 8) -------------------------------------------------------------

@@ -154,3 +154,10 @@ def test_an_excluded_unit_that_yolo_hold_matches_stays_held():
     assert holds["openspec:b"] == HELD
     assert holds["openspec:a"].reason == "held by plan p1 (new)"  # the planned unit still follows its plan
     assert config_holds(cfg_with("*"), ["openspec:b"], set()) == {"openspec:b": HELD}
+
+
+def test_a_unit_a_plan_both_plans_and_excludes_is_not_planned_for_the_config():
+    from l4.yolo.plans import planned_ids
+
+    f = file("p1", plan_text("p1", ["openspec:a", "openspec:b"], exclude=[{"id": "openspec:b", "reason": "later"}]))
+    assert planned_ids(f) == {"openspec:a"}

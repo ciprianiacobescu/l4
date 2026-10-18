@@ -45,22 +45,23 @@ def only(bench: Bench, test_id: str, text: str = PIN_TEXT) -> bool:
     return depcheck.dependency_only(bench.wb, test_id, import_roots(bench.wb), text)
 
 
-def test_scn_imp_306_a_version_pin_is_not_applicable(make_bench, monkeypatch):
+def test_scn_imp_306_a_version_pin_is_held_for_a_person_never_passed(make_bench, monkeypatch):
+    """Round 3 (L4-IMP-062): a criterion whose every test is dependency only is inconclusive, never not applicable."""
     bench = staged(make_bench, PIN)
     gates: list[str] = []
 
     def no_run(*args, **kwargs):
         gates.append("zero")
-        raise AssertionError("a not applicable criterion runs no variant run")
+        raise AssertionError("a criterion with no project import runs no variant run")
 
     monkeypatch.setattr(discrimination, "zeroed_run", no_run)
     monkeypatch.setattr(discrimination, "_criterion_texts", lambda wb: {C1: PIN_TEXT})
     got = confirm_pre_satisfied(bench.wb, {C1: [PIN_ID]}, real=real_report(bench))
-    assert got.not_applicable == {C1: (PIN_ID,)} and gates == []
-    assert got.confirmed == {} and got.unconfirmed == {} and got.inconclusive == {} and got.message == ""
+    assert got.inconclusive == {C1: discrimination.NO_PROJECT_IMPORT} and gates == []
+    assert got.not_applicable == {} and got.confirmed == {} and got.unconfirmed == {}
 
 
-def test_scn_imp_306_through_run_red_the_proof_says_not_applicable(make_bench, monkeypatch):
+def test_scn_imp_306_through_run_red_the_task_is_held_with_a_harness_question(make_bench, monkeypatch):
     monkeypatch.setattr(discrimination, "_criterion_texts", lambda wb: {KNOWN: PIN_TEXT})
     pin = (
         "import importlib.metadata\n\nimport pytest\n\n\n"
@@ -71,12 +72,54 @@ def test_scn_imp_306_through_run_red_the_proof_says_not_applicable(make_bench, m
     step = Step(writes={"tests/test_pins.py": pin}, structured=result("red", criteria_ids=[KNOWN]))
     bench: Bench = make_bench([step])
     outcome = run_red(bench.wb, TASK, attempt=1)
-    assert outcome.status == "already_satisfied", outcome.reason
-    test_id = "tests.test_pins::test_runner_is_the_verified_pin"
-    assert bench.events("task.red_ok")[-1]["criteria"][KNOWN] == {
-        "tests": [test_id], "proof": "pre_satisfied", "discriminating": [test_id], "via": "not_applicable",
-    }  # fmt: skip
-    assert bench.events("criterion.pre_satisfied")[-1]["via"] == "not_applicable"
+    assert outcome.status == "held", (outcome.status, outcome.reason)
+    assert discrimination.NO_PROJECT_IMPORT in outcome.held.reason
+    assert bench.events("task.red_ok") == [] and bench.events("criterion.pre_satisfied") == []
+    assert "not_applicable" not in str(bench.events("check.inconclusive"))
+
+
+ATTACK_TESTS = {
+    "neq_empty": 'assert importlib.metadata.version("packaging") != ""',
+    "tautology": 'assert importlib.metadata.version("packaging") == importlib.metadata.version("packaging")',
+    "startswith_empty": 'assert importlib.metadata.version("packaging").startswith("")',
+    "version_ge_zero": 'assert Version(importlib.metadata.version("packaging")) >= Version("0")',
+    "in_itself": 'assert importlib.metadata.version("packaging") in importlib.metadata.version("packaging")',
+    "dunder_neq": 'assert packaging.__version__ != ""',
+    "pinned_eq": 'assert importlib.metadata.version("packaging") == "26.2"',
+}
+ATTACK_TEXTS = {
+    "decimal": "pricing: WHEN `apply_discount(50.0, 'SAVE10')` THEN it returns 45.0 and adds no packaging fee",
+    "other_pkg_version": "build: WHEN the packaging step runs under pytest 8.1 THEN the wheel holds the skill",
+    "release_word": "release: WHEN a release is cut THEN the packaging notes list every unit",
+    "real_pin": 'deps: WHEN the suite runs THEN importlib.metadata.version("packaging") == "26.2"',
+}
+
+
+def test_round3_no_shape_of_a_dependency_read_is_ever_a_pass(make_bench, monkeypatch):
+    """The 28 cells of the round-3 review (N3e): each is held for a person, none confirmed or not applicable."""
+    body = "import importlib.metadata\n\nimport packaging\nfrom packaging.version import Version\n" + "".join(
+        f"\n\ndef test_{k}():\n    {line}\n" for k, line in ATTACK_TESTS.items()
+    )
+    bench = staged(make_bench, body, "test_static")
+    for text in ATTACK_TEXTS.values():
+        monkeypatch.setattr(discrimination, "_criterion_texts", lambda wb, text=text: {C1: text})
+        for key in ATTACK_TESTS:
+            got = confirm_pre_satisfied(bench.wb, {C1: [f"tests.test_static::test_{key}"]}, real=None)
+            assert got.not_applicable == {} and got.confirmed == {}, (key, text)
+            assert C1 in got.inconclusive or C1 in got.unconfirmed, (key, text)
+
+
+def test_round3_the_runtime_decimal_case_is_held_not_satisfied(make_bench, monkeypatch):
+    monkeypatch.setattr(discrimination, "_criterion_texts", lambda wb: {KNOWN: ATTACK_TEXTS["decimal"]})
+    test = (
+        "import importlib.metadata\n\nimport pytest\n\n\n"
+        f'@pytest.mark.l4("{KNOWN}")\ndef test_known_code():\n'
+        '    assert importlib.metadata.version("packaging") != ""\n'
+    )
+    step = Step(writes={"tests/test_pin.py": test}, structured=result("red", criteria_ids=[KNOWN]))
+    bench: Bench = make_bench([step])
+    outcome = run_red(bench.wb, DISCOUNT_TASK, attempt=1)
+    assert outcome.status == "held", (outcome.status, outcome.reason)
 
 
 def test_scn_imp_307_a_test_that_reads_no_dependency_is_still_not_discriminating(make_bench):

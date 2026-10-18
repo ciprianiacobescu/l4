@@ -68,20 +68,28 @@ def deepest_location(text: str) -> tuple[str, int] | None:
     return found
 
 
-def own_statement(text: str, own_files: Collection[str]) -> str | None:
-    """The source line a traceback shows under its first frame in one of `own_files` (the outermost frame the unit's own
-    test module has), stripped of the `>` marker; None when the traceback has no such frame or shows no line."""
+def own_failure(text: str, own_files: Collection[str]) -> tuple[str, bool] | None:
+    """The INNERMOST frame of a traceback that is in one of `own_files`: (the source line it shows, stripped of the `>`
+    marker; whether a repository frame of another file follows it). None when there is no such frame or it shows no
+    line. An own test module that imports an own helper whose statement fails is judged by the helper's frame."""
     lines = text.splitlines()
+    last: tuple[int, str] | None = None
+    deeper = False
     for i, raw in enumerate(lines):
         found = LOCATION.match(raw.strip())
-        if found is None or found.group("path") not in own_files:
+        if found is None or not in_repository(found.group("path")):
             continue
-        for follow in lines[i + 1 :]:
-            code = follow.strip().removeprefix(">").strip()
-            if not code or _MARKERS_ONLY.match(code):
-                continue
-            return None if LOCATION.match(follow.strip()) or COLLECTION_LINE.match(code) else code
+        if found.group("path") in own_files:
+            last, deeper = (i, found.group("path")), False
+        elif last is not None:
+            deeper = True
+    if last is None:
         return None
+    for follow in lines[last[0] + 1 :]:
+        code = follow.strip().removeprefix(">").strip()
+        if not code or _MARKERS_ONLY.match(code):
+            continue
+        return None if LOCATION.match(follow.strip()) or COLLECTION_LINE.match(code) else (code, deeper)
     return None
 
 

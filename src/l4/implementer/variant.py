@@ -20,7 +20,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from l4.gates.collection import deepest_location, first_error_line, own_statement
+from l4.gates.collection import deepest_location, first_error_line, own_failure
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult
 
@@ -35,6 +35,7 @@ class VariantRun:
     report: TestReport | None
     reason: str = ""  # set only when the whole run is inconclusive
     new_errors: tuple[str, ...] = ()  # the collection errors the real run does not have, in report order
+    log: str = ""  # the redacted tail of the log of a run that wrote no report
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ def classify(gate: GateResult, real: TestReport | None, *, redact: Callable[[str
             tail = ""
         if line := first_error_line(redact(tail)):  # redacted whole first: a cut must not split a secret
             reason += f": {line}"
-        return VariantRun(name, None, _bound(reason, redact))
+        return VariantRun(name, None, _bound(reason, redact), log=redact(tail))
     known = set(real.collection_errors) if real is not None else set()
     new = tuple(e for e in report.collection_errors if e not in known)
     if report.executed == 0:
@@ -96,9 +97,9 @@ def _absent(
         if error is None:
             return "none", ""  # the module collected and the id is gone: collection-time code read a production answer
         detail = run.report.collection_details.get(error, "")
-        statement = own_statement(detail, own_files)
-        if statement is not None and not statement.startswith(("import ", "from ")):
-            return "none", ""  # the unit's own test module failed at a statement that is not an import: its own doing
+        failure = own_failure(detail, own_files)
+        if failure is not None and not (failure[0].startswith(("import ", "from ")) and failure[1]):
+            return "none", ""  # the innermost own frame is not an import of other code: the unit's own doing
         where = deepest_location(detail)
         if where is not None and where[0] in own_files:
             return "none", ""
@@ -110,6 +111,10 @@ def _absent(
     if line := first_error_line(redact(detail) if redact else detail):
         reason += f": {line}"
     return "inconclusive", _bound(reason, redact)
+
+
+def _own_conftest_in(log: str, own_files: Collection[str]) -> bool:
+    return any(f.rsplit("/", 1)[-1] == "conftest.py" and f in log for f in own_files)
 
 
 def test_outcome(
@@ -128,6 +133,8 @@ def test_outcome(
     if test_id in proved:
         return "proof", ""
     if run.report is None:
+        if zero_value and _own_conftest_in(run.log, own_files):
+            return "none", ""  # a conftest.py the unit added stopped pytest: its own doing
         return "inconclusive", run.reason
     case = run.report.tests.get(test_id)
     if case is None:
