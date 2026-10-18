@@ -150,6 +150,7 @@ class TracingTest:
     status: str
     proof: str
     adequate: bool = True
+    note: str = ""  # why a proof that no run showed counts: `not applicable: ...` or `accepted by Q-NNN: ...`
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,8 @@ class CriterionEvidence:
 @dataclass(frozen=True)
 class AuditRecord:
     """Step 4a for one criterion. `status`: accepted, rejected (passes against zero values, or cannot be collected),
-    failed (fails at head), not_testable, invalid, timeout or skipped (cap)."""
+    inconclusive (the zero-value run could not run the test: no finding, L4-VER-050), failed (fails at head),
+    not_testable, invalid, timeout or skipped (cap)."""
 
     criterion: str
     status: str

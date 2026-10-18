@@ -14,6 +14,7 @@ from l4.verifier.traceability import (
     ignored_findings,
     inadequate_findings,
     new_covered,
+    red_notes,
     red_proofs,
     trace_criteria,
 )
@@ -222,3 +223,42 @@ def test_a_reason_given_by_the_caller_replaces_the_generic_no_proof_text():
         reasons={OWNER: "passes against the zero values and on the base"},
     )
     assert e.ignored == ((OWNER, "passes against the zero values and on the base"),)
+
+
+NOT_APPLICABLE = {"tests": [], "proof": "pre_satisfied", "discriminating": ["t"], "via": "not_applicable"}
+OVERRIDE = {
+    "tests": [], "proof": "pre_satisfied", "discriminating": ["t"], "via": "human_override", "question": "Q-001",
+}  # fmt: skip
+
+
+def test_scn_ver_153_a_not_applicable_proof_is_evidence_with_its_label():
+    """L4-VER-051: a criterion recorded `discrimination not applicable` or accepted by a person after an
+    inconclusive check is evidence, and the judge and the report see the label."""
+    for info, note in (
+        (NOT_APPLICABLE, "not applicable: no project code"),
+        (OVERRIDE, "accepted by Q-001: the check was inconclusive"),
+    ):
+        ledger = [red_ok({A: info})]
+        assert red_proofs(ledger) == {A: {"t": "pre_satisfied"}}
+        assert red_notes(ledger) == {(A, "t"): note}
+        [e] = trace_criteria([crit(A)], report(case("t", "passed", A)), ledger, CFG)
+        assert e.state == "covered" and [(t.id, t.proof, t.note) for t in e.tests] == [("t", "pre_satisfied", note)]
+
+
+def test_a_note_free_proof_has_no_note():
+    ledger = [red_ok({A: proof(["t::a"])})]
+    assert red_notes(ledger) == {}
+    [e] = trace_criteria([crit(A)], report(case("t::a", "passed", A)), ledger, CFG)
+    assert e.tests[0].note == ""
+
+
+def test_the_three_renderings_append_the_note():
+    from l4.verifier.ladder import _gate_summary
+    from l4.verifier.report import render_verification_md
+    from l4.verifier.types import CriterionEvidence, TracingTest, Verdict, VerifyResult
+
+    note = "accepted by Q-001: the check was inconclusive"
+    result = VerifyResult("openspec:u", 1, Verdict.PASS, "", "abc")
+    result.trace = [CriterionEvidence(A, "a", "covered", (TracingTest("t", "passed", "pre_satisfied", note=note),))]
+    assert f"t (passed, pre_satisfied, {note})" in _gate_summary(result)
+    assert f"t (passed, pre_satisfied, {note})" in render_verification_md(result)

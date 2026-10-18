@@ -1697,6 +1697,8 @@ def _discriminating_tests(wb: Workbench, added: Sequence[str]) -> tuple[list[str
     outcome = discriminate_extra(wb, list(added), base_sha)
     if outcome.accepted:
         return sorted(outcome.accepted), ""
+    if added and all(t in outcome.inconclusive for t in added):  # the runs could not decide: the verifier does
+        return sorted(added), ""
     shown = ", ".join(sorted(added)[:MAX_LISTED])
     return [], (
         "none of the tests you added looks at the answer: they pass when the project's functions answer their zero "

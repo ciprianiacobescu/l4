@@ -452,7 +452,7 @@ Every task follows these rules:
 
 ## 6. The verifier (L4-VER-050, L4-VER-051, L4-VER-009, D11)
 
-- [ ] 6.1 The audit records an inconclusive run.
+- [x] 6.1 The audit records an inconclusive run.
   - Tests first, `tests/unit/verifier/test_audit_inconclusive.py` (the world of `tests/unit/verifier/test_audit.py`):
     - `test_scn_ver_150_an_inconclusive_audit_run_is_not_a_rejection`: `audit.confirm_pre_satisfied` monkeypatched to
       return the criterion inconclusive with `E   TypeError: 'NoneType' object is not callable` in its reason;
@@ -469,7 +469,7 @@ Every task follows these rules:
     `inconclusive`. `src/l4/verifier/report.py`: after `## Rejected audit tests`, `## Inconclusive audit runs` with one
     line per such record.
 
-- [ ] 6.2 The extra proofs and the test chore.
+- [x] 6.2 The extra proofs and the test chore.
   - Tests first:
     - `tests/unit/verifier/test_extra_inconclusive.py::test_scn_ver_152_an_extra_test_whose_runs_were_inconclusive_says_so`:
       `discriminate_extra` with `zeroed_run` and `run_with_code_of` monkeypatched to runs where the test is absent
@@ -491,7 +491,7 @@ Every task follows these rules:
     `src/l4/implementer/tdd.py` `_discriminating_tests`: no accepted test and every added test in `inconclusive` →
     `(sorted(added), "")`.
 
-- [ ] 6.3 The judge sees unproven evidence.
+- [x] 6.3 The judge sees unproven evidence.
   - Tests first:
     - `tests/unit/verifier/test_traceability.py::test_scn_ver_153_a_not_applicable_proof_is_evidence_with_its_label`:
       a `task.red_ok` with `{"tests": [], "proof": "pre_satisfied", "discriminating": ["t"], "via":

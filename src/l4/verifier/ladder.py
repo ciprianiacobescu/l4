@@ -311,7 +311,10 @@ def _gate_summary(result: VerifyResult) -> str:
         lines += ["", "Traceability (criterion, state, tracing tests with status and proof):"]
         lines += [
             f"  {e.criterion}  {e.state}  "
-            + ("; ".join(f"{t.id} ({t.status}, {t.proof})" for t in e.tests) or "no discriminating test")
+            + (
+                "; ".join(f"{t.id} ({t.status}, {t.proof}{', ' + t.note if t.note else ''})" for t in e.tests)
+                or "no discriminating test"
+            )
             for e in result.trace
         ]
     if result.audit:
@@ -397,13 +400,19 @@ def _extra_proof_step(
     candidates = extra_candidates(trace, attribution, chore_files, file_of=files.get)
     if not candidates:
         return None
-    outcome = discriminate_extra(wb, sorted({t for found in candidates.values() for t, _ in found}), base)
+    outcome = discriminate_extra(
+        wb, sorted({t for found in candidates.values() for t, _ in found}), base, real=run.report
+    )
     decided = _ExtraDecision()
     groups: dict[tuple[str, str, str], list[str]] = {}
     for criterion, found in candidates.items():
         for test, source in found:
             if (via := outcome.accepted.get(test)) is None:
-                decided.reasons[test] = outcome.reasons.get(test) or "passes against the zero values and on the base"
+                decided.reasons[test] = (
+                    f"inconclusive: {outcome.inconclusive[test]}"
+                    if test in outcome.inconclusive
+                    else outcome.reasons.get(test) or "passes against the zero values and on the base"
+                )
                 continue
             decided.proofs.setdefault(criterion, {})[test] = source
             groups.setdefault((criterion, source, via), []).append(test)

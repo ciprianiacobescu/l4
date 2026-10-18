@@ -635,12 +635,15 @@ class ExtraRun:
     """The verifier's decision on tests that people or a test chore wrote: `accepted` maps a test id to `zero_value` (it
     failed by assertion when the project's functions answered their zero value) or `base` (it failed by assertion
     against the unit base's production code); `rejected` are the ids that did neither; `reasons` say why a rejected id
-    that did fail on the base is no proof; `runs` is the number of gate runs made (at most two)."""
+    that did fail on the base is no proof; `inconclusive` are the rejected ids a run could not decide (their module did
+    not import there, no test ran), with why (L4-VER-050); `runs` is the number of gate runs made (the zero-value run
+    and its keep reruns, and the run on the base: at most four)."""
 
     accepted: dict[str, str] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
     runs: int = 0
     reasons: dict[str, str] = field(default_factory=dict)
+    inconclusive: dict[str, str] = field(default_factory=dict)
 
 
 ERROR_AT_BASE = "fails on the base only with an error, not by assertion"
@@ -652,42 +655,52 @@ def production_changes(wb: Workbench, base_sha: str) -> list[str]:
     return sorted(p for p in done.stdout.splitlines() if p.endswith(".py") and not _is_test_path(wb, p))
 
 
-def discriminate_extra(wb: Workbench, tests: Sequence[str], base_sha: str) -> ExtraRun:
+def discriminate_extra(
+    wb: Workbench, tests: Sequence[str], base_sha: str, *, real: TestReport | None = None
+) -> ExtraRun:
     """Does a test that no red record covers look at the answer? Run 1: the project's functions answer their zero value
     (`zeroed_run`): a test that fails by assertion is accepted. Run 2, for the ones still passing: the unit's changed
     production files are swapped to the unit base (`red_code_in_place`): a test that fails there by assertion is
-    accepted. Fail closed: in both runs an id counts as failing only when the report lists it as failed by assertion
-    (`fails_on_zero`). An error at the base shows that the test reached the unit's new code (a module or a function the
-    base does not have), not that it checked the answer (m1.11 review: a test with no assertion on the answer that only
-    imports the new module failed there and was accepted); like a module that does not import at the base, a skipped
-    id, an id the report lacks and a run that wrote no report, it is no proof. At most two gate runs, none when there is
-    nothing to run."""
+    accepted. Both runs are classified against `real` (L4-IMP-060): an error at the base shows that the test reached
+    the unit's new code (a module or a function the base does not have), not that it checked the answer (m1.11 review:
+    a test with no assertion on the answer that only imports the new module failed there and was accepted), so it is
+    no proof; a test a run could not run (its module did not import, no test executed, no report) is `inconclusive`
+    when the zero-value run could not decide it and the base run did not accept it, and is no proof otherwise. At most
+    two gate runs and two keep reruns of the first, none when there is nothing to run."""
     wanted = sorted(set(tests))
     accepted: dict[str, str] = {}
+    undecided: dict[str, str] = {}
     runs = 0
+    redact = wb.redactor.redact_text
     scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
-    zero = zeroed_run(wb, "test-extra-zero", scope, public=True, real=None, candidates=wanted) if scope else None
+    zero = zeroed_run(wb, "test-extra-zero", scope, public=True, real=real, candidates=wanted) if scope else None
+    own = zero.own if zero is not None else own_test_files(wb)
     if zero is not None:
         runs += 1 + zero.reruns
-        if zero.gate.report is not None:
-            accepted |= {t: PROOF_ZERO_VALUE for t in wanted if fails_on_zero(zero.gate.report.tests.get(t))}
+        for test in wanted:
+            outcome, why = variant.test_outcome(zero.run, test, real, own, redact=redact)
+            if outcome == "proof":
+                accepted[test] = PROOF_ZERO_VALUE
+            elif outcome == "inconclusive":
+                undecided[test] = why
     rest = [t for t in wanted if t not in accepted]
     production = production_changes(wb, base_sha)
+    reasons: dict[str, str] = {}
     if rest and production:
         runs += 1
         # a module the unit added is set aside at the base: its own tests then fail to import; the others must still
-        # run (run_with_code_of goes on past collection errors), and those ids fail closed
-        base_gate = run_with_code_of(wb, base_sha, production, name="test-extra-base")
-        at_base = base_gate.report.tests if base_gate.report is not None else {}
-        accepted |= {t: "base" for t in rest if fails_on_zero(at_base.get(t))}
-        reasons = {
-            t: ERROR_AT_BASE
-            for t in rest
-            if t not in accepted and t in at_base and at_base[t].status in ("failed", "error")
-        }
-    else:
-        reasons = {}
-    return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons)
+        # run (run_with_code_of goes on past collection errors), and those ids are not proofs
+        base = variant.classify(run_with_code_of(wb, base_sha, production, name="test-extra-base"), real, redact=redact)
+        for test in rest:
+            outcome, _ = variant.test_outcome(base, test, real, own, redact=redact)
+            case = base.report.tests.get(test) if base.report is not None else None
+            if outcome == "proof":
+                accepted[test] = "base"
+            elif case is not None and case.status in ("failed", "error"):
+                reasons[test] = ERROR_AT_BASE
+    inconclusive = {t: why for t, why in undecided.items() if t not in accepted}
+    reasons = {t: why for t, why in reasons.items() if t not in inconclusive}
+    return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons, inconclusive)
 
 
 def file_of_test(wb: Workbench, test_id: str) -> str | None:

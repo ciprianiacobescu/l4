@@ -616,3 +616,18 @@ def test_the_red_retry_message_for_a_pytest_gate_names_the_marker(make_bench):
     outcome = run_red(bench.wb, TASK, attempt=1)
     assert outcome.status == "failed" and "tag each test that checks a criterion with @pytest.mark.l4" in outcome.reason
     assert "any other runner" not in outcome.reason
+
+
+def test_scn_ver_151_a_test_chore_whose_check_cannot_decide_is_left_to_the_verifier(make_bench, monkeypatch):
+    """L4-VER-009: tests the chore added, none of which the discrimination runs could run, are not rejected: the
+    verifier decides a round later (as it does when there is no unit base)."""
+    from l4.implementer import tdd
+    from l4.implementer.discrimination import ExtraRun
+
+    bench = make_bench([])
+    ids = ["tests.test_a::test_one", "tests.test_a::test_two"]
+    reason = "did not run in test-extra-zero"
+    monkeypatch.setattr(
+        tdd, "discriminate_extra", lambda wb, tests, base, **kw: ExtraRun(inconclusive=dict.fromkeys(ids, reason))
+    )
+    assert tdd._discriminating_tests(bench.wb, ids) == (sorted(ids), "")

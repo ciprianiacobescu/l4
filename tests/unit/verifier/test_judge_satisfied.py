@@ -221,3 +221,17 @@ def test_the_block_carries_a_task_whole_with_the_lines_under_its_checkbox(tmp_pa
     assert "to the Meaning column." in text and "3.2" not in text
     (unit / "tasks.md").unlink()
     assert _task_text(wb)(task) == task.title  # no file at head: the title
+
+
+def test_scn_ver_154_the_satisfied_block_names_an_override():
+    """L4-VER-051: a task whose criteria rest on a person's acceptance says so in the block the judge reads."""
+    info = {"tests": [], "proof": "pre_satisfied", "discriminating": ["t"], "via": "human_override"}
+    proof = {"C-00000001": {**info, "question": "Q-001"}}
+    events = [
+        ev(1, "task.red_ok", task="3.1", criteria=proof, tdd="already-satisfied"),
+        ev(2, "task.done", task="3.1", tdd="already-satisfied"),
+    ]
+    [ref] = satisfied_refs(TASKS, events)
+    assert ref.labels == (("C-00000001", "accepted by Q-001: the check was inconclusive"),)
+    block = prompt_of(ref).user.split('<l4:data kind="satisfied">')[1].split("</l4:data>")[0]
+    assert "Proved by: C-00000001 (tests: t; accepted by Q-001: the check was inconclusive)" in block

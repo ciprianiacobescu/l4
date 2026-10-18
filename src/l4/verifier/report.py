@@ -74,7 +74,8 @@ def _test_cell(result: VerifyResult, e: CriterionEvidence) -> str:
         extra = ""
         if t.proof == "generated" and made is not None and t.id in made.tests:
             extra = f", base {made.base}, head {made.head}"
-        parts.append(f"{t.id} ({t.status}, {t.proof}{extra}{'' if t.adequate else ', inadequate'})")
+        note = f", {t.note}" if t.note else ""
+        parts.append(f"{t.id} ({t.status}, {t.proof}{note}{extra}{'' if t.adequate else ', inadequate'})")
     return "; ".join(parts)
 
 
@@ -249,6 +250,9 @@ def render_verification_md(result: VerifyResult) -> str:
         if rejected := [a for a in result.audit if a.status == "rejected"]:
             lines += ["", "## Rejected audit tests", ""]
             lines += [f"- {_flat(a.criterion, 20)}: {_flat(a.reason or 'no reason', 300)}" for a in rejected]
+        if undecided := [a for a in result.audit if a.status == "inconclusive"]:
+            lines += ["", "## Inconclusive audit runs", ""]
+            lines += [f"- {_flat(a.criterion, 20)}: {_flat(a.reason or 'no reason', 300)}" for a in undecided]
     if result.human:
         lines += ["", "## Human verdicts", ""]
         lines += [

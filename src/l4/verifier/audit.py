@@ -255,12 +255,14 @@ def _judge_written(
         if cid in confirmation.confirmed:
             out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids)))
             out.accepted.append(wb.worktree / rel)
+        elif cid in confirmation.not_applicable:  # it checks a dependency and no project code (L4-IMP-062)
+            out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids), "not applicable: no project code"))
+            out.accepted.append(wb.worktree / rel)
+        elif cid in confirmation.inconclusive:  # the run could not run the test: not a rejection (L4-VER-050)
+            out.records.append(AuditRecord(cid, "inconclusive", rel, tuple(ids), confirmation.inconclusive[cid]))
+            (wb.worktree / rel).unlink(missing_ok=True)  # no finding: the criterion keeps its implementer evidence
         else:
-            why = (
-                confirmation.inconclusive.get(cid)
-                or confirmation.reason
-                or "it passes when the project's functions answer their zero value"
-            )
+            why = confirmation.reason or "it passes when the project's functions answer their zero value"
             _reject(wb, out, cid, rel, "rejected", why, tuple(ids))
 
 
