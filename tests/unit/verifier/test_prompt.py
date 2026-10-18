@@ -145,7 +145,8 @@ SINGLE_USER = (
     "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
     '<l4:data source="notes_for_verifier">\n(none)\n</l4:data>\n'
 )
-SINGLE_SHA = "8a154b14a0fcde3a3d79d8033e7116114007dc3af22005f4cded4d43cb070521"
+# the hash moved with judge@11: the system text gained the cut-list and done-tasks rules; the user text is unchanged
+SINGLE_SHA = "b4a1c30c5c69b9ba1d83eaf45eea1ea76f829d9c23aa19a112a4db0f24892d58"
 LISTING = ((1, "src/app/export.py", 50000), (1, "tests/test_export.py", 30000), (2, "src/app/report.py", 60000),
            (3, "src/app/util.py", 10000), (0, "docs/big.md", 99999))  # fmt: skip
 
