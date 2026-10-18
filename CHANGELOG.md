@@ -58,6 +58,17 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - New config key `verifier.test_awareness_allow` (list of production path globs, default empty): a match of the test-awareness
   blocker in a file under one of them is listed for the judge with its glob instead of blocking. It is read from the base
   branch's `.l4/config.yaml`, never from the unit, and `l4 doctor` shows it (CFG-010) (L4-VER-039).
+- Every pytest gate run is cross-checked: the harness's plugin records what pytest judged for each test outside the
+  worktree, and a JUnit report that disagrees (a pass the record does not hold, a failure removed) fails the gate with
+  `the test report was altered` and the test ids; a conftest or helper with `atexit.register`, `os._exit`, a
+  session-end hook that writes a file, or a name of the report path is a content-scan hit (L4-IMP-006 (8), L4-VER-039).
+- The audit file is written next to the unit's own test files (an option value such as `--ignore tests/legacy` or `--tb
+  short` no longer picks the directory), confirmed by a `--collect-only` run when the unit has no test file there
+  (L4-VER-033).
+- A `[test-infra]` or `[config]` tag in a fix unit's or follow-up unit's task exempts nothing, and brackets in
+  model-written finding text become parentheses before they reach a task (L4-IMP-006).
+- The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
+  `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
 
 ## 0.4.14 (2026-10-17)
 

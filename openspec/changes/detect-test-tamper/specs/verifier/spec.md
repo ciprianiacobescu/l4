@@ -64,7 +64,8 @@ A harness commit without an `L4-Task`, or one no allowance covers, SHALL keep th
   `[test-infra]`, and one changed by a green commit of task 1.1 whose file a `task.unfrozen` of task 1.1 names
 - **WHEN** the check runs
 - **THEN** it SHALL raise no finding, note the superseded one as today, and list the other two with `(task <t>:
-  [test-infra])` and `(task 1.1: unfrozen by <source>)`
+  [test-infra])` and `(task 1.1: unfrozen by <source>)`; the same tag in the task of a fix unit SHALL allow nothing,
+  and a finding titled `... [test-infra]` SHALL yield a fix task with no tag
 
 #### Scenario: SCN-VER-108 (−) A `task.unfrozen` of another task allows nothing
 - **GIVEN** a green commit of task 1.2 that changes a pre-existing test whose file only a `task.unfrozen` of task 1.1
@@ -93,8 +94,8 @@ changed a test that an earlier step wrote`, naming the test, the task and the co
 ### Requirement: L4-VER-033 Audit tests run without the unit's test and support files
 Step 4a SHALL run each audit test and its zero-value run with every test and support file the unit added, changed or
 deleted at its base version (an added one set aside; added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/`
-kept), collecting only the audit file, written where the test command collects. Each file SHALL be restored byte for
-byte after, also after an error. Runner configuration stays.
+kept), collecting only the audit file, written next to the unit's own test files (else where a `--collect-only` run
+shows the test command collects it, else `tests`). Each file SHALL be restored byte for byte after.
 
 #### Scenario: SCN-VER-112 (−) The broken code is held when the unit's conftest is set aside
 - **GIVEN** the verifier-6 reproduction written so that step 1's AST rule (L4-VER-037) does not see it (the autouse
@@ -124,6 +125,12 @@ byte after, also after an error. Runner configuration stays.
 - **THEN** the audit test SHALL be judged from the run with the support files at the base, despite the other file's
   collection error; with `gates.test.command` narrowed to `tests/unit` the audit file SHALL be written under
   `tests/unit/` and collected
+
+- **GIVEN** also a test command `pytest --ignore tests/legacy tests` or `pytest --tb short tests` with a directory
+  `short/` added by the unit, and broken code that the audit test fails on
+- **WHEN** step 4a runs
+- **THEN** the audit file SHALL be written under `tests/` (next to the unit's own test file), collected, and the broken
+  code held (`failed`, verdict not PASS)
 
 #### Scenario: SCN-VER-118 (+) The zero-value run uses the same support files as the head run
 - **GIVEN** an audit test that passes at head with the support files at the base
@@ -304,10 +311,10 @@ changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
   pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
 
 ### Requirement: L4-VER-039 The content scan reads helper modules and flags test-call replacement
-Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support files a
-`pytest_pyfunc_call` hook, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj`
-or `.runtest`. A production-diff line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` SHALL block, unless its file
-matches `verifier.test_awareness_allow` (read at the base) and it is listed; a test for pytest SHALL be listed.
+Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support and
+helper files `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call`/`pytest_runtest_setup`, an assignment to `.obj` or
+`.runtest`, `atexit.register`, `os._exit`, a session-end hook that writes a file, and a name of the test output. A
+production read of an `L4_*`/`PYTEST_*` variable or a name of the output SHALL block unless allowed (listed).
 
 #### Scenario: SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits
 - **GIVEN** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
@@ -327,6 +334,13 @@ matches `verifier.test_awareness_allow` (read at the base) and it is listed; a t
   the base commit, the same match in a file it does not name, and the key set only in the unit's own head config
 - **WHEN** the content scan runs
 - **THEN** the first SHALL be listed for the judge with the glob that allowed it, and the others SHALL be blockers
+
+- **GIVEN** also honest production code: a docstring or comment naming `PYTEST_CURRENT_TEST` or `.l4-out`, a constant
+  `L4_TCP = 6`, a plugin reading `PYTEST_XDIST_WORKER`, a template `templates/report.xml.j2` when the report is
+  `report.xml`; and a conftest with `atexit.register`, `os._exit`, or a `pytest_sessionfinish` that rewrites the report
+- **WHEN** the content scan runs
+- **THEN** the honest code SHALL raise no finding, the conftest SHALL be a hit, and a unit whose conftest rewrites the
+  JUnit report at exit SHALL end FAIL even with the scan bypassed (`the test report was altered`, naming the tests)
 
 #### Scenario: SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone
 - **GIVEN** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for

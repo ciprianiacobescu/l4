@@ -2161,7 +2161,12 @@ freed them, L4-IMP-002, or the task's own reviewed text named them, L4-IMP-014);
 keeps (`task.tests_added.files`), whose own review is unchanged; and every path of a task whose title carries the human
 `[test-infra]` tag. The steps that write tests stay free: `red`, `already-satisfied` and the test chore, within (2). The
 `[test-infra]` tag lifts this freeze only; it does not lift the red-to-green freeze of L4-IMP-002. The verifier checks
-the same rule on the commits (§10.2 step 1). `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
+the same rule on the commits (§10.2 step 1). A human tag exempts nothing in a fix unit's or a follow-up unit's task: the
+harness wrote those titles from model-written findings, whose brackets it turns into parentheses. (8) **report
+cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
+every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
+longer shows, makes the gate fail with `the test report was altered` and the test ids (no record, no check).
+`--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
 depth [I].
 
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
@@ -3319,8 +3324,8 @@ changed a test that an earlier step wrote`, naming the test, the task and the co
 
 **L4-VER-033** Step 4a SHALL run each audit test and its zero-value run with every test and support file the unit added, changed or
 deleted at its base version (an added one set aside; added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/`
-kept), collecting only the audit file, written where the test command collects. Each file SHALL be restored byte for
-byte after, also after an error. Runner configuration stays.
+kept), collecting only the audit file, written next to the unit's own test files (else where a `--collect-only` run
+shows the test command collects it, else `tests`). Each file SHALL be restored byte for byte after.
 
 **L4-VER-034** An audit test SHALL never run with the unit's test or support files in place. One whose collection fails in a
 production module, whose cause the log does not show, or that leaves no report SHALL hold its criterion (L4-VER-012). One
@@ -3347,10 +3352,10 @@ and SHALL require each test that passed at the base to pass. One that fails twic
 SHALL be a blocker, unless `tests.superseded` names it. A support file only people changed, a `[test-infra]` task
 changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
 
-**L4-VER-039** Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support files a
-`pytest_pyfunc_call` hook, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj`
-or `.runtest`. A production-diff line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` SHALL block, unless its file
-matches `verifier.test_awareness_allow` (read at the base) and it is listed; a test for pytest SHALL be listed.
+**L4-VER-039** Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support and
+helper files `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call`/`pytest_runtest_setup`, an assignment to `.obj` or
+`.runtest`, `atexit.register`, `os._exit`, a session-end hook that writes a file, and a name of the test output. A
+production read of an `L4_*`/`PYTEST_*` variable or a name of the output SHALL block unless allowed (listed).
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -7736,12 +7741,13 @@ scenario is a spec defect (§26).
 - **When** the check runs after each commit
 - **Then** after the first it SHALL list `<path>::<name> changed by <sha10>` and raise no finding; after the second it
   SHALL raise `a pre-existing test was changed`
-#### SCN-VER-107 (+) Superseded, `[test-infra]` and unfrozen changes are allowed and listed · L4-VER-031
+#### SCN-VER-107 (+) Superseded, `[test-infra]` and unfrozen changes are allowed and listed · L4-VER-031, L4-IMP-006
 - **Given** a changed pre-existing test that a `tests.superseded` event names, one changed by a commit of a task tagged
   `[test-infra]`, and one changed by a green commit of task 1.1 whose file a `task.unfrozen` of task 1.1 names
 - **When** the check runs
 - **Then** it SHALL raise no finding, note the superseded one as today, and list the other two with `(task <t>:
-  [test-infra])` and `(task 1.1: unfrozen by <source>)`
+  [test-infra])` and `(task 1.1: unfrozen by <source>)`; the same tag in the task of a fix unit SHALL allow nothing,
+  and a finding titled `... [test-infra]` SHALL yield a fix task with no tag
 #### SCN-VER-108 (−) A `task.unfrozen` of another task allows nothing · L4-VER-031
 - **Given** a green commit of task 1.2 that changes a pre-existing test whose file only a `task.unfrozen` of task 1.1
   names
@@ -7787,6 +7793,12 @@ scenario is a spec defect (§26).
 - **Then** the audit test SHALL be judged from the run with the support files at the base, despite the other file's
   collection error; with `gates.test.command` narrowed to `tests/unit` the audit file SHALL be written under
   `tests/unit/` and collected
+
+- **Given** also a test command `pytest --ignore tests/legacy tests` or `pytest --tb short tests` with a directory
+  `short/` added by the unit, and broken code that the audit test fails on
+- **When** step 4a runs
+- **Then** the audit file SHALL be written under `tests/` (next to the unit's own test file), collected, and the broken
+  code held (`failed`, verdict not PASS)
 #### SCN-VER-116 (−) An audit test that needs a fixture only the unit defines is held · L4-VER-034
 - **Given** an audit test that requests a fixture only the unit's `tests/conftest.py` defines, and a step-1 content scan
   with status `ok`
@@ -7919,7 +7931,7 @@ scenario is a spec defect (§26).
 - **When** step 1 runs
 - **Then** no merge-base worktree SHALL be made (`base_source: "evidence"`), the test SHALL be the minor finding `a
   pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
-#### SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits · L4-VER-039, L4-VER-037
+#### SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits · L4-VER-039, L4-VER-037, L4-IMP-006
 - **Given** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
   plain `pytest_runtest_setup`, `item.obj = lambda: None` in `pytest_collection_modifyitems`, and `item.runtest = …`;
   and a `tests/checks.py` with no test that holds a `pytest_runtest_setup`
@@ -7937,6 +7949,13 @@ scenario is a spec defect (§26).
   the base commit, the same match in a file it does not name, and the key set only in the unit's own head config
 - **When** the content scan runs
 - **Then** the first SHALL be listed for the judge with the glob that allowed it, and the others SHALL be blockers
+
+- **Given** also honest production code: a docstring or comment naming `PYTEST_CURRENT_TEST` or `.l4-out`, a constant
+  `L4_TCP = 6`, a plugin reading `PYTEST_XDIST_WORKER`, a template `templates/report.xml.j2` when the report is
+  `report.xml`; and a conftest with `atexit.register`, `os._exit`, or a `pytest_sessionfinish` that rewrites the report
+- **When** the content scan runs
+- **Then** the honest code SHALL raise no finding, the conftest SHALL be a hit, and a unit whose conftest rewrites the
+  JUnit report at exit SHALL end FAIL even with the scan bypassed (`the test report was altered`, naming the tests)
 #### SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone · L4-VER-039, L4-VER-038
 - **Given** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for
   `test_total_adds_prices`, or with `pytest_collection_modifyitems` setting its `item.obj`, a green that breaks

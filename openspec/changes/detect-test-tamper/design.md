@@ -668,6 +668,39 @@ A second review of `a8a239e3` found the run of D13 stopping every first-round by
   verification.md with the glob that allowed it (`allowed by `<glob>``) instead of blocking; the other rules are
   unchanged. Doctor shows the key (CFG-010, info).
 
+### 6.8 Third adversarial review (2026-10-18)
+
+The third review of `9d788ba8` found three majors and a precision problem; the fixes:
+
+- **Audit directory (D15):** `audit_directory` took the first existing word after `pytest`, which can be an option value
+  (`--ignore tests/legacy`, `--tb short` plus a directory the unit adds). The audit file is now written next to the
+  unit's own test files (`audit.red_test_directory`: the most common directory of the changed test-glob `.py` files that
+  define a test at head; the head report proves that directory is collected). With no such file the command-derived
+  directory is confirmed by a `--collect-only` run of the audit file (`audit.confirm_collected`, gate
+  `audit-collect-check`); a directory that is not collected falls back to `tests/`.
+- **Report cross-check (new, applies to every gate run):** the harness's pytest plugin appends one JSON line per test
+  phase to a file named by `L4_OUTCOME_FILE` (under the runner's gate-tmp, outside the worktree; the plugin drops the
+  variable from its environment at configure, keeps an append-only descriptor and writes at
+  `pytest_runtest_logreport`). `Workbench.run_gate_spec` reads it after the run (`gates.outcomes.read_record`,
+  `altered`): a pass in the JUnit report that the record does not hold, or a failure the report no longer shows,
+  makes the gate fail with no readable report and the reason `the test report was altered: <ids>`
+  (`guard.report_altered` event; the verifier names it as its own blocker, `verifier.gates._judged`). A runner without
+  the plugin leaves no record and is not checked: a documented limit, as is code that edits the record in its own
+  process (the path is hidden from the environment, but the descriptor lives in the plugin's module). The content scan
+  adds `atexit.register`, `os._exit` (through aliases), a `pytest_sessionfinish` / `pytest_unconfigure` /
+  `pytest_terminal_summary` that writes a file, and a name of `.l4-out` or a report path in a support file.
+- **Tag injection (L4-IMP-006):** `openspec._plain` and the Kiro `_line` replace brackets in model-written text
+  (findings' titles and details) so that no `[tag]` survives into a fix or follow-up task; `scan.has_human_tag` and
+  `integrity._human_tag` ignore human tags (`[test-infra]`, `[config]`) in a harness-written task (a fix unit, or any
+  task of a unit that carries a fix or follow-up marker, like `named_task_text`). `_flat` stays as it is for the ids of
+  criteria (hashed from titles).
+- **Scan precision (D14):** the test-awareness blocker reads Python with the AST (comments and docstrings ignored): a
+  string naming `.l4-out` or a configured report path with word and path boundaries, or an `L4_*` / `PYTEST_*` name in
+  the same expression as `environ` / `getenv` (an xdist worker variable is benign); other languages are read line by
+  line without `#` and `//` comments. The finding names `verifier.test_awareness_allow` as the documented exception.
+  The string-building evasions (`"PYTEST" + "_ADDOPTS"`, `base64`, a `.txt` read by `exec`) stay a documented limit:
+  the report cross-check is the structural defence.
+
 ## Appendix A: the reproductions
 
 The reviewer's tests (repro paths in `findings.json`, under the session scratchpad `l4review/`) use the fixtures of this

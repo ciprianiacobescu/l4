@@ -57,8 +57,8 @@ def _by_name(record: Mapping[str, str], test_id: str) -> list[str]:
 
 
 def altered(report: TestReport, record: Mapping[str, str] | None) -> list[str]:
-    """The tests on which the JUnit report and the record disagree: a pass the record says was not one, and a failure the
-    report no longer shows. Sorted. A JUnit id the conversion does not know is matched by its last name."""
+    """The tests on which the JUnit report and the record disagree: a pass the record says was not one, and a failure
+    the report no longer shows. Sorted. A JUnit id the conversion does not know is matched by its last name."""
     if record is None:
         return []
     bad: set[str] = set()

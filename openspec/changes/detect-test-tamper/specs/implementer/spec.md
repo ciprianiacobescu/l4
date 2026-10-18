@@ -174,7 +174,12 @@ freed them, L4-IMP-002, or the task's own reviewed text named them, L4-IMP-014);
 keeps (`task.tests_added.files`), whose own review is unchanged; and every path of a task whose title carries the human
 `[test-infra]` tag. The steps that write tests stay free: `red`, `already-satisfied` and the test chore, within (2). The
 `[test-infra]` tag lifts this freeze only; it does not lift the red-to-green freeze of L4-IMP-002. The verifier checks
-the same rule on the commits (§10.2 step 1). `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
+the same rule on the commits (§10.2 step 1). A human tag exempts nothing in a fix unit's or a follow-up unit's task: the
+harness wrote those titles from model-written findings, whose brackets it turns into parentheses. (8) **report
+cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
+every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
+longer shows, makes the gate fail with `the test report was altered` and the test ids (no record, no check).
+`--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
 depth [I]. The paragraphs of L4-IMP-006 that follow in docs/SPEC.md (the run ledger's restore and the guard notes of the
 next attempt) are unchanged, except that a `guard.test_tamper` with `action: "rejected"` is not a guard note: the failed
 attempt's reason and excerpt already carry it.
