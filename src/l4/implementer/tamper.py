@@ -61,7 +61,7 @@ def _sha(text: str) -> str:
 
 
 def _doc(text: str) -> str:
-    return "\n".join(line.rstrip() for line in inspect.cleandoc(text).splitlines())
+    return "\n".join(line.rstrip() for line in inspect.cleandoc(text).splitlines()).strip()
 
 
 def _parse(source: str) -> ast.Module | None:

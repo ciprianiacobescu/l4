@@ -303,3 +303,18 @@ def test_a_test_moved_next_to_a_weakened_helper_is_not_moved():  # SCN-IMP-270
     assert moved(gone, added) == set()
     same = {("tests/test_b.py", n): (f.definition, f.closure) for n, f in facts_of(a).items() if f.test}
     assert moved(gone, same) == {("tests/test_a.py", "test_one")}
+
+
+def test_a_docstring_whose_last_line_is_blank_is_the_same_docstring():  # SCN-IMP-266 (second review, fmt2)
+    before = (
+        'def test_x():\n    """Summary.\n    """\n    assert 1\n\n\n'
+        'def test_y():\n    """Summary line.   \n\n    More text.\n    """\n    assert 1\n\n\n'
+        'def test_z():\n    """Summary.\n\n    """\n    assert 1\n'
+    )
+    after = (
+        'def test_x():\n    """Summary."""\n    assert 1\n\n\n'
+        'def test_y():\n    """Summary line.\n\n    More text.\n    """\n    assert 1\n\n\n'
+        'def test_z():\n    """Summary."""\n    assert 1\n'
+    )
+    assert compare("tests/test_x.py", before, after) == []
+    assert [t.name for t in compare("tests/test_x.py", before, after.replace("More text", "More words"))] == ["test_y"]
