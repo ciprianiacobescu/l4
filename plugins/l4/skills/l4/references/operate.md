@@ -41,7 +41,9 @@ not count.
 **A harness question** (`Kind: harness`: a check L4 could not decide; no attempt was used) is answered `accept: <why>` or
 `retry: <note>`, and no other word. Read the source of the tests in its Context first: `accept` replays exactly that step.
 L4 saved the step's changes as `.l4/held/<task>-<check>.patch` on the unit branch, and the next run applies the patch with
-every guard and gate and starts no agent; a missing, changed or non-applying patch gives a new question, not a pass.
+every guard and gate and starts no agent. The question lists every path the patch changes and shows the diff of each file
+that is no named test: read them all, because `accept` replays exactly these changes. It covers a named test only while its
+source is the one shown (the same name with another body is a new question); a missing, changed or non-applying patch gives a new question, not a pass.
 `retry` deletes the patch and runs an agent step with your note.
 
 The hand edit is the fallback, for a question the command refuses. Edit the file on the unit branch, then commit and

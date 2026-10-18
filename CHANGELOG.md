@@ -18,7 +18,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   agent for that step: it checks the digest, applies the patch, runs the guards, gates and checks an agent's changes get, records
   `held.replayed` and counts the criteria for those tests. A missing patch, a different digest or a patch that does not apply gives
   a new question that says why, never a pass. `retry` deletes the patch and runs an agent with the note; a replay deletes it in the
-  step's commit; a restarted unit or a reopened task drops it. A later agent attempt is told the accepted tests (data block
+  step's commit; a restarted unit or a reopened task drops it. The question lists every changed path and shows the diff of every file that is no named test; the accept covers a test only while its source is the one shown (a digest is recorded), so the same name with another body is a new question. A later agent attempt is told the accepted tests (data block
   `accepted tests`) and to keep them unchanged. All four held checks (`pre_satisfied`, `vacuity`, `at_red`, `tests`) do this. A
   question raised by 0.4.16 has no patch and keeps the old behaviour.
 - The runbook and the skill no longer say that `l4 questions answer`, `accept`, `l4 retry` and `l4 restart` always start a run:

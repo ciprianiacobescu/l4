@@ -8,7 +8,7 @@ test that pins a dependency's version. A person answered `accept: <why>`. The ne
    (`Override.covers`).
 
 The next red step's agent wrote the test again from scratch, under another name
-(`test_verified_fastmcp_version_is_installed` became `test_fastmcp_version_is_the_verified_one`), the accept did not
+(a test named for the installed version became one named for the verified version), the accept did not
 cover it, and a new question about the same criterion was raised. Every accept starts the same loop; the person can
 never get past the hold.
 
@@ -17,8 +17,10 @@ never get past the hold.
 - **A hold keeps what it held** (L4-IMP-065, D1). When a step is held with a harness question (`pre_satisfied`,
   `vacuity`, `at_red`, `tests`), the step's changes are saved before they are discarded, as a binary-safe patch at
   `<unit folder>/.l4/held/<task>-<check>.patch` (with the agent's result beside it), committed with the questions
-  commit. `question.raised` records the patch's `patch_sha256` and the test ids. The question's Context shows the
-  source of each named test, redacted before it is cut to 40 lines.
+  commit. `question.raised` records the patch's `patch_sha256` and the test ids. The question's Context lists every path the
+  step changes, shows the source of each named test and the diff of every other changed file (redacted before they
+  are cut to 40 lines each), and records a digest of each named test's source: the accept covers a test only while its
+  source is the one shown (L4-IMP-065).
 - **An accept replays the held step** (D2). When the next run reaches the step and an accept of that question is
   recorded, no agent runs: the harness verifies the patch's digest, applies it, and runs on it exactly what an agent
   step's changes get (every guard, the gates and the same checks). The override covers the tests of the patch.

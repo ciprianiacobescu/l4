@@ -50,3 +50,16 @@ agent's write is put back with `guard.violation`. A test fixes it in place.
 - A patch of a held step is committed to the unit branch before a person has looked at it. It passed the agent step's
   secret scan; the replay scans it again.
 - A branch that moved makes the patch not apply: a new question, never a pass.
+
+## Review round
+
+**D6. The accept binds to content.** `question.raised` carries `source_sha256`, the sha256 of each named test's exact
+source (a Python function with its decorators; for another language, the file from the line that names the test). An
+`Override` lists the tests whose current source differs (`changed`) and does not cover them, so the same name with another
+body is a new question. The override is not single-use. A question without digests keeps the rule by test id.
+
+**D7. The question shows everything the replay applies.** It lists every changed path, shows the source of the named tests
+and the diff of every other changed file, each redacted before it is cut to 40 lines. A step over 200 paths or 50 such
+files is not saved. The replay resets the environment setup as an agent step does, applies the verified bytes from
+standard input with git settings independent of the operator's configuration, requires both digests, and commits under the
+profile that wrote the step.
