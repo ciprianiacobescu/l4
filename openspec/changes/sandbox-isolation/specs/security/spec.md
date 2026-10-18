@@ -139,9 +139,9 @@ gate (a tmpfs under bwrap). Setup gates and agent sandboxes keep them writable.
 
 ### Requirement: L4-SEC-036 An environment an agent step or a gate changed is rebuilt
 After each passing `gates.setup` command the harness SHALL record a manifest of the tree's environment directories
-(lstat of every entry, ctime included). After every agent step and every other gate it SHALL compare them: a directory
-that differs, is new or has no manifest MUST be removed, so the next `gates.setup` builds it again, with one
-`env.rebuilt` and a `guard.violation` (rule `environment`) per planted path.
+(lstat of every entry, ctime included). After every agent step and every other gate it MUST remove a directory that
+differs, is new or has no manifest, so the next `gates.setup` builds it again, and record `env.rebuilt` and, per planted
+path, a `guard.violation` (rule `environment`), or a non-failing `guard.notice` for a dependency upgrade with no lock file.
 
 #### Scenario: SCN-SEC-88 (−) A `.pth` planted by a green step does not make green pass
 - **GIVEN** a red task whose green step writes only `zz_l4.pth` and a pytest plugin that turns failures into passes into `.venv` site-packages, the production code left a stub
@@ -172,6 +172,16 @@ that differs, is new or has no manifest MUST be removed, so the next `gates.setu
 - **GIVEN** `gates.setup: []` and a test gate whose command creates `.venv`
 - **WHEN** the gate ends
 - **THEN** `.venv` is removed with `env.rebuilt{reason: "created"}`
+
+#### Scenario: SCN-PRV-106 (+) A dependency upgrade without a lock file is a notice, not a violation
+- **GIVEN** a unit whose `package.json` has no dependency at HEAD, an installed `node_modules/vitest`, and a step that writes no lock file
+- **WHEN** the step adds `vitest` to `dependencies` and changes `node_modules/vitest/dist/index.js`
+- **THEN** `node_modules` is removed, `env.rebuilt{declared: false}` and one `guard.notice{rule: "environment"}` naming the file are recorded, and no `guard.violation` is
+
+#### Scenario: SCN-PRV-107 (−) A startup hook is never excused by a manifest change
+- **GIVEN** a step that adds a dependency to `pyproject.toml`, writes no lock file, and writes `zz.pth` into `.venv` site-packages
+- **WHEN** the step ends
+- **THEN** `.venv` is removed and a `guard.violation{rule: "environment"}` names `zz.pth`
 
 ### Requirement: L4-SEC-037 A workbench's gates run on an environment it built
 The first `gates.setup` command a workbench runs in a tree SHALL first remove that tree's environment directories when

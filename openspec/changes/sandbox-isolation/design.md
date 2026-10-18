@@ -185,20 +185,35 @@ New module `src/l4/implementer/envguard.py`:
   the path relative to the tree; `take_manifest(tree, tracked) -> EnvManifest` walks every `envdirs.env_dirs` entry
   without following symlinks and skips `TOOL_CACHE_DIRS` subtrees. ctime is the tamper evidence: a same-uid process
   can reset mtime with `utime`, never ctime; a replacement by rename changes `ino` [V POSIX; macOS `st_ctime_ns` exists].
-  No content hashing: an lstat walk of a 50,000-file `node_modules` is well under a second [I].
+  No content hashing: an lstat walk of a 50,000-file `node_modules` is well under a second [I]. `.venv/.lock` (uv's own
+  lock file, which `uv run` touches and which holds no code) is left out of the manifest.
 - `diff_manifest(before, after) -> EnvDiff(added, changed, removed)` (sorted relative paths).
-- `planted(tree, diff, changed_files) -> list[str]`, used for reporting only (the rebuild, not the classification, is the
-  protection; an agent can also rewrite a `RECORD`). A path is planted when it was added or changed and:
-  - its name is `*.pth`, `sitecustomize.py`, `usercustomize.py` or `*.pyc` and the install was not declared or no
-    `*.dist-info/RECORD` lists it with a matching sha256; or
-  - it is under `.venv` and no `RECORD` of the current environment lists it with a matching sha256 (paths in `RECORD` are
-    relative to their site-packages directory; `../../../bin/x` resolves to `.venv/bin/x`); or
-  - it is under a `node_modules` and the install was not declared.
-  The install is **declared** when `changed_files` (the step's `Workbench.changed_files()`) holds a dependency manifest
-  or lock file at any depth: `pyproject.toml`, `uv.lock`, `poetry.lock`, `Pipfile.lock`, `setup.py`, `setup.cfg`,
-  `requirements*.txt`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`,
-  `bun.lock`, `bun.lockb` [V for the RECORD shape: uv writes `path,sha256=<b64>,size` for every installed file;
-  `__pycache__/*.pyc` and `_virtualenv.pth` are in no RECORD, so they must be in the manifest from setup, which they are].
+- `classify(tree, diff, changed_files, *, read_head) -> Plants(violations, notices, declared, manifest_changed)` and
+  `planted(...)`, which returns its violations; both are used for **reporting only** (the rebuild, not the
+  classification, is the protection; an agent can also rewrite a `RECORD`). **The three-way rule (owner decision Q4)**,
+  per added or changed file (a directory is never reported on its own):
+  1. a **lock file** changed in the step (`LOCK_FILES`: `uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`,
+     `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, at any depth): the install is
+     **declared**. A path under `node_modules` is accepted; a path under `.venv` is accepted when a `RECORD` of the current
+     environment lists it with a matching sha256 (paths in `RECORD` are relative to their site-packages directory;
+     `../../../bin/x` resolves to `.venv/bin/x`; the `RECORD` file itself lists no hash and counts as listed), else it is a
+     violation. `env.rebuilt{declared: true}`, nothing else;
+  2. **no lock file, but a dependency manifest changed** in the same step (`manifest_changed`: any change of a
+     `requirements*.txt`; a `package.json` in `dependencies`, `devDependencies`, `peerDependencies`,
+     `optionalDependencies`, `bundleDependencies`, `overrides` or `resolutions`; a `pyproject.toml` in `[project]
+     dependencies` or `optional-dependencies`, `[dependency-groups]` or `[tool.uv]`; `setup.py`/`setup.cfg` in any way;
+     compared with the file at HEAD through `Workbench._head_reader`, parsed with `json`/`tomllib`, a file that does not
+     parse counts as changed): a path under `node_modules` or `.venv` that no `RECORD` lists is a **`guard.notice`**
+     (`rule: "environment"`), which fails nothing and is not a guard note for the next prompt (`guardnotes.GUARD_EVENTS`
+     does not list it). **One narrowing of the owner's words, for safety**: a Python startup hook (`*.pth`,
+     `sitecustomize.py`, `usercustomize.py`, `*.pyc`) is never downgraded to a notice, because the dependency change of the
+     same step must not be able to launder a `.pth` plant; such a file is accepted only when the install was declared by a
+     lock file and a `RECORD` lists it with its hash, and is a violation otherwise;
+  3. **neither**: a **`guard.violation`** (`rule: "environment"`), advice in `guardnotes._ADVICE`.
+  The rebuild happens in all three cases, and the ledger gets at most 20 `guard.violation` and `guard.notice` records
+  per rebuild together (`planted_more` counts the rest). The verifier's integrity step counts an outstanding
+  `guard.violation` (a blocker), and a `guard.notice` is not one: that is the point of Q4, a legitimate `npm install
+  vitest@latest` that forgot the lock file costs a rebuild and a line, not the unit.
 - `remove_env_dir(path)`: `unlink` for a symlink, else `shutil.rmtree`.
 
 `Workbench` gets `env_manifests: dict[Path, EnvManifest]` (in memory only: a file under the cache would be one more thing
@@ -214,9 +229,14 @@ New module `src/l4/implementer/envguard.py`:
 - `check_env(tree, *, phase, changed=()) -> bool`: no environment and no manifest → nothing. Otherwise, per environment
   directory, compare with the manifest; a directory that differs, is new, or has no manifest is removed, its entries
   dropped from the manifest, `setup_at` set to `None` when `tree` is the worktree, and recorded:
-  `env.rebuilt{tree, dirs, phase, added, changed, removed, reason: changed|created|unverified, declared}` once, and one
-  `guard.violation{path, rule: "environment", action: "removed", phase}` per planted path, at most 20 (the count of the
-  rest in `env.rebuilt.planted_more`). Returns whether anything was removed.
+  `env.rebuilt{tree, dirs, phase, added, changed, removed, reason: changed|created|unverified, declared, planted_more}`
+  once (`added`/`changed`/`removed` are counts), then one `guard.violation{path, rule: "environment", action: "removed",
+  phase}` per planted path and one `guard.notice` (same fields) per path of case 2 above, at most 20 together (the rest is
+  `planted_more`). The classification is made **before** anything is removed (it reads the `RECORD` files and the files'
+  hashes). `reason` is `created` when the workbench holds no manifest for the tree (a project without `gates.setup`, or a
+  tree no setup built) or the directory is not in the manifest, else `changed`; `unverified` is the reason of the removal
+  before a setup (above). A directory that a step or gate deleted differs too: nothing is left to remove, the manifest
+  forgets it and `setup_at` is cleared. Returns whether any directory differed.
 - `tdd.agent_step` calls `wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())` in its `finally`, after
   `revert_protected` and `restore_ledger` (`tdd.py:708-717`). `setup_at = None` is already set there, so the next
   `run_setup` (every gate path after an agent step calls it: `tdd.py:516, 828, 851, 1125, 1177, 1205, 1290, 1623, 1652`)
@@ -329,5 +349,6 @@ half of the regression tests on a real runner; SANDBOX-001 stays as specified an
   scratch cache for its own `uv add`), or by giving the verifier a fresh copy of the project seed as its uv cache?
 - Q3: record sandbox-security-6 as fixed by this change (the lock directories are under hidden roots), or keep its own
   change for a hidden lock directory under `mode: none`?
-- Q4: a rebuilt environment after a legitimate dependency change by the agent is reported as `env.rebuilt` only; an
-  upgrade of a Node dependency without a lock change is reported as a `guard.violation`. Acceptable noise?
+- Q4 (decided by the owner): a dependency upgrade without a lock-file change is a non-failing `guard.notice` (rule
+  `environment`) when a dependency manifest changed in the same step, a `guard.violation` otherwise; the rebuild happens
+  in both cases. D7 states the rule; one narrowing is recorded there (a startup hook stays a violation).

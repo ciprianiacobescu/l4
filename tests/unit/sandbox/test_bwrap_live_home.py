@@ -65,7 +65,8 @@ def test_another_units_step_files_and_locks_are_hidden(var_tmp_dir):  # SCN-SEC-
 
 
 def test_tools_under_the_home_run_in_both_kinds(var_tmp_dir):  # SCN-SEC-78
-    world = make_world(var_tmp_dir)
+    # the PATH is the harness's own (it decides the tool paths and the sandbox PATH alike)
+    world = make_world(var_tmp_dir, path=f"{var_tmp_dir}/home/.local/bin:/usr/local/bin:/usr/bin:/bin")
     home = world.home
     (home / ".local" / "bin").mkdir(parents=True)
     (home / ".local" / "share" / "l4-test" / "versions" / "1").mkdir(parents=True)
@@ -76,10 +77,9 @@ def test_tools_under_the_home_run_in_both_kinds(var_tmp_dir):  # SCN-SEC-78
     for tool in (tool_a, real_b):
         tool.chmod(stat.S_IRWXU)
     (home / ".local" / "bin" / "l4-tool-b").symlink_to(real_b)
-    path = f"{home}/.local/bin:/usr/local/bin:/usr/bin:/bin"
     wb = world.bench("add-search", "r-20261017T1201Z-bbbb", "claude-code")
     for kind in ("gate", "agent"):
-        done = world.run(wb, kind, "l4-tool-a && l4-tool-b", path=path)
+        done = world.run(wb, kind, "l4-tool-a && l4-tool-b")
         assert done.returncode == 0, done.stderr
         assert done.stdout.split() == ["a", "b"]
 

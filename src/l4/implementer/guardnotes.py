@@ -41,6 +41,11 @@ _ADVICE = {
         "rebind a name or a fixture, do not patch or assign the unit's code from it (set the environment instead), "
         "and leave it a regular file. The harness put it back to its red version, so write the change again."
     ),
+    "environment": (
+        "The harness rebuilds `.venv` and `node_modules` from the lock files after every step and removed what the "
+        "step wrote there. Declare a dependency in the manifest and the lock file (`uv add`, `npm install` are "
+        "fine); never write into an installed environment."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),

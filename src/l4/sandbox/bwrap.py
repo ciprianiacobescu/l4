@@ -139,6 +139,10 @@ class BwrapSandbox:
         for cache in spec.caches:
             out += ["--ro-bind" if cache.read_only else "--bind", str(cache.path), str(cache.path)]
         out += ["--ro-bind", str(spec.git_common_dir), str(spec.git_common_dir)]
+        for path in spec.read_only:  # L4-SEC-035: a gate that does not build the environment cannot change it ...
+            out += ["--ro-bind", str(path), str(path)]
+        for path in spec.empty_dirs:  # ... and its tool caches start empty (the harness made the mount points)
+            out += ["--tmpfs", str(path)]
         # HB-X1: no repo guidance directory is there to be loaded. After EVERY bind: a later bind of a path at or above
         # the worktree (a cache at `$L4_CACHE/worktrees` is valid config) would put the host directory back.
         for path in repo_guidance_masks(spec.worktree):

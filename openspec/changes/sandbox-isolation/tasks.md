@@ -177,7 +177,7 @@ Every task follows these rules:
 
 ## 4. The project environment (implementer-2; L4-SEC-035..037)
 
-- [ ] 4.1 Tests, ported from `verify-implementer/repo/tests/unit/implementer/test_verify_impl2_venv.py` and
+- [x] 4.1 Tests, ported from `verify-implementer/repo/tests/unit/implementer/test_verify_impl2_venv.py` and
   `verify-implementer/repro_impl2_uv_sync.sh`:
   - `tests/unit/implementer/test_env_plant.py::test_a_pth_planted_by_green_does_not_make_green_pass` (SCN-SEC-88):
     copy the reproduction (the `MKREALVENV` setup script that builds `.venv` with `python -m venv --without-pip` and
@@ -193,7 +193,7 @@ Every task follows these rules:
     `uv sync --frozen` again and assert both survive (the reason for L4-SEC-036), then `envguard.planted(...)` lists both,
     `envguard.remove_env_dir` + `uv sync --frozen` builds `.venv` without them, and `.venv/bin/python -c` shows neither
     variable set.
-- [ ] 4.2 Tests: `tests/unit/implementer/test_envguard.py`, with `make_bench` (NoSandbox) and a fake venv built by the
+- [x] 4.2 Tests: `tests/unit/implementer/test_envguard.py`, with `make_bench` (NoSandbox) and a fake venv built by the
   setup script of 4.1:
   - `test_a_declared_dependency_is_rebuilt_without_a_violation` (SCN-SEC-90): an agent step that changes
     `pyproject.toml` and `uv.lock` and adds `site-packages/newdep/__init__.py` plus `newdep-1.0.dist-info/RECORD`
@@ -211,21 +211,24 @@ Every task follows these rules:
   - `test_the_first_setup_in_a_fresh_worktree_removes_nothing` (SCN-SEC-95): no `env.rebuilt`, a manifest after setup.
   - `test_a_tracked_node_modules_is_never_removed`: a committed `vendor/node_modules/x.js` changed by a step is left to
     the production guards, and `env_dirs` does not list it.
-- [ ] 4.3 Tests: `tests/unit/sandbox/test_env_dirs.py::test_tool_caches_start_empty_in_every_gate` (SCN-SEC-87): the
+  - `test_a_dependency_upgrade_without_a_lock_is_a_notice_not_a_violation` (SCN-PRV-106, owner decision Q4) and
+    `test_a_startup_hook_is_a_violation_even_when_a_manifest_changed` (SCN-PRV-107), and
+    `test_the_pure_classification` (the three-way rule on a bare tree: lock, manifest section, neither).
+- [x] 4.3 Tests: `tests/unit/sandbox/test_env_dirs.py::test_tool_caches_start_empty_in_every_gate` (SCN-SEC-87): the
   gate argv of a worktree with `.venv` and `node_modules/.vite` has `--ro-bind` of both after the git dir bind, then
   `--tmpfs <node_modules/.vite>`, then the guidance masks; a setup gate's argv has neither; `envdirs.reset_tool_caches`
   turns a `.vite/deps/x.js` into an empty `.vite` and replaces a symlinked `.cache` with an empty directory. Live, in
   `tests/unit/sandbox/test_bwrap_live_env.py` (`@requires_bwrap`): `test_a_test_gate_cannot_write_the_environment`
   (SCN-SEC-85) and `test_uv_run_works_on_the_read_only_environment` (SCN-SEC-86, also skipped without uv; if it fails,
   apply the `.venv/.lock` fallback of design D6 and say so in the commit).
-- [ ] 4.4 Code: new `src/l4/sandbox/envdirs.py` (design D6: `ENV_DIR_NAMES`, `TOOL_CACHE_DIRS`, `env_dirs`,
+- [x] 4.4 Code: new `src/l4/sandbox/envdirs.py` (design D6: `ENV_DIR_NAMES`, `TOOL_CACHE_DIRS`, `env_dirs`,
   `read_only_mounts`, `reset_tool_caches`). `src/l4/sandbox/base.py`: `SandboxSpec.read_only` and `empty_dirs`
   (tuples, default `()`); `gate_sandbox_spec` fills them from `read_only_mounts(worktree, tracked)` when `builds_env` is
   false (the caller passes `tracked`, from `git ls-files -z` of the env directory names). `src/l4/sandbox/bwrap.py`:
   emit them after the git dir bind and before the guidance masks. Verify: 4.3 files, `tests/unit/sandbox/`.
-- [ ] 4.5 Code: new `src/l4/implementer/envguard.py` (design D7: `Entry`, `EnvManifest`, `take_manifest`,
+- [x] 4.5 Code: new `src/l4/implementer/envguard.py` (design D7: `Entry`, `EnvManifest`, `take_manifest`,
   `diff_manifest`, `planted`, `remove_env_dir`, `DECLARING_FILES`). Verify: the uv test of 4.1 and the pure parts of 4.2.
-- [ ] 4.6 Code, wiring: `src/l4/implementer/workbench.py`: `env_manifests`, `check_env(tree, *, phase, changed=())`,
+- [x] 4.6 Code, wiring: `src/l4/implementer/workbench.py`: `env_manifests`, `check_env(tree, *, phase, changed=())`,
   and in `run_gate_spec` the `builds_env` behaviour of design D7 (remove an unverified environment before a setup gate,
   manifest after a passing one; `reset_tool_caches` before, `check_env` after, any other gate).
   `src/l4/implementer/tdd.py`: `agent_step`'s `finally` calls `wb.check_env(wb.worktree, phase=role,

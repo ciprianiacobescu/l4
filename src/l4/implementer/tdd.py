@@ -715,6 +715,9 @@ def agent_step(
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
             wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+            # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard sees
+            # it: an environment that differs from the one setup built is removed, and setup builds it again
+            wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
@@ -1202,7 +1205,7 @@ def run_green(
     _check_opened(wb, red, unfreeze, red.manifest)
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
-    run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
+    run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
     hung = gate_hung(gate) if reason else []

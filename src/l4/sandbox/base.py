@@ -1,12 +1,13 @@
 """Sandbox types (SPEC L4-SEC-005). One `Sandbox.wrap` is the choke point every agent and gate spawn goes through."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
 from l4.config.defaults import CREDENTIAL_PATHS
 from l4.exitcodes import ExitCode, L4Exit
+from l4.sandbox.envdirs import read_only_mounts
 
 SandboxKind = Literal["agent", "gate"]
 
@@ -44,6 +45,8 @@ class SandboxSpec:
     cache_root: Path = field(kw_only=True)  # `$L4_CACHE`: covered by a tmpfs when outside the home (L4-SEC-031)
     tool_paths: tuple[Path, ...] = field(kw_only=True)  # bound read-only after the tmpfs over the home (L4-SEC-032)
     setup_paths: tuple[Path, ...] = field(default=(), kw_only=True)  # gate of a `gates.setup` command only (L4-SEC-033)
+    read_only: tuple[Path, ...] = field(default=(), kw_only=True)  # .venv / node_modules of a gate that builds nothing
+    empty_dirs: tuple[Path, ...] = field(default=(), kw_only=True)  # tool caches inside them: a tmpfs each (L4-SEC-035)
 
     def __post_init__(self) -> None:
         if (self.kind == "agent") != (self.adapter is not None):
@@ -149,14 +152,18 @@ def gate_sandbox_spec(
     tool_paths: tuple[Path, ...],
     setup_paths: tuple[Path, ...] = (),
     builds_env: bool,
+    tracked: Collection[str] = (),
     runner_tmp: tuple[Path, ...] = (),
 ) -> SandboxSpec:
     """The one way to build a gate sandbox: no adapter, so every adapter's login is hidden. A spec without
     `credential_paths` hides nothing, which is how a gate could read `~/.codex`. `configured_credential_paths` is
     `cfg.sandbox.credential_paths`; `caches` come from `l4.sandbox.caches.mount_caches`. `builds_env` is true for a
-    `gates.setup` command only: it alone keeps `setup_paths` (a registry login for the download)."""
+    `gates.setup` command only: it alone keeps `setup_paths` (a registry login for the download) and writes the
+    environment; every other gate gets `.venv` and each `node_modules` read-only, and their tool caches empty
+    (L4-SEC-035; `tracked` are the repository's tracked paths below those names, which are source, not environment)."""
+    read_only, empty = ((), ()) if builds_env else read_only_mounts(worktree, tracked)
     return SandboxSpec(
         "gate", worktree, git_common_dir, tmp_dir, home, expand_credential_paths(configured_credential_paths, home),
         caches=caches, network=network, runner_tmp=runner_tmp, cache_root=cache_root, tool_paths=tool_paths,
-        setup_paths=setup_paths if builds_env else (),
+        setup_paths=setup_paths if builds_env else (), read_only=read_only, empty_dirs=empty,
     )  # fmt: skip
