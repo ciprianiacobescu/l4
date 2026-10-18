@@ -19,7 +19,7 @@ _Line = tuple[int, str]  # (log level, message)
 MAX_TEXT = 160
 PROBE_ORDER = ("binary", "auth", "quota", "hello")
 ZEROED_GATES = frozenset(
-    {"test-zero", "test-presatisfied"}
+    {"test-zero", "test-presatisfied", "test-extra-zero"}
 )  # the harness zeroes the code on purpose: a failure is the point
 
 
@@ -101,6 +101,9 @@ class ProgressTrace:
             "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
             "gate.finished": self._gate,
+            "check.inconclusive": self._check_inconclusive,
+            "check.accepted": self._check_accepted,
+            "zero.kept": self._zero_kept,
             "task.red_ok": self._red_ok,
             "task.red_resumed": self._red_resumed,
             "task.done": self._done,
@@ -343,10 +346,36 @@ class ProgressTrace:
         if d.get("tests") is not None:
             counts = f", {d['tests']} tests: {d.get('passed')} passed, {d.get('failed')} failed"
         why = f" — {_clip(d['reason'], 100)}" if d.get("status") != "pass" and d.get("reason") else ""
-        expected = (
-            " (expected: zero values must fail)" if d.get("name") in ZEROED_GATES and d.get("status") == "fail" else ""
+        ran_nothing = d.get("tests") == 0 or d.get("exit_code") == 2 or bool(d.get("collection_errors"))
+        expected = (  # a zeroed run that ran no test did not "fail as expected": it did not run (L4-IMP-064)
+            " (expected: zero values must fail)"
+            if d.get("name") in ZEROED_GATES and d.get("status") == "fail" and not ran_nothing
+            else ""
         )
         return f"gate {d.get('name')} {d.get('status')}{expected} (exit {d.get('exit_code')}{counts}){why}"
+
+    def _check_inconclusive(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        return logging.WARNING, (
+            f"task {d.get('task')} {d.get('phase')}: the {d.get('check')} check could not decide "
+            f"({_clip(d.get('reason') or 'no reason', 200)}); no attempt counted, {d.get('question')} asks a person"
+        )
+
+    def _check_accepted(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        subjects = d.get("criteria") or d.get("tests") or []
+        noun = "criteria" if d.get("criteria") else "tests"
+        return logging.INFO, (
+            f"task {d.get('task')}: {d.get('question')} accepted {len(subjects)} {noun} on the evidence of the real run"
+        )
+
+    def _zero_kept(self, e: LedgerEvent) -> tuple[int, str]:
+        d = e.data
+        functions = d.get("functions") or []
+        return logging.INFO, (
+            f"gate {d.get('gate')}: kept {len(functions)} function(s) real ({d.get('cause')}): "
+            f"{_clip(', '.join(str(f) for f in functions), 200)}"
+        )
 
     def _red_ok(self, e: LedgerEvent) -> tuple[int, str]:
         n = len(e.data.get("tests") or [])
@@ -498,10 +527,22 @@ class ProgressTrace:
         return lines
 
 
-def log_artefacts(out_dir: Path, run_id: str) -> None:
-    """Once, after the last unit: where this run's agent transcripts and gate logs are (a CI job uploads `.l4-out/`)."""
+def artefacts_note(environ: Mapping[str, str], upload_artifacts: bool) -> str:
+    """What the artefacts line says when a GitHub Actions job uploads nothing (`ci.upload_artifacts: false`): the
+    evidence is then the excerpts of the committed ledger (L4-IMP-064). Empty everywhere else."""
+    if environ.get("GITHUB_ACTIONS") == "true" and not upload_artifacts:
+        return (
+            " (not uploaded: ci.upload_artifacts is false; the ledger's gate.finished and task.attempt_failed events "
+            "carry the excerpts)"
+        )
+    return ""
+
+
+def log_artefacts(out_dir: Path, run_id: str, note: str = "") -> None:
+    """Once, after the last unit: where this run's agent transcripts and gate logs are (a CI job uploads `.l4-out/`
+    unless `note` says it does not)."""
     out = out_dir.resolve()
-    log.info("artefacts: %s/, %s/ (CI: job artifacts)", out / "agent" / run_id, out / "gates" / run_id)
+    log.info("artefacts: %s/, %s/%s", out / "agent" / run_id, out / "gates" / run_id, note or " (CI: job artifacts)")
 
 
 def project_web_url(environ: Mapping[str, str], gitlab_api_url: str | None, project: str | None) -> str | None:

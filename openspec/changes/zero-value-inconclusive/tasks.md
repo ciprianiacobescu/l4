@@ -510,7 +510,7 @@ Every task follows these rules:
 
 ## 7. Evidence and status (L4-IMP-064, L4-OPS-006, D10)
 
-- [ ] 7.1 The excerpt in the committed ledger.
+- [x] 7.1 The excerpt in the committed ledger.
   - Tests first:
     - `tests/unit/implementer/test_workbench.py::test_scn_imp_318_gate_finished_carries_the_collection_error`: on the
       bench, a test file `tests/test_broken.py` whose import raises `ImportError("glpat-" + "x" * 20)`; the `test`
@@ -527,7 +527,7 @@ Every task follows these rules:
     when the attempt has an excerpt. `src/l4/implementer/excerpt.py`: the module docstring says the ledger gets only
     `ledger_excerpt` of it (`E` lines and one location, 600 characters, redacted), which no prompt reads.
 
-- [ ] 7.2 The console, the artefacts line and the job summary.
+- [x] 7.2 The console, the artefacts line and the job summary.
   - Tests first, `tests/unit/obs/test_progress.py`:
     - `test_scn_imp_318_a_variant_run_that_ran_no_test_does_not_say_expected`: `gate.finished{name:
       "test-presatisfied", status: fail, exit_code: 2, tests: 0, passed: 0, failed: 0, collection_errors: 45}` prints
@@ -550,7 +550,7 @@ Every task follows these rules:
     cfg.ci.upload_artifacts))` (positional: tests replace it with `lambda *a: None`). `src/l4/ci/step_summary.py`:
     the `check.inconclusive` line (ids and codes only, L4-OBS-005).
 
-- [ ] 7.3 `l4 status`, `l4 plan` and the plan's waiting detail.
+- [x] 7.3 `l4 status`, `l4 plan` and the plan's waiting detail.
   - Tests first:
     - `tests/unit/state/test_next_step.py::test_scn_imp_319_a_harness_question_names_its_cause_and_both_answers`:
       `UnitFacts(phase="awaiting_human", open_blocking_questions=("Q-007",), harness_open=(("Q-007", "Task 3.1: the

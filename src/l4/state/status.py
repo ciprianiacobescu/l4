@@ -513,7 +513,8 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, url
     """The `--unit` detail (L4-OPS-006): the phase, the whole cause of a stop, the run that stopped it, the label that
     does what the step does, and the step last."""
     facts = _facts(snapshot)
-    cause = reason(facts) if snapshot.state.phase in (*STOPPED, CORRUPT_PHASE) else None
+    held = snapshot.state.phase == Phase.AWAITING_HUMAN.value and bool(facts.harness_open)  # L4-OPS-006
+    cause = reason(facts) if snapshot.state.phase in (*STOPPED, CORRUPT_PHASE) or held else None
     label = label_for(facts, cfg.forge.labels_prefix)
     lines = [f"Phase: {snapshot.state.phase or '-'}"]
     lines += [f"Cause: {cause}"] if cause else []

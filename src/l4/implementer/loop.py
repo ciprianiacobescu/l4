@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
+from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
@@ -320,6 +321,7 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         wb.emit(
             "task.attempt_failed", task=task.key, phase=phase, attempt=step, profile=profile, reason=failure,
             excerpt_lines=len(excerpt.splitlines()),
+            **({"excerpt": wb.redactor.redact_text(ledger_excerpt(excerpt))} if excerpt else {}),
         )  # fmt: skip
         if escalate and phase != "single" and 1 <= limit_after < limit:
             count = failures[phase][profile]

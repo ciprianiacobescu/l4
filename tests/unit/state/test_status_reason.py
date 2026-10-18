@@ -148,3 +148,37 @@ def test_status_of_a_unit_escalated_with_no_convertible_finding_names_feedback_f
     _, out, _ = run_cli(unit_repo, capsys, "status", "--json")
     (unit,) = json.loads(out)["units"]
     assert "l4 feedback add --unit openspec:add-x" in unit["next"] and unit["halt_reason"] == "no_convertible_finding"
+
+
+HARNESS_QUESTION = (
+    "# Questions\n\n---\n\n## Q-007: Task 1.1: the pre-satisfied check could not decide\n\n- **Status:** {status}\n"
+    "- **Blocking tasks:** 1.1\n- **Kind:** harness\n\n### Context\nx\n\n### Answer\n"
+    "<!-- write below this line -->\n{answer}\n"
+)
+CHECK_REASON = "the test-presatisfied run ran no test (exit 2, 45 collection errors)"
+HELD = [
+    *IMPLEMENTING[:4],
+    ("question.raised", {"id": "Q-007", "task": "1.1", "kind": "harness", "check": "pre_satisfied"}),
+    ("check.inconclusive", {"task": "1.1", "phase": "red", "check": "pre_satisfied", "reason": CHECK_REASON,
+                            "question": "Q-007"}),
+    ("phase.changed", {"from": "implementing", "to": "awaiting_human", "trigger": "questions_blocking"}),
+]  # fmt: skip
+
+
+def test_status_unit_prints_the_harness_cause(unit_repo, trailers, capsys):
+    def work(repo):
+        unit_repo.write_ledger(repo, *HELD)
+        (repo / "openspec/changes/add-x/questions.md").write_text(HARNESS_QUESTION.format(status="open", answer=""))
+
+    unit_repo.push_unit_branch(work, trailers)
+    code, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    assert code == 0
+    lines = out.splitlines()
+    assert f"Cause: Q-007: Task 1.1: the pre-satisfied check could not decide ({CHECK_REASON})" in lines
+    nexts = [line for line in lines if line.startswith("Next:")]
+    assert nexts and 'l4 questions answer Q-007 --unit openspec:add-x --text "accept: <why>"' in nexts[0]
+    assert '--text "retry: <note>"' in nexts[0]
+    _, raw, _ = run_cli(unit_repo, capsys, "status", "--json")
+    (unit,) = json.loads(raw)["units"]
+    assert unit["reason"].startswith("Q-007: Task 1.1:") and CHECK_REASON in unit["reason"]
+    assert '--text "retry: <note>"' in unit["next"]

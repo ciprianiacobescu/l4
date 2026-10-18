@@ -4,8 +4,9 @@ error). Pure: the report's own `<failure>`/`<error>` bodies, cut to what a perso
 
 Bounds: at most 8 lines per test, 40 lines and 3,000 characters in all. Paths are made relative to the worktree, the
 gate's tmp root is `<tmp>`, and the redactor sees each test's whole body before a line is kept, then the result again.
-The excerpt is agent-influenced output: the caller puts it in the prompt's data fence only, and never in the committed
-ledger.
+The excerpt is agent-influenced output: the caller puts it in the prompt's data fence only. The committed ledger gets
+only `ledger_excerpt` of it (L4-IMP-064: the `E` lines and one repository location, at most 600 characters, redacted),
+which no prompt reads.
 """
 
 import re

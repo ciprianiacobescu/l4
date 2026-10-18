@@ -51,3 +51,5 @@ def test_a_plan_waits_on_a_unit_held_by_a_harness_question(world, tmp_path):
     assert step.start_next_run is False
     state = fold_plan("p1", world.events())
     assert state.status == "waiting" and state.wait_reason == "unit_awaiting_human"
+    waiting = [e for e in world.events() if e.type == "plan.waiting"][-1].data
+    assert "harness check inconclusive: Q-001" in waiting["detail"]

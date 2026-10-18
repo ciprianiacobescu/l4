@@ -29,7 +29,7 @@ from l4.forge.urls import ForgeUrls, app_forge_urls
 from l4.implementer.tasks import answers_unblock, open_blocking_questions, questions_hold
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.sim.availability import ProbingAvailability, availability_json, roles_needed
-from l4.specs.questions import blocked_tasks
+from l4.specs.questions import QuestionKind, QuestionStatus, blocked_tasks
 from l4.state.lifecycle import SPEC_EDIT_PHASES, TERMINAL, Phase
 from l4.state.status import UnitSnapshot, snapshots
 from l4.vcs.git import Git
@@ -77,6 +77,8 @@ class UnitFacts:
     verdicts_ready: tuple[str, ...] = ()  # answered with `accept` or `reject`, not yet consumed
     verdicts_invalid: tuple[str, ...] = ()  # answered, but not starting with `accept` or `reject`
     verdicts_dismissed: tuple[str, ...] = ()  # Status `dismissed`: read as open (L4-OPS-009)
+    harness_open: tuple[tuple[str, str, str], ...] = ()  # (id, title, the check's reason) of the open harness questions
+    harness_invalid: tuple[str, ...] = ()  # answered, but not starting with `accept` or `retry` (L4-QMD-004)
     fix_unit_of: str | None = None  # this unit is a fix unit of that parent: never planned on its own (G5)
     open_fix_unit: str | None = None  # the last fix unit spawned and not done
     fix_progress: tuple[int, int] | None = None  # (done, total) tasks of the open fix unit
@@ -172,6 +174,11 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
     if phase == Phase.CLARIFYING.value:
         return "clarify", "clarifying: open questions go to the clarifier"
     if phase == Phase.AWAITING_HUMAN.value:
+        if facts.harness_invalid:
+            return (
+                "none",
+                f"awaiting_human: harness answer must start with accept or retry: {', '.join(facts.harness_invalid)}",
+            )
         if facts.verdicts_invalid:
             return "none", (
                 f"awaiting_human: verdict answer must start with accept or reject: {', '.join(facts.verdicts_invalid)}"
@@ -193,6 +200,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         waiting = f" (open: {', '.join(facts.open_blocking_questions)})" if facts.open_blocking_questions else ""
         if facts.verdicts_open:
             waiting += f" (verdicts open: {', '.join(facts.verdicts_open)})"
+        if facts.harness_open:
+            waiting += f" (harness check inconclusive: {', '.join(qid for qid, _, _ in facts.harness_open)})"
         if facts.drafts:
             waiting += f" (answer written but Status is still open: {', '.join(facts.drafts)})"
         if facts.unreadable:
@@ -307,6 +316,25 @@ def _follow_up_facts(snapshot: UnitSnapshot) -> dict[str, Any]:
     return {"follow_up_items": tuple(i.id for i in offer.items), "follow_up_open": offer.open}
 
 
+def _harness_facts(snapshot: UnitSnapshot) -> dict[str, tuple]:
+    """The open harness questions that hold a pending task, each with the reason of the newest `check.inconclusive`
+    that names it, and the ones answered with something that is neither `accept` nor `retry` (L4-QMD-004)."""
+    file = snapshot.questions
+    if file is None:
+        return {}
+    held = set(open_blocking_questions(file, snapshot.tasks))
+    reasons = {
+        str(e.data["question"]): str(e.data.get("reason") or "")
+        for e in snapshot.events
+        if e.type == "check.inconclusive" and e.data.get("question")
+    }  # the newest wins
+    harness = [q for q in file.questions if q.kind is QuestionKind.HARNESS and q.id in held]
+    return {
+        "harness_open": tuple((q.id, q.title, reasons.get(q.id, "")) for q in harness),
+        "harness_invalid": tuple(q.id for q in harness if q.status is QuestionStatus.ANSWERED),
+    }
+
+
 def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
     verdicts = verdict_status(snapshot.questions, snapshot.state.verdicts_consumed)
     progress, fix_open = _fix_facts(snapshot)
@@ -334,6 +362,7 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         fix_progress=progress,
         fix_questions_open=fix_open,
         legacy_round=legacy_round(snapshot.state, snapshot.questions),
+        **_harness_facts(snapshot),
         **_review_facts(snapshot),
         **_spec_edit_facts(snapshot),
         **_follow_up_facts(snapshot),

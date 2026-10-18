@@ -376,3 +376,54 @@ def test_scn_obs_03_the_raw_gate_line_is_not_at_info(console):
 def test_scn_obs_04_a_gate_without_the_key_prints_as_today(console):
     ProgressTrace()(event("gate.finished", name="test", status="fail", exit_code=1, tests=3, passed=2, failed=1))
     assert lines(console) == ["gate test fail (exit 1, 3 tests: 2 passed, 1 failed)"]
+
+
+REASON = "the test-presatisfied run ran no test (exit 2, 45 collection errors)"
+
+
+def test_scn_imp_318_a_variant_run_that_ran_no_test_does_not_say_expected(console):
+    """L4-IMP-064: a zeroed run that executed nothing was not "expected to fail": it did not run."""
+    trace = ProgressTrace()
+    trace(event("gate.finished", name="test-presatisfied", status="fail", exit_code=2, tests=0, passed=0, failed=0,
+                collection_errors=45))  # fmt: skip
+    trace(event("gate.finished", name="test-presatisfied", status="fail", exit_code=1, tests=2001, passed=1999,
+                failed=2, collection_errors=0))  # fmt: skip
+    trace(event("gate.finished", name="test-extra-zero", status="fail", exit_code=2, tests=0, passed=0, failed=0))
+    trace(event("gate.finished", name="test-extra-zero", status="fail", exit_code=1, tests=3, passed=1, failed=2))
+    lines = console.getvalue().splitlines()
+    assert lines[0] == "[l4] openspec:demo gate test-presatisfied fail (exit 2, 0 tests: 0 passed, 0 failed)"
+    assert lines[1].startswith("[l4] openspec:demo gate test-presatisfied fail (expected: zero values must fail)")
+    assert lines[2] == "[l4] openspec:demo gate test-extra-zero fail (exit 2, 0 tests: 0 passed, 0 failed)"
+    assert "(expected: zero values must fail)" in lines[3]
+
+
+def test_the_held_check_and_the_kept_functions_are_printed(console):
+    trace = ProgressTrace()
+    trace(event("check.inconclusive", task="2.2", phase="red", check="pre_satisfied", reason=REASON, question="Q-007"))
+    trace(event("check.accepted", task="2.2", check="pre_satisfied", question="Q-007", criteria=["C-1", "C-2"]))
+    trace(event("zero.kept", gate="test-presatisfied", rerun=1, cause="collection",
+                functions=["src/pytdd/telemetry.py::traced"]))  # fmt: skip
+    assert console.getvalue().splitlines() == [
+        f"[l4] openspec:demo task 2.2 red: the pre_satisfied check could not decide ({REASON}); no attempt counted, "
+        "Q-007 asks a person",
+        "[l4] openspec:demo task 2.2: Q-007 accepted 2 criteria on the evidence of the real run",
+        "[l4] openspec:demo gate test-presatisfied: kept 1 function(s) real (collection): "
+        "src/pytdd/telemetry.py::traced",
+    ]
+
+
+def test_the_artefacts_line_says_when_nothing_was_uploaded(caplog):
+    from l4.progress import artefacts_note, log_artefacts
+
+    github = {"GITHUB_ACTIONS": "true"}
+    assert artefacts_note(github, False) == (
+        " (not uploaded: ci.upload_artifacts is false; the ledger's gate.finished and task.attempt_failed events "
+        "carry the excerpts)"
+    )
+    assert artefacts_note(github, True) == "" and artefacts_note({}, False) == ""
+    with caplog.at_level(logging.INFO, logger="l4"):
+        log_artefacts(Path("/o"), "r-1", artefacts_note(github, False))
+        log_artefacts(Path("/o"), "r-2")
+    first, second = (r.getMessage() for r in caplog.records if "artefacts:" in r.getMessage())
+    assert first.endswith("carry the excerpts)") and "(CI: job artifacts)" not in first
+    assert second.endswith("(CI: job artifacts)")
