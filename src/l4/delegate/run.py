@@ -522,7 +522,7 @@ class _Pass:
         )
         data |= shared
         if who is not None:
-            data |= dict(profile=who[2].profile_name, model=who[0])
+            data |= dict(profile=who[2].profile_name, model=who[0], cli=who[1])
         if called:
             data["cost_usd"] = cost
         if target.fix:

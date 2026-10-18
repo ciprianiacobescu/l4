@@ -21,6 +21,7 @@ from l4.state.status import UnitSnapshot
 from l4.verifier.verdicts import verdict_status
 
 FINAL = ("answered", "escalated", "discarded")  # a `delegate.result` that ends a question's current raise
+ESCALATED = ("escalated", "discarded")  # ... and leaves the question to a person (`Escalated by:`, L4-DLG-008)
 WAITING_PHASES = ("awaiting_human", "fixing")
 Due = tuple[str, str | None]  # (question key, the time it may be asked again, or None)
 
@@ -37,6 +38,29 @@ def results_of(events: Sequence[LedgerEvent], key: str) -> list[LedgerEvent]:
 
 def is_final(events: Sequence[LedgerEvent], key: str) -> bool:
     return any(e.data.get("status") in FINAL for e in results_of(events, key))
+
+
+def escalations(events: Sequence[LedgerEvent], open_keys: Collection[str]) -> tuple[tuple[str, str, str | None], ...]:
+    """(key, reason, kind) of every question in `open_keys` that the delegate escalated for its current raise: the
+    questions a person has to answer (L4-DLG-008). A discarded reply is an escalation."""
+    out = []
+    for key in open_keys:
+        last = next((e for e in reversed(results_of(events, key)) if e.data.get("status") in FINAL), None)
+        if last is not None and last.data.get("status") in ESCALATED:
+            kind = last.data.get("kind")
+            out.append((key, str(last.data.get("reason") or ""), kind if isinstance(kind, str) else None))
+    return tuple(out)
+
+
+def delegate_answers(events: Sequence[LedgerEvent]) -> tuple[LedgerEvent, ...]:
+    """The `delegate.result{status: answered}` of the current raise of each question, in the order recorded."""
+    keys = dict.fromkeys(k for e in events if e.type == "question.raised" and (k := question_key(e)))
+    found = []
+    for key in keys:
+        last = next((e for e in reversed(results_of(events, key)) if e.data.get("status") in FINAL), None)
+        if last is not None and last.data.get("status") == "answered":
+            found.append(last)
+    return tuple(sorted(found, key=lambda e: e.seq))
 
 
 def retry_after(events: Sequence[LedgerEvent], key: str) -> str | None:
