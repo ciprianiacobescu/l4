@@ -622,7 +622,7 @@ class _Pass:
         )  # fmt: skip
         s.ledger.append(
             "question.answered", id=question.id, by="delegate", profile=selected.profile_name, model=model,
-            answer_sha256=digest, **({"fix_unit": target.fix} if target.fix else {}),
+            cli=cli, answer_sha256=digest, **({"fix_unit": target.fix} if target.fix else {}),
         )  # fmt: skip
         new.save(target.path / QUESTIONS_FILENAME)
         self._commit(target, question, edit.form, edit.status.value, who, key, edit=edit, mark=mark)

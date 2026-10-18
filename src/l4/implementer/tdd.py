@@ -985,10 +985,21 @@ def _reject_preexisting(wb: Workbench, found: Sequence[Tampered]) -> RedOutcome:
 
 VIA_HUMAN_OVERRIDE = "human_override"
 VIA_AGENT_OVERRIDE = "agent_override"  # an agent answered, where clarifier.answer_by_agents allows it
+VIA_DELEGATE_OVERRIDE = "delegate_override"  # the delegate answered (L4-DLG-010)
 
 
 def override_via(override: Override) -> str:
+    if override.by == "delegate":
+        return VIA_DELEGATE_OVERRIDE
     return VIA_AGENT_OVERRIDE if override.by == "agent" else VIA_HUMAN_OVERRIDE
+
+
+def override_who(override: Override) -> dict[str, str]:
+    """The model and the CLI of a delegate's accept, for the records the judge and the report read; nothing for
+    anyone else (a person's and an agent's records are as they were)."""
+    if override.by != "delegate":
+        return {}
+    return {k: v for k, v in (("model", override.model), ("cli", override.cli)) if v}
 
 
 def _via(
@@ -1000,7 +1011,11 @@ def _via(
 ) -> dict:
     """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run."""
     if overridden and criterion in overridden:
-        return {"via": override_via(overridden[criterion]), "question": overridden[criterion].question}
+        return {
+            "via": override_via(overridden[criterion]),
+            "question": overridden[criterion].question,
+            **override_who(overridden[criterion]),
+        }
     if criterion in earlier:
         return {"via": VIA}
     if criterion in confirmation.confirmed:
@@ -1028,7 +1043,7 @@ def _accept(wb: Workbench, task: Task, check: str, used: Mapping[str, Override],
         by_question.setdefault(override.question, (override, []))[1].append(subject)
     for question, (override, subjects) in by_question.items():
         wb.emit("check.accepted", task=task.key, check=check, question=question, answer_sha256=override.answer_sha256,
-                by=override.by, **{key: subjects})  # fmt: skip
+                by=override.by, **override_who(override), **{key: subjects})  # fmt: skip
 
 
 def _decide_pre_satisfied(
@@ -1189,7 +1204,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return {
                 "tests": list(tests), "proof": PROOF_PRE_SATISFIED, "discriminating": list(overridden_tests[criterion]),
                 "via": override_via(overridden[criterion]), "question": overridden[criterion].question,
-                "answer_sha256": overridden[criterion].answer_sha256,
+                "answer_sha256": overridden[criterion].answer_sha256, **override_who(overridden[criterion]),
             }  # fmt: skip
         return {
             "tests": list(tests),
@@ -1365,6 +1380,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 "discriminating": list(tests), "via": override_via(run_b_overrides[criterion]),
                 "question": run_b_overrides[criterion].question,
                 "answer_sha256": run_b_overrides[criterion].answer_sha256,
+                **override_who(run_b_overrides[criterion]),
             }  # fmt: skip
     worse = worse_static_gates(wb, base, "red")  # a lint error in a test file would be frozen and deadlock green
     if (out := tampered("static gates")) is not None:

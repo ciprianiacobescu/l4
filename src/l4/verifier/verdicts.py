@@ -264,7 +264,7 @@ def settle_holds(
             continue
         hold, verdict = settled
         why = f": {verdict.reason}" if verdict.reason else ""
-        note = f"settled with hold {hold_id(hold)}, {verdict.decision}ed by {verdict.by}{why}"
+        note = f"settled with hold {hold_id(hold)}, {verdict.decision}ed by {verdict.label}{why}"
         out.append(dataclasses.replace(f, severity=Severity.MINOR, detail=f"{f.detail} ({note})"))
     known = {f.id for f in out}
     for hold in holds:
@@ -429,6 +429,9 @@ def effective_verdicts(events: Sequence[LedgerEvent], current: Mapping[str, str]
                 str(d.get("by", "human")),
                 str(d.get("reason", "")),
                 str(d.get("text_sha256", "")),
+                str(d.get("marker") or ""),
+                str(d.get("model") or ""),
+                str(d.get("cli") or ""),
             ),  # fmt: skip
         )
     keep = {}
@@ -492,7 +495,7 @@ def apply_finding_verdicts(findings: Sequence[Finding], effective: Mapping[str, 
         if verdict is None:
             out.append(f)
         elif verdict.decision == "accept":
-            note = f"waived by {verdict.by}" + (f": {verdict.reason}" if verdict.reason else "")
+            note = f"waived by {verdict.label}" + (f": {verdict.reason}" if verdict.reason else "")
             out.append(dataclasses.replace(f, severity=Severity.MINOR, detail=f"{f.detail} ({note})"))
         else:
             out.append(dataclasses.replace(f, source="human", detail=f"{f.detail}{rejection_note(verdict)}"))
@@ -502,7 +505,7 @@ def apply_finding_verdicts(findings: Sequence[Finding], effective: Mapping[str, 
 def rejection_note(verdict: HumanVerdict) -> str:
     """What `apply_finding_verdicts` appends to a rejected finding's detail."""
     reason = f" ({verdict.reason})" if verdict.reason else ""
-    return f" [rejected by {verdict.by}{reason}]"
+    return f" [rejected by {verdict.label}{reason}]"
 
 
 # --- asking -----------------------------------------------------------------------------------------------------------

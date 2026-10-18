@@ -291,7 +291,7 @@ def render_verification_md(result: VerifyResult) -> str:
     if result.human:
         lines += ["", "## Human verdicts", ""]
         lines += [
-            f"- {_flat(v.question, 20)} {v.decision} {_flat(v.target, 20)} by {_flat(v.by, 40)}"
+            f"- {_flat(v.question, 20)} {v.decision} {_flat(v.target, 20)} by {_flat(v.label, 80)}"
             + (f": {_flat(v.reason, 300)}" if v.reason else "")
             for v in result.human
         ]

@@ -821,9 +821,12 @@ class _Step:
         state = fold_plan(ctx.plan_id, [*ctx.read.events, *events])
         revision = self._fetch_target() or self.git.rev_parse(f"refs/remotes/origin/{self.target}")
         units: dict[str, UnitState] = {uid: s.state for uid, s in self.snaps.items()}
+        from l4.delegate.due import final_results  # the delegate's scope reads the plans
+
+        decisions = {uid: final_results(s.events) for uid, s in self.snaps.items() if s.events}
         return render_report(
             repository=self._repository(), plan=ctx.file.plan, state=state, events=[*ctx.read.events, *events],
-            target_revision=revision, units=units, generated_at=self._at(),
+            target_revision=revision, units=units, generated_at=self._at(), delegate=decisions,
         )  # fmt: skip
 
     def _with_report(self, ctx: _Ctx, events: Sequence[PlanEvent]) -> None:

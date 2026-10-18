@@ -37,12 +37,13 @@ _FIELD = "\x1f"  # between the sha, the subject and the body of a commit
 class Actor:
     by: Literal["human", "agent", "clarifier", "delegate"]
     marker: str | None = None  # an agent: the marker of its environment (CLAUDECODE, ...)
-    profile: str | None = None  # the delegate: the profile and the model that answered
+    profile: str | None = None  # the delegate: the profile, the model and the CLI that answered
     model: str | None = None
+    cli: str | None = None
 
     def fields(self) -> dict[str, str]:
         """The keys a ledger event adds to `by`: only those set."""
-        out = {"marker": self.marker, "profile": self.profile, "model": self.model}
+        out = {"marker": self.marker, "profile": self.profile, "model": self.model, "cli": self.cli}
         return {k: v for k, v in out.items() if v}
 
 
@@ -62,11 +63,12 @@ def _ledger_delegate(events: Sequence[LedgerEvent], qid: str, digest: str | None
             pass
         else:
             continue
-        profile, model = data.get("profile"), data.get("model")
+        profile, model, cli = data.get("profile"), data.get("model"), data.get("cli")
         return Actor(
             "delegate",
             profile=profile if isinstance(profile, str) else None,
             model=model if isinstance(model, str) else None,
+            cli=cli if isinstance(cli, str) else None,
         )
     return None
 

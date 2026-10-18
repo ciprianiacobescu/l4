@@ -52,15 +52,21 @@ def escalations(events: Sequence[LedgerEvent], open_keys: Collection[str]) -> tu
     return tuple(out)
 
 
-def delegate_answers(events: Sequence[LedgerEvent]) -> tuple[LedgerEvent, ...]:
-    """The `delegate.result{status: answered}` of the current raise of each question, in the order recorded."""
+def final_results(events: Sequence[LedgerEvent]) -> tuple[LedgerEvent, ...]:
+    """The final `delegate.result` (answered, escalated, discarded) of the current raise of each question, in the order
+    recorded: what the delegate decided, a deferral not being a decision."""
     keys = dict.fromkeys(k for e in events if e.type == "question.raised" and (k := question_key(e)))
     found = []
     for key in keys:
         last = next((e for e in reversed(results_of(events, key)) if e.data.get("status") in FINAL), None)
-        if last is not None and last.data.get("status") == "answered":
+        if last is not None:
             found.append(last)
     return tuple(sorted(found, key=lambda e: e.seq))
+
+
+def delegate_answers(events: Sequence[LedgerEvent]) -> tuple[LedgerEvent, ...]:
+    """The `delegate.result{status: answered}` of the current raise of each question, in the order recorded."""
+    return tuple(e for e in final_results(events) if e.data.get("status") == "answered")
 
 
 def retry_after(events: Sequence[LedgerEvent], key: str) -> str | None:
