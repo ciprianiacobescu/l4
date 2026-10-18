@@ -27,6 +27,11 @@ from l4.state.ledger import read_ledger
 
 VIA = "earlier_red"
 _FAILED_PROOFS = (PROOF_RED_ASSERTION, PROOF_ZERO_VALUE)
+_NO_EVIDENCE_VIA = (
+    "human_override",
+    "agent_override",
+    "not_applicable",
+)  # L4-IMP-063, L4-IMP-062: never an earlier red's evidence
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,8 @@ def _evidence(wb: Workbench) -> dict[str, _Evidence]:
         criteria = event.data.get("criteria")
         for info in criteria.values() if isinstance(criteria, dict) else ():
             if not isinstance(info, dict) or info.get("proof") not in _FAILED_PROOFS:
+                continue
+            if info.get("via") in _NO_EVIDENCE_VIA:  # a person's acceptance or a dependency check saw nothing fail
                 continue
             for test in info.get("discriminating") or []:  # the ones that red saw fail by assertion
                 if (task, str(test)) not in allowed:

@@ -151,11 +151,11 @@ def unfreeze_note(
     )
 
 
-def _recorded_digests(events: Sequence[LedgerEvent]) -> dict[str, set[str]]:
-    """Per question id, the `answer_sha256` of every `question.answered{by: human}` the ledger holds."""
+def recorded_digests(events: Sequence[LedgerEvent], actors: Collection[str] = ("human",)) -> dict[str, set[str]]:
+    """Per question id, the `answer_sha256` of every `question.answered{by: <one of actors>}` the ledger holds."""
     found: dict[str, set[str]] = {}
     for event in events:
-        if event.type == "question.answered" and event.data.get("by") == "human":
+        if event.type == "question.answered" and event.data.get("by") in actors:
             found.setdefault(str(event.data.get("id")), set()).add(str(event.data.get("answer_sha256")))
     return found
 
@@ -170,13 +170,15 @@ def unfrozen(
     did not touch, which the task may have to change), an ignore file stays frozen (`kept`). An `accepted` answer is the
     clarifier's suggestion, so the question itself (title, Context, Options) must name the file too; a human's own
     answer may name any test or support file."""
-    digests = _recorded_digests(events)
+    digests = recorded_digests(events)
     grants: list[Grant] = []
     kept: list[tuple[str, str]] = []
     for question in questions:
         if question.status not in _HUMAN_STATUSES or answered_by(question) != "human":
             continue
-        if question.kind is QuestionKind.VERDICT or not (set(question.blocking_tasks) & set(scope)):
+        if question.kind in (QuestionKind.VERDICT, QuestionKind.HARNESS) or not (
+            set(question.blocking_tasks) & set(scope)
+        ):
             continue
         digest = answer_sha256(question)
         answer = effective_answer(question)

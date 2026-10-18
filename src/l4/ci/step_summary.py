@@ -54,6 +54,10 @@ class StepSummary:
         task = f" task {key[1]}" if key[1] else ""
         if e.type == "task.red_ok" and d.get("tdd") == "already-satisfied":
             return f"- {who}{task}: already satisfied (no green step)"
+        if e.type == "check.inconclusive":  # ids and codes only: never the reason (L4-OBS-005)
+            return (
+                f"- {who}{task}: held ({_text(d.get('check')) or 'a'} check inconclusive, {_text(d.get('question'))})"
+            )
         if e.type == "breaker.tripped":
             return f"- {who}{task}: halted ({_text(d.get('reason')) or 'unknown'})"
         if e.type == "task.done":

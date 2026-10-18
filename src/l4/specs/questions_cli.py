@@ -47,6 +47,7 @@ from l4.specs.questions import (
     QuestionsFile,
     QuestionStatus,
     effective_answer,
+    harness_decision,
     unescape_text,
 )
 from l4.state.ledger import MAX_LEDGER_FILE_BYTES, LedgerCorrupt, LedgerEvent, parse_ledger_files
@@ -402,6 +403,8 @@ def agent_reason(
         return None
     if question.kind is QuestionKind.VERDICT:
         return "a verdict answer is a person's decision"
+    if question.kind is QuestionKind.HARNESS:
+        return "a harness override is a person's decision"
     kind = question.kind.value if question.kind is not None else question.kind_text or "unknown"
     if kind not in rules.auto_accept_kinds:
         return f"its kind is {kind}, and clarifier.auto_accept_kinds is [{', '.join(rules.auto_accept_kinds)}]"
@@ -487,11 +490,18 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
         answer_why = agent_reason(q, None, frozen, rules)
     is_open = q.status is QuestionStatus.OPEN
     verdict = q.kind is QuestionKind.VERDICT
+    harness = q.kind is QuestionKind.HARNESS
     commands: list[str] = []
     if is_open and not q.answer_text:
-        if takes and not verdict:
+        if takes and not verdict and not harness:
             commands.append(f"l4 questions accept {q.id} --unit {folder.unit}")
-        commands.append(f"l4 questions answer {q.id} --unit {folder.unit} --text TEXT")
+        if harness:
+            commands += [
+                f'l4 questions answer {q.id} --unit {folder.unit} --text "accept: <why>"',
+                f'l4 questions answer {q.id} --unit {folder.unit} --text "retry: <note>"',
+            ]
+        else:
+            commands.append(f"l4 questions answer {q.id} --unit {folder.unit} --text TEXT")
     else:
         commands.append(f"l4 questions --unit {folder.unit}")
     section = _section(q, folder.file)
@@ -521,6 +531,9 @@ def run_show(app: AppContext, *, question: str, unit: str | None, as_json: bool)
                 f'answer with: l4 questions answer {q.id} --unit {folder.unit} --text "accept <reason>"'
                 ' (or "reject <reason>")'
             )
+        elif harness:
+            out.append("answer with one of:")
+            out.extend(f"  {command}" for command in commands)
         else:
             out.append(
                 f"accept takes: {takes}" if takes else "accept takes: no clarifier suggestion: answer it with --text"
@@ -642,6 +655,10 @@ def check_question(
             f"submit it on {branch} (set Status to answered) or remove it, then run the command again",
         )
     verdict = question.kind is QuestionKind.VERDICT
+    harness = question.kind is QuestionKind.HARNESS
+    harness_fix = f'l4 questions answer {qid} --unit {unit} --text "accept: <why>" (or "retry: <note>")'
+    if harness and form == "accept":
+        return Refusal("a harness question is answered with accept or retry", harness_fix)
     if form == "accept":
         if verdict:
             return Refusal(
@@ -663,6 +680,11 @@ def check_question(
                 'the same command with the first word fixed: --text "accept <reason>" (or "reject <reason>")',
             )
             if verdict and not _DECISION.match(text)
+            else None
+        )
+        or (
+            Refusal("a harness question is answered with accept or retry", harness_fix)
+            if harness and harness_decision(text) is None
             else None
         )
         or (

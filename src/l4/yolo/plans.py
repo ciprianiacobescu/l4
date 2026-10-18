@@ -230,6 +230,13 @@ def listed_ids(file: "PlanFile") -> set[str]:
     return set() if found is None else {*found[0], *found[1]}
 
 
+def planned_ids(file: "PlanFile") -> set[str]:
+    """The unit ids a plan file PLANS (`batches[].units[].id`), not the ones it excludes; empty for a file that is not a
+    JSON object. Only these count as listed for `yolo.hold` (L4-ADO-011): excluding a unit must not release it."""
+    found = _raw_ids(file.text)
+    return set() if found is None else set(found[0]) - set(found[1])
+
+
 @dataclass(frozen=True)
 class PlanHolds:
     held: dict[str, tuple[str, str]]  # unit id -> (plan id, plan status)

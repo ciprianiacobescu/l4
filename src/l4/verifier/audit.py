@@ -25,12 +25,12 @@ review of a failing audit test (5.5, 5.6), the verifier red commit.
 
 import hashlib
 import math
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from l4.agents.factory import RoleUnavailable
+from l4.gates.collection import collection_error
 from l4.gates.dryrun import narrow_ruff_paths
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
@@ -230,7 +230,7 @@ def _judge_written(
         statuses = {report.tests[i].status for i in ids} if report is not None else set()
         if collected is not None and report is not None and any(stem in e for e in report.collection_errors):
             code = (wb.worktree / rel).read_text(encoding="utf-8", errors="replace")
-            collected[cid] = (_collection_error(gate.log_path, stem), code)
+            collected[cid] = (collection_error(gate.log_path, stem), code)
             (wb.worktree / rel).unlink(missing_ok=True)
         elif collected is not None and interrupted and not ids and not broken:
             deferred[cid] = rel  # pytest stops at a collection error: this file never ran, so it runs again below
@@ -249,46 +249,24 @@ def _judge_written(
         _judge_written(wb, deferred, round_no, out)  # the broken file is gone: a plain run of the others
     if not candidates:
         return
-    confirmation = confirm_pre_satisfied(wb, candidates)
+    confirmation = confirm_pre_satisfied(wb, candidates, real=report)
     for cid, ids in candidates.items():
         rel = written[cid]
         if cid in confirmation.confirmed:
             out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids)))
             out.accepted.append(wb.worktree / rel)
+        elif cid in confirmation.not_applicable:  # it checks a dependency and no project code (L4-IMP-062)
+            out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids), "not applicable: no project code"))
+            out.accepted.append(wb.worktree / rel)
+        elif cid in confirmation.inconclusive:  # the run could not run the test: not a rejection (L4-VER-050)
+            out.records.append(AuditRecord(cid, "inconclusive", rel, tuple(ids), confirmation.inconclusive[cid]))
+            (wb.worktree / rel).unlink(missing_ok=True)  # no finding: the criterion keeps its implementer evidence
         else:
             why = confirmation.reason or "it passes when the project's functions answer their zero value"
             _reject(wb, out, cid, rel, "rejected", why, tuple(ids))
 
 
-_COLLECTION_LINE = re.compile(r"^(E\s+.+|\w*(?:Error|Exception)\b.*)$")
-_COLLECTING = re.compile(r"^_{3,} ERROR collecting (\S+) _{3,}$")
-_SECTION_END = re.compile(r"^(?:_{3,}|={3,})")
-MAX_COLLECTION_ERROR_CHARS = 600
-
-
-def _own_section(lines: Sequence[str], stem: str) -> Sequence[str] | None:
-    """The lines pytest printed under `ERROR collecting <the file of stem>`; None when it printed no such section."""
-    for i, line in enumerate(lines):
-        if (m := _COLLECTING.match(line.strip())) and stem in m.group(1):
-            end = next((j for j in range(i + 1, len(lines)) if _SECTION_END.match(lines[j].strip())), len(lines))
-            return lines[i + 1 : end]
-    return None
-
-
-def _collection_error(log_path: Path, stem: str) -> str:
-    """What the test run printed for the audit file that could not be imported: its `E ` lines (a pytest collection
-    error) from its own `ERROR collecting` section when there is one (two broken files must not see each other's
-    error), else from the whole log, bounded. Empty log or unreadable: the plain fact."""
-    try:
-        text = log_path.read_text(encoding="utf-8", errors="replace")[-40_000:]
-    except OSError:
-        text = ""
-    every = text.splitlines()
-    own = _own_section(every, stem)
-    picked = every if own is None else own
-    lines = [m.group(1).strip() for line in picked if (m := _COLLECTION_LINE.match(line.strip()))]
-    shown = "\n".join(dict.fromkeys(lines))[:MAX_COLLECTION_ERROR_CHARS]
-    return shown or "the file could not be imported when the tests were collected"
+_collection_error = collection_error
 
 
 def _collect_retry_reason(error: str, code: str) -> str:

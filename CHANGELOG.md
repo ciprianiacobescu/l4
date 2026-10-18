@@ -6,6 +6,70 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (2026-10-18)
+
+### Fixed
+- `yolo.hold` holds a unit that a delivery plan only excludes: listing a held unit in a plan's `exclude` released it, so after
+  a plan review the held units ran. Only the units a plan plans (a batch's units) follow the plan; an excluded unit that
+  `yolo.hold` matches stays `held by yolo.hold`, and `l4 plan` / `l4 yolo status` say so. The coverage check still counts a held
+  unit as covered (L4-ADO-011).
+- Review of the zero-value work (L4-IMP-060..062): a missing test is the agent's (no proof) when the innermost frame of
+  its own files is not an import of other code (also a `conftest.py` the unit added that stops pytest);
+  the keep loop reads module-level calls of pre-existing test-support modules, and a test that failed by assertion in any
+  pass counts as a proof.
+- The GitHub setup action installs the harness again with `source: action` (the default for a published
+  harness): since 0.4.14 the build reads the l4 skill from `plugins/l4/skills/l4` (L4-SKL-003), which the action's
+  build copy and cache key left out, so every run failed with "Forced include not found". The copy and the key now
+  hold the skill, and a test keeps them in step with every `force-include` of pyproject.toml.
+- A check that could not run no longer fails the agent. The pre-satisfied zero-value run, the base run, run (b), the
+  `test-at-red` run, the verifier's audit and the extra-proof runs are judged against the real run, per test: a test
+  that failed by assertion is a proof, one that passed or failed another way is no proof, and one the run did not run
+  (no report, no test collected, its module failed to import only there, skipped only there) is inconclusive. In 0.4.14
+  and 0.4.15 a decorator factory zeroed to `None` broke the import of the modules that apply it, pytest stopped with
+  45 collection errors and ran 0 tests, and the message said "its tests still pass"; the unit halted after nine red
+  attempts on four profiles (L4-IMP-060).
+- Zeroing keeps what imports need: a public function annotated to return a callable or a class keeps its body when a
+  module of the varied set applies it at import time (a decorator or decorator factory, or a module-level or
+  class-level call), and when a run leaves a candidate inconclusive the functions its tracebacks call, and those called
+  by the module-level statements of the production module whose import failed, are kept real and the run is made again,
+  at most twice (`zero.kept` records them). Every variant run goes on past collection errors
+  (`--continue-on-collection-errors`), so the base run of a unit that adds a module no longer stops at the first test
+  file that imports it (L4-IMP-061).
+- In a zero-value run a test the unit's own files made unrunnable (it skips itself on the zero answer, its test or
+  support file raises at collection, a `parametrize` over a production answer loses its id) is no proof, so the
+  attempt fails as on 0.4.15; only a production module that failed to import leaves a criterion inconclusive and holds
+  the task. An agent can no longer turn "not discriminating" into a held task, and an `accept` covers only the tests
+  the question named.
+- Every excerpt in the committed ledger, `questions.md` and the console is redacted before it is cut, so no prefix of a
+  secret survives.
+- A failing assertion in the setup of a fixture counts as a failure on the zero values when the fixture is in a test
+  or support file the unit added or changed; in a file that was there before it is inconclusive (L4-IMP-002).
+- The verifier no longer rejects an audit test, or ignores a person's or a chore's test, because a zero-value run
+  could not run it: the audit records it `inconclusive` (no finding, listed in `verification.md`), and an extra test
+  says why it has no proof (L4-VER-050).
+- The console no longer says `(expected: zero values must fail)` for a zero-value run that ran no test, and the
+  artefacts line says `not uploaded` when `ci.upload_artifacts` is false in GitHub Actions (L4-IMP-064).
+
+### Changed
+- An inconclusive check holds the task: no attempt is used, no profile escalates, the step's changes are discarded,
+  one question of the new kind `harness` is raised and the unit waits in `awaiting_human` (exit 11); a delivery plan
+  waits without chaining runs. A person answers `accept: <why>` (the next run counts those criteria on the evidence of
+  the real run when the check is inconclusive again; audited as `via: human_override`) or `retry: <note>` (the check
+  runs again, for example after an L4 upgrade). A criterion a run shows to be not discriminating still fails the
+  attempt, and the message lists the inconclusive ones apart. The discrimination check of a test chore that cannot
+  decide holds the chore the same way. An agent may answer only where
+  `clarifier.answer_by_agents` is true on the base branch; its answer is recorded `by: agent` and labelled
+  `agent_override`, never as a person's (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009).
+- A criterion whose every test imports no project module and reads a dependency's version (a version pin) is no longer
+  passed: it is inconclusive ("its tests import no project module: the zero-value check cannot judge them"), the task is
+  held with a `harness` question, and nothing is recorded `via: not_applicable` any more (old ledgers are still read). A
+  person's `accept` counts it (L4-IMP-062).
+- `gate.finished` and `task.attempt_failed` carry an `excerpt` of at most 600 characters (the `E` lines and the deepest
+  repository location, redacted) in the committed ledger, for a repository that uploads no job artifacts
+  (L4-IMP-064).
+- `l4 status --unit`, `l4 plan` and the waiting detail of a plan name a harness question: `Cause:` quotes the check's
+  reason, `Next:` the two answers, and the plan says `harness check inconclusive: Q-NNN` (L4-OPS-006).
+
 ## 0.4.15 (2026-10-18)
 
 ### Added

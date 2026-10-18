@@ -80,7 +80,7 @@ from l4.implementer.tdd import BaselineFailed, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, make_workbench
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
 from l4.planner import facts_of, next_action
-from l4.progress import ProgressTrace, log_artefacts, project_web_url
+from l4.progress import ProgressTrace, artefacts_note, log_artefacts, project_web_url
 from l4.provision.readiness import platform_of, provider_steps, steps_for
 from l4.services import H_PUSHED, ForgeHook, HookContext, Hooks, MirrorHook, Services, build_services
 from l4.specs.base import Framework, OpenSpecUnavailable, SpecProvider, UnitRef, UnknownUnit, ValidationReport
@@ -1592,7 +1592,7 @@ def run_command(
         log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
     _start_next_run(app, cfg, step)
-    log_artefacts(app.out_dir, app.run_id)
+    log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
     return result
 
 

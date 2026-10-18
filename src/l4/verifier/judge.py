@@ -27,6 +27,7 @@ from l4.schemacheck import validate
 from l4.specs.base import Criterion, Task
 from l4.verifier.judge_repair import repair_reply
 from l4.verifier.selection import same_model
+from l4.verifier.traceability import _unproven_note
 from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
@@ -304,6 +305,7 @@ class SatisfiedRef:
     task: str
     text: str
     criteria: tuple[tuple[str, tuple[str, ...]], ...]
+    labels: tuple[tuple[str, str], ...] = ()  # (criterion, note) of a proof no run showed (L4-VER-051)
 
 
 def satisfied_refs(
@@ -330,8 +332,11 @@ def satisfied_refs(
             for cid, info in sorted(proofs.get(key, {}).items())
         )
 
+    def labels(key: str) -> tuple[tuple[str, str], ...]:
+        return tuple((cid, note) for cid, info in sorted(proofs.get(key, {}).items()) if (note := _unproven_note(info)))
+
     text = text_of or (lambda task: task.title)
-    return [SatisfiedRef(t.key, text(t), proof(t.key)) for t in tasks if done.get(t.key)]
+    return [SatisfiedRef(t.key, text(t), proof(t.key), labels(t.key)) for t in tasks if done.get(t.key)]
 
 
 def _satisfied_block(items: Sequence[SatisfiedRef]) -> str:
@@ -340,7 +345,11 @@ def _satisfied_block(items: Sequence[SatisfiedRef]) -> str:
     sections = []
     for i in items:
         lines = [f"### Task {i.task}", i.text.strip()]
-        lines += [f"Proved by: {cid} (tests: {', '.join(tests)})" for cid, tests in i.criteria]
+        notes = dict(i.labels)
+        lines += [
+            f"Proved by: {cid} (tests: {', '.join(tests)}{'; ' + notes[cid] if cid in notes else ''})"
+            for cid, tests in i.criteria
+        ]
         sections.append("\n".join(lines))
     return '<l4:data kind="satisfied">\n' + defuse("\n\n".join(sections)) + "\n</l4:data>"
 

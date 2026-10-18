@@ -24,6 +24,7 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
 from l4.fsutil import atomic_write_bytes
+from l4.gates.collection import ledger_excerpt
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult, GateSpec, run_gate
@@ -283,6 +284,10 @@ class Workbench:
         self.restore_ledger()
         readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
         extra = note(result.report) if note is not None and readable else {}
+        if result.report is not None:
+            extra = {**extra, "collection_errors": len(result.report.collection_errors)}
+        if excerpt := self._gate_excerpt(spec, result):
+            extra = {**extra, "excerpt": excerpt}
         self.emit(
             "gate.finished", name=spec.name, status=result.status, exit_code=result.exit_code, reason=result.reason,
             log=os.path.relpath(log, self.out_dir.parent), tests=result.report.total if result.report else None,
@@ -291,6 +296,29 @@ class Workbench:
             **extra,
         )  # fmt: skip
         return result
+
+    def _gate_excerpt(self, spec: GateSpec, result: GateResult) -> str:
+        """What the committed ledger keeps of a test gate that failed without telling which test (no report, no test
+        executed, or a collection error): the `E` lines and the deepest repository location, at most 600 characters and
+        redacted (L4-IMP-064). It is read from the first collection error's traceback, else from the end of the gate
+        log, and no prompt ever reads it. Empty for every other gate."""
+        report = result.report
+        if not spec.reports or result.status != "fail":
+            return ""
+        if report is not None and report.executed > 0 and not report.collection_errors:
+            return ""
+        text = (
+            report.collection_details.get(report.collection_errors[0], "")
+            if report and report.collection_errors
+            else ""
+        )
+        if not text:
+            try:
+                text = result.log_path.read_text(encoding="utf-8", errors="replace")[-40_000:]
+            except OSError:
+                text = ""
+        # redacted whole first, cut after: a cut inside a secret would leave a prefix the redactor cannot see
+        return self.redactor.redact_text(ledger_excerpt(self.redactor.redact_text(text)))
 
     def _tracked_bytecode(self, git: Git | None = None) -> frozenset[str]:
         """Bytecode the repository itself commits (rare): a changed copy is a production change the guards see."""

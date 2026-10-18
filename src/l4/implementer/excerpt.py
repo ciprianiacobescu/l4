@@ -4,14 +4,16 @@ error). Pure: the report's own `<failure>`/`<error>` bodies, cut to what a perso
 
 Bounds: at most 8 lines per test, 40 lines and 3,000 characters in all. Paths are made relative to the worktree, the
 gate's tmp root is `<tmp>`, and the redactor sees each test's whole body before a line is kept, then the result again.
-The excerpt is agent-influenced output: the caller puts it in the prompt's data fence only, and never in the committed
-ledger.
+The excerpt is agent-influenced output: the caller puts it in the prompt's data fence only. The committed ledger gets
+only `ledger_excerpt` of it (L4-IMP-064: the `E` lines and one repository location, at most 600 characters, redacted),
+which no prompt reads.
 """
 
 import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from l4.gates.collection import LOCATION, in_repository
 from l4.gates.junit import TestReport
 
 MAX_E_LINES = 6
@@ -21,9 +23,7 @@ MAX_CHARS = 3000
 MAX_TESTS = 8  # tests with a block of their own; the rest are counted
 LINT_HEAD_LINES = 36
 _E_LINE = re.compile(r"^E\s+\S")
-_LOCATION = re.compile(r"^(?P<path>[^\s:][^:\s]*):(?P<line>\d+): ?(?P<what>.*)$")
 _PYTEST_TMP = re.compile(r"/(?:private/)?(?:var/folders/[^\s'\"]+?/T|tmp)/pytest-of-[^/\s'\"]+/pytest-\d+")
-_NOT_REPO = ("site-packages/", "/lib/python", "<frozen", ".venv/", "<tmp>")
 _TRUNCATED = "... (truncated)"
 
 
@@ -38,10 +38,6 @@ def _clean(text: str, worktree: Path, tmp_root: Path | None) -> str:
     return text
 
 
-def _in_repository(path: str) -> bool:
-    return not path.startswith("/") and not any(mark in path for mark in _NOT_REPO)
-
-
 def _test_lines(body: str) -> list[str]:
     """The `E` lines (at most 6), the `>` line of the deepest frame in a repository file with its location, and the
     last `path:line: ErrorName` line, in the order pytest prints them."""
@@ -54,11 +50,11 @@ def _test_lines(body: str) -> list[str]:
         if line.startswith(">"):
             last_arrow = line.rstrip()
             continue
-        found = _LOCATION.match(line)
+        found = LOCATION.match(line)
         if found is None:
             continue
         last_location = line.strip()
-        if last_arrow is not None and _in_repository(found.group("path")):
+        if last_arrow is not None and in_repository(found.group("path")):
             deepest = (last_arrow, last_location)
         last_arrow = None
     out: list[str] = []
