@@ -197,7 +197,7 @@ def test_scn_imp_325_the_question_shows_the_redacted_source_of_each_test_cut_to_
     assert patch_of(bench).read_bytes() == b""  # nothing changed in the step: the patch is empty, the result is kept
 
 
-def test_scn_imp_326_a_later_agent_step_is_told_which_tests_are_accepted(make_bench, monkeypatch, raw):
+def test_scn_imp_326_a_later_agent_step_is_told_the_earlier_accept_covers_nothing_now(make_bench, monkeypatch, raw):
     bench = held_new(make_bench, monkeypatch)
     answer(bench, raw, "accept: fine")
     calls = []
@@ -208,15 +208,15 @@ def test_scn_imp_326_a_later_agent_step_is_told_which_tests_are_accepted(make_be
 
     monkeypatch.setattr(tdd, "worse_static_gates", worse)
     outcome = run_task(bench.wb, TASK)
-    # attempt 1 replayed the saved step and failed a gate; attempt 2 is an agent step, told which tests are accepted
+    # attempt 1 replayed the saved step and failed a gate; attempt 2 is an agent step, told the accept is used up
     assert len(bench.events("held.replayed")) == 1 and len(bench.events("task.attempt_failed")) == 1
     assert len(bench.adapter.requests) == 2, outcome.reason
     prompt = bench.adapter.requests[-1].prompt
     assert 'source="accepted tests"' in prompt
     block = prompt.split('source="accepted tests"', 1)[1].split("</l4:data>", 1)[0]
-    assert NEW_ID in block and "def test_new_total" in block and "unchanged" in block
-    assert "same name" in block and "covers only them" in block
-    # the agent's second attempt wrote another test: the accept does not cover it, a new question is raised
+    assert "earlier step" in block and "covers nothing" in block and "new answer" in block
+    assert "def test_new_total" not in block  # no source, no claim of coverage
+    # the agent's second attempt wrote another test: the used-up accept covers nothing, a new question is raised
     assert (outcome.status, outcome.question_ids) == ("blocked", ["Q-002"])
 
 
@@ -372,7 +372,7 @@ def test_m2_the_question_lists_every_changed_path_and_shows_the_diff_of_a_suppor
     text = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
     assert "tests/conftest.py" in text and "tests/test_new.py" in text and "(2 files)" in text
     assert "_support" in text and "autouse=True" in text  # the diff of the non-test file
-    assert "replays exactly these changes (2 files)" in text
+    assert "replays exactly the saved change of 2 files" in text and ".l4/held/1.1-pre_satisfied.patch" in text
 
 
 def test_m2_an_at_red_question_shows_the_production_diff_and_cuts_a_long_one(make_bench, raw, monkeypatch):
@@ -388,6 +388,7 @@ def test_m2_an_at_red_question_shows_the_production_diff_and_cuts_a_long_one(mak
     qid = raise_held(bench, first.held)
     text = question_text(bench).split(f"## {qid}", 1)[1]
     assert "src/pytdd/pricing.py" in text and "CODES" in text and "[cut: " in text
+    assert "replayed too" in text and "1.1-at_red.patch" in text
 
 
 def test_m3_the_replay_resets_the_setup_so_the_gate_sees_the_replayed_environment(
@@ -530,3 +531,134 @@ def test_minor_a_vacuity_hold_is_replayed_through_run_task(make_bench, monkeypat
     assert second.status == "done", second.reason
     assert len(bench.adapter.requests) == 2  # red once (the hold), green once; the red step was replayed
     assert [e["check"] for e in bench.events("held.replayed")] == ["vacuity"]
+
+
+# --- round 2: an accept takes effect only through the replay of exactly the saved step ----------------------------
+
+STAND_IN = NEW.replace(
+    "from pytdd import total\n",
+    "def total(prices):  # a local stand-in: the test no longer calls the code under test\n    return 4.0\n",
+)
+CONFTEST_STAND_IN = (
+    "import pytest\n\n\n@pytest.fixture(autouse=True)\ndef _stand_in(request, monkeypatch):\n"
+    "    if request.module.__name__.endswith('test_new'):\n"
+    "        monkeypatch.setattr(request.module, 'total', lambda prices: 4.0)\n"
+)
+SHADOWED = (
+    NEW
+    + '\n\n@pytest.mark.l4("'
+    + KNOWN
+    + '")\ndef test_new_total():  # the later def is the one pytest runs\n    assert True\n'
+)
+
+
+def later(**writes: str) -> Step:
+    return Step(writes=writes, structured=result("red", criteria_ids=[KNOWN]))
+
+
+@pytest.mark.parametrize(
+    "writes",
+    [
+        {"tests/test_new.py": STAND_IN},
+        {"tests/test_new.py": NEW, "tests/conftest.py": CONFTEST_STAND_IN},
+        {"tests/test_new.py": SHADOWED},
+    ],
+    ids=["module-level-helper", "new-conftest", "second-def"],
+)
+def test_r1_after_a_used_up_replay_the_accept_covers_nothing_whatever_the_next_step_changed(
+    make_bench, monkeypatch, raw, writes
+):
+    bench = held_new(make_bench, monkeypatch, [new_step(), later(**writes)])
+    answer(bench, raw, "accept: fine")
+    fail_lint_once(monkeypatch)
+    outcome = run_task(bench.wb, TASK)
+    assert (outcome.status, outcome.question_ids) == ("blocked", ["Q-002"]), outcome.reason
+    assert bench.events("task.done") == [] and len(bench.events("held.replayed")) == 1
+    patch = patch_of(bench).read_bytes()  # the new hold saved the new step
+    assert hashlib.sha256(patch).hexdigest() == bench.events("question.raised")[-1]["patch_sha256"]
+
+
+def test_r1_a_used_up_accept_is_no_override_for_any_test_id(make_bench, monkeypatch, raw):
+    from l4.implementer.held import accepted_overrides
+
+    bench = held_new(make_bench, monkeypatch)
+    answer(bench, raw, "accept: fine")
+    assert accepted_overrides(bench.wb, "1.1", "pre_satisfied") == {}  # outside a replay: nothing
+    fail_lint_once(monkeypatch)
+    run_task(bench.wb, TASK)
+    assert accepted_overrides(bench.wb, "1.1", "pre_satisfied") == {}  # after it: nothing, for Go or vitest ids alike
+    assert accepted_overrides(bench.wb, "1.1", "at_red") == {}
+
+
+def test_r1_a_replay_that_fails_a_gate_counts_as_an_attempt_and_the_cycle_is_bounded(make_bench, monkeypatch, raw):
+    zero_says(monkeypatch)
+    bench = held_bench(make_bench, [new_step(), new_step()], implementer={"max_task_attempts": 1})
+    assert run_task(bench.wb, TASK).status == "blocked"
+    answer(bench, raw, "accept: fine")
+    monkeypatch.setattr(tdd, "worse_static_gates", lambda wb, base, phase: "lint got worse")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "halt" and "max_task_attempts (1)" in outcome.reason
+    assert len(bench.events("task.attempt_failed")) == 1 and len(bench.adapter.requests) == 1
+
+
+def test_r4_a_reopened_task_neither_covers_nor_replays_an_earlier_accept(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [new_step(), new_step()])
+    bench.wb.emit("tasks.reopened", tasks=["1.1"])
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert (outcome.status, outcome.question_ids) == ("blocked", ["Q-002"]), outcome.reason  # the same body, still new
+    assert bench.events("held.replayed") == [] and bench.events("check.accepted") == []
+
+
+def test_r4_a_reopened_task_drops_the_accept_of_a_question_without_a_saved_step_too(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [new_step(), new_step()])
+    old_style(bench)
+    bench.wb.emit("tasks.reopened", tasks=["1.1"])
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert (outcome.status, outcome.question_ids) == ("blocked", ["Q-002"]), outcome.reason
+
+
+def test_r2_the_question_shows_the_module_level_code_of_the_named_test_file(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [later(**{"tests/test_new.py": STAND_IN})])
+    ctx = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
+    assert "return 4.0" in ctx and "a local stand-in" in ctx  # the diff of the test file, not only the function
+    answer(bench, raw, "accept: fine")
+    assert run_task(bench.wb, TASK).status == "done"
+
+
+def test_r2_a_cut_diff_says_the_cut_lines_are_replayed_too_and_where_the_whole_patch_is(make_bench, monkeypatch, raw):
+    long_conftest = "".join(f"# line {n}\n" for n in range(45)) + CONFTEST_STAND_IN
+    bench = held_new(make_bench, monkeypatch, [new_step(("tests/conftest.py", long_conftest))])
+    ctx = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
+    assert "_stand_in" not in ctx and "[cut: " in ctx
+    assert "replayed too" in ctx and ".l4/held/1.1-pre_satisfied.patch" in ctx
+    assert "the whole patch is in" in ctx
+    answer(bench, raw, "accept: fine")
+    assert run_task(bench.wb, TASK).status == "done"
+    assert "_stand_in" in (bench.wb.worktree / "tests" / "conftest.py").read_text()
+
+
+def test_r5_capture_and_apply_survive_diff_context_zero_and_autocrlf(make_bench, tmp_path):
+    from l4.implementer import held_patch
+    from l4.implementer.held import HeldCheck
+
+    config = tmp_path / "gitconfig"
+    config.write_text("[diff]\n\tcontext = 0\n[core]\n\tautocrlf = true\n")
+    bench: Bench = make_bench([])
+    wb = bench.wb
+    wb.git.env["GIT_CONFIG_GLOBAL"] = str(config)
+    target = wb.worktree / "README.md"
+    target.write_text("one\n\ntwo\n\nthree\n")
+    wb.git.run("add", "README.md")
+    wb.commit("docs: readme", task="0.1", attempt=1, phase="red", tdd=None)
+    target.write_text("one\n\nTWO\n\nthree\n")
+    held = held_patch.capture(wb, HeldCheck("1.1", "red", "pre_satisfied", (KNOWN,), (), "why"), None)
+    assert (
+        held.patch is not None and b"@@ -1,5 +1,5 @@" in held.patch
+    )  # three lines of context, whatever diff.context says
+    wb.discard_changes()
+    check = wb.git.run_input_bytes(
+        *held_patch.GIT_PLAIN, *held_patch.APPLY_FLAGS, "--check", "-", data=held.patch, check=False
+    )
+    assert check.returncode == 0, check.stderr
