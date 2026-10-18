@@ -9,6 +9,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.16 (unreleased)
 
 ### Fixed
+- `yolo.hold` holds a unit that a delivery plan only excludes: listing a held unit in a plan's `exclude` released it, so after
+  a plan review the held units ran. Only the units a plan plans (a batch's units) follow the plan; an excluded unit that
+  `yolo.hold` matches stays `held by yolo.hold`, and `l4 plan` / `l4 yolo status` say so. The coverage check still counts a held
+  unit as covered (L4-ADO-011).
+- Round-2 review of the zero-value work (L4-IMP-061, L4-IMP-062): a dependency pin is recognised only for a distribution that
+  is not the repository's own, named as a whole token with a version beside it in the criterion's text, and compared by the
+  test; a missing test is the agent's (no proof) whenever its own test module failed at a statement that is not an import;
+  the keep loop reads module-level calls of pre-existing test-support modules, and a test that failed by assertion in any
+  pass counts as a proof.
 - The GitHub setup action installs the harness again with `source: action` (the default for a published
   harness): since 0.4.14 the build reads the l4 skill from `plugins/l4/skills/l4` (L4-SKL-003), which the action's
   build copy and cache key left out, so every run failed with "Forced include not found". The copy and the key now

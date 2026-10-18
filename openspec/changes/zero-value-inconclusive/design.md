@@ -38,9 +38,12 @@ still reaches the person, as the cause of the missing tests.
 
 **D1a. The cause decides (review M1).** In a zero-value run (not the base run, which only confirms) a test the unit's
 own files made unrunnable is *no proof*, as D6 does for a fixture assertion: skipped only there; absent because the
-collection error of its module has its deepest repository frame (`deepest_location`) in a test or support file the unit
-wrote; or absent while its module collected (collection-time code read a production answer, a `parametrize` over it).
-Inconclusive stays for a PRODUCTION module that failed to import. Otherwise an agent that writes `if not got:
+collection error of its module failed, in the unit's own test module (`own_statement`), at a statement that is not an
+import, whatever the deepest frame (a pre-existing helper the module calls raised: round-2 N1); or absent while its module collected (collection-time code read a production answer, a `parametrize` over it).
+Inconclusive stays for a failing import statement of the own test module, that is a PRODUCTION module that failed to import.
+Round 2 also narrows the pin rule (N3: not the repository's own distribution, a whole-token name with a version beside it
+in the criterion's text, a compared version), counts a proof from any pass of the keep loop (H1: one extra pass keeps
+nothing by annotation) and reads module-level calls of pre-existing test-support modules (m1). Otherwise an agent that writes `if not got:
 pytest.skip()` turns "not discriminating" into a hold, and a person's `accept` into a pass.
 
 **D2. Precedence: the agent's fault wins.** When at least one unconfirmed criterion is refuted, the attempt fails as

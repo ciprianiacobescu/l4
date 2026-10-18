@@ -638,3 +638,15 @@ Every task follows these rules:
   `test_held_answers.py`.
 - [x] 9.6 Docs: SPEC (L4-IMP-060..064, L4-QMD-009, L4-VER-050, L4-VER-051, SCN-IMP-300..319 amended, SCN-VER-151
   amended, SCN-VER-156, SCN-VER-157), CHANGELOG, runbook, design, specs.
+
+## 10. Round-2 review fixes
+
+- [x] 10.1 yolo.hold: a unit a plan only excludes stays held (L4-ADO-011). Tests: `test_yolo_plans_holds.py`,
+  `test_yolo_cycle_planner.py`.
+- [x] 10.2 N3: a pin needs a distribution that is not the repository's own, named as a whole token with a version in the
+  criterion's text, and a compared version (L4-IMP-062). Tests: `test_dependency_only.py`.
+- [x] 10.3 N1: a missing test is the agent's when its own test module failed at a statement that is not an import
+  (L4-IMP-060). Tests: `test_zero_value_causes.py` (N1a, N1b).
+- [x] 10.4 H1: a proof from any pass of the keep loop counts; m1: the keep rule reads module-level calls of pre-existing
+  test-support modules (L4-IMP-061). Tests: `test_zero_keep_applied.py`.
+- [x] 10.5 Docs: SPEC (L4-ADO-011, L4-IMP-060..062, SCN-ADO-35, SCN-IMP-307), CHANGELOG, design, specs.

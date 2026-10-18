@@ -349,9 +349,9 @@ error for an invalid one). A cut of a planned unit's own folder SHALL be a probl
 that leaves the exit code alone, because the review lists it as not shown in full without blocking. `l4 yolo check`
 SHALL print the same lines for an admitted plan, and its exit code does not change.
 
-**L4-ADO-011** `yolo.hold` holds units that no plan lists. `yolo.hold` SHALL be a list of unit ids or `fnmatch` patterns, empty by default. A unit that matches it, and that no
-plan file lists, SHALL get no agent work of any kind. `l4 status`, `l4 plan` and `l4 run --dry-run` show such a unit
-as `held by yolo.hold`. A unit that a plan file lists follows that plan's rules. A merged or archived unit is never
+**L4-ADO-011** `yolo.hold` holds units that no plan plans. `yolo.hold` SHALL be a list of unit ids or `fnmatch` patterns, empty by default. A unit that matches it, and that no
+plan file PLANS (a batch's unit; listing it in `exclude` is not planning it), SHALL get no agent work of any kind, whether or not a plan is active. `l4 status`, `l4 plan` and `l4 run --dry-run` show such a unit
+as `held by yolo.hold`. A unit that a plan file plans follows that plan's rules; an excluded unit that `yolo.hold` matches stays `held by yolo.hold`. A merged or archived unit is never
 held. The hold writes no ledger entry and calls no model. `validate_plan.py` counts a held unit as covered.
 
 **L4-ADO-012** `l4 init --hold-existing` writes the hold. `l4 init --hold-existing` SHALL write the ids of every unit found at init into `yolo.hold`, sorted. With no unit it
@@ -2456,9 +2456,9 @@ only when every one of its tests ran and none is a proof. A reason SHALL quote t
 cut at 300 characters; the raw text is redacted first and cut after, so no prefix of a secret survives.
 In a zero-value run (the pre-satisfied run, run (b) and the test chore's run; not the base run, which only confirms) a test the unit's own
 files made unrunnable is **no proof**, never inconclusive, as a setup assertion in the unit's own fixture is a proof (L4-IMP-002): a test
-that skipped only there, one absent because the collection error of its module has its deepest repository frame in a test or support file the
-unit added or changed, and one whose module collected but lost the id (a `parametrize` over a production answer). Only a production module
-that failed to import leaves a test inconclusive. Without this rule an agent could turn "not discriminating" into a held task, and a person's
+that skipped only there, one absent because its module's collection error failed at a statement of the unit's own test module that is not an
+import (whatever the deepest frame: a pre-existing helper the agent's module calls raised), and one whose module collected but lost the id (a `parametrize` over a production answer). Only a failing import statement of the
+own test module (a production module that failed to import) leaves a test inconclusive. Without this rule an agent could turn "not discriminating" into a held task, and a person's
 `accept` into a pass, with a test that skips itself on the zero answer. `run_with_code_of` returns the gate result, so "no test" and "no report" differ.
 [V: a consumer repository, harness 0.4.14, task 3.1: the pre-satisfied run ended `Interrupted: 45 errors during
 collection` and ran 0 tests, and the message said "its tests still pass"; the base run stopped at the first collection
@@ -2468,15 +2468,16 @@ error; nine red attempts on four profiles halted the unit.]
 `Callable` or `type` (also `X | None` or `Optional[X]` of them, also as a string) SHALL keep its body only when a module of the varied set
 applies it at import time, as a decorator or decorator factory or by a call in a module-level or class-level statement: the zero value of a
 decorator factory is not a value a test can meet, it breaks the import of a module that applies the decorator while its class body runs. A
-callable-returning function that nothing applies at import is zeroed like any other, so an honest test of it keeps its proof. When a zero-value run leaves a candidate inconclusive, the harness SHALL keep the zeroed functions
+callable-returning function that nothing applies at import is zeroed like any other, so an honest test of it keeps its proof, and a test that failed by assertion in ANY pass counts: while a candidate has no proof and the first pass kept something by annotation, one more pass keeps nothing by annotation and counts for proofs only (a decorator factory under test). When a zero-value run leaves a candidate inconclusive, the harness SHALL keep the zeroed functions
 called on the failing lines of the run's new collection errors and of setup assertions outside the unit's files, and those called by the
-module-level statements of a production module whose import failed (`_CFG = load()` above `RATE = _CFG["rate"]`), and run again: at most twice, only when a new function is kept, at most 50 functions, recording `zero.kept{gate, rerun,
+module-level statements of a production or pre-existing test-support module whose import failed (`_CFG = load()` above `RATE = _CFG["rate"]`; never the unit's own files), and run again: at most twice, only when a new function is kept, at most 50 functions, recording `zero.kept{gate, rerun,
 cause, functions}`. [V: the same halt: `@telemetry.traced("…")` applied in a class body received `None`:
 `TypeError: 'NoneType' object is not callable`.]
 
 **L4-IMP-062** Discrimination is not applicable to a dependency check. A pre-satisfied criterion whose every candidate test calls
-`importlib.metadata.version`, `distribution` or `metadata` with a LITERAL distribution name that the criterion's text names (or reads
-`<that dependency>.__version__`), and uses no project code, no repository helper, no definition of its file beyond a constant, no fixture
+`importlib.metadata.version`, `distribution` or `metadata` with a LITERAL distribution name that the criterion's text names as a whole token with a version beside it (a version or pin word, or a `1.2` number), that is none of
+the repository's own distributions (every `[project].name` of its `pyproject.toml` files), and COMPARES the version (`==`, `<`, `in`, `startswith`; not its truth)
+(or reads `<that dependency>.__version__` the same way), and uses no project code, no repository helper, no definition of its file beyond a constant, no fixture
 beyond pytest's built-ins and its own `parametrize`, and no code reached by a string (`pytest.importorskip`, `importlib.import_module`,
 `__import__`, `request.getfixturevalue`, `sys.modules`) SHALL be recorded `proof: pre_satisfied, via: not_applicable`, with no variant run for
 it, and the judge sees the label (L4-VER-051). Any other test SHALL stay not discriminating: `assert 1 + 1 == 2`, `json.loads("1") == 1`, and
@@ -7062,7 +7063,7 @@ scenario is a spec defect (§26).
   third `def test_z(): assert pytest.__version__` tagged with a criterion about `apply_discount`, and a fourth that
   reaches `pytdd` through `importlib.import_module("pytdd")` beside a `version("pytest")` read
 - **When** the pre-satisfied confirmation runs
-- **Then** no criterion is not applicable, and all fail red as `not discriminating`
+- **Then** no criterion is not applicable, and all fail red as `not discriminating`; so does a read of the repository's own distribution, one whose name is only part of another token or has no version beside it in the criterion's text, and one whose version is tested for truth rather than compared
 
 ## MODIFIED Requirements
 
@@ -9980,7 +9981,7 @@ scenario is a spec defect (§26).
 #### SCN-ADO-35 (+) A pattern holds every new spec until a plan lists it · L4-ADO-011
 - **Given** `yolo.hold: ["*"]` and a new change `c`
 - **When** `l4 run` runs, and later a plan file that lists `c` is reviewed and activated
-- **Then** `c` is held at first, and afterwards follows the plan
+- **Then** `c` is held at first, and afterwards follows the plan; a unit that a plan only excludes stays held by `yolo.hold` before and after the plan is activated
 
 #### SCN-ADO-36 (+) The validator counts a held spec as covered · L4-ADO-011
 - **Given** `yolo.hold: ["openspec:a"]` and plan files that do not list `a`

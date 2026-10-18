@@ -44,7 +44,8 @@ failing production module, and run again: at most twice, recording `zero.kept`.
 - **GIVEN** the modules of SCN-IMP-302 with `def traced(name):` unannotated, and a candidate test of `Store.add`
 - **WHEN** the first zero-value run fails to import `store.py` on the line `@telemetry.traced("store.add")`
 - **THEN** the harness keeps `traced`, records `zero.kept{cause: collection, rerun: 1}`, runs once more, and the
-  candidate fails by assertion there, which confirms its criterion; for `_CFG = load()` above `RATE = _CFG["rate"]`
+  candidate fails by assertion there, which confirms its criterion; a test that failed by assertion in any pass counts, and
+  a pre-existing test-support module on the traceback is read like a production one; for `_CFG = load()` above `RATE = _CFG["rate"]`
   the failing line calls nothing, and the harness keeps `load`, which the module-level statement above it calls
 
 #### Scenario: SCN-IMP-304 (−) The keep reruns are bounded
@@ -70,7 +71,9 @@ the criterion's text names, and uses no project code (also none reached by a str
   third `def test_z(): assert pytest.__version__` tagged with a criterion about `apply_discount`, and a fourth that
   reaches `pytdd` through `importlib.import_module("pytdd")` beside a `version("pytest")` read
 - **WHEN** the pre-satisfied confirmation runs
-- **THEN** no criterion is not applicable, and all fail red as `not discriminating`
+- **THEN** no criterion is not applicable, and all fail red as `not discriminating`; so does a read of the repository's
+  own distribution, one whose name is only part of another token or has no version beside it in the criterion's text,
+  and one whose version is tested for truth rather than compared
 
 ## MODIFIED Requirements
 
