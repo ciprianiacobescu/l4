@@ -44,11 +44,12 @@ from l4.gates.runner import GateResult
 from l4.gates.trace import trace_env
 from l4.implementer import resultalias
 from l4.implementer.base_run import VIA as BASE_VIA
-from l4.implementer.base_run import BaseRunResult, confirmed_by_base_run, failure_message
+from l4.implementer.base_run import BaseRunResult, combine, confirmed_by_base_run
 from l4.implementer.discrimination import (
     PROOF_PRE_SATISFIED,
     PROOF_RED_ASSERTION,
     PROOF_ZERO_VALUE,
+    VIA_NOT_APPLICABLE,
     PreSatisfied,
     _test_file,
     confirm_pre_satisfied,
@@ -818,6 +819,17 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
     return note
 
 
+def _via(criterion: str, earlier: Mapping[str, EarlierRed], based: BaseRunResult, confirmation: PreSatisfied) -> dict:
+    """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run."""
+    if criterion in earlier:
+        return {"via": VIA}
+    if criterion in confirmation.confirmed:
+        return {}
+    if criterion in based.confirmed:
+        return {"via": BASE_VIA}
+    return {"via": VIA_NOT_APPLICABLE} if criterion in confirmation.not_applicable else {}
+
+
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
     stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
@@ -881,20 +893,21 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
         earlier = confirmed_by_earlier_red(wb, passing, report, new_ids)  # L4-IMP-003: no zero-value run for these
-        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in passing.items() if c not in earlier})
+        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in passing.items() if c not in earlier}, real=report)
         if (out := tampered("pre-satisfied confirmation")) is not None:
             return out
-        if confirmation.unconfirmed:  # whatever the zero-value run left (all of it, or part): last, the base run
-            based = confirmed_by_base_run(wb, confirmation.unconfirmed, new_ids)
+        left = {c: passing[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
+        if left:  # whatever the zero-value run left (all of it, or part): last, the base run, which only confirms
+            based = confirmed_by_base_run(wb, left, new_ids, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        if message := failure_message(confirmation, based):
+        if message := combine(confirmation, based).message:
             wb.discard_changes()
             return RedOutcome("failed", message)
         pre_satisfied = passing
         for criterion, tests in pre_satisfied.items():
-            via = {"via": VIA} if criterion in earlier else {"via": BASE_VIA} if criterion in based.confirmed else {}
-            wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
+            wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests),
+                    **_via(criterion, earlier, based, confirmation))  # fmt: skip
     # a stale test that is gone or fails now was replaced on purpose; one that still passes is simply kept
     replaced = frozenset(
         t for t in (stale.tests if stale else ()) if t not in report.tests or report.tests[t].status != "passed"
@@ -917,16 +930,20 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             "discriminating": list(
                 earlier[criterion].tests
                 if criterion in earlier
+                else confirmation.confirmed[criterion]
+                if criterion in confirmation.confirmed
                 else based.confirmed[criterion]
                 if criterion in based.confirmed
-                else confirmation.confirmed[criterion]
+                else confirmation.not_applicable[criterion]
             ),
             **(
                 {"via": VIA, "red_sha": earlier[criterion].red_sha, "red_task": earlier[criterion].red_task}
                 if criterion in earlier
+                else {}
+                if criterion in confirmation.confirmed
                 else {"via": BASE_VIA, "base_sha": based.base_sha}
                 if criterion in based.confirmed
-                else {}
+                else {"via": VIA_NOT_APPLICABLE}
             ),
         }
 
@@ -1000,20 +1017,21 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.discard_changes()
             return RedOutcome("failed", f"no test traces {', '.join(bare)} yet: write a new test for each")
         earlier = confirmed_by_earlier_red(wb, candidates, report, frozenset())
-        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in candidates.items() if c not in earlier})
+        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in candidates.items() if c not in earlier}, real=report)
         if (out := tampered("pre-satisfied confirmation")) is not None:
             return out
-        if confirmation.unconfirmed:
+        left = {c: candidates[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
+        if left:
             every = {t for tests in candidates.values() for t in tests}
-            based = confirmed_by_base_run(wb, confirmation.unconfirmed, every)
+            based = confirmed_by_base_run(wb, left, every, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        if message := failure_message(confirmation, based):
+        if message := combine(confirmation, based).message:
             wb.discard_changes()
             return RedOutcome("failed", message)
         for criterion, tests in candidates.items():
-            via = {"via": VIA} if criterion in earlier else {"via": BASE_VIA} if criterion in based.confirmed else {}
-            wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
+            wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests),
+                    **_via(criterion, earlier, based, confirmation))  # fmt: skip
         return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
     allowed = {t for tests in pre_satisfied.values() for t in tests}
     verdict = classify_red(
@@ -1031,7 +1049,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if open_criteria and not zeroed:  # no stub added by red: the ones that HEAD holds answer run (b)
         zeroed = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
     if open_criteria and zeroed:
-        vacuity = vacuity_check(wb, zeroed, open_criteria)
+        vacuity = vacuity_check(wb, zeroed, open_criteria, real=report)
         if (out := tampered("vacuity check")) is not None:
             return out
         if vacuity.message:
@@ -1210,7 +1228,7 @@ def run_green(
     if hung:
         excerpt = hang_excerpt(hung) or excerpt
         wb.emit("gate.hung", task=task.key, tests=[h.id for h in hung], attempt=attempt)
-    reason = reason or _undiscriminating(wb, red, unfreeze) or worse_static_gates(wb, base, "green")
+    reason = reason or _undiscriminating(wb, red, unfreeze, gate.report) or worse_static_gates(wb, base, "green")
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt, hung=tuple(hung))
@@ -1321,13 +1339,17 @@ def ci_steps_reason(wb: Workbench, steps: Sequence[ChoreCiStep]) -> str:
     return ""
 
 
-def _undiscriminating(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze) -> str:
-    """Decision 7: a corrected test must still fail against the red commit's code."""
+def _undiscriminating(wb: Workbench, red: RedOutcome, unfreeze: Unfreeze, real: TestReport | None = None) -> str:
+    """Decision 7: a corrected test must still fail against the red commit's code. A run that could not run the tests
+    decides nothing; it is reported as `inconclusive: ...` (the task is held for it from task 5.2 on)."""
     assert red.manifest is not None
     ids = sorted(i for i in red.new_ids if _test_file(wb, i) in unfreeze.paths)
     if not ids:
         return ""
-    passing = fails_at_red(wb, red.manifest.red_sha, ids)
+    at_red = fails_at_red(wb, red.manifest.red_sha, ids, real=real)
+    if at_red.inconclusive:
+        return f"inconclusive: {at_red.inconclusive}"
+    passing = at_red.failing_not
     return (
         f"the corrected test no longer discriminates: {_list(passing)} do not fail against the red commit's code"
         " (they pass, are skipped or did not run there)"

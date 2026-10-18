@@ -1,0 +1,171 @@
+"""L4-IMP-062 (SCN-IMP-306, 307): a criterion whose every test reads a dependency and no project code cannot be shown
+discriminating by any variant run; it is recorded `discrimination not applicable`, and the judge sees the label."""
+
+from l4.agents.fake import Step
+from l4.implementer import depcheck, discrimination
+from l4.implementer.discrimination import confirm_pre_satisfied, import_roots
+from l4.implementer.tdd import run_red, run_setup
+from l4.specs.base import Task
+
+from .conftest import KNOWN, Bench, result
+
+TASK = Task("1.1", "1.1", "1.1 Pin the runner", False, " ", 0, 1, 3)
+C1, C2 = "C-aaaaaaaa", "C-bbbbbbbb"
+PIN = (
+    "import importlib.metadata\n\nimport pytest\n\nimport pytdd\n\n\n"
+    '@pytest.mark.l4("C-aaaaaaaa")\n'
+    "def test_runner_is_the_verified_pin():\n"
+    '    assert importlib.metadata.version("pytest") == pytest.__version__\n\n\n'
+    '@pytest.mark.l4("C-bbbbbbbb")\n'
+    "def test_uses_the_project():\n"
+    "    assert pytdd.total([1.0]) == 1.0\n"
+)
+PIN_ID = "tests.test_pins::test_runner_is_the_verified_pin"
+PROJECT_ID = "tests.test_pins::test_uses_the_project"
+
+
+def staged(make_bench, source: str, name: str = "test_pins") -> Bench:
+    bench: Bench = make_bench([])
+    (bench.wb.worktree / "tests" / f"{name}.py").write_text(source)
+    run_setup(bench.wb)
+    return bench
+
+
+def real_report(bench: Bench):
+    gate = bench.wb.run_gate("test", bench.wb.cfg.gates.test.command, reports=bench.wb.cfg.gates.test.reports)
+    assert gate.report is not None
+    return gate.report
+
+
+def only(bench: Bench, test_id: str) -> bool:
+    return depcheck.dependency_only(bench.wb, test_id, import_roots(bench.wb))
+
+
+def test_scn_imp_306_a_version_pin_is_not_applicable(make_bench, monkeypatch):
+    bench = staged(make_bench, PIN)
+    gates: list[str] = []
+
+    def no_run(*args, **kwargs):
+        gates.append("zero")
+        raise AssertionError("a not applicable criterion runs no variant run")
+
+    monkeypatch.setattr(discrimination, "zeroed_run", no_run)
+    got = confirm_pre_satisfied(bench.wb, {C1: [PIN_ID]}, real=real_report(bench))
+    assert got.not_applicable == {C1: (PIN_ID,)} and gates == []
+    assert got.confirmed == {} and got.unconfirmed == {} and got.inconclusive == {} and got.message == ""
+
+
+def test_scn_imp_306_through_run_red_the_proof_says_not_applicable(make_bench):
+    pin = (
+        "import importlib.metadata\n\nimport pytest\n\n\n"
+        f'@pytest.mark.l4("{KNOWN}")\n'
+        "def test_runner_is_the_verified_pin():\n"
+        '    assert importlib.metadata.version("pytest") == pytest.__version__\n'
+    )
+    step = Step(writes={"tests/test_pins.py": pin}, structured=result("red", criteria_ids=[KNOWN]))
+    bench: Bench = make_bench([step])
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "already_satisfied", outcome.reason
+    test_id = "tests.test_pins::test_runner_is_the_verified_pin"
+    assert bench.events("task.red_ok")[-1]["criteria"][KNOWN] == {
+        "tests": [test_id], "proof": "pre_satisfied", "discriminating": [test_id], "via": "not_applicable",
+    }  # fmt: skip
+    assert bench.events("criterion.pre_satisfied")[-1]["via"] == "not_applicable"
+
+
+def test_scn_imp_307_a_test_that_reads_no_dependency_is_still_not_discriminating(make_bench):
+    source = (
+        "import json\n\nfrom pytdd import total\n\n\n"
+        "def test_arithmetic():\n    assert 1 + 1 == 2\n\n\n"
+        'def test_stdlib_only():\n    assert json.loads("1") == 1\n'
+    )
+    bench = staged(make_bench, source)
+    for test_id in ("tests.test_pins::test_arithmetic", "tests.test_pins::test_stdlib_only"):
+        assert not only(bench, test_id)
+    got = confirm_pre_satisfied(
+        bench.wb,
+        {C1: ["tests.test_pins::test_arithmetic"], C2: ["tests.test_pins::test_stdlib_only"]},
+        real=real_report(bench),
+    )
+    assert set(got.unconfirmed) == {C1, C2} and got.not_applicable == {}
+
+
+def test_project_code_a_helper_or_a_fixture_is_not_dependency_only(make_bench):
+    source = """\
+import importlib.metadata
+
+import pytest
+
+from helpers import make
+from pytdd import total
+
+PIN = "pytest"
+
+
+def local() -> str:
+    return "pytest"
+
+
+def test_calls_a_local_def():
+    assert importlib.metadata.version(local()) == pytest.__version__
+
+
+@pytest.fixture
+def exporter():
+    return []
+
+
+def test_takes_a_fixture(exporter):
+    assert importlib.metadata.version("pytest") and exporter == []
+
+
+def test_imports_project_in_body():
+    from pytdd.pricing import total as t
+
+    assert importlib.metadata.version("pytest") and t([1.0]) == 1.0
+
+
+def test_uses_a_helper_module():
+    assert importlib.metadata.version("pytest") and make()
+
+
+def test_uses_a_project_import():
+    assert importlib.metadata.version("pytest") and total([1.0]) == 1.0
+"""
+    bench = staged(make_bench, source)
+    (bench.wb.worktree / "tests/helpers.py").write_text("def make() -> int:\n    return 1\n")
+    for name in (
+        "test_calls_a_local_def", "test_takes_a_fixture", "test_imports_project_in_body",
+        "test_uses_a_helper_module", "test_uses_a_project_import",
+    ):  # fmt: skip
+        assert not only(bench, f"tests.test_pins::{name}"), name
+
+
+def test_a_class_test_a_parametrized_test_and_a_constant_are_read(make_bench):
+    source = """\
+import importlib.metadata
+
+import pytest
+
+PIN = "pytest"
+
+
+class TestPins:
+    def test_pin(self):
+        assert importlib.metadata.version(PIN)
+
+
+@pytest.mark.parametrize("name", ["pytest"])
+def test_param(name):
+    assert importlib.metadata.version(name)
+
+
+def test_dependency_attribute():
+    assert pytest.__version__
+"""
+    bench = staged(make_bench, source)
+    assert only(bench, "tests.test_pins.TestPins::test_pin")
+    assert only(bench, "tests.test_pins::test_param[pytest]")
+    assert only(bench, "tests.test_pins::test_dependency_attribute")
+    assert not only(bench, "tests.test_pins::test_missing")
+    assert not only(bench, "tests.no_such_file::test_x")

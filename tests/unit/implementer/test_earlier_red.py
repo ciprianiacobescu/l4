@@ -63,7 +63,7 @@ def spy(monkeypatch):
     """Records what confirm_pre_satisfied receives; confirms everything it is given."""
     seen: list[dict] = []
 
-    def fake(wb, candidates):
+    def fake(wb, candidates, *, real=None):
         seen.append({c: list(t) for c, t in candidates.items()})
         return PreSatisfied({c: tuple(t) for c, t in candidates.items()})
 
@@ -75,7 +75,7 @@ def refuse(monkeypatch):
     monkeypatch.setattr(
         tdd,
         "confirm_pre_satisfied",
-        lambda wb, cands: PreSatisfied({}, {c: tuple(t) for c, t in cands.items()}, "unconfirmed"),
+        lambda wb, cands, *, real=None: PreSatisfied({}, {c: tuple(t) for c, t in cands.items()}, "unconfirmed"),
     )
 
 

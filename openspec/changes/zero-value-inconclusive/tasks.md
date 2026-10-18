@@ -212,7 +212,7 @@ Every task follows these rules:
 
 ## 4. What a variant run proves (L4-IMP-002, L4-IMP-003, L4-IMP-062, D2, D3, D6, D9)
 
-- [ ] 4.1 The pre-satisfied confirmation: confirmed, refuted or inconclusive.
+- [x] 4.1 The pre-satisfied confirmation: confirmed, refuted or inconclusive.
   - Tests first, `tests/unit/implementer/test_presatisfied_inconclusive.py`, on the bench:
     - `test_scn_imp_300_a_run_that_collects_nothing_is_inconclusive_not_still_passing`: `src/pytdd/config.py` with
       `def load() -> dict:` (returns `{"rate": 2}`) and module-level `RATE = load()["rate"]`; a candidate test imports
@@ -242,7 +242,7 @@ Every task follows these rules:
       `confirm_pre_satisfied` fakes of `tests/unit/implementer/test_base_run.py`, `test_already_satisfied*.py` and
       `test_earlier_red.py` take `*, real=None`.
 
-- [ ] 4.2 Discrimination not applicable to a dependency check.
+- [x] 4.2 Discrimination not applicable to a dependency check.
   - Tests first, `tests/unit/implementer/test_dependency_only.py`, on the bench, in one new test file
     `tests/test_pins.py` that also holds a test importing `pytdd`:
     - `test_scn_imp_306_a_version_pin_is_not_applicable`: `import importlib.metadata`, `import pytest`, and
@@ -284,7 +284,7 @@ Every task follows these rules:
     `not_applicable` and out of the runs. `tdd.run_red` (both sites) writes the proof of task 4.2's first test for it
     and emits `criterion.pre_satisfied` with `via: not_applicable`; the base run is not asked for it.
 
-- [ ] 4.3 The base run confirms or says nothing; run (b) and `test-at-red` are classified.
+- [x] 4.3 The base run confirms or says nothing; run (b) and `test-at-red` are classified.
   - Tests first:
     - `tests/unit/implementer/test_base_run.py::test_scn_imp_311_a_base_run_cannot_refute_what_the_zero_value_run_could_not_decide`:
       a `zero` fake that returns `KNOWN` inconclusive; the red step writes `PASSES_AT_BASE`; `combine(zero, based)`

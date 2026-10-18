@@ -14,8 +14,10 @@ passes at head. The run:
   preserved mtimes, so incremental builds see the restored sources as newer).
 
 A criterion is confirmed when one of its new tests failed by assertion there; an error (missing export, import
-error, TypeError) is inconclusive; a test that passes at the base too shows the criterion was satisfied before
-the unit.
+error, TypeError) is no proof; a test that passes at the base too shows the criterion was satisfied before the
+unit. The base run only confirms (L4-IMP-003): the zero-value run alone can show that a test does not discriminate,
+so a test the base run could not run (it imports a module the base lacks) leaves its criterion as the zero-value run
+left it, inconclusive included (`combine`).
 """
 
 import os
@@ -25,11 +27,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from l4.evidence.scope import file_kind
+from l4.gates.junit import TestReport
+from l4.implementer import variant
 from l4.implementer.discrimination import (
     PreSatisfied,
     _is_test_path,
     _matches,
-    fails_on_zero,
+    own_test_files,
     run_with_code_of,
     unit_base,
 )
@@ -51,6 +55,7 @@ class BaseRunResult:
     confirmed: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> tests that failed by assertion
     base_sha: str = ""
     reason: str = ""  # why the run was skipped, or what it showed when it confirmed nothing
+    inconclusive: dict[str, str] = field(default_factory=dict)  # criterion -> why the run could not run its tests
 
 
 def _is_manifest(wb: Workbench, path: str) -> bool:
@@ -109,10 +114,16 @@ def _plan(wb: Workbench, base: str) -> tuple[list[str], str]:
 
 
 def confirmed_by_base_run(
-    wb: Workbench, candidates: Mapping[str, Sequence[str]], new_ids: Collection[str]
+    wb: Workbench,
+    candidates: Mapping[str, Sequence[str]],
+    new_ids: Collection[str],
+    *,
+    real: TestReport | None = None,
 ) -> BaseRunResult:
     """`candidates`: criterion -> this step's new tests, which passed at head and which no earlier red and no
-    zero-value run confirmed. Fail closed: anything the run cannot decide leaves the criterion unconfirmed."""
+    zero-value run confirmed. The run is classified against `real` (L4-IMP-060): a criterion is confirmed when one of
+    its new tests is a proof there; one whose tests the run could not run is `inconclusive`. A skipped run says so in
+    `reason` and decides nothing."""
     if not candidates:
         return BaseRunResult()
     base = unit_base(wb)
@@ -122,24 +133,55 @@ def confirmed_by_base_run(
     if why:
         return BaseRunResult(base_sha=base, reason=f"base run skipped: {why}")
     gate = run_with_code_of(wb, base, paths, name="test-base-run")  # restores by sha256, reports put back
-    tests = gate.report.tests if gate.report is not None else {}
-    if not tests:
-        return BaseRunResult(base_sha=base, reason="base run skipped: the gate wrote no readable report")
+    run = variant.classify(gate, real, redact=wb.redactor.redact_text)
+    own = own_test_files(wb)
     confirmed: dict[str, tuple[str, ...]] = {}
+    inconclusive: dict[str, str] = {}
     for criterion, names in candidates.items():
-        failing = tuple(t for t in names if t in new_ids and fails_on_zero(tests.get(t)))
-        if failing:
-            confirmed[criterion] = failing
+        outcomes = [(t, *variant.test_outcome(run, t, real, own, redact=wb.redactor.redact_text)) for t in names]
+        outcomes = [o for o in outcomes if o[0] in new_ids]
+        proving = tuple(t for t, outcome, _ in outcomes if outcome == "proof")
+        if proving:
+            confirmed[criterion] = proving
+        elif undecided := [why for _, outcome, why in outcomes if outcome == "inconclusive"]:
+            inconclusive[criterion] = undecided[0]
     reason = "" if confirmed else "none of its new tests fails by assertion against the unit base code"
-    return BaseRunResult(confirmed, base, reason)
+    return BaseRunResult(confirmed, base, reason, inconclusive)
+
+
+@dataclass(frozen=True)
+class Decision:
+    """What the zero-value run and the base run leave of the pre-satisfied candidates (design D3): `refuted` are the
+    agent's to fix, `inconclusive` are not (the check could not decide)."""
+
+    refuted: dict[str, tuple[str, ...]]
+    inconclusive: dict[str, str]
+    message: str
+
+
+def combine(zero: PreSatisfied, based: BaseRunResult) -> Decision:
+    """A criterion the base run confirmed is confirmed. Of the rest, those the zero-value run refuted stay refuted and
+    those it could not decide stay inconclusive, whatever the base run saw (it only confirms)."""
+    refuted = {c: t for c, t in zero.unconfirmed.items() if c not in based.confirmed}
+    inconclusive = {}
+    for criterion, reason in zero.inconclusive.items():
+        if criterion in based.confirmed:
+            continue
+        note = based.inconclusive.get(criterion) or (
+            based.reason if based.reason.startswith("base run skipped") else ""
+        )
+        inconclusive[criterion] = f"{reason}; {note}" if note else reason
+    parts = []
+    if refuted:
+        message = PreSatisfied({}, refuted, zero.reason).message
+        note = based.reason or ("some of the others were confirmed by the base run" if based.confirmed else "")
+        parts.append(f"{message[:-1]}; {note})" if note else message)
+    if inconclusive:
+        parts.append("inconclusive: " + ", ".join(f"{c} ({why})" for c, why in sorted(inconclusive.items())))
+    return Decision(refuted, inconclusive, "; ".join(parts))
 
 
 def failure_message(zero: PreSatisfied, based: BaseRunResult) -> str:
-    """The "not discriminating" message for the criteria neither the zero-value run nor the base run confirmed; empty
-    when there are none. A base run that was skipped, or that confirmed nothing, adds why."""
-    left = {c: t for c, t in zero.unconfirmed.items() if c not in based.confirmed}
-    if not left:
-        return ""
-    message = PreSatisfied({}, left, zero.reason).message
-    note = based.reason or ("some of the others were confirmed by the base run" if based.confirmed else "")
-    return f"{message[:-1]}; {note})" if note else message
+    """The "not discriminating" and "inconclusive" message for the criteria neither the zero-value run nor the base run
+    confirmed; empty when there are none. A base run that was skipped, or that confirmed nothing, adds why."""
+    return combine(zero, based).message

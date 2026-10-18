@@ -88,7 +88,13 @@ def test_a_good_file_that_pytest_never_ran_because_of_another_files_collection_e
         worktree=tmp_path, run_gate=run_gate,
         cfg=NS(gates=NS(test=NS(command="pytest", reports=[]))),
     )  # fmt: skip
-    monkeypatch.setattr(audit, "confirm_pre_satisfied", lambda wb, candidates: NS(confirmed=set(candidates), reason=""))
+    monkeypatch.setattr(
+        audit,
+        "confirm_pre_satisfied",
+        lambda wb, candidates, *, real=None: NS(
+            confirmed=set(candidates), reason="", inconclusive={}, not_applicable={}
+        ),
+    )
     out, collected = audit.AuditOutcome(), {}
     audit._judge_written(wb, paths, 1, out, collected)
     assert runs == [[bad, good], [good]]

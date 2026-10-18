@@ -182,3 +182,24 @@ def test_with_no_proved_test_the_message_still_says_how_to_prove_a_zero_answer()
     message = Vacuity(vacuous={C1: ("tests.test_red::test_zero_is_the_answer",)}).message
     assert "the zero value itself" in message and "assert a real answer in the same test" in message
     assert "@pytest.mark.l4(" not in message
+
+
+def test_a_run_b_with_no_report_is_inconclusive_not_vacuous(staged: tuple[Bench, Path], monkeypatch):
+    """L4-IMP-060: a zero-value run that wrote no report did not run the tests, so no criterion is vacuous."""
+    from l4.gates.runner import GateResult
+    from l4.implementer.workbench import Workbench
+
+    bench, _ = staged
+
+    def no_report(self, name, command, **kwargs):
+        log = self.out_dir / "test-zero.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("")
+        return GateResult(name, "fail", "exit code 2", 2, log, None)
+
+    monkeypatch.setattr(Workbench, "run_gate", no_report)
+    tracing = {C1: ["tests.test_red::test_call_only"], C2: ["tests.test_red::test_real_answer"]}
+    result = vacuity_check(bench.wb, ["src/pytdd/pricing.py"], tracing)
+    assert set(result.inconclusive) == {C1, C2} and result.vacuous == {} and result.proofs == {}
+    assert "vacuous:" not in result.message and result.message.startswith("inconclusive: ")
+    assert "wrote no readable report" in result.inconclusive[C1]

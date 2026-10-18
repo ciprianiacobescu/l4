@@ -249,14 +249,18 @@ def _judge_written(
         _judge_written(wb, deferred, round_no, out)  # the broken file is gone: a plain run of the others
     if not candidates:
         return
-    confirmation = confirm_pre_satisfied(wb, candidates)
+    confirmation = confirm_pre_satisfied(wb, candidates, real=report)
     for cid, ids in candidates.items():
         rel = written[cid]
         if cid in confirmation.confirmed:
             out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids)))
             out.accepted.append(wb.worktree / rel)
         else:
-            why = confirmation.reason or "it passes when the project's functions answer their zero value"
+            why = (
+                confirmation.inconclusive.get(cid)
+                or confirmation.reason
+                or "it passes when the project's functions answer their zero value"
+            )
             _reject(wb, out, cid, rel, "rejected", why, tuple(ids))
 
 
