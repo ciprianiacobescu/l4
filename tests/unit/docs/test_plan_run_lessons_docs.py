@@ -16,13 +16,13 @@ def test_the_spec_has_the_fifteen_requirements_and_their_scenarios_in_order() ->
         assert f"**{rid} " in spec, rid
     assert spec.index("**L4-VER-018 ") < spec.index("**L4-VER-040 ") < spec.index("**L4-VER-045 ")
     assert spec.index("**L4-YOLO-035** ") < spec.index("**L4-YOLO-050 ") < spec.index("**L4-YOLO-055 ")
-    for n in range(130, 150):
+    for n in range(140, 160):  # SCN-VER-130..139 belong to detect-test-tamper (the merge renumbered these ten)
         assert f"#### SCN-VER-{n} " in spec, n
     for n in range(130, 150):
         assert f"#### SCN-YOLO-{n} " in spec, n
     assert spec.index("#### SCN-VER-77 ") < spec.index("#### SCN-VER-150 ") < spec.index("### 23.9.1 Human feedback")
     assert "`yolo.extend_by_agents`" in spec and "extend_by_agents: false" in spec
-    assert "| 40 | `plan-run-lessons` |" in spec and "judge@10" in spec
+    assert "| 46 | `plan-run-lessons` |" in spec and "judge@10" in spec
 
 
 def test_the_runbook_teaches_the_holds_the_escalation_and_the_extension() -> None:
@@ -48,10 +48,10 @@ def test_the_yolo_doc_and_the_skill_teach_the_extension_and_the_judge_view_hold(
     assert "yolo.extend_by_agents" in read("plugins", "l4", "skills", "l4", "references", "plan.md")
 
 
-def test_the_changelog_has_an_unreleased_0_4_16_above_the_released_sections() -> None:
+def test_the_changelog_has_an_unreleased_0_4_17_above_the_released_sections() -> None:
     changelog = read("CHANGELOG.md")
-    assert changelog.index("## 0.4.16 (unreleased)") < changelog.index("## 0.4.14 (")
-    head = changelog.split("## 0.4.16 (unreleased)", 1)[1].split("\n## ", 1)[0]
+    assert changelog.index("## 0.4.17 (unreleased)") < changelog.index("## 0.4.15 (")
+    head = changelog.split("## 0.4.17 (unreleased)", 1)[1].split("\n## ", 1)[0]
     for needle in ("### Added", "### Fixed", "### Changed", "judge@10", "judge_view_rejected", "plan.extended"):
         assert needle in head, needle
     assert "yolo.extend_by_agents" in head and "Lock files" in head
