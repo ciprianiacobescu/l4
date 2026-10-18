@@ -9,6 +9,8 @@ import stat
 import tempfile
 from pathlib import Path, PurePosixPath
 
+MAX_SOURCE_BYTES = 256 * 1024  # a spec or steering file is read up to this size (kiro-prompt-context)
+
 
 class UnsafeFile(OSError):
     """A repo-controlled path that must not be read or replaced: a symlink, a non-regular file, or too large."""
@@ -47,6 +49,18 @@ def read_regular_file(path: Path, *, limit: int) -> bytes:
     if info.st_size > limit:
         raise UnsafeFile(f"{path} is larger than {limit} bytes")
     return path.read_bytes()
+
+
+def read_regular_prefix(path: Path, limit: int) -> tuple[bytes, int]:
+    """The first `limit` bytes of a regular file and its size; never follows a symlink. The rules of
+    `read_regular_file`, except that a file over the limit is read up to it instead of refused."""
+    info = os.lstat(path)  # FileNotFoundError propagates: absence is not unsafe
+    if stat.S_ISLNK(info.st_mode):
+        raise UnsafeFile(f"{path} is a symlink")
+    if not stat.S_ISREG(info.st_mode):
+        raise UnsafeFile(f"{path} is not a regular file")
+    with path.open("rb") as handle:
+        return handle.read(limit), info.st_size
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:

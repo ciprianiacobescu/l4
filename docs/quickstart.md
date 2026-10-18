@@ -341,6 +341,12 @@ To ask for changes to a unit's code once its MR/PR is open (a refactor, a hard-c
 environment variable, a missing test), run `.l4/bin/l4 feedback add`, then commit and push. [docs/feedback.md](feedback.md)
 has one worked example for each kind and says what happens after the push.
 
+For a Kiro spec, the implementer receives each criterion's text, the task's whole block from `tasks.md` and the steering
+in `.kiro/steering/` that applies to the task (by its inclusion mode; the root `AGENTS.md` only with
+`implementer.include_agents_md: true`). Before the first run, check what a long spec loses: `.l4/bin/l4 run --dry-run`
+prints the prompt's budget, each steering decision and each file it would cut. Shorten a cut file, or raise
+`implementer.context_budget_tokens` (default 32000).
+
 When a unit stops or does not move, use the [operations runbook](runbook.md).
 
 ## Use L4 from your IDE

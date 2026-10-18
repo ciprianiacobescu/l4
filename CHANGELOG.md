@@ -20,6 +20,27 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   (`plan.extended`, or `plan.resumed` that extends) records the actor, its marker and whether the key allowed it
   (L4-YOLO-051).
 - `l4 yolo status` lists the extensions of a plan (`extended: runs 90 -> 110 by <who> (person): <why>`).
+- Kiro steering reaches the implementer as data. The harness reads `.kiro/steering/*.md` on the host and puts each file
+  that applies under `# Project conventions` as an `<l4:data>` block, by its Kiro front matter: none or `always`
+  (always), `fileMatch` (a pattern matches a path of the task or of the unit branch), `manual` (the task, the
+  requirements or the design names it as `#<file>`) and `auto` (after the others, when the budget has room). An
+  OpenSpec unit gets the `context` of `openspec/config.yaml` the same way, never its `rules`. The sandbox masks stay,
+  and `~/.kiro/steering` is never read. `implementer.include_agents_md: true` adds the repository root's `AGENTS.md`
+  as a convention (never `CLAUDE.md`).
+- Nothing is cut silently any more. A source that is cut by the budget or not read (over 262,144 bytes, a symbolic link,
+  a file that is not regular) is named under `# Not shown in full` with its path, the characters shown and the lines
+  left out, and the run records `prompt.truncated`. `prompt.rendered` records `budget_tokens`, `budget_source` and the
+  steering decisions.
+- `l4 run --dry-run` prints per unit the budget, each steering decision and each cut. `l4 status --unit` prints the
+  last `Prompt cut:` and `--json` has `prompt_cut`. Doctor SPEC-004 warns when the next task's prompt would cut a source.
+- A profile may set `context_budget_tokens` for its own steps, for a small local model in a fallback chain.
+- The step-9 judge gets each done task's whole block (detail bullets included) and is asked whether the diff does what
+  each task's text says; `verifier.judge_context_budget_tokens` (48000) bounds its spec text in the implementer's
+  priority order, and a spec file it did not see whole is named to it.
+
+- A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
+  then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
+  or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
 
 ### Fixed
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
@@ -152,7 +173,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A diff over 120000 characters no longer holds the unit every round. The judge now reads it in parts: whole files,
   ordered so that a test sits next to the code it is named after, at most 8 parts of at most 120000 characters, one judge
   call each, and the replies are merged into one verdict (a `fail` of any part wins, then a `pass`). A diff within the
-  cap keeps its one prompt. The prompt template is `judge@10`; `verdict.json` lists `judge_parts` and `verification.md`
+  cap keeps its one prompt. The prompt template is `judge@11` (`judge@10` added the parts); `verdict.json` lists `judge_parts` and `verification.md`
   says `judged in N parts` (L4-VER-041, L4-VER-042).
 - The judge's diff leaves out the harness's bookkeeping, named once: every `.l4/` file, `.serena/memories/harness/**`, and
   the `verification.md`, `questions.md` and `feedback.md` of each unit folder of the family (L4-VER-040). Lock files
@@ -171,6 +192,19 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the run that reads the answer; once the answer is pushed, that the next run reads it and how to start it now. The
   wait line shows the live reason, not the stale `open: Q-…` detail. The plan step, the resume and the status decide with
   one rule (L4-YOLO-052, L4-YOLO-053, L4-YOLO-054).
+- Requirements and the criteria text no longer disappear behind a long `design.md` (a Kiro unit whose design was 125,492
+  characters lost its `requirements.md` to the budget).
+- A spec file over 262,144 bytes was dropped from the implementer's and the judge's prompt without a word; it is now read
+  up to the limit and named, and the judge holds the round.
+- A Kiro leaf's cited criteria were not required in red: a red step that tested one of `_Requirements: 1.1, 1.2_` passed,
+  and the no-new-test path ticked such a leaf without proving the other. Red now fails with a reason that names the
+  criterion and the line; a criterion that an earlier red already proved needs no copy (review finding implementer-5).
+- Red no longer counts a criterion as proved by an earlier test that was merely re-tagged (the proof is per criterion
+  and test, in a file only appended to), accepts new tests, fixtures and constants in an existing test file, and accepts a step that
+  reports every cited id. Hostile steering (deep YAML, huge or complex patterns, forged names) and unsafe capability directory names
+  are named and left out; `l4 status` shows the latest prompt's cut; the clarifier charges its line numbers.
+- A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
+  item `2.1` both counted; they resolve against the fix unit's own items.
 
 ### Changed
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
@@ -222,6 +256,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - Every `--extend-…` of `l4 yolo resume` is a person's decision: an agent is refused, with the command a person runs,
   unless `yolo.extend_by_agents` is true on the base branch. Before, the rule was only written in the docs
   (L4-YOLO-051).
+- Every implementer prompt carries each criterion's full text and the task's whole block from `tasks.md` (the enclosing
+  headings, the parent tasks' lines, the detail bullets and the `_Requirements:_` line), never cut. The rest of the
+  budget is filled in a fixed order by whole sections: conventions (at most half), the requirements narrative, the
+  design and the proposal, the sections the task names first.
+- `implementer.context_budget_tokens` rises from 24000 to 32000.
+- The clarifier's documents are chosen by the same builder, order and cut list (`clarifier@5`).
+- Step 1's declared scope reads a Kiro unit's `requirements.md` and `bugfix.md`.
+- Templates `contract@12` (conventions, the cut list), `red@11` (every listed criterion needs a new test or an earlier
+  proof) and `judge@11` (the cut-list rule, the done-tasks block; it also holds the diff in parts of `judge@10`).
 
 ## 0.4.15 (2026-10-18)
 

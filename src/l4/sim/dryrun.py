@@ -9,7 +9,8 @@ exits 0. Only git reads happen; in CI the ref refresh (a fetch) is a read of the
 The prompt is rendered from the unit snapshot, not by `tdd._prompt` (that one needs a worktree, git and the ledger), so
 a block that another increment adds to `_prompt` reaches the dry run only when it is added here too: the
 previous-attempt block never (a dry run has no attempt), the lessons block by M1.5 at its merge (parallel-ownership
-C14).
+C14). The unit's context (sources, conventions, the task's block, the budget) comes from `prompt_inputs`, the builder
+of the run itself, so it cannot drift; the console shows its budget, steering decisions and cuts (L4-IMP-054).
 M1: `verify --dry-run` and `init --dry-run`, prompts for later steps of the same unit.
 """
 
@@ -31,9 +32,10 @@ from l4.config.schema import L4Config, Profile
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, most_severe
 from l4.fsutil import atomic_write_bytes
-from l4.implementer.prompt import PromptContext, collect_sources, render_prompt
+from l4.implementer.prompt import PromptContext, render_prompt
 from l4.implementer.result import RESULT_SCHEMA
 from l4.implementer.tasks import select_next_step, task_scope
+from l4.implementer.unit_context import Cut, cut_summary, prompt_inputs, safe_label
 from l4.memory.inject import branch_changed_files, inject_for_task, task_paths
 from l4.orchestrator import ACTIONABLE
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
@@ -78,6 +80,34 @@ class Step:
     command: str | None = None
     base_moved: str | None = None  # step 0 would merge the base: what and where it can conflict
     held: str | None = None  # a delivery plan holds the unit: why (a named run of it exits 13)
+    context: "ContextReport | None" = None  # the budget, the steering decisions and the cuts of the prompt (L4-IMP-054)
+
+
+@dataclass(frozen=True)
+class ContextReport:
+    """What a person needs to see of the prompt's context before a run: the budget and its key, every steering decision,
+    and every source that is cut or not read."""
+
+    budget_tokens: int
+    budget_source: str  # `implementer` or `profile:<name>`
+    steering: tuple[dict[str, object], ...]
+    cuts: tuple[Cut, ...]
+
+    def lines(self) -> list[str]:
+        if self.budget_source == "implementer":
+            key = "implementer.context_budget_tokens"
+        elif self.budget_source == "model_window":
+            key = "capped at 60% of the model's context window"
+        else:
+            key = f"profiles.{safe_label(self.budget_source.removeprefix('profile:'))}.context_budget_tokens"
+        head = f"context: budget {self.budget_tokens} tokens ({key})" + ("" if self.cuts else ", nothing cut")
+        steering = [
+            f"steering: {safe_label(str(d['path']))} included ({d['why']})"
+            if d["included"]
+            else f"steering: {safe_label(str(d['path']))} left out ({d['why']})"
+            for d in self.steering
+        ]
+        return [head, *steering, *(f"cut: {cut_summary(c)}" for c in self.cuts)]
 
 
 def _safe(text: str) -> str:
@@ -126,8 +156,8 @@ def _gates(cfg: L4Config) -> list[str]:
 
 def _prompt(
     app: AppContext, cfg: L4Config, provider: SpecProvider, ref: UnitRef, snapshot: UnitSnapshot, task_key: str,
-    title: str, profile: Profile,
-) -> str:  # fmt: skip
+    title: str, profile_name: str, profile: Profile,
+) -> tuple[str, ContextReport]:  # fmt: skip
     answers = ""
     if snapshot.questions is not None:
         scope = task_scope(snapshot.tasks, task_key)
@@ -138,11 +168,19 @@ def _prompt(
     base, head = (f"refs/remotes/origin/{name}" for name in (cfg.forge.base_branch, branch))
     pushed = branch_changed_files(Git(app.repo, environ=app.environ), base, head)
     lessons = inject_for_task(app.repo, cfg.memory, task_paths(title, pushed), redact=app.redactor.redact_text).block
+    task = next(t for t in snapshot.tasks if t.key == task_key)
+    inputs = prompt_inputs(  # the one builder of the run: the dry run cannot drift on the context
+        root=app.repo, provider=provider, ref=ref, task=task, tasks=snapshot.tasks, changed=pushed, cfg=cfg,
+        profile_name=profile_name, profile=profile,
+    )  # fmt: skip
     ctx = PromptContext(
         unit_id=ref.id, adapter=profile.adapter or "", task_key=task_key, task_title=title,
-        task_links=next((t.links for t in snapshot.tasks if t.key == task_key), ()),  # a Kiro leaf's refs (K20)
-        sources=collect_sources(provider.unit_dir(ref)), criteria=tuple(provider.criteria(ref)),
-        gate_command=cfg.gates.test.command, context_budget_tokens=cfg.implementer.context_budget_tokens,
+        task_links=task.links,  # a Kiro leaf's refs (K20)
+        source_files=inputs.source_files, conventions=inputs.conventions, task_block=inputs.task_block,
+        unit_rel=inputs.unit_rel, budget_source=inputs.budget_source, window_tokens=inputs.window_tokens,
+        criteria=inputs.criteria,
+        own_criteria=inputs.own_criteria,
+        gate_command=cfg.gates.test.command, context_budget_tokens=inputs.budget_tokens,
         static_gate_commands=(*cfg.gates.lint, *cfg.gates.typecheck),
         data_blocks=(
             *((("answered questions", answers),) if answers else ()),
@@ -150,7 +188,9 @@ def _prompt(
         ),
         run_ledger=ledger_path(provider.unit_dir(ref), app.run_id).resolve().relative_to(app.repo.resolve()).as_posix(),
     )  # fmt: skip
-    return app.redactor.redact_text(render_prompt("red", ctx).text)
+    rendered = render_prompt("red", ctx)
+    report = ContextReport(rendered.budget_tokens, rendered.budget_source, tuple(inputs.steering), rendered.cuts)
+    return app.redactor.redact_text(rendered.text), report
 
 
 def _step(
@@ -173,13 +213,14 @@ def _step(
     task = select_next_step(snapshot.tasks, blocked)
     if task is None or head is None:  # nothing eligible: the real run parks the unit or waits for a person
         return Step(ref.id, phase, entry.next_action, None, None, status, expected)
-    text = _prompt(app, cfg, provider, ref, snapshot, task.key, task.title, head[1])
+    text, context = _prompt(app, cfg, provider, ref, snapshot, task.key, task.title, head[0], head[1])
     target = app.out_dir / DRY_DIR / app.run_id / _safe(ref.id) / f"{_safe(task.key)}-red.prompt.md"
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_bytes(target, text.encode("utf-8"))
     return Step(
-        ref.id, phase, entry.next_action, task.key, "red", status, expected, target, _implementer_command(cfg, head[1])
-    )
+        ref.id, phase, entry.next_action, task.key, "red", status, expected, target,
+        _implementer_command(cfg, head[1]), context=context,
+    )  # fmt: skip
 
 
 def _base_moved(cfg: L4Config, git: Git, unit_id: str) -> str | None:
@@ -205,6 +246,8 @@ def _render(app: AppContext, cfg: L4Config, steps: Sequence[Step], exit_code: Ex
             out.append(f"  {s.base_moved}")
         if s.prompt is not None:
             out.append(f"  prompt:  {s.prompt.relative_to(app.repo).as_posix()}")
+        if s.context is not None:
+            out.extend(f"  {line}" for line in s.context.lines())
         if s.command is not None:
             out.append(f"  command: {s.command}")
             out.append(f"  env:     {' '.join(_env_names(app))}  (names only)")

@@ -78,9 +78,10 @@ def module_of(path: str, roots: Sequence[str] = MODULE_ROOTS) -> str | None:
 
 
 def _sections(name: str, text: str) -> str:
-    """What a unit file may declare: the proposal's `## Impact`, the whole of design and tasks, nothing else."""
+    """What a unit file may declare: the proposal's `## Impact`, the whole of design and tasks and of a Kiro unit's
+    requirements and bugfix (owner decision 7 of kiro-prompt-context), nothing else."""
     base = PurePosixPath(name).name
-    if base in ("design.md", "tasks.md"):
+    if base in ("design.md", "tasks.md", "requirements.md", "bugfix.md"):
         return text
     if base != "proposal.md":
         return ""
@@ -153,7 +154,7 @@ def declared_scope(
     return DeclaredScope(tuple(paths), tuple(globs), frozenset(modules), tuple(sources), tree_modules)
 
 
-UNIT_FILES = ("proposal.md", "design.md", "tasks.md")
+UNIT_FILES = ("proposal.md", "design.md", "tasks.md", "requirements.md", "bugfix.md")
 
 
 def _union(own: DeclaredScope, parent: DeclaredScope) -> DeclaredScope:

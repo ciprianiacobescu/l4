@@ -35,7 +35,7 @@ _HEADING = re.compile(r"(#{1,4})[ \t]+\S")
 _FENCE = re.compile(r"\s{0,3}(```|~~~)")
 
 
-def _enclosing_headings(data: bytes, line: int) -> list[str]:
+def enclosing_headings(data: bytes, line: int) -> list[str]:
     """The heading lines (`#`..`####`) above 1-based `line` that enclose it: the closest heading above, then the
     closest one of each lower level above that, outermost first. A `#` line inside a code fence is no heading."""
     stack: list[tuple[int, str]] = []
@@ -57,5 +57,5 @@ def task_context(data: bytes, task: Task, framework: Framework) -> str:
     """What the named-file rule reads for a task (L4-IMP-014): the Markdown headings that enclose the task in the same
     file, outermost first and each ended by `\\n`, then `task_text`. A heading is part of the same reviewed file as the
     task line, so it has the same trust source."""
-    headings = "".join(f"{text}\n" for text in _enclosing_headings(data, task.line))
+    headings = "".join(f"{text}\n" for text in enclosing_headings(data, task.line))
     return headings + task_text(data, task, framework)

@@ -74,7 +74,7 @@ from l4.implementer.guards import (
 )
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
-from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
+from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
     RESULT_SCHEMA,
@@ -92,13 +92,14 @@ from l4.implementer.stubs import ProductionGuard, enforce_red_scope, escaping_li
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
+from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env, cache_env
 from l4.security.protected import changed_paths, glob_match, revert_protected
-from l4.specs.base import Framework, Marker, Task
-from l4.specs.criteria import trace_ids
+from l4.specs.base import Framework, Marker, Task, UnitRef
+from l4.specs.criteria import linked_criteria, own_criteria, trace_ids
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import read_follow_up_marker
 from l4.specs.kiro import parse_kiro_tasks
@@ -310,6 +311,13 @@ def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset
         return frozenset()
     changed = {str(c["new_id"]) for c in pending_stale(events, task.key) if c.get("new_id")}
     return frozenset({i for case in base.tests.values() for i in trace_ids(case)} - changed)
+
+
+def cited_criteria(provider: Any, ref: UnitRef, links: Sequence[str]) -> dict[str, str]:
+    """id -> alias of the criteria a Kiro leaf's `_Requirements:_` links name, read on the task's OWN unit (a fix unit
+    cites the numbers of its own `bugfix.md` items, never the parent's `Req 2.1`). Empty for an OpenSpec task, which
+    has no links, and for links that name no criterion (L4-KSP-012, kiro-prompt-context D8)."""
+    return {c.id: c.alias for c in linked_criteria(own_criteria(provider, ref), links)}
 
 
 def _first_line(case: TestCase) -> str:
@@ -640,9 +648,9 @@ def _accepted(wb: Workbench) -> tuple[tuple[str, str], ...]:
     return (("accepted review findings", block),) if block else ()
 
 
-def _lessons(wb: Workbench, task: Task) -> Injection:
+def _lessons(wb: Workbench, task: Task, changed: Sequence[str] | None = None) -> Injection:
     """The lessons that apply to the task, as a data block (SPEC L4-MEM-003); one `lessons.injected` event when any."""
-    paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()])
+    paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()] if changed is None else changed)
     injection = inject_for_task(wb.worktree, wb.cfg.memory, paths, writer=wb, redact=wb.redactor.redact_text)
     for problem in injection.skipped:
         log.warning("%s: lessons: %s", wb.ref.id, problem.message)
@@ -662,18 +670,26 @@ def _prompt(
     unfreeze: Unfreeze | None = None,
     adds_tests: bool = False,
     stale: StaleTests | None = None,
+    attempt: int = 1,
 ) -> str:
     answers = _answers(wb, task)
-    lessons = _lessons(wb, task)
+    changed = [*wb.branch_changed_files(), *wb.changed_files()]
+    lessons = _lessons(wb, task, changed)
+    own = getattr(wb.provider, "own_tasks", wb.provider.tasks)  # a fix unit's tasks.md holds its own tasks only
+    inputs = prompt_inputs(
+        root=wb.worktree, provider=wb.provider, ref=wb.ref, task=task, tasks=own(wb.ref), changed=changed,
+        cfg=wb.cfg, profile_name=wb.selected.profile_name, profile=wb.selected.profile,
+    )  # fmt: skip
     redact = wb.redactor.redact_text
     note = retry_note(_ledger_events(wb), task.key, wb.event_context.get("fix_unit"), redact=redact)  # D11
     ctx = PromptContext(
         unit_id=wb.ref.id, adapter=wb.selected.profile.adapter or "", task_key=task.key, task_title=task.title,
-        task_links=task.links,
-        sources=collect_sources(wb.ref.path), criteria=tuple(wb.provider.criteria(wb.ref)),
+        task_links=task.links, source_files=inputs.source_files, conventions=inputs.conventions,
+        task_block=inputs.task_block, unit_rel=inputs.unit_rel, budget_source=inputs.budget_source,
+        criteria=inputs.criteria, own_criteria=inputs.own_criteria,
         gate_command=wb.cfg.gates.test.command, previous_failure=previous_failure,
         result_path=Path(RESULT_ALIAS_PATH) if wb.impl.capabilities().schema_mode == "prompt_contract" else None,
-        context_budget_tokens=wb.cfg.implementer.context_budget_tokens,
+        context_budget_tokens=inputs.budget_tokens, window_tokens=inputs.window_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
         e2e_dir=e2e_test_dir(wb.cfg.gates.e2e, wb.worktree) if e2e_configured(wb.cfg) else None,
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
@@ -696,10 +712,21 @@ def _prompt(
     wb.emit(
         "prompt.rendered", role=role, task=task.key, sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         template_version=rendered.template_version, sources=list(rendered.sources),
+        budget_tokens=rendered.budget_tokens, budget_source=rendered.budget_source, steering=inputs.steering,
         answers=[{"id": qid, "answer_sha256": digest} for qid, digest in answers.consumed],  # L4-QMD-006
         lessons=list(lessons.ids),
         **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),
     )  # fmt: skip
+    if rendered.over_window and inputs.window_tokens:  # the never-cut parts alone do not fit: nothing can be squeezed
+        wb.emit(
+            "prompt.over_window", role=role, task=task.key, attempt=attempt, window_tokens=inputs.window_tokens,
+            prompt_tokens=len(rendered.text) // CHARS_PER_TOKEN,
+        )  # fmt: skip
+    if rendered.cuts:  # L4-IMP-052: what the prompt does not show whole, by path
+        wb.emit(
+            "prompt.truncated", role=role, task=task.key, attempt=attempt, budget_tokens=rendered.budget_tokens,
+            sources=[c.as_dict() for c in rendered.cuts],
+        )  # fmt: skip
     return text
 
 
@@ -721,7 +748,7 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
@@ -991,18 +1018,34 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     report = gate.report
     new_ids = new_test_ids(base_report, report)
     family = {c.id for c in wb.provider.criteria(wb.ref)}
+    exempt = unchanged_criteria(wb, task, base_report)
+    named = cited_criteria(wb.provider, wb.ref, task.links)  # L4-KSP-012: the leaf's own cited criteria
+    required = {c for c in named if c not in exempt}
+    proved_earlier: dict[str, EarlierRed] = {}
+    existing: dict[str, tuple[str, ...]] = {}
     tracing: dict[str, tuple[str, ...]] = {}
     pre_satisfied: dict[str, tuple[str, ...]] = {}
     confirmation = PreSatisfied()
     based = BaseRunResult()
     earlier: dict[str, EarlierRed] = {}
     if family and new_ids and not set(report.collection_errors) - set(base_report.collection_errors):
+        # owner decision 4: a cited criterion that an earlier red of the unit proved, and whose tests pass now, needs
+        # no copy among the new tests
+        traced_new = set().union(*(trace_ids(report.tests[i]) for i in new_ids))
+        passing_now = {
+            i: trace_ids(case) for i, case in report.tests.items() if i not in new_ids and case.status == "passed"
+        }
+        existing = {c: tuple(sorted(i for i, ids in passing_now.items() if c in ids)) for c in required - traced_new}
+        proved_earlier = confirmed_by_earlier_red(wb, {c: t for c, t in existing.items() if t}, report, new_ids)
         check = check_criteria(
             result,
             family,
             {i: report.tests[i] for i in new_ids},
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
-            exempt=unchanged_criteria(wb, task, base_report),
+            exempt=exempt | set(proved_earlier),  # M2: an honest step may list a criterion an earlier red proved
+            required=required - set(proved_earlier),
+            aliases=named,
+            links=", ".join(task.links),
         )
         for test in check.untraced:
             wb.emit("test.untraced", task=task.key, test=test)
@@ -1011,8 +1054,12 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return RedOutcome("failed", check.error)
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
-        earlier = confirmed_by_earlier_red(wb, passing, report, new_ids)  # L4-IMP-003: no zero-value run for these
+        earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
         confirmation = confirm_pre_satisfied(wb, {c: t for c, t in passing.items() if c not in earlier})
+        for criterion in proved_earlier:  # proved by tests that exist already: recorded like the no-new-test path
+            wb.emit(
+                "criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(existing[criterion]), via=VIA
+            )
         if (out := tampered("pre-satisfied confirmation")) is not None:
             return out
         if confirmation.unconfirmed:  # whatever the zero-value run left (all of it, or part): last, the base run
@@ -1116,10 +1163,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             superseded=replaced,
         )  # fmt: skip
 
-    cited = tuple(sorted(set(result.criteria_ids)))
+    reported = tuple(sorted(set(result.criteria_ids)))
+    cited = tuple(sorted(set(reported) | required))  # L4-KSP-013: the leaf's cited criteria are proved too
     reason = result.tdd_exemption.reason.strip() if result.tdd_exemption else ""
     if (  # L4-IMP-003: no new test, no file changed, and the task says that tests of an earlier task already hold it
-        cited and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
+        reported and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
         and not [p for p in changed if p != wb.ledger_rel]
         and not set(report.collection_errors) - set(base_report.collection_errors)
     ):  # fmt: skip
@@ -1161,6 +1209,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if tampered_tests := preexisting_test_changes(wb, task, base, stale):  # after classify_red: it keeps its reasons
         return _reject_preexisting(wb, tampered_tests)
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
+    proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
     discriminating: Mapping[str, Sequence[str]] = {}
     zeroed = list(scope.stub_files)

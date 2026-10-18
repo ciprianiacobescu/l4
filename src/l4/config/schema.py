@@ -454,6 +454,8 @@ class Profile(_Strict):
     min_version: ToolVersion | None = None
     min_remaining_percent: float | None = Field(None, ge=0, le=100)  # overrides availability.min_remaining_percent
     max_concurrency: int | None = Field(default=None, ge=1)
+    context_budget_tokens: int | None = Field(default=None, ge=1000)  # this profile's steps: replaces the implementer's
+    context_window: int | None = Field(default=None, ge=1000)  # the model's window: caps the whole prompt at 60 % of it
     options: dict[str, Any] = Field(default_factory=dict)
     vendor: str | None = None
     base_url: str | None = None
@@ -533,7 +535,8 @@ class AvailabilityCfg(_Strict):
 
 class ImplementerCfg(_Strict):
     task_grouping: Literal["task", "parent"] = "task"
-    context_budget_tokens: int = 24000
+    context_budget_tokens: int = 32000  # tokens of 4 characters (L4-IMP-053)
+    include_agents_md: bool = False  # the repository root's AGENTS.md joins the prompt as a convention (L4-IMP-051)
     max_task_attempts: int = Field(default=3, ge=1)
     escalate_after: int = Field(default=2, ge=0)  # failed attempts of a phase on one profile before the next (0: off)
     result_repair_attempts: int = Field(default=1, ge=0)
@@ -647,6 +650,7 @@ class VerifierCfg(_Strict):
     evidence: EvidenceCfg = Field(default_factory=EvidenceCfg)
     panel: PanelCfg = Field(default_factory=PanelCfg)
     fix_minor_findings: bool = False
+    judge_context_budget_tokens: int = Field(default=48000, ge=1000)  # the step-9 judge's spec text (L4-KSP-014)
     secret_scan: Literal["gitleaks", "none"] = "gitleaks"
     test_awareness_allow: list[str] = Field(default_factory=list)  # globs of production files; read at the base
 

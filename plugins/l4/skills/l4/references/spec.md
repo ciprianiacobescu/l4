@@ -28,6 +28,8 @@ design agree): a fix in one file often raises a consistency finding in another.
   - A MODIFIED block keeps every scenario name of the requirement it replaces.
   - Keep each requirement statement short.
 
+Kiro authors: see `kiro.md` for what the prompt carries.
+
 Before the push, run both:
 
 ```sh

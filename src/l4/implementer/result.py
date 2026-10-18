@@ -189,6 +189,9 @@ def check_criteria(
     new_tests: Mapping[str, TestCase],
     trace_hint: str = TRACE_HINT_EITHER,
     exempt: Collection[str] = (),
+    required: Collection[str] = (),
+    aliases: Mapping[str, str] | None = None,
+    links: str = "",
 ) -> CriteriaCheck:
     """The criteria a red step covers (L4-IMP-005): `criteria_ids` when it lists any, else whatever the new tests
     trace. Each must belong to the unit's family and have a new test that traces it. `trace_hint` is how the retry
@@ -196,10 +199,14 @@ def check_criteria(
     test gate); the one caller, `tdd.py`, does not pass it yet, so the default names both forms. `exempt`: cited
     criteria that need no NEW test (L4-OPS-015): in the red step of a task a spec edit reopened, the criteria the edit
     left unchanged, whose tests already exist. A cited criterion in `exempt` that no new test traces is not a failure
-    and is left out of `tracing`; a changed or added criterion still needs its test."""
+    and is left out of `tracing`; a changed or added criterion still needs its test.
+
+    `required` (L4-KSP-012): the criteria a Kiro leaf's `_Requirements:_` line names. They are cited whatever
+    `criteria_ids` lists, and each needs a new test that traces it; the failure names the id, its alias (`aliases`) and
+    the line (`links`), so that the next attempt reads what to write."""
     traces = {test_id: trace_ids(case) for test_id, case in new_tests.items()}
     untraced = tuple(sorted(i for i, ids in traces.items() if not ids))
-    cited = tuple(sorted(set(result.criteria_ids) or set().union(*traces.values())))
+    cited = tuple(sorted((set(result.criteria_ids) or set().union(*traces.values())) | set(required)))
     tracing = {c: tuple(sorted(i for i, ids in traces.items() if c in ids)) for c in cited}
     waived = {c for c in cited if c in exempt and not tracing[c]}
     tracing = {c: t for c, t in tracing.items() if c not in waived}
@@ -207,6 +214,12 @@ def check_criteria(
         error = f"no criterion is covered: {trace_hint}"
     elif unknown := [c for c in cited if c not in family_criteria]:
         error = f"criteria that are not one of this unit's: {', '.join(unknown)}"
+    elif missing := [c for c in cited if c in required and c not in waived and not tracing[c]]:
+        names = ", ".join(f"{c} ({aliases[c]})" if aliases and c in aliases else c for c in missing)
+        error = (
+            f"no new test traces {names}, which the task's _Requirements: {links}_ line names: write a new test for "
+            "each criterion that line names, tagged with its id"
+        )
     elif untraced_cited := [c for c in cited if c not in waived and not tracing[c]]:
         error = f"no new test traces {', '.join(untraced_cited)}: {trace_hint}"
     else:

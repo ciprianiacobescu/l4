@@ -1283,6 +1283,22 @@ on the unit.
 - `l4 unlock` is not available in 0.4.15 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
+### 7.11a The prompt cut a spec file, or red names a criterion
+
+Three lines of this kind need no repair of the harness.
+
+- **`Prompt cut:` in `l4 status --unit <unit>`** (for example `Prompt cut: task 1 red attempt 1: .kiro/specs/x/design.md
+  61234 of 125492 characters`). The implementer's prompt did not show a file whole. The prompt names each such file
+  under `# Not shown in full` and the agent can open it, but a long file is read less well. Shorten the file, or raise
+  `implementer.context_budget_tokens` (a profile may set `context_budget_tokens`). `l4 run --dry-run` and `l4 doctor`
+  (SPEC-004) show the same cut before a run. A steering file that is cut cannot be opened by the agent: shorten it.
+- **A red failure `no new test traces <id> (Req N.M), which the task's _Requirements: … line names`.** The task cites a
+  criterion that no new test of the step traces. The next attempt reads the message. If the criterion is already
+  tested by an earlier task, the step may add no copy only when that earlier red proved it; else add a test.
+- **A judge hold `the spec file <path> is larger than 262144 bytes`, `is a symlink` or `was cut to fit the judge's
+  budget`.** The judge did not see that spec file whole. Split or shorten the file, replace the link with the file, or
+  raise `verifier.judge_context_budget_tokens` (default 48000); then retry.
+
 ### 7.12 Red job: exit 1, 2 or 3
 
 **Exit 1, internal error or infrastructure:**

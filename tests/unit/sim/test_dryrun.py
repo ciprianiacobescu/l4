@@ -212,3 +212,38 @@ def test_dry_run_shows_a_unit_held_by_yolo_hold(tdd_repo, capsys):
                 environ=tdd_repo.environ)  # fmt: skip
     out = capsys.readouterr().out
     assert code == 0 and "held: held by yolo.hold" in out and "would exit 13" in out
+
+
+# -- the context a Kiro unit's prompt carries (kiro-prompt-context, L4-IMP-054) ---------------------------------------
+
+
+def kiro_dry_run(tdd, capsys, *, long_design: bool):
+    from ..implementer.conftest import to_kiro
+
+    to_kiro(tdd, long_design=long_design)
+    config = {"frameworks": ["kiro"], "implementer": {"context_budget_tokens": 24000}}
+    code, out, err = dry_run(tdd, capsys, config=config)
+    assert code == 0, err
+    return out
+
+
+def test_the_dry_run_shows_the_budget_the_steering_and_the_cut(tdd_repo, capsys):
+    """SCN-IMP-288: the probe's long design is cut at 24000 tokens and the console says so before a run."""
+    out = kiro_dry_run(tdd_repo, capsys, long_design=True)
+    assert "context: budget 24000 tokens (implementer.context_budget_tokens)\n" in out
+    assert "steering: .kiro/steering/tech.md included (always)" in out
+    import re
+
+    cut = re.search(r"cut: \.kiro/specs/tip-calc/design\.md (\d+) of 125492 characters shown \(budget\)", out)
+    assert cut and 0 < int(cut.group(1)) < 125_492
+    run_id = next((tdd_repo.repo / ".l4-out" / "dry-run").iterdir()).name
+    prompt = (tdd_repo.repo / ".l4-out" / "dry-run" / run_id / "kiro-tip-calc" / "1-red.prompt.md").read_text()
+    for marker in ("REQ-INTRO-MARKER", "TASK-DETAIL-MARKER", "Use Decimal throughout", "STEERING-MARKER"):
+        assert marker in prompt
+    assert "# Not shown in full" in prompt and ".kiro/specs/tip-calc/design.md" in prompt
+
+
+def test_the_dry_run_with_the_short_design_says_nothing_was_cut(tdd_repo, capsys):
+    out = kiro_dry_run(tdd_repo, capsys, long_design=False)
+    assert "context: budget 24000 tokens (implementer.context_budget_tokens), nothing cut\n" in out
+    assert "cut:" not in out and "steering: .kiro/steering/tech.md included (always)" in out

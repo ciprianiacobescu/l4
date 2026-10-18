@@ -22,7 +22,7 @@ def test_the_spec_has_the_fifteen_requirements_and_their_scenarios_in_order() ->
         assert f"#### SCN-YOLO-{n} " in spec, n
     assert spec.index("#### SCN-VER-77 ") < spec.index("#### SCN-VER-150 ") < spec.index("### 23.9.1 Human feedback")
     assert "`yolo.extend_by_agents`" in spec and "extend_by_agents: false" in spec
-    assert "| 46 | `plan-run-lessons` |" in spec and "judge@10" in spec
+    assert "| 46 | `plan-run-lessons` |" in spec and "judge@11" in spec
 
 
 def test_the_runbook_teaches_the_holds_the_escalation_and_the_extension() -> None:
@@ -52,6 +52,6 @@ def test_the_changelog_has_an_unreleased_0_4_17_above_the_released_sections() ->
     changelog = read("CHANGELOG.md")
     assert changelog.index("## 0.4.17 (unreleased)") < changelog.index("## 0.4.15 (")
     head = changelog.split("## 0.4.17 (unreleased)", 1)[1].split("\n## ", 1)[0]
-    for needle in ("### Added", "### Fixed", "### Changed", "judge@10", "judge_view_rejected", "plan.extended"):
+    for needle in ("### Added", "### Fixed", "### Changed", "judge@11", "judge_view_rejected", "plan.extended"):
         assert needle in head, needle
     assert "yolo.extend_by_agents" in head and "Lock files" in head
