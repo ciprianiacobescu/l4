@@ -346,7 +346,7 @@ def test_integrity_blocker_stops_ladder_and_every_sub_check_has_a_row(tmp_path, 
     assert report.blocked
     assert [c.name for c in report.checks] == [
         "protected paths", "pre-existing tests", "red-green freeze", "test path freeze", "content scan",
-        "suppressions", "tdd history",
+        "test awareness", "suppressions", "tdd history",
     ]  # fmt: skip
     assert {c.name: c.status for c in report.checks}["content scan"] == "failed"
     assert raw_git  # the helpers import stays used by the module

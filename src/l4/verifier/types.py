@@ -137,6 +137,7 @@ class IntegrityReport:
         default_factory=list
     )  # fixtures a test requests that patch the unit's code (listed)
     base_tests: dict[str, Any] | None = None  # the ids that passed at the base (L4-VER-038), for the next round
+    test_awareness: list[str] = field(default_factory=list)  # signs of a test run in production code (judge, listed)
 
     @property
     def blocked(self) -> bool:

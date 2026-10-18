@@ -10,6 +10,7 @@ check (2.11), the secret scan (2.12).
 M1: verifier 2.7-2.9, 2.11, 2.12, 2.13 (the red re-run, verifier red commits, `pre_adoption`), other languages.
 """
 
+import re
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -65,6 +66,7 @@ class Outcome:
     allowed_tests: list[str] = field(default_factory=list)  # pre-existing test changes an allowance covers: listed
     mocked: list[str] = field(default_factory=list)  # patches of the unit's code a support fixture makes on request
     base_tests: dict[str, Any] | None = None  # the passed ids of the base's run (L4-VER-038), kept for later rounds
+    listed: list[str] = field(default_factory=list)  # signs of a test run in production code, shown to the judge
 
 
 def _blocker(title: str, detail: str, severity: Severity = Severity.BLOCKER) -> Finding:
@@ -908,12 +910,74 @@ def check_tdd_history(ctx: IntegrityContext) -> Outcome:
     return Outcome(findings, f"{checked} task(s); red tests passing at head: step 3")
 
 
+# --- 2.14 production code that looks for the test run (second review N1, N2; L4-VER-039) -----------------------------
+
+_REACTS = re.compile(r"\.l4-out|\bL4_[A-Z0-9_]+|\bPYTEST_[A-Z0-9_]+")  # the run's output and environment: a blocker
+_SIGNS = (  # other signs that code knows it runs under a test: listed for the judge, not blocked
+    re.compile(r"""['"]_?pytest['"]\s+in\s+sys\.modules"""),
+    re.compile(r"^\s*(?:import|from)\s+_?pytest\b"),
+    re.compile(r"\batexit\.register\b"),
+    re.compile(r"sys\.argv.*pytest|pytest.*sys\.argv"),
+)
+
+
+def _awareness_hits(ctx: IntegrityContext, text: str) -> list[str]:
+    """The lines of `text` that name the run's output or environment (including the configured report paths)."""
+    reports = [r for r in (*ctx.cfg.gates.test.reports, *ctx.cfg.gates.e2e.reports) if r]
+    return [line for line in text.splitlines() if _REACTS.search(line) or any(report in line for report in reports)]
+
+
+def check_test_awareness(ctx: IntegrityContext) -> Outcome:
+    """Production code that reacts to the verifier's own run (a blocker): a line of the unit's non-test, non-support
+    diff that names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*` variable. Code that only looks like it
+    knows about a test run (`"pytest" in sys.modules`, importing pytest, `atexit.register`, `sys.argv` checked for
+    pytest) is listed for the judge (`Outcome.listed`). A line only people's commits wrote is listed in `human_scan`."""
+    tdd, git = ctx.cfg.tdd, ctx.git
+    paths = sorted(
+        p for p, s in _changed(git, ctx.base_sha, ctx.head_sha).items()
+        if s != "D" and _suffix(p) in CODE_SUFFIXES and not _in_unit_dirs(ctx, p) and "/.l4/" not in f"/{p}"
+        and not _matches([*tdd.test_globs, *tdd.test_support_globs], p)
+    )  # fmt: skip
+    if not paths:
+        return Outcome(note="no production file changed", skipped=True)
+    diff = git.run(
+        "-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", ctx.base_sha,
+        ctx.head_sha, "--", *(f":(literal){p}" for p in paths),
+    ).stdout  # fmt: skip
+    hits: dict[str, list[scan.AddedLine]] = {}
+    listed: list[str] = []
+    for line in scan.added_lines(diff):
+        if _awareness_hits(ctx, line.text):
+            hits.setdefault(line.path, []).append(line)
+        elif any(sign.search(line.text) for sign in _SIGNS):
+            listed.append(f"{line.path}:{line.number}: {line.text.strip()[:100]}")
+    blockers: list[str] = []
+    human: list[str] = []
+    for path, lines in sorted(hits.items()):
+        who = _introducers(
+            ctx, path, lambda before, after: len(_awareness_hits(ctx, after)) > len(_awareness_hits(ctx, before))
+        )
+        rows = [f"{path}:{line.number} ({line.text.strip()[:80]})" for line in lines]
+        if _by_people(who):
+            human += [f"{row} (added by {', '.join(r[SHA][:10] for r in who)})" for row in rows]
+        else:
+            blockers += rows
+    findings = []
+    if blockers:
+        advice = "Production code may not look for the test run, its output or its environment"
+        findings.append(_blocker("production code reacts to the test run", f"{_listed(blockers)}. {advice}"))
+    extra = f", {len(listed)} listed for the judge" if listed else ""
+    note = f"{len(blockers)} hit(s){extra}" if blockers else f"no production line reacts to the test run{extra}"
+    return Outcome(findings, note, human_scan=human, listed=listed)
+
+
 CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("protected paths", check_protected),
     ("pre-existing tests", check_tests),
     ("red-green freeze", check_freeze),
     ("test path freeze", check_test_paths),
     ("content scan", check_scan),
+    ("test awareness", check_test_awareness),
     ("suppressions", check_suppressions),
     ("tdd history", check_tdd_history),
 )
@@ -933,6 +997,7 @@ def record_outcome(report: IntegrityReport, name: str, out: Outcome) -> None:
     report.findings.extend(out.findings)
     if out.base_tests is not None:
         report.base_tests = out.base_tests
+    report.test_awareness.extend(out.listed)
     report.declared.extend(out.declared)
     report.human_protected.extend(out.human)
     report.human_tests.extend(out.human_tests)

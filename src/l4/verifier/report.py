@@ -227,6 +227,13 @@ def render_verification_md(result: VerifyResult) -> str:
         if result.integrity.allowed_tests:
             lines += ["", "## Pre-existing tests changed with an allowance (L4-VER-031)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.allowed_tests]
+        if result.integrity.test_awareness:
+            lines += [
+                "",
+                "## Production code that may know about a test run (for the judge, L4-VER-039)",
+                "",
+            ]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.test_awareness]
         if result.integrity.mocked_support:
             lines += ["", "## Fixtures that patch the unit's code when a test requests them (L4-VER-037)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.mocked_support]
