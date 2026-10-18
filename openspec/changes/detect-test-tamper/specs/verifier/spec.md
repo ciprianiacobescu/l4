@@ -311,10 +311,10 @@ changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
   pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
 
 ### Requirement: L4-VER-039 The content scan reads helper modules and flags test-call replacement
-Step 1's content scan SHALL flag in support and helper files call/setup hooks that replace tests, `atexit.register`,
-`os._exit`, session-end file writers and names of the test output. It SHALL flag in test, support and production files
-any reference to `l4_trace`, `_OUTCOME`, `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4`, and assignments to
-`.exitstatus`/`.xmlpath`. A production read of an `L4_*`/`PYTEST_*` variable SHALL block unless allowed (listed).
+Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
+session-end file writers. In test, support and production files it SHALL flag the names `l4_trace`, `_OUTCOME_FD`,
+`L4_OUTCOME_FILE`, `config.option.xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus`/`.xmlpath`,
+and a production read of `L4_*`/`PYTEST_*`; `verifier.test_awareness_allow` lists instead of blocking.
 
 #### Scenario: SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits
 - **GIVEN** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
@@ -347,6 +347,11 @@ any reference to `l4_trace`, `_OUTCOME`, `L4_OUTCOME_FILE`, `xmlpath`, `sys.modu
 - **WHEN** the unit is verified
 - **THEN** the references SHALL be hits (blockers), the gate SHALL fail with `the test report was altered`, and an empty
   or missing record under a pytest report SHALL fail with `(no outcome record)`
+
+- **GIVEN** also honest tests: a fixture named `xmlpath`, a constant `_OUTCOMES`, and, under an allowed glob, a test of
+  the harness's own plugin
+- **WHEN** the content scan runs
+- **THEN** the first two SHALL be no hit and the plugin test SHALL be listed with its glob
 
 #### Scenario: SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone
 - **GIVEN** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for

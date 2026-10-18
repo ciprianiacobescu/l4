@@ -14,6 +14,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   cases and an empty or missing record fails with `the test report was altered (no outcome record)`; a failed row of a
   phase wins over a later passed one; and the content scan flags references to `l4_trace`, `_OUTCOME`,
   `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus` / `.xmlpath`.
+  Only those exact names count (a fixture called `xmlpath` or a constant `_OUTCOMES` is fine), `verifier.test_awareness_allow`
+  lists the match instead of blocking it, the record sits outside the gate's temp directory under a random name, and a
+  record the plugin created but left empty fails the gate even when a wrapper (`make test`) ran pytest.
 - A red step that weakened, rewrote or shadowed a test that already existed (a second `def` of its name, a helper, a
   constant, a fixture or an autouse fixture it uses in its file) used to be committed and judged green. It now fails its
   attempt with `red changed tests that existed before this step: <path>::<name> (<why>)`, nothing is committed, and the

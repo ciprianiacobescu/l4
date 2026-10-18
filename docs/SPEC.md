@@ -2165,7 +2165,7 @@ the same rule on the commits (§10.2 step 1). A human tag exempts nothing in a f
 harness wrote those titles from model-written findings, whose brackets it turns into parentheses. (8) **report
 cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
 every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
-longer shows, makes the gate fail with `the test report was altered` and the test ids. A pytest gate whose record is empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`); a runner without the plugin (Go, TypeScript) is held to no record, and a failed row of a phase wins over a later passed one. `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
+longer shows, makes the gate fail with `the test report was altered` and the test ids. A gate whose record is empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`) whenever the plugin ran (the record file exists, or the command names pytest); a runner that never loaded it (Go, TypeScript) is held to no record. The record has a random name in a directory the gate's TMPDIR does not hold; a failed row of a phase wins. `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
 depth [I].
 
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
@@ -3351,10 +3351,10 @@ and SHALL require each test that passed at the base to pass. One that fails twic
 SHALL be a blocker, unless `tests.superseded` names it. A support file only people changed, a `[test-infra]` task
 changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
 
-**L4-VER-039** Step 1's content scan SHALL flag in support and helper files call/setup hooks that replace tests, `atexit.register`,
-`os._exit`, session-end file writers and names of the test output. It SHALL flag in test, support and production files
-any reference to `l4_trace`, `_OUTCOME`, `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4`, and assignments to
-`.exitstatus`/`.xmlpath`. A production read of an `L4_*`/`PYTEST_*` variable SHALL block unless allowed (listed).
+**L4-VER-039** Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
+session-end file writers. In test, support and production files it SHALL flag the names `l4_trace`, `_OUTCOME_FD`,
+`L4_OUTCOME_FILE`, `config.option.xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus`/`.xmlpath`,
+and a production read of `L4_*`/`PYTEST_*`; `verifier.test_awareness_allow` lists instead of blocking.
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -7961,6 +7961,11 @@ scenario is a spec defect (§26).
 - **When** the unit is verified
 - **Then** the references SHALL be hits (blockers), the gate SHALL fail with `the test report was altered`, and an empty
   or missing record under a pytest report SHALL fail with `(no outcome record)`
+
+- **Given** also honest tests: a fixture named `xmlpath`, a constant `_OUTCOMES`, and, under an allowed glob, a test of
+  the harness's own plugin
+- **When** the content scan runs
+- **Then** the first two SHALL be no hit and the plugin test SHALL be listed with its glob
 
 #### SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone · L4-VER-039, L4-VER-038
 - **Given** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for

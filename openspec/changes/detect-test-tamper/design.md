@@ -720,6 +720,20 @@ A conftest emptied the plugin's descriptor list through `sys.modules`, kept the 
   through `__closure__`) can still tamper with its own process. The run of the base's tests (a separate process with the
   unit's test files at the base), the sampled audit and the judge remain the backstops.
 
+### 6.10 Fifth review (ACCEPT at ff87cdd3) close-out
+
+- **Exact names:** `_OUTCOME_FD`, `L4_OUTCOME_FILE`, `l4_trace` (a name, import or string), and `xmlpath` only as
+  `<x>.option.xmlpath`, `getattr(<x>.option, "xmlpath")` or an assignment to `.xmlpath`. `_OUTCOMES` and a fixture named
+  `xmlpath` are no hits. `verifier.test_awareness_allow` (read at the base) applies to this rule in test and support
+  files too: a match under an allowed glob is listed for the judge with the glob.
+- **Where the record lives:** `unit_cache/records/<random>/<token_hex(16)>.jsonl`, bound writable into the gate sandbox
+  (`SandboxSpec.record_dir`) and not under the gate's TMPDIR, so a glob over `tempfile.gettempdir()` finds nothing. The
+  directory is removed after the cross-check. A process that walks the filesystem can still find it (see 6.9).
+- **Fail closed on the plugin, not on the command text:** the plugin creates the record file when it is imported, so a
+  file that exists with no rows under a report with test cases is the record being emptied, whatever wrapper (`make
+  test`) ran pytest. A missing file is held to the rule only when the command names pytest; a runner that never loaded
+  the plugin (Go, TypeScript) creates nothing and keeps the relaxation.
+
 ## Appendix A: the reproductions
 
 The reviewer's tests (repro paths in `findings.json`, under the session scratchpad `l4review/`) use the fixtures of this
