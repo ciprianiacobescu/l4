@@ -341,8 +341,9 @@ def test_only_regular_run_files_are_taken_from_the_unpublished_directory(tmp_pat
     run = "r-20261004T0900Z-aaaa"
     source = tmp_path / f"{run}.jsonl"
     source.write_text('{"x": 1}\n')
-    kept = keep_unpublished(tmp_path / "cache", "openspec", "add-x", source)
+    directory = tmp_path / "cache" / "pending-unpublished" / "proj-0123456789" / "openspec" / "add-x"
+    kept = keep_unpublished(directory, source)
     (kept.parent / "notes.txt").write_text("not a run file\n")
     (kept.parent / "r-20261004T0900Z-bbbb.jsonl").symlink_to(source)
-    assert unpublished_files(tmp_path / "cache", "openspec", "add-x") == {run: kept}
-    assert unpublished_files(tmp_path / "cache", "openspec", "other") == {}
+    assert unpublished_files(directory) == {run: kept}
+    assert unpublished_files(directory.parent / "other") == {}

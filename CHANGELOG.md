@@ -8,6 +8,14 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
 ## 0.4.17 (unreleased)
 
+### Added
+- `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
+  find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
+  login such as `~/.npmrc`). An entry that is, holds or lies inside a login is a configuration error.
+- Doctor `SANDBOX-003` plants canaries in the home, in another unit's step directory and in the lock directory and fails
+  (exit 3) when either sandbox kind can read one. Doctor `SANDBOX-004` warns while `sandbox.setup_paths` is set.
+- The ledger events `env.rebuilt` and `guard.notice`, and `guard.violation` with rule `environment`.
+
 ### Fixed
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
   there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
@@ -20,6 +28,27 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   now takes effect.
 - The folders the sandbox masks (`.hermes`, `.kiro/hooks`, `.kiro/prompts`, and now `.kiro/skills`) are protected paths:
   what a step or a test run wrote there used to be committed.
+- Code an agent wrote can no longer read the runner user's files. The agent and gate sandboxes showed the real home, so
+  a test written by an agent could read `~/.git-credentials`, `~/.netrc`, `~/.ssh/id_*`, `~/.config/gh/hosts.yml` or
+  `~/.docker/config.json` (proved under bubblewrap 0.8.0). Both sandbox kinds now start from an empty home and an
+  empty runner cache and see only the tools, the step's own directories and the caches.
+- A file written into `.venv` or `node_modules` can no longer decide a verdict. A green step that wrote only a `.pth`
+  file into site-packages passed with the production code still a stub, and the verifier ran on that environment too:
+  no guard looked there, `git clean` and `uv sync --frozen` kept the file. The harness now rebuilds an environment that
+  a step or a gate changed, and gates that do not build it see it read-only.
+- Two projects with a unit of the same name on one runner no longer share directories. The step directories, the
+  `uv`, `pip` and `npm` caches, the excludes file and the unpublished run files are keyed by the repository key, so one
+  project's unpublished run file is never pushed into the other's lock ref.
+- A unit's OpenCode provider key file and credential-loader file are no longer readable from another unit's sandbox,
+  are created in 0700 directories, and one left by a killed run is removed before the unit runs again.
+- The login lock files and the unit lock files are no longer readable inside the sandboxes.
+- A package cache can no longer carry a plant into a rebuilt environment. A file an agent step or a gate wrote into the
+  unit's `uv` cache (`zz_marker.pth` in `archive-v0/<id>/`) came back in every environment rebuilt from it. The per-unit
+  caches are now read-only except for `gates.setup`, every step and gate works in a private scratch cache that is
+  discarded, and the verifier builds from caches of its own, emptied at the start of each round.
+- A symlink in a `PATH` directory, or a shim into a project's `node_modules`, can no longer expose the files next to its
+  target: the sandbox binds the target file or the package, and skips any tool path that is or lies inside a login or
+  a known secret location (`~/.config/gh`, `~/.aws`, ...).
 
 ### Changed
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
@@ -33,6 +62,17 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - New default gate globs: `pyrightconfig.json`, `pylintrc`, `.eslintignore`, `.prettierrc*`, `.prettierignore`,
   `biome.json`, `biome.jsonc`; `.coveragerc` is runner configuration. The new key `tdd.extra_gate_config_globs` adds
   globs without restating the defaults.
+- Per-unit directories under `$L4_CACHE` carry the repository key (`units/<key>/<fw>/<name>`). Caches start empty once
+  after the upgrade (a new `uv` cache gets the project's seed copy); the old `units/<fw>/<name>` directories can be
+  deleted by hand. A run file of the earlier `pending-unpublished` layout is published by the repository it records (its key, or the
+  project path of its CI link); any other, a local run included, is kept and named in one warning.
+- A project environment (`.venv`, `node_modules`) that an agent step or a gate changed is removed and built again by the
+  next `gates.setup`; the verifier builds its own. A project without `gates.setup` therefore builds its environment in
+  every gate: set `gates.setup`. A test gate that writes into `node_modules` other than `.cache` and `.vite` fails
+  read-only: move that command to `gates.setup`. Every agent step and every gate but `gates.setup` starts from an empty
+  package cache (read-only shared cache plus a scratch), so a test gate that needs a download setup did not make fails
+  under `gates.network: none`: move the download to `gates.setup`. The verifier downloads once per round. A dependency upgrade without a lock-file change is a notice, not a
+  violation, when a dependency manifest changed in the same step.
 
 ## 0.4.15 (2026-10-18)
 

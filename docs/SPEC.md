@@ -602,7 +602,7 @@ looks like a secret in config MUST fail validation.
 registry, harness-owned tool prefixes, per-unit sandbox caches, S1 calibration data) MUST default, when the variable is
 unset, to `$XDG_CACHE_HOME/l4`, else `~/.cache/l4`, and MUST resolve **outside** the repository: worktrees live outside
 the repo (L4-WTR-001) and the cross-job `flock` of L4-LCK-001 must be shared by jobs of the same project whose build
-directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which is why both paths are keyed by the project's repository key
+directories differ (GitLab's `builds/<token>/<slot>/<group>/<project>`), which is why these paths, and every per-unit directory (L4-SEC-034), are keyed by the project's repository key
 (from its `origin` URL, never from a local path) and not by the checkout's location
 [I, decision of the cross-change review 2026-10-03; a repo-local `.l4-cache/` was rejected for these two reasons]. A
 `$L4_CACHE` inside the repository is a usage error (exit 2). `$L4_HOME` (default `~/.local/share/l4`) holds the
@@ -698,7 +698,8 @@ gates:                             # deterministic commands, run in the worktree
 sandbox:                           # isolation of agents AND gate commands from harness secrets (L4-SEC-005)
   mode: auto                       # auto | user | bwrap | container | none
   user_per_profile: {}             # mode=user: {profile: os-user}; REQUIRED when >1 profile has credential_paths (L4-SEC-005)
-  caches:                          # per-unit cache dirs mounted read-write into both sandbox kinds, with matching env vars
+  caches:                          # per-unit cache dirs mounted read-write into both sandbox kinds, with matching env vars;
+                                   # `{unit}` = `<repository key>/<framework>/<name>` (L4-SEC-034)
     uv: {path: "$L4_CACHE/units/{unit}/cache/uv", env: UV_CACHE_DIR}
     pip: {path: "$L4_CACHE/units/{unit}/cache/pip", env: PIP_CACHE_DIR}
     npm: {path: "$L4_CACHE/units/{unit}/cache/npm", env: npm_config_cache}
@@ -715,6 +716,12 @@ sandbox:                           # isolation of agents AND gate commands from 
     claude-code: ["~/.claude", "~/.claude.json"]
     opencode: ["~/.local/share/opencode", "~/.config/opencode"]
     kiro-cli: ["~/.kiro", "~/.aws/sso/cache", "~/.local/share/kiro-cli", "~/Library/Application Support/kiro-cli"]
+  tool_paths: []                   # ~/... or absolute: a tool under the home that the harness does not find on its own
+                                   # (L4-SEC-032), bound read-only into both sandbox kinds; a path that is, holds or lies
+                                   # inside a login is a load error (L4-SEC-033)
+  setup_paths: []                  # ~/... or absolute: bound read-only into the gate sandbox of a gates.setup command only
+                                   # (~/.npmrc, ~/.config/pip/pip.conf for a private registry); a login is exposed to setup
+                                   # code the agent can influence (doctor SANDBOX-004 warns while it is set)
   user: l4-sandbox                 # for mode=user (sudo -n -u), created by the runner admin
   image: null                      # for mode=container
   allow_none: false                # mode=none is refused unless explicitly allowed (doctor SANDBOX-001)
@@ -2646,7 +2653,7 @@ limit, options: {reasoningEffort}}}}`. **The key never enters the sandbox enviro
 values land in bwrap's argv (L4-SEC-001) and `OPENCODE_CONFIG_CONTENT` is an environment value too, so the adapter reads
 `api_key_env` from the harness's own environment (`RunRequest.host_env`, a field `build_agent_env` never copies),
 writes it to a new 0600 file in the step's private `opencode-config` directory, and removes it when the run ends,
-whatever the outcome. The redactor already knows the variable (every `*_env` key of the config). Implement mode
+whatever the outcome; a file left by a killed run is removed when the unit's next workbench is built (L4-PRV-041). The redactor already knows the variable (every `*_env` key of the config). Implement mode
 sends only `options.tools` (`tools: {"*": false, <t>: true}`) because the server compiles tool JSON schemas into a
 constrained-decoding grammar and refuses a large set (HTTP 400 `grammar binding failed`, intermittent; 82 tools made
 prefill take minutes [V]); judge mode sends none. `reasoning: none` is the working switch (`reasoning_effort: "none"`
@@ -2683,7 +2690,8 @@ The env lists are the **complete** child environment. Bracketed parts are option
 `spikes/00-summary.md` §3.
 
 A bracketed credential variable reaches only its own profile's agent process (L4-PRV-024).
-1. The adapter writes the value to a new 0600 file in the step's private directory.
+1. The adapter writes the value to a new 0600 file in the step's private directory (0700, visible only in the step's own
+   agent sandbox, L4-PRV-040).
 2. A `/bin/sh` loader inside the sandbox reads the file, deletes it, exports the variable and execs the CLI.
 3. The value is never in any argv. bwrap's `--setenv` list is excluded too, because it is readable by any local user.
 
@@ -2700,6 +2708,17 @@ says:
 - it is redacted by default.
 
 A free model without `auth: api_key`, a subscription profile and a profile with a custom provider MUST be unchanged.
+
+**L4-PRV-040** The OpenCode provider key file (L4-PRV-028, the custom-provider key) and the credential-loader file
+(L4-PRV-024) SHALL be written only in the step's private directory, created with mode 0700, as new 0600 files, and removed
+when the step ends, whatever its outcome. That directory lies under the hidden runner cache (L4-SEC-031) and is bound only
+into its own step's agent sandbox, so no gate or agent sandbox of another step, unit or project can read the files
+(sandbox-security-4).
+
+**L4-PRV-041** When a workbench is built, the harness SHALL remove a provider key file and a credential-loader file left
+in the unit's private directory by a run that was killed (a SIGKILL skips every `finally`), before any agent or gate runs.
+The probe's `hello` SHALL keep its key in a new 0700 temporary directory under its working directory, which is the runner
+cache in a run (hidden, L4-SEC-031) and a system temp directory in doctor (hidden by the sandbox's own `/tmp`).
 
 `claude-code` implementer, auth `subscription` [V as one command, spikes/01, except `--mcp-config F`, and `--safe-mode` replaced by `--setting-sources "" --disable-slash-commands` (HB-X1: V live, `/context` and hooks canaries on the runner; a model call was not possible, the runner's OAuth session had expired)]:
 
@@ -3721,6 +3740,8 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `run.finished` (exit code).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
+
+Sandbox isolation adds these records (L4-SEC-036, L4-SEC-037): `env.rebuilt` (`{tree, dirs, phase, added, changed, removed, reason, declared, planted_more}`, once for a removal of an environment directory: `tree` is `worktree` or the name of another checkout, `dirs` the directories removed, `added`/`changed`/`removed` counts, `reason` one of `changed`, `created` and `unverified`, `declared` whether a lock file changed in the step, `planted_more` the paths not named below), `guard.violation` with `rule: "environment"` (`{path, rule, action: "removed", phase}`, one per planted path, at most 20 with the notices) and `guard.notice` (`{path, rule: "environment", action: "removed", phase}`: a dependency upgrade without a lock-file change, reported and not failing; it is not a guard note for the next prompt).
 
 The result contract adds these records (L4-IMP-020, L4-FAC-011): `result.normalized` (`{task, phase, attempt, source, fixes}`, once for a step whose result object the harness repaired; it holds no text of the agent), `context_peak_tokens` and `context_peak_percent` on `agent.finished` (each only when the stream shows it), and, second wave and not built (L4-IMP-022), `result.repair` (`{task, phase, attempt, outcome, reason?}`).
 
@@ -4768,6 +4789,8 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
 | SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
+| SANDBOX-003 | error | the home and the runner cache are hidden (L4-SEC-030, L4-SEC-031, L4-SEC-038): canaries in `$HOME` (outside every credential path), in another unit's step directory under the runner cache, in its lock directory and beside two symlinked tools (one a `node_modules` shim) are read through the real gate and agent argv, and the tools themselves must stay readable; a readable canary fails (exit 3) naming the path and the kind, never the content; the canaries are removed; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
+| SANDBOX-004 | warn | `sandbox.setup_paths` is set (L4-SEC-033): a registry login is bound into the sandbox of every `gates.setup` command, in reach of setup code an agent can influence; a `fail` row of severity warn, never an exit code | remove the entry or use a read-only token |
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
 | CFG-003 | error | verifier independence satisfiable in the worst case (union of all implementer-chain vendors) | — |
@@ -5120,7 +5143,9 @@ kinds of sandbox (bubblewrap with `--unshare-pid --proc /proc`, a container, or 
   read-write (logins, OAuth refresh and session stores for resume, L4-IMP-010); that profile's credential env vars; no
   other profile's credentials, no forge/trigger/App secrets; network allowed (LLM APIs);
 - **gate sandbox** (every gate command, test, build, `serve`, scanner run on the worktree): the worktree read-write,
-  `.git` read-only, an **empty home**, no credential paths and no credential env vars at all; network allowed unless
+  `.git` read-only, an **empty home** (L4-SEC-030: a tmpfs over the real home, the tool paths of L4-SEC-032 read-only), the runner cache
+  hidden (L4-SEC-031), the environment read-only unless the command is `gates.setup` (L4-SEC-035), no credential paths
+  and no credential env vars at all; network allowed unless
   `gates.network: none`.
 Both kinds (HB-X1; the gate runs agent-written code) cover, after every bind, each **existing** one of `.claude`,
 `.agents`, `.codex`, `.opencode`, `.hermes`, `.kiro/steering`, `.kiro/agents`, `.kiro/settings`, `.kiro/hooks`,
@@ -5135,14 +5160,15 @@ is valid) would put the host directories back [V live: a parent bound after the 
 is per mount namespace: the host worktree is unchanged. Mirrored in `scripts/runner/sandbox-probe.sh` (planted `.claude`/`.agents` canary).
 `mode: user` (a separate OS user) cannot separate two profiles' logins inside one user's home: with more than one
 profile that has `credential_paths`, it REQUIRES `sandbox.user_per_profile` (one OS user per profile), otherwise doctor
-fails. Both sandbox kinds get the per-unit cache mounts of `sandbox.caches` with their environment variables (per-unit
+fails. Both sandbox kinds get the per-unit cache mounts of `sandbox.caches` (keyed by the repository key, L4-SEC-034, read-only except for `gates.setup`, with a
+private scratch cache for every step, L4-SEC-039) with their environment variables (per-unit
 caches so that agent-written code cannot poison another unit's cache). A new unit's `uv` cache is a **copy** of the
 project's seed (`$L4_CACHE/seed/<hash of the origin URL without credentials>/uv`): the seed is filled by `gates.setup`,
 unchanged, on a detached scratch checkout of the base branch's head, under a lock and only when the base's `uv.lock` or
 the setup commands changed; it is copied, never shared, into a unit cache that is new, and is never mounted into a sandbox
 that runs an agent or agent-written code. A failed fill is `cache.seed_failed` and the unit downloads as before.
-`UV_LINK_MODE=copy` is set when a `uv` cache is mounted. `HOME` inside a sandbox is a private directory
-holding only the mounts above. `mode: auto` picks `bwrap` if available, then `container`, then `user`; `none` is refused unless
+`UV_LINK_MODE=copy` is set when a `uv` cache is mounted. `HOME` inside a sandbox is a tmpfs over the real home
+holding only the mounts above, and the runner cache is a tmpfs too (L4-SEC-030, L4-SEC-031). `mode: auto` picks `bwrap` if available, then `container`, then `user`; `none` is refused unless
 `sandbox.allow_none: true`, which doctor reports as an accepted risk on every run.
 **Container-daemon sockets (HB-1).** A read-only bind does not stop `connect()` on a unix socket: with
 `--ro-bind / /` alone, a runner user in group `docker` reached `/var/run/docker.sock` from inside the sandbox, with or
@@ -5245,6 +5271,128 @@ detail that begins `task <k>: a gate run put a symbolic link at <paths>`; the fi
 attempt. In the verifier a recorded refusal is a blocker (`a gate run planted a symbolic link in the worktree`, or `could
 not restore a file after a gate run`) and the round ends FAIL (SCN-SEC-41, SCN-SEC-46, SCN-SEC-47, SCN-SEC-49,
 SCN-SEC-54).
+
+**L4-SEC-030 The real home is hidden in both sandbox kinds.** Every bwrap sandbox, agent and gate, MUST cover the runner
+user's real `$HOME` with a tmpfs right after the base flags (`--ro-bind / /`, `--dev`, `--proc`, `--tmpfs /tmp`, the
+`/run` masks, the namespaces) and bind back, after it, only what L4-SEC-005, L4-SEC-031 and L4-SEC-032 name. `HOME` in
+the child environment keeps its path (the CLIs find their logins at `~/.claude`, `~/.codex`, and shims and virtual
+environments carry absolute paths into the home): inside, it is an empty writable tmpfs plus those binds. A `$HOME` that
+is `/`, not absolute or not an existing directory MUST make the sandbox unavailable (exit 3): the harness then does not
+know where the user's files are. Any other file of the home, a git, SSH, gh, docker or netrc credential included, MUST
+NOT be readable (sandbox-security-2). The argv order of both kinds is: the base flags; `--tmpfs <home>`; `--tmpfs
+<cache root>` (L4-SEC-031); the tool paths and, for a setup gate, the setup paths, `--ro-bind` each (L4-SEC-032,
+L4-SEC-033); the masks over every other adapter's login and over the runner's scratch directories; the agent's own
+login paths read-write; the worktree and the step's temp directory read-write; the cache mounts; the main repository's
+`.git` read-only; the read-only environment directories and the empty tool caches of a gate that builds nothing
+(L4-SEC-035); the repository guidance masks (HB-X1) last. `mode: user` and `mode: container` are not built (M2) and
+MUST meet this requirement when they are. Mirrored in `scripts/runner/sandbox-probe.sh` and `ci-probe-m15.sh`
+(`root:DIR` and `tool:DIR` arguments), which tests/unit/sandbox/test_probe_parity.py diffs against the Python.
+
+**L4-SEC-031 The runner cache is hidden in both sandbox kinds.** Every bwrap sandbox MUST cover the runner cache
+`$L4_CACHE` (L4-CFG-005) with a tmpfs, after the home's and before any bind, when it exists, is not `/` and lies outside
+`$HOME` (inside the home it is covered already), so that under it only the step's own worktree, private temp directory
+and cache mounts are visible. Other units' and projects' step directories, worktrees, unpublished run files, the seed,
+the probe's key directory and the lock files MUST NOT be visible (sandbox-security-4).
+
+**L4-SEC-032 Tools under a hidden root stay usable, read-only.** After the tmpfs of L4-SEC-030 and L4-SEC-031 the sandbox
+MUST bind read-only each existing tool path under the home or the runner cache, and the credential masks MUST come
+after them, so no tool bind re-exposes a login. `l4.sandbox.home.tool_paths` derives them, in this order, dropping a
+duplicate, a path inside an earlier one, a path inside the worktree or the main checkout, and a path that is or holds the
+home: (1) each entry of the sandbox's PATH and, for a symlink entry, its resolved path; (2) the `node_modules` of an
+entry ending in `node_modules/.bin`; (3) for each symlink directly inside an entry whose target is a file under a hidden
+root outside that entry, the target file itself (Claude's native install is one file), or its package directory when it
+lies in a `node_modules` (the directory below the innermost `node_modules`, two levels for an `@scope`): never the
+directory around a file and never the project around a `node_modules`; (4) `$L4_HOME`; (5) uv's Python
+and tool directories (`$UV_PYTHON_INSTALL_DIR`, `$UV_TOOL_DIR`, else under `$XDG_DATA_HOME` or `~/.local/share`), never
+`~/.local/share/uv` as a whole (uv keeps `credentials/` there); (6) the corepack home (`$COREPACK_HOME`, else
+`~/.cache/node/corepack`); (7) the harness's own gate plugin directories (the evidence plugins reach every test gate
+through `PYTHONPATH`; a harness run by `uvx` lives in the uv cache); (8) `~/.serena`, agent kind only; (9)
+`sandbox.tool_paths`. Every path derived by (1) to (8) is vetted: one that is, holds or lies inside a login path
+of any adapter or a well-known secret location of the home (`~/.ssh`, `~/.config/gh`, `~/.aws`, `~/.docker`, `~/.kube`,
+`~/.npmrc`, `~/.pypirc`, `~/.netrc`, `~/.git-credentials`, `~/.cargo/credentials*`, `~/.config/opencode`, `~/.claude*`,
+`~/.codex`, `~/.gnupg`, cloud CLI configs) is not bound and is reported as skipped. A tool under the home that none of these
+reaches, or that needs the files beside its target, fails inside the sandbox ("command not found"): the fix is a
+`sandbox.tool_paths` entry.
+
+**L4-SEC-033 Configured home paths are checked at load.** `sandbox.tool_paths` (both kinds) and `sandbox.setup_paths`
+(only the gate sandbox of a `gates.setup` command, for a registry login such as `~/.npmrc` or `~/.netrc`) are lists of
+`~/`-relative or absolute paths, bound read-only when they exist. An entry that is `/` or `~`, contains the runner cache,
+or equals, contains or lies inside any adapter's credential path, built-in or configured, MUST be a configuration error
+(exit 2) that names the key and never the path; what needs the environment (the runner cache, an absolute entry that
+reaches a login once `~` is expanded) is checked where the paths are expanded and ends the run with exit 2 the same way.
+`setup_paths` hands a registry login to setup code an agent can influence (a build backend hook, a `postinstall` script):
+that is the owner's accepted risk of keeping the key, and doctor `SANDBOX-004` warns whenever it is set.
+
+**L4-SEC-034 Every per-unit directory carries the repository key.** Per-unit directories under `$L4_CACHE` MUST include the
+repository key of L4-WTR-001 (sandbox-security-1): `units/<key>/<fw>/<name>` for the step temp directories (`agent-tmp`,
+`gate-tmp`), `excludes`, the agents' raw streams and the merge-base checkout; `pending-unpublished/<key>/<fw>/<name>`;
+and `{unit}` in `sandbox.caches` is `<key>/<fw>/<name>`, so every existing configuration is keyed with no edit. The
+harness MUST NOT write or remove anything of the earlier layout (`units/<fw>/<name>`, `pending-unpublished/<fw>/<name>`),
+except that it moves a run file of it that belongs to this repository to the keyed directory and publishes it as usual (it
+records this repository's key in `run.started`, or, written before 0.4.16, a CI link whose project path is the path of
+`origin`; the commits a file names prove nothing, every clone has them); any other run file stays and is named in one warning per run. A new keyed uv cache is new and gets
+the project's seed copy.
+
+**L4-SEC-035 Gates that do not build the environment cannot change it.** The gate sandbox of any command other than
+`gates.setup` MUST bind read-only each existing environment directory of the tree it runs in (`.venv` at the root and
+every `node_modules` that git tracks no file in), after the cache and git binds and before the guidance masks; each
+`node_modules/.cache` and `node_modules/.vite` MUST be empty at the start of every such gate (a tmpfs under bwrap, and
+the harness empties them before each gate in every mode: vite loads pre-bundled modules from `.vite/deps`). Setup gates
+and agent sandboxes keep them writable. A tool that writes elsewhere inside `node_modules` in a test gate fails read-only
+and belongs in `gates.setup`.
+
+**L4-SEC-036 An environment an agent step or a gate changed is rebuilt (implementer-2).** No guard looks at `.venv` or
+`node_modules`, `git clean` keeps them, and `uv sync --frozen` leaves a `.pth` or `sitecustomize.py` that no installed
+distribution owns [V, uv 0.10.0], so a file planted there decides every later gate. After each passing `gates.setup`
+command the harness MUST record, in memory, a manifest of the tree's environment directories: the `lstat` of every entry
+(kind, mode, size, mtime, ctime, inode, link target; a directory by kind, mode and inode only, because its own times move with
+every child and with the tool-cache reset before each gate) without following symlinks, the tool caches left out. After every
+agent step and every other gate it MUST compare the environment with the manifest; a directory that differs, is new or has
+no manifest MUST be removed, so that the next `gates.setup` builds it again, and the worktree's `setup_at` is cleared. It
+records one `env.rebuilt` (`{tree, dirs, phase, added, changed, removed, reason: changed|created|unverified, declared,
+planted_more}`, counts for the three lists) and, for each added or changed path that no install explains, one
+`guard.violation` (`rule: "environment"`, `action: "removed"`, `phase`), at most 20 together with the notices (the rest is
+`planted_more`). A path is explained by an install when a lock file (`uv.lock`, `poetry.lock`, `Pipfile.lock`,
+`package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`) changed in the same
+step (`declared`) and, under `.venv`, a `RECORD` of the current environment lists it with a matching sha256. **A dependency
+upgrade without a lock-file change** (owner decision Q4) is reported as a non-failing `guard.notice` (`rule:
+"environment"`) instead of a violation when a dependency manifest changed in the same step: a `requirements*.txt` in any
+way, a `package.json` in `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`,
+`bundleDependencies`, `overrides` or `resolutions`, a `pyproject.toml` in `[project] dependencies` or
+`optional-dependencies`, `[dependency-groups]` or `[tool.uv]` (compared with HEAD, parsed); a Python startup hook
+(`*.pth`, `sitecustomize.py`, `usercustomize.py`, `*.pyc`) stays a violation unless a `RECORD` lists it and the install
+was declared by a lock file. The rebuild happens in every case. The classification only decides how a removal is
+reported; the removal is the protection. A project with no `gates.setup` never gets a manifest: every environment a step
+or gate leaves is removed (`created`), so a test command that builds its own environment builds it in every gate.
+
+**L4-SEC-037 A workbench's gates run on an environment it built.** The first `gates.setup` command a workbench runs in a
+tree MUST first remove that tree's environment directories when the workbench holds no manifest for it
+(`env.rebuilt{reason: "unverified"}`), so the verifier, a fix unit and any workbench built after a fallback never run
+gates on an environment an earlier step left. A run's first setup in a new worktree removes nothing.
+
+**L4-SEC-038 Doctor SANDBOX-003 proves the home and the runner cache are hidden.** Doctor `SANDBOX-003` MUST plant
+canaries (a file in `$HOME` outside every credential path, a credential file in another unit's step directory, a lock
+file, and a secret beside each of two symlinked tools in a PATH directory of its own, one a shim into a project's
+`node_modules`; each holding a random marker only) and run them through the real gate and agent argv; a readable canary MUST fail
+the check (exit 3) naming the path and the kind, never the content, and the canaries and the probe directory MUST be
+removed. It is skipped when bwrap is absent or `sandbox.mode` is not `auto` or `bwrap`.
+
+**L4-SEC-039 Package caches are read-only except for setup, and the verifier has its own.** A cache an agent step or a
+gate could write came back in every environment rebuilt from it: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/` survives
+`rm -rf .venv; uv sync --frozen` into site-packages [V, real uv], and the manifest of L4-SEC-036 trusts what setup built.
+Every agent sandbox and every gate sandbox except that of a `gates.setup` command (and the uv seed's fill) MUST therefore
+mount the per-unit package caches of `sandbox.caches` (`uv`, `pip`, `npm`, `pnpm`, `go`, `gobuild`) read-only, and the
+step MUST work in a private scratch cache: the cache variable (`UV_CACHE_DIR`, `npm_config_cache`,
+`pnpm_config_store_dir`, ...) names a directory under the step's private temp directory, empty at the start of the step and
+of every gate and removed at the end, so that `uv add`, `npm install` and `pnpm add` still work. Only `gates.setup` writes
+the shared cache. One exception, gates only: `GOMODCACHE` is read where it is, because Go's module cache is read-only by
+design and a test gate with `gates.network: none` has no other source (an agent gets a scratch for it too). The
+verifier's workbench (L4-VER-010) MUST build from caches of its own, at the same configured paths with the namespace
+`verify` after the repository key (`units/<key>/verify/<fw>/<name>/...`), emptied at the start of each verification round
+and shared by every workbench of the round; its first `gates.setup` rebuilds the environment from them (L4-SEC-037), and
+the manifest baseline of the round is taken only after that rebuild. The cost is stated: every step and gate starts from an
+empty cache, the verifier downloads once per round (a new uv cache is first copied from the project's seed), and a test gate
+that needs a download setup did not make belongs in `gates.setup`.
 
 ---
 
@@ -5396,6 +5544,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
 | 40 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; `l4 yolo check --worktree` (L4-YOLO-034) backs `l4_plan_check`, and the read-only `l4 status --events|--verification` back two more tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
 | 42 | `guard-harness-writes` | no harness write follows a link a gate planted, and a planted link halts the unit (L4-SEC-020, L4-SEC-021); no step commits a link that points outside the worktree; gate and runner configuration is defined exactly, put back after every agent step and every gate run, and opened only by a human tag or answer, with a pytest marker allowed (L4-IMP-040, L4-IMP-041, L4-IMP-006 (3)); the folders the sandbox masks, `.kiro/skills` included, are protected paths (L4-SEC-004); `openspec/changes/guard-harness-writes/` | the ported reproductions pass; a consumer repository's red step that edits `[tool.ruff]` has it put back |
+| 43 | `sandbox-isolation` | an empty home and a hidden runner cache in both sandbox kinds, tools read-only (`sandbox.tool_paths`, `sandbox.setup_paths`), keyed per-unit directories, a project environment (`.venv`, `node_modules`) read-only for gates that do not build it and rebuilt when a step or a gate changed it, package caches read-only except for setup with a private scratch per step and a cache of its own for the verifier, key files visible only to their step, doctor `SANDBOX-003` and `SANDBOX-004`; L4-SEC-030..039, L4-PRV-040..041 (`openspec/changes/sandbox-isolation/`) | `SANDBOX-003` passes on `l4-runner` and on a GitHub-hosted runner; the dummy repository's gates stay green |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -10247,6 +10396,222 @@ scenario is a spec defect (§26).
 - **Given** a call with a progress token and a very short heartbeat
 - **When** the call completes, many times over
 - **Then** no progress notification is written after its response
+
+### 23.24 Sandbox isolation (SEC, PRV)
+
+#### SCN-SEC-70 (−) Agent-written tests read no credential of the home · L4-SEC-030
+- **Given** a runner home that holds `.git-credentials`, `.netrc`, `.ssh/id_ed25519`, `.config/gh/hosts.yml` and `.docker/config.json`, and a working bwrap
+- **When** a gate of a unit runs a command that reads each of them
+- **Then** every read fails inside the gate sandbox
+
+#### SCN-SEC-71 (−) An agent sandbox sees its own login and nothing else of the home · L4-SEC-030
+- **Given** the home of SCN-SEC-70 plus `~/.claude.json` and `~/.codex/auth.json`, and a claude-code implementer
+- **When** a command in its agent sandbox reads every one of these files
+- **Then** only `~/.claude.json` is readable
+
+#### SCN-SEC-72 (+) The tmpfs over the home comes before every bind · L4-SEC-030
+- **Given** a gate spec and an agent spec whose worktree, temp directory, caches and git common directory all lie under `$HOME`
+- **When** the bwrap argv is built
+- **Then** `--tmpfs <home>` follows the base flags, and every bind of those paths comes after it
+
+#### SCN-SEC-73 (−) A home of `/` is refused · L4-SEC-030
+- **Given** `HOME=/` in the harness environment
+- **When** a gate is wrapped in bwrap
+- **Then** `SandboxUnavailable` is raised (exit 3) naming `HOME`, and no process starts
+
+#### SCN-SEC-74 (+) A runner cache outside the home is covered and the step's directories come back · L4-SEC-031
+- **Given** `L4_CACHE=/var/cache/l4` and a gate spec of a unit in it
+- **When** the bwrap argv is built
+- **Then** `--tmpfs /var/cache/l4` follows the home's tmpfs, and the worktree, the step's temp directory and each cache mount are bound after it
+
+#### SCN-SEC-75 (−) Another unit's step files and the lock files are not visible · L4-SEC-031
+- **Given** a runner cache outside the home with a file in another unit's `agent-tmp`, another project's worktree and a file in `locks/`, and a working bwrap
+- **When** a gate and an agent of this unit read them
+- **Then** every read fails, while the unit's own worktree and caches are readable
+
+#### SCN-SEC-76 (+) User-local tools are bound read-only · L4-SEC-032
+- **Given** a home with `~/.local/bin/uv`, a symlink `~/.local/bin/claude` to `~/.local/share/claude/versions/2.1.288`, `$L4_HOME/npm/node_modules/.bin` on PATH and `~/.local/share/uv/python`
+- **When** the agent argv is built
+- **Then** `~/.local/bin`, `~/.local/share/claude/versions/2.1.288` (the file, not its directory), `$L4_HOME`, `~/.local/share/uv/python` and the harness's plugin directories are `--ro-bind` entries, `~/.local/share/uv` as a whole is not, and no tool path is bound twice
+
+#### SCN-SEC-77 (−) A tool bind never re-exposes a login · L4-SEC-032
+- **Given** a PATH entry `~/.local/share/opencode/bin` and a codex agent spec
+- **When** the argv is built
+- **Then** that entry is not bound (it lies inside a login path) and is named among the skipped paths, and nothing under `~/.local/share/opencode` is visible
+
+#### SCN-SEC-78 (+) Tools under the home run in both sandbox kinds · L4-SEC-032
+- **Given** a working bwrap, a home outside `/tmp` with a script in `~/.local/bin` and a symlinked tool whose target is under `~/.local/share`
+- **When** a gate and an agent sandbox run both tools
+- **Then** both exit 0 in both kinds
+
+#### SCN-SEC-79 (+) A setup gate reads the registry login, a test gate and an agent do not · L4-SEC-033
+- **Given** `sandbox.setup_paths: ["~/.npmrc"]` and an existing `~/.npmrc`
+- **When** the argv of a setup gate, a test gate and an agent is built
+- **Then** only the setup gate's argv binds `~/.npmrc`, read-only
+
+#### SCN-SEC-80 (−) A tool path inside a login is refused · L4-SEC-033
+- **Given** `sandbox.tool_paths: ["~/.codex/bin"]`
+- **When** the configuration is loaded
+- **Then** loading fails with exit 2 naming `sandbox.tool_paths`, and the message does not contain the path
+
+#### SCN-SEC-81 (−) Two projects with the same unit name share no directory · L4-SEC-034
+- **Given** two repositories with different `origin` URLs, one runner cache, and a unit `openspec:add-login` in each
+- **When** a workbench is built for each and project A resets its agent temp directory
+- **Then** the unit caches, `agent-tmp`, `gate-tmp`, `excludes` and every cache mount differ, and project B's result file is still there
+
+#### SCN-SEC-82 (−) A unit of another project is not handed this project's uv cache · L4-SEC-034
+- **Given** project A's unit `add-login` that wrote a file into its uv cache
+- **When** project B's unit `add-login` mounts its caches
+- **Then** B's uv cache is new (it gets B's seed copy) and does not hold A's file
+
+#### SCN-SEC-83 (−) One project's unpublished run file never reaches another project's lock ref · L4-SEC-034
+- **Given** project A kept an unpublished run file of `openspec:add-login`
+- **When** project B's run of `openspec:add-login` starts and publishes what is unpublished
+- **Then** B's unpublished files are empty and nothing is pushed for A's run
+
+#### SCN-SEC-84 (+) A run file of the earlier layout is adopted only by its own repository · L4-SEC-034
+- **Given** two run files in `pending-unpublished/openspec/add-login`, one whose `run.started` records this repository's key and one that records another key, and a clone of this repository that has every commit either file names
+- **When** the run starts
+- **Then** the first is moved to the keyed directory and published, the second is left in place, and one warning names its directory
+
+#### SCN-SEC-85 (−) A test gate cannot write into the environment · L4-SEC-035
+- **Given** a working bwrap and a worktree with `.venv/lib/python3.12/site-packages` and `node_modules/pkg`
+- **When** a test gate writes `zz.pth` into site-packages and changes `node_modules/pkg/index.js`
+- **Then** both writes fail, and a setup gate in the same worktree can write both
+
+#### SCN-SEC-86 (+) A uv project's tests run on the read-only environment setup built · L4-SEC-035
+- **Given** a working bwrap, uv on PATH and a uv project with no dependencies
+- **When** the setup gate runs `uv sync --frozen` and the test gate runs `uv run --frozen python -c "print(1)"`
+- **Then** both gates pass and `.venv` was read-only in the test gate
+
+#### SCN-SEC-87 (+) The tool caches start empty and writable in every gate · L4-SEC-035
+- **Given** a worktree whose `node_modules/.vite/deps` holds a file from an earlier gate
+- **When** the next test gate starts, under bwrap or under `sandbox.mode: none`
+- **Then** `node_modules/.vite` is an empty directory the gate can write, and under bwrap its argv has `--tmpfs` over it after the read-only bind of `node_modules`
+
+#### SCN-SEC-88 (−) A `.pth` planted by a green step does not make green pass · L4-SEC-036
+- **Given** a red task whose green step writes only `zz_l4.pth` and a pytest plugin that turns failures into passes into `.venv` site-packages, the production code left a stub
+- **When** the green phase runs
+- **Then** green fails on the stub, the plant is gone, and `guard.violation{rule: "environment"}` names `zz_l4.pth`
+
+#### SCN-SEC-89 (−) Plants that survive `uv sync --frozen` are removed by the harness · L4-SEC-036
+- **Given** uv on PATH, a synced uv project, and `zz_planted.pth` and `sitecustomize.py` written into its site-packages after the manifest
+- **When** `uv sync --frozen` runs again, and then the harness compares the environment
+- **Then** both files survive the sync, the harness reports both as planted and removes `.venv`, and the next sync builds it without them
+
+#### SCN-SEC-90 (+) A dependency the agent declared is installed again with no violation · L4-SEC-036
+- **Given** an agent step that changes `pyproject.toml` and `uv.lock` and adds a dist whose files its `RECORD` lists with their hashes
+- **When** the step ends
+- **Then** `env.rebuilt{declared: true}` is recorded, `.venv` is removed, and no `guard.violation` is recorded
+
+#### SCN-SEC-91 (−) Under `sandbox.mode: none` a gate's plant is removed after the gate · L4-SEC-036
+- **Given** `sandbox.mode: none`, `sandbox.allow_none: true`, and a test gate whose test writes `sitecustomize.py` into `.venv`
+- **When** the gate ends
+- **Then** `.venv` is removed, `guard.violation{phase: "gate", rule: "environment"}` names the file, and `setup_at` is cleared, so no later gate runs on the planted environment: the next `run_setup` builds it again, and a gate before that runs without it and fails rather than passes
+
+#### SCN-SEC-92 (−) A changed installed package is removed with `node_modules` · L4-SEC-036
+- **Given** an agent step that edits `node_modules/vitest/dist/index.js` and changes no package manifest or lock file
+- **When** the step ends
+- **Then** `node_modules` is removed, and `guard.violation` names `node_modules/vitest/dist/index.js`
+
+#### SCN-SEC-93 (−) An environment a gate created is not left for the next gate · L4-SEC-036
+- **Given** `gates.setup: []` and a test gate whose command creates `.venv`
+- **When** the gate ends
+- **Then** `.venv` is removed with `env.rebuilt{reason: "created"}`
+
+#### SCN-SEC-94 (−) The verifier never runs on the implementer's environment · L4-SEC-037
+- **Given** a worktree whose `.venv` an implementer workbench built, with a file added to it after its manifest
+- **When** the verifier's workbench runs `gates.setup`
+- **Then** `.venv` is removed first with `env.rebuilt{reason: "unverified"}` and built again, without the file
+
+#### SCN-SEC-95 (+) The first setup in a fresh worktree removes nothing · L4-SEC-037
+- **Given** a new worktree with no environment directory
+- **When** the implementer's first `gates.setup` runs
+- **Then** no `env.rebuilt` is recorded and the manifest is taken after the setup
+
+#### SCN-SEC-96 (−) A readable canary fails the check · L4-SEC-038
+- **Given** a fake runner whose agent sandbox reports the home canary readable
+- **When** `SANDBOX-003` runs
+- **Then** it fails naming the canary path and `agent`, prints no canary content, and no canary is left on disk
+
+#### SCN-SEC-97 (+) The real argv passes the check · L4-SEC-038
+- **Given** a Linux runner with a working bwrap
+- **When** `l4 doctor` runs `SANDBOX-003`
+- **Then** it passes and no canary is left on disk
+
+#### SCN-SEC-98 (+) The check is skipped without a bwrap sandbox · L4-SEC-038
+- **Given** `sandbox.mode: none` with `sandbox.allow_none: true`
+- **When** `SANDBOX-003` runs
+- **Then** it is skipped with a reason that names the mode
+
+#### SCN-SEC-99 (−) The login and unit lock files are not readable in any sandbox · L4-SEC-031
+- **Given** the login lock file of `l4.agents.gate.lock_root` and the unit lock file of `UnitNames.flock_path`, both existing, a runner cache under the home and one outside it, and the gate and agent specs of a unit of any adapter
+- **When** the bwrap argv is built (and, with a working bwrap, a command in each sandbox kind reads both files)
+- **Then** neither file is visible at its path in either kind, and the login lock directory lies under no adapter's credential path
+
+#### SCN-PRV-100 (−) A unit's key files are not readable from another unit's sandboxes · L4-PRV-040
+- **Given** a working bwrap, unit A's provider key file and credential-loader file written by the real `write_key_file` and `write_credential_file` into A's private directory, and unit B of the same project
+- **When** a gate and an agent sandbox of unit B read both files
+- **Then** every read fails, and the files hold their values on the host
+
+#### SCN-PRV-101 (+) The private directory is 0700 and the key file is gone after the step · L4-PRV-040
+- **Given** an opencode profile with a custom provider and a fake process runner
+- **When** an agent step runs once to an end and once to an exception
+- **Then** during the run the private directory and `opencode-config` are 0700 and the key file is 0600, and after each run no key file and no credential file is left
+
+#### SCN-PRV-102 (−) A key file left by a killed run is gone before the next step · L4-PRV-041
+- **Given** `agent-tmp/opencode-config/provider.key` and `agent-tmp/credential` left in a unit's directory
+- **When** the next run builds the unit's workbench
+- **Then** both files are gone before the first gate or agent step
+
+#### SCN-PRV-103 (−) The hello's key directory is hidden from every sandbox · L4-PRV-041
+- **Given** a probe context whose working directory is the runner cache, and a gate spec of any unit
+- **When** the hello writes its key and the gate argv is built
+- **Then** the key's directory is under the runner cache, has mode 0700, and the argv covers the runner cache with a tmpfs and binds nothing above or at that directory
+
+#### SCN-PRV-104 (+) A run that ends normally leaves nothing for the next workbench to remove · L4-PRV-041
+- **Given** an opencode agent step with a provider key that ended normally
+- **When** the unit's next workbench is built
+- **Then** no key file or credential file was there to remove, and the private directory exists with mode 0700
+
+#### SCN-PRV-105 (+) Doctor warns while setup_paths is set · L4-SEC-033
+- **Given** `sandbox.setup_paths: ["~/.npmrc"]`, with or without bwrap on the machine
+- **When** doctor runs
+- **Then** `SANDBOX-004` is reported as a warning that a registry login is in reach of setup code, the path is not echoed, and the exit code is unchanged; with `setup_paths: []` the row passes
+
+#### SCN-PRV-106 (+) A dependency upgrade without a lock file is a notice, not a violation · L4-SEC-036
+- **Given** a unit whose `package.json` has no dependency at HEAD, an installed `node_modules/vitest`, and a step that writes no lock file
+- **When** the step adds `vitest` to `dependencies` and changes `node_modules/vitest/dist/index.js`
+- **Then** `node_modules` is removed, `env.rebuilt{declared: false}` and one `guard.notice{rule: "environment"}` naming the file are recorded, and no `guard.violation` is
+
+#### SCN-PRV-107 (−) A startup hook is never excused by a manifest change · L4-SEC-036
+- **Given** a step that adds a dependency to `pyproject.toml`, writes no lock file, and writes `zz.pth` into `.venv` site-packages
+- **When** the step ends
+- **Then** `.venv` is removed and a `guard.violation{rule: "environment"}` names `zz.pth`
+#### SCN-PRV-108 (−) A symlinked tool exposes nothing beside its target · L4-SEC-032
+- **Given** a symlink in a PATH directory into `~/.config/gh/secret.yml`, a shim into `~/mytool/node_modules/leakpkg/cli.js` with `~/mytool/secret.txt` in the project, and a symlink to `~/share/tool/real.sh` with `beside.txt` next to it
+- **When** a gate and an agent sandbox read the three secrets and run the shim and the plain tool
+- **Then** every secret read fails, both tools run, and the bound paths are the target file and the package directory, never the directory around a file or the project
+
+#### SCN-PRV-109 (−) A gate cannot write the shared cache and works in a scratch · L4-SEC-039
+- **Given** a unit whose uv cache holds what its setup built, and a working bwrap
+- **When** a test gate writes `zz_marker.pth` into that cache and into `$UV_CACHE_DIR`, and then a `gates.setup` command writes the cache
+- **Then** the first write fails, the second works in a directory under the gate's temp directory that is empty at the start of every gate, and only the setup write reaches the shared cache
+
+#### SCN-PRV-110 (−) An agent step's cache plant never reaches the shared cache · L4-SEC-039
+- **Given** an agent step that writes `archive-v0/<id>/zz_marker.pth` into the cache directory its environment names
+- **When** the step ends
+- **Then** the directory is under the step's temp directory, the shared cache holds no such file, the agent sandbox mounted the shared cache read-only, and the scratch is gone
+
+#### SCN-PRV-111 (+) The verifier builds from its own emptied cache · L4-SEC-039
+- **Given** a verification round and a file left in the verifier's cache by the last round
+- **When** the round's workbench is built
+- **Then** its caches lie under `units/<key>/verify/<fw>/<name>`, differ from the implementer's, are empty, and serve every workbench of the round
+
+#### SCN-PRV-112 (−) A cache plant does not come back in a rebuilt environment · L4-SEC-039
+- **Given** the reviewer's reproduction: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/`, and real uv
+- **When** an agent step plants into the cache its environment names, and the environment is rebuilt with `rm -rf .venv; uv sync --frozen` from the unit's cache and then from the verifier's
+- **Then** neither environment holds `zz_marker.pth`, while a cache written directly does carry it into site-packages
 
 ## 24. Definition of done
 

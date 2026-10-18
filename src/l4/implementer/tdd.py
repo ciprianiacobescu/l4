@@ -94,7 +94,7 @@ from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfr
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
-from l4.sandbox.env import build_agent_env
+from l4.sandbox.env import build_agent_env, cache_env
 from l4.security.protected import glob_match, revert_protected
 from l4.specs.base import Framework, Marker, Task
 from l4.specs.criteria import trace_ids
@@ -481,7 +481,7 @@ def run_setup(wb: Workbench) -> None:
         wb.seed_checked = True
         ensure_uv_seed(wb)
     for command in wb.cfg.gates.setup:
-        result = wb.run_gate("setup", command, network=True)
+        result = wb.run_gate("setup", command, network=True, builds_env=True)
         if result.status != "pass":
             raise SetupFailed(f"gates.setup failed ({result.reason}); see {result.log_path}")
     wb.setup_at = head
@@ -713,7 +713,7 @@ def agent_step(
     spec = wb.agent_spec()
     tmp = wb.reset_agent_tmp()
     trace = trace_env(wb.cfg.gates.test_timeout_seconds())
-    extra = {c.env: str(c.path) for c in wb.caches} | dict(getattr(wb.impl, "extra_env", {})) | trace
+    extra = cache_env(spec) | dict(getattr(wb.impl, "extra_env", {})) | trace  # the step's private caches (L4-SEC-039)
     key = re.sub(r"[^A-Za-z0-9._-]", "_", task.key)
     stem, again = f"{key}-{role}-{attempt}", 1
     while (published := wb.agent_log_paths(stem)[1]).exists() or published.with_suffix(".prompt.md").exists():
@@ -757,10 +757,14 @@ def agent_step(
             wb.publish_agent_logs(raw_events, published)
             wb.setup_at = None  # the agent may have changed the environment: the next step installs again
             # also on an exception: whatever the agent left behind must not be committed or folded by a later step
+            wb.discard_scratch()
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
             revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt)
             wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+            # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard sees
+            # it: an environment that differs from the one setup built is removed, and setup builds it again
+            wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
@@ -1257,7 +1261,7 @@ def run_green(
     _check_opened(wb, red, unfreeze, red.manifest)
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
-    run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
+    run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
     hung = gate_hung(gate) if reason else []

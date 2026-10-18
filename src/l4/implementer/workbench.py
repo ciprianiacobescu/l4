@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4.agents.base import AgentAdapter, McpServer
+from l4.agents.credentials import CREDENTIAL_FILE
 from l4.agents.factory import Selected
+from l4.agents.opencode import CONFIG_DIR
+from l4.agents.opencode_provider import KEY_FILE
 from l4.agents.proc import ProcRunner
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
@@ -28,6 +31,8 @@ from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.gates.trace import trace_env
+from l4.implementer import envguard
+from l4.implementer.envguard import diff_manifest, remove_env_dir, take_manifest
 from l4.implementer.gateconfig import restore_config, snapshot_config
 from l4.implementer.guardnotes import GuardNote, note_of
 from l4.memory.inject import branch_changed_files
@@ -35,19 +40,26 @@ from l4.memory.serena import SerenaStatus, check_serena, mcp_server_for, serena_
 from l4.redact import Redactor
 from l4.safepath import resolve_tool
 from l4.sandbox.base import (
+    SCRATCH_DIR,
     CacheMount,
     Sandbox,
     SandboxSpec,
     expand_credential_paths,
     gate_sandbox_spec,
+    readonly_with_scratch,
     runner_tmp_paths,
 )
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import toolchain_env
+from l4.sandbox.envdirs import env_dirs, reset_tool_caches
+from l4.sandbox.home import spec_paths
 from l4.security.protected import ProtectedSet, restore_protected, revert_unsnapshotted, snapshot_protected
 from l4.specs.base import SpecProvider, UnitRef
 from l4.state.ledger import ledger_path
+from l4.vcs.errors import GitError
 from l4.vcs.git import Git
+from l4.vcs.names import unit_dir
+from l4.vcs.repokey import key_of_common_dir
 from l4.vcs.trailers import CommitTrailers
 from l4.vcs.wip import restore_wip, snapshot_wip, wip_ref
 
@@ -59,6 +71,7 @@ HARNESS_EXCLUDES = (
     ".serena/.gitignore",  # Serena 1.7.0 writes it at every start, even when project.yml is committed
     ".l4-result",  # the result alias of a prompt-contract step (`resultalias`); no slash: a symlink, not a directory
 )  # fmt: skip
+MAX_REPORTED_PLANTS = envguard.MAX_REPORTED  # planted paths named in the ledger per rebuild; the rest is counted
 MAX_SUBJECT_CHARS = 200
 SKIP_CI = "[skip ci]"  # SPEC: a checkpoint commit MUST carry it, so the clip must never cut it off
 LOG_TAIL_CHARS = 2000
@@ -73,6 +86,34 @@ SERENA_PROJECT = ".serena/project.yml"
 _SERENA_CHECKED: dict[tuple[str, str, str], tuple[SerenaStatus, bytes | None]] = {}
 
 _BYTECODE_KEPT = frozenset({".git", ".venv", "node_modules"})  # the installed environment and git are not ours here
+
+
+def env_root(rel: str) -> str:
+    """The environment directory a manifest path belongs to: `.venv`, or the path up to the first `node_modules`."""
+    parts = rel.split("/")
+    if parts[0] == ".venv":
+        return ".venv"
+    return "/".join(parts[: parts.index("node_modules") + 1]) if "node_modules" in parts else parts[0]
+
+
+def private_dir(path: Path) -> None:
+    """The directory, and mode 0700 on it: only the unit's own sandboxes may see what a step keeps there. The mode is
+    set after the `mkdir` because the umask can only remove bits, never add them (L4-PRV-040)."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.chmod(0o700)
+
+
+def remove_leftover_credentials(agent_tmp: Path) -> list[Path]:
+    """A provider key file and a credential-loader file that a killed run (SIGKILL skips every `finally`) left in the
+    unit's step directory are removed before any agent or gate runs. Returns what it removed (L4-PRV-041)."""
+    removed: list[Path] = []
+    for path in (agent_tmp / CONFIG_DIR / KEY_FILE, agent_tmp / CREDENTIAL_FILE):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            removed.append(path)
+    if removed:
+        log.warning("%s: removed %d credential file(s) a killed run left behind", agent_tmp.parent.name, len(removed))
+    return removed
 
 
 def purge_bytecode(worktree: Path, tracked: Collection[str] = ()) -> None:
@@ -159,6 +200,8 @@ class Workbench:
     run_id: str
     iteration: int
     unit_cache: Path
+    cache_root: Path
+    repo_key: str
     out_dir: Path
     home: Path
     git_common_dir: Path
@@ -181,10 +224,15 @@ class Workbench:
     unsafe: list[UnsafeWrite] = field(default_factory=list)  # harness writes refused since `run_task` cleared it
     activated_digest: str | None = None  # the unit folder's digest frozen at the plan's activation (plan step), if any
     activated_plan: str | None = None  # the plan that froze it
+    # tree -> the manifest of its environment directories as the last passing `gates.setup` left them (L4-SEC-036). In
+    # memory only: a file under the cache would be one more thing `sandbox.mode: none` code could edit.
+    env_manifests: dict[Path, envguard.EnvManifest] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        private_dir(self.unit_cache)  # the unit's step files are for its own sandboxes only (L4-PRV-040)
+        remove_leftover_credentials(self.unit_cache / "agent-tmp")  # a killed run skipped the `finally` (L4-PRV-041)
         for sub in ("agent-tmp", "gate-tmp"):
-            (self.unit_cache / sub).mkdir(parents=True, exist_ok=True)
+            private_dir(self.unit_cache / sub)
         self.excludes.write_text("\n".join(HARNESS_EXCLUDES) + "\n", encoding="utf-8")
 
     @property
@@ -265,22 +313,40 @@ class Workbench:
 
     def agent_spec(self) -> SandboxSpec:
         """Only the selected adapter's login is visible; the sandbox hides every other adapter's."""
+        tools, _ = spec_paths(
+            self.host_env, home=self.home, cache_root=self.cache_root, kind="agent", sandbox_cfg=self.cfg.sandbox,
+            credential_paths=self.credential_paths, forbid=(self.worktree, self.git_common_dir.parent),
+        )  # fmt: skip
         return SandboxSpec(
             "agent", self.worktree, self.git_common_dir, self.agent_tmp, self.home, self.credential_paths,
-            adapter=self.selected.profile.adapter, caches=self.caches, network=True,
-            runner_tmp=runner_tmp_paths(self.host_env),
+            adapter=self.selected.profile.adapter, network=True,
+            caches=readonly_with_scratch(self.caches, self.agent_tmp, create=False),
+            runner_tmp=runner_tmp_paths(self.host_env), cache_root=self.cache_root, tool_paths=tools,
         )  # fmt: skip
 
     def gate_spec(
-        self, *, network: bool, tree: Path | None = None, caches: tuple[CacheMount, ...] | None = None
+        self,
+        *,
+        network: bool,
+        tree: Path | None = None,
+        caches: tuple[CacheMount, ...] | None = None,
+        builds_env: bool = False,
     ) -> SandboxSpec:
         """No adapter: the sandbox hides every login, so agent-written tests cannot read one. `caches` replaces the
-        unit's own mounts (the uv seed's fill, which runs no agent-written code)."""
+        unit's own mounts (the uv seed's fill, which runs no agent-written code). `builds_env` is true for a
+        `gates.setup` command: it alone gets `sandbox.setup_paths` (L4-SEC-033)."""
+        root = tree or self.worktree
+        tools, setup = spec_paths(
+            self.host_env, home=self.home, cache_root=self.cache_root, kind="gate", sandbox_cfg=self.cfg.sandbox,
+            credential_paths=self.credential_paths, forbid=(root, self.git_common_dir.parent), builds_env=builds_env,
+        )  # fmt: skip
         return gate_sandbox_spec(
-            worktree=tree or self.worktree, git_common_dir=self.git_common_dir, tmp_dir=self.unit_cache / "gate-tmp",
+            worktree=root, git_common_dir=self.git_common_dir, tmp_dir=self.unit_cache / "gate-tmp",
             home=self.home, configured_credential_paths=self.cfg.sandbox.credential_paths,
             caches=self.caches if caches is None else caches,
             network=network, runner_tmp=runner_tmp_paths(self.host_env),
+            cache_root=self.cache_root, tool_paths=tools, setup_paths=setup, builds_env=builds_env,
+            tracked=() if builds_env else self._tracked_env(self.git if tree is None else self.git.at(root)),
         )  # fmt: skip
 
     def run_gate(
@@ -293,6 +359,7 @@ class Workbench:
         must_contain: Collection[str] = (),
         extra_env: Mapping[str, str] | None = None,
         note: Callable[[TestReport], dict] | None = None,
+        builds_env: bool = False,
     ) -> GateResult:
         """`network` defaults to `gates.network`; the setup step passes True (it downloads the dependencies).
         `extra_env` (the coverage plugin's `cov_env`) is merged with the trace plugin's: `PYTEST_ADDOPTS` and
@@ -302,7 +369,7 @@ class Workbench:
             name, command, tuple(reports), self.cfg.gates.test.format, duration_seconds(self.cfg.gates.timeout),
             frozenset(must_contain),
         )  # fmt: skip
-        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note)
+        return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note, builds_env=builds_env)
 
     def run_gate_spec(
         self,
@@ -313,6 +380,7 @@ class Workbench:
         extra_env: Mapping[str, str] | None = None,
         caches: tuple[CacheMount, ...] | None = None,
         note: Callable[[TestReport], dict] | None = None,
+        builds_env: bool = False,
     ) -> GateResult:
         """The one way a gate runs, in the unit's worktree or in another checkout of the repository (the merge base the
         verifier serves): bytecode purged before, the protected set put back after, the trace plugin loaded, the
@@ -322,15 +390,21 @@ class Workbench:
         log = self._next_gate_log(spec.name)
         purge_bytecode(root, self._tracked_bytecode(git))
         self._report_links(root, spec)  # a link on a report path is removed and recorded: the gate writes a real one
+        tracked_env = self._tracked_env(git)
+        if builds_env:
+            if root not in self.env_manifests:  # L4-SEC-037: never build on an environment this workbench did not
+                self._remove_unverified_env(root, tracked_env)
+        else:
+            reset_tool_caches(root, tracked_env)  # empty and writable at every gate; the only protection of them here
         before = snapshot_protected(root, self.protected)
         configs = snapshot_config(self.cfg, root, git, self.excludes)
         try:
             result = run_gate(
                 spec, worktree=root, sandbox=self.sandbox,
                 sandbox_spec=(
-                    self.gate_spec(network=network, tree=root)
+                    self.gate_spec(network=network, tree=root, builds_env=builds_env)
                     if caches is None
-                    else self.gate_spec(network=network, tree=root, caches=caches)
+                    else self.gate_spec(network=network, tree=root, caches=caches, builds_env=builds_env)
                 ),
                 host_env=self.host_env, log_path=log,
                 redactor=self.redactor, runner=self.runner,
@@ -351,6 +425,17 @@ class Workbench:
             restore_config(self, root, git, configs, where=spec.name)
         self._report_links(root, spec)  # ... and one the gate planted: the restores that follow must find a real folder
         self.restore_ledger()
+        shutil.rmtree(
+            self.unit_cache / "gate-tmp" / SCRATCH_DIR, ignore_errors=True
+        )  # a gate's private caches go with it
+        if builds_env:
+            if result.status == "pass":
+                reset_tool_caches(root, tracked_env)
+                self.env_manifests[root] = take_manifest(root, tracked_env)
+            else:
+                self.env_manifests.pop(root, None)  # a half-built environment is nobody's: the next setup starts over
+        else:
+            self.check_env(root, phase="gate", git=git)
         readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
         extra = note(result.report) if note is not None and readable else {}
         self.emit(
@@ -366,6 +451,84 @@ class Workbench:
         for rel in spec.reports:
             if (link := linked_component(root, rel)) is not None:
                 self.refused_write(LinkedPath(link), path=rel, where=spec.name, root=root)
+    def _tracked_env(self, git: Git | None = None) -> frozenset[str]:
+        """Paths git tracks inside `.venv` or any `node_modules`: such a directory is source, not an environment."""
+        raw = (git or self.git).run_bytes(
+            "ls-files", "-z", "--", ".venv", "node_modules", ":(glob)**/node_modules/**", check=False
+        )
+        return frozenset(os.fsdecode(p) for p in raw.split(b"\0") if p)
+
+    def _remove_unverified_env(self, tree: Path, tracked: Collection[str]) -> None:
+        """L4-SEC-037: the first `gates.setup` command of this workbench in `tree` finds an environment it did not
+        build (the implementer's, in the verifier's workbench): it goes before the setup builds one."""
+        dirs = [d for d in env_dirs(tree, tracked) if os.path.lexists(d)]
+        if not dirs:
+            return
+        for path in dirs:
+            remove_env_dir(path)
+        self._env_removed(tree, dirs, "unverified", phase="setup", diff=envguard.EnvDiff((), (), ()), plants=None)
+
+    def check_env(self, tree: Path, *, phase: str, changed: Collection[str] = (), git: Git | None = None) -> bool:
+        """Compare the environment directories of `tree` with the manifest the last passing setup took (L4-SEC-036). A
+        directory that differs, is new or has no manifest is removed, so the next `gates.setup` builds it again, and
+        recorded: one `env.rebuilt`, then one `guard.violation` (rule `environment`) per path that no install explains
+        and one `guard.notice` per path of a dependency change without a lock file (at most MAX_REPORTED together).
+        Returns whether anything was removed."""
+        git = git or (self.git if tree == self.worktree else self.git.at(tree))
+        tracked = self._tracked_env(git)
+        manifest = self.env_manifests.get(tree)
+        after = take_manifest(tree, tracked)
+        if manifest is None and not after:
+            return False
+        before = manifest if manifest is not None else {}
+        diff = diff_manifest(before, after)
+        if not diff:
+            return False
+        existing = {d.relative_to(tree).as_posix(): d for d in env_dirs(tree, tracked)}
+        hit = sorted({env_root(p) for p in (*diff.added, *diff.changed, *diff.removed)})  # directories that differ
+        # no manifest: a project without `gates.setup`, or a tree setup never built: whatever is there is new to us
+        reason = "created" if manifest is None or any(rel not in before for rel in hit) else "changed"
+        # classified before anything is removed: the RECORD files and the hashes are read from the files themselves
+        plants = envguard.classify(tree, diff, changed, read_head=self._head_reader(git))
+        gone = [rel for rel in hit if rel not in existing]  # a directory the step or gate deleted
+        for rel in hit:
+            if rel in existing:
+                remove_env_dir(existing[rel])
+        for key in [k for k in before if any(k == rel or k.startswith(rel + "/") for rel in hit)]:
+            before.pop(key, None)  # the manifest forgets what was removed
+        if manifest is not None:
+            self.env_manifests[tree] = before
+        self._env_removed(tree, hit, reason, phase=phase, diff=diff, plants=plants)
+        return bool(hit) or bool(gone)
+
+    def _head_reader(self, git: Git) -> Callable[[str], bytes | None]:
+        def read(path: str) -> bytes | None:
+            try:
+                return git.run_bytes("show", f"HEAD:{path}")
+            except GitError:
+                return None
+
+        return read
+
+    def _env_removed(
+        self, tree: Path, dirs: Sequence[Path | str], reason: str, *, phase: str, diff: envguard.EnvDiff,
+        plants: envguard.Plants | None,
+    ) -> None:  # fmt: skip
+        if tree == self.worktree:
+            self.setup_at = None  # the next `run_setup` builds the environment again
+        else:
+            self.env_manifests.pop(tree, None)
+        reported = [("guard.violation", p) for p in plants.violations] if plants else []
+        reported += [("guard.notice", p) for p in plants.notices] if plants else []
+        shown = reported[:MAX_REPORTED_PLANTS]
+        self.emit(
+            "env.rebuilt", tree="worktree" if tree == self.worktree else tree.name,
+            dirs=[d if isinstance(d, str) else d.relative_to(tree).as_posix() for d in dirs], phase=phase,
+            added=len(diff.added), changed=len(diff.changed), removed=len(diff.removed), reason=reason,
+            declared=bool(plants and plants.declared), planted_more=len(reported) - len(shown),
+        )  # fmt: skip
+        for event, path in shown:
+            self.emit(event, path=path, rule="environment", action="removed", phase=phase)
 
     def _tracked_bytecode(self, git: Git | None = None) -> frozenset[str]:
         """Bytecode the repository itself commits (rare): a changed copy is a production change the guards see."""
@@ -563,8 +726,13 @@ class Workbench:
 
     def reset_agent_tmp(self) -> Path:
         shutil.rmtree(self.agent_tmp, ignore_errors=True)
-        self.agent_tmp.mkdir(parents=True)
+        private_dir(self.agent_tmp)
+        readonly_with_scratch(self.caches, self.agent_tmp, create=True)  # makes the step's private cache directories
         return self.agent_tmp
+
+    def discard_scratch(self) -> None:
+        """The agent's private caches go with the step (L4-SEC-039)."""
+        shutil.rmtree(self.agent_tmp / SCRATCH_DIR, ignore_errors=True)
 
     def _take_serena_project(self) -> bytes | None:
         """What Serena left in `.serena/project.yml` while it started (it rewrites the file into its full form, or
@@ -630,16 +798,17 @@ def make_workbench(
     (the one file of the run that every step leaves alone). `family_glob` is the namespace of fix units that no step
     may create or edit (`<changes>/<parent>-fix-*`; the unit's own by default): only the harness writes them."""
     cache = cache_root(app.environ, repo=app.repo)
-    framework = ref.framework.value
     common = Path(git.run("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    repo_key = key_of_common_dir(common, app.environ)  # the key every per-unit directory carries (L4-SEC-034)
     unit_rel = ref.path.resolve().relative_to(worktree.resolve()).as_posix()
     ledger_rel = ledger_rel or ledger_path(ref.path, app.run_id).resolve().relative_to(worktree.resolve()).as_posix()
     home = Path(app.environ["HOME"]) if app.environ.get("HOME") else Path.home()
     return Workbench(
         cfg=cfg, ref=ref, provider=provider, worktree=worktree, git=git, ledger=ledger, sandbox=sandbox,
         selected=selected, host_env=app.environ, redactor=app.redactor, run_id=app.run_id, iteration=iteration,
-        unit_cache=cache / "units" / framework / ref.name, out_dir=app.out_dir, home=home, git_common_dir=common,
-        caches=caches if caches is not None else mount_caches(cfg.sandbox.caches, cache, ref.id),
+        unit_cache=unit_dir(cache, repo_key, ref.id), cache_root=cache, repo_key=repo_key, out_dir=app.out_dir,
+        home=home, git_common_dir=common,
+        caches=caches if caches is not None else mount_caches(cfg.sandbox.caches, cache, ref.id, repo_key),
         protected=ProtectedSet(
             tuple(cfg.odd.forbidden_paths), unit_rel, ledger_rel, tuple(extra_unit_dirs),
             (family_glob or f"{unit_rel}-fix-*",),

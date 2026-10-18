@@ -67,6 +67,11 @@ _ADVICE = {
         "them. A dependency you added in the same file must be written again too; a new pytest marker is allowed. If "
         "the task needs one of these settings, ask a question that names the file."
     ),
+    "environment": (
+        "The harness rebuilds `.venv` and `node_modules` from the lock files after every step and removed what the "
+        "step wrote there. Declare a dependency in the manifest and the lock file (`uv add`, `npm install` are "
+        "fine); never write into an installed environment."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),

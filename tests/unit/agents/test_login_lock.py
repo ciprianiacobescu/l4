@@ -98,7 +98,10 @@ def test_the_key_is_the_store_the_spawned_cli_uses_so_an_override_in_the_host_en
     assert login_key(profile, host) == login_key(profile, environ(home))
     # the reason: neither spawn environment carries the override
     ctx_env = probe_env(ProbeCtx(host, tmp_path, lambda *a: None))
-    spec = SandboxSpec("agent", tmp_path, tmp_path / ".git", tmp_path / "t", home, adapter=profile.adapter)
+    spec = SandboxSpec(
+        "agent", tmp_path, tmp_path / ".git", tmp_path / "t", home, adapter=profile.adapter,
+        cache_root=tmp_path / "cache", tool_paths=(),
+    )  # fmt: skip
     assert override not in ctx_env and override not in build_agent_env(host, spec)
 
 

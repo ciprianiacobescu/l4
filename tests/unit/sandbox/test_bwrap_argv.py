@@ -34,7 +34,10 @@ def test_gate_argv_shape(make_spec):
     assert pairs(argv, "--bind") == [(str(spec.worktree),) * 2, (str(spec.tmp_dir),) * 2]
     # no login path of any adapter is visible to code the agent wrote
     home = spec.home
-    assert set(pairs(argv, "--tmpfs")) == {("/tmp",), (str(home / ".codex"),), (str(home / ".local/share/opencode"),)}
+    # (and the home itself is a tmpfs, L4-SEC-030, so the login masks sit on top of an empty directory)
+    assert set(pairs(argv, "--tmpfs")) == {
+        ("/tmp",), (str(home),), (str(home / ".codex"),), (str(home / ".local/share/opencode"),),
+    }  # fmt: skip
     assert ("/dev/null", str(home / ".claude.json")) in pairs(argv, "--ro-bind")
 
 

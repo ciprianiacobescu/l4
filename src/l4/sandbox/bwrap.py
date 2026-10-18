@@ -14,7 +14,8 @@ unix socket, and a runner user in group `docker` would reach `/var/run/docker.so
 `/etc/resolv.conf` points to is put back, read-only, so DNS keeps working. Residual: a daemon socket outside /run
 (e.g. a path under the user's home) stays reachable; abstract sockets (dbus, X11) are isolated only by `--unshare-net`,
 which gates get with `gates.network: none` and agent sandboxes (network on) do not.
-M1: sandbox-security 1.8 (empty home, tool binds from PATH), 2.3 (per-unit caches under a private HOME).
+L4-SEC-030..033: the real home and the runner cache are covered by a tmpfs right after the base flags, and the tool
+paths come back read-only before the credential masks (`l4.sandbox.home`). Still open: sandbox-security 1.12-1.13.
 """
 
 import os
@@ -23,7 +24,15 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from l4.proc import Runner, run_process
-from l4.sandbox.base import Availability, SandboxSpec, WrappedCommand, hidden_credential_paths, repo_guidance_masks
+from l4.sandbox.base import (
+    Availability,
+    SandboxSpec,
+    SandboxUnavailable,
+    WrappedCommand,
+    hidden_credential_paths,
+    repo_guidance_masks,
+)
+from l4.sandbox.home import cache_is_covered
 
 PROBE_TIMEOUT_S = 30.0
 
@@ -83,6 +92,13 @@ def _hide(path: Path) -> list[str]:
     return []
 
 
+def _check_home(home: Path) -> None:
+    """A `HOME` that is not an existing absolute directory other than `/` means the harness does not know where the
+    user's files are: fail closed (L4-SEC-030)."""
+    if not home.is_absolute() or home == ROOT or not home.is_dir():
+        raise SandboxUnavailable("HOME must name an existing directory other than / for the sandbox to hide it")
+
+
 class BwrapSandbox:
     name = "bwrap"
 
@@ -106,6 +122,12 @@ class BwrapSandbox:
         """`cwd` is where the command starts (default: the worktree). It must be inside a mounted path: the step's
         private dir (`spec.tmp_dir`) is, which is where the tool-less calls' empty directory lives."""
         out = [self._exe, *base_flags(network=spec.network or spec.kind == "agent", host_root=self._root)]
+        _check_home(spec.home)
+        out += ["--tmpfs", str(spec.home)]  # L4-SEC-030: the real home is not there; what a step needs comes back below
+        if cache_is_covered(spec.cache_root, spec.home):
+            out += ["--tmpfs", str(spec.cache_root)]  # L4-SEC-031: nothing of another unit or project
+        for path in (*spec.tool_paths, *spec.setup_paths):
+            out += ["--ro-bind", str(path), str(path)]  # L4-SEC-032/033: before the masks, so none re-exposes a login
         for path in hidden_credential_paths(spec):
             out += _hide(path)
         for path in spec.runner_tmp:
@@ -117,6 +139,10 @@ class BwrapSandbox:
         for cache in spec.caches:
             out += ["--ro-bind" if cache.read_only else "--bind", str(cache.path), str(cache.path)]
         out += ["--ro-bind", str(spec.git_common_dir), str(spec.git_common_dir)]
+        for path in spec.read_only:  # L4-SEC-035: a gate that does not build the environment cannot change it ...
+            out += ["--ro-bind", str(path), str(path)]
+        for path in spec.empty_dirs:  # ... and its tool caches start empty (the harness made the mount points)
+            out += ["--tmpfs", str(path)]
         # HB-X1: no repo guidance directory is there to be loaded. After EVERY bind: a later bind of a path at or above
         # the worktree (a cache at `$L4_CACHE/worktrees` is valid config) would put the host directory back.
         for path in repo_guidance_masks(spec.worktree):

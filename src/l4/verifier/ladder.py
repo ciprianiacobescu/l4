@@ -71,6 +71,7 @@ from l4.planner import facts_of, next_action
 from l4.s1.items import item_keys_by_subject, items_from_evidence, project_key
 from l4.s1.records import append_records
 from l4.s1.shadow import run_shadow
+from l4.sandbox.caches import verifier_caches
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
@@ -1300,12 +1301,18 @@ def verify_hook(ctx: HookContext) -> Trigger:
     else:
         selected = select_judge(services.factory, cfg, services.ref.id, implementers, skip=skip)
     logs: list[tuple[Path, Path]] = []
+    # L4-SEC-039: the round builds the project environment from caches of its own, emptied here, that no implementer
+    # step or gate has touched; every workbench of the round (a judge that took over included) shares them
+    round_caches = verifier_caches(
+        cfg.sandbox.caches, cache_root(services.app.environ, repo=services.app.repo), services.ref.id,
+        services.names.repo_key,
+    )  # fmt: skip
 
     def bench(chosen: Selected) -> Workbench:
         return make_workbench(
             cfg=cfg, app=services.app, ref=services.ref, provider=family, worktree=services.worktree,
             git=services.git, ledger=services.ledger, sandbox=services.sandbox, selected=chosen,
-            iteration=state.iteration, push=ctx.push,
+            iteration=state.iteration, push=ctx.push, caches=round_caches,
         )  # fmt: skip
 
     def backend(chosen: Selected, judge_wb: Workbench) -> AgentJudge:

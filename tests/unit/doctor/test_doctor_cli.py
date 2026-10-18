@@ -89,7 +89,19 @@ def test_json_output_and_resolved_paths(world, capsys):
     ids = [c["id"] for c in doc["checks"]]
     expected = ["CI-001", "CFG-002", "ENV-001", "ENV-002", "ENV-003", "ENV-004", "PRV-001", "PRV-002"]
     expected += ["SPEC-001", "SPEC-002", "SPEC-004", "MEM-001", "ENV-006", "ENV-007", "ENV-008"]
-    expected += ["S1-001", "S1-002", "COV-001", "SANDBOX-002", "CFG-005", "MEM-002", "CI-002", "ENV-013", "EVAL-001"]
+    expected += [
+        "S1-001",
+        "S1-002",
+        "COV-001",
+        "SANDBOX-002",
+        "SANDBOX-003",
+        "SANDBOX-004",
+        "CFG-005",
+        "MEM-002",
+        "CI-002",
+        "ENV-013",
+        "EVAL-001",
+    ]
     expected += [
         "ENV-014",
         "CFG-004",
@@ -120,7 +132,11 @@ def test_json_output_and_resolved_paths(world, capsys):
     skipped |= {"S1-001", "S1-002", "COV-001", "ENV-013", "EVAL-001"}  # nothing shadowed, no tuned checkpoint or
     # Ollama host, no project interpreter, no eval baseline in this repository
     # profile; no Kiro; no Laya profile, no e2e gate
-    host = {"PRV-002", "SANDBOX-002"}  # bubblewrap on the machine running the tests: not this test's business
+    host = {
+        "PRV-002",
+        "SANDBOX-002",
+        "SANDBOX-003",
+    }  # bubblewrap on the machine running the tests: not this test's business
     assert {c["status"] for c in doc["checks"] if c["id"] not in skipped | host} == {"pass"}
     assert {c["id"] for c in doc["checks"] if c["status"] == "skip"} - host == skipped
     assert main(["doctor", "--repo", str(repo)], environ=environ) == 0

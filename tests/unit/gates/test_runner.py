@@ -21,7 +21,10 @@ def passed(*ids: str) -> TestReport:
 def work(tmp_path: Path):
     (tmp_path / "wt").mkdir()
     (tmp_path / "tmp").mkdir()
-    spec = SandboxSpec("gate", tmp_path / "wt", tmp_path / "git", tmp_path / "tmp", tmp_path / "home")
+    spec = SandboxSpec(
+        "gate", tmp_path / "wt", tmp_path / "git", tmp_path / "tmp", tmp_path / "home",
+        cache_root=tmp_path / "cache", tool_paths=(),
+    )  # fmt: skip
     return tmp_path, spec
 
 

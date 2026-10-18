@@ -102,7 +102,7 @@ def credential_loader(req: RunRequest) -> Iterator[Callable[[list[str]], list[st
         yield list
         return
     directory = req.result_path.parent
-    directory.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     (directory / CREDENTIAL_FILE).unlink(missing_ok=True)  # O_EXCL below: a leftover must not be reused
     path = write_credential_file(directory, value)
     try:
