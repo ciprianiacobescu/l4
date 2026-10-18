@@ -133,3 +133,50 @@ def test_n2_production_code_that_forges_the_junit_report_fails_step_1(run_l4, va
     run = run_l4([red_step(), green, judge_step()])
     text = failed_at_step_1(run, AWARE_TITLE, row="| test awareness |")
     assert ".l4-out" in text
+
+
+# --- the owner's allow-list: verifier.test_awareness_allow, read at the BASE ------
+
+CONFIG = ".l4/config.yaml"
+ALLOW_YAML = "version: 1\nverifier:\n  test_awareness_allow:\n    - 'src/pytdd/**'\n"
+MATCH = 'X = ".l4-out/junit.xml"\n'
+
+
+def allow_scan(tmp_path, git_environ, *, base_config="", head_config="", path="src/pytdd/pricing.py"):
+    base_files = dict(BASE)
+    if base_config:
+        base_files[CONFIG] = base_config
+    repo, base = new_repo(tmp_path, git_environ, base_files)
+    edits = {path: MATCH}
+    if head_config:
+        edits[CONFIG] = head_config
+    repo.write(edits)
+    return check_test_awareness(repo.context(base, repo.commit("work", task="1.1", tdd="green")))
+
+
+def test_a_match_in_an_allowed_path_is_listed_with_its_glob_not_blocked(tmp_path, git_environ):  # SCN-VER-129
+    out = allow_scan(tmp_path, git_environ, base_config=ALLOW_YAML)
+    assert out.findings == []
+    [line] = out.listed
+    assert "src/pytdd/pricing.py:" in line and ".l4-out" in line and "allowed by `src/pytdd/**`" in line
+
+
+def test_the_same_match_in_a_path_that_is_not_allowed_is_a_blocker(tmp_path, git_environ):  # SCN-VER-129
+    out = allow_scan(tmp_path, git_environ, base_config=ALLOW_YAML, path="src/other/module.py")
+    assert [f.title for f in out.findings] == [AWARE_TITLE]
+
+
+def test_a_key_set_only_in_the_units_head_does_not_allow_itself(tmp_path, git_environ):  # SCN-VER-129
+    out = allow_scan(tmp_path, git_environ, head_config=ALLOW_YAML)
+    assert [f.title for f in out.findings] == [AWARE_TITLE]
+
+
+def test_an_unreadable_base_config_allows_nothing(tmp_path, git_environ):  # SCN-VER-129
+    out = allow_scan(tmp_path, git_environ, base_config="verifier: [not a mapping\n")
+    assert [f.title for f in out.findings] == [AWARE_TITLE]
+
+
+def test_the_key_is_part_of_the_schema_and_defaults_to_empty():  # SCN-VER-129
+    assert L4Config().verifier.test_awareness_allow == []
+    cfg = L4Config.model_validate({"verifier": {"test_awareness_allow": ["tools/**"]}})
+    assert cfg.verifier.test_awareness_allow == ["tools/**"]

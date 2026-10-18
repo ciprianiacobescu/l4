@@ -616,6 +616,7 @@ class VerifierCfg(_Strict):
     panel: PanelCfg = Field(default_factory=PanelCfg)
     fix_minor_findings: bool = False
     secret_scan: Literal["gitleaks", "none"] = "gitleaks"
+    test_awareness_allow: list[str] = Field(default_factory=list)  # globs of production files; read at the base
 
 
 class GithubAppCfg(_Strict):

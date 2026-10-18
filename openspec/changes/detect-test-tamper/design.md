@@ -661,8 +661,12 @@ A second review of `a8a239e3` found the run of D13 stopping every first-round by
   in `human_scan`); `"pytest" in sys.modules`, importing `pytest` or `_pytest`, `atexit.register` and a `sys.argv` test
   for pytest are listed for the judge (`IntegrityReport.test_awareness`, shown in verification.md, no finding). Known
   limit: code that detects the run by other means; the audit and step 5 are the second line. A repository whose own
-  production code legitimately names these (the harness itself) needs a person's commit or a `[test-infra]`-style
-  allowance; none is built.
+  production code legitimately names these (the harness itself) sets the config key `verifier.test_awareness_allow` (a
+  list of repository path globs, default empty). It is read from `.l4/config.yaml` **at the base commit** of the unit
+  (`load_config_text` on the blob; a missing or unreadable file allows nothing), never from the unit's head, so an agent
+  cannot add itself. A blocker-class match in a production file that matches a glob is listed for the judge in
+  verification.md with the glob that allowed it (`allowed by `<glob>``) instead of blocking; the other rules are
+  unchanged. Doctor shows the key (CFG-010, info).
 
 ## Appendix A: the reproductions
 

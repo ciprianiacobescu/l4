@@ -225,3 +225,17 @@ def _cfg_009(ctx: DoctorContext) -> CheckResult:
 
 
 CFG_009 = register(Check("CFG-009", "The implementer escalation can act", "warn", _cfg_009, scopes=CONFIG_SCOPES))
+
+
+def _cfg_010(ctx: DoctorContext) -> CheckResult:
+    """Shows `verifier.test_awareness_allow`: the production paths where code may name the test run. The verifier reads
+    the key at the base branch, never from a unit's head (L4-VER-039)."""
+    globs = ctx.cfg.verifier.test_awareness_allow
+    if not globs:
+        return CheckResult("pass", "verifier.test_awareness_allow is empty: no production path may name the test run")
+    return CheckResult("pass", f"verifier.test_awareness_allow (read at the base branch): {', '.join(globs)}")
+
+
+CFG_010 = register(
+    Check("CFG-010", "Production paths that may name the test run", "info", _cfg_010, scopes=CONFIG_SCOPES)
+)

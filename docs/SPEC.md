@@ -847,6 +847,7 @@ verifier:
   generate_missing_tests: true
   audit_sample_ratio: 0.3          # share of covered NEW criteria that also get an independent verifier test (min 1)
   max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them
+  test_awareness_allow: []         # production path globs where code may name the test run (`.l4-out`, `L4_*`, `PYTEST_*`); read at the BASE branch, listed for the judge (L4-VER-039)
   playwright:
     enabled: auto                  # auto = when gates.e2e is configured
     base_url_env: L4_E2E_BASE_URL
@@ -3346,10 +3347,10 @@ and SHALL require each test that passed at the base to pass. One that fails twic
 SHALL be a blocker, unless `tests.superseded` names it. A support file only people changed, a `[test-infra]` task
 changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
 
-**L4-VER-039** Step 1's content scan SHALL read a changed Python file of `tdd.test_globs` that defines no test as a support file, and
-flag in support files a `pytest_pyfunc_call` hook, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an
-assignment to `.obj` or `.runtest`. A production-diff line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*`
-SHALL be a blocker; a test for pytest in production code SHALL be listed for the judge.
+**L4-VER-039** Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support files a
+`pytest_pyfunc_call` hook, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj`
+or `.runtest`. A production-diff line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` SHALL block, unless its file
+matches `verifier.test_awareness_allow` (read at the base) and it is listed; a test for pytest SHALL be listed.
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -7931,6 +7932,11 @@ scenario is a spec defect (§26).
 - **When** the content scan runs
 - **Then** each SHALL be the blocker `production code reacts to the test run` naming `file:line`, and the unit SHALL end
   FAIL at step 1; a production line with `import pytest` SHALL only be listed
+
+- **Given** also a match of that kind in a production file that `verifier.test_awareness_allow` names in the config at
+  the base commit, the same match in a file it does not name, and the key set only in the unit's own head config
+- **When** the content scan runs
+- **Then** the first SHALL be listed for the judge with the glob that allowed it, and the others SHALL be blockers
 #### SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone · L4-VER-039, L4-VER-038
 - **Given** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for
   `test_total_adds_prices`, or with `pytest_collection_modifyitems` setting its `item.obj`, a green that breaks

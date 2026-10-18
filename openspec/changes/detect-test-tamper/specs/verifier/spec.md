@@ -304,10 +304,10 @@ changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
   pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
 
 ### Requirement: L4-VER-039 The content scan reads helper modules and flags test-call replacement
-Step 1's content scan SHALL read a changed Python file of `tdd.test_globs` that defines no test as a support file, and
-flag in support files a `pytest_pyfunc_call` hook, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an
-assignment to `.obj` or `.runtest`. A production-diff line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*`
-SHALL be a blocker; a test for pytest in production code SHALL be listed for the judge.
+Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support files a
+`pytest_pyfunc_call` hook, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj`
+or `.runtest`. A production-diff line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` SHALL block, unless its file
+matches `verifier.test_awareness_allow` (read at the base) and it is listed; a test for pytest SHALL be listed.
 
 #### Scenario: SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits
 - **GIVEN** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
@@ -322,6 +322,11 @@ SHALL be a blocker; a test for pytest in production code SHALL be listed for the
 - **WHEN** the content scan runs
 - **THEN** each SHALL be the blocker `production code reacts to the test run` naming `file:line`, and the unit SHALL end
   FAIL at step 1; a production line with `import pytest` SHALL only be listed
+
+- **GIVEN** also a match of that kind in a production file that `verifier.test_awareness_allow` names in the config at
+  the base commit, the same match in a file it does not name, and the key set only in the unit's own head config
+- **WHEN** the content scan runs
+- **THEN** the first SHALL be listed for the judge with the glob that allowed it, and the others SHALL be blockers
 
 #### Scenario: SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone
 - **GIVEN** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for

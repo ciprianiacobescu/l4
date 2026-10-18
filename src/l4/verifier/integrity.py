@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from l4.config.loader import ConfigSchemaError, load_config_text
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.implementer.opened import check_opened, new_patches, unit_modules
@@ -927,6 +928,18 @@ def _awareness_hits(ctx: IntegrityContext, text: str) -> list[str]:
     return [line for line in text.splitlines() if _REACTS.search(line) or any(report in line for report in reports)]
 
 
+def _awareness_allow(ctx: IntegrityContext) -> list[str]:
+    """`verifier.test_awareness_allow` as the BASE commit's `.l4/config.yaml` says it: a unit cannot add itself. A
+    missing or unreadable config at the base allows nothing."""
+    blob = _blob(ctx.git, ctx.base_sha, ".l4/config.yaml")
+    if blob is None:
+        return []
+    try:
+        return list(load_config_text(blob.decode("utf-8", "replace")).verifier.test_awareness_allow)
+    except ConfigSchemaError:
+        return []
+
+
 def check_test_awareness(ctx: IntegrityContext) -> Outcome:
     """Production code that reacts to the verifier's own run (a blocker): a line of the unit's non-test, non-support
     diff that names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*` variable. Code that only looks like it
@@ -944,10 +957,14 @@ def check_test_awareness(ctx: IntegrityContext) -> Outcome:
         "-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", ctx.base_sha,
         ctx.head_sha, "--", *(f":(literal){p}" for p in paths),
     ).stdout  # fmt: skip
+    allowed = _awareness_allow(ctx)
     hits: dict[str, list[scan.AddedLine]] = {}
     listed: list[str] = []
     for line in scan.added_lines(diff):
         if _awareness_hits(ctx, line.text):
+            if glob := next((g for g in allowed if glob_match(g, line.path)), None):
+                listed.append(f"{line.path}:{line.number}: {line.text.strip()[:100]} (allowed by `{glob}`)")
+                continue
             hits.setdefault(line.path, []).append(line)
         elif any(sign.search(line.text) for sign in _SIGNS):
             listed.append(f"{line.path}:{line.number}: {line.text.strip()[:100]}")

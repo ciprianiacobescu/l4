@@ -55,6 +55,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   leave it uncollected and the criterion held); a test command that never collects it is a minor rejection naming the
   command. A generated UI test's head run reverts a helper named like a test module and no longer falls back to the
   unit's support files: a server that does not start without them holds the criterion (L4-VER-033..035).
+- New config key `verifier.test_awareness_allow` (list of production path globs, default empty): a match of the test-awareness
+  blocker in a file under one of them is listed for the judge with its glob instead of blocking. It is read from the base
+  branch's `.l4/config.yaml`, never from the unit, and `l4 doctor` shows it (CFG-010) (L4-VER-039).
 
 ## 0.4.14 (2026-10-17)
 
