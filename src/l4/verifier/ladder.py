@@ -38,6 +38,7 @@ from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
 from l4.availability.vendor import resolve_vendor
 from l4.ci.failing_step import active_ci_steps
+from l4.clarifier.actor import answer_actor
 from l4.config.defaults import cache_root
 from l4.config.preflight import preflight_run_config
 from l4.config.redaction import load_app_config
@@ -1446,9 +1447,11 @@ def verify_hook(ctx: HookContext) -> Trigger:
     criteria = family.criteria(services.ref)
     calibration = cache_root(services.app.environ, repo=services.app.repo) / "s1-calibration.jsonl"
     before = read_ledger(services.ref.path).events
+    unit_git = Git(services.ref.path)
     recorded = consume_verdicts(
-        QuestionsFile.load(services.ref.path / QUESTIONS_FILENAME), before, services.ledger, criteria
-    )
+        QuestionsFile.load(services.ref.path / QUESTIONS_FILENAME), before, services.ledger, criteria,
+        actor_of=lambda question: answer_actor(unit_git, services.ref.path, question, before),
+    )  # fmt: skip
     # a human's verdict on a hold is ground truth: written at once, since the answer is consumed only once and the
     # round can still end before a judge is found (exit 12)
     record_human_labels(

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from l4.clarifier.actor import Actor
 from l4.config.schema import L4Config
 from l4.redact import Redactor
 from l4.specs.base import Criterion
@@ -352,11 +353,17 @@ def _raised(events: Iterable[LedgerEvent]) -> dict[str, Mapping[str, Any]]:
 
 
 def consume_verdicts(
-    file: QuestionsFile | None, events: Sequence[LedgerEvent], ledger: EventSink, criteria: Sequence[Criterion]
+    file: QuestionsFile | None,
+    events: Sequence[LedgerEvent],
+    ledger: EventSink,
+    criteria: Sequence[Criterion],
+    actor_of: Callable[[Question], Actor] | None = None,
 ) -> list[str]:
     """Record `human.verdict` for every validly answered verdict question whose answer is new (or changed since it was
     recorded), and return the question ids it recorded. The text hash is the one the question was raised on; a question
-    the ledger does not know is judged on the criterion's text now."""
+    the ledger does not know is judged on the criterion's text now. `by` (and `marker`, `profile`, `model`) is the real
+    actor of the answer (`actor_of`, L4-QMD-009); a caller that passes none records a person's, as every ledger before
+    0.4.18 did."""
     raised = _raised(events)
     done = {str(e.data.get("question")): e.data.get("answer_sha256") for e in events if e.type == "human.verdict"}
     current = {c.id: text_sha256(c) for c in criteria}
@@ -376,9 +383,10 @@ def consume_verdicts(
         if not target:
             continue
         sha = str(known.get("text_sha256") or current.get(target) or finding_sha256(target))
+        actor = actor_of(q) if actor_of is not None else Actor("human")
         ledger.append(
-            "human.verdict", question=q.id, target=target, decision=parsed[0], by="human", reason=parsed[1][:1000],
-            text_sha256=sha, answer_sha256=digest,
+            "human.verdict", question=q.id, target=target, decision=parsed[0], by=actor.by, reason=parsed[1][:1000],
+            text_sha256=sha, answer_sha256=digest, **actor.fields(),
         )  # fmt: skip
         recorded.append(q.id)
     return recorded

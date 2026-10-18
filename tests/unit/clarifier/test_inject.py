@@ -68,3 +68,18 @@ def test_a_dismissed_question_says_to_proceed_without_it():
 def test_nothing_answered_renders_nothing():
     rendered = render_answer_blocks(parse(section("Q-001", "open", "1.1")).questions, str)
     assert rendered.text == "" and rendered.consumed == ()
+
+
+def test_answer_blocks_name_agent_and_delegate():  # SCN-DLG-46
+    from l4.clarifier.actor import Actor
+
+    file = parse(
+        section("Q-003", "answered", "1.1", answer="Use cents."),
+        section("Q-004", "answered", "1.1", answer="Use dollars."),
+        section("Q-005", "answered", "1.1", answer="Use euros."),
+    )
+    actors = {"Q-003": Actor("delegate", profile="p", model="m"), "Q-004": Actor("human"), "Q-005": Actor("agent")}
+    text = render_answer_blocks(file.questions, str, actor_of=lambda q: actors[q.id]).text
+    assert '<l4:data kind="answer" id="Q-003" by="delegate">' in text
+    assert '<l4:data kind="answer" id="Q-004" by="human">' in text
+    assert '<l4:data kind="answer" id="Q-005" by="agent">' in text

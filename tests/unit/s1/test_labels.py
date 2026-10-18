@@ -60,3 +60,22 @@ def test_a_reject_on_a_scope_hold_overrides_the_deterministic_label_in_the_expor
     (row,) = export.ground_truth_rows([path]).rows
     assert row.expected == {"relevant": False, "unrelated": True, "relatedness": 0}
     assert "human_overrides_deterministic" in row.tags
+
+
+def test_only_a_persons_verdicts_become_labels():  # SCN-DLG-31
+    holds = {"H-aaaaaaaa": HoldRef("file1", "scope")}
+    criteria = {"C-11111111": "crit1", "C-22222222": "crit2", "C-33333333": "crit3", "C-44444444": "crit4"}
+    events = [
+        verdict("C-11111111", "accept", by="agent"),
+        verdict("C-22222222", "reject", by="delegate"),
+        verdict("H-aaaaaaaa", "reject", by="agent"),
+        Ev("human.verdict", {"question": "Q-1", "target": "C-33333333", "decision": "accept"}),  # no `by`: a person
+        verdict("C-44444444", "accept", by="human"),
+    ]
+    got = {lab.item_key for lab in labels_from_verdicts(events, holds, criteria, now=NOW)}
+    assert got == {"crit3", "crit4"}
+
+
+def test_a_later_agent_verdict_does_not_leave_the_earlier_persons_label():
+    events = [verdict("C-11111111", "accept", by="human"), verdict("C-11111111", "reject", by="agent")]
+    assert labels_from_verdicts(events, {}, {"C-11111111": "crit1"}, now=NOW) == []

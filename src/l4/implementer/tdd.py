@@ -31,6 +31,7 @@ from l4.ci.failing_step import (
     reproduction,
 )
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
+from l4.clarifier.actor import answer_actor
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
 from l4.config.schema import duration_seconds
 from l4.evidence.scope import file_kind
@@ -586,7 +587,11 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
     if file is None:
         return RenderedAnswers("", ())
     scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-    return render_answer_blocks(file.questions, wb.redactor.redact_text, tasks=scope)
+    events, unit_git = read_ledger(wb.ref.path).events, wb.git.at(wb.ref.path)
+    return render_answer_blocks(
+        file.questions, wb.redactor.redact_text, tasks=scope,
+        actor_of=lambda question: answer_actor(unit_git, wb.ref.path, question, events),
+    )  # fmt: skip
 
 
 MAX_REASON = 1000  # one failure headline of an escalation block, cut (escalate-and-note D9)
