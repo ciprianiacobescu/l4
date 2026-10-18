@@ -56,3 +56,19 @@ def test_an_audit_test_file_under_a_planted_link_is_not_removed_through_it(make_
     assert (outside / "test_l4_audit_c_1_r1.py").read_text() == "outside\n"
     assert [u.link for u in wb.planted_links()] == ["tests"]
     assert not (wb.worktree / "tests").is_symlink()
+
+
+def test_a_generated_ui_test_file_under_a_planted_e2e_link_is_not_removed_through_it(make_bench, tmp_path):
+    """The writer's file is removed after agent-controlled e2e runs (verifier/generate.py): never through a link"""
+    from l4.verifier.generate import _drop_generated
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "test_l4_gen.py").write_text("outside\n")
+    wb = make_bench([]).wb
+    (wb.worktree / "e2e").symlink_to(outside)
+    _drop_generated(wb, wb.worktree, "e2e/test_l4_gen.py")
+    assert (outside / "test_l4_gen.py").read_text() == "outside\n"
+    assert [u.link for u in wb.planted_links()] == ["e2e"]
+    assert not (wb.worktree / "e2e").is_symlink()
+    assert [f.title for f in _unsafe_findings(wb)] == ["a gate run planted a symbolic link in the worktree"]

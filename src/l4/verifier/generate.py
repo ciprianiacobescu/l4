@@ -14,12 +14,12 @@ per criterion (the live protocol's shape, plus the evidence); line 34's ladder r
 M1: verifier 3.2 (`flaky_repeats`), 3.3 (the synthetic baseline), 3.7/3.8 (audit sampling), the agentic verifier.
 """
 
-import contextlib
 import hashlib
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from l4.fsutil import UnsafeFile, unlink_inside
 from l4.gates.e2e import ServerNotReady, run_e2e
 from l4.gates.junit import TestReport
 from l4.implementer.tdd import RoleLimit
@@ -208,8 +208,7 @@ def generate_ui_test(
         finally:
             for tree in written:
                 if not (last.status == "accepted" and tree == wb.worktree):
-                    with contextlib.suppress(OSError):
-                        (tree / rel).unlink()
+                    _drop_generated(wb, tree, rel)
         if last.status == "accepted":
             # the file ran under agent-controlled e2e runs with the tree writable: put the harness's bytes back before
             # they are hashed and committed, whatever a test did to its own file
@@ -219,6 +218,17 @@ def generate_ui_test(
             return outcome(attempt, last)
         retry_reason = last.reason
     return outcome(MAX_ATTEMPTS, last)
+
+
+def _drop_generated(wb: Workbench, tree: Path, rel: str) -> None:
+    """Remove the writer's file after agent-controlled e2e runs, never through a link a run planted (L4-SEC-020): the
+    link is removed itself and recorded, which makes the round a blocker (L4-SEC-021)."""
+    try:
+        unlink_inside(tree, rel)
+    except UnsafeFile as exc:
+        wb.refused_write(exc, path=rel, where="generate", root=tree)
+    except (OSError, ValueError):
+        pass
 
 
 def generate_ui_tests(

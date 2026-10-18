@@ -19,7 +19,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from l4.fsutil import LinkedPath, UnsafeFile, read_inside, unlink_inside, unlink_matching_inside, write_inside
+from l4.fsutil import (
+    LinkedPath,
+    UnsafeFile,
+    linked_component,
+    read_inside,
+    unlink_inside,
+    unlink_matching_inside,
+    write_inside,
+)
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer.stubs import _is_inside, has_stub, zero_value_variant
@@ -81,7 +89,11 @@ def _canonical(wb: Workbench, relative: str) -> str | None:
 
 def _put(wb: Workbench, rel: str, data: bytes, mode: int | None, where: str) -> bool:
     """Write `data` over `rel` without following a link (D3). A planted link is removed and recorded, and the write is
-    made once more into a real directory. Nothing is raised: this runs in `finally` blocks."""
+    made once more into a real directory. A link as the last component is checked first: the rename in `write_inside`
+    would replace it silently, and a plant must be recorded like every other. Nothing is raised: this runs in
+    `finally` blocks."""
+    if (link := linked_component(wb.worktree, rel)) is not None:
+        wb.refused_write(LinkedPath(link), path=rel, where=where)
     try:
         write_inside(wb.worktree, rel, data, mode=mode)
         return True

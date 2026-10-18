@@ -212,3 +212,22 @@ def test_run_gate_spec_records_and_removes_a_linked_report_path_before_and_after
     wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)  # the gate plants it this time
     assert (outside / "junit.xml").read_text() == "outside\n"
     assert not (wb.worktree / ".l4-out").is_symlink() and [u.link for u in wb.planted_links()] == [".l4-out"]
+
+
+def test_a_leaf_symlink_planted_in_place_of_a_varied_file_is_recorded_and_the_outside_file_is_untouched(
+    make_bench, tmp_path
+):
+    """SCN-SEC-40, the last component: a rename over a link replaces it silently, so the plant must be recorded"""
+    other = tmp_path / "other.py"
+    other.write_text("outside file\n")
+    cmd = plant_after_tests(f"rm src/pytdd/pricing.py && ln -s {other} src/pytdd/pricing.py")
+    bench = make_bench([], test={"command": cmd})
+    wb = bench.wb
+    run_setup(wb)
+    original = (wb.worktree / "src/pytdd/pricing.py").read_bytes()
+    zeroed_run(wb, "test-zero", ["src/pytdd/pricing.py"], public=True)
+    assert other.read_text() == "outside file\n"
+    target = wb.worktree / "src/pytdd/pricing.py"
+    assert target.is_file() and not target.is_symlink() and target.read_bytes() == original
+    assert [u.link for u in wb.planted_links()] == ["src/pytdd/pricing.py"]
+    assert planted(bench, "src/pytdd/pricing.py")

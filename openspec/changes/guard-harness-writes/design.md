@@ -153,6 +153,8 @@ Report paths and the paths that `ProductionGuard` and `restore_to_base` handle a
 | `gates/runner.run_gate` | Removing an earlier report uses `unlink_inside`. A `LinkedPath` there, or a `linked_component` of a report path found before the parse, returns `result("fail", "report path {rel} has a symbolic link at {link}")`: before the command runs in the first case, before any read in the second, the way `shadowing_plugin` fails. `dryrun.py` calls `run_gate` directly and gets the same protection. |
 | `workbench.Workbench.run_gate_spec` | Before and after the gate, each report path with a `linked_component` goes to the record (D4). The link is removed, so the gate writes a real `.l4-out`. |
 | `stubs.restore_to_base`, `enforce_red_scope`, `ProductionGuard` | D5. |
+| `discrimination._put` | A link as the LAST component is found with `linked_component` before the write and goes to `refused_write`: the rename in `write_inside` would replace it without an error, and a leaf plant must be recorded and halt like every other (hard links and FIFOs stay a silent replace, SCN-SEC-44). |
+| `verifier/generate.py` `_drop_generated` | The writer's UI test file is removed after agent-controlled e2e runs with `unlink_inside`; a planted `e2e` link is removed and recorded (`where: generate`), a blocker in the verifier (SCN-SEC-47). |
 | `verifier/audit.py` | The three `(wb.worktree / rel).unlink(missing_ok=True)` calls become `unlink_inside`, and an `UnsafeFile` goes to the record. |
 
 `_put(wb, rel, data, mode, where)`:
