@@ -208,6 +208,7 @@ from l4.verifier.verdicts import (
     hold_sha256,
     raise_verdict_questions,
     regressions,
+    round_judges,
     settle_holds,
     supersede_stale_verdicts,
     text_sha256,
@@ -1413,7 +1414,7 @@ def _ask_verdicts(
         services.ref.path, services.ref.name, outcomes=result.criteria, criteria=criteria, trace=result.trace,
         findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
-        hold_views=result.hold_views,
+        hold_views=result.hold_views, judges=round_judges(events, round_no, wb.cfg),
     )  # fmt: skip
     if (section := verdict_section(ctx, consumed)) is not None:
         ctx.shared["notes"] = (section,)

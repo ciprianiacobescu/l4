@@ -807,6 +807,7 @@ def agent_step(
         model=run.model_resolved, input_tokens=run.usage.input_tokens, output_tokens=run.usage.output_tokens,
         **denial_facts(run), **context_peak_facts(run),
     )  # fmt: skip
+    wb.served_model = run.model_resolved  # who a question raised from this step is asked by (L4-DLG-002)
     for rejected in run.tool_rejections:  # SPEC §8.3: a policy-rejected call the JSON stream omits
         wb.emit("agent.tool_rejected", task=task.key, phase=role, **rejected)
     if run.session_id:

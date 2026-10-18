@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from l4.config.schema import L4Config
 from l4.redact import Redactor
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise
@@ -624,11 +625,13 @@ def raise_verdict_questions(
     holds: Sequence[str] = (),
     covers: Mapping[str, Collection[str]] | None = None,
     hold_views: Mapping[str, Mapping[str, Any]] | None = None,
+    judges: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
     except where a verdict question for the same target is still waiting (open or invalidly answered). Returns the new
-    question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`."""
+    question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`. `judges` (from
+    `round_judges`) is recorded on each, so the delegate is never a mind that judged the round (L4-DLG-002)."""
     status = verdict_status(existing, consumed)
     unsettled = {*status.open, *status.invalid, *status.ready}
     waiting_q = {t: q.id for q in _verdict_questions(existing) if (t := target_of(q)) and q.id in unsettled}
@@ -665,8 +668,28 @@ def raise_verdict_questions(
         ledger.append(
             "question.raised", id=qid, kind="verdict", source="verifier", target=target, text_sha256=sha,
             round=round_no, title=titles.get(qid, ""), **({"covers": quoted_ids} if quoted_ids else {}),
+            **({"judges": [dict(j) for j in judges]} if judges is not None else {}),
         )  # fmt: skip
     return ids
+
+
+def round_judges(events: Iterable[LedgerEvent], round_no: int, cfg: L4Config) -> list[dict[str, Any]]:
+    """Who judged round `round_no`: each distinct `{profile, model}` of its `verify.judge` events, a panel's parts and a
+    fallback judge included. A round that reused an earlier round's judge made no call of its own: the latest earlier
+    round that judged is the one whose mind decided it. The model is the one that served the call, else the profile's
+    configured model, else None."""
+    calls = [e for e in events if e.type == "verify.judge" and isinstance(e.data.get("profile"), str)]
+    rounds = [r for e in calls if isinstance(r := e.data.get("round"), int) and r <= round_no]
+    out: list[dict[str, Any]] = []
+    for e in calls:
+        if not rounds or e.data.get("round") != max(rounds):
+            continue
+        profile = e.data["profile"]
+        configured = cfg.profiles.get(profile)
+        entry = {"profile": profile, "model": e.data.get("model") or (configured.model if configured else None)}
+        if entry not in out:
+            out.append(entry)
+    return out
 
 
 def verdict_targets(
