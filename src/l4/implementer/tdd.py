@@ -843,11 +843,13 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
 def _edited_tests(wb: Workbench, base: str, changed: Sequence[str]) -> list[str]:
     """The Python test files of the base that this red step edited instead of appending to (`appended_only`): an earlier
     test is frozen, and a tag inserted above it would claim a criterion it was never shown to fail for."""
-    globs = wb.cfg.tdd.test_globs
+    globs, support = wb.cfg.tdd.test_globs, wb.cfg.tdd.test_support_globs
     edited = []
     for path in changed:
         target = wb.worktree / path
-        if not path.endswith(".py") or not _matches(globs, path) or target.is_symlink() or not target.is_file():
+        if not path.endswith(".py") or not _matches(globs, path) or _matches(support, path):
+            continue  # support files (conftest.py and the like) have their own rules
+        if target.is_symlink() or not target.is_file():
             continue
         before = wb.git.run("show", f"{base}:{path}", check=False)
         if before.returncode == 0 and not appended_only(
@@ -1075,13 +1077,6 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             via = {"via": VIA} if criterion in earlier else {"via": BASE_VIA} if criterion in based.confirmed else {}
             wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
         return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
-    if stale is None and (edited := _edited_tests(wb, base, changed)):
-        wb.discard_changes()
-        return RedOutcome(
-            "failed",
-            f"an existing test file was edited, not appended to: {', '.join(edited[:3])}; keep every existing test as "
-            "it is and write NEW tests (a tag added to an old test creates no new test)",
-        )
     allowed = {t for tests in pre_satisfied.values() for t in tests}
     verdict = classify_red(
         base_report, report, test_files_changed=test_files,
@@ -1091,6 +1086,13 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
+    if stale is None and (edited := _edited_tests(wb, base, changed)):
+        wb.discard_changes()
+        return RedOutcome(
+            "failed",
+            f"an existing test file was edited, not appended to: {', '.join(edited[:3])}; keep every existing test as "
+            "it is and write NEW tests (a tag added to an old test creates no new test)",
+        )
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
     proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
