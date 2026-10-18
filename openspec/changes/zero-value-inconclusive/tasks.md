@@ -580,7 +580,7 @@ Every task follows these rules:
 
 ## 8. Docs
 
-- [ ] 8.1 `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md`.
+- [x] 8.1 `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md`.
   - `docs/SPEC.md`:
     - L4-IMP-002: the pre-satisfied paragraph (confirmed, refuted, inconclusive; the precedence of D2; the setup rule of
       D6; dependency-only criteria), check 5 (judged by L4-IMP-060; an inconclusive run is not vacuous), the

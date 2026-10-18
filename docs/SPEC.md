@@ -1297,8 +1297,8 @@ pytest with `--junitxml`; `package.json` scripts + lockfile → npm/pnpm/yarn/bu
 How to answer: write under "### Answer" and set **Status** to `answered`.
 To accept the clarifier's suggestion as-is, set **Status** to `accepted`.
 Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded
-Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with `accept` or
-`reject`, then give your reason.
+Kind values: technical · product · ambiguous · verdict · harness. For a `verdict` question, start the answer with `accept` or
+`reject`, then give your reason; for a `harness` question, with `accept` or `retry`.
 Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->
 
 <!-- l4:index:start -->
@@ -1348,6 +1348,11 @@ untouched.
 **L4-QMD-004** IDs are `Q-NNN`, unique per unit, never reused. `superseded` questions name their successor. For
 `Kind: verdict` questions (L4-VER-013) the answer MUST start with the word `accept` or `reject` (case-insensitive);
 any other answer with Status `answered` is invalid: it is not consumed and the sticky comment asks for a fix.
+A `Kind: harness` question (L4-IMP-063) is answered `accept` or `retry`: its answer MUST start with one of the two
+words (case-insensitive, then a space, `:`, `,` or the end), and Status `dismissed` reads as `retry`. Any other answer
+with Status `answered` is invalid: it is not consumed, the question keeps holding its task, and `l4 plan` and the
+sticky comment ask for a fix. `l4 questions accept` SHALL refuse a harness question, and `l4 questions answer` SHALL
+refuse a harness text that does not start with `accept` or `retry` (exit 2 with a `Fix:` line naming both).
 
 **L4-QMD-005** A question is *answered* when Status ∈ {answered, accepted, answered-by-clarifier, dismissed}. A unit
 is unblocked when every question listing a pending task under *Blocking tasks* is answered.
@@ -1428,12 +1433,13 @@ cases:
 **L4-QMD-009** Agents need the project's consent for a person's decisions. The writing forms SHALL use the actor rule of `l4 yolo accept`. A caller is an agent when one of the agent markers is
 set, or when standard input is not a terminal. An agent MAY accept or answer a question only when all of these hold:
 - its kind is in `clarifier.auto_accept_kinds`;
-- its kind is not `verdict`;
+- its kind is not `verdict` or `harness`;
 - the effective answer names no frozen path (`task.red_ok.frozen`) of a task that the question holds.
 
 Any other write by an agent MUST be refused unless `clarifier.answer_by_agents` is `true`. Both keys MUST be read
 from `.l4/config.yaml` on the base branch, never on the unit branch. `clarifier.answer_by_agents` SHALL default to
-`false`. The commit body SHALL name the actor: `person`, or `agent: <marker>`.
+`false`. For a harness question the refusal SHALL say `a harness override is a person's decision`. The commit body
+SHALL name the actor: `person`, or `agent: <marker>`.
 
 **L4-QMD-010** A verdict answer can be replaced on purpose.
 
@@ -1725,7 +1731,8 @@ pending leaves of one parent into one step.
       tracing it MUST fail **by assertion** against the zero-value stubs. Other new tests may pass against zero-value stubs (correct edge cases such as
       `total([]) == 0` or `parse("") is None` do) and are never flagged when a sibling test of the same criterion
       discriminates; a criterion whose new tests all pass against zero-value stubs (e.g. only call-only tests) fails
-      the red phase as vacuous;
+      the red phase as vacuous. The run is judged by L4-IMP-060: a test the run did not run is inconclusive, and a
+      criterion all of whose unconfirmed tests are inconclusive is not vacuous, it is held (L4-IMP-063);
    6. static gates: each `gates.lint`/`gates.typecheck` command that passed at the step base MUST still pass after the
       red step; otherwise the red attempt fails and the redacted, truncated gate output is fed back to the retry, and
       the red prompt names these commands. Red tests are frozen for green, so a static-gate error inside them could
@@ -1736,7 +1743,9 @@ pending leaves of one parent into one step.
    `bool→False`, `list→[]`, `dict→{}`, `set→set()`, `tuple→()`, `bytes→b""`; unannotated or unknown → `None`; a
    generator or a context manager stays one (L4-IMP-026). A guarded stub's guard body gets the same treatment [V, spikes/02, which also showed `return None` to be wrong for a
    `-> str` function]. Other languages use the type's zero value, an empty value, or doing nothing [U: per-language
-   derivation, change-0 fixtures].
+   derivation, change-0 fixtures]. When every public function is zeroed (the pre-satisfied run), a function annotated
+   to return a callable or a class keeps its body, and the functions a failing run's tracebacks call are kept real
+   on a rerun (L4-IMP-061).
 
    **Pre-satisfied criteria.** When every new test tracing a cited criterion passes in run (a), the criterion does not
    fail red if, and only if, the harness confirms discrimination. Against a scratch copy in which every public function
@@ -1746,6 +1755,20 @@ pending leaves of one parent into one step.
    imported modules are found under the import roots of L4-IMP-025.
    - Confirmed criteria are recorded as `criterion.pre_satisfied`, listed in `verification.md` and always included in
      audit sampling.
+   - The run is judged against the real run, test by test (L4-IMP-060). A criterion is **confirmed** when one of its
+     tests fails by assertion; **not discriminating** (refuted) only when every one of its tests ran and none did;
+     **inconclusive** otherwise (no report, no test executed, its module failed to import only there, skipped only
+     there). A test fails by assertion on the zero values when it failed by assertion, or when its **setup** failed by
+     assertion at a line of a test or support file that the unit added or changed since the unit base (a fixture the
+     unit wrote is the unit's own check of a production answer); a setup assertion anywhere else, in a shared fixture
+     that fails every test that uses it, is inconclusive, and a setup error of another kind is no proof.
+   - **Precedence.** A criterion that is not discriminating fails red (`not discriminating: <ids> (…)`, counted, the
+     message listing the inconclusive criteria apart as `inconclusive: <id> (<reason>)`, so the retry is not told to
+     fix what it cannot). Only when every unconfirmed criterion is inconclusive is the task held, with a harness
+     question (L4-IMP-063): no attempt is used.
+   - A criterion whose every test reads a dependency and no project code (a version pin) is **not applicable**: it is
+     recorded `via: not_applicable` and no run varies anything for it (L4-IMP-062). A criterion about the interpreter
+     (`sys.version_info`) reads only the standard library, so it stays not discriminating when pre-satisfied.
    - Unconfirmed ones fail red (`not discriminating`).
    - If every cited criterion is pre-satisfied, the task follows `already_satisfied` (L4-IMP-003).
    - The zero-value run is the harness's own write: it never counts as a gate run that moved production files. Each
@@ -1780,6 +1803,8 @@ pending leaves of one parent into one step.
    file must still pass, and the corrected test must still fail against the red commit's production code (a
    `test-at-red` gate with the production files swapped back to their red content, where an id counts as failing only
    when the report lists it as failed); otherwise the attempt fails with `the corrected test no longer discriminates`.
+   A `test-at-red` run that wrote no report or executed no test decides nothing: the green attempt is not counted, the
+   red commit stays, and the task is held with a harness question (`check: at_red`, L4-IMP-063).
    Every later step freezes the file again. The text of a task can also open a Python support file that it names in green (L4-IMP-014), a person's answer can unfreeze one (L4-IMP-015) and can also open a pre-existing test file that the task must change and that red did not touch, and an opened file is checked so that it cannot replace the code under test (L4-IMP-016).
 
 **L4-IMP-014** A task's own reviewed text opens the support files it names. In the green step of a task, the harness SHALL open each path of the red manifest that meets all of these conditions:
@@ -1880,7 +1905,7 @@ earlier tests, `via: earlier_red`, `red_sha` and `red_task` of the newest such r
 coverage hold is a harness-made exemption too, and its step adds tests (L4-VER-006).
 **Confirmation by a base run.** The order is: the earlier red, then the zero-value run on the criteria left, then a
 base run on the criteria the zero-value run left unconfirmed (a project it cannot read, or a criterion it could not
-decide); when the zero-value run confirms everything, no base run happens. A base run (`implementer/base_run.py`,
+decide); when the zero-value run confirms everything, no base run happens. The base run **only confirms**. A base run (`implementer/base_run.py`,
 language-neutral) runs the test gate as `test-base-run` against the unit base code (`unit_base`): the production files
 changed since the unit base, by commits or in the worktree (a red stub), are swapped to their base content (`git
 diff base HEAD` plus the worktree's changes; files added since are set aside), while test files, test support files and
@@ -1889,10 +1914,16 @@ manifest or lock file (`package.json`, lock files, `pyproject.toml`, `requiremen
 `Directory.Build.*`, `Directory.Packages.props`, `global.json`, `NuGet.config`, `go.mod`, `Cargo.*`, ...) or any
 `tdd.runner_config_files` file changed since the unit base, the environment differs: the run is skipped and nothing is
 confirmed. A symlink or submodule in the changed set skips it too. Every file touched is put back byte for byte (sha256
-checked) before anything else runs. A criterion is confirmed only when one of its new tests FAILS BY ASSERTION in that
-run; an error (missing export, import or collection error, TypeError) is inconclusive, and a test that passes at the
-unit base too shows the criterion was satisfied before the unit: not confirmed. The step then fails with `not
-discriminating: ` naming only the criteria neither run confirmed. The proof is `pre_satisfied` with `discriminating` =
+checked) before anything else runs. The run passes `--continue-on-collection-errors` and is judged like every variant
+run (L4-IMP-060), so an unrelated test file that imports a module the unit added (set aside at the base) does not
+stop pytest before the candidates run. A criterion is confirmed only when one of its new tests FAILS BY ASSERTION in
+that run; an error (missing export, import or collection error, TypeError), a test that passes at the unit base (the
+criterion was satisfied before the unit) and a test that does not run there (its module cannot import at the base)
+confirm nothing and refute nothing: the criterion keeps what the zero-value run said. Refuted by the zero-value run
+(or with nothing to vary, or no project module imported) and not confirmed here: `not discriminating`, as before;
+inconclusive there and not confirmed here: inconclusive, and the task is held (L4-IMP-063). A skipped base run (a
+changed manifest, a symlink, no unit base) is not classified; its reason stays in the message. The step then fails
+with `not discriminating: ` naming only the criteria neither run confirmed that a run showed not to discriminate. The proof is `pre_satisfied` with `discriminating` =
 the tests that failed at the base, `via: base_run` and `base_sha`; `criterion.pre_satisfied` carries `via` too.
 **Already satisfied without a new test.** When an earlier task already wrote and proved the tests of every criterion a
 task cites, a copy proves nothing more. A red step that adds no new test, changes no file and adds no stub is accepted
@@ -2227,8 +2258,9 @@ no task moves.
 
 A failed attempt is an attempt that the implementer loop counts against `max_task_attempts`: a harness check that does
 not pass, a result failure of L4-IMP-021, or an agent run that ends with a status that is not `ok` and not a limit. It SHALL
-count against the profile that ran it. A limit (L4-AVL-006), a `blocked` result and the question about a frozen test
-that hangs MUST NOT count, and MUST NOT start an escalation.
+count against the profile that ran it. A limit (L4-AVL-006), a `blocked` result, the question about a frozen test
+that hangs, and a check held as inconclusive with a `harness` question (L4-IMP-063) MUST NOT count, and MUST NOT
+start an escalation.
 
 In the unit's own task loop, after a failed attempt of phase P of task T, the harness SHALL try to move P to another
 profile when all of these hold:
@@ -2409,6 +2441,60 @@ has no `yield`: the decorator and the annotation decide. The `vacuous` message S
 manager: assert on what it yields, or on its effects after the block. [V: a consumer repository's unit halted after
 five red attempts on a `@contextmanager` stub whose zero-value variant `return None` made every `with` raise a
 `TypeError` before the test body ran, so no test could fail by assertion.]
+
+**L4-IMP-060** A variant run is judged against the real run. Every variant run (run (b), the pre-satisfied zero-value
+run, the base run, `test-at-red`, the audit's run and the extra proofs' runs) SHALL pass
+`--continue-on-collection-errors` and SHALL be judged per test against the real run: a test that failed by assertion
+is a proof; one that passed, or failed by another error, is none; one the run did not run (absent from the report, or
+skipped only there), and every test of a run with no report or no executed test, is inconclusive. A criterion is
+confirmed when any of its tests is a proof, inconclusive when none is and any is inconclusive, and not discriminating
+only when every one of its tests ran and none is a proof. A reason SHALL quote the first `E` line when there is one,
+cut at 300 characters and redacted. `run_with_code_of` returns the gate result, so "no test" and "no report" differ.
+[V: a consumer repository, harness 0.4.14, task 3.1: the pre-satisfied run ended `Interrupted: 45 errors during
+collection` and ran 0 tests, and the message said "its tests still pass"; the base run stopped at the first collection
+error; nine red attempts on four profiles halted the unit.]
+
+**L4-IMP-061** Zeroing keeps what imports need. When the harness zeroes every public function, one annotated to return
+`Callable` or `type` (also `X | None` or `Optional[X]` of them, also as a string) SHALL keep its body: the zero value of
+a decorator factory is not a value a test can meet, it breaks the import of a module that applies the decorator while
+its class body runs. When a zero-value run leaves a candidate inconclusive, the harness SHALL keep the zeroed functions
+called on the failing lines of the run's new collection errors and of setup assertions outside the unit's files, and
+run again: at most twice, only when a new function is kept, at most 50 functions, recording `zero.kept{gate, rerun,
+cause, functions}`. [V: the same halt: `@telemetry.traced("…")` applied in a class body received `None`:
+`TypeError: 'NoneType' object is not callable`.]
+
+**L4-IMP-062** Discrimination is not applicable to a dependency check. A pre-satisfied criterion whose every candidate
+test reads a dependency (a name bound to a module from outside the repository that is not in the standard library, or a
+call of `importlib.metadata`'s distribution reader) and uses no project code, no repository helper, no definition of its
+file beyond a constant and no fixture beyond pytest's built-ins and its own `parametrize` SHALL be recorded
+`proof: pre_satisfied, via: not_applicable`, with no variant run for it, and the judge sees the label (L4-VER-051). A
+test that reads no dependency (`assert 1 + 1 == 2`, `json.loads("1") == 1`) SHALL stay not discriminating. [V: the same
+unit: a test that pins a dependency's version passes on the zero values and at the base alike, so no check could ever
+confirm its criterion.]
+
+**L4-IMP-063** An inconclusive check holds the task with a harness question. When every unconfirmed criterion of a red
+step (the pre-satisfied check, or run (b)), or every corrected test of `test-at-red`, is inconclusive, the harness SHALL
+discard the step's changes, record `check.inconclusive{task, phase, check, criteria, tests, reason, runs, kept,
+question}`, raise one question of the kind `harness` that blocks the task (`question.raised{id, task, kind: harness,
+title, check, criteria, tests}`), and end the task `blocked`: no attempt is counted and no profile escalates
+(L4-IMP-017). The unit goes to `awaiting_human` (exit 11; through `clarifying` when a clarifier runs, which never takes
+a harness question), and a delivery plan waits on it without chaining a run (L4-YOLO-012). The answer is `accept` or
+`retry` (L4-QMD-004). `accept` lets the next attempt, which does the red step again, count those criteria when the same
+check is inconclusive again for criteria the question names (read from its `question.raised` event and from a
+`question.answered{by: human}` event with the digest of the answer): the proof is `pre_satisfied` (run (b): `zero_value`)
+with `via: human_override`, `question` and `answer_sha256`, and `check.accepted{task, check, question, answer_sha256,
+criteria | tests}` and `criterion.pre_satisfied{via: human_override}` are recorded; a conclusive result always wins over
+the answer, and an override is never an earlier red's evidence. `retry` runs the check again, and its note reaches the
+agent as any answer does. A criterion that a run shows to be not discriminating still fails the attempt (L4-IMP-002).
+[V: the halted unit above would have waited here instead of spending nine attempts.]
+
+**L4-IMP-064** The evidence of a variant run reaches the ledger and the console. `gate.finished` of a test gate that
+failed with no report, no executed test or a collection error, and `task.attempt_failed`, SHALL carry `excerpt`: the `E`
+lines and the deepest repository location of the failure, at most 600 characters, redacted by the run's redactor, never
+read into a prompt; `gate.finished` carries `collection_errors` whenever there is a report. The gate line of a run that
+executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
+`ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
+was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
 
 ## 8. Agent and model factory
 
@@ -2956,7 +3042,10 @@ invalid and go through the one repair of L4-CLR-005.
    `s1_judge` chain does not count as S1. [I, decision of delivery change 7 `clarification-loop` (design D5): M1 has no Laya/Jev on the
    reference runner, and the stand-in is opt-in so the default stays this SPEC's rule]
 
-Otherwise the question stays `open` with a *Clarifier suggestion* and the unit goes to `awaiting_human`.
+Otherwise the question stays `open` with a *Clarifier suggestion* and the unit goes to `awaiting_human`. A `verdict`
+question and a `harness` question (L4-IMP-063) are never routed to the clarifier: the first is the verifier's, the
+second a check of the harness's own, and only a person (or an agent where `clarifier.answer_by_agents` is true)
+answers either.
 
 **L4-CLR-003** S1 questions (Laya or Jev). The two yes/no questions first proposed ("is this a product decision?",
 "does `cited_text` support `answer`?") did not separate the cases on Jev (technical questions scored 0.24 and 0.42
@@ -2987,7 +3076,9 @@ version of the questions.
   citation state.
 
 **L4-CLR-004** On `awaiting_human` the forge MUST get label `l4:needs-answers`, a sticky comment listing open
-question IDs and titles with a link to `questions.md` on the unit branch, and the configured mentions.
+question IDs and titles with a link to `questions.md` on the unit branch, and the configured mentions. The section
+also names a harness question whose answer does not start with `accept` or `retry` (L4-QMD-004): `Q-NNN has an
+answer that does not start with `accept` or `retry`: it was not read. Please answer again.`
 
 **L4-CLR-005** If no clarifier profile is available or its output stays invalid after one repair, the questions stay
 `open` without suggestion, the unit goes to `awaiting_human` (exit 11, not 12 — humans can always answer), and the
@@ -3057,7 +3148,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered* |
-| 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. Audit and generated tests run with the unit's added or changed support files reverted to their base versions where they still collect; otherwise with them, provided the step-1 content scan of those files is clean |
+| 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit and generated tests run with the unit's added or changed support files reverted to their base versions where they still collect; otherwise with them, provided the step-1 content scan of those files is clean |
 | 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head**. Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
 | 6 | quality (opt-in) | `gates.extra` entries such as diff coverage or mutation testing on changed files |
 | 7 | contracts / security (opt-in) | `gates.extra` entries such as schemathesis, property tests, `semgrep --baseline-commit <base>` |
@@ -3195,6 +3286,8 @@ test reports individually. A test is discriminating when it fails at the synthet
 evidence is discriminating when **at least one** of its tracing tests also fails **by assertion** against the
 zero-value stubs (tests whose correct answer is the zero value count together with such a sibling, never alone):
 * **implementer tests** — proven during the red phase (both runs, L4-IMP-002) and re-checked by the TDD-history step;
+  a criterion recorded `not applicable` or accepted by a person after an inconclusive check is labelled for the judge
+  (L4-VER-051);
 * **verifier-written tests** (steps 4a and 5) — run by the verifier at the synthetic baseline and with zero-value stubs;
 * **existing criteria** (text unchanged from the base specs, e.g. an untouched scenario inside a MODIFIED
   requirement): pass-to-pass is accepted. The base specs are read from git at the baseline commit (`git show
@@ -3253,6 +3346,20 @@ first prompt, the judge's own reply (redacted and cut as for a schema repair) an
 id. A valid second reply SHALL be the verdict (`reply: retried`). A second reply that is not valid, a second call that
 times out or errs, and a second call served by another model SHALL keep the first verdict: a valid verdict is never
 dropped over an evidence answer. An id that no kept reply answers is recorded as not answered, as before.
+
+**L4-VER-050 The audit tells an inconclusive run from a rejection.** Step 4a SHALL judge the zero-value run of its audit
+tests by L4-IMP-060 against the audit's head run: confirmed is accepted, not applicable (L4-IMP-062) is accepted with
+the label `not applicable: no project code`, refuted is rejected (a minor finding), and inconclusive is recorded
+`inconclusive` with its reason: no finding, not committed, listed in `verification.md`. The two runs for tests that
+people or a test chore wrote (L4-VER-009) are judged the same way: at most two gate runs per round, plus at most two keep
+reruns of the zero-value run (L4-IMP-061), none without such a test; a test whose runs were inconclusive is no proof,
+and its minor finding says `inconclusive: <reason>`, not that it passes against the zero values and on the base. A test
+chore whose added tests are all inconclusive SHALL be accepted, for the verifier to decide a round later.
+
+**L4-VER-051 The judge sees evidence the harness did not prove.** A tracing test whose red proof has `via:
+not_applicable` or `via: human_override` SHALL count as evidence and SHALL be labelled in the judge's per-test list, in
+the satisfied block of L4-VER-018 and in `verification.md`: `not applicable: no project code` or `accepted by Q-NNN: the
+check was inconclusive`. Such a criterion is pre-satisfied, so step 4a always audits it.
 
 **L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
 (L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
@@ -3675,6 +3782,8 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `{cache, reason}`),
 `run.finished` (exit code).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
+zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override` (with `question` and `answer_sha256` for the second) on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
+
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
 
 The result contract adds these records (L4-IMP-020, L4-FAC-011): `result.normalized` (`{task, phase, attempt, source, fixes}`, once for a step whose result object the harness repaired; it holds no text of the agent), `context_peak_tokens` and `context_peak_percent` on `agent.finished` (each only when the stream shows it), and, second wave and not built (L4-IMP-022), `result.repair` (`{task, phase, attempt, outcome, reason?}`).
@@ -3835,6 +3944,12 @@ otherwise. `l4 status --unit ID` MUST print the phase, `Cause:` (whole), `Stoppe
 command that moves the unit (`l4 retry --unit ID --reason TEXT`, `l4 restart --unit ID --reason TEXT`, or the answer
 path of a question). A unit `halted` with `max_task_attempts` and a `halt_task` also prints `Retry note: the --reason of l4 retry goes to the implementer of task <k>` before `Next:`. `--json` MUST carry `reason` and `next`, and `halt_task` (and `halt_fix_unit` when set) for such a unit. `l4 plan` MUST use the recorded `detail` for `halted` and
 `escalated`.
+A unit in `awaiting_human` held by a harness question (L4-IMP-063) shows `Q-NNN: <title>` as its REASON; `l4 status
+--unit ID` prints `Cause:` with the check's reason (the `reason` of the newest `check.inconclusive` that names the
+question) and `Next:` with both answers (`l4 questions answer Q-NNN --unit ID --text "accept: <why>"`, which takes
+the claim on the real run's evidence, or `--text "retry: <note>"`, which runs the check again); `l4 plan` and the
+waiting detail of a plan say `harness check inconclusive: Q-NNN`, and `harness answer must start with accept or retry:
+Q-NNN` for an answer that is neither. `--json` carries the same `reason` and `next`.
 
 **L4-OPS-007** After a FAIL round the fix loop MUST compare its failure with the previous round's. The failure is the
 sorted set of the failed gate names, the failing test ids of a failed test gate (JUnit reports) and the exit code of a
@@ -4605,6 +4720,8 @@ print as today. The key MUST NOT change the verdict of the red step: the red che
 
 When `GITHUB_ACTIONS` is `true` and `GITHUB_STEP_SUMMARY` names a file, `l4 run` SHALL append one Markdown list line
 to that file for each task that ends in the run:
+- `check.inconclusive`: `- <unit> task <k>: held (<check> check inconclusive, <question>)`: ids and codes only, never the
+  reason (L4-IMP-063);
 - `task.done`: `- <unit> task <k>: done (<n> attempts, <profile>, <took>)`, where `<n>` is the number of agent steps
   of the task in this run, `<profile>` the profile of the last one, and `<took>` the time since `task.started` in the
   format of L4-IMP-023;
@@ -5313,6 +5430,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 38 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
 | 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
 | 40 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; `l4 yolo check --worktree` (L4-YOLO-034) backs `l4_plan_check`, and the read-only `l4 status --events|--verification` back two more tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
+| 41 | `zero-value-inconclusive` | a variant run that could not run a test is inconclusive, never the agent's fault: every variant run is judged per test against the real run and goes on past collection errors (L4-IMP-060); zeroing keeps decorator and class factories and the functions a failing run's tracebacks call (L4-IMP-061); a dependency check is not applicable (L4-IMP-062); an inconclusive check holds the task with a `harness` question answered `accept` or `retry`, using no attempt (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009); the ledger carries the evidence an artifact-less repository lacks and the status names the cause (L4-IMP-064, L4-OPS-006); the verifier records an inconclusive audit run and labels unproven evidence (L4-VER-050, L4-VER-051; `openspec/changes/zero-value-inconclusive/`) | the consumer repository's held unit retried on 0.4.16: tasks 2.2 and 3.1 confirmed or held, never counted |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -6875,6 +6993,137 @@ scenario is a spec defect (§26).
 - **When** a test runs `list(numbers())` against the zero-value variant
 - **Then** both give `[]`
 
+#### SCN-IMP-300 (−) A readable report with collection errors and no test is inconclusive · L4-IMP-060
+- **Given** a zero-value run whose JUnit report lists 45 collection errors, each ending
+  `E   TypeError: 'NoneType' object is not callable`, and no test case
+- **When** the harness judges a criterion whose two tests passed in run (a)
+- **Then** the criterion is inconclusive, not "not discriminating", and its reason names the run and quotes
+  `E   TypeError: 'NoneType' object is not callable`
+
+#### SCN-IMP-301 (−) A base run goes on past an unrelated test that imports an added module · L4-IMP-060
+- **Given** a unit that added `src/pytdd/middleware.py`, committed `tests/test_middleware.py` importing it, and a
+  candidate test in `tests/test_pricing_rules.py` that fails by assertion against the unit base's `pricing.py`
+- **When** the base run swaps the production files to the unit base
+- **Then** pytest reports the collection error of `tests/test_middleware.py` and still runs the candidate, which
+  confirms its criterion, and `run_with_code_of` returns a gate result whose report holds both
+
+#### SCN-IMP-302 (+) A decorator factory annotated to return a callable keeps its body · L4-IMP-061
+- **Given** `src/pytdd/telemetry.py` with `def traced(name: str) -> Callable[[_F], _F]`, and `src/pytdd/store.py`
+  whose class body applies `@telemetry.traced("store.add")` to a method
+- **When** the pre-satisfied zero-value run varies both modules
+- **Then** `traced` keeps its body, every test module imports, and `zero.kept{cause: annotation}` lists
+  `src/pytdd/telemetry.py::traced`
+
+#### SCN-IMP-303 (+) An unannotated decorator factory is kept after the run names it · L4-IMP-061
+- **Given** the modules of SCN-IMP-302 with `def traced(name):` unannotated, and a candidate test of `Store.add`
+- **When** the first zero-value run fails to import `store.py` on the line `@telemetry.traced("store.add")`
+- **Then** the harness keeps `traced`, records `zero.kept{cause: collection, rerun: 1}`, runs once more, and the
+  candidate fails by assertion there, which confirms its criterion
+
+#### SCN-IMP-304 (−) The keep reruns are bounded · L4-IMP-061
+- **Given** a zero-value run whose every report names one more zeroed function on a failing collection line
+- **When** the harness keeps and reruns
+- **Then** it runs the gate three times in all, records two `zero.kept`, and the candidates are inconclusive
+
+#### SCN-IMP-305 (−) An inconclusive test-at-red run holds the green step · L4-IMP-063
+- **Given** a green step whose test file a person's answer unfroze, and a `test-at-red` run that ran no test
+- **When** the green checks finish
+- **Then** the green attempt is not counted, the task is held by a harness question with `check: at_red` that names
+  the corrected tests, and the red commit stays
+
+#### SCN-IMP-306 (+) A version pin is recorded as not applicable · L4-IMP-062
+- **Given** a candidate `def test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") ==
+  pytest.__version__` in a test file whose other tests import `pytdd`
+- **When** the pre-satisfied confirmation runs
+- **Then** its criterion is recorded with `via: not_applicable`, `criterion.pre_satisfied` carries the same `via`, and
+  no variant run varies anything for it
+
+#### SCN-IMP-307 (−) A test that reads no dependency is still not discriminating · L4-IMP-062
+- **Given** a candidate `def test_x(): assert 1 + 1 == 2`, and another `def test_y(): assert json.loads("1") == 1`
+- **When** the pre-satisfied confirmation runs
+- **Then** neither criterion is not applicable, and both fail red as `not discriminating`
+
+## MODIFIED Requirements
+
+#### SCN-IMP-308 (+) A fixture assertion in the unit's own test file counts · L4-IMP-002
+- **Given** a test file the unit added whose fixture asserts `telemetry.init(exporter) is True`, and three candidates
+  that use the fixture and passed in run (a)
+- **When** the zero-value run makes `init` answer `False`
+- **Then** each candidate errors in setup by assertion at a line of that file, and their criteria are confirmed
+
+#### SCN-IMP-309 (−) A fixture assertion in a pre-existing conftest does not count · L4-IMP-002
+- **Given** the fixture of SCN-IMP-308 in `tests/conftest.py`, unchanged since the unit base
+- **When** the zero-value run makes `init` answer `False`
+- **Then** the candidates are inconclusive, the harness keeps `init` and reruns, and the body's assertions decide
+
+#### SCN-IMP-310 (−) A refuted criterion fails the attempt beside an inconclusive one · L4-IMP-002
+- **Given** a red step with criterion A whose tests passed on the zero values, and criterion B whose test module did
+  not import in the zero-value run nor at the base
+- **When** the red checks finish
+- **Then** the attempt fails with `not discriminating: A (…)` and `inconclusive: B (…)`, counts as a failed attempt,
+  and no question is raised
+
+#### SCN-IMP-311 (−) A base run cannot refute what the zero-value run could not decide · L4-IMP-003
+- **Given** a criterion whose zero-value run was inconclusive, and whose candidate passes at the unit base
+- **When** the confirmation combines the two runs
+- **Then** the criterion is inconclusive, not `not discriminating`
+
+#### SCN-IMP-312 (−) An inconclusive pre-satisfied check consumes no attempt · L4-IMP-063
+- **Given** an already-satisfied red step whose zero-value run ran no test (45 collection errors) and whose base run
+  confirms nothing, on a chain of two implementer profiles with `escalate_after: 2`
+- **When** the task loop handles the outcome
+- **Then** there is no `task.attempt_failed` and no `implementer.escalated`, one `check.inconclusive` and one
+  `question.raised{kind: harness}` name the task, the criteria and the `E` line, the agent ran once, the unit is in
+  phase `awaiting_human` with exit 11, and a plan step that sees the unit waits and starts no next run
+
+#### SCN-IMP-313 (−) An inconclusive check starts no escalation · L4-IMP-017
+- **Given** a profile that already failed one red attempt of task 3.1 with `escalate_after: 2`
+- **When** its second attempt ends with an inconclusive check
+- **Then** the profile's count stays 1, no escalation is asked, and the task is held
+
+#### SCN-IMP-314 (+) A person accepts the claim on the evidence of the real run · L4-IMP-063
+- **Given** the question of SCN-IMP-312 answered `accept: the decorator factory is zeroed by an L4 bug` by a person
+- **When** the next run's red step finds the same check inconclusive for the same criteria
+- **Then** the task is committed as already satisfied, each criterion's proof has `via: human_override`, `question`
+  and `answer_sha256`, and `check.accepted` and `criterion.pre_satisfied{via: human_override}` are recorded
+
+#### SCN-IMP-315 (+) A retry runs the check again · L4-IMP-063
+- **Given** the question of SCN-IMP-312 answered `retry: upgraded L4 to the release that keeps decorator factories`
+- **When** the next run's red step runs and the zero-value run now confirms every criterion
+- **Then** the task is already satisfied with `proof: pre_satisfied` and no `via`, and the red prompt carried the
+  answer's text
+
+#### SCN-IMP-316 (−) A harness answer must start with accept or retry · L4-QMD-004
+- **Given** an open harness question Q-007 holding task 3.1
+- **When** a person runs `l4 questions answer Q-007 --unit A --text "looks fine"`, and then writes the same answer by
+  hand with Status `answered` and pushes
+- **Then** the command exits 2 with a `Fix:` line naming `accept` and `retry`; after the hand edit `l4 plan` shows
+  `harness answer must start with accept or retry: Q-007` and task 3.1 stays held
+
+#### SCN-IMP-317 (−) An agent cannot answer a harness question without consent · L4-QMD-009
+- **Given** `AI_AGENT=l4-mcp`, no `clarifier.answer_by_agents` on the base, and the open harness question Q-007
+- **When** the agent runs `l4 questions answer Q-007 --unit A --text "accept: the run broke"`
+- **Then** it exits 2 with `a harness override is a person's decision` and pushes nothing; with
+  `clarifier.answer_by_agents: true` pushed to the base, the same command pushes the answer with `agent: AI_AGENT`
+
+#### SCN-IMP-318 (+) The ledger and the console carry the collection error · L4-IMP-064
+- **Given** a `test-presatisfied` run that exits 2 with 45 collection errors whose first `E` line is
+  `E   TypeError: 'NoneType' object is not callable` and whose message holds a `glpat-` token shape
+- **When** the run's events are written and printed in a GitHub Actions job with `ci.upload_artifacts: false`
+- **Then** `gate.finished` has `collection_errors: 45` and an `excerpt` of at most 600 characters with that line and
+  the token redacted; the console line reads `gate test-presatisfied fail (exit 2, 0 tests: 0 passed, 0 failed)` with
+  no `(expected: …)`, followed by the `check.inconclusive` warning; the artefacts line ends `(not uploaded:
+  ci.upload_artifacts is false; the ledger's gate.finished and task.attempt_failed events carry the excerpts)`
+
+## MODIFIED Requirements
+
+#### SCN-IMP-319 (+) l4 status and the plan name the harness cause and the next step · L4-OPS-006
+- **Given** a plan whose current unit A is held by harness question Q-007 on task 3.1
+- **When** a person runs `l4 status --unit A`, `l4 plan` and the next plan step runs
+- **Then** `Cause:` quotes the check's reason, `Next:` names both `l4 questions answer Q-007 --unit A --text
+  "accept: …"` and `--text "retry: …"`, `l4 plan` shows `harness check inconclusive: Q-007`, and the plan records
+  `plan.waiting{reason: unit_awaiting_human}` with that detail
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -7549,6 +7798,44 @@ scenario is a spec defect (§26).
 - **Given** a PASS with `verifier.fix_minor_findings` on, a parent with two requirements, and a judge's minor spec-gap finding with no criterion that no person rejected
 - **When** the fix unit is planned
 - **Then** it has no task, and the finding is listed as not converted (`a scenario for it needs a requirement and the parent has several`)
+
+#### SCN-VER-150 (−) An inconclusive audit run is not a rejection · L4-VER-050
+- **Given** an audit test for a pre-satisfied criterion that passes at head, and a zero-value run that ran no test
+  (`E   TypeError: 'NoneType' object is not callable` in every collection error)
+- **When** step 4a judges it
+- **Then** `verify.audit` records `status: inconclusive` with that line in its reason, no minor finding is raised, the
+  file is not committed, and `verification.md` lists the record with its reason
+
+#### SCN-VER-151 (+) A test chore whose check cannot decide is left to the verifier · L4-VER-050
+- **Given** a test chore that added two tests citing a criterion, and a `discriminate_extra` whose zero-value run and
+  base run were both inconclusive for them
+- **When** the chore's discrimination check runs
+- **Then** the chore is accepted with both tests, as when no unit base exists
+
+#### SCN-VER-152 (−) An extra test whose runs were inconclusive says so · L4-VER-009
+- **Given** a test a person wrote, carrying a criterion, whose zero-value run did not import its module and whose
+  module cannot import at the unit base
+- **When** step 4 decides its proof
+- **Then** it is no evidence, and its minor finding says `inconclusive:` with the `E` line
+
+#### SCN-VER-153 (+) The judge sees a not-applicable criterion · L4-VER-051
+- **Given** a unit whose `task.red_ok` proves a criterion with `via: not_applicable`
+- **When** the judge prompt and `verification.md` are written
+- **Then** the criterion's test reads `(passed, pre_satisfied, not applicable: no project code)` in both, and the
+  criterion is among the audited ones
+
+#### SCN-VER-154 (+) The judge sees an override · L4-VER-051
+- **Given** an already-satisfied task whose criterion was accepted by harness question Q-007
+- **When** the judge prompt is written
+- **Then** the satisfied block's line reads `Proved by: C-… (tests: …; accepted by Q-007: the check was
+  inconclusive)`
+
+## MODIFIED Requirements
+
+#### SCN-VER-155 (+) The audit's zero-value run keeps a decorator factory · L4-VER-050
+- **Given** an audit test of `Store.add` and the modules of SCN-IMP-302
+- **When** step 4a runs its zero-value run
+- **Then** `traced` keeps its body, the audit test fails by assertion there, and the record is `accepted`
 
 ### 23.9.1 Human feedback (FBK)
 

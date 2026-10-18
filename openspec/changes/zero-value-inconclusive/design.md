@@ -171,10 +171,17 @@ Neither needs the hold; the hold is the backstop for the next shape the keep loo
 - `harness` questions are new in `questions.md`: a harness before 0.4.16 parses the kind as unknown; an answer written
   for it is still read as an answer by that older harness, which has no hold to consume it.
 
-## Open questions
+## Decisions on the open questions (owner, before the build)
 
-1. Should a *skipped* base run (manifest changed) for a project the zero-value run cannot read (a non-Python unit)
-   become inconclusive too? Today it fails the agent; this change leaves it, because it changes non-Python behaviour.
+1. A *skipped* base run for a project the zero-value run cannot read (a non-Python unit) behaves as today: it fails
+   the agent, with the skip reason in the message.
 2. A criterion about the interpreter (`sys.version_info`) reads only the standard library, so it is not
-   dependency-only and stays not discriminating when pre-satisfied. Is that the wanted rule?
-3. Should a person be able to answer a `harness` question from the PR (a label), as `l4:retry` does for a halt?
+   dependency-only and stays not discriminating when pre-satisfied.
+3. No PR-label answer for a `harness` question now.
+4. `accept` re-runs the agent step once (the held work is not persisted); that is accepted.
+
+## Follow-ups
+
+- A PR label that answers a `harness` question (`l4:retry` already restarts a halted unit), once the question has been
+  used on a real unit.
+- Keep the held work for `accept`: persist the discarded step so that an accepted claim needs no second agent step.

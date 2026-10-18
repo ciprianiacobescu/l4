@@ -6,6 +6,45 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (unreleased)
+
+### Fixed
+- A check that could not run no longer fails the agent. The pre-satisfied zero-value run, the base run, run (b), the
+  `test-at-red` run, the verifier's audit and the extra-proof runs are judged against the real run, per test: a test
+  that failed by assertion is a proof, one that passed or failed another way is no proof, and one the run did not run
+  (no report, no test collected, its module failed to import only there, skipped only there) is inconclusive. In 0.4.14
+  and 0.4.15 a decorator factory zeroed to `None` broke the import of the modules that apply it, pytest stopped with
+  45 collection errors and ran 0 tests, and the message said "its tests still pass"; the unit halted after nine red
+  attempts on four profiles (L4-IMP-060).
+- Zeroing keeps what imports need: a public function annotated to return a callable or a class keeps its body, and when
+  a run leaves a candidate inconclusive the functions its tracebacks call are kept real and the run is made again, at
+  most twice (`zero.kept` records them). Every variant run goes on past collection errors
+  (`--continue-on-collection-errors`), so the base run of a unit that adds a module no longer stops at the first test
+  file that imports it (L4-IMP-061).
+- A failing assertion in the setup of a fixture counts as a failure on the zero values when the fixture is in a test
+  or support file the unit added or changed; in a file that was there before it is inconclusive (L4-IMP-002).
+- The verifier no longer rejects an audit test, or ignores a person's or a chore's test, because a zero-value run
+  could not run it: the audit records it `inconclusive` (no finding, listed in `verification.md`), and an extra test
+  says why it has no proof (L4-VER-050).
+- The console no longer says `(expected: zero values must fail)` for a zero-value run that ran no test, and the
+  artefacts line says `not uploaded` when `ci.upload_artifacts` is false in GitHub Actions (L4-IMP-064).
+
+### Changed
+- An inconclusive check holds the task: no attempt is used, no profile escalates, the step's changes are discarded,
+  one question of the new kind `harness` is raised and the unit waits in `awaiting_human` (exit 11); a delivery plan
+  waits without chaining runs. A person answers `accept: <why>` (the next run counts those criteria on the evidence of
+  the real run when the check is inconclusive again; audited as `via: human_override`) or `retry: <note>` (the check
+  runs again, for example after an L4 upgrade). A criterion a run shows to be not discriminating still fails the
+  attempt, and the message lists the inconclusive ones apart. An agent may answer only where
+  `clarifier.answer_by_agents` is true on the base branch (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009).
+- A criterion whose every test checks a dependency and no project code (a version pin) is recorded as discrimination
+  not applicable (`via: not_applicable`), and the judge sees the label (L4-IMP-062, L4-VER-051).
+- `gate.finished` and `task.attempt_failed` carry an `excerpt` of at most 600 characters (the `E` lines and the deepest
+  repository location, redacted) in the committed ledger, for a repository that uploads no job artifacts
+  (L4-IMP-064).
+- `l4 status --unit`, `l4 plan` and the waiting detail of a plan name a harness question: `Cause:` quotes the check's
+  reason, `Next:` the two answers, and the plan says `harness check inconclusive: Q-NNN` (L4-OPS-006).
+
 ## 0.4.15 (2026-10-18)
 
 ### Added
