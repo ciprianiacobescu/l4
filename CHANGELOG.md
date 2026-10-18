@@ -6,6 +6,24 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.17 (unreleased)
+
+### Fixed
+- An `accept` of a held check now binds to the step the person looked at (L4-IMP-065). On 0.4.16 a task held with a `harness`
+  question discarded the step's changes, and an accept covered a criterion only while its candidate tests were among the test
+  ids the question named, so the next agent wrote the test again under another name and a new question was raised for the same
+  criterion, without end. Now the held step is saved first, as `.l4/held/<task>-<check>.patch` in the unit folder (binary-safe,
+  with the agent's result beside it), committed with the questions commit, and `question.raised` records `patch_sha256`. The
+  question's Context shows the source of each named test, redacted and cut to 40 lines. The next run after an `accept` starts no
+  agent for that step: it checks the digest, applies the patch, runs the guards, gates and checks an agent's changes get, records
+  `held.replayed` and counts the criteria for those tests. A missing patch, a different digest or a patch that does not apply gives
+  a new question that says why, never a pass. `retry` deletes the patch and runs an agent with the note; a replay deletes it in the
+  step's commit; a restarted unit or a reopened task drops it. A later agent attempt is told the accepted tests (data block
+  `accepted tests`) and to keep them unchanged. All four held checks (`pre_satisfied`, `vacuity`, `at_red`, `tests`) do this. A
+  question raised by 0.4.16 has no patch and keeps the old behaviour.
+- The runbook and the skill no longer say that `l4 questions answer`, `accept`, `l4 retry` and `l4 restart` always start a run:
+  they do when the forge token is set, and otherwise print `start a run with: …`.
+
 ## 0.4.16 (2026-10-18)
 
 ### Fixed

@@ -55,8 +55,8 @@ Other documents:
 > **NOTE: The `l4 status` table shows why a unit stopped.** The column `REASON` has the cause, cut at 60 characters.
 > `l4 status --unit <unit>` shows the full cause and the next command (section 4).
 
-> **CAUTION: The operator labels and `l4 resume` do not start a run.** `l4 retry` and `l4 restart` start a run, unless
-> you add `--no-run`. After you add a label, start a run (section 6) or wait for the schedule.
+> **CAUTION: The operator labels and `l4 resume` do not start a run.** `l4 retry` and `l4 restart` start a run when the forge token is set, unless
+> you add `--no-run` (without the token they print how to start one). After you add a label, start a run (section 6) or wait for the schedule.
 
 > **CAUTION: Do not use `l4 run --unit` to retry a unit or to look at a unit.** On a halted or escalated unit it exits
 > 13 and changes nothing. On other phases it runs agents from your computer. To continue a stopped unit, use
@@ -608,7 +608,8 @@ In this runbook, `l4` means the command of step 1. What each command needs:
 
 Each CI run checks out the head of `<base>`, plans all units and runs the units that have a next action. You cannot
 start a CI run for one unit. A run that you start on a unit branch does the same as a run on `<base>`. `l4 retry`
-and `l4 restart` start a run for you, unless you add `--no-run`.
+and `l4 restart` start a run for you when the forge token is set, unless you add `--no-run`; without the token
+they print `start a run with: …`, and you do that.
 
 **On GitHub:**
 
@@ -665,7 +666,8 @@ labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you:
 
 `l4 questions` reads `questions.md` on the unit branch on `origin`, not in your work tree. It needs the forge
 credentials of section 5 and push permission on the unit branch. `accept` and `answer` write one commit to the unit
-branch and push it, without force. The push starts the run that takes the answer. The command changes only the
+branch and push it, without force. The commit has `[skip ci]`, so the push starts no run: the command asks the forge to
+start one on the base branch only when the forge token is set, and otherwise prints `start a run with: …`. The command changes only the
 `- **Status:**` line, the `### Answer` text and the index row of the question.
 
 1. List the open questions of the unit:
@@ -696,7 +698,8 @@ branch and push it, without force. The push starts the run that takes the answer
    sets the Status `accepted`: it takes the suggestion of the clarifier. Do not use `accept` for a verdict question.
 4. To see the change first, add `--no-push`. The command then prints the diff and the commit message, and writes
    nothing.
-5. Make sure that the last line says that the commit was pushed. The run that the push starts moves the unit when your
+5. Make sure that the output says that the commit was pushed and what happened to the run: `run started on <base>`, or
+   `start a run with: …` (no forge token, or the forge refused: do the command in the line). The run moves the unit when your
    answer frees a task. `l4 plan` then shows `answers submitted: Q-NNN`.
 
 The command stops with exit 2 and changes nothing when the answer cannot be taken. The output has `questions: <cause>`
@@ -748,7 +751,7 @@ command.
    git push
    ```
 
-A push to a unit branch runs that branch's own copy of `l4.yml`, which can be older than the base's and pin an older harness; the harness then does no work. So start the run on the base branch: `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on the base branch). The unit moves when your answers free a task. `l4 plan` then shows `answers submitted: Q-NNN`. `l4 questions accept` and `answer` do this for you: their commit has `[skip ci]` and the command starts the run on the base (`--no-run` skips it).
+A push to a unit branch runs that branch's own copy of `l4.yml`, which can be older than the base's and pin an older harness; the harness then does no work. So start the run on the base branch: `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on the base branch). The unit moves when your answers free a task. `l4 plan` then shows `answers submitted: Q-NNN`. `l4 questions accept` and `answer` do this for you when the forge token is set: their commit has `[skip ci]` and the command starts the run on the base (`--no-run` skips it); without the token they print how to start one.
 
 **For verdict questions** (`- **Kind:** verdict`; the title starts with `Criterion C-…`, `Finding F-…` or `Hold H-…`):
 
@@ -790,13 +793,19 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   that were made, the functions that were kept real, and the `excerpt` of the failing run in `gate.finished`).
 - Answer with the command, and start the answer with one of two words:
   - `l4 questions answer Q-NNN --unit <unit> --text "retry: <note>"` runs the check again. Use it after you upgraded L4
-    (`l4 upgrade`) or fixed the cause. The note reaches the agent as an answer.
-  - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run.
-    The next run does the red step again (one more agent step); when the same check is inconclusive again for the
-    criteria the question names and the tests it named are the ones the check sees again, they count, and the ledger
-    records `via: human_override` (`agent_override` for an agent's answer) with the question and the digest of your
-    answer. A later different test of the criterion is not covered: the unit is held again. A check that now shows a criterion not to discriminate still fails the attempt. The
-    verifier and the judge see that the claim was accepted.
+    (`l4 upgrade`) or fixed the cause. The saved patch is deleted, an agent step runs, and the note reaches it as an answer.
+  - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run, for
+    exactly the step you were shown. The question's Context lists the source of each test it names (redacted, at most 40
+    lines each), and the step's changes are saved on the unit branch as `<unit folder>/.l4/held/<task>-<check>.patch`
+    (L4-IMP-065). The next run starts **no agent** for that step: it applies the saved patch (checking its digest first),
+    runs the guards, the gates and the same checks an agent's changes get, and when the check is inconclusive again for the
+    tests it named, they count; the ledger records `held.replayed` and `via: human_override` (`agent_override` for an
+    agent's answer) with the question and the digest of your answer, and the step's commit deletes the patch. If the patch
+    is missing, its digest differs or it no longer applies (the branch moved), there is no override: a new question says
+    why. A later agent attempt of the task (after a gate failure) is told the accepted tests and to keep them unchanged.
+    A check that now shows a criterion not to discriminate still fails the attempt. The verifier and the judge see that
+    the claim was accepted. A question that 0.4.16 raised has no saved patch: its accept works as before (one more agent
+    step that must write the same tests).
   - `l4 questions accept` is refused for this kind, and so is an answer that starts with another word. A `dismissed`
     Status reads as `retry`.
 - Only a person answers, unless `clarifier.answer_by_agents` is `true` on the base branch. The clarifier never takes

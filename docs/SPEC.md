@@ -2488,9 +2488,11 @@ question}`, raise one question of the kind `harness` that blocks the task (`ques
 title, check, criteria, tests}`), and end the task `blocked`: no attempt is counted and no profile escalates
 (L4-IMP-017). The unit goes to `awaiting_human` (exit 11; through `clarifying` when a clarifier runs, which never takes
 a harness question), and a delivery plan waits on it without chaining a run (L4-YOLO-012). The answer is `accept` or
-`retry` (L4-QMD-004). `accept` lets the next attempt, which does the red step again, count those criteria when the same
+`retry` (L4-QMD-004). `accept` lets the next run, which replays the held step (L4-IMP-065: the harness saved the step's changes before it discarded
+them, and no agent runs for the replay), count those criteria when the same
 check is inconclusive again for criteria the question names (read from its `question.raised` event, whose `tests` the candidates of
-the criterion must be among: an answer given about one test does not carry a later different test; and from a `question.answered` event of
+the criterion must be among: an answer given about one test does not carry a later different test, which is why the step is replayed
+and not written again; and from a `question.answered` event of
 a person or, under `clarifier.answer_by_agents`, an agent, with the digest of the answer): the proof is `pre_satisfied` (run (b): `zero_value`)
 with `via: human_override` (`agent_override` for an agent's answer, recorded `question.answered{by: agent}`), `question` and
 `answer_sha256`, and `check.accepted{task, check, question, answer_sha256, by, criteria | tests}` and `criterion.pre_satisfied{via}` are recorded; a conclusive result always wins over
@@ -2506,6 +2508,31 @@ inside a secret would leave a prefix the redactor cannot see), never read into a
 executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
+
+**L4-IMP-065** A held step is kept, and an `accept` replays it. When a step is held with a harness question (`check`:
+`pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes, save them
+as `git diff --binary` of the step against its start, with the agent's result beside it, at
+`<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit; `question.raised`
+carries `patch_sha256`, `result_sha256` and the test ids. The question's Context SHALL show the source of each named test (the
+function with its decorators, at most 10 tests), redacted by the run's redactor before it is cut to 40 lines, a cut saying how
+many lines it dropped. When the run reaches the step of that task and the newest harness question of the task and check is
+answered `accept` by the rules of L4-IMP-063 (a person's answer, or an agent's where `clarifier.answer_by_agents` allows it,
+with its digest in the ledger), carries a `patch_sha256`, has not been replayed (`held.replayed{question}`) and no
+`unit.restarted` or `tasks.reopened` of the task follows it, the harness SHALL start no agent: it reads both files as regular
+files, checks their digests, checks that the patch applies (`git apply --check`), applies it, and then does what it does after an
+agent returns (protected paths put back with `guard.violation`, the run ledger restored, the secret scan, which fails the step
+as an agent's would) and hands the saved result to the code that follows the step, so the scope guards, tamper checks, gates and
+checks are the ones an agent step's changes get. It records `held.replayed{question, task, check, patch_sha256, tests,
+sources}` after applying; the override covers the tests of the patch. A missing or unusable file, a digest that differs or a
+patch that does not apply SHALL give no override, no agent step and a new harness question (without a `patch_sha256`) whose Why
+says which. `retry` (or `dismissed`) SHALL delete both files in a commit before the agent step, whose prompt carries the note;
+a replay deletes them in the step's own commit; a restarted unit or a reopened task drops them. The replay is used once: a later
+attempt after a failed gate is an agent step, whose prompt carries the data block `accepted tests` (the ids and redacted source
+of the accepted tests, with the rule to keep them unchanged: an accept covers only them). `<unit folder>/.l4/held/` is a
+harness-owned path (`**/.l4/**`, L4-SEC-004): an agent's write to it is put back. A question raised by 0.4.16 has no
+`patch_sha256`: its accept works as before. [V: a consumer repository, a version-pin test held on one criterion: the accepted
+question named `test_verified_fastmcp_version_is_installed`, the next agent wrote `test_fastmcp_version_is_the_verified_one`, the
+accept did not cover it, and a second question was raised for the same criterion.]
 
 ## 8. Agent and model factory
 
@@ -5444,6 +5471,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
 | 40 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; `l4 yolo check --worktree` (L4-YOLO-034) backs `l4_plan_check`, and the read-only `l4 status --events|--verification` back two more tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
 | 41 | `zero-value-inconclusive` | a variant run that could not run a test is inconclusive, never the agent's fault: every variant run is judged per test against the real run and goes on past collection errors (L4-IMP-060); zeroing keeps decorator and class factories and the functions a failing run's tracebacks call (L4-IMP-061); a dependency check is not applicable (L4-IMP-062); an inconclusive check holds the task with a `harness` question answered `accept` or `retry`, using no attempt (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009); the ledger carries the evidence an artifact-less repository lacks and the status names the cause (L4-IMP-064, L4-OPS-006); the verifier records an inconclusive audit run and labels unproven evidence (L4-VER-050, L4-VER-051; `openspec/changes/zero-value-inconclusive/`) | the consumer repository's held unit retried on 0.4.16: tasks 2.2 and 3.1 confirmed or held, never counted |
+| 48 | `held-accept-binding` | a held step is kept and an `accept` replays it: the step's changes are saved as `.l4/held/<task>-<check>.patch` before they are discarded, the question shows the redacted source of the tests, and the next run applies the patch with every guard, gate and check instead of starting an agent; a missing, changed or non-applying patch is a new question; `retry` drops it; a later agent step is told the accepted tests (L4-IMP-065, L4-IMP-063; `openspec/changes/held-accept-binding/`) | an accepted version-pin hold on a consumer repository: the next run takes the accept without a second question |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7148,6 +7176,48 @@ scenario is a spec defect (§26).
 - **Then** `Cause:` quotes the check's reason, `Next:` names both `l4 questions answer Q-007 --unit A --text
   "accept: …"` and `--text "retry: …"`, `l4 plan` shows `harness check inconclusive: Q-007`, and the plan records
   `plan.waiting{reason: unit_awaiting_human}` with that detail
+
+#### SCN-IMP-320 (+) An accept replays the held step without an agent · L4-IMP-065
+- **Given** a red step that wrote a passing test and was held (pre-satisfied check, harness question Q-001 with
+  `patch_sha256`), and a second agent step that would write the test under another name
+- **When** a person answers `accept: …` and the next run reaches the step
+- **Then** no agent runs, `held.replayed{question: Q-001, check: pre_satisfied}` is recorded, the proof has `via:
+  human_override`, the task proceeds on the test the person was shown, and the patch is deleted in the step's commit
+
+#### SCN-IMP-321 (−) A patch that cannot be replayed is a new question, never a pass · L4-IMP-065
+- **Given** an accepted harness question whose patch is missing, or whose digest differs from `patch_sha256`, or does not
+  apply because the branch moved
+- **When** the next run reaches the step
+- **Then** no agent runs, no override applies and no `held.replayed` is recorded; a new harness question names the reason
+  and has no `patch_sha256`
+
+#### SCN-IMP-322 (+) A retry drops the patch and the agent runs with the note · L4-IMP-065
+- **Given** a held step answered `retry: <note>`
+- **When** the next run reaches the step
+- **Then** the patch is deleted in a commit, the agent step runs and its prompt carries the note
+
+#### SCN-IMP-323 (−) The replayed changes meet the guards · L4-IMP-065
+- **Given** a saved patch that writes a protected path, and another that adds a token-shaped value
+- **When** each is replayed after an accept
+- **Then** the protected path is put back with `guard.violation`; the secret fails the step with `guard.secret`, as for
+  an agent, and the next attempt is an agent step
+
+#### SCN-IMP-324 (−) An agent cannot write the held path · L4-IMP-065, L4-SEC-004
+- **Given** an agent step that writes `<unit folder>/.l4/held/1.1-pre_satisfied.patch`
+- **When** the step ends
+- **Then** the file is removed with `guard.violation`
+
+#### SCN-IMP-325 (+) The question shows what is accepted · L4-IMP-065
+- **Given** a held test of more than 40 lines whose text holds a token shape
+- **When** the question is raised
+- **Then** its Context shows the test function with the token redacted, at most 40 lines of it, and `[cut: N more
+  lines]`
+
+#### SCN-IMP-326 (+) A later agent step is told which tests are accepted · L4-IMP-065
+- **Given** a task whose replay failed a gate after an accept
+- **When** the next attempt's agent step runs
+- **Then** its prompt holds the data block `accepted tests` with the ids, their source, and the rule to keep them
+  unchanged
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

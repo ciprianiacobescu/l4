@@ -20,7 +20,7 @@
 ## Answering `questions.md`
 
 Use the command first. It reads `questions.md` on the unit branch on `origin`, edits only the Status, the Answer and the
-index row, commits (`[skip ci]`), pushes, and starts a run on the base branch, which resumes the unit.
+index row, commits (`[skip ci]`), pushes, and starts a run on the base branch when the forge token is set (otherwise it prints how to start one), which resumes the unit.
 
 ```sh
 l4 questions --unit FW:NAME                        # open questions; "draft" has an answer but is still open
@@ -37,6 +37,12 @@ whose answer names no frozen test path of the task it holds. Give every other qu
 ambiguous question, a verdict question, or an answer that names a frozen path. Only a person, or
 `clarifier.answer_by_agents: true` in `.l4/config.yaml` on the base branch, changes that. The key on the unit branch does
 not count.
+
+**A harness question** (`Kind: harness`: a check L4 could not decide; no attempt was used) is answered `accept: <why>` or
+`retry: <note>`, and no other word. Read the source of the tests in its Context first: `accept` replays exactly that step.
+L4 saved the step's changes as `.l4/held/<task>-<check>.patch` on the unit branch, and the next run applies the patch with
+every guard and gate and starts no agent; a missing, changed or non-applying patch gives a new question, not a pass.
+`retry` deletes the patch and runs an agent step with your note.
 
 The hand edit is the fallback, for a question the command refuses. Edit the file on the unit branch, then commit and
 push. The harness reads only answers whose Status says they are submitted.
