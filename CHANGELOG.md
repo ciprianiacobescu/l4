@@ -21,7 +21,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   step's commit; a restarted unit or a reopened task drops it. The question lists every changed path and shows the redacted diff of every changed path; a cut says that the cut lines are replayed
   too and names the patch path. The accept takes effect only through the replay of exactly that saved step: once the replay is used up
   (it failed a gate or the check refuted a criterion; a failed replay counts as an attempt), it covers nothing, and a later step
-  that meets the same inconclusive check is held again with a new question. A reopened task drops every earlier accept. A later agent
+  that meets the same inconclusive check is held again with a new question. A reopened task drops every earlier accept. Every question of this release records `saved: true|false`; only a question without it (0.4.16) keeps the old rule by test id. A step is always saved whole, whatever its size; a question is bounded (400 characters a line, 200 KB a Context, then the path list and the patch path). A refused replay (patch missing, digest differs, does not apply) raises a question that offers only `retry`. A replay that finds a path outside its saved patch after the gates fails as an attempt. A later agent
   attempt gets a notice (data block `accepted tests`) that the earlier accept was for the earlier step only. All four held checks (`pre_satisfied`, `vacuity`, `at_red`, `tests`) do this. A
   question raised by 0.4.16 has no patch and keeps the old behaviour.
 - The runbook and the skill no longer say that `l4 questions answer`, `accept`, `l4 retry` and `l4 restart` always start a run:

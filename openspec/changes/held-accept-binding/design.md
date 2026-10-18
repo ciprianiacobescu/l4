@@ -74,3 +74,13 @@ requires both digests, and commits under the profile that wrote the step.
 **D8. The `accepted tests` block** no longer claims coverage for a saved step: after a used-up replay it says that the earlier
 accept was for the earlier step only and a new step needs a new answer. For a question of 0.4.16 it still lists the tests
 and the rule to keep them unchanged.
+
+**D9. An explicit `saved` marker, always save, bounded questions, exact replay.** The old id-only rule was decided by a
+missing digest, so a question whose step was not saved (a refusal, a very large step) fell back to it and an unseen body
+could be accepted. Now every question of 0.4.17 records `saved: true|false`; only a question without the field keeps the old
+rule. A step is saved whole whatever its size; a question caps each line (400 characters) and its Context (200 KB), then lists
+the paths and the patch path, so `questions.md` cannot pass its 2 MB limit. A refused replay raises a `saved: false` question
+that offers only `retry`; an `accept` to it is ignored and the run says so. After a replay, the paths the step changed must be
+the patch's paths (outside the harness's outputs): a path written by a test or the setup while the gates ran fails the step as
+an attempt. A global `core.autocrlf=true` is not defended against: a CRLF checkout can make the patch not apply, which is a
+refusal, never a pass.
