@@ -36,7 +36,7 @@ from l4.specs.openspec import parse_openspec_tasks
 from l4.specs.providers import providers_for
 from l4.specs.questions import MAX_QUESTIONS_BYTES, QUESTIONS_FILENAME, QuestionsFile
 from l4.state.feedback_view import counts, item_views
-from l4.state.fold import UnitState, fold
+from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.followups import (
     FollowUpOffer,
     archive_folders,
@@ -198,7 +198,8 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
             files, tasks = read_ledger_files(provider.unit_dir(ref)), provider.tasks(ref)
             questions = QuestionsFile.load(provider.unit_dir(ref) / QUESTIONS_FILENAME)
             feedback = FeedbackFile.load(provider.unit_dir(ref))
-        read = merge_ledgers(parse_ledger_files(files), read_pending(git, lock_ref(ref.id)))  # the tail after H (5.5)
+        pending = read_pending(git, lock_ref(ref.id))
+        read = merge_ledgers(parse_ledger_files(files), pending)  # the tail after H (5.5)
         _check_unit(read, ref.id)
     except LedgerCorrupt as exc:
         detail = str(exc).removeprefix("ledger corrupt: ")
@@ -207,6 +208,7 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
     for name in read.torn:
         log.warning("%s: last line of %s was cut off mid-write and is ignored", ref.id, name)
     state = fold(read.events, ref.id)
+    state.ready_head, state.ready_at = recorded_ready(pending.events)  # H comes from the lock ref only (L4-ARC-008)
     last, open_run = _activity(read.events)
     children = child_snapshots(provider, git, ref, state.children, tracking_ref if on_branch else None)
     marker = read_fix_marker(provider.unit_dir(ref))

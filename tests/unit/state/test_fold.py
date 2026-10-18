@@ -2,7 +2,7 @@ import json
 import random
 from datetime import UTC, datetime, timedelta
 
-from l4.state.fold import HANDLERS, UnitState, dump_state, fold
+from l4.state.fold import HANDLERS, UnitState, dump_state, fold, recorded_ready
 from l4.state.ledger import LedgerEvent
 
 T0 = datetime(2026, 10, 3, 13, 0, 0, tzinfo=UTC)
@@ -143,14 +143,16 @@ def test_ci_results_are_folded_per_head():
     assert fold(events[:1], "openspec:x").ci_heads == {} and fold(events[:1], "openspec:x").ci_failure is None
 
 
-def test_pr_ready_folds_into_ready_head():
-    """L4-ARC-008: the latest `pr.ready{head}` in fold order is H; one without a string head changes nothing."""
-    assert fold([], "openspec:x").ready_head is None
-    assert fold([ev(0, RUN1, 1, "pr.ready", url="u", number=1)], "openspec:x").ready_head is None
+def test_recorded_ready_reads_the_latest_pr_ready_of_the_pending_events():
+    """L4-ARC-008: H is the latest `pr.ready{head}` in fold order among the pending events; one without a string head
+    changes nothing. `fold` itself never sets it (a `pr.ready` in the branch tree is anyone's text)."""
+    assert recorded_ready([]) == (None, None)
+    assert recorded_ready([ev(0, RUN1, 1, "pr.ready", url="u", number=1)]) == (None, None)
     first = ev(1, RUN1, 2, "pr.ready", url="u", number=1, head="a" * 40)
     second = ev(2, RUN2, 1, "pr.ready", url="u", number=1, head="b" * 40)
-    assert fold([first, second], "openspec:x").ready_head == "b" * 40
+    assert recorded_ready([second, first]) == ("b" * 40, second.ts)
     for bad in (None, 7, "", ["c"]):
         junk = ev(3, RUN2, 2, "pr.ready", url="u", number=1, head=bad)
-        assert fold([first, second, junk], "openspec:x").ready_head == "b" * 40
-    assert "pr.ready" in HANDLERS
+        assert recorded_ready([first, second, junk]) == ("b" * 40, second.ts)
+    assert fold([first, second], "openspec:x").ready_head is None
+    assert "pr.ready" not in HANDLERS
