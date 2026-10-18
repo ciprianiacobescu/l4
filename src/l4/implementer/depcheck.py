@@ -66,7 +66,7 @@ def own_distributions(wb: Workbench) -> frozenset[str]:
 
 def names_a_version(text: str, dependency: str) -> bool:
     """Does the criterion's text name `dependency` as a whole token and speak of a version next to it (a version or pin
-    word, or a `1.2` number within `WINDOW` characters)? `mcp` is not in `mintmory-history-mcp`; `packaging` in a
+    word, or a `1.2` number within `WINDOW` characters)? `mcp` is not in `shop-history-mcp`; `packaging` in a
     sentence about a packaging fee has no version next to it."""
     parts = [re.escape(part) for part in re.split(r"[-_.]+", dependency.lower()) if part]
     if not parts:

@@ -316,7 +316,7 @@ def test_n3_the_project_s_own_distribution_is_no_dependency(make_bench):
 
 def test_n3_the_name_must_be_a_whole_token(make_bench):
     bench = staged(make_bench, PIN)
-    assert one(bench, "mcp", "the client of `mintmory-history-mcp` pins version 1.2 of nothing") is False
+    assert one(bench, "mcp", "the client of `shop-history-mcp` pins version 1.2 of nothing") is False
     assert one(bench, "distro", "the distribution list of version 1.2 is exported") is False
     assert one(bench, "pytest", "pytest is pinned to version 1.0") is True
 
