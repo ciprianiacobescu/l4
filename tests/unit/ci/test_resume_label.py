@@ -121,3 +121,18 @@ def test_the_refused_note_header_is_unchanged():
     from l4.ci.resume_label import resume_refused_note
 
     assert resume_refused_note({"label:1": "why"}).startswith("### The `l4:resume` label was not honoured")
+
+
+def test_scn_ver_138_the_escalated_section_with_judge_view_rejected_names_its_own_way_out():
+    """L4-VER-044: split the change, or replace the answer with `accept`; never feedback."""
+    from l4.ci.resume_label import halted_section
+    from l4.state.next_step import judge_view_way_out
+
+    text = halted_section(
+        "escalated", "a person rejected a hold on the judge's view of the diff", "openspec:x", "l4:resume",
+        reason_code="judge_view_rejected",
+    )  # fmt: skip
+    assert text.startswith("### Escalated: a person rejected a hold on the judge's view of the diff\n\n")
+    assert text.endswith(f"To go on: {judge_view_way_out('openspec:x')}.")
+    assert "l4 restart --unit openspec:x" in text and "--replace" in text and "l4 retry --unit openspec:x" in text
+    assert "feedback" not in text

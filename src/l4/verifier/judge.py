@@ -31,11 +31,13 @@ from l4.verifier.types import REPLY_OUTCOMES, FeedbackRef
 
 JUDGE_SCHEMA_ID = "l4/judge-verdict@1"
 PROMPT_VERSION = (
-    9  # 9: the satisfied block, its rule and the reply's satisfied array;
+    10  # 10: the diff in parts;
+    # 9: the satisfied block, its rule and the reply's satisfied array;
     # 8: the accepted review findings block, its rule and the reply's `accepted` array;
     # 7: the feedback block, its rule and the reply's `feedback` array; 6: the round-outputs block and its rule;
     # 5: the Owner changes block; 4: the test conventions block; 3: a spec gap names its criterion
 )
+NOT_IN_PART = "not in this part"  # what a part's reply says of an item whose code is in another part (L4-VER-041)
 MAX_REPAIR_ECHO_CHARS = 8_000
 MAX_CALLS = 2  # the first answer and one repair or retry
 MAX_RETRY_PROBLEM_CHARS = 800  # the validation error a retry shows the judge (paths and rules, never values)
@@ -346,6 +348,45 @@ def _satisfied_block(items: Sequence[SatisfiedRef]) -> str:
 
 
 @dataclass(frozen=True)
+class PartView:
+    """What a prompt that shows one part of a long diff says about the others (L4-VER-041): the part's number, the
+    number of parts, and every file of the diff as `(part number, path, characters)`, the files no part shows with part
+    number 0."""
+
+    index: int
+    count: int
+    listing: tuple[tuple[int, str, int], ...]
+    more: int = 0  # files the (capped) listing leaves out; verification.md lists them
+
+
+def _part_rules(part: PartView) -> str:
+    k, n = part.index, part.count
+    return (
+        f"This change's diff is longer than one prompt holds, so it is judged in {n} parts and this prompt shows part "
+        f"{k}. Every\nfile is listed below with its part; only the files of part {k} are shown. Judge only what this "
+        f"part and the gate\nreport show:\n"
+        f'- A criterion whose code is not in this part: answer insufficient_evidence with the reasoning "'
+        f'{NOT_IN_PART}". Never answer fail for it. A criterion whose code is in this part is judged here, '
+        "whichever part holds its test.\n"
+        "- A fail must cite code shown in this part.\n"
+        "- A feedback, accepted or satisfied item whose code is not in this part: answer false, with evidence that "
+        f'starts with "{NOT_IN_PART}".\n'
+        "- A test that is not shown in this part: leave it out of test_adequacy. "
+        "Judge the adequacy of every test shown here, wherever its code is.\n"
+    )
+
+
+def _part_listing(part: PartView) -> str:
+    lines = [
+        (f"part {n}: " if n else "no part (not judged): ") + f"{path} ({chars} characters)"
+        for n, path, chars in part.listing
+    ]
+    if part.more:
+        lines.append(f"+{part.more} more files: see verification.md")
+    return '<l4:data kind="diff parts">\n' + defuse("\n".join(lines)) + "\n</l4:data>"
+
+
+@dataclass(frozen=True)
 class JudgePrompt:
     system: str
     user: str
@@ -372,6 +413,7 @@ def build_judge_prompt(
     feedback: Sequence[FeedbackRef] = (),
     accepted: Sequence[AcceptedRef] = (),
     satisfied: Sequence[SatisfiedRef] = (),
+    part: PartView | None = None,
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -382,7 +424,9 @@ def build_judge_prompt(
     (`accepted`, L4-YOLO-028), and the tasks ticked as already satisfied (`satisfied`, L4-VER-018). `redact` runs
     over the whole text before it is hashed (L4-OBS-002), so `sha256` is the hash of the prompt document the judge was
     sent (`render_prompt`: system, blank line, user; the schema instruction a prompt-contract adapter appends is not
-    part of it) and of the published `.prompt.md` (HB-5)."""
+    part of it) and of the published `.prompt.md` (HB-5). With `part` the diff section is headed `part K of N`, holds
+    the rules of a part and the list of every file with its part, and `diff` is the part's own text (L4-VER-041);
+    without it the prompt is the one of a diff within the cap."""
     spec = "\n".join(data_block(path, text) for path, text in sources) or "(no spec files)"
     listed = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria) or "(the unit has no scenarios)"
     note = "\n[diff truncated: the rest is not shown to you]" if diff_truncated else ""
@@ -421,11 +465,18 @@ def build_judge_prompt(
         if satisfied
         else []
     )
+    if part is None:
+        diff_section = "## Diff (base...head)\n" + data_block("git diff", diff_text)
+    else:
+        diff_section = (
+            f"## Diff (base...head), part {part.index} of {part.count}\n{_part_rules(part)}"
+            f"{_part_listing(part)}\n{data_block('git diff', diff_text)}"
+        )
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
         "## Criteria to judge (one verdict per id)\n" + data_block("criteria", listed),
-        "## Diff (base...head)\n" + data_block("git diff", diff_text),
+        diff_section,
         "## Gate report\nThe harness ran these gates on the committed head.\n" + data_block("gate report", gate_report),
         *block,
         *owners,

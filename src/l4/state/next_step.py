@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from l4.planner import UnitFacts
 
 NO_CONVERTIBLE_FINDING = "no_convertible_finding"  # `phase.changed{to: escalated, reason}` of the fix loop (L4-OPS-022)
+JUDGE_VIEW_REJECTED = "judge_view_rejected"  # a person rejected a hold on the judge's view of the diff (L4-VER-044)
+UNCONVERTED_AND_JUDGE_VIEW = "no_convertible_finding_and_judge_view_rejected"  # both causes in one round (L4-VER-044)
 CONTINUES = "nothing: the harness continues at the next run"
 RUNBOOK_CORRUPT = "see docs/runbook.md section 7.9"
 CORRUPT_PHASE = "corrupt"  # `l4.state.status.CORRUPT_PHASE`: a status value, not a lifecycle phase
@@ -27,6 +29,32 @@ def feedback_way_out(unit: str) -> str:
         f"l4 feedback add --unit {unit} --kind behaviour --when ... --then ... --text ... "
         f"(then the git lines it prints), then l4 retry --unit {unit} --reason TEXT"
     )
+
+
+def judge_view_way_out(unit: str) -> str:
+    """The step of a unit escalated with `judge_view_rejected` (L4-VER-044): a fix unit cannot shrink the diff the judge
+    could not see, so the change is split, or a person who checked the files replaces the answer with an accept."""
+    return (
+        "a fix unit cannot shrink the diff the judge could not see; split the change into smaller units (then "
+        f"l4 restart --unit {unit} --reason TEXT), or, once you checked the files the hold names, replace the answer: "
+        f'l4 questions answer Q-NNN --unit {unit} --text "accept ..." --replace, then l4 retry --unit {unit} '
+        "--reason TEXT"
+    )
+
+
+def way_out(unit: str, halt_reason: str | None) -> str | None:
+    """The unit's own way out of an escalation: `feedback_way_out` for `no_convertible_finding`, `judge_view_way_out`
+    for `judge_view_rejected`, None for every other reason."""
+    if halt_reason == NO_CONVERTIBLE_FINDING:
+        return feedback_way_out(unit)
+    if halt_reason == JUDGE_VIEW_REJECTED:
+        return judge_view_way_out(unit)
+    if halt_reason == UNCONVERTED_AND_JUDGE_VIEW:  # each cause keeps its own way out
+        return (
+            f"two causes. For the finding no fix task can be derived from: {feedback_way_out(unit)}. "
+            f"For the hold on the judge's view: {judge_view_way_out(unit)}"
+        )
+    return None
 
 
 def _unique(*groups: tuple[str, ...]) -> tuple[str, ...]:
@@ -81,8 +109,8 @@ def next_step(facts: "UnitFacts", *, branch: str, questions_path: str) -> str:
     """The one command or action that moves the unit. `branch` and `questions_path` say where an answer goes. The
     command stays bare (`l4 retry --unit U --reason TEXT`); the label that does the same is `label_for`."""
     phase, unit = facts.phase, facts.unit
-    if phase == Phase.ESCALATED.value and facts.halt_reason == NO_CONVERTIBLE_FINDING:
-        return feedback_way_out(unit)
+    if phase == Phase.ESCALATED.value and (own := way_out(unit, facts.halt_reason)) is not None:
+        return own
     if phase in _STOPPED:
         return f"l4 retry --unit {unit} --reason TEXT"
     if phase == Phase.ABANDONED.value:

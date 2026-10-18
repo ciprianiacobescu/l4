@@ -96,7 +96,7 @@ from l4.state.environment import run_environment
 from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
-from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
+from l4.state.next_step import way_out
 from l4.state.pending import (
     PendingLedger,
     adopt_legacy,
@@ -1380,21 +1380,22 @@ def _refuse_stopped(
     edit after the stop is not refused: the run takes `spec_edited` (L4-OPS-014). An `abandoned` unit (its MR was closed
     without a merge) is refused the same way and told `l4 restart` (L4-OPS-009, review L4)."""
     phase = state.phase
+    own: str | None = None
     if phase == Phase.ABANDONED.value:
         detail = app.redactor.redact_text(state.halt_detail or "the merge request was closed without a merge")
         next_step = f"l4 restart --unit {ref.id} --reason TEXT"
     elif phase in (Phase.HALTED.value, Phase.ESCALATED.value) and edit is None:
         detail = app.redactor.redact_text(state.halt_detail or state.halt_reason or "no cause was recorded")
-        next_step = (
-            feedback_way_out(ref.id)
-            if phase == Phase.ESCALATED.value and state.halt_reason == NO_CONVERTIBLE_FINDING
-            else f"l4 retry --unit {ref.id} --reason TEXT"
-        )
+        own = way_out(ref.id, state.halt_reason) if phase == Phase.ESCALATED.value else None
+        next_step = own or f"l4 retry --unit {ref.id} --reason TEXT"
     else:
         return None
     log.error("%s %s: %s", ref.id, phase, detail)
     log.error("Next: %s", next_step)
-    reason = f"{phase}: {detail}. Next: {next_step}"[:300]
+    if own is not None:  # the unit's own way out is whole: a cut would lose the command that ends it (L4-VER-044)
+        reason = f"{phase}: {detail[:150]}. Next: {next_step}"
+    else:
+        reason = f"{phase}: {detail}. Next: {next_step}"[:300]
     return UnitRunResult(
         UnitOutcome(unit=ref.id, phase_before=phase, phase_after=phase, exit_reason=reason), ExitCode.HALTED
     )

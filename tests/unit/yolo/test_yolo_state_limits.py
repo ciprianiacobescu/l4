@@ -155,3 +155,13 @@ def test_good_limits_are_accepted(limits):
     assert not isinstance(result, PlanInvalid), result
     if "deadline" in limits:
         assert result.limits.deadline.utcoffset() is not None
+
+
+def test_scn_yolo_131_the_plan_step_counts_the_runs_an_active_plan_was_given():
+    """L4-YOLO-050: `plan.extended` raises the limit in force with no stop and no resume."""
+    limits = {"max_runs": 90}
+    full = charge(runs=90)
+    assert reached(active(limits, full), now=NOW)[0] == "limit_runs"
+    raised = active(limits, full, ev("plan.extended", by="me", actor="person", reason="r", extend={"runs": 20}))
+    assert reached(raised, now=NOW) is None
+    assert effective_limits(raised).runs == 110 and raised.status == "active"

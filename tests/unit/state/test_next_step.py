@@ -3,7 +3,7 @@
 import pytest
 
 from l4.planner import UnitFacts
-from l4.state.next_step import label_for, next_step
+from l4.state.next_step import feedback_way_out, judge_view_way_out, label_for, next_step, way_out
 
 QPATH = "openspec/changes/x/questions.md"
 BRANCH = "l4/openspec/x"
@@ -30,6 +30,21 @@ def test_the_escalation_with_no_convertible_finding_names_feedback_before_the_re
         "l4 retry --unit openspec:x --reason TEXT"
     )
     assert "--then" in got and "--text" in got and "a retry alone repeats the same verdict" in got
+
+
+def test_scn_ver_138_the_escalation_with_judge_view_rejected_names_its_own_way_out():
+    """L4-VER-044: a fix unit cannot shrink the diff; split the change, or replace the answer and retry."""
+    got = step("escalated", halt_reason="judge_view_rejected")
+    assert got == judge_view_way_out("openspec:x")
+    assert "l4 restart --unit openspec:x" in got and "--replace" in got and "l4 retry --unit openspec:x" in got
+    assert "l4 feedback add" not in got and "a retry alone repeats" not in got
+    assert got.index("l4 restart --unit") < got.index("l4 retry --unit")
+
+
+def test_way_out_is_the_units_own_step_for_two_reasons_and_nothing_for_the_others():
+    assert way_out("openspec:x", "no_convertible_finding") == feedback_way_out("openspec:x")
+    assert way_out("openspec:x", "judge_view_rejected") == judge_view_way_out("openspec:x")
+    assert way_out("openspec:x", "fix_rounds_exhausted") is None and way_out("openspec:x", None) is None
 
 
 @pytest.mark.parametrize(

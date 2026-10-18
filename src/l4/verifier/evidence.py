@@ -179,6 +179,9 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
     result.gates = [GateLine(**g) for g in prev.get("gates", [])]
     result.findings = [_finding(f) for f in prev.get("findings", [])]
     result.holds = list(prev.get("holds") or [])
+    result.hold_views = {str(h): dict(v) for h, v in (prev.get("hold_views") or {}).items()}
+    result.judge_parts = [dict(r) for r in prev.get("judge_parts") or []]
+    result.judge_files = [list(r) for r in prev.get("judge_files") or []]
     result.cx_runs = {cid: CounterexampleRun(**run) for cid, run in (prev.get("cx_runs") or {}).items()}
     result.trace = [_evidence(e) for e in prev.get("trace", [])]
     result.audit = [

@@ -361,15 +361,19 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan is cancelled (kept in the plan ledger)."),
     ]),
-    "yolo resume": ("Resume a stopped or waiting delivery plan once the cause is gone.", lambda: [
-        click.Argument(["plan"]),
-        _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
-        _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help="Raise the cost limit by this many dollars."),
-        _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
-        _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
-        _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),
-        _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
-    ]),
+    "yolo resume": (
+        "Resume a stopped or waiting delivery plan once the cause is gone, or raise a limit of an active one "
+        "(--extend-…).",
+        lambda: [
+            click.Argument(["plan"]),
+            _opt("--reason", "reason", required=True, help="Why the plan resumes (kept in the plan ledger)."),
+            _opt("--extend-cost", "extend_cost", type=FINITE_FLOAT, help="Raise the cost limit by this many dollars."),
+            _opt("--extend-runs", "extend_runs", type=int, help="Raise the run limit by N."),
+            _opt("--extend-attempts", "extend_attempts", type=int, help="Raise the attempts limit of every unit by N."),
+            _opt("--extend-deadline", "extend_deadline", help="A later deadline, ISO 8601."),
+            _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
+        ],
+    ),
     "yolo report": ("Print the report of a delivery plan.", lambda: [click.Argument(["plan"])]),
     "mcp serve": (MCP_SERVE_HELP, lambda: [
         _opt("--repo", "repos", multiple=True, type=click.Path(path_type=Path),

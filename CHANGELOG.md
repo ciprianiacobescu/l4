@@ -15,6 +15,11 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - Doctor `SANDBOX-003` plants canaries in the home, in another unit's step directory and in the lock directory and fails
   (exit 3) when either sandbox kind can read one. Doctor `SANDBOX-004` warns while `sandbox.setup_paths` is set.
 - The ledger events `env.rebuilt` and `guard.notice`, and `guard.violation` with rule `environment`.
+- `yolo.extend_by_agents` (default `false`) in `.l4/config.yaml` on the base branch lets an agent raise a plan's limits
+  with `l4 yolo resume --extend-…`, like `yolo.review.accept_by_agents` does for `l4 yolo accept`. The event
+  (`plan.extended`, or `plan.resumed` that extends) records the actor, its marker and whether the key allowed it
+  (L4-YOLO-051).
+- `l4 yolo status` lists the extensions of a plan (`extended: runs 90 -> 110 by <who> (person): <why>`).
 
 ### Fixed
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
@@ -144,6 +149,28 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
   signed harness commits or a ref only the harness can write.
 - A PR that a person merged at another head while the plan held H is recorded with the head that was merged.
+- A diff over 120000 characters no longer holds the unit every round. The judge now reads it in parts: whole files,
+  ordered so that a test sits next to the code it is named after, at most 8 parts of at most 120000 characters, one judge
+  call each, and the replies are merged into one verdict (a `fail` of any part wins, then a `pass`). A diff within the
+  cap keeps its one prompt. The prompt template is `judge@10`; `verdict.json` lists `judge_parts` and `verification.md`
+  says `judged in N parts` (L4-VER-041, L4-VER-042).
+- The judge's diff leaves out the harness's bookkeeping, named once: every `.l4/` file, `.serena/memories/harness/**`, and
+  the `verification.md`, `questions.md` and `feedback.md` of each unit folder of the family (L4-VER-040). Lock files
+  (`uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`,
+  `composer.lock`, `Gemfile.lock`) are shown as one line each (path, old and new size, lines added and removed) and never
+  hold the unit (L4-VER-045).
+- What the judge still cannot see (one file longer than one part, a diff that needs more than 8 parts) is a hold
+  `judge view: …` of its own kind. Its question says what `accept` and `reject` mean and asks for no `WHEN … THEN …`. A
+  rejected one is a human finding no fix task is derived from: the unit escalates with `judge_view_rejected`, and
+  `l4 status`, the refusal of `l4 run --unit`, the sticky note and a plan stopped on the unit name the way out (split the
+  change and `l4 restart`, or `--replace` with an accept and `l4 retry`). Before, a reject with a `WHEN … THEN …` made a
+  fix unit that could not shrink the diff, and the same hold came back every round (L4-VER-043, L4-VER-044,
+  L4-YOLO-055).
+- After `l4 questions answer`, `l4 yolo resume` no longer refuses a plan whose answer is pushed and not yet read, and
+  `l4 yolo status` says what happens: while a question is open, how to answer and that the plan continues by itself at
+  the run that reads the answer; once the answer is pushed, that the next run reads it and how to start it now. The
+  wait line shows the live reason, not the stale `open: Q-…` detail. The plan step, the resume and the status decide with
+  one rule (L4-YOLO-052, L4-YOLO-053, L4-YOLO-054).
 
 ### Changed
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
@@ -178,6 +205,23 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `ci: preexisting` and the job names.
 - GitHub job names in `ci.failed` and `ci.preexisting` are `<workflow file> / <job>` (`tests.yml / build`).
 - On GitLab, a hand-off commit with no pipeline job is `ci_not_run`; it was `ci_green`.
+- A person's accept of a `judge view:` hold is bound to the head content of every file the hold covers and to the full list of
+  files the judge did not see (the hold's text names five): it is void, and the hold asked again, when that content changes. The
+  question lists every unseen file (L4-VER-046). The file list of a part prompt is capped at 200 files (then
+  `+K more files: see verification.md`, which lists them all) and the diff is read with one `git diff` (L4-VER-047). A test is
+  packed with the code it imports, a part that shows the code judges its criterion, and a part that cannot see a test cannot
+  call it inadequate. A lock file is a lock file only when its old and new names both are, and its line shows the changed lines
+  that touch a source field and the hosts they name (L4-VER-045).
+- The key `yolo.extend_by_agents` (and `yolo.review.accept_by_agents`) is read from the plan's own target branch, and only when the plan file there is the one the plan recorded; an agent that names
+  another base branch in its configuration has no key. `--extend-cost` must be finite. `l4 yolo status` lists the extensions the plan's
+  fold applied, follows the unit's answer step for an invalid, dismissed or draft answer, and describes a unit as answered only when an
+  answer is recorded (L4-YOLO-056). A rejected judge-view hold beside another unconvertible reject names both ways out.
+- `l4 yolo resume PLAN --reason TEXT --extend-…` on an **active** plan raises the limit and records `plan.extended`; it
+  resumes nothing and starts no run. Before, it was refused until the plan stopped. Without an `--extend-…` the refusal
+  names the four options, and an extension that changes no limit is refused (L4-YOLO-050).
+- Every `--extend-…` of `l4 yolo resume` is a person's decision: an agent is refused, with the command a person runs,
+  unless `yolo.extend_by_agents` is true on the base branch. Before, the rule was only written in the docs
+  (L4-YOLO-051).
 
 ## 0.4.15 (2026-10-18)
 

@@ -124,7 +124,7 @@ Do not write the file from nothing. Let L4 list the specs, then add the order yo
    done. An edit stops the plan (`inputs_changed`) and needs a new review and activation.
 
 The skill reference `references/plan.md` teaches an agent these steps. The agent never activates, resumes or cancels a
-plan, never writes `refs/l4/plans/*`, and sets `merge: auto` only when you ask and `forge.merge_policy` is `auto`.
+plan (and raises no limit, unless `yolo.extend_by_agents` is true), never writes `refs/l4/plans/*`, and sets `merge: auto` only when you ask and `forge.merge_policy` is `auto`.
 
 ## The two merge modes
 
@@ -293,7 +293,10 @@ L4 post-checks every merged unit of the plan that is not integrated, not only th
 ## Stops and waits
 
 A plan **waits** when the current unit needs a person's answer or has no agent available. The plan continues by itself
-when the cause is gone. `l4 yolo resume` also wakes it.
+when the cause is gone. `l4 yolo resume` also wakes it. A plan that waits for an answer continues at the run that reads
+the answer: `l4 questions answer` pushes the answer and starts that run, so no resume is needed. Once the answer is
+pushed, `l4 yolo status` says that the next run reads it, and `l4 yolo resume` starts that run at once; while a question
+is open, a resume is refused.
 
 A plan with `merge: auto` also waits when the merge of the current unit is not ready, for example when the unit has no
 open PR, or the PR is aimed at another branch than the target, when no hand-off commit H is recorded (`l4 retry --unit
@@ -337,6 +340,10 @@ ledger, per attempt of a unit, and checks it before each dispatch and each merge
 attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
 activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. The usage is never reset:
 not by a restart of a unit, not by a resume. A resume without `--extend-…` is refused while the limit is still reached. To allow more, use `l4 yolo resume --extend-cost`, `--extend-runs`, `--extend-attempts` or `--extend-deadline`.
+On an **active** plan the same option raises the limit before it is reached: L4 records `plan.extended` (limits before
+and after, who, why) and changes nothing else; the plan is not resumed and no run starts. `l4 yolo status` lists the
+extensions. Raising a limit is a person's decision: an agent is refused unless `yolo.extend_by_agents` is `true` in
+`.l4/config.yaml` on the base branch (default `false`).
 
 ## The report and the receipts
 
@@ -378,5 +385,5 @@ example with a PR. You can squash there. L4 never does it.
 | `l4 yolo activate <plan> --reason <text>` | Freezes the inputs and starts the plan. |
 | `l4 yolo status [<plan>] [--json]` | Shows the state, the units, the usage and `Next:`. |
 | `l4 yolo cancel <plan> --reason <text>` | Stops the plan for good. |
-| `l4 yolo resume <plan> --reason <text> [--extend-…]` | Continues a stopped or waiting plan when the cause is gone. |
+| `l4 yolo resume <plan> --reason <text> [--extend-…]` | Continues a stopped or waiting plan when the cause is gone; on an active plan, an `--extend-…` raises the limit and resumes nothing. An `--extend-…` is a person's (`yolo.extend_by_agents`). |
 | `l4 yolo report <plan>` | Prints the report. |

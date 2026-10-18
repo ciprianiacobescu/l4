@@ -88,11 +88,20 @@ from l4.state.lifecycle import Trigger
 from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
-from l4.verifier import base_tests
+from l4.verifier import base_tests, diffparts
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
 from l4.verifier.conventions import test_conventions
+from l4.verifier.diffparts import (
+    DiffPart,
+    DiffParts,
+    blob_ids,
+    bookkeeping_pathspecs,
+    file_rows,
+    judge_parts,
+    part_listing,
+)
 from l4.verifier.evidence import (
     commit_verifier_tests,
     read_verdict,
@@ -122,6 +131,7 @@ from l4.verifier.judge import (
     JudgePrompt,
     JudgeRun,
     JudgeVerdict,
+    PartView,
     RoundOutput,
     accepted_refs,
     build_judge_prompt,
@@ -129,6 +139,7 @@ from l4.verifier.judge import (
     run_judge,
     satisfied_refs,
 )
+from l4.verifier.judge_parts import merge_part_verdicts
 from l4.verifier.notes import verdict_section
 from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
 from l4.verifier.preconditions import check_preconditions, record_ci_steps, record_feedback
@@ -176,6 +187,7 @@ from l4.verifier.ui_step import (
     with_generated,
 )
 from l4.verifier.verdicts import (
+    HoldView,
     apply_finding_verdicts,
     carry_rejects,
     consume_verdicts,
@@ -183,6 +195,7 @@ from l4.verifier.verdicts import (
     finding_sha256,
     hold_covers,
     hold_id,
+    hold_sha256,
     raise_verdict_questions,
     regressions,
     settle_holds,
@@ -198,6 +211,7 @@ TRIGGERS = {Verdict.PASS: Trigger.VERIFY_PASS, Verdict.FAIL: Trigger.VERIFY_FAIL
             Verdict.NEEDS_HUMAN: Trigger.VERIFY_NEEDS_HUMAN}  # fmt: skip
 MAX_DIFF_CHARS = 120_000
 MAX_NOTES_CHARS = 6_000
+MAX_HOLD_PATHS = 5  # the unseen files a `judge view:` hold names
 UNEXECUTED_NOTE = "not executed in M0: the verifier worktree is M1 (verifier 1.5)"
 JUDGE_TIMEOUT_S = 600  # no config key in SPEC section 5; `claude -p` answers in 15-20 s [V]
 VERIFY_PHASES = ("implemented", "verifying")
@@ -249,13 +263,13 @@ class VerifyContext:
 
 
 def _git_diff(wb: Workbench, base_sha: str, head: str) -> tuple[str, bool]:
-    """`git diff <base>...<head>` without the harness's own `.l4/` files and the `verification.md` of each unit of the
-    family (the harness's report of an earlier round, not the unit's work: M1.9 live F4), cut at MAX_DIFF_CHARS. A
-    `verification.md` anywhere else is project content and stays."""
-    reports = [f":(literal,exclude){d}/verification.md" for d in _unit_dirs(wb)]
+    """`git diff <base>...<head>` without the harness's bookkeeping (`bookkeeping_pathspecs`, L4-VER-040: the `.l4/`
+    files, the harness's memories, and the `verification.md`, `questions.md` and `feedback.md` of each unit of the
+    family: the harness's own files, not the unit's work), cut at MAX_DIFF_CHARS. A file of those names anywhere else
+    is project content and stays."""
     raw = wb.git.run_bytes(
         "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{base_sha}...{head}", "--", ".",
-        ":(glob,exclude)**/.l4/**", *reports,
+        *bookkeeping_pathspecs(_unit_dirs(wb)),
     )  # fmt: skip
     text = raw.decode("utf-8", errors="replace")
     return text[:MAX_DIFF_CHARS], len(text) > MAX_DIFF_CHARS
@@ -752,7 +766,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     wb, result = vc.wb, run.result
     current = {c.id: text_sha256(c) for c in criteria}
     current |= {f.id: finding_sha256(f.id) for f in result.findings if f.source == "judge" and f.blocking}
-    current |= {hold_id(h): finding_sha256(hold_id(h)) for h in result.holds}
+    current |= {hold_id(h): hold_sha256(h, result.hold_views) for h in result.holds}
     effective = effective_verdicts(events, current)
     result.findings, effective = carry_rejects(
         result.findings, effective, events, lambda n, target: stored_finding(read_verdict(wb.ref.path, n), target)
@@ -1033,48 +1047,74 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
 
     def judge_body() -> tuple[bool, str]:
-        diff, truncated = _git_diff(wb, base_sha, result.head_sha)
-        prompt = build_judge_prompt(
-            unit_id=wb.ref.id, sources=_family_sources(wb), criteria=criteria, diff=diff,
-            diff_truncated=truncated, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
-            redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
-            owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
-            round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted,
-            satisfied=satisfied,
-        )  # fmt: skip
-        result.prompt_sha256 = prompt.sha256
-        result.prompt_template = prompt.version
-        if truncated:
-            result.holds.append(f"the diff is longer than {MAX_DIFF_CHARS} characters: the judge saw only the start")
-        judged = _ask_judges(vc, prompt, result)
-        if judged.status == "error":
-            raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
-        if judged.verdict is None:
-            result.holds.append(f"the judge's reply was discarded ({judged.status}: {judged.detail})")
-            return False, f"{judged.status}: {judged.detail}"
-        run.judged = judged.verdict
-        result.judge_verdict = judged.verdict.model_dump(mode="json")
-        verdicts = pick_verdicts(judged.verdict)
+        parts = judge_parts(wb.git, base_sha, result.head_sha, _unit_dirs(wb))
+        result.holds.extend(_judge_view_holds(parts))
+        many = len(parts.parts) > 1
+        listing, more = part_listing(parts)
+        result.judge_files = [list(row) for row in file_rows(parts)]
+        blobs = blob_ids(wb.git, result.head_sha, _covered(parts))
+        views = _hold_views(parts, lambda path: blobs.get(path, "missing"))
+        result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
+        shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
+        prompts = [
+            build_judge_prompt(
+                unit_id=wb.ref.id, sources=_family_sources(wb), criteria=criteria, diff=part.text,
+                diff_truncated=part.cut, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
+                redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
+                owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
+                round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted, satisfied=satisfied,
+                part=PartView(part.index, len(shown), listing, more) if many else None,
+            )
+            for part in shown
+        ]  # fmt: skip
+        hashes = [p.sha256 for p in prompts]
+        result.prompt_sha256 = hashes[0] if not many else hashlib.sha256("\n".join(hashes).encode()).hexdigest()
+        result.prompt_template = prompts[0].version
+        replies: list[JudgeVerdict] = []
+        outcomes: list[str] = []
+        for part, prompt in zip(shown, prompts, strict=True):
+            at = (part.index, len(shown)) if many else None
+            judged = _ask_judges(vc, prompt, result, part=at)
+            if judged.status == "error":
+                raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
+            if judged.verdict is None:
+                where = f"part {part.index} of {len(shown)}, " if many else ""
+                result.holds.append(f"the judge's reply was discarded ({where}{judged.status}: {judged.detail})")
+                return False, f"{judged.status}: {judged.detail}"
+            replies.append(judged.verdict)
+            outcomes.append(judged.reply)
+            if many:
+                result.judge_parts.append(
+                    {"part": part.index, "files": len(part.entries), "chars": len(part.text), "reserve": parts.reserve,
+                     "profile": vc.judge_profile, "calls": judged.calls, "reply": judged.reply,
+                     "prompt_sha256": prompt.sha256}
+                )  # fmt: skip
+        if many:  # the worst reply of the parts is the round's
+            result.judge_reply = next((w for w in ("discarded", "retried", "repaired", "valid") if w in outcomes), "")
+        verdict = merge_part_verdicts(replies)
+        run.judged = verdict
+        result.judge_verdict = verdict.model_dump(mode="json")
+        verdicts = pick_verdicts(verdict)
         for c in criteria:
             _counterexample(wb, result, c.id, verdicts.get(c.id))
         unknown = sorted(set(verdicts) - ids)
         if unknown:
             title = "the judge cited criteria the unit does not have"
             result.findings.append(Finding(Severity.MINOR, title, ", ".join(unknown[:5]), "judge"))
-        result.findings.extend(judge_findings(judged.verdict, known=ids))
-        reviewed = [(a.test, a.criterion, a.adequate) for a in judged.verdict.test_adequacy]
+        result.findings.extend(judge_findings(verdict, known=ids))
+        reviewed = [(a.test, a.criterion, a.adequate) for a in verdict.test_adequacy]
         result.trace = apply_adequacy(result.trace, reviewed)
         result.findings.extend(inadequate_findings(result.trace))
         if asked:
-            _judge_feedback(vc, result, asked, judged.verdict, base_sha)
+            _judge_feedback(vc, result, asked, verdict, base_sha)
         for item in accepted:  # evidence only: the harness's merge guard reads these (L4-YOLO-028)
-            answer = next((a for a in judged.verdict.accepted or [] if a.id == item.id), None)
+            answer = next((a for a in verdict.accepted or [] if a.id == item.id), None)
             wb.emit(
                 "review.accepted_judged", id=item.id, round=vc.round, addressed=answer.addressed if answer else False,
                 evidence=answer.evidence if answer else "not answered", profile=vc.judge_profile,
             )  # fmt: skip
         for ref in satisfied:  # L4-VER-018: a task ticked without a change of its own is checked against its text
-            said = next((a for a in judged.verdict.satisfied or [] if a.task == ref.task), None)
+            said = next((a for a in verdict.satisfied or [] if a.task == ref.task), None)
             holds, evidence = (said.holds, said.evidence) if said else (False, "not answered")
             wb.emit(
                 "verify.satisfied_judged", task=ref.task, round=vc.round, holds=holds, evidence=evidence,
@@ -1086,9 +1126,53 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             elif not said.holds:
                 title = f"task {ref.task} is ticked as already satisfied, but its text is not done"
                 result.findings.append(Finding(Severity.MAJOR, title, said.evidence, "judge"))
-        return True, f"{judged.calls} call(s)"
+        return True, f"{result.judge_calls} call(s)"
 
     _step(vc, run, "9", "judge", judge_body)
+
+
+def _view_holds(parts: DiffParts) -> list[tuple[str, tuple[str, ...]]]:
+    """Each hold on the judge's view (L4-VER-043) with every file it covers: a file cut to one part, and the files in no
+    part judged (all of them: the text names five). No character count of the diff is in a text, so a small change of
+    size does not make a new hold."""
+    holds = [
+        (
+            f"judge view: the diff of `{part.entries[0].paths[-1]}` is longer than one part "
+            f"({diffparts.MAX_PART_CHARS} characters): the judge saw only its start",
+            (part.entries[0].paths[-1],),
+        )
+        for part in parts.parts
+        if part.cut
+    ]
+    if parts.unseen:
+        named = ", ".join(f"`{path}`" for path in parts.unseen[:MAX_HOLD_PATHS])
+        more = f" (+{len(parts.unseen) - MAX_HOLD_PATHS} more)" if len(parts.unseen) > MAX_HOLD_PATHS else ""
+        holds.append(
+            (
+                f"judge view: the diff needs more than {diffparts.MAX_JUDGE_PARTS} parts of "
+                f"{diffparts.MAX_PART_CHARS} characters: the judge did not see {named}{more}",
+                tuple(parts.unseen),
+            )
+        )
+    return holds
+
+
+def _judge_view_holds(parts: DiffParts) -> list[str]:
+    return [text for text, _ in _view_holds(parts)]
+
+
+def _covered(parts: DiffParts) -> list[str]:
+    return [path for _, paths in _view_holds(parts) for path in paths]
+
+
+def _hold_views(parts: DiffParts, blob_of: Callable[[str], str]) -> dict[str, HoldView]:
+    """The content a person's accept of each hold is bound to: the head blob of every file the hold covers and the full
+    list of unseen files (review M1). The hold's id stays the hash of its text."""
+    views = {}
+    for text, paths in _view_holds(parts):
+        covered = "\n".join(f"{path}\t{blob_of(path)}" for path in paths)
+        views[text] = HoldView(hashlib.sha256(f"{text}\0{covered}".encode()).hexdigest(), paths)
+    return views
 
 
 def _task_text(wb: Workbench) -> Callable[[Task], str]:
@@ -1147,7 +1231,9 @@ def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
     return found
 
 
-def _ask_judges(vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult) -> JudgeRun:
+def _ask_judges(
+    vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None
+) -> JudgeRun:
     """One judge, then the next independent one for as long as the answer is a usage limit, comes from another
     model than the profile names (SCN-AVL-15) or from a served model whose vendor is not independent of the
     implementers (L4-VER-001; an unknown vendor never is): that verdict is dropped and never counted. The calls and
@@ -1181,6 +1267,7 @@ def _ask_judges(vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult) ->
         wb.emit(
             "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
             model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+            **({"part": part[0], "parts": part[1]} if part else {}),
         )  # fmt: skip
         if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
             wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
@@ -1258,6 +1345,7 @@ def _ask_verdicts(
         services.ref.path, services.ref.name, outcomes=result.criteria, criteria=criteria, trace=result.trace,
         findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
+        hold_views=result.hold_views,
     )  # fmt: skip
     if (section := verdict_section(ctx, consumed)) is not None:
         ctx.shared["notes"] = (section,)

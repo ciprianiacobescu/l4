@@ -28,7 +28,12 @@ from l4.specs.feedback import FeedbackItem
 from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
-from l4.verifier.verdicts import WHEN_THEN, is_coverage_hold_finding, rejection_note
+from l4.verifier.verdicts import (
+    JUDGE_VIEW_REJECTED_TITLE,
+    WHEN_THEN,
+    is_coverage_hold_finding,
+    rejection_note,
+)
 
 MAX_FIX_TASKS = 5
 MAX_TITLE_CHARS = 100
@@ -161,6 +166,11 @@ def _candidates(
     for f, minor in picked:
         if f.feedback is not None:  # one task per item, never shared and never dropped (L4-FBK-005)
             grouped[f.id] = _feedback_candidate(f, f.feedback)
+            continue
+        if f.title == JUDGE_VIEW_REJECTED_TITLE:  # a hold on the judge's view: a person's, whatever its reason says
+            skipped.append(f"{f.id}: a hold on the judge's view of the diff: a fix unit cannot shrink the diff")
+            if (judged := rejects.get(f.id)) is not None and judged.question not in unconverted:
+                unconverted.append(judged.question)
             continue
         criterion = f.criterion if f.criterion in by_id else None
         verdict = rejects.get(f.id) or (rejects.get(criterion) if criterion else None)
