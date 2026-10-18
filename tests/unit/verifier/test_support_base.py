@@ -156,3 +156,76 @@ def test_an_empty_plan_touches_nothing(tmp_path, git_environ):
     before = snapshot(repo.path)
     with support_at_base(wb, base, SupportPlan()) as reverted:
         assert reverted == [] and snapshot(repo.path) == before
+
+
+# --- detect-test-tamper 9.1: the revert set of the amendment (design D13 step 3, D16) ---------------------------------
+
+
+def unit_plan(tmp_path, git_environ, base_files, edits, deletes=(), cfg=None, integrity=None):
+    from l4.verifier.support_base import unit_test_plan
+
+    repo, base = new_repo(tmp_path, git_environ, base_files)
+    repo.write(edits)
+    repo.delete(*deletes)
+    head = repo.commit("unit", task="1.1", tdd="red")
+    git = Git(repo.path, environ=git_environ)
+    return unit_test_plan(git, cfg or L4Config(), base, head, integrity), repo, base, head
+
+
+def test_the_revert_set_holds_test_and_support_files_and_leaves_data_and_runner_config(tmp_path, git_environ):
+    base = {
+        "tests/fixtures/data.json": '{"a": 1}\n',
+        "tests/test_old.py": "def test_old():\n    assert 1\n",
+        "tests/helpers.py": "X = 1\n",
+        "pyproject.toml": "[project]\nname = 'x'\n",
+        "src/code.py": "X = 1\n",
+    }
+    edits = {
+        "tests/fixtures/data.json": '{"a": 2}\n',  # changed data is reverted
+        "tests/fixtures/factory.py": "X = 1\n",  # added code under fixtures/ is reverted
+        "fixtures/cart.html": "<p>4 items</p>\n",  # added data stays
+        "tests/testdata/new.csv": "a,b\n",  # added data stays
+        "tests/checks.py": "def assert_total():\n    return None\n",  # a test-glob file with no test
+        "tests/test_new.py": "def test_new():\n    assert 1\n",
+        "pyproject.toml": "[project]\nname = 'y'\n",
+        "src/code.py": "X = 2\n",
+        "tests/.l4/x.py": "X = 1\n",
+    }
+    plan, *_ = unit_plan(tmp_path, git_environ, base, edits, deletes=["tests/test_old.py"])
+    assert dict(plan.changes) == {
+        "tests/fixtures/data.json": "M",
+        "tests/fixtures/factory.py": "A",
+        "tests/checks.py": "A",
+        "tests/test_new.py": "A",
+        "tests/test_old.py": "D",
+    }
+
+
+def test_extra_globs_count_and_the_fallback_follows_the_scan(tmp_path, git_environ):
+    cfg = L4Config(tdd={"extra_test_support_globs": ["extra/**"]})
+    plan, *_ = unit_plan(tmp_path, git_environ, {"a.txt": "1\n"}, {"extra/shared.py": "X = 1\n"}, cfg=cfg)
+    assert dict(plan.changes) == {"extra/shared.py": "A"}
+    assert plan.fallback is False and plan.why_not == "step 1 did not run" and plan.base_sha
+    (tmp_path / "ok").mkdir()
+    ok, *_ = unit_plan(tmp_path / "ok", git_environ, {"a.txt": "1\n"}, {"extra/s.py": "X\n"}, cfg=cfg,
+                       integrity=integrity("ok"))  # fmt: skip
+    assert ok.fallback is True
+
+
+def test_the_runner_keeps_the_support_files_and_helpers_but_not_the_units_test_modules(tmp_path, git_environ):
+    from l4.verifier.support_base import runner_support
+
+    edits = {
+        "e2e/conftest.py": "import pytest\n",
+        "e2e/helpers.py": "X = 1\n",
+        "e2e/test_cart.py": "def test_cart():\n    assert 1\n",
+        "e2e/cart.spec.ts": "export {};\n",
+        "tests/fixtures/factory.py": "X = 1\n",
+    }
+    plan, *_ = unit_plan(tmp_path, git_environ, {"a.txt": "1\n"}, edits)
+    assert {p for p, _ in runner_support(plan, L4Config()).changes} == {
+        "e2e/conftest.py",
+        "e2e/helpers.py",
+        "tests/fixtures/factory.py",
+    }
+    assert runner_support(plan, L4Config()).base_sha == plan.base_sha

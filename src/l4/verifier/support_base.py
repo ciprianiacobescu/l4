@@ -12,12 +12,14 @@ configuration in red and green."""
 import contextlib
 import hashlib
 import os
-from collections.abc import Iterator
+import re
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from l4.config.schema import L4Config
+from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.implementer.discrimination import _drop_bytecode
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
@@ -41,6 +43,64 @@ class SupportPlan:
 
 
 NO_SUPPORT = SupportPlan()  # the plan of a unit that changed no support file: runs are as before
+
+# Data directories (design D13 step 3): a file ADDED under one that is not source code stays in place in every run. New
+# data cannot change what a base test checks, and setting it aside breaks an honest app (review M6).
+DATA_GLOBS = ("**/fixtures/**", "**/mocks/**", "**/__mocks__/**", "**/testdata/**")
+_TESTISH = re.compile(r"(^test_|_test\.|\.test\.|\.spec\.)")
+
+
+def collect_only_env(paths: Sequence[str]) -> dict[str, str]:
+    """The environment that makes the harness's pytest plugin collect only these Python files (`L4_COLLECT_ONLY`)."""
+    return {"L4_COLLECT_ONLY": os.pathsep.join(paths)}
+
+
+def _readable(integrity: IntegrityReport | None) -> tuple[bool, str]:
+    check = next((c for c in integrity.checks if c.name == "content scan"), None) if integrity is not None else None
+    if check is not None and check.status == "ok":
+        return True, ""
+    if integrity is None:
+        return False, "step 1 did not run"
+    if check is None:
+        return False, "step 1 has no content scan"
+    return False, f"step 1's content scan did not read them: {check.note}"
+
+
+def unit_test_plan(git: Git, cfg: L4Config, base_sha: str, head: str, integrity: IntegrityReport | None) -> SupportPlan:
+    """Every test and support file the unit added, changed or deleted (design D13 step 3): the paths of
+    `tdd.test_globs` and `tdd.test_support_globs`, less `.l4/` directories, runner configuration and added data files
+    under `DATA_GLOBS` that are not source code. `fallback` and `why_not` are `support_plan`'s (step 5 uses them)."""
+    tdd = cfg.tdd
+    fields = [f for f in git.run_bytes("diff", "--name-status", "-z", "--no-renames", base_sha, head).split(b"\0") if f]
+    changes = []
+    for status, raw in zip(fields[0::2], fields[1::2], strict=True):
+        path, letter = raw.decode("utf-8", "replace"), status.decode()[:1]
+        letter = "M" if letter == "T" else letter
+        if (
+            not any(glob_match(g, path) for g in (*tdd.test_globs, *tdd.test_support_globs))
+            or any(glob_match(g, path) for g in tdd.runner_config_files)
+            or "/.l4/" in f"/{path}"
+        ):
+            continue
+        data = any(glob_match(g, path) for g in DATA_GLOBS) and PurePosixPath(path).suffix.lower() not in CODE_SUFFIXES
+        if letter == "A" and data:
+            continue
+        changes.append((path, letter))
+    fallback, why = _readable(integrity)
+    return SupportPlan(tuple(sorted(changes)), fallback, why, base_sha)
+
+
+def runner_support(plan: SupportPlan, cfg: L4Config) -> SupportPlan:
+    """The part of a plan that step 5's head run reverts (design D16): the e2e runner's own support files. The unit's
+    other test files stay but are not collected. A test-glob file whose name does not look like a test module counts as
+    support (a helper under `e2e/`)."""
+    support = cfg.tdd.test_support_globs
+    keep = tuple(
+        (path, status)
+        for path, status in plan.changes
+        if any(glob_match(g, path) for g in support) or not _TESTISH.search(PurePosixPath(path).name)
+    )
+    return SupportPlan(keep, plan.fallback, plan.why_not, plan.base_sha)
 
 
 def support_plan(git: Git, cfg: L4Config, base_sha: str, head: str, integrity: IntegrityReport | None) -> SupportPlan:

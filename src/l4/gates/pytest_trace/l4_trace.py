@@ -12,6 +12,10 @@ every thread's traceback, 30 s later, and the process ends with exit 70. It does
 when the project's pytest-timeout sets a limit of its own (`--timeout`, `PYTEST_TIMEOUT` or the `timeout` ini value:
 its limit wins); an installed pytest-timeout that sets none leaves only the tests with a `timeout` marker to it. Off the
 main thread (an xdist worker on execnet's thread model) there is no SIGALRM, only the hard limit.
+
+With `L4_COLLECT_ONLY=<path>[<os.pathsep><path>...]` set (the verifier's audit run, design D15) it collects only those
+Python files, relative to the directory pytest runs in: every other `.py` file except a `conftest.py` is ignored, and a
+directory never is. An empty value collects no Python file.
 """
 
 import contextlib
@@ -20,6 +24,7 @@ import os
 import signal
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -98,6 +103,23 @@ def _disarm(soft: bool) -> None:
         signal.setitimer(signal.ITIMER_REAL, 0)
     faulthandler.cancel_dump_traceback_later()
     _current["deadline"] = None
+
+
+def _collect_only() -> set[str] | None:
+    raw = os.environ.get("L4_COLLECT_ONLY")
+    if raw is None:
+        return None
+    return {os.path.realpath(p) for p in raw.split(os.pathsep) if p}
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    only = _collect_only()
+    if only is None or collection_path.suffix != ".py" or collection_path.name == "conftest.py":
+        return None
+    bases = {Path.cwd(), config.invocation_params.dir, config.rootpath}
+    listed = {os.path.realpath(b / p) for b in bases for p in os.environ["L4_COLLECT_ONLY"].split(os.pathsep) if p}
+    listed |= {p for p in only if os.path.isabs(p)}
+    return None if os.path.realpath(collection_path) in listed else True
 
 
 def pytest_runtest_logstart(nodeid: str, location: object) -> None:
