@@ -899,7 +899,7 @@ def test_unread_files_do_not_hide_a_python_finding_and_a_skipped_row_blocks_noth
     assert out.findings and "not checked: python only; changed files outside it: src/b.ts" in out.note
     (tmp_path / "second").mkdir()
     repo2, base2 = new_repo(tmp_path / "second", git_environ)
-    repo2.write({"web/app.ts": "export default {};\n"})  # not configuration (L4-IMP-040 would block it)
+    repo2.write({"src/setupTests.ts": "export default {};\n"})  # a support file, not configuration (L4-IMP-040)
     report = run_integrity(repo2.context(base2, repo2.commit("ts")))
     rows = {c.name: c for c in report.checks}
     assert rows["content scan"].status == "skipped" and rows["suppressions"].status == "skipped"
