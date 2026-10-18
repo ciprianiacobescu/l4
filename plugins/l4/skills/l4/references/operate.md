@@ -74,6 +74,8 @@ push. The harness reads only answers whose Status says they are submitted.
 
 ## Retry or restart a stuck unit
 
+Never check out the unit branch to "restart" it. Run the commands below from a clone on the base branch (docs/control-loop.md).
+
 The note names the reason; so do `l4 status` (the `REASON` column) and `l4 status --unit FW:NAME`, which ends with
 `Next:` and, for a unit a label moves, an `Or:` line. Only a member (Developer on GitLab, write access on GitHub) can
 use a label. A command needs the forge token in the environment; the project comes from `origin`.

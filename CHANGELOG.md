@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.17 (unreleased)
+
+### Added
+- `docs/control-loop.md`, "How L4 runs: branches, events and the control loop": the one control loop, where each kind of state lives (base branch, unit branch, lock ref, plan ref, keep refs, PR), what starts a run, one run step by step, what a stop keeps, redoes or loses, what each local command writes, a worked recovery of a halted unit in a stopped plan, and swimlane diagrams. Linked from the README, the quickstart, the runbook, the delivery-plans page, the architecture page and the skill's operate reference.
+
 ## 0.4.15 (2026-10-18)
 
 ### Added

@@ -89,6 +89,7 @@ Clients: `claude-code`, `cursor`, `vscode` (project only), `kiro`, `codex`, `ope
 
 * [Quickstart](docs/quickstart.md)
 * [Operations runbook](docs/runbook.md): the states of a unit, why a unit stops, and how to resume or retry
+* [How L4 runs](docs/control-loop.md): branches, events and the control loop; why `l4 retry` runs on the base branch
 * [Delivery plans](docs/yolo-mode.md): order units by dependency and, with two opt-ins, merge them automatically into the integration branch
 * [Architecture](docs/architecture.md)
 * [Specification](docs/SPEC.md)
