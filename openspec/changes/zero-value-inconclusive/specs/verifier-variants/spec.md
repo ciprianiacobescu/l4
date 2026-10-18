@@ -9,7 +9,7 @@ rejection, and the judge sees the pre-satisfied evidence that the harness did no
 Step 4a SHALL judge the zero-value run of its audit tests by L4-IMP-060 against the audit's head run: confirmed is
 accepted, not applicable (L4-IMP-062) is accepted with its label, refuted is rejected (a minor finding), and
 inconclusive is recorded `inconclusive` with its reason: no finding, not committed, listed in `verification.md`. A test
-chore whose added tests are all inconclusive SHALL be accepted, for the verifier to decide.
+chore whose added tests are all inconclusive SHALL be held with a harness question (L4-IMP-063), not accepted.
 
 #### Scenario: SCN-VER-150 (−) An inconclusive audit run is not a rejection
 - **GIVEN** an audit test for a pre-satisfied criterion that passes at head, and a zero-value run that ran no test
@@ -18,11 +18,11 @@ chore whose added tests are all inconclusive SHALL be accepted, for the verifier
 - **THEN** `verify.audit` records `status: inconclusive` with that line in its reason, no minor finding is raised, the
   file is not committed, and `verification.md` lists the record with its reason
 
-#### Scenario: SCN-VER-151 (+) A test chore whose check cannot decide is left to the verifier
+#### Scenario: SCN-VER-151 (+) A test chore whose check cannot decide is held
 - **GIVEN** a test chore that added two tests citing a criterion, and a `discriminate_extra` whose zero-value run and
   base run were both inconclusive for them
 - **WHEN** the chore's discrimination check runs
-- **THEN** the chore is accepted with both tests, as when no unit base exists
+- **THEN** the chore is held with a harness question (`check: tests`), no attempt is used and nothing is committed
 
 #### Scenario: SCN-VER-155 (+) The audit's zero-value run keeps a decorator factory
 - **GIVEN** an audit test of `Store.add` and the modules of SCN-IMP-302
@@ -30,22 +30,33 @@ chore whose added tests are all inconclusive SHALL be accepted, for the verifier
 - **THEN** `traced` keeps its body, the audit test fails by assertion there, and the record is `accepted`
 
 ### Requirement: L4-VER-051 The judge sees evidence the harness did not prove
-A tracing test whose red proof has `via: not_applicable` or `via: human_override` SHALL count as evidence and SHALL be
-labelled in the judge's per-test list, in the satisfied block of L4-VER-018 and in `verification.md`:
-`not applicable: no project code` or `accepted by Q-NNN: the check was inconclusive`. Such a criterion is
-pre-satisfied, so step 4a always audits it.
+A tracing test whose red proof has `via: not_applicable`, `human_override` or `agent_override` SHALL count as evidence and
+be labelled in the judge's per-test list, in the satisfied block of L4-VER-018 and in `verification.md`. The label is the
+guarantee: step 4a samples such a criterion first but audits at most `MAX_AUDIT_PER_ROUND` per round and may be off.
 
 #### Scenario: SCN-VER-153 (+) The judge sees a not-applicable criterion
 - **GIVEN** a unit whose `task.red_ok` proves a criterion with `via: not_applicable`
 - **WHEN** the judge prompt and `verification.md` are written
-- **THEN** the criterion's test reads `(passed, pre_satisfied, not applicable: no project code)` in both, and the
-  criterion is among the audited ones
+- **THEN** the criterion's test reads `(passed, pre_satisfied, not applicable: no project code)` in both
 
 #### Scenario: SCN-VER-154 (+) The judge sees an override
 - **GIVEN** an already-satisfied task whose criterion was accepted by harness question Q-007
 - **WHEN** the judge prompt is written
 - **THEN** the satisfied block's line reads `Proved by: C-… (tests: …; accepted by Q-007: the check was
   inconclusive)`
+
+#### Scenario: SCN-VER-156 (+) The judge tells an agent's acceptance from a person's
+- **GIVEN** an already-satisfied task whose criterion was accepted through harness question Q-007 by an agent, under
+  `clarifier.answer_by_agents`
+- **WHEN** the judge prompt and `verification.md` are written
+- **THEN** the proof is `via: agent_override`, the ledger has `question.answered{by: agent}` and `check.accepted{by:
+  agent}`, and the satisfied block reads `…; accepted by an agent through Q-007: the check was inconclusive)`
+
+#### Scenario: SCN-VER-157 (−) A label is not an audit
+- **GIVEN** five pre-satisfied criteria recorded `via: not_applicable`
+- **WHEN** step 4a samples them
+- **THEN** at most two are audited and the others are listed as skipped, and every one still carries its label in the
+  judge's list; with no verifier agent none is audited
 
 ## MODIFIED Requirements
 

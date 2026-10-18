@@ -622,3 +622,19 @@ Every task follows these rules:
   - Then `python scripts/check_spec.py docs/SPEC.md` (no uncovered requirement, no undefined ref, no unknown phase,
     exit code or key), `npx --yes @fission-ai/openspec@1.14.1 validate zero-value-inconclusive --strict`, and the
     whole unit suite once: `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit`.
+
+## 9. Review fixes (adversarial review of c603ab04: REJECT, 4 major, 3 minor)
+
+- [x] 9.1 M1: in a zero-value run a test the unit's own files made unrunnable is no proof (D1a); an accept covers only
+  the tests the question named. Tests: `tests/unit/implementer/test_zero_value_causes.py` (B1-B4, the binding).
+- [x] 9.2 M2: dependency-only needs a literal distribution name that the criterion's text names; code reached by a
+  string is project code; "step 4a always audits it" corrected. Tests: `test_dependency_only.py` (A1, A2).
+- [x] 9.3 M3: every excerpt and reason is redacted before it is cut. Tests: `test_excerpt_redaction.py` (S1, S2).
+- [x] 9.4 M4: a callable-returning function is kept by annotation only when a varied module applies it at import
+  time. Tests: `test_zero_keep_applied.py` (R1).
+- [x] 9.5 m1: the keep loop also keeps the functions called by the module-level statements of the failing production
+  module (K1); m2: a test chore whose tests are all inconclusive is held; m3: an agent's answer is recorded
+  `by: agent` and labelled `agent_override`. Tests: `test_zero_keep_applied.py`, `test_criterion_tests_chore.py`,
+  `test_held_answers.py`.
+- [x] 9.6 Docs: SPEC (L4-IMP-060..064, L4-QMD-009, L4-VER-050, L4-VER-051, SCN-IMP-300..319 amended, SCN-VER-151
+  amended, SCN-VER-156, SCN-VER-157), CHANGELOG, runbook, design, specs.

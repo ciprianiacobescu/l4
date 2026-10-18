@@ -62,7 +62,7 @@ investigator reproduced it with the 0.4.14 library against a clone (the evidence
   harness question and the two answers.
 - **The verifier tells inconclusive from rejected** (L4-VER-050, L4-VER-051, L4-VER-009). An audit test whose
   zero-value run is inconclusive is recorded `inconclusive`, with no finding; an extra test says why it has no proof; a
-  test chore whose check cannot decide is left to the verifier; unproven pre-satisfied evidence is labelled for the
+  test chore whose check cannot decide is held with a harness question; unproven pre-satisfied evidence is labelled for the
   judge.
 
 Not in this change:

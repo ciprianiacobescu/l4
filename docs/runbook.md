@@ -793,8 +793,9 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
     (`l4 upgrade`) or fixed the cause. The note reaches the agent as an answer.
   - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run.
     The next run does the red step again (one more agent step); when the same check is inconclusive again for the
-    criteria the question names, they count, and the ledger records `via: human_override` with the question and the
-    digest of your answer. A check that now shows a criterion not to discriminate still fails the attempt. The
+    criteria the question names and the tests it named are the ones the check sees again, they count, and the ledger
+    records `via: human_override` (`agent_override` for an agent's answer) with the question and the digest of your
+    answer. A later different test of the criterion is not covered: the unit is held again. A check that now shows a criterion not to discriminate still fails the attempt. The
     verifier and the judge see that the claim was accepted.
   - `l4 questions accept` is refused for this kind, and so is an answer that starts with another word. A `dismissed`
     Status reads as `retry`.

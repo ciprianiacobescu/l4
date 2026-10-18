@@ -6,10 +6,11 @@ plan waits without looping, and the evidence reaches the ledger, the console and
 ## ADDED Requirements
 
 ### Requirement: L4-IMP-063 An inconclusive check holds the task with a harness question
-When every unconfirmed criterion of a red step, or every corrected test of `test-at-red`, is inconclusive, the harness
-SHALL discard the step's changes, record `check.inconclusive`, raise one question of kind `harness` blocking the task,
-and end the task `blocked`: no attempt counted, no escalation. The clarifier SHALL NOT take it. An `accept` answer SHALL
-let the next attempt count those criteria when the check is inconclusive again (`via: human_override`).
+When every unconfirmed criterion of a red step, every corrected test of `test-at-red` or every added test of a test
+chore is inconclusive, the harness SHALL discard the step's changes, raise one question of kind `harness` blocking the
+task, and end the task `blocked`: no attempt counted, no escalation. An `accept` SHALL let the next attempt count those
+criteria when the check is inconclusive again for the tests the question named, labelled `human_override` or
+`agent_override`.
 
 #### Scenario: SCN-IMP-312 (−) An inconclusive pre-satisfied check consumes no attempt
 - **GIVEN** an already-satisfied red step whose zero-value run ran no test (45 collection errors) and whose base run
@@ -23,7 +24,9 @@ let the next attempt count those criteria when the check is inconclusive again (
 - **GIVEN** the question of SCN-IMP-312 answered `accept: the decorator factory is zeroed by an L4 bug` by a person
 - **WHEN** the next run's red step finds the same check inconclusive for the same criteria
 - **THEN** the task is committed as already satisfied, each criterion's proof has `via: human_override`, `question`
-  and `answer_sha256`, and `check.accepted` and `criterion.pre_satisfied{via: human_override}` are recorded
+  and `answer_sha256`, and `check.accepted` and `criterion.pre_satisfied{via: human_override}` are recorded; had
+  the second attempt written a different test of the criterion, the answer would not cover it and the task is held
+  again; an answer an agent gave records `by: agent` and `via: agent_override`
 
 #### Scenario: SCN-IMP-315 (+) A retry runs the check again
 - **GIVEN** the question of SCN-IMP-312 answered `retry: upgraded L4 to the release that keeps decorator factories`
@@ -38,10 +41,10 @@ let the next attempt count those criteria when the check is inconclusive again (
   the corrected tests, and the red commit stays
 
 ### Requirement: L4-IMP-064 The evidence of a variant run reaches the ledger and the console
-`gate.finished` of a failing test gate with no report, no executed test or a collection error, and
-`task.attempt_failed`, SHALL carry `excerpt`: its `E` lines and deepest repository location, at most 600 characters,
-redacted, never read into a prompt. The gate line of a run that executed no test SHALL NOT say `(expected: …)`. The
-artefacts line SHALL say `not uploaded` when `ci.upload_artifacts` is false in GitHub Actions.
+`gate.finished` of a failing test gate with no report, no executed test or a collection error, and `task.attempt_failed`,
+SHALL carry `excerpt`: its `E` lines and deepest repository location, at most 600 characters, redacted before it is cut,
+never read into a prompt. A run that executed no test SHALL NOT print `(expected: …)`, and the artefacts line SHALL say
+`not uploaded` when `ci.upload_artifacts` is false in GitHub Actions.
 
 #### Scenario: SCN-IMP-318 (+) The ledger and the console carry the collection error
 - **GIVEN** a `test-presatisfied` run that exits 2 with 45 collection errors whose first `E` line is

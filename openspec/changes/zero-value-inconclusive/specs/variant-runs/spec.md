@@ -6,18 +6,18 @@ run a test is inconclusive, never "still passes", and the zero values never brea
 ## ADDED Requirements
 
 ### Requirement: L4-IMP-060 A variant run is judged against the real run
-Every variant run (run (b), the pre-satisfied zero-value run, the base run, `test-at-red`, the audit's and the extra
-proofs' runs) SHALL pass `--continue-on-collection-errors` and SHALL be judged per test against the real run: failed by
+Every variant run SHALL pass `--continue-on-collection-errors` and be judged per test against the real run: failed by
 assertion is a proof; passed, or another error, is none; absent, or skipped only there, is inconclusive, as is every
-test of a run with no report or no executed test. A reason SHALL quote the first `E` line when there is one, cut at
-300 characters, redacted.
+test of a run with no report or no executed test. In a zero-value run a test the unit's own files made unrunnable is
+no proof, not inconclusive. A reason SHALL quote the first `E` line, redacted before it is cut to 300 characters.
 
 #### Scenario: SCN-IMP-300 (−) A readable report with collection errors and no test is inconclusive
 - **GIVEN** a zero-value run whose JUnit report lists 45 collection errors, each ending
   `E   TypeError: 'NoneType' object is not callable`, and no test case
 - **WHEN** the harness judges a criterion whose two tests passed in run (a)
 - **THEN** the criterion is inconclusive, not "not discriminating", and its reason names the run and quotes
-  `E   TypeError: 'NoneType' object is not callable`
+  `E   TypeError: 'NoneType' object is not callable`; had the collection errors been raised by the unit's own test
+  files, or the test skipped itself on the zero answer, the criterion would be not discriminating and fail red
 
 #### Scenario: SCN-IMP-301 (−) A base run goes on past an unrelated test that imports an added module
 - **GIVEN** a unit that added `src/pytdd/middleware.py`, committed `tests/test_middleware.py` importing it, and a
@@ -27,23 +27,25 @@ test of a run with no report or no executed test. A reason SHALL quote the first
   confirms its criterion, and `run_with_code_of` returns a gate result whose report holds both
 
 ### Requirement: L4-IMP-061 Zeroing keeps what imports need
-When the harness zeroes every public function, one annotated to return `Callable` or `type` (also `X | None` of
-them) SHALL keep its body. When a zero-value run leaves a candidate inconclusive, the harness SHALL keep the zeroed
-functions called on the failing lines of the run's new collection errors and of setup assertions outside the unit's
-files, and run again: at most twice, only when a new function is kept, recording `zero.kept`.
+When the harness zeroes every public function, one annotated to return `Callable` or `type` SHALL keep its body only when
+a module of the varied set applies it at import time. When a zero-value run leaves a candidate inconclusive, the
+harness SHALL keep the zeroed functions its tracebacks call, and those called by the module-level statements of the
+failing production module, and run again: at most twice, recording `zero.kept`.
 
 #### Scenario: SCN-IMP-302 (+) A decorator factory annotated to return a callable keeps its body
 - **GIVEN** `src/pytdd/telemetry.py` with `def traced(name: str) -> Callable[[_F], _F]`, and `src/pytdd/store.py`
-  whose class body applies `@telemetry.traced("store.add")` to a method
+  whose class body applies `@telemetry.traced("store.add")` to a method, and a `make_adder(n) -> Callable[[int], int]`
+  that no varied module applies at import time
 - **WHEN** the pre-satisfied zero-value run varies both modules
 - **THEN** `traced` keeps its body, every test module imports, and `zero.kept{cause: annotation}` lists
-  `src/pytdd/telemetry.py::traced`
+  `src/pytdd/telemetry.py::traced`; `make_adder` is zeroed, so an honest test of it that follows check 5 keeps its proof
 
 #### Scenario: SCN-IMP-303 (+) An unannotated decorator factory is kept after the run names it
 - **GIVEN** the modules of SCN-IMP-302 with `def traced(name):` unannotated, and a candidate test of `Store.add`
 - **WHEN** the first zero-value run fails to import `store.py` on the line `@telemetry.traced("store.add")`
 - **THEN** the harness keeps `traced`, records `zero.kept{cause: collection, rerun: 1}`, runs once more, and the
-  candidate fails by assertion there, which confirms its criterion
+  candidate fails by assertion there, which confirms its criterion; for `_CFG = load()` above `RATE = _CFG["rate"]`
+  the failing line calls nothing, and the harness keeps `load`, which the module-level statement above it calls
 
 #### Scenario: SCN-IMP-304 (−) The keep reruns are bounded
 - **GIVEN** a zero-value run whose every report names one more zeroed function on a failing collection line
@@ -51,22 +53,24 @@ files, and run again: at most twice, only when a new function is kept, recording
 - **THEN** it runs the gate three times in all, records two `zero.kept`, and the candidates are inconclusive
 
 ### Requirement: L4-IMP-062 Discrimination is not applicable to a dependency check
-A pre-satisfied criterion whose every candidate test reads a dependency (a module from outside the repository that is
-not in the standard library, or `importlib.metadata`) and uses no project code, no repository helper and no fixture
-beyond pytest's built-ins SHALL be recorded `proof: pre_satisfied, via: not_applicable`, with no variant run for it. A
-test that reads no dependency SHALL stay not discriminating.
+A pre-satisfied criterion whose every candidate test reads a dependency's version with a literal distribution name that
+the criterion's text names, and uses no project code (also none reached by a string), SHALL be recorded
+`proof: pre_satisfied, via: not_applicable`, with no variant run for it. Any other test SHALL stay not discriminating.
 
 #### Scenario: SCN-IMP-306 (+) A version pin is recorded as not applicable
-- **GIVEN** a candidate `def test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") ==
-  pytest.__version__` in a test file whose other tests import `pytdd`
+- **GIVEN** a criterion that names the installed `pytest` version, and a candidate `def
+  test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") == pytest.__version__` in a test
+  file whose other tests import `pytdd`
 - **WHEN** the pre-satisfied confirmation runs
 - **THEN** its criterion is recorded with `via: not_applicable`, `criterion.pre_satisfied` carries the same `via`, and
   no variant run varies anything for it
 
 #### Scenario: SCN-IMP-307 (−) A test that reads no dependency is still not discriminating
-- **GIVEN** a candidate `def test_x(): assert 1 + 1 == 2`, and another `def test_y(): assert json.loads("1") == 1`
+- **GIVEN** a candidate `def test_x(): assert 1 + 1 == 2`, another `def test_y(): assert json.loads("1") == 1`, a
+  third `def test_z(): assert pytest.__version__` tagged with a criterion about `apply_discount`, and a fourth that
+  reaches `pytdd` through `importlib.import_module("pytdd")` beside a `version("pytest")` read
 - **WHEN** the pre-satisfied confirmation runs
-- **THEN** neither criterion is not applicable, and both fail red as `not discriminating`
+- **THEN** no criterion is not applicable, and all fail red as `not discriminating`
 
 ## MODIFIED Requirements
 
@@ -96,7 +100,9 @@ inconclusive is held (L4-IMP-063). The zero-value stubs keep what imports need (
   not import in the zero-value run nor at the base
 - **WHEN** the red checks finish
 - **THEN** the attempt fails with `not discriminating: A (…)` and `inconclusive: B (…)`, counts as a failed attempt,
-  and no question is raised
+  and no question is raised; a test that skips itself when the answer is the zero value, a test module that raises
+  at import after reading a production answer, and a `parametrize` over a production answer fail red as they do on
+  0.4.15 and are never held
 
 ### Requirement: L4-IMP-003 Confirmation by a base run confirms or decides nothing
 The base run SHALL pass `--continue-on-collection-errors` and SHALL only confirm: a criterion is confirmed when one of

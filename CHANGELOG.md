@@ -20,11 +20,20 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   and 0.4.15 a decorator factory zeroed to `None` broke the import of the modules that apply it, pytest stopped with
   45 collection errors and ran 0 tests, and the message said "its tests still pass"; the unit halted after nine red
   attempts on four profiles (L4-IMP-060).
-- Zeroing keeps what imports need: a public function annotated to return a callable or a class keeps its body, and when
-  a run leaves a candidate inconclusive the functions its tracebacks call are kept real and the run is made again, at
-  most twice (`zero.kept` records them). Every variant run goes on past collection errors
+- Zeroing keeps what imports need: a public function annotated to return a callable or a class keeps its body when a
+  module of the varied set applies it at import time (a decorator or decorator factory, or a module-level or
+  class-level call), and when a run leaves a candidate inconclusive the functions its tracebacks call, and those called
+  by the module-level statements of the production module whose import failed, are kept real and the run is made again,
+  at most twice (`zero.kept` records them). Every variant run goes on past collection errors
   (`--continue-on-collection-errors`), so the base run of a unit that adds a module no longer stops at the first test
   file that imports it (L4-IMP-061).
+- In a zero-value run a test the unit's own files made unrunnable (it skips itself on the zero answer, its test or
+  support file raises at collection, a `parametrize` over a production answer loses its id) is no proof, so the
+  attempt fails as on 0.4.15; only a production module that failed to import leaves a criterion inconclusive and holds
+  the task. An agent can no longer turn "not discriminating" into a held task, and an `accept` covers only the tests
+  the question named.
+- Every excerpt in the committed ledger, `questions.md` and the console is redacted before it is cut, so no prefix of a
+  secret survives.
 - A failing assertion in the setup of a fixture counts as a failure on the zero values when the fixture is in a test
   or support file the unit added or changed; in a file that was there before it is inconclusive (L4-IMP-002).
 - The verifier no longer rejects an audit test, or ignores a person's or a chore's test, because a zero-value run
@@ -39,10 +48,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   waits without chaining runs. A person answers `accept: <why>` (the next run counts those criteria on the evidence of
   the real run when the check is inconclusive again; audited as `via: human_override`) or `retry: <note>` (the check
   runs again, for example after an L4 upgrade). A criterion a run shows to be not discriminating still fails the
-  attempt, and the message lists the inconclusive ones apart. An agent may answer only where
-  `clarifier.answer_by_agents` is true on the base branch (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009).
-- A criterion whose every test checks a dependency and no project code (a version pin) is recorded as discrimination
-  not applicable (`via: not_applicable`), and the judge sees the label (L4-IMP-062, L4-VER-051).
+  attempt, and the message lists the inconclusive ones apart. The discrimination check of a test chore that cannot
+  decide holds the chore the same way. An agent may answer only where
+  `clarifier.answer_by_agents` is true on the base branch; its answer is recorded `by: agent` and labelled
+  `agent_override`, never as a person's (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009).
+- A criterion whose every test reads a dependency's version with a literal distribution name that the criterion's text
+  names, and uses no project code (also none reached by `importorskip`, `import_module`, `__import__` or
+  `getfixturevalue`), is recorded as discrimination not applicable (`via: not_applicable`), and the judge sees the
+  label; the audit samples at most two criteria per round, so the label, not the audit, is the guarantee
+  (L4-IMP-062, L4-VER-051).
 - `gate.finished` and `task.attempt_failed` carry an `excerpt` of at most 600 characters (the `E` lines and the deepest
   repository location, redacted) in the committed ledger, for a repository that uploads no job artifacts
   (L4-IMP-064).

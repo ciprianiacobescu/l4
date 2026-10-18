@@ -27,14 +27,21 @@ inconclusive. Taken per run, that voids every base run of a unit that adds a mod
 module aside, so a test file that imports it fails collection (row 3.1/base: two unrelated files failed while every
 candidate ran). So the classifier has three levels:
 - *run*: no report, or no test executed (`TestReport.executed == 0`) → every candidate is inconclusive;
-- *test*: a candidate absent from the variant's report, or skipped only there, is inconclusive (its module failed to
-  import there, or the variant changed its collection or its skip condition); one that failed by assertion is a
+- *test*: a candidate absent from the variant's report is inconclusive when a production module failed to import there
+  (D1a decides when the cause is the unit's own files); one that failed by assertion is a
   *proof*; one that passed, or failed or errored by another kind, is *no proof* (unchanged check 5: an error shows the
   test touched the answer, not that it checked it);
 - *criterion*: confirmed when any test is a proof; inconclusive when none is and any is inconclusive; refuted ("not
   discriminating") only when every test ran and none is a proof.
 The new collection errors (those the real run does not have) are named in the reason, so "more collection errors"
 still reaches the person, as the cause of the missing tests.
+
+**D1a. The cause decides (review M1).** In a zero-value run (not the base run, which only confirms) a test the unit's
+own files made unrunnable is *no proof*, as D6 does for a fixture assertion: skipped only there; absent because the
+collection error of its module has its deepest repository frame (`deepest_location`) in a test or support file the unit
+wrote; or absent while its module collected (collection-time code read a production answer, a `parametrize` over it).
+Inconclusive stays for a PRODUCTION module that failed to import. Otherwise an agent that writes `if not got:
+pytest.skip()` turns "not discriminating" into a hold, and a person's `accept` into a pass.
 
 **D2. Precedence: the agent's fault wins.** When at least one unconfirmed criterion is refuted, the attempt fails as
 today (counted, escalating), and the message lists the inconclusive ones apart (`inconclusive: …`) so the retry is
@@ -65,8 +72,11 @@ plugin's `-p l4_trace` is already in it). `run_with_code_of` returns the `GateRe
 
 **D5. What zeroing keeps.**
 - *By annotation* (public mode): a function whose return annotation is `Callable` (any module prefix, subscripted or
-  not, also `X | None` / `Optional[X]` of it) or `type`/`Type` keeps its body: the zero value of a decorator factory
-  or a class factory is not a value a test can meet, it breaks the import. Red-stub mode (run (b)) needs no such
+  not, also `X | None` / `Optional[X]` of it) or `type`/`Type` AND whose name a module of the varied set applies at
+  import time (`import_time_names`: decorators and decorator-factory calls, module-level and class-level calls; review
+  M4) keeps its body: the zero value of a decorator factory or a class factory is not a value a test can meet, it
+  breaks the import. A function that predates the unit and that nothing applies at import is zeroed, so an honest test
+  of it (`f = make_adder(2); assert f is not None; assert f(3) == 5`) keeps its proof. Red-stub mode (run (b)) needs no such
   rule: a stub is `raise NotImplementedError` in run (a) as well, so a stub that a module applies at import time
   already fails run (a) at collection (`tests not collected individually`), and run (b) never sees it. (An identity
   decorator for a `Callable[[A], A]` stub was considered and dropped for that reason.)
@@ -74,7 +84,9 @@ plugin's `-p l4_trace` is already in it). `run_with_code_of` returns the `GateRe
   tracebacks of the run's new collection errors (the JUnit `<error>` bodies) and of the candidates' setup assertions
   outside the unit's files (D6), takes the names *called* on their code lines (`a.b.c(` → `c`, `@a.b(` or `@a.b` →
   `b`), keeps every zeroed function of the varied files with that simple name, and runs again. A name that is not a
-  zeroed function is ignored, so an ordinary word on the line keeps nothing.
+  zeroed function is ignored, so an ordinary word on the line keeps nothing. The names also include those called by
+  the module-level statements of each production module in the failing traceback (review m1: `_CFG = load()` above
+  `RATE = _CFG["rate"]`, where the failing line calls nothing).
 - *Bound*: at most 2 reruns (3 runs in all), and a rerun only when it keeps at least one new function; at most 50
   functions are kept per check. Two layers cover the cases seen (one decorator factory, or a factory whose real body
   calls a second one at import time); each rerun is a whole suite run (about 2 minutes for the consumer).
@@ -110,9 +122,13 @@ and keeps holding, with the planner saying so.
 **D8. What `accept` means.** The next run runs the red step again (one more agent step: the trade-off for not
 persisting the held tree). When the same check is inconclusive again for criteria that the accepted question names
 (read from its `question.raised` event, which the harness wrote, not from the editable file), and the answer's digest
-is recorded in a `question.answered{by: human}` event (the unfreeze rule), those criteria count: pre-satisfied ones with
+is recorded in a `question.answered{by: human}` event (the unfreeze rule; `by: agent` when an agent answered under
+`clarifier.answer_by_agents`, found from the `By:` line of the commit of `l4 questions`), those criteria count when
+their candidate tests are among the `tests` of that `question.raised` event (an answer about one test does not carry a
+later different one; review M1): pre-satisfied ones with
 `proof: pre_satisfied, via: human_override, question, answer_sha256` and the passing tests of run (a) as
-`discriminating`; run (b) ones with `proof: zero_value, via: human_override`. A conclusive result wins over the
+`discriminating`; run (b) ones with `proof: zero_value, via: human_override`. An agent's answer is labelled
+`via: agent_override` everywhere, the judge included (review m3). A conclusive result wins over the
 answer: a confirmed criterion is confirmed, a refuted one fails the attempt. `check.accepted` records the use. An
 override is never evidence for a later task's earlier-red confirmation. `retry` needs nothing from the harness: the
 answer unblocks the task, and its text reaches the red prompt as any answer does (L4-CLR-006).
@@ -122,17 +138,21 @@ tests that import project code). A test is *dependency-only* when its function, 
 name bound to a module inside the repository (project or test helper), no name bound by a module-level definition of
 its file other than a constant, take no fixture other than pytest's built-ins (`tmp_path`, `tmp_path_factory`,
 `monkeypatch`, `capsys`, `capsysbinary`, `capfd`, `capfdbinary`, `caplog`, `recwarn`, `request`, `pytestconfig`) and the
-names of its own `parametrize`, and read a dependency: a name bound to a module outside the repository that is not in
-`sys.stdlib_module_names`, or a call of the standard library's distribution reader (`importlib.metadata.version`,
-`.distribution`, `.metadata`, `.distributions`). `assert 1 + 1 == 2` and `json.loads("1") == 1` stay not
-discriminating. A criterion whose every candidate is dependency-only gets `proof: pre_satisfied, via:
-not_applicable` with its tests as `discriminating`, runs no variant run, and is labelled for the judge (L4-VER-051);
-pre-satisfied criteria are always audited.
+names of its own `parametrize`, reach no project code by a string (`pytest.importorskip`, `importlib.import_module`,
+`__import__`, `request.getfixturevalue`, `sys.modules`), and read a dependency's version: a call of
+`importlib.metadata.version`, `.distribution` or `.metadata` with a LITERAL distribution name, or
+`<dependency>.__version__`, where the criterion's text names that dependency (review M2: a bare read of a dependency
+ticked any criterion). `assert 1 + 1 == 2`, `json.loads("1") == 1` and `assert pytest.__version__` under a criterion
+about something else stay not discriminating. A criterion whose every candidate is dependency-only gets `proof: pre_satisfied, via:
+not_applicable` with its tests as `discriminating`, runs no variant run, and is labelled for the judge (L4-VER-051).
+Step 4a samples pre-satisfied criteria first but audits at most `MAX_AUDIT_PER_ROUND` (2) per round and is off without
+a verifier agent: the label is the guarantee, the audit is not.
 
 **D10. Evidence in the committed ledger.** `excerpt.py` says the failure excerpt goes in the prompt fence, never in
 the committed ledger. This change narrows that: the ledger gets `excerpt` (at most 600 characters, the audit's bound)
-made only of `E` lines and the deepest repository location line, redacted by `wb.redactor` (the ledger writer redacts
-again), on `gate.finished` of a test gate that failed with no report, no test executed or a collection error, and on
+made only of `E` lines and the deepest repository location line. The raw text is redacted by `wb.redactor` BEFORE it
+is cut, and the result again (review M3: a cut inside a secret leaves a prefix no redactor recognises; the same order
+holds for the reasons of `variant.classify` and `test_outcome`), on `gate.finished` of a test gate that failed with no report, no test executed or a collection error, and on
 `task.attempt_failed`. Precedents: `task.attempt_failed.reason` already names agent-written tests and error classes,
 and `ci.failed.tail` already carries a redacted job log end. The ledger field is never read into a prompt. The
 artefacts line tells the truth about uploads; a gates-only upload is deferred (proposal).
@@ -142,8 +162,9 @@ artefacts line tells the truth about uploads; a gates-only upload is deferred (p
 (the criterion keeps its implementer evidence). A not-applicable audit test is accepted with its label.
 `discriminate_extra` returns the inconclusive ids with their reasons (`inconclusive: <reason>`); the verifier's minor
 finding then says that, not "passes against the zero values and on the base". A test chore whose added tests are all
-inconclusive is accepted, as the no-unit-base case already is: the verifier decides a round later. The extra-proof
-bound becomes two gate runs plus at most two keep reruns of the zero-value run.
+inconclusive is held with a harness question (`check: tests`, review m2), not accepted: accepting it would let an agent
+pass a chore with tests made unrunnable on purpose; the no-unit-base case, where no run can be made at all, is still
+accepted. The extra-proof bound becomes two gate runs plus at most two keep reruns of the zero-value run.
 
 **D12. The two evidence tasks, traced through the new rules.**
 - *2.2*: `traced` is kept by annotation → the run imports every module (verified: 2001 tests, 0 collection errors) →
@@ -164,8 +185,8 @@ Neither needs the hold; the hold is the backstop for the next shape the keep loo
   so a test that only checks it can pass instead of failing: a refutation the agent did not cause. The names come
   only from the failing lines of new collection errors and of foreign setup assertions, which bounds it.
 - The setup rule lets one fixture of the unit's own file confirm every criterion whose tests use it (11 in row 2.2).
-  That is the unit's own assertion on a production answer; pre-satisfied criteria are always audited and their tests
-  reviewed by the judge.
+  That is the unit's own assertion on a production answer; the judge reviews their tests (the audit samples at most two
+  criteria per round).
 - The dependency-only rule can accept a test that reads a dependency but checks nothing of the criterion; the label
   puts it before the judge.
 - `harness` questions are new in `questions.md`: a harness before 0.4.16 parses the kind as unknown; an answer written

@@ -1438,7 +1438,9 @@ set, or when standard input is not a terminal. An agent MAY accept or answer a q
 
 Any other write by an agent MUST be refused unless `clarifier.answer_by_agents` is `true`. Both keys MUST be read
 from `.l4/config.yaml` on the base branch, never on the unit branch. `clarifier.answer_by_agents` SHALL default to
-`false`. For a harness question the refusal SHALL say `a harness override is a person's decision`. The commit body
+`false`. For a harness question the refusal SHALL say `a harness override is a person's decision`; an answer an agent gives where the key allows it is
+recorded `question.answered{by: agent}` (the commit of `l4 questions` names the agent in `By:`) and counts as `agent_override`, never as a
+person's. The commit body
 SHALL name the actor: `person`, or `agent: <marker>`.
 
 **L4-QMD-010** A verdict answer can be replaced on purpose.
@@ -1756,7 +1758,8 @@ pending leaves of one parent into one step.
    - Confirmed criteria are recorded as `criterion.pre_satisfied`, listed in `verification.md` and always included in
      audit sampling.
    - The run is judged against the real run, test by test (L4-IMP-060). A criterion is **confirmed** when one of its
-     tests fails by assertion; **not discriminating** (refuted) only when every one of its tests ran and none did;
+     tests fails by assertion; **not discriminating** (refuted) only when every one of its tests ran and none did, a test the unit's own
+     files made unrunnable (it skipped itself, its test or support file raised at collection) counting as ran;
      **inconclusive** otherwise (no report, no test executed, its module failed to import only there, skipped only
      there). A test fails by assertion on the zero values when it failed by assertion, or when its **setup** failed by
      assertion at a line of a test or support file that the unit added or changed since the unit base (a fixture the
@@ -1767,7 +1770,8 @@ pending leaves of one parent into one step.
      fix what it cannot). Only when every unconfirmed criterion is inconclusive is the task held, with a harness
      question (L4-IMP-063): no attempt is used.
    - A criterion whose every test reads a dependency and no project code (a version pin) is **not applicable**: it is
-     recorded `via: not_applicable` and no run varies anything for it (L4-IMP-062). A criterion about the interpreter
+     recorded `via: not_applicable` and no run varies anything for it (L4-IMP-062): its tests read a dependency's version with a literal
+     name that the criterion's text names, and nothing else. A criterion about the interpreter
      (`sys.version_info`) reads only the standard library, so it stays not discriminating when pre-satisfied.
    - Unconfirmed ones fail red (`not discriminating`).
    - If every cited criterion is pre-satisfied, the task follows `already_satisfied` (L4-IMP-003).
@@ -2449,28 +2453,35 @@ is a proof; one that passed, or failed by another error, is none; one the run di
 skipped only there), and every test of a run with no report or no executed test, is inconclusive. A criterion is
 confirmed when any of its tests is a proof, inconclusive when none is and any is inconclusive, and not discriminating
 only when every one of its tests ran and none is a proof. A reason SHALL quote the first `E` line when there is one,
-cut at 300 characters and redacted. `run_with_code_of` returns the gate result, so "no test" and "no report" differ.
+cut at 300 characters; the raw text is redacted first and cut after, so no prefix of a secret survives.
+In a zero-value run (the pre-satisfied run, run (b) and the test chore's run; not the base run, which only confirms) a test the unit's own
+files made unrunnable is **no proof**, never inconclusive, as a setup assertion in the unit's own fixture is a proof (L4-IMP-002): a test
+that skipped only there, one absent because the collection error of its module has its deepest repository frame in a test or support file the
+unit added or changed, and one whose module collected but lost the id (a `parametrize` over a production answer). Only a production module
+that failed to import leaves a test inconclusive. Without this rule an agent could turn "not discriminating" into a held task, and a person's
+`accept` into a pass, with a test that skips itself on the zero answer. `run_with_code_of` returns the gate result, so "no test" and "no report" differ.
 [V: a consumer repository, harness 0.4.14, task 3.1: the pre-satisfied run ended `Interrupted: 45 errors during
 collection` and ran 0 tests, and the message said "its tests still pass"; the base run stopped at the first collection
 error; nine red attempts on four profiles halted the unit.]
 
 **L4-IMP-061** Zeroing keeps what imports need. When the harness zeroes every public function, one annotated to return
-`Callable` or `type` (also `X | None` or `Optional[X]` of them, also as a string) SHALL keep its body: the zero value of
-a decorator factory is not a value a test can meet, it breaks the import of a module that applies the decorator while
-its class body runs. When a zero-value run leaves a candidate inconclusive, the harness SHALL keep the zeroed functions
-called on the failing lines of the run's new collection errors and of setup assertions outside the unit's files, and
-run again: at most twice, only when a new function is kept, at most 50 functions, recording `zero.kept{gate, rerun,
+`Callable` or `type` (also `X | None` or `Optional[X]` of them, also as a string) SHALL keep its body only when a module of the varied set
+applies it at import time, as a decorator or decorator factory or by a call in a module-level or class-level statement: the zero value of a
+decorator factory is not a value a test can meet, it breaks the import of a module that applies the decorator while its class body runs. A
+callable-returning function that nothing applies at import is zeroed like any other, so an honest test of it keeps its proof. When a zero-value run leaves a candidate inconclusive, the harness SHALL keep the zeroed functions
+called on the failing lines of the run's new collection errors and of setup assertions outside the unit's files, and those called by the
+module-level statements of a production module whose import failed (`_CFG = load()` above `RATE = _CFG["rate"]`), and run again: at most twice, only when a new function is kept, at most 50 functions, recording `zero.kept{gate, rerun,
 cause, functions}`. [V: the same halt: `@telemetry.traced("…")` applied in a class body received `None`:
 `TypeError: 'NoneType' object is not callable`.]
 
-**L4-IMP-062** Discrimination is not applicable to a dependency check. A pre-satisfied criterion whose every candidate
-test reads a dependency (a name bound to a module from outside the repository that is not in the standard library, or a
-call of `importlib.metadata`'s distribution reader) and uses no project code, no repository helper, no definition of its
-file beyond a constant and no fixture beyond pytest's built-ins and its own `parametrize` SHALL be recorded
-`proof: pre_satisfied, via: not_applicable`, with no variant run for it, and the judge sees the label (L4-VER-051). A
-test that reads no dependency (`assert 1 + 1 == 2`, `json.loads("1") == 1`) SHALL stay not discriminating. [V: the same
-unit: a test that pins a dependency's version passes on the zero values and at the base alike, so no check could ever
-confirm its criterion.]
+**L4-IMP-062** Discrimination is not applicable to a dependency check. A pre-satisfied criterion whose every candidate test calls
+`importlib.metadata.version`, `distribution` or `metadata` with a LITERAL distribution name that the criterion's text names (or reads
+`<that dependency>.__version__`), and uses no project code, no repository helper, no definition of its file beyond a constant, no fixture
+beyond pytest's built-ins and its own `parametrize`, and no code reached by a string (`pytest.importorskip`, `importlib.import_module`,
+`__import__`, `request.getfixturevalue`, `sys.modules`) SHALL be recorded `proof: pre_satisfied, via: not_applicable`, with no variant run for
+it, and the judge sees the label (L4-VER-051). Any other test SHALL stay not discriminating: `assert 1 + 1 == 2`, `json.loads("1") == 1`, and
+a read of a dependency (`assert pytest.__version__`) under a criterion about something else. [V: the same unit: a test that pins a
+dependency's version passes on the zero values and at the base alike, so no check could ever confirm its criterion.]
 
 **L4-IMP-063** An inconclusive check holds the task with a harness question. When every unconfirmed criterion of a red
 step (the pre-satisfied check, or run (b)), or every corrected test of `test-at-red`, is inconclusive, the harness SHALL
@@ -2480,18 +2491,20 @@ title, check, criteria, tests}`), and end the task `blocked`: no attempt is coun
 (L4-IMP-017). The unit goes to `awaiting_human` (exit 11; through `clarifying` when a clarifier runs, which never takes
 a harness question), and a delivery plan waits on it without chaining a run (L4-YOLO-012). The answer is `accept` or
 `retry` (L4-QMD-004). `accept` lets the next attempt, which does the red step again, count those criteria when the same
-check is inconclusive again for criteria the question names (read from its `question.raised` event and from a
-`question.answered{by: human}` event with the digest of the answer): the proof is `pre_satisfied` (run (b): `zero_value`)
-with `via: human_override`, `question` and `answer_sha256`, and `check.accepted{task, check, question, answer_sha256,
-criteria | tests}` and `criterion.pre_satisfied{via: human_override}` are recorded; a conclusive result always wins over
+check is inconclusive again for criteria the question names (read from its `question.raised` event, whose `tests` the candidates of
+the criterion must be among: an answer given about one test does not carry a later different test; and from a `question.answered` event of
+a person or, under `clarifier.answer_by_agents`, an agent, with the digest of the answer): the proof is `pre_satisfied` (run (b): `zero_value`)
+with `via: human_override` (`agent_override` for an agent's answer, recorded `question.answered{by: agent}`), `question` and
+`answer_sha256`, and `check.accepted{task, check, question, answer_sha256, by, criteria | tests}` and `criterion.pre_satisfied{via}` are recorded; a conclusive result always wins over
 the answer, and an override is never an earlier red's evidence. `retry` runs the check again, and its note reaches the
 agent as any answer does. A criterion that a run shows to be not discriminating still fails the attempt (L4-IMP-002).
-[V: the halted unit above would have waited here instead of spending nine attempts.]
+The discrimination check of a test chore (`check: tests`) that cannot decide holds the chore the same way. [V: the halted unit above would have
+waited here instead of spending nine attempts.]
 
 **L4-IMP-064** The evidence of a variant run reaches the ledger and the console. `gate.finished` of a test gate that
 failed with no report, no executed test or a collection error, and `task.attempt_failed`, SHALL carry `excerpt`: the `E`
-lines and the deepest repository location of the failure, at most 600 characters, redacted by the run's redactor, never
-read into a prompt; `gate.finished` carries `collection_errors` whenever there is a report. The gate line of a run that
+lines and the deepest repository location of the failure, at most 600 characters, redacted by the run's redactor before it is cut (a cut
+inside a secret would leave a prefix the redactor cannot see), never read into a prompt; `gate.finished` carries `collection_errors` whenever there is a report. The gate line of a run that
 executed no test SHALL NOT say `(expected: zero values must fail)`, and the artefacts line SHALL say `not uploaded` when
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
@@ -3354,12 +3367,14 @@ the label `not applicable: no project code`, refuted is rejected (a minor findin
 people or a test chore wrote (L4-VER-009) are judged the same way: at most two gate runs per round, plus at most two keep
 reruns of the zero-value run (L4-IMP-061), none without such a test; a test whose runs were inconclusive is no proof,
 and its minor finding says `inconclusive: <reason>`, not that it passes against the zero values and on the base. A test
-chore whose added tests are all inconclusive SHALL be accepted, for the verifier to decide a round later.
+chore whose added tests are all inconclusive SHALL be held with a harness question (L4-IMP-063, `check: tests`), not accepted.
 
 **L4-VER-051 The judge sees evidence the harness did not prove.** A tracing test whose red proof has `via:
 not_applicable` or `via: human_override` SHALL count as evidence and SHALL be labelled in the judge's per-test list, in
-the satisfied block of L4-VER-018 and in `verification.md`: `not applicable: no project code` or `accepted by Q-NNN: the
-check was inconclusive`. Such a criterion is pre-satisfied, so step 4a always audits it.
+the satisfied block of L4-VER-018 and in `verification.md`: `not applicable: no project code`, `accepted by Q-NNN: the check was
+inconclusive`, or `accepted by an agent through Q-NNN: the check was inconclusive` for `via: agent_override`. Such a criterion is
+pre-satisfied, so step 4a samples it before the others, but the audit takes at most `MAX_AUDIT_PER_ROUND` criteria per round and is off
+without a verifier agent or with `audit_sample_ratio` 0: the label for the judge is the guarantee, not the audit.
 
 **L4-VER-018 The judge checks each task ticked as already satisfied.** A task the harness ticked `already satisfied`
 (L4-IMP-003) has no change of its own, and its criteria passing does not show that its own text is done: a README line
@@ -3782,7 +3797,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 `{cache, reason}`),
 `run.finished` (exit code).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
-zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override` (with `question` and `answer_sha256` for the second) on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
+zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
 
@@ -6998,7 +7013,8 @@ scenario is a spec defect (§26).
   `E   TypeError: 'NoneType' object is not callable`, and no test case
 - **When** the harness judges a criterion whose two tests passed in run (a)
 - **Then** the criterion is inconclusive, not "not discriminating", and its reason names the run and quotes
-  `E   TypeError: 'NoneType' object is not callable`
+  `E   TypeError: 'NoneType' object is not callable`; had the collection errors been raised by the unit's own test
+  files, or the test skipped itself on the zero answer, the criterion would be not discriminating and fail red
 
 #### SCN-IMP-301 (−) A base run goes on past an unrelated test that imports an added module · L4-IMP-060
 - **Given** a unit that added `src/pytdd/middleware.py`, committed `tests/test_middleware.py` importing it, and a
@@ -7009,16 +7025,18 @@ scenario is a spec defect (§26).
 
 #### SCN-IMP-302 (+) A decorator factory annotated to return a callable keeps its body · L4-IMP-061
 - **Given** `src/pytdd/telemetry.py` with `def traced(name: str) -> Callable[[_F], _F]`, and `src/pytdd/store.py`
-  whose class body applies `@telemetry.traced("store.add")` to a method
+  whose class body applies `@telemetry.traced("store.add")` to a method, and a `make_adder(n) -> Callable[[int], int]`
+  that no varied module applies at import time
 - **When** the pre-satisfied zero-value run varies both modules
 - **Then** `traced` keeps its body, every test module imports, and `zero.kept{cause: annotation}` lists
-  `src/pytdd/telemetry.py::traced`
+  `src/pytdd/telemetry.py::traced`; `make_adder` is zeroed, so an honest test of it that follows check 5 keeps its proof
 
 #### SCN-IMP-303 (+) An unannotated decorator factory is kept after the run names it · L4-IMP-061
 - **Given** the modules of SCN-IMP-302 with `def traced(name):` unannotated, and a candidate test of `Store.add`
 - **When** the first zero-value run fails to import `store.py` on the line `@telemetry.traced("store.add")`
 - **Then** the harness keeps `traced`, records `zero.kept{cause: collection, rerun: 1}`, runs once more, and the
-  candidate fails by assertion there, which confirms its criterion
+  candidate fails by assertion there, which confirms its criterion; for `_CFG = load()` above `RATE = _CFG["rate"]`
+  the failing line calls nothing, and the harness keeps `load`, which the module-level statement above it calls
 
 #### SCN-IMP-304 (−) The keep reruns are bounded · L4-IMP-061
 - **Given** a zero-value run whose every report names one more zeroed function on a failing collection line
@@ -7032,16 +7050,19 @@ scenario is a spec defect (§26).
   the corrected tests, and the red commit stays
 
 #### SCN-IMP-306 (+) A version pin is recorded as not applicable · L4-IMP-062
-- **Given** a candidate `def test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") ==
-  pytest.__version__` in a test file whose other tests import `pytdd`
+- **Given** a criterion that names the installed `pytest` version, and a candidate `def
+  test_runner_is_the_verified_pin(): assert importlib.metadata.version("pytest") == pytest.__version__` in a test
+  file whose other tests import `pytdd`
 - **When** the pre-satisfied confirmation runs
 - **Then** its criterion is recorded with `via: not_applicable`, `criterion.pre_satisfied` carries the same `via`, and
   no variant run varies anything for it
 
 #### SCN-IMP-307 (−) A test that reads no dependency is still not discriminating · L4-IMP-062
-- **Given** a candidate `def test_x(): assert 1 + 1 == 2`, and another `def test_y(): assert json.loads("1") == 1`
+- **Given** a candidate `def test_x(): assert 1 + 1 == 2`, another `def test_y(): assert json.loads("1") == 1`, a
+  third `def test_z(): assert pytest.__version__` tagged with a criterion about `apply_discount`, and a fourth that
+  reaches `pytdd` through `importlib.import_module("pytdd")` beside a `version("pytest")` read
 - **When** the pre-satisfied confirmation runs
-- **Then** neither criterion is not applicable, and both fail red as `not discriminating`
+- **Then** no criterion is not applicable, and all fail red as `not discriminating`
 
 ## MODIFIED Requirements
 
@@ -7061,7 +7082,9 @@ scenario is a spec defect (§26).
   not import in the zero-value run nor at the base
 - **When** the red checks finish
 - **Then** the attempt fails with `not discriminating: A (…)` and `inconclusive: B (…)`, counts as a failed attempt,
-  and no question is raised
+  and no question is raised; a test that skips itself when the answer is the zero value, a test module that raises
+  at import after reading a production answer, and a `parametrize` over a production answer fail red as they do on
+  0.4.15 and are never held
 
 #### SCN-IMP-311 (−) A base run cannot refute what the zero-value run could not decide · L4-IMP-003
 - **Given** a criterion whose zero-value run was inconclusive, and whose candidate passes at the unit base
@@ -7085,7 +7108,9 @@ scenario is a spec defect (§26).
 - **Given** the question of SCN-IMP-312 answered `accept: the decorator factory is zeroed by an L4 bug` by a person
 - **When** the next run's red step finds the same check inconclusive for the same criteria
 - **Then** the task is committed as already satisfied, each criterion's proof has `via: human_override`, `question`
-  and `answer_sha256`, and `check.accepted` and `criterion.pre_satisfied{via: human_override}` are recorded
+  and `answer_sha256`, and `check.accepted` and `criterion.pre_satisfied{via: human_override}` are recorded; had
+  the second attempt written a different test of the criterion, the answer would not cover it and the task is held
+  again; an answer an agent gave records `by: agent` and `via: agent_override`
 
 #### SCN-IMP-315 (+) A retry runs the check again · L4-IMP-063
 - **Given** the question of SCN-IMP-312 answered `retry: upgraded L4 to the release that keeps decorator factories`
@@ -7806,11 +7831,11 @@ scenario is a spec defect (§26).
 - **Then** `verify.audit` records `status: inconclusive` with that line in its reason, no minor finding is raised, the
   file is not committed, and `verification.md` lists the record with its reason
 
-#### SCN-VER-151 (+) A test chore whose check cannot decide is left to the verifier · L4-VER-050
+#### SCN-VER-151 (+) A test chore whose check cannot decide is held · L4-VER-050
 - **Given** a test chore that added two tests citing a criterion, and a `discriminate_extra` whose zero-value run and
   base run were both inconclusive for them
 - **When** the chore's discrimination check runs
-- **Then** the chore is accepted with both tests, as when no unit base exists
+- **Then** the chore is held with a harness question (`check: tests`), no attempt is used and nothing is committed
 
 #### SCN-VER-152 (−) An extra test whose runs were inconclusive says so · L4-VER-009
 - **Given** a test a person wrote, carrying a criterion, whose zero-value run did not import its module and whose
@@ -7821,8 +7846,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-153 (+) The judge sees a not-applicable criterion · L4-VER-051
 - **Given** a unit whose `task.red_ok` proves a criterion with `via: not_applicable`
 - **When** the judge prompt and `verification.md` are written
-- **Then** the criterion's test reads `(passed, pre_satisfied, not applicable: no project code)` in both, and the
-  criterion is among the audited ones
+- **Then** the criterion's test reads `(passed, pre_satisfied, not applicable: no project code)` in both
 
 #### SCN-VER-154 (+) The judge sees an override · L4-VER-051
 - **Given** an already-satisfied task whose criterion was accepted by harness question Q-007
@@ -7830,12 +7854,25 @@ scenario is a spec defect (§26).
 - **Then** the satisfied block's line reads `Proved by: C-… (tests: …; accepted by Q-007: the check was
   inconclusive)`
 
-## MODIFIED Requirements
-
 #### SCN-VER-155 (+) The audit's zero-value run keeps a decorator factory · L4-VER-050
 - **Given** an audit test of `Store.add` and the modules of SCN-IMP-302
 - **When** step 4a runs its zero-value run
 - **Then** `traced` keeps its body, the audit test fails by assertion there, and the record is `accepted`
+
+#### SCN-VER-156 (+) The judge tells an agent's acceptance from a person's · L4-VER-051
+- **Given** an already-satisfied task whose criterion was accepted through harness question Q-007 by an agent, under
+  `clarifier.answer_by_agents`
+- **When** the judge prompt and `verification.md` are written
+- **Then** the proof is `via: agent_override`, the ledger has `question.answered{by: agent}` and `check.accepted{by:
+  agent}`, and the satisfied block reads `…; accepted by an agent through Q-007: the check was inconclusive)`
+
+#### SCN-VER-157 (−) A label is not an audit · L4-VER-051
+- **Given** five pre-satisfied criteria recorded `via: not_applicable`
+- **When** step 4a samples them
+- **Then** at most two are audited and the others are listed as skipped, and every one still carries its label in the
+  judge's list; with no verifier agent none is audited
+
+## MODIFIED Requirements
 
 ### 23.9.1 Human feedback (FBK)
 
