@@ -51,19 +51,25 @@ CHECKS: dict[str, tuple[Check, ...]] = {
     "single": ("tests",),
 }
 MAX_PATHS = 200  # changed paths a question lists
-MAX_DIFFS = 50  # changed non-test files whose diff a question shows
+MAX_DIFFS = 50  # changed paths whose diff a question shows
 ACCEPTED_TESTS_RULE = (
     "A person accepted these tests for this task: a check could not decide on them, and the person took them on the "
-    "evidence of the real run, for the source shown below. Keep them unchanged: the same name and the same body. The "
-    "accept covers only them, and only while their source is the one shown: a test of another name, or the same name "
-    "with another body, is not covered, and the task is held again with a new question."
+    "evidence of the real run. Keep them unchanged: the same name and the same body. The accept covers only them; a "
+    "test of another name, or the same name with another body, is not covered and is checked again."
+)
+USED_UP_NOTICE = (
+    "A person accepted an earlier step of this task, which a check could not decide on, and L4 replayed that step. The "
+    "replay is used up: that accept was for that earlier step only and covers nothing now. If a check cannot decide on "
+    "your step, the task is held again and a new step needs a new answer from a person."
 )
 # the operator's git configuration must not change what a patch looks like or how it applies
 GIT_PLAIN = (
     "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "-c", "color.ui=never", "-c", "diff.external=",
     "-c", "core.quotePath=false", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
 )  # fmt: skip
-DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/")
+DIFF_FLAGS = (
+    "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/",
+)  # fmt: skip
 APPLY_FLAGS = ("apply", "--binary", "--whitespace=nowarn", "-p1")
 
 
@@ -172,11 +178,19 @@ def _changes(wb: Workbench) -> list[tuple[str, str]]:
     ]
 
 
-def _file_diff(wb: Workbench, path: str) -> str:
+def _file_diff(wb: Workbench, path: str, patch_rel: str) -> str:
+    """The diff of one changed path, redacted whole and then cut; a cut says that the cut lines are replayed too."""
     out = wb.git.run_bytes(
         *GIT_PLAIN, "diff", "--cached", *DIFF_FLAGS, "HEAD", "--", f":(literal){path}"
     ).decode("utf-8", "replace")  # fmt: skip
-    return _cut(wb.redactor.redact_text(out))
+    lines = wb.redactor.redact_text(out).splitlines()
+    if len(lines) <= MAX_SOURCE_LINES:
+        return "\n".join(lines)
+    note = (
+        f"[cut: {len(lines) - MAX_SOURCE_LINES} more lines; the cut lines are replayed too: the whole change is in "
+        f"`{patch_rel}` on the unit branch]"
+    )
+    return "\n".join([*lines[:MAX_SOURCE_LINES], note])
 
 
 def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) -> HeldCheck:
@@ -184,21 +198,20 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
     named test and the source and digest of each named test. Called while the changes are still in the work tree:
     `discard_changes` follows. The index is left as it was. A step too large to show in full is not saved (an accept
     could not bind to what the person did not see)."""
-    wb.git.run("add", "-A", config=wb.exclude_config)
+    wb.git.run("add", "-A", config=(*wb.exclude_config, ("core.autocrlf", "false"), ("core.safecrlf", "false")))
+    patch_rel = held_rel(wb, held.task, held.check, "patch")
     try:
         patch = wb.git.run_bytes(
             *GIT_PLAIN, "diff", "--cached", "--binary", *DIFF_FLAGS, "HEAD", "--", ".", f":(exclude){wb.ledger_rel}"
         )  # fmt: skip
         changes = _changes(wb)
-        named = {p.relative_to(wb.worktree).as_posix() for i in held.tests if (p := _test_path(wb, i)) is not None}
-        others = [path for _, path in changes if path not in named]
-        if len(changes) > MAX_PATHS or len(others) > MAX_DIFFS or len(patch) > MAX_PATCH_BYTES:
+        if len(changes) > MAX_PATHS or len(changes) > MAX_DIFFS or len(patch) > MAX_PATCH_BYTES:
             note = (
-                f"This step changed {len(changes)} files ({len(others)} that are no named test), too many to show in "
-                "full, so it is not saved: an accept would not be bound to what you can read here."
+                f"This step changed {len(changes)} files, too many to show in full, so it is not saved and an accept "
+                "cannot replay it: the next run does the step again."
             )
             return replace(held, note=note, sources=test_sources(wb, held.tests))
-        diffs = tuple((path, _file_diff(wb, path)) for path in others)
+        diffs = tuple((path, _file_diff(wb, path, patch_rel)) for _, path in changes)
     finally:
         wb.git.run("reset", "-q")
     return replace(
@@ -209,6 +222,8 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
         digests=tuple((t, source_digest(wb, t)) for t in held.tests[:MAX_SUBJECTS]),
         changes=tuple(f"{what} {wb.redactor.redact_text(path)}" for what, path in changes),
         diffs=diffs,
+        patch_path=patch_rel,
+        carries=(wb.replay_question,) if wb.replay_question else (),
     )
 
 
@@ -239,6 +254,7 @@ def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, Any
         atomic_write_bytes(target, data)
     return rels, {
         "patch_sha256": _digest(held.patch), "result_sha256": _digest(meta), "source_sha256": dict(held.digests),
+        "carries": list(held.carries),
     }  # fmt: skip
 
 
@@ -358,7 +374,7 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
     if answer == "retry":
         drop_held(wb, task.key, check, attempt=attempt, why="retry")
         return None
-    valid = any(o.question == qid for o in accepted_overrides(wb, task.key, check, verify=False).values())
+    valid = any(o.question == qid for o in accepted_overrides(wb, task.key, check, for_replay=True).values())
     sha = raised.data.get("patch_sha256")
     stale = any(
         e.type == "unit.restarted" or (e.type == "tasks.reopened" and task.key in (e.data.get("tasks") or []))
@@ -422,6 +438,7 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     base = wb.head()
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
+    wb.replay_question = replay.question  # the accept applies in this step only
     if replay.patch:
         try:
             wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=replay.patch)  # the bytes that were verified
@@ -450,21 +467,22 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
 
 
 def accepted_tests_block(wb: Workbench, role: str, task: Task) -> tuple[tuple[str, str], ...]:
-    """The data block `accepted tests`: the tests a person's accept covers for this task, with their source."""
+    """The data block `accepted tests` of an agent step. A question of 0.4.16 (no saved step) still covers its tests by
+    id: they are listed with their source and the rule to keep them unchanged. After a replay that is used up, the
+    accept covers nothing: the block says that it was for an earlier step and that a new step needs a new answer."""
+    lines: list[str] = []
     tests: list[str] = []
     for check in CHECKS[role]:
-        for override in accepted_overrides(wb, task.key, check, verify=False).values():
+        for override in accepted_overrides(wb, task.key, check).values():
             tests += sorted(t for t in override.tests if t not in tests)
-    if not tests:
+    if tests:
+        lines += [ACCEPTED_TESTS_RULE]
+        for test in tests[:MAX_SHOWN_TESTS]:
+            lines += ["", f"{test}:", *(f"    {line}" for line in test_source(wb, test).splitlines())]
+        if len(tests) > MAX_SHOWN_TESTS:
+            lines += ["", f"(+{len(tests) - MAX_SHOWN_TESTS} more accepted tests)"]
+    if any(e.type == "held.replayed" and e.data.get("task") == task.key for e in _events(wb)):
+        lines += ["", USED_UP_NOTICE] if lines else [USED_UP_NOTICE]
+    if not lines:
         return ()
-    saved: dict[str, str] = {}
-    for event in _events(wb):
-        if event.type == "held.replayed" and event.data.get("task") == task.key:
-            saved |= {str(k): str(v) for k, v in (event.data.get("sources") or {}).items()}
-    lines = [ACCEPTED_TESTS_RULE]
-    for test in tests[:MAX_SHOWN_TESTS]:
-        source = saved.get(test) or test_source(wb, test)
-        lines += ["", f"{test}:", *(f"    {line}" for line in source.splitlines())]
-    if len(tests) > MAX_SHOWN_TESTS:
-        lines += ["", f"(+{len(tests) - MAX_SHOWN_TESTS} more accepted tests)"]
     return (("accepted tests", data_block("accepted tests", wb.redactor.redact_text("\n".join(lines)))),)

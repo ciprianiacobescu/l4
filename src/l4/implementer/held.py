@@ -10,7 +10,7 @@ when the check is inconclusive again) or `retry` (the check runs again, for exam
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Criterion
@@ -57,11 +57,11 @@ class HeldCheck:
     patch: bytes | None = None  # the step's changes (`git diff --binary`), saved before they were discarded
     result: str = ""  # the agent's result for that step, as JSON
     sources: tuple[tuple[str, str], ...] = ()  # (test id, its redacted, cut source) of the tests the question names
-    digests: tuple[tuple[str, str], ...] = ()  # (test id, sha256 of its exact source): what an accept is bound to
+    digests: tuple[tuple[str, str], ...] = ()  # (test id, sha256 of its exact source): recorded for audit only
+    patch_path: str = ""  # where the saved step is on the unit branch (repository path)
+    carries: tuple[str, ...] = ()  # the question whose replay produced this step: its accept applies to the step again
     changes: tuple[str, ...] = ()  # every path the saved step changes, as `added path`, `modified path`, `deleted path`
-    diffs: tuple[
-        tuple[str, str], ...
-    ] = ()  # (path, its redacted, cut diff) of every changed file that is no named test
+    diffs: tuple[tuple[str, str], ...] = ()  # (path, its redacted, cut diff) of every changed path
     note: str = ""  # why the step could not be saved (too large to show in full)
 
     @property
@@ -79,7 +79,7 @@ class HeldCheck:
 
 def _source_lines(held: HeldCheck) -> list[str]:
     """What the person accepts: every path the replay applies, the tests as they are in the saved step, and the diff of
-    every other changed file (redacted before they were cut, when the hold was taken)."""
+    every changed path (redacted before it was cut, when the hold was taken)."""
     lines: list[str] = []
     if held.changes:
         lines += ["", f"Changes the replay applies ({len(held.changes)} files):", *(f"    {c}" for c in held.changes)]
@@ -90,8 +90,14 @@ def _source_lines(held: HeldCheck) -> list[str]:
     for path, text in held.diffs:
         lines += [
             "",
-            f"Diff of {path} (redacted; at most {MAX_SOURCE_LINES} lines):",
+            f"Diff of {path} (redacted; at most {MAX_SOURCE_LINES} lines shown; a cut says so):",
             *(f"    {x}" for x in text.splitlines()),
+        ]
+    if held.carries:
+        lines += [
+            "",
+            f"This step is the replay of the step you accepted with {', '.join(held.carries)}: that accept applies to "
+            "it again when you accept this question.",
         ]
     if held.note:
         lines += ["", held.note]
@@ -106,12 +112,13 @@ def _accept_lines(held: HeldCheck) -> list[str]:
             "accepted). A criterion that the check shows not to discriminate still fails the attempt."
         ]
     return [
-        f"`accept: <why>` replays exactly these changes ({len(held.changes)} files): the harness saved the step on the "
-        "unit branch, and the next run applies it, with every guard and gate an agent's changes get, instead of "
-        "starting an agent. The accept covers each test named above only while its source is the one shown here (a "
-        "digest of it is recorded): the same name with another body is a new question. When the check cannot decide "
-        "again, the claim is taken (the verifier and the judge see that it was accepted). A criterion that the check "
-        "shows not to discriminate still fails the attempt."
+        f"`accept: <why>` replays exactly the saved change of {len(held.changes)} files (the whole patch is in "
+        f"`{held.patch_path}` on the unit branch): the next run applies it, with every guard and gate an agent's "
+        "changes get, instead of starting an agent. The accept takes effect only through that replay: if the replay "
+        "fails a gate or the check refutes a criterion, the accept is used up, and a later step that meets the same "
+        "inconclusive check is held again with a new question. When the check cannot decide again during the replay, "
+        "the claim is taken (the verifier and the judge see that it was accepted). A criterion that the check shows "
+        "not to discriminate still fails the attempt."
     ]
 
 
@@ -156,20 +163,21 @@ class Override:
     answer_sha256: str
     tests: frozenset[str] = frozenset()
     by: str = "human"
-    changed: frozenset[str] = frozenset()  # named tests whose source is no longer the one the answerer saw
 
     def covers(self, tests: Sequence[str]) -> bool:
-        return set(tests) <= self.tests - self.changed
+        return set(tests) <= self.tests
 
 
-def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, verify: bool = True) -> dict[str, Override]:
+def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay: bool = False) -> dict[str, Override]:
     """subject (criterion id, or test id for `at_red`) -> the person's `accept` that covers it. A harness question
     counts when it blocks `task_key`, a human answered it `accept` with Status `answered`, the ledger recorded that
     answer's digest (`question.answered{by: human}`), and its own `question.raised` event (which the harness wrote:
-    the file's text is never read for the subjects) has this task and this check. A question that recorded the
-    digest of each named test's source (L4-IMP-065) covers a test only while its source in the work tree has that
-    digest (`verify`; a caller that runs before the step has no tests to look at passes False); one without digests
-    keeps the rule by test id."""
+    the file's text is never read for the subjects) has this task and this check. Two things end an accept
+    (L4-IMP-065): a `tasks.reopened` of the task after the question was raised, and, for a question that saved its
+    step (`patch_sha256`), the replay: it takes effect only while that step is replayed (`wb.replay_question`), so
+    once the replay is used up it covers nothing, and a later step that meets the same inconclusive check is held
+    again with a new question. A question of 0.4.16 (no `patch_sha256`) keeps the rule by test id. `for_replay`: the
+    caller asks whether the question can be replayed at all."""
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is None:
         return {}
@@ -180,8 +188,11 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, verify: bo
         if e.type == "question.answered" and e.data.get("by") in ("human", "agent")
     }
     raised = {
-        str(e.data.get("id")): e for e in events if e.type == "question.raised" and e.data.get("kind") == "harness"
+        str(e.data.get("id")): (i, e)
+        for i, e in enumerate(events)
+        if e.type == "question.raised" and e.data.get("kind") == "harness"
     }
+    allowed = _replay_chain(wb.replay_question, {qid: e for qid, (_, e) in raised.items()})
     found: dict[str, Override] = {}
     for question in file.questions:
         if question.kind is not QuestionKind.HARNESS or task_key not in question.blocking_tasks:
@@ -192,22 +203,28 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, verify: bo
         by = actors.get((question.id, str(digest)))
         if harness_answer(question) != "accept" or digest is None or by is None:
             continue
-        event = raised.get(question.id)
+        at, event = raised.get(question.id, (0, None))
         if event is None or event.data.get("task") != task_key or event.data.get("check") != check:
             continue
+        if any(e.type == "tasks.reopened" and task_key in (e.data.get("tasks") or []) for e in events[at + 1 :]):
+            continue  # the criteria may have changed since: an earlier accept never covers or replays
+        if event.data.get("patch_sha256") and not for_replay and question.id not in allowed:
+            continue  # a saved step is accepted for its replay only (and for the steps that replay produced)
         subjects = event.data.get("tests" if check in _TEST_SUBJECTS else "criteria") or []
         recorded = frozenset(str(t) for t in event.data.get("tests") or [])
-        changed = _changed_tests(wb, event.data.get("source_sha256"), recorded) if verify else frozenset()
-        if check in _TEST_SUBJECTS:
-            subjects = [s for s in subjects if str(s) not in changed]
-        found.update({str(s): Override(question.id, digest, recorded, by, changed) for s in subjects})
+        found.update({str(s): Override(question.id, digest, recorded, by) for s in subjects})
     return found
 
 
-def _changed_tests(wb: Workbench, digests: object, recorded: frozenset[str]) -> frozenset[str]:
-    """The recorded tests whose source now is not the one the answerer saw. No digests (a question of 0.4.16): none."""
-    if not isinstance(digests, dict) or not digests:
-        return frozenset()
-    from l4.implementer.held_patch import source_digest  # the module imports this one
-
-    return frozenset(t for t in recorded if digests.get(t) != source_digest(wb, t))
+def _replay_chain(question: str | None, raised: Mapping[str, Any]) -> set[str]:
+    """The question being replayed and those whose accept it carries (its step came from a replay that held again)."""
+    chain: set[str] = set()
+    todo = [question] if question else []
+    while todo:
+        qid = todo.pop()
+        if qid in chain:
+            continue
+        chain.add(qid)
+        event = raised.get(qid)
+        todo += [str(c) for c in (event.data.get("carries") or [])] if event is not None else []
+    return chain

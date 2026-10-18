@@ -792,6 +792,7 @@ def step_or_replay(
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
     wb.commit_agent = None
+    wb.replay_question = None  # an accept of a saved step takes effect only in its replay
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:
         return agent_step(wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale)

@@ -657,7 +657,7 @@ def test_r5_capture_and_apply_survive_diff_context_zero_and_autocrlf(make_bench,
     assert (
         held.patch is not None and b"@@ -1,5 +1,5 @@" in held.patch
     )  # three lines of context, whatever diff.context says
-    wb.discard_changes()
+    wb.git.run("checkout", "HEAD", "--", ".", config=[("core.autocrlf", "false")])  # back to the bytes of the base
     check = wb.git.run_input_bytes(
         *held_patch.GIT_PLAIN, *held_patch.APPLY_FLAGS, "--check", "-", data=held.patch, check=False
     )
