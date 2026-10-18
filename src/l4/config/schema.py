@@ -830,6 +830,7 @@ class YoloMergeCfg(_Strict):
 
     method: Literal["squash", "fast-forward"] = "squash"
     delete_branches: bool = True
+    require_ci: bool = False  # true: a hand-off commit that no CI ran on waits for one (L4-YOLO-043)
 
 
 class YoloCfg(_Strict):

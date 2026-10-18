@@ -954,6 +954,8 @@ yolo:
   merge:                           # how a plan's harness merge lands a unit (L4-YOLO-032, L4-YOLO-033)
     method: squash                 # squash | fast-forward: one squash commit through the forge's merge call, or the push of the head
     delete_branches: true          # false: keep the merged unit and archive branches
+    require_ci: false              # true: a hand-off commit no CI ran on waits for one; false: it is merged, recorded as
+                                   # ci: not_run (L4-YOLO-043); running, red or unreadable CI always blocks
   hold: []                         # unit ids or fnmatch patterns (`openspec:a`, `kiro:*`): a matching unit that no plan file lists gets no
                                    # agent work and shows `held by yolo.hold`; an empty string is a load error (L4-ADO-011)
 
@@ -3648,16 +3650,23 @@ checkpoint beside the served model.
 
 **L4-ARC-008 Hand-off invariant.** At PASS the harness makes exactly **one hand-off commit H** on the unit branch (it
 contains `verification.md`, the round's evidence index and the folded ledger; no `[skip ci]`) and marks the PR ready.
-The verdict, the evidence, the approval and the repository's required checks all bind to H. While the PR is ready
+It records the sha of H as `pr.ready{head}` on the unit's lock ref (L4-STA-004), and that record is H from then on
+(`UnitState.ready_head`). The verdict, the evidence, the approval and the repository's required checks all bind to H. While the PR is ready
 (`in_review`, `archived`), the only harness pushes to the unit branch are, each as **one push**: (a) on approval —
 an optional base-merge commit plus the archive commit (L4-ARC-001); (b) on a base move — archive revert, base merge and
 re-archive (L4-ARC-006); and (c) when the unit leaves review — the archive revert, pushed after the PR was set back to
 draft (from then on the normal checkpoint rules apply). After every push of type (a) or (b) the PR head MUST be a
 harness commit **without** `[skip ci]` (the archive commit), so required checks run on the head a human merges. Ledger
 events produced after H (`phase.changed`, costs, approvals) are written to the unit's lock-ref commits (off-branch,
-never a PR head; L4-STA-004) and folded into the next unit-branch commit. Any commit after H that the harness did not make (a commit is the harness's only when its author **and** its
-committer are the harness bot identity **and** it carries an `L4-Run` trailer, so an amended, rebased or cherry-picked
-H is a person's) **voids the approval**, removes `archive.approval_label`, and sends the unit back (answers or spec
+never a PR head; L4-STA-004) and folded into the next unit-branch commit. Any commit after the recorded H that the harness did not make **voids the approval**. With
+`archive.mode: post_merge_pr`, where the harness pushes nothing to the unit branch while the PR is ready (L4-ARC-007),
+that is every commit after the recorded H, whatever its author, committer or trailers, and a recorded H that is not an
+ancestor of the branch head is rewritten history. Only a unit with no recorded H keeps the identity rule: a commit is
+the harness's only when its author **and** its committer are the harness bot identity **and** it carries an `L4-Run`
+trailer, so an amended, rebased or cherry-picked H is a person's. H is read from the pending files of the unit's lock ref
+only, never from events in the branch tree. Anyone who can push the lock ref can forge `pr.ready{head}`: that residual
+is accepted, and closing it needs signed harness commits or a ref only the harness can write. A voided approval removes
+`archive.approval_label` and sends the unit back (answers or spec
 edits → `implementing`; anything else → `verifying` for a new round). Before the harness itself rewrites the PR content
 after H (archive revert), it MUST set the PR back to draft and the `l4/<unit>` status to `pending`.
 
@@ -3837,8 +3846,8 @@ branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a sou
 `feedback.withdrawn` (`{id}`) | `feedback.invalid` (`{id, problem}`, and `duplicate: true` for a copy of a heading; the problems are the rule that the item breaks, `duplicate id FB-NNN` and `no Status line`) | `feedback.waiting` (`{ids, reason}`, `fix_unit_full` or `follow_up_open`),
 all L4-FBK-004..007, `guard.restored` (`{task, paths, reason}`; `feedback_refactor` for the frozen tests of a refactor chore,
 L4-VER-006),
-`archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H), `ci.failed` (`{head, pipeline,
-jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own CI is red on H; `tail` is the end of the job's
+`archive.done` (`{via: "done_gate", base}` for a Kiro unit), `pr.updated`, `pr.ready` (`{url, number, head}`: `head` is the sha of H, read from the lock ref's pending files as `ready_head`, never from the branch tree, L4-ARC-008), `ci.failed` (`{head, pipeline,
+jobs: [{name, stage, url, tail, step}], preexisting: [name]}`: the project's own CI is red on H; on GitHub a job is named `<workflow file> / <job>` (L4-CI-011); `tail` is the end of the job's
 log, redacted; `step` the last `$` command of its `step_script`, redacted, at most 300 characters) and `ci.step` (`{job, head, step,
 command, status: derived|skipped|reproduced, reason, source}`: what step 0 or a `[chore]` decided about a red job's failing
 step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipeline, jobs: [name]}`: red on H and on the base head, so no fix round),
@@ -4253,10 +4262,11 @@ or without a plan, a merged PR MUST count as the unit's merge only when its dest
 unit stays `in_review` and its cause says `merged into <x>, not the base <base>`.
 
 **L4-YOLO-008** The guarded merge. With `merge: auto`, the plan step SHALL merge a unit only when all the preconditions of design D8 hold (in review, PASS,
-no open question, no person's commit after the hand-off, the PR open with the target as base, the target tip an
-ancestor of the unit head, and the head to push equals the tip of the unit branch on `origin` and the head of the PR),
+no open question, no commit after the recorded hand-off commit H and no other review edge to take (L4-YOLO-041), the
+PR open with the target as base, the target tip an ancestor of H, the recorded H (L4-YOLO-040) equal to the tip of the
+unit branch on `origin` and the head of the PR, and the repository's CI on H allowing the merge (L4-YOLO-042)),
 with the method of `yolo.merge.method` (L4-YOLO-032): by default one squash commit made by the forge's merge call pinned
-to the unit head, with `fast-forward` by pushing the unit head to the target without force. The step MUST record
+to H, with `fast-forward` by pushing H to the target without force. The step MUST record
 `unit.merge_requested` with the lease before the merge, after it has read the plan again: a cancelled or stopped plan MUST NOT merge (R5). With
 `fast-forward`, a refused push for `non-fast-forward` MUST send the unit to `verifying` once per attempt (`stale`); a second one, or any other refusal,
 MUST stop the plan with `merge_refused` and the forge's reason. The harness MUST NOT merge any unit that is not the
@@ -4307,7 +4317,8 @@ D9 and L4-YOLO-011 say. It SHALL wait, with the reason, while its current unit i
 `waiting_capacity`; a waiting plan goes on by itself when the cause is gone, and `l4 yolo resume` also wakes it. A `merge: auto`
 plan SHALL also wait, with the reason `merge_not_ready`, the unit and the detail (once, not again while the detail holds),
 while the merge of its current unit is not ready (no open PR, a PR aimed at another branch, a PR head that is not the
-branch tip); it goes on by itself when the merge is ready. A `merge: auto` plan SHALL likewise wait with the reason `accepted_finding_open` (L4-YOLO-028). A plan stopped with `unit_rejected` MUST need the cause fixed (the unit's spec, which then needs a new review, or the
+branch tip, no recorded H, a branch head that is not H, or the repository's CI on H running, red and not yet recorded,
+or unreadable, or not run when `yolo.merge.require_ci` is true, L4-YOLO-042); it goes on by itself when the merge is ready. A `merge: auto` plan SHALL likewise wait with the reason `accepted_finding_open` (L4-YOLO-028). A plan stopped with `unit_rejected` MUST need the cause fixed (the unit's spec, which then needs a new review, or the
 configuration) and a new activation, and the step MUST NOT ask `l4 retry` to move a rejected unit; after the activation
 the next run of the unit reads the corrected spec or configuration, and a unit that its run rejects again stops the plan
 again. A unit that its own run rejects (exit 14, for example an empty
@@ -4489,11 +4500,11 @@ change) and `l4 yolo waive` (the finding needs no handling).
 **L4-YOLO-032** The plan merges a unit by squash unless configured to fast-forward. The configuration has
 `yolo.merge.method` (`squash` or `fast-forward`, default `squash`). With `squash`, after every precondition of
 L4-YOLO-008 and `unit.merge_requested`, the plan step SHALL merge the unit's PR through the forge's merge call with the
-squash method, pinned to the verified head, with a message the harness writes: the PR title without `[skip ci]` and with
+squash method, pinned to the recorded hand-off commit H (L4-YOLO-040), never a branch tip it read, with a message the harness writes: the PR title without `[skip ci]` and with
 ` (#<pr>)`, and the trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run`. A forge answer that the head moved SHALL be
 `not_ready`; any other refusal SHALL stop the plan with `merge_refused` and the forge's message. After the merge the
-harness SHALL compare the landed commit's parent with the target tip it read and its tree with the head's tree, and
-SHALL record `unit.merged{head, merge_commit, method, raced}` with `raced: true` when either differs. The post-merge
+harness SHALL compare the landed commit's parent with the target tip it read and its tree with H's tree, and
+SHALL record `unit.merged{head, merge_commit, method, raced, ci, ci_jobs}` (`head` is H, or the head a person merged the PR at) with `raced: true` when either differs. The post-merge
 check SHALL run on the landed commit. With `fast-forward` the merge SHALL stay the push of L4-YOLO-008, recorded with
 `merge_commit` equal to the head.
 
@@ -4565,6 +4576,14 @@ CLI. The decisions are in `openspec/changes/mcp-server/design.md` (D1..D5).
 - A project entry depends on where the client starts the server. Claude Code sets `CLAUDE_PROJECT_DIR` (from v2.1.139), VS Code starts it in the workspace folder, OpenCode and Codex in the session's directory: their entries hold `l4 mcp serve` with no path. Cursor documents no working directory, so its project entry holds `--repo ${workspaceFolder}` (the folder that contains `.cursor/mcp.json`; https://cursor.com/docs/context/mcp). Kiro documents neither, so `--project` for Kiro SHALL be refused (exit 2, nothing written) with the hint to use the user scope.
 - Codex starts a server with an allowlisted environment: its entry SHALL also carry `env_vars` naming `forge.token_env` of the repository's `.l4/config.yaml` (the schema default when it does not), keeping the variables the user listed.
 - Claude Code desktop worktree sessions read `.mcp.json` of the main checkout and set `CLAUDE_PROJECT_DIR` to it (https://code.claude.com/docs/en/worktrees): a project file serves a worktree only for a session started inside it; to serve a worktree otherwise, use a user-scope entry with `--repo <worktree path>`.
+
+**L4-YOLO-040** The plan merges the recorded hand-off commit H and nothing after it. The guarded merge SHALL take H from `UnitState.ready_head`. It SHALL be `not_ready` when no H is recorded, naming `l4 retry --unit <id>`, and when the snapshot's hand-off commit or branch head is not H, naming both shas. Every sha the merge uses SHALL be H: the `ls-remote` and PR-head checks, the squash `sha`, the fast-forward push, the keep ref and the leased branch delete.
+
+**L4-YOLO-041** A review edge comes before the merge. When the plan's current unit is in review with a PASS and the planner gives it work (a commit after H, a spec edit, rewritten history, or red repository CI recorded on H), the plan step SHALL dispatch the unit and SHALL NOT call the guarded merge. The guarded merge SHALL itself be `not_ready` when the unit's recorded `ci.failed` is for H.
+
+**L4-YOLO-042** The merge waits for the repository's CI on H. Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H as the sweep does (L4-CI-012). `running`, `failed`, `blocked` (a cancelled or held job), an unreported required check and a read error SHALL be `not_ready` whatever `yolo.merge.require_ci` says, naming H and the jobs or the check. `green` and `preexisting` SHALL go on, and `not_run` too unless `yolo.merge.require_ci` is true (L4-YOLO-043). `unit.merged` SHALL record `ci`, and `ci_jobs` for `preexisting`.
+
+**L4-YOLO-043** Whether a hand-off commit that no CI ran on is merged is configured. The configuration SHALL have `yolo.merge.require_ci` (default `false`): whether a `not_run` CI on H blocks the merge. Running, red (new on H) and unreadable CI SHALL block whatever its value. With `false`, `not_run` SHALL NOT block: the plan step SHALL merge, record `unit.merged{ci: not_run}` and warn in the plan report and on the merged PR or MR. With `true`, it SHALL be `not_ready`, naming `yolo.merge.require_ci: false`.
 
 ---
 
@@ -4964,8 +4983,8 @@ step that can return a semantic exit code pipes it through `l4 ci map-exit`.
   `GITHUB_TOKEN` (no push runs; the PR `synchronize` runs it would otherwise create need manual approval [V]); GitLab
   checkpoints additionally use `-o ci.skip`;
 - **hand-off pushes on GitHub with `GITHUB_TOKEN`** start no workflow run (GitHub's rule against recursive runs). With no
-  check run at the hand-off commit, the sweeper records the repository-CI duty as `not_run` with that reason, never
-  green (L4-GHP-008). A token that does start runs, or a GitHub App (forge-and-ci 2.11), restores the duty.
+  check run at the hand-off commit, or none but the harness's own `l4` job, the sweeper records the repository-CI duty as
+  `not_run` with the reason, never green (L4-GHP-008, L4-CI-012). A token that does start runs, or a GitHub App (forge-and-ci 2.11), restores the duty.
 - **hand-off pushes** (the hand-off commit H of L4-ARC-008, and the archive commit) MUST NOT carry `[skip ci]`, so the
   repository's normal CI runs on the head a human merges — GitHub: pushed with a GitHub App installation token that the
   **harness mints itself** from `forge.github_app` immediately before the push (installation tokens live 1 h [V]; the App
@@ -5116,6 +5135,19 @@ Doctor row TOOL-001 names each gate command whose first word is not on the gate 
 `l4 init` proposes `ci.toolchains` from `go.work` or `go.mod`, `.nvmrc` or `package.json` `engines.node`, and
 `packageManager: pnpm@X`. The toolchains are on the read-only host root of the gate sandbox: its guarantees and network
 rules are unchanged.
+
+
+**L4-CI-010** A GitHub check run is one job of one workflow. On GitHub, `list_pipeline_jobs` SHALL key a check run of the `github-actions` app by its workflow file, its workflow run's event and its name, and another app's by the app's slug and name, and keep the newest of a key. A re-run job's earlier execution SHALL be dropped (`jobs?filter=latest` against `all`), and a check run that is no job of the run SHALL stay apart. A check run whose workflow run is not found SHALL be keyed by its check suite.
+
+**L4-CI-011** The base comparison matches the workflow and the job. `evaluate_ci`, `ci.failed` and `ci.preexisting` SHALL name a GitHub job `<workflow file> / <job>` (`<app slug> / <name>` for another app), and a job red on H SHALL be pre-existing only when a job with that workflow file and name is red on the base head. On GitLab a job SHALL stay its name, one per name across the pipelines of a commit, newest pipeline first, because every pipeline of a commit runs the project's one CI configuration.
+
+**L4-CI-012** A hand-off commit that no job of the project ran on is not_run. The repository-CI duty SHALL be `not_run`, never green, when H has no job other than the ignored `l4` job, on every forge. Its reason SHALL say which case it is: no check run at all on GitHub (a push made with `GITHUB_TOKEN` starts none), only the harness's own `l4` job, or no pipeline job on GitLab. The sweep and the guarded merge SHALL read H's CI through one function, `read_handoff_ci`.
+
+**L4-CI-013** A job that did not pass is not green. A project job's newest attempt SHALL pass on success, neutral or skipped, and be red on failure, timed_out, startup_failure or stale. A cancelled job and a held one (`action_required`, a manual job that may not fail) SHALL be `blocked`: neither green nor a fix round. A cancelled job counts as its twin under another event when that ran, and as skipped when the twins only skipped. Every project job skipped SHALL be `not_run`.
+
+**L4-CI-014** CI that may not exist yet is running. On GitHub the reader SHALL also read the workflow runs of H: a run not `completed` (not the harness's own), an unfinished GitLab pipeline and a required check that H has not reported SHALL be running. `not_run` SHALL be final only ten minutes after the recorded `pr.ready`, unless the repository can start no CI (no workflow but `l4.yml`, no required check, no CI on the base head). An unreported required check SHALL block the merge after the window, with or without a job.
+
+**L4-CI-015** Commit statuses are read and only the harness's own job is ignored. On GitHub the combined commit status of H SHALL be read as jobs, a failure or error red and pending running, except the harness's own `l4/*` contexts. Only the job `l4` of the workflow `l4.yml` SHALL be ignored as the harness's own.
 
 ---
 
@@ -5656,6 +5688,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 42 | `guard-harness-writes` | no harness write follows a link a gate planted, and a planted link halts the unit (L4-SEC-020, L4-SEC-021); no step commits a link that points outside the worktree; gate and runner configuration is defined exactly, put back after every agent step and every gate run, and opened only by a human tag or answer, with a pytest marker allowed (L4-IMP-040, L4-IMP-041, L4-IMP-006 (3)); the folders the sandbox masks, `.kiro/skills` included, are protected paths (L4-SEC-004); `openspec/changes/guard-harness-writes/` | the ported reproductions pass; a consumer repository's red step that edits `[tool.ruff]` has it put back |
 | 43 | `sandbox-isolation` | an empty home and a hidden runner cache in both sandbox kinds, tools read-only (`sandbox.tool_paths`, `sandbox.setup_paths`), keyed per-unit directories, a project environment (`.venv`, `node_modules`) read-only for gates that do not build it and rebuilt when a step or a gate changed it, package caches read-only except for setup with a private scratch per step and a cache of its own for the verifier, key files visible only to their step, doctor `SANDBOX-003` and `SANDBOX-004`; L4-SEC-030..039, L4-PRV-040..041 (`openspec/changes/sandbox-isolation/`) | `SANDBOX-003` passes on `l4-runner` and on a GitHub-hosted runner; the dummy repository's gates stay green |
 | 44 | `detect-test-tamper` | a red step that changes, rebinds or deletes a pre-existing test, or adds a statement that replaces one, fails its attempt; step 1 compares pre-existing tests per test on the AST by file and qualified name (people's changes listed), runs the base's tests on the unit's code with every test and support file the unit touched at its base version, in any language with a JUnit report, and blocks a support or helper file that patches the unit's code or replaces a test's call, and production code that reacts to the test run; audit tests run without any of the unit's test or support files, hold a criterion whose production module does not import, and never fall back; a generated test's head run keeps added app data (L4-IMP-045..049, L4-VER-030..039; `openspec/changes/detect-test-tamper/`) | the reviewers' reproductions: no false PASS, no crash on an honest unit |
+| 45 | `merge-safety` | the plan's merge lands exactly the recorded hand-off commit H (`pr.ready{head}`; any commit after it re-enters review whatever its identity, L4-ARC-008, L4-YOLO-040, L4-YOLO-041), waits for the repository's CI on H (running, red or unreadable CI blocks; `yolo.merge.require_ci`, default `false`, decides whether a hand-off commit no CI ran on waits, L4-YOLO-042, L4-YOLO-043), reads a GitHub check run as one job of one workflow and a hand-off commit with no job of the project as `not_run` on every forge, and never reads CI that may not exist yet, a cancelled job, a failed commit status or a stale conclusion as green (L4-CI-010..015; `openspec/changes/merge-safety/`) | a consumer repository's `merge: auto` plan after the upgrade: a hand-off push that starts no CI is now merged on record (`ci: not_run`) with a warning; give the push a token that starts runs and set `yolo.merge.require_ci: true` to make the CI gate the merge |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -8955,6 +8988,106 @@ scenario is a spec defect (§26).
 - **Then** GitHub: the step succeeds with a warning annotation; GitLab: the job ends with exit 11 and is shown as an
   allowed failure.
 
+#### SCN-CI-050 (−) No check run at all on H on GitHub is not_run with the GITHUB_TOKEN reason · L4-CI-002
+- **Given** a GitHub repository whose hand-off commit has no check run
+- **When** the sweep's CI duty runs
+- **Then** it is `ci_not_run` with `pushes made with GITHUB_TOKEN start no runs`, never `ci_green`
+
+#### SCN-CI-051 (−) A failed job of one workflow is not hidden behind a passing job of the same name · L4-CI-010
+- **Given** on H the Actions check runs `build` of `tests.yml` (failure) and `build` of `docs.yml` (success, newer), and a green base
+- **When** the sweep's CI duty runs
+- **Then** it is `ci_failed` naming `tests.yml / build`
+
+#### SCN-CI-052 (+) A re-run collapses to its newest attempt · L4-CI-010
+- **Given** `tests.yml`'s job `test` failed in attempt 1 and passed in attempt 2 of the same workflow run, both in one check suite (a re-run keeps its suite)
+- **When** the check runs of H are listed
+- **Then** there is one job `tests.yml / test`, and it is `success`
+
+#### SCN-CI-053 (−) A push run and a pull_request run of one workflow are two jobs · L4-CI-010
+- **Given** `tests.yml` ran on H for `push` (job `build` success) and for `pull_request` (job `build` failure)
+- **When** the check runs of H are listed and judged
+- **Then** both are listed, and H is red
+
+#### SCN-CI-054 (+) A check run of another app is keyed by the app · L4-CI-010
+- **Given** a check run `build` of the app `codecov` (failure) and an Actions job `build` of `tests.yml` (success)
+- **When** the check runs of H are listed
+- **Then** there are two jobs, `codecov / build` and `tests.yml / build`, and H is red
+
+#### SCN-CI-055 (−) A workflow listing that cannot be read keeps every check suite apart · L4-CI-010
+- **Given** the check runs of SCN-CI-051 and a forge that answers 403 to the workflow-runs listing
+- **When** the check runs of H are listed
+- **Then** each Actions check run is keyed by its check suite, the failed `build` is still listed, and one warning says that the workflow runs could not be read
+
+#### SCN-CI-056 (+) The base comparison matches the workflow and the job · L4-CI-011
+- **Given** `tests.yml / build` red on H, and on the base head once `docs.yml / build` red and once `tests.yml / build` red
+- **When** the CI is evaluated
+- **Then** the first case is `failed` (new on H), and the second is `preexisting`
+
+#### SCN-CI-057 (+) GitLab keeps one job per name across the pipelines of a commit · L4-CI-011
+- **Given** a GitLab commit with an older pipeline whose job `test` failed and a newer one whose `test` passed
+- **When** its jobs are listed
+- **Then** there is one job `test`, it is `success`, and its key is `test`
+
+#### SCN-CI-058 (−) A hand-off commit whose only check run is the skipped l4 job is not_run · L4-CI-012
+- **Given** a GitHub hand-off commit whose only check run is the harness's `l4` job, `skipped`
+- **When** the sweep's CI duty runs
+- **Then** it is `ci_not_run`, and the reason says that the only check run is the harness's own `l4` job and does not name `GITHUB_TOKEN`
+
+#### SCN-CI-059 (−) A GitLab commit with no job of the project is not_run · L4-CI-012
+- **Given** a GitLab hand-off commit with no pipeline job
+- **When** the sweep's CI duty runs
+- **Then** it is `ci_not_run` with `no pipeline of the project has a job on the hand-off commit`, not `ci_green`
+
+#### SCN-CI-060 (+) The sweep and the merge read the same verdict · L4-CI-012
+- **Given** five hand-off commits whose CI is running, green, failed, pre-existing, and without a job
+- **When** `read_handoff_ci` reads each, and the sweep's CI duty reports each
+- **Then** they agree: `running` and `ci_waiting`, `green` and `ci_green`, `failed` and `ci_failed`, `preexisting` and `ci_preexisting`, `not_run` and `ci_not_run`
+
+#### SCN-CI-061 (−) A cancelled, stale or action_required job is not green · L4-CI-013
+- **Given** a GitHub hand-off commit whose only project job concluded `cancelled`, `action_required` or `stale`
+- **When** the CI is read
+- **Then** the cancelled and the `action_required` job are `blocked`, the stale job is `failed`, never `green`; a cancelled push job whose pull_request twin was skipped is `not_run`
+
+#### SCN-CI-062 (−) A queued workflow run with no check run yet is running · L4-CI-014
+- **Given** a GitHub hand-off commit with a queued workflow run and no check run
+- **When** the CI is read
+- **Then** it is `running`, not `not_run`
+
+#### SCN-CI-063 (−) An unfinished workflow run is running though its created jobs passed · L4-CI-014
+- **Given** a workflow run in progress whose only created check run passed
+- **When** the CI is read
+- **Then** it is `running`, and `green` once the run is completed
+
+#### SCN-CI-064 (−) A required check that H has not reported is running, then not_run · L4-CI-014
+- **Given** a base branch that requires the checks `build` and `lint`, and H with a passed `build` only
+- **When** the CI is read within ten minutes of the hand-off, and an hour after it
+- **Then** it is `running`, and then `unreported` naming `lint`, which blocks the merge; so does a required check when H has no job at all, and a CI app on the base head keeps the window
+
+#### SCN-CI-065 (−) An unfinished GitLab pipeline with no job yet is running · L4-CI-014
+- **Given** a GitLab hand-off commit whose pipeline is `created`, `pending` or `running` and lists no project job
+- **When** the CI is read
+- **Then** it is `running`, not `not_run`
+
+#### SCN-CI-066 (−) A failed commit status makes H red · L4-CI-015
+- **Given** a GitHub hand-off commit with a passed check run and a commit status `ci/jenkins` in state `failure`
+- **When** the CI is read
+- **Then** it is `failed`, naming `status / ci/jenkins`; a pending `l4/add-x` status is ignored
+
+#### SCN-CI-067 (−) A failed job named l4 of another workflow is a project job · L4-CI-015
+- **Given** a failed job `l4` of `tests.yml`, and a failed job `l4` of `l4.yml`
+- **When** the CI is read
+- **Then** the first is red and the second is ignored
+
+#### SCN-CI-068 (−) A failed check run is not hidden behind a same-name check run of its suite · L4-CI-015
+- **Given** a workflow run with one job and two check runs `Test Results` of one suite, one failed and one passed
+- **When** the check runs of H are listed
+- **Then** the failed one is listed and H is red
+
+#### SCN-CI-069 (+) One CI read makes few calls · L4-CI-015
+- **Given** a green GitHub hand-off commit with one workflow, and a base head with 48 scheduled `l4.yml` runs
+- **When** the CI is read
+- **Then** it makes at most ten API calls, lists no job of an `l4.yml` run, and reads the base head only when H has a red job
+
 ### 23.14 Doctor, dry-run, simulation (DOC, DRY, SIM)
 
 #### SCN-DOC-01 (+) Healthy repository · L4-DOC-001
@@ -10250,6 +10383,151 @@ scenario is a spec defect (§26).
 - **Given** a unit parked in `waiting_capacity` because the only profile hit a rate limit that resets in 40 minutes
 - **When** the plan step runs before the reset
 - **Then** the plan waits (`unit_waiting_capacity`), starts no run, and does not stop
+
+#### SCN-YOLO-100 (−) A commit after H that claims the bot's identity sends the unit back · L4-ARC-008, L4-YOLO-041
+- **Given** an active `merge: auto` plan whose current unit is in review with a PASS and `pr.ready{head: H}`, and after H a commit that adds `evil.py`, whose author and committer are the bot and which carries an `L4-Run` trailer
+- **When** the plan step runs, and then the unit's run
+- **Then** nothing is merged and `evil.py` is not on the target, the commit is listed after the hand-off, the step dispatches the unit, and its run takes `commit_after_handoff` to `verifying`
+
+#### SCN-YOLO-101 (−) A forged second hand-off commit does not become H · L4-ARC-008
+- **Given** the unit of SCN-YOLO-100 with one more commit on top whose subject is the hand-off subject, with `L4-Phase: verified` and the bot's identity
+- **When** the snapshot is read and the plan step runs
+- **Then** the hand-off commit is the recorded H, both commits are listed after it, the head is not at the hand-off, and nothing is merged
+
+#### SCN-YOLO-102 (−) A person's commit after H still re-enters review · L4-ARC-008
+- **Given** the unit of SCN-YOLO-100 whose commit after H is a person's
+- **When** the plan step runs
+- **Then** the commit is listed after the hand-off, nothing is merged, and the step dispatches the unit
+
+#### SCN-YOLO-103 (−) A recorded H that is no longer on the branch is rewritten history · L4-ARC-008
+- **Given** a unit in review whose branch a person reset to a commit before the recorded H
+- **When** the snapshot is read
+- **Then** the review is `lost`, and the review trigger is `commit_after_handoff` with `lost: true`
+
+#### SCN-YOLO-104 (+) A unit with no recorded H keeps the identity rule · L4-ARC-008
+- **Given** a unit in review whose ledger has no `pr.ready`, a strict harness commit after its hand-off commit, and then a person's commit
+- **When** the snapshot is read
+- **Then** the hand-off commit is found by its subject, the harness commit is not listed after it, and the person's commit is
+
+#### SCN-YOLO-105 (+) A fast-forward merge pushes the recorded H · L4-YOLO-008
+- **Given** `yolo.merge.method: fast-forward` and a unit in review with a PASS whose recorded H is the branch tip and the PR head, with a green CI job on H
+- **When** the plan step merges
+- **Then** the target's tip is H, and `unit.merged{head: H, merge_commit: H, ci: green}` is recorded
+
+#### SCN-YOLO-106 (+) The squash merge is pinned to the recorded H · L4-YOLO-032
+- **Given** the unit of SCN-YOLO-105 and the default `squash`
+- **When** the plan step merges
+- **Then** the forge's merge call gets `sha` H, the merged PR's head is H, the landed commit's tree is H's tree, and `unit.merged{head: H}` names that commit as `merge_commit`
+
+#### SCN-YOLO-107 (−) A merge that waits for CI is recorded once and chains no run · L4-YOLO-013
+- **Given** the wait of SCN-YOLO-112 on record
+- **When** two more plan steps run while the job still runs
+- **Then** no further `plan.waiting` is written, and neither step starts a run
+
+#### SCN-YOLO-108 (−) A head that is not the recorded H is not merged · L4-YOLO-040
+- **Given** a unit whose recorded H is `H`, whose branch tip on `origin` is a later commit `X`, and a snapshot that names `X` as both the hand-off commit and the head
+- **When** the guarded merge runs
+- **Then** it is `not_ready` with a detail that names `X` and `H`, nothing is pushed, and no merge call is made
+
+#### SCN-YOLO-109 (−) No recorded H, no merge · L4-YOLO-040
+- **Given** a unit in review with a PASS at its hand-off commit but no `pr.ready` in its ledger
+- **When** the guarded merge runs
+- **Then** it is `not_ready` naming `l4 retry --unit openspec:x`, and nothing is pushed
+
+#### SCN-YOLO-110 (−) Red CI recorded on H is verified, not merged · L4-YOLO-041
+- **Given** an active `merge: auto` plan whose current unit is in review with a PASS, an open PR, and `ci.failed{head: H, jobs: [unit-tests]}` recorded
+- **When** the plan step runs
+- **Then** no `unit.merge_requested` or `unit.merged` is written, the target does not hold H, and the step dispatches the unit (`dispatched openspec:a (in_review)`)
+
+#### SCN-YOLO-111 (−) The guarded merge refuses recorded red CI on H · L4-YOLO-041
+- **Given** the unit of SCN-YOLO-110, given straight to the guarded merge
+- **When** it runs
+- **Then** it is `not_ready` with `the repository CI failed on the hand-off commit`, `unit-tests` and `(recorded)`, and nothing is pushed
+
+#### SCN-YOLO-112 (−) CI still running on H holds the merge · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, whose job `test` is running on H
+- **When** the plan step runs
+- **Then** nothing is merged, and `plan.waiting{merge_not_ready}` says `the repository CI is still running on the hand-off commit` with H
+
+#### SCN-YOLO-113 (+) The wait ends when H is green · L4-YOLO-042
+- **Given** the wait of SCN-YOLO-112 and the job now `success`
+- **When** the plan step runs
+- **Then** the cause is gone, the unit is merged, and `unit.merged{ci: green}` is recorded
+
+#### SCN-YOLO-114 (−) Red CI on H that the sweep has not recorded is not merged · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, whose job `test` failed on H and is green on the base, with no `ci.failed` recorded
+- **When** the plan step runs
+- **Then** nothing is merged, and the wait names `test` and says that the next sweep records it
+
+#### SCN-YOLO-115 (+) A job red on H and on the base does not hold the merge · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, whose job `lint` failed on H and on the base head
+- **When** the plan step runs
+- **Then** the unit is merged, `unit.merged{ci: preexisting, ci_jobs: [lint]}` is recorded, and a warning line names `lint`
+
+#### SCN-YOLO-116 (−) require_ci true: no CI ran on H, the plan waits and names the fix · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, with no job of the project on H and `yolo.merge.require_ci: true`
+- **When** the plan step runs
+- **Then** nothing is merged, and the wait says that no CI of the repository ran on H and names `yolo.merge.require_ci: false`
+
+#### SCN-YOLO-117 (−) CI that cannot be read is not green · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, and a forge whose CI read fails with HTTP 502
+- **When** the plan step runs
+- **Then** nothing is merged, and the wait says that the repository CI of H could not be read
+
+#### SCN-YOLO-118 (+) By default a hand-off commit that no CI ran on is merged, on record · L4-YOLO-043
+- **Given** the unit of SCN-YOLO-116 with no `yolo.merge` configuration
+- **When** the plan step runs
+- **Then** the unit is merged, `unit.merged{ci: not_run}` is recorded, and a warning line in the plan report names H and `yolo.merge.require_ci`
+
+#### SCN-YOLO-119 (−) A job recorded as red on the base too, now red on H alone, names the retry · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, with `ci.preexisting{head: H, jobs: [lint]}` recorded, and `lint` now failed on H and green on the base head
+- **When** the plan step runs
+- **Then** nothing is merged, and the wait names `lint` and `l4 retry --unit openspec:a`
+
+#### SCN-YOLO-120 (−) require_ci false still waits for red CI on H · L4-YOLO-043
+- **Given** `yolo.merge.require_ci: false` and a unit in review with a PASS at its recorded H, whose job `test` failed on H and is green on the base, with no `ci.failed` recorded
+- **When** the plan step runs
+- **Then** nothing is merged, and the wait names `test`
+
+#### SCN-YOLO-121 (−) A cancelled job blocks the merge whatever require_ci says · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, whose only job `test` was cancelled
+- **When** the plan step runs, with `yolo.merge.require_ci` true and false
+- **Then** nothing is merged, no fix round is opened, and the wait names `test` and says to re-run it
+
+#### SCN-YOLO-122 (−) CI that is not created yet waits in the window after the hand-off · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H, no job of the project on H, and `pr.ready` recorded three minutes ago
+- **When** the plan step runs, and then again ten minutes after the hand-off
+- **Then** the first step merges nothing and starts no run (the CI is still running), and the second merges on record with `ci: not_run`
+
+#### SCN-YOLO-123 (−) Every project job skipped is not_run · L4-YOLO-042
+- **Given** a unit in review with a PASS at its recorded H whose only job was skipped, past the window
+- **When** the plan step runs with the default configuration
+- **Then** the unit is merged with `ci: not_run`, not `ci: green`; so is a cancelled push job whose pull_request twin was skipped, and with `require_ci` true the plan waits
+
+#### SCN-YOLO-124 (−) A PR a person merged at another head records that head · L4-YOLO-032
+- **Given** a squash merge pinned to H, and a person who pushes X and merges the PR at X before the forge answers
+- **When** the plan step merges
+- **Then** the forge answers "merged", the merge is `raced`, and `unit.merged` records X as `head` and `ci: unknown`, not H and its verdict
+
+#### SCN-YOLO-125 (−) A pr.ready written into the branch tree is not H · L4-ARC-008
+- **Given** a unit in review whose recorded H is on the lock ref, and a commit after H that adds a ledger file with `pr.ready{head: X}`, dated far in the future, where X is that commit
+- **When** the snapshot is read
+- **Then** the recorded H is still the lock ref's, and the commit after H sends the unit back
+
+#### SCN-YOLO-126 (−) A required check that H has not reported blocks after the window · L4-YOLO-043
+- **Given** a base branch that requires `lint`, and a unit in review with a PASS at its recorded H that has not reported it, more than ten minutes after the hand-off
+- **When** the plan step runs, with `yolo.merge.require_ci` true and false
+- **Then** nothing is merged, and the wait says that the required check `lint` has not reported on H and that GitHub will refuse the merge until it does
+
+#### SCN-YOLO-127 (+) Required checks that could not be read are said once · L4-YOLO-043
+- **Given** a forge that answers 403 on every read of the base branch's required checks, and a green CI on H
+- **When** the plan step merges
+- **Then** the unit is merged, and the plan report says once that the required checks could not be read
+
+#### SCN-YOLO-128 (−) A repository that cannot start any CI does not wait for the window · L4-YOLO-043
+- **Given** a unit in review with a PASS at its recorded H, handed off a minute ago, in a repository with no workflow but `l4.yml`, no required check and no status on H
+- **When** the plan step runs
+- **Then** the unit is merged at once with `ci: not_run`
 
 ### 23.21 Experience graph (KG)
 

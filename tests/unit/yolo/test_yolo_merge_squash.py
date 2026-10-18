@@ -7,7 +7,7 @@ import logging
 import pytest
 
 from l4.config.schema import L4Config
-from l4.forge.base import MergeCall
+from l4.forge.base import JobResult, MergeCall
 from l4.forge.local import LocalForge
 from l4.yolo.merge import confirm_merged, merge_guarded, squash_message
 
@@ -29,6 +29,9 @@ class ScriptedForge(LocalForge):
     def __init__(self, origin, answer: MergeCall | None = None, before=None) -> None:
         super().__init__(origin=origin)
         self.answer, self.before = answer, before
+
+    def list_pipeline_jobs(self, sha, *, settled=False):
+        return [JobResult("test", "", "success", False, 1, 1, "")]  # the repository's CI on H is green
 
     def merge_pr(self, number, *, sha, title, message):
         if self.before is not None:
@@ -152,3 +155,24 @@ def test_confirm_merged_reads_the_landed_commit_not_the_head(world):
     assert not confirm_merged(
         forge, world.git, world.cfg, out.pr, world.head, wait_s=0
     )  # the head is not in the target
+
+
+def test_a_pr_a_person_merged_at_another_head_records_the_head_actually_merged(world):
+    """The forge answers "merged" for a pull request a person merged at X while the harness held H: the merged head
+    is X, not H, and the merge is raced (SCN-YOLO-124, L4-YOLO-032)."""
+    other = world.work.parent / "other"
+    world.raw(world.work.parent, "clone", "-q", "-b", BRANCH, str(world.origin), str(other))
+    x = world.commit(other, "later.txt", "a person's later commit")
+
+    class Meanwhile(ScriptedForge):
+        def merge_pr(self, number, *, sha, title, message):
+            world.raw(other, "push", "-q", "origin", BRANCH)  # a person pushes X and merges the pull request at X
+            self.merge(number, x)
+            return MergeCall("merged", x, "the pull request was merged already")
+
+    forge = Meanwhile(world.origin)
+    forge.create_pr(BRANCH, "main", "[l4] x", "body", draft=False)
+    out = merge(world, forge)
+    assert out.status == "merged" and out.raced is True and out.landed == x
+    assert out.head == x != world.head
+    assert out.ci == "unknown" and out.ci_jobs == ()  # H's CI verdict says nothing about X (SCN-YOLO-124)

@@ -114,7 +114,9 @@ def test_plan_sweep_reports_the_ci_decision(review, gitlab, capsys):
     short = review.handoff[:10]
     assert l4(review, "plan", "--sweep") == 0
     captured = capsys.readouterr()
-    assert f"ci: H {short} green" in captured.err and "in_review" in captured.out  # no pipeline yet: nothing red
+    # no pipeline job yet: not run, never green (L4-CI-012)
+    assert f"ci: H {short}: no pipeline of the project has a job on the hand-off commit" in captured.err
+    assert "in_review" in captured.out
     gitlab.add_pipeline(review.handoff, [("test", "failed", {"trace": "FAILED"}), ("build", "running")])
     assert l4(review, "plan", "--sweep") == 0
     assert f"ci: H {short} running" in capsys.readouterr().err

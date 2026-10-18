@@ -28,6 +28,19 @@ class FakeGitHub:
     graphql_errors: list[dict] = field(default_factory=list)
     _next_comment: int = 1000
     check_runs: list[dict] = field(default_factory=list)  # {id, name, status, conclusion, sha, ...}
+    workflow_runs: list[dict] = field(default_factory=list)  # {id, head_sha, path, event, check_suite_id, run_attempt}
+    attempts: dict[tuple[int, int], dict] = field(default_factory=dict)  # (run id, attempt) -> the run of that attempt
+    workflow_runs_status: int = 200  # the answer of the workflow-runs listing (403: the token may not read actions)
+    attempts_status: int = 200  # the answer of an attempt read
+    jobs: dict[int, list[dict]] = field(default_factory=dict)  # workflow run id -> {id, latest} jobs of its executions
+    statuses: list[dict] = field(default_factory=list)  # {sha, context, state, target_url}: commit statuses
+    rules: list[dict] | None = None  # the answer of rules/branches/:branch (None: 404)
+    rules_status: int = 200
+    protection: dict | None = None  # the answer of the classic required_status_checks endpoint (None: 404)
+    branch: dict | None = None  # the answer of GET branches/:branch (None: 404), e.g. {"protection": {...}}
+    branch_status: int = 200
+    workflows: list[str] = field(default_factory=list)  # the workflow files the repository defines
+    workflows_status: int = 200
     logs: dict[int, str] = field(default_factory=dict)  # check run id -> the text behind the log redirect
     redirect_to: str = "https://logs.example.test/blob"  # where `actions/jobs/:id/logs` sends the client
     issue_events: dict[int, list[dict]] = field(default_factory=dict)  # issue number -> /issues/:n/events entries
@@ -65,16 +78,51 @@ class FakeGitHub:
         *,
         suite: int | None = None,
         log: str | None = None,
+        app: str | None = None,
     ) -> dict:
         run_id = 5000 + len(self.check_runs) + 1
         run = {
             "id": run_id, "name": name, "status": status, "conclusion": conclusion, "sha": sha,
             "html_url": f"https://github.test/{REPO}/runs/{run_id}", "check_suite": {"id": suite or 1},
         }  # fmt: skip
+        if app is not None:
+            run["app"] = {"slug": app}
         self.check_runs.append(run)
         if log is not None:
             self.logs[run_id] = log
         return run
+
+    def add_workflow_run(
+        self,
+        sha: str,
+        path: str,
+        event: str,
+        *,
+        suite: int,
+        run_id: int | None = None,
+        attempts: tuple[int, ...] = (),
+        status: str = "completed",
+    ) -> dict:
+        """A workflow run of `sha`: `path` is the file under `.github/workflows/`, `suite` the check suite of its latest
+        attempt, `attempts` the suites of the earlier attempts, oldest first (each readable at `.../attempts/<n>`)."""
+        run_id = run_id or 800 + len(self.workflow_runs) + 1
+        run = {
+            "id": run_id, "head_sha": sha, "path": f".github/workflows/{path}", "event": event,
+            "check_suite_id": suite, "run_attempt": len(attempts) + 1, "status": status,
+        }  # fmt: skip
+        self.workflow_runs.append(run)
+        for number, earlier in enumerate(attempts, start=1):
+            self.attempts[(run_id, number)] = {**run, "check_suite_id": earlier, "run_attempt": number}
+        return run
+
+    def add_job(self, run_id: int, check_run: dict, *, latest: bool = True) -> None:
+        """The check run `check_run` is a job of workflow run `run_id`; `latest: False` is a superseded execution."""
+        self.jobs.setdefault(run_id, []).append({"id": check_run["id"], "latest": latest})
+
+    def add_status(self, sha: str, context: str, state: str) -> dict:
+        status = {"sha": sha, "context": context, "state": state, "target_url": f"https://ci.test/{context}"}
+        self.statuses.append(status)
+        return status
 
     def _page(self, request: httpx.Request, items: list[dict], key: str | None = None) -> httpx.Response:
         query = parse_qs(request.url.query.decode())
@@ -106,6 +154,43 @@ class FakeGitHub:
         if m := re.fullmatch(rf"/repos/{REPO}/commits/([0-9a-f]+)/check-runs", path):
             runs = [r for r in self.check_runs if r["sha"] == m.group(1)]
             return self._page(request, runs, "check_runs")
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/runs/(\d+)/attempts/(\d+)", path):
+            found = self.attempts.get((int(m.group(1)), int(m.group(2))))
+            if self.attempts_status != 200 or found is None:
+                return httpx.Response(
+                    self.attempts_status if self.attempts_status != 200 else 404, json={"message": "x"}
+                )
+            return httpx.Response(200, json=found)
+        if m := re.fullmatch(rf"/repos/{REPO}/actions/runs/(\d+)/jobs", path):
+            wanted = request.url.params.get("filter", "latest")
+            jobs = [j for j in self.jobs.get(int(m.group(1)), []) if wanted == "all" or j["latest"]]
+            return self._page(request, [{"id": j["id"], "name": "job"} for j in jobs], "jobs")
+        if m := re.fullmatch(rf"/repos/{REPO}/commits/([0-9a-f]+)/status", path):
+            found = [x for x in self.statuses if x["sha"] == m.group(1)]
+            return self._page(request, found, "statuses")
+        if re.fullmatch(rf"/repos/{REPO}/rules/branches/[^/]+", path):
+            if self.rules_status != 200 or self.rules is None:
+                return httpx.Response(self.rules_status if self.rules_status != 200 else 404, json={"message": "x"})
+            return httpx.Response(200, json=self.rules)
+        if re.fullmatch(rf"/repos/{REPO}/branches/[^/]+", path):
+            if self.branch_status != 200 or self.branch is None:
+                return httpx.Response(self.branch_status if self.branch_status != 200 else 404, json={"message": "x"})
+            return httpx.Response(200, json=self.branch)
+        if path == f"/repos/{REPO}/actions/workflows":
+            if self.workflows_status != 200:
+                return httpx.Response(self.workflows_status, json={"message": "x"})
+            found = [{"path": f".github/workflows/{name}", "state": "active"} for name in self.workflows]
+            return self._page(request, found, "workflows")
+        if re.fullmatch(rf"/repos/{REPO}/branches/[^/]+/protection/required_status_checks", path):
+            if self.protection is None:
+                return httpx.Response(404, json={"message": "Branch not protected"})
+            return httpx.Response(200, json=self.protection)
+        if path == f"/repos/{REPO}/actions/runs":
+            if self.workflow_runs_status != 200:
+                return httpx.Response(self.workflow_runs_status, json={"message": "Resource not accessible"})
+            wanted = request.url.params.get("head_sha")
+            runs = [r for r in self.workflow_runs if wanted is None or r["head_sha"] == wanted]
+            return self._page(request, runs, "workflow_runs")
         if m := re.fullmatch(rf"/repos/{REPO}/actions/jobs/(\d+)/logs", path):
             if int(m.group(1)) not in self.logs:
                 return httpx.Response(404, json={"message": "Not Found"})

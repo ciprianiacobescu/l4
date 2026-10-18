@@ -93,7 +93,7 @@ from l4.state.breaker import LIMIT as VERIFIER_ERROR_LIMIT
 from l4.state.breaker import consecutive_verifier_errors
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, VERIFIER_ERRORS, feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.environment import run_environment
-from l4.state.fold import UnitState, fold
+from l4.state.fold import UnitState, fold, recorded_ready
 from l4.state.ledger import LedgerClosed, LedgerEvent, LedgerRead, LedgerWriter, ledger_path, read_ledger
 from l4.state.lifecycle import SPEC_EDIT_PHASES, Edge, Phase, Trigger, allowed_edge, transition
 from l4.state.next_step import NO_CONVERTIBLE_FINDING, feedback_way_out
@@ -285,6 +285,7 @@ class Orchestrator:
 
     def _refold(self) -> UnitState:
         self.state = fold(self._ledger().events, self.services.ref.id)
+        self.state.ready_head, self.state.ready_at = recorded_ready(self._pending.events)  # the lock ref only
         return self.state
 
     def _go(self, trigger: Trigger, **context: object) -> Edge:
@@ -781,7 +782,7 @@ class Orchestrator:
         merge."""
         s = self.services
         unit_rel = s.ref.path.resolve().relative_to(s.worktree.resolve()).as_posix()
-        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel)
+        after = after_handoff(s.git, "HEAD", s.ref.name, unit_rel, recorded=self.state.ready_head)
         found = review_trigger(after, self.state)
         if found is None:
             return False

@@ -133,7 +133,7 @@ def test_scn_yolo_14_and_24_a_verified_unit_is_merged_integrated_and_the_next_ru
         "plan.charged",
     ]
     assert last(world, "unit.merged") == {
-        "unit": A, "head": head, "pr": 1, "merge_commit": head, "method": "fast-forward", "raced": False,
+        "unit": A, "head": head, "pr": 1, "merge_commit": head, "method": "fast-forward", "raced": False, "ci": "green",
     }  # fmt: skip
     assert last(world, "unit.integrated") == {"unit": A, "revision": head}
     assert world.profile_calls == [(head, "all")]

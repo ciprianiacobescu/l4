@@ -117,6 +117,33 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   model-written finding text become parentheses before they reach a task (L4-IMP-006).
 - The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
   `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
+- A delivery plan with `merge: auto` no longer merges a commit that nobody verified. The merge lands the hand-off
+  commit H that the hand-off recorded (`pr.ready{head}`), pinned to its sha, and never the branch tip. Any commit after
+  H sends the unit back to verification, whatever author, committer or `L4-Run` trailer it claims: before, a commit that
+  copied the bot's identity and trailer after the review was squash-merged unseen, and a forged second hand-off commit
+  became H (L4-ARC-008, L4-YOLO-040).
+- A plan no longer merges a unit whose repository CI is red. A red CI that the sweep recorded on H is dispatched for
+  verification before any merge, and the merge itself waits while the CI on H is running, is red and not yet recorded,
+  or cannot be read, with a `merge_not_ready` detail that says why (L4-YOLO-041, L4-YOLO-042).
+- On GitHub, a failed job is no longer hidden behind a passing job of the same name in another workflow. A check run is
+  one job of one workflow (and event), a re-run replaces its earlier attempt, and a job red on H is pre-existing only
+  when the same workflow's job is red on the base (L4-CI-010, L4-CI-011).
+- A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
+  (L4-CI-012).
+
+- A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, an
+  `action_required` check (a person must act) and a stale run, a failed commit status, a workflow run still queued or in
+  progress, an unfinished GitLab pipeline and a required check that H has not reported are all read: cancelled or held
+  jobs block the merge with "re-run it" and open no fix round (a cancelled push run whose pull_request twin finished
+  does not block), a required check that never reports blocks it whatever `yolo.merge.require_ci` says, and the
+  others are red or running. "No CI" is final only ten minutes after the hand-off, unless the repository has no
+  workflow but `l4.yml`, requires no check and shows no status on H (L4-CI-013, L4-CI-014, L4-CI-015). Only the
+  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read now makes about ten API
+  calls, not more than a hundred: the jobs of `l4.yml` runs and the base head are read only when needed.
+- The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
+  Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
+  signed harness commits or a ref only the harness can write.
+- A PR that a person merged at another head while the plan held H is recorded with the head that was merged.
 
 ### Changed
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
@@ -141,6 +168,16 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   package cache (read-only shared cache plus a scratch), so a test gate that needs a download setup did not make fails
   under `gates.network: none`: move the download to `gates.setup`. The verifier downloads once per round. A dependency upgrade without a lock-file change is a notice, not a
   violation, when a dependency manifest changed in the same step.
+- A plan merge waits for the repository's CI on H when it is running, red or unreadable. The new key
+  `yolo.merge.require_ci` (default `false`) decides only whether a hand-off commit that no CI ran on waits too. With
+  the default it is merged, after waiting up to ten minutes for a CI that may still be created (at once in a
+  repository that can start none), and `unit.merged` records `ci: not_run`; a warning goes to the plan report and to a
+  note on the merged PR or MR. A PR a person merged at another head records `ci: unknown`. A GitHub repository whose hand-off is pushed with the workflow's `GITHUB_TOKEN`
+  (which starts no runs) that wants its CI to gate the merge gives the push a token that starts runs, such as a GitHub
+  App, and sets `yolo.merge.require_ci: true`. A job red on H and on the base does not block: `unit.merged` records
+  `ci: preexisting` and the job names.
+- GitHub job names in `ci.failed` and `ci.preexisting` are `<workflow file> / <job>` (`tests.yml / build`).
+- On GitLab, a hand-off commit with no pipeline job is `ci_not_run`; it was `ci_green`.
 
 ## 0.4.15 (2026-10-18)
 

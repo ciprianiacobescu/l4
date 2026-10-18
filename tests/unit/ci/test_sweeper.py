@@ -474,7 +474,8 @@ def test_red_project_job_on_h_is_recorded_once_per_h(review, gitlab):
 
 def test_green_or_running_pipeline_writes_nothing(review, gitlab):
     refs = review.raw(review.origin, "for-each-ref")
-    assert [a.what for a in ci_sweep(review, "r-20261005T1000Z-0001")] == ["ci_green"]  # no pipeline at all
+    # no pipeline at all: not run, never green (L4-CI-012)
+    assert [a.what for a in ci_sweep(review, "r-20261005T1000Z-0001")] == ["ci_not_run"]
     gitlab.add_pipeline(review.handoff, [("test", "failed"), ("build", "running")])
     (running,) = ci_sweep(review, "r-20261005T1100Z-0002")
     assert running.what == "ci_waiting" and "running" in running.detail

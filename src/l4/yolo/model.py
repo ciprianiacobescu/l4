@@ -273,6 +273,9 @@ class MergeOutcome:
     detail: str = ""
     landed: str | None = None  # the sha now on the target: the head for a fast-forward, the squash commit for a squash
     raced: bool = False  # a squash whose parent is not the tip read before it, or whose tree is not the head's
+    ci: str | None = None  # `merged`: what the CI on H said: green, preexisting or not_run (L4-YOLO-042)
+    warning: str = ""  # `merged`: a limit of the CI read that the report should say (required checks unreadable)
+    ci_jobs: tuple[str, ...] = ()  # `preexisting`: the keys of the jobs red on H and on the base
 
 
 @dataclass(frozen=True)

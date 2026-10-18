@@ -10,7 +10,7 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.context import AppContext
-from l4.forge.base import PullRequest
+from l4.forge.base import JobResult, PullRequest
 from l4.redact import Redactor
 from l4.specs.base import Framework, UnitRef
 from l4.state.fold import LastVerdict, QuestionState, UnitState
@@ -34,6 +34,9 @@ class FakeForge:
     def get_pr(self, number: int):
         self.gets.append(number)
         return self.pr
+
+    def list_pipeline_jobs(self, sha: str, *, settled: bool = False):
+        return [JobResult("test", "", "success", False, 1, 1, "")]  # the repository's CI on H is green
 
 
 def pull(state="open", base="main") -> PullRequest:
@@ -83,7 +86,7 @@ class World:
 
     def snapshot(self, **state) -> UnitSnapshot:
         fields = {
-            "unit": UNIT, "phase": "in_review", "pr": PR_URL,
+            "unit": UNIT, "phase": "in_review", "pr": PR_URL, "ready_head": self.handoff,
             "last_verdict": LastVerdict(round=1, verdict="PASS", findings=0),
         }  # fmt: skip
         fields.update(state)

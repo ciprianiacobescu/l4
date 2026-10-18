@@ -1,11 +1,12 @@
 """The unit branch after the hand-off (SPEC 12.0, forge-and-ci 2.41): what a human did to it while it was `in_review`.
 
-`after_handoff` is pure over git. H is the unit's hand-off commit (`l4.vcs.authorship.handoff_commit`), a *foreign*
-commit is any commit after H on the first-parent chain that is not the harness's (bot as author and committer, and an
-`L4-Run` trailer), and a *spec edit* is a net change of the unit folder outside the files the harness owns
-(`verification.md` and `.l4/`). `review_trigger` turns that, and the CI result the sweep recorded for H, into the
-lifecycle edge `_drive` takes (M1 form: the source is `in_review` only; the approval half of SPEC 12.0 needs
-`on_approval`, which is not built).
+`after_handoff` is pure over git. H is the sha that `pr.ready{head}` recorded (`UnitState.ready_head`, L4-ARC-008) and a
+*foreign* commit is any commit after it on the first-parent chain, whatever its identity. A unit with no recorded H
+keeps the older rule: H is the unit's newest hand-off commit (`l4.vcs.authorship.handoff_commit`) and a foreign commit
+is one that is not the harness's (bot as author and committer, and an `L4-Run` trailer). A *spec edit* is a net change
+of the unit folder outside the files the harness owns (`verification.md` and `.l4/`). `review_trigger` turns that, and
+the CI result the sweep recorded for H, into the lifecycle edge `_drive` takes (M1 form: the source is `in_review`
+only; the approval half of SPEC 12.0 needs `on_approval`, which is not built).
 """
 
 from dataclasses import dataclass
@@ -50,13 +51,25 @@ def _owned(rel_to_unit: str) -> bool:
     return PurePosixPath(rel_to_unit).parts[0] in _HARNESS_OWNED
 
 
-def after_handoff(git: Git, head: str, name: str, unit_rel: str) -> AfterHandoff:
+def after_handoff(git: Git, head: str, name: str, unit_rel: str, *, recorded: str | None = None) -> AfterHandoff:
+    """What came after H. With `recorded`, the sha that `pr.ready{head}` recorded (L4-ARC-008), that sha is H and every
+    first-parent commit after it is foreign whatever its author, committer or trailers: with `archive.mode:
+    post_merge_pr` the harness pushes nothing to the unit branch while the PR is ready. A `recorded` that is not an
+    ancestor of the head is rewritten history (`lost`). Without it, H is the newest commit with the hand-off subject
+    and a commit is the harness's by its identity (`is_harness_strict`)."""
     head_sha = git.rev_parse(head)
-    handoff = handoff_commit(git, head, name) if head_sha else None
+    if recorded is not None and head_sha is not None:
+        if git.run("merge-base", "--is-ancestor", recorded, head_sha, check=False).returncode != 0:
+            return AfterHandoff(recorded, head_sha, lost=True)
+        handoff = recorded
+    else:
+        handoff = handoff_commit(git, head, name) if head_sha else None
     if head_sha is None or handoff is None:
         return AfterHandoff(handoff, head_sha, lost=True)
     records = commit_records(git, "--first-parent", "--reverse", f"{handoff}..{head_sha}")
-    foreign = tuple(ForeignCommit(r[SHA], r[AUTHOR], r[SUBJECT]) for r in records if not is_harness_strict(r))
+    foreign = tuple(
+        ForeignCommit(r[SHA], r[AUTHOR], r[SUBJECT]) for r in records if recorded or not is_harness_strict(r)
+    )
     spec_edit = False
     if foreign:
         changed = git.run("diff", "--name-only", "-z", handoff, head_sha, "--", f":(literal){unit_rel}").stdout

@@ -7,6 +7,7 @@ event sets (`fix_round`, `children`, `parent`, `cooldowns`, `branch`, retry/halt
 
 import json
 from collections.abc import Callable, Iterable
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer
@@ -124,6 +125,10 @@ class UnitState(_Model):
         default_factory=dict
     )  # head sha -> failed | preexisting: the sweep acts once per H
     ci_failure: CiFailure | None = None
+    # `pr.ready{head}` of the lock ref's pending files, set by the reader with `recorded_ready` and never by `fold`: a
+    # `pr.ready` in the branch tree is anyone's text (L4-ARC-008). Not part of state.json.
+    ready_head: str | None = Field(None, exclude=True)
+    ready_at: datetime | None = Field(None, exclude=True)  # the `ts` of that `pr.ready`
     breaker_trips: int = 0  # `breaker.tripped` events since the last `unit.resumed` (L4-IMP-013)
     fix_rounds_extra: int = 0  # the sum of `budget.extended{fix_rounds}`, added to `verifier.max_fix_rounds`
     feedback_rounds_extra: int = 0  # the sum of `budget.extended{feedback_rounds}`, added to `feedback.max_rounds`
@@ -380,6 +385,19 @@ def _ci_failed(state: UnitState, event: LedgerEvent) -> None:
 def _ci_preexisting(state: UnitState, event: LedgerEvent) -> None:
     if head := _text(event, "head"):
         state.ci_heads.setdefault(head, "preexisting")
+
+
+def recorded_ready(pending: Iterable[LedgerEvent]) -> tuple[str | None, datetime | None]:
+    """H and the time of the latest `pr.ready{head}` in fold order among the events of the lock ref's pending files,
+    and only those (L4-ARC-008): the branch tree is not a source of H, because anyone who can push the branch can write
+    a `pr.ready` there. The lock ref stays writable by anyone who can push it (the accepted residual, design D1)."""
+    head: str | None = None
+    at: datetime | None = None
+    for event in sorted(pending, key=lambda e: (e.ts, e.run_id, e.seq)):
+        value = event.data.get("head")
+        if event.type == "pr.ready" and isinstance(value, str) and value:
+            head, at = value, event.ts
+    return head, at
 
 
 def _pr_closed(state: UnitState, event: LedgerEvent) -> None:
