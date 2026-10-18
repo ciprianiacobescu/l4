@@ -840,13 +840,22 @@ class Sweeper:
         try:
             platform = forge_platform(self.cfg, self.app.environ, origin_url(self.app.repo, self.app.environ))
             base = self.git.rev_parse(f"refs/remotes/origin/{self.cfg.forge.base_branch}")
-            read = read_handoff_ci(self.forge, head, base, platform)  # the reader the guarded merge uses too
+            read = read_handoff_ci(
+                self.forge,
+                head,
+                base,
+                platform,
+                base_branch=self.cfg.forge.base_branch,
+                ready_at=state.ready_at,
+            )  # the reader the guarded merge uses too
             if read.status == "running":
-                return SweepAction(
-                    snapshot.ref.id, "ci_waiting", f"H {short} running" + (f" ({read.reason})" if read.reason else "")
-                )
+                why = f" ({read.reason})" if read.reason else ""
+                return SweepAction(snapshot.ref.id, "ci_waiting", f"H {short} running{why}")
             if read.status == "not_run":
                 return SweepAction(snapshot.ref.id, "ci_not_run", f"H {short}: {read.reason}")
+            if read.status == "blocked":
+                keys = ", ".join(j.key for j in read.blocked)
+                return SweepAction(snapshot.ref.id, "ci_blocked", f"H {short}: cancelled or held: {keys}: re-run it")
             if read.status == "green":
                 return SweepAction(snapshot.ref.id, "ci_green", f"H {short} green")
             logs = {j.job_id: self._log(j) for j in read.failed[:MAX_TAILS]}

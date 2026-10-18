@@ -2,6 +2,8 @@
 SCN-YOLO-112..119). `yolo.merge.require_ci` defaults to false: red, running or unreadable CI on H always blocks, and a
 commit that no CI ran on merges on record unless `require_ci` is true."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from l4.forge.base import ForgeError
@@ -167,3 +169,46 @@ def test_a_squash_merge_records_green_ci(world):
     world.step({"a": snap})
     (data,) = merged(world)
     assert data["head"] == head and data["ci"] == "green"
+
+
+@pytest.mark.parametrize("require_ci", [False, True])
+@pytest.mark.parametrize("status", ["canceled", "manual"])
+def test_a_cancelled_or_held_job_blocks_whatever_require_ci_says(world, status, require_ci):
+    """F1 (SCN-YOLO-121): not green, not a fix round: the wait names the job and says to re-run it."""
+    configure(world, require_ci=require_ci)
+    head, snap = ready(world, ci=(("test", status),))
+    world.step({"a": snap})
+    assert "unit.merged" not in world.kinds()
+    detail = waits(world)[-1].data["detail"]
+    assert "test" in detail and "re-run it" in detail and head[:10] in detail
+
+
+def test_a_job_that_did_not_pass_is_red_not_green(world):
+    """F1: a failed job (GitHub's action_required and stale map to it) is the new-red path, with the base green."""
+    configure(world, require_ci=True)
+    head, snap = ready(world, ci=(("test", "failed"), ("lint", "success")))
+    world.forge.script_jobs(base_head(world), [("test", "success")])
+    world.step({"a": snap})
+    assert "unit.merged" not in world.kinds()
+
+
+def test_every_project_job_skipped_is_not_run(world):
+    """F1 (SCN-YOLO-123): all skipped is `not_run`: the default merges on record, `require_ci: true` waits."""
+    head, snap = ready(world, ci=(("test", "skipped"),))
+    world.step({"a": snap})
+    assert [m["ci"] for m in merged(world)] == ["not_run"]
+
+
+def test_ci_not_created_yet_waits_inside_the_window(world):
+    """F2 (SCN-YOLO-122): no CI yet, three minutes after the hand-off, is `running`: the default does not merge, and the
+    wait chains no run. The same state ten minutes later is `not_run` and merges on record."""
+    recent = datetime.now(UTC) - timedelta(minutes=3)
+    head, snap = ready(world, ci=None, ready_at=recent)
+    step = world.step({"a": snap})
+    assert "unit.merged" not in world.kinds() and step.start_next_run is False
+    assert (
+        "still running" in waits(world)[-1].data["detail"] and "less than 10 minutes" in waits(world)[-1].data["detail"]
+    )
+    old = datetime.now(UTC) - timedelta(minutes=11)
+    world.step({"a": world.in_review("a", head, ci=None, ready_at=old)})
+    assert [m["ci"] for m in merged(world)] == ["not_run"]

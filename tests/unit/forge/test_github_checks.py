@@ -38,7 +38,7 @@ def test_check_runs_of_sha_become_job_results(github, forge):
     jobs = {j.name: j for j in forge.list_pipeline_jobs(SHA)}
     assert {n: j.status for n, j in jobs.items()} == {
         "lint": "success", "test": "success", "build": "running", "docs": "pending", "deploy": "canceled",
-        "optional": "skipped", "gate": "failed", "approve": "manual",
+        "optional": "skipped", "gate": "failed", "approve": "failed",  # action_required needs a person: not a pass (F1)
     }  # fmt: skip
     assert jobs["test"].pipeline_id == 78 and jobs["test"].allow_failure is False and jobs["test"].stage == ""
     assert isinstance(jobs["lint"], JobResult) and jobs["lint"].web_url.startswith("https://github.test/")
@@ -66,7 +66,8 @@ def test_settled_reads_every_check_run_and_keeps_the_newest_finished_one(github,
     settled = {j.name: j for j in forge.list_pipeline_jobs(SHA, settled=True)}
     assert {n: j.status for n, j in settled.items()} == {"test": "failed", "build": "pending"}
     assert settled["test"].pipeline_id == 10
-    assert github.requests[-1][2].get("filter") == "all"  # not only the latest run of each check suite
+    listings = [query for _, path, query, _ in github.requests if path.endswith("/check-runs")]
+    assert listings[-1].get("filter") == "all"  # not only the latest run of each check suite
 
 
 def _tests_and_docs(github: FakeGitHub) -> None:
@@ -149,3 +150,142 @@ def test_an_unreadable_attempt_drops_only_its_suite(github, forge):
     github.add_check_run(SHA, "test", "completed", "success", suite=32, app="github-actions")
     github.attempts_status = 403
     assert {j.workflow for j in forge.list_pipeline_jobs(SHA)} == {"suite-31", "tests.yml"}
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "status"),
+    [
+        ("success", "success"), ("neutral", "skipped"), ("skipped", "skipped"),
+        ("failure", "failed"), ("timed_out", "failed"), ("startup_failure", "failed"),
+        ("action_required", "failed"), ("stale", "failed"), ("cancelled", "canceled"),
+    ],
+)  # fmt: skip
+def test_a_conclusion_is_a_pass_a_failure_or_a_cancellation(github, forge, conclusion, status):
+    """F1 (L4-CI-013): only success, neutral and skipped pass; a conclusion that did not pass is red, a cancellation
+    is its own status; the reader never calls a job that did not pass green."""
+    github.add_check_run(SHA, "test", "completed", conclusion, suite=1, app="github-actions")
+    (job,) = forge.list_pipeline_jobs(SHA)
+    assert job.status == status
+
+
+def test_a_workflow_run_that_is_not_completed_is_a_running_job_even_without_check_runs(github, forge):
+    """F2 (SCN-CI-062, L4-CI-014): GitHub has not created the check runs of a queued run yet; the run itself is read."""
+    github.add_workflow_run(SHA, "tests.yml", "push", suite=1, status="queued")
+    (job,) = forge.list_pipeline_jobs(SHA)
+    assert job.status == "pending" and job.workflow == "tests.yml" and job.event == "push"
+
+
+def test_an_unfinished_workflow_run_is_running_though_its_created_jobs_passed(github, forge):
+    """F2: a `needs:` job that is not created yet; the run's own status says the CI is not finished."""
+    github.add_workflow_run(SHA, "tests.yml", "push", suite=1, status="in_progress")
+    github.add_check_run(SHA, "build", "completed", "success", suite=1, app="github-actions")
+    jobs = forge.list_pipeline_jobs(SHA)
+    assert sorted(j.status for j in jobs) == ["running", "success"]
+
+
+def test_the_harness_own_workflow_run_is_never_a_running_job(github, forge):
+    """The sweep runs inside `l4.yml`: its own unfinished run must not hold the verdict back."""
+    github.add_workflow_run(SHA, "l4.yml", "push", suite=1, status="in_progress")
+    assert forge.list_pipeline_jobs(SHA) == []
+
+
+def test_commit_statuses_are_jobs_except_the_harness_own(github, forge):
+    """F5 (SCN-CI-066, L4-CI-015): a CI that reports commit statuses is read; `l4/*` contexts are the harness's own."""
+    github.add_status(SHA, "ci/jenkins", "failure")
+    github.add_status(SHA, "ci/lint", "success")
+    github.add_status(SHA, "ci/slow", "pending")
+    github.add_status(SHA, "ci/boom", "error")
+    github.add_status(SHA, "l4/add-x", "pending")
+    github.add_status("b" * 40, "ci/other", "failure")
+    jobs = {j.key: j.status for j in forge.list_pipeline_jobs(SHA)}
+    assert jobs == {
+        "status / ci/jenkins": "failed", "status / ci/lint": "success", "status / ci/slow": "pending",
+        "status / ci/boom": "failed",
+    }  # fmt: skip
+
+
+def test_same_name_check_runs_of_one_suite_that_are_not_attempts_stay_distinct(github, forge):
+    """F6 (SCN-CI-068, L4-CI-010): a reporter's `Test Results` check runs are not jobs of the run; a failed one is not
+    hidden by a passing one of the same name in the same suite."""
+    run = github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    job = github.add_check_run(SHA, "test", "completed", "success", suite=1, app="github-actions")
+    github.add_job(run["id"], job)
+    github.add_check_run(SHA, "Test Results", "completed", "failure", suite=1, app="github-actions")
+    github.add_check_run(SHA, "Test Results", "completed", "success", suite=1, app="github-actions")
+    jobs = forge.list_pipeline_jobs(SHA)
+    assert sorted(j.status for j in jobs) == ["failed", "success", "success"]
+    assert [j.key for j in red_jobs(jobs)] == ["tests.yml / Test Results"]
+
+
+def test_a_superseded_execution_of_a_job_is_dropped_by_the_latest_jobs_listing(github, forge):
+    """F6: a re-run job's earlier execution is in `jobs?filter=all` but not in `filter=latest`."""
+    run = github.add_workflow_run(SHA, "tests.yml", "push", suite=31, run_id=900, attempts=(31,))
+    old = github.add_check_run(SHA, "test", "completed", "failure", suite=31, app="github-actions")
+    new = github.add_check_run(SHA, "test", "completed", "success", suite=31, app="github-actions")
+    github.add_job(run["id"], old, latest=False)
+    github.add_job(run["id"], new)
+    (job,) = forge.list_pipeline_jobs(SHA)
+    assert job.status == "success" and job.job_id == new["id"]
+
+
+def test_required_checks_come_from_the_branch_rules(github, forge):
+    """F2 (SCN-CI-064): the base branch's required status checks, from the rules, else from the classic protection."""
+    github.rules = [
+        {"type": "pull_request", "parameters": {}},
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "build"}]}},
+    ]
+    assert forge.required_checks("main") == ["build"]
+    github.rules = None
+    github.protection = {"contexts": ["lint"], "checks": [{"context": "lint"}, {"context": "test"}]}
+    assert forge.required_checks("main") == ["lint", "test"]
+    github.protection = None
+    assert forge.required_checks("main") == []  # no rules and no protection: nothing required, not an error
+
+
+def test_required_checks_that_cannot_be_read_are_not_fatal(github, forge):
+    github.rules_status = 403
+    assert forge.required_checks("main") == []
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "verdict"),
+    [("cancelled", "blocked"), ("action_required", "failed"), ("stale", "failed"), ("timed_out", "failed")],
+)
+def test_the_reader_does_not_call_a_job_that_did_not_pass_green(github, forge, conclusion, verdict):
+    """The review's R1 (SCN-CI-061): the only project job was cancelled, needs action or went stale."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    github.add_check_run(SHA, "test", "completed", conclusion, suite=1, app="github-actions")
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == verdict
+
+
+def test_the_reader_waits_for_a_queued_run_a_run_in_progress_and_a_pending_status(github, forge):
+    """The review's R2, R3 and R4 (SCN-CI-062, SCN-CI-063, SCN-CI-066)."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    run = github.add_workflow_run(SHA, "tests.yml", "push", suite=1, status="queued")
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "running"  # R2
+    run["status"] = "in_progress"
+    github.add_check_run(SHA, "build", "completed", "success", suite=1, app="github-actions")
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "running"  # R3
+    run["status"] = "completed"
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "green"
+    github.add_status(SHA, "ci/jenkins", "failure")  # R4
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "failed"
+
+
+def test_a_failed_job_named_l4_in_another_workflow_is_a_project_job(github, forge):
+    """The review's R6 (SCN-CI-067): only `l4.yml`'s `l4` job is the harness's own."""
+    from l4.ci.handoff_ci import read_handoff_ci
+
+    github.add_workflow_run(SHA, "tests.yml", "push", suite=1)
+    github.add_check_run(SHA, "l4", "completed", "failure", suite=1, app="github-actions")
+    github.add_check_run(SHA, "lint", "completed", "success", suite=1, app="github-actions")
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "failed"
+    github.check_runs.clear()
+    github.workflow_runs.clear()
+    github.add_workflow_run(SHA, "l4.yml", "push", suite=2)
+    github.add_check_run(SHA, "l4", "completed", "failure", suite=2, app="github-actions")
+    github.add_check_run(SHA, "lint", "completed", "success", suite=2, app="github-actions")
+    assert read_handoff_ci(forge, SHA, "b" * 40, "github").status == "green"

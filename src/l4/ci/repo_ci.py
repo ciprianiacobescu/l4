@@ -18,6 +18,7 @@ from typing import Literal
 from l4.forge.base import UNFINISHED, JobResult
 
 DEFAULT_IGNORE = ("l4",)
+HARNESS_WORKFLOWS = ("", "l4.yml")  # a job named like an ignored one is the harness's own only in its workflow (F7)
 CiStatus = Literal["running", "green", "failed", "preexisting"]
 
 
@@ -28,8 +29,12 @@ class CiVerdict:
     preexisting: tuple[JobResult, ...] = ()  # red on H and on the base
 
 
-def _considered(jobs: Sequence[JobResult], ignore: Sequence[str]) -> list[JobResult]:
-    return [j for j in jobs if j.name not in ignore]
+def considered(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
+    """The project's jobs: not the harness's own job (`l4` of the workflow `l4.yml`, or of a forge with no workflow)."""
+    return [j for j in jobs if not (j.name in ignore and j.workflow in HARNESS_WORKFLOWS)]
+
+
+_considered = considered
 
 
 def unfinished(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> bool:
@@ -39,6 +44,20 @@ def unfinished(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE
 def red_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
     """Failed and not `allow_failure`; `manual`, `skipped` and `canceled` are not red."""
     return [j for j in _considered(jobs, ignore) if j.status == "failed" and not j.allow_failure]
+
+
+def blocked_jobs(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> list[JobResult]:
+    """Jobs that neither passed nor failed: cancelled, or held for a person (`manual` and not allowed to fail). They
+    block a merge ("re-run it") but are not a fix round: nothing in the code is wrong (L4-CI-013)."""
+    return [
+        j for j in _considered(jobs, ignore) if j.status == "canceled" or (j.status == "manual" and not j.allow_failure)
+    ]
+
+
+def all_skipped(jobs: Sequence[JobResult], ignore: Sequence[str] = DEFAULT_IGNORE) -> bool:
+    """The project has jobs on the commit and every one was skipped: nothing ran (L4-CI-013)."""
+    kept = _considered(jobs, ignore)
+    return bool(kept) and all(j.status == "skipped" for j in kept)
 
 
 def evaluate_ci(

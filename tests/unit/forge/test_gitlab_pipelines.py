@@ -185,3 +185,22 @@ def test_a_trace_without_sections_has_no_step(gitlab: FakeGitLab, make_forge_cli
     (job,) = forge.list_pipeline_jobs(SHA)
     log = forge.job_log(job.job_id, 40)
     assert log.step is None and "$ make test" in log.tail
+
+
+def test_an_unfinished_pipeline_without_a_project_job_is_a_running_job(gitlab: FakeGitLab, make_forge_client):
+    """F2 (SCN-CI-065, L4-CI-014): a pipeline that is created or pending has no job to read yet, and is not "no CI"."""
+    forge = make_forge_client()
+    for status in ("created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"):
+        gitlab.pipelines.clear()
+        gitlab.add_pipeline(SHA, [], status=status)
+        (job,) = forge.list_pipeline_jobs(SHA)
+        assert job.status == "pending" and job.web_url == ""
+    gitlab.pipelines.clear()
+    gitlab.add_pipeline(SHA, [("l4", "running")], status="running")  # the harness's own job is not the project's CI
+    assert [j.status for j in forge.list_pipeline_jobs(SHA) if j.name != "l4"] == ["pending"]
+    gitlab.pipelines.clear()
+    gitlab.add_pipeline(SHA, [("test", "success")], status="running")
+    assert [j.name for j in forge.list_pipeline_jobs(SHA)] == ["test"]  # its jobs speak for it
+    gitlab.pipelines.clear()
+    gitlab.add_pipeline(SHA, [], status="success")
+    assert forge.list_pipeline_jobs(SHA) == []

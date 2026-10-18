@@ -12,7 +12,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -68,10 +68,12 @@ _PR_REFUSED = (
     "(Settings > Actions > General > Workflow permissions), or run `l4 setup github`"
 )
 _CHECK_CONCLUSIONS = {
-    "success": "success", "failure": "failed", "timed_out": "failed", "startup_failure": "failed",
-    "cancelled": "canceled", "skipped": "skipped", "neutral": "skipped", "stale": "skipped",
-    "action_required": "manual",
+    "success": "success", "neutral": "skipped", "skipped": "skipped",  # the passes
+    "failure": "failed", "timed_out": "failed", "startup_failure": "failed", "action_required": "failed",
+    "stale": "failed",  # red: a job that did not pass is not green (L4-CI-013)
+    "cancelled": "canceled",  # neither: the merge blocks until the job is re-run
 }  # fmt: skip
+_STATUS_STATES = {"success": "success", "failure": "failed", "error": "failed", "pending": "pending"}
 
 
 def _check_status(status: object, conclusion: object) -> str:
@@ -90,6 +92,14 @@ def _checked_api_url(api_url: str) -> str:
     if not parts.hostname or "@" in parts.netloc:
         raise ValueError("the GitHub API URL needs a host and must not carry credentials")
     return api_url.rstrip("/")
+
+
+class _Suite(NamedTuple):
+    """The workflow of a check suite: its file, the event of its run and the run's id (None: no run is known)."""
+
+    workflow: str
+    event: str
+    run_id: int | None
 
 
 class GitHubForge:
@@ -400,58 +410,90 @@ class GitHubForge:
     # --- the project's own CI: check runs ------------------------------------------------------------------------
 
     def list_pipeline_jobs(self, sha: str, *, settled: bool = False) -> list[JobResult]:
-        """The check runs of the commit as `JobResult`s, one per (workflow, event, name) (L4-CI-010): a check run of an
-        Actions job is keyed by its workflow file and the event of its workflow run, one of another app by the app's
-        slug, and only the newest check run of a key is kept, so a re-run replaces its earlier attempt and a failed job
-        of one workflow is not hidden behind a passing job of the same name in another. The `l4` workflow's own run is
-        listed like any other; the caller ignores it. `settled` reads every run (`filter=all`, not only the latest of
-        each check suite) and keeps a key's newest finished run when it has one."""
+        """The project's CI on the commit as `JobResult`s (L4-CI-010, L4-CI-014, L4-CI-015):
+        - a check run of an Actions job is keyed by its workflow file and the event of its workflow run, one of another
+          app by the app's slug; a re-run replaces its earlier execution (the run's `jobs?filter=latest` against
+          `filter=all`), and a check run that is no job of the run (a reporter's `Test Results`) is kept apart, so a
+          failed one is not hidden behind a passing one of the same name;
+        - a workflow run that is not `completed` is a running job of its own (the check runs of a queued run, or of a
+          `needs:` job, may not exist yet); the harness's own `l4.yml` run is not;
+        - a commit status is a job, except the harness's own `l4/*` contexts.
+        `settled` reads every check run (`filter=all`) and keeps a key's newest finished one when it has one."""
         path = f"/repos/{self._repo}/commits/{quote(sha, safe='')}/check-runs"
         runs = sorted(
             self._pages(path, {"filter": "all"} if settled else None, key="check_runs"),
             key=lambda run: int(run["id"]), reverse=True,
         )  # fmt: skip
-        suites = (
-            self._workflow_suites(sha)
-            if any(((run.get("app") or {}).get("slug")) == ACTIONS_APP for run in runs)
-            else {}
-        )
-        newest: dict[tuple[str, str, str], JobResult] = {}
+        workflow_runs, suites = self._workflow_runs(sha)
+        jobs_of: dict[int, tuple[set[int], set[int]] | None] = {}
+        newest: dict[tuple[str, str, str, int], JobResult] = {}
         for run in runs:
-            job = self._job(run, self._identity_of(run, suites))
-            key = (job.workflow, job.event, job.name)
+            identity = self._identity_of(run, suites)
+            key_id = 0
+            if identity.run_id is not None:
+                if identity.run_id not in jobs_of:
+                    jobs_of[identity.run_id] = self._run_jobs(identity.run_id)
+                known = jobs_of[identity.run_id]
+                if known is not None:
+                    latest, every = known
+                    if int(run["id"]) in every - latest:
+                        continue  # an earlier execution of a job that was run again
+                    if int(run["id"]) not in latest:
+                        key_id = int(run["id"])  # no job of the run: its own check run, never collapsed
+            job = self._job(run, (identity.workflow, identity.event))
+            key = (job.workflow, job.event, job.name, key_id)
             if key not in newest or (settled and newest[key].status in UNFINISHED and job.status not in UNFINISHED):
                 newest[key] = job
-        return list(newest.values())
+        found = list(newest.values())
+        for wr in workflow_runs:
+            if str(wr.get("status")) != "completed" and self._workflow_file(wr) not in ("", WORKFLOW_FILE):
+                found.append(self._running_run(wr))
+        return found + self._commit_statuses(sha)
 
     @staticmethod
-    def _identity_of(run: dict[str, Any], suites: Mapping[int, tuple[str, str]]) -> tuple[str, str]:
-        """(workflow, event) of a check run: an Actions job's workflow file and run event (a `suite-<id>` key when its
-        workflow run is not known, which cannot hide another job), another app's slug, or nothing for an old fake."""
+    def _workflow_file(run: dict[str, Any]) -> str:
+        return str(run.get("path") or "").removeprefix(WORKFLOWS_DIR).partition("@")[0]
+
+    @staticmethod
+    def _running_run(run: dict[str, Any]) -> JobResult:
+        """An unfinished workflow run as one job that is still to come."""
+        status = "running" if run.get("status") == "in_progress" else "pending"
+        return JobResult(
+            name="(workflow run)", stage="", status=status, allow_failure=False, pipeline_id=run.get("check_suite_id"),
+            job_id=None, web_url=str(run.get("html_url") or ""),
+            workflow=GitHubForge._workflow_file(run), event=str(run.get("event") or ""),
+        )  # fmt: skip
+
+    @staticmethod
+    def _identity_of(run: dict[str, Any], suites: Mapping[int, "_Suite"]) -> "_Suite":
+        """The workflow, event and workflow run of a check run: an Actions job's workflow file and run event (a
+        `suite-<id>` key, with no workflow run, when its run is not known, which cannot hide another job), another
+        app's slug, or nothing for an old fake."""
         slug = (run.get("app") or {}).get("slug")
         if not slug:
-            return "", ""
+            return _Suite("", "", None)
         if slug != ACTIONS_APP:
-            return str(slug), ""
+            return _Suite(str(slug), "", None)
         suite = (run.get("check_suite") or {}).get("id")
-        return suites.get(suite) or (f"suite-{suite if suite is not None else 'unknown'}", "")  # type: ignore[arg-type]
+        return suites.get(suite) or _Suite(f"suite-{suite if suite is not None else 'unknown'}", "", None)  # type: ignore[arg-type]
 
-    def _workflow_suites(self, sha: str) -> dict[int, tuple[str, str]]:
-        """Check suite id -> (workflow file, event) for the workflow runs of `sha`, every attempt of each (a re-run may
-        or may not get a new check suite: both are covered). A listing the token may not read gives `{}` with one
-        warning, an attempt it may not read drops only that attempt's suite: the check runs then keep their own keys."""
-        found: dict[int, tuple[str, str]] = {}
+    def _workflow_runs(self, sha: str) -> tuple[list[dict[str, Any]], dict[int, "_Suite"]]:
+        """The workflow runs of `sha`, and check suite id -> (workflow file, event, run id) for every attempt of each (a
+        re-run may or may not get a new check suite: both are covered). A listing the token may not read gives nothing
+        with one warning, an attempt it may not read drops only that attempt's suite: the check runs then keep their
+        own keys."""
+        found: dict[int, _Suite] = {}
         base = f"/repos/{self._repo}/actions/runs"
         try:
             runs = list(self._pages(base, {"head_sha": sha}, key="workflow_runs"))
         except (ForgeAuthError, ForgeNotFound):
             log.warning("the workflow runs of %s could not be read: check runs are told apart by check suite", sha[:10])
-            return {}
+            return [], {}
         for run in runs:
-            file = str(run.get("path") or "").removeprefix(WORKFLOWS_DIR).partition("@")[0]
+            file = self._workflow_file(run)
             if not file:
                 continue
-            identity = (file, str(run.get("event") or ""))
+            identity = _Suite(file, str(run.get("event") or ""), int(run["id"]) if "id" in run else None)
             if isinstance(run.get("check_suite_id"), int):
                 found[run["check_suite_id"]] = identity
             for attempt in range(1, int(run.get("run_attempt") or 1)):
@@ -461,7 +503,61 @@ class GitHubForge:
                     continue
                 if isinstance(earlier, dict) and isinstance(earlier.get("check_suite_id"), int):
                     found[earlier["check_suite_id"]] = identity
-        return found
+        return runs, found
+
+    def _run_jobs(self, run_id: int) -> tuple[set[int], set[int]] | None:
+        """(latest execution ids, every execution id) of the jobs of a workflow run, None when they cannot be told
+        (unreadable, or no job listed): its check runs are then all taken as jobs, newest of a name first."""
+        base = f"/repos/{self._repo}/actions/runs/{run_id}/jobs"
+        try:
+            latest = {int(j["id"]) for j in self._pages(base, {"filter": "latest"}, key="jobs")}
+            every = {int(j["id"]) for j in self._pages(base, {"filter": "all"}, key="jobs")}
+        except (ForgeAuthError, ForgeNotFound):
+            return None
+        return (latest, every | latest) if latest else None
+
+    def _commit_statuses(self, sha: str) -> list[JobResult]:
+        """The commit statuses of `sha` as jobs of the workflow `status` (a CI that reports statuses, not check runs);
+        the harness's own `l4/*` contexts are left out."""
+        path = f"/repos/{self._repo}/commits/{quote(sha, safe='')}/status"
+        return [
+            JobResult(
+                name=str(item["context"]),
+                stage="",
+                status=_STATUS_STATES.get(str(item.get("state")), "failed"),
+                allow_failure=False,
+                pipeline_id=None,
+                job_id=None,
+                web_url=str(item.get("target_url") or ""),
+                workflow="status",
+            )  # fmt: skip
+            for item in self._pages(path, key="statuses")
+            if not str(item.get("context") or "").startswith("l4/") and item.get("context")
+        ]
+
+    def required_checks(self, branch: str) -> list[str]:
+        """The status checks that the branch rules require, else the classic branch protection (a repository that has
+        neither, or a token that may not read them, requires nothing that this can see: not an error)."""
+        names: list[str] = []
+        try:
+            rules = self._request("GET", f"/repos/{self._repo}/rules/branches/{quote(branch, safe='')}").json()
+        except (ForgeAuthError, ForgeNotFound):
+            rules = None
+        for rule in rules if isinstance(rules, list) else []:
+            if isinstance(rule, dict) and rule.get("type") == "required_status_checks":
+                for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                    names.append(str(check.get("context") or ""))
+        if not names:
+            try:
+                protection = self._request(
+                    "GET", f"/repos/{self._repo}/branches/{quote(branch, safe='')}/protection/required_status_checks"
+                ).json()
+            except (ForgeAuthError, ForgeNotFound):
+                protection = None
+            if isinstance(protection, dict):
+                names += [str(c) for c in protection.get("contexts") or []]
+                names += [str((c or {}).get("context") or "") for c in protection.get("checks") or []]
+        return [n for n in dict.fromkeys(names) if n]
 
     @staticmethod
     def _job(run: dict[str, Any], identity: tuple[str, str] = ("", "")) -> JobResult:

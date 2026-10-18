@@ -201,8 +201,20 @@ def squash_merge(
             "the target moved while the forge merged",
             pr.number, landed[:10], parent[:10] or "?", tree[:10] or "?", tip[:10], expected[:10] or "?",
         )  # fmt: skip
+    merged_head = head
+    if raced:  # a person may have merged the pull request at another head: that head is what landed
+        try:
+            shown = forge.get_pr(pr.number).head_sha
+        except (ForgeError, ForgeUnavailable) as exc:
+            log.info("!%s: the merged head could not be read: %s", pr.number, exc)
+            shown = None
+        if shown and shown != head:
+            log.warning(
+                "!%s: the pull request was merged at %s, not at the verified %s", pr.number, shown[:10], head[:10]
+            )
+            merged_head = shown
     return MergeOutcome(
-        "merged", head, tip, pr.number, f"{target} squash-merged as {landed}", landed=landed, raced=raced
+        "merged", merged_head, tip, pr.number, f"{target} squash-merged as {landed}", landed=landed, raced=raced
     )
 
 
@@ -238,16 +250,26 @@ def _ci_gate(
     try:
         base = git.rev_parse(f"refs/remotes/origin/{cfg.forge.base_branch}")
         platform = forge_platform(cfg, app.environ, origin_url(app.repo, app.environ))
-        read = read_handoff_ci(forge, head, base, platform)
+        read = read_handoff_ci(
+            forge, head, base, platform, base_branch=cfg.forge.base_branch, ready_at=snapshot.state.ready_at
+        )
     except (ForgeError, ForgeUnavailable) as exc:
         first = app.redactor.redact_text((str(exc).splitlines() or [type(exc).__name__])[0])
         return _not_ready(f"the repository CI of the hand-off commit {h10} could not be read: {first}", **known), "", ()
     if read.status == "running":
-        base_note = " (the base head's CI is unfinished)" if read.reason else ""
+        base_note = f" ({read.reason})" if read.reason else ""
         return (
             _not_ready(
                 f"the repository CI is still running on the hand-off commit {h10}{base_note}: "
                 "the plan merges when it is green",
+                **known,
+            ), "", (),
+        )  # fmt: skip
+    if read.status == "blocked":
+        keys = ", ".join(sorted(j.key for j in read.blocked))
+        return (
+            _not_ready(
+                f"the repository CI has a cancelled or held job on the hand-off commit {h10}: {keys}: re-run it",
                 **known,
             ), "", (),
         )  # fmt: skip

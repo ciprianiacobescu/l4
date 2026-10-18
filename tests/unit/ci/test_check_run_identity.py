@@ -26,7 +26,7 @@ def _github_checks(
             sha = request.url.params.get("head_sha")
             found = [
                 {"id": 700 + n, "head_sha": sha, "path": f".github/workflows/{path}", "event": "push",
-                 "check_suite_id": suite, "run_attempt": 1}
+                 "check_suite_id": suite, "run_attempt": 1, "status": "completed"}
                 for n, (path, suite) in enumerate(workflows.get(sha, []))
             ]  # fmt: skip
             return httpx.Response(200, json={"total_count": len(found), "workflow_runs": found})

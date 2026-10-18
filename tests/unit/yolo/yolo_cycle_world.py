@@ -5,6 +5,7 @@ OpenSpec CLI and no agent runs), a local forge and a judge that is a scripted `F
 import json
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -268,8 +269,11 @@ class CycleWorld:
         scripted as `ci` (one green job by default), replacing any earlier script for that sha."""
         if ci is not None:
             self.forge.script_jobs(head, list(ci), replace=True)
-        fields = {"unit": unit_id(name), "phase": "in_review", "pr": "local://forge/pull/1", "ready_head": head,
-                  "last_verdict": LastVerdict(round=1, verdict="PASS", findings=0), **state}  # fmt: skip
+        fields = {
+            "unit": unit_id(name), "phase": "in_review", "pr": "local://forge/pull/1", "ready_head": head,
+            "ready_at": datetime(2026, 1, 1, tzinfo=UTC),  # long ago: the window after the hand-off is over
+            "last_verdict": LastVerdict(round=1, verdict="PASS", findings=0), **state,
+        }  # fmt: skip
         ref = UnitRef(Framework.OPENSPEC, name, self.repo / "openspec" / "changes" / name)
         return UnitSnapshot(
             ref=ref, state=UnitState(**fields), source="branch", review=AfterHandoff(handoff=head, head=head),
