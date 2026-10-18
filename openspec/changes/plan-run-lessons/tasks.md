@@ -231,6 +231,6 @@ Every task follows these rules:
   with `### Fixed` (the parts and the bookkeeping list; the `judge_view` holds and `judge_view_rejected`; the resume and
   the hints after an answer) and `### Changed` (`l4 yolo resume --extend-…` on an active plan; an agent can no longer
   raise a plan's limits).
-- [ ] 9.3 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/verifier tests/unit/state tests/unit/ci
+- [x] 9.3 Run `.venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/verifier tests/unit/state tests/unit/ci
   tests/unit/yolo tests/unit/specs`, `.venv/bin/ruff check .`, `.venv/bin/python scripts/check_spec.py docs/SPEC.md` and
   `npx --yes @fission-ai/openspec@1.14.1 validate plan-run-lessons --strict`; all pass.
