@@ -37,13 +37,13 @@ def broken_total_green():
     return green
 
 
-def failed_at_step_1(run, title):
+def failed_at_step_1(run, title, row=ROW):
     unit = run.outcome["units"][0]
     assert unit.get("verdict") not in ("PASS", None) or run.code != 0
     assert steps_of(run).get("1") == "failed" and "2" not in steps_of(run)
     text = run.pushed(f"{UNIT_DIR}/verification.md")
-    [row] = [line for line in text.splitlines() if line.startswith(ROW)]
-    assert "failed" in row and title in text
+    [found] = [line for line in text.splitlines() if line.startswith(row)]
+    assert "failed" in found and title in text
     return text
 
 
@@ -137,7 +137,7 @@ def test_a_conftest_hook_that_neuters_a_test_fails_the_run_alone(
     failed_at_step_1(run, RUN_TITLE)
 
 
-# --- the judgement, pure (SCN-VER-138) --------------------------------------------------------------------------------
+# --- the judgement, pure (SCN-VER-138) ------
 
 
 def report(**statuses) -> TestReport:
@@ -172,7 +172,7 @@ def test_a_parametrised_case_that_vanished_is_a_candidate_like_any_other():  # S
     assert judged.not_run == ["a::t[OLD]"]
 
 
-# --- the allowances, the base reference and the repeat, with a scripted workbench (SCN-VER-138, SCN-VER-139) ----------
+# --- the allowances, the base reference and the repeat, with a scripted workbench (SCN-VER-138, SCN-VER-139) ------
 
 import json  # noqa: E402
 from contextlib import contextmanager  # noqa: E402
@@ -353,7 +353,7 @@ def test_the_run_is_skipped_when_step_1_already_failed_or_the_unit_changed_no_te
     assert not out.skipped and "changed no test or support file" in out.note and wb.runs == []
 
 
-# --- SCN-VER-137: a weakened Go and TypeScript test, through a runner that writes JUnit for both -------------
+# --- SCN-VER-137: a weakened Go and TypeScript test, through a runner that writes JUnit for both ------
 
 FAKE_RUNNER = """import re
 import subprocess
@@ -423,3 +423,69 @@ def test_weakened_go_and_typescript_tests_fail_the_run(run_l4, valid_spec, tdd_r
     text = failed_at_step_1(run, RUN_TITLE)
     assert "cart.cart_test::TestTotal" in text and "web.cart.test::adds prices" in text
     assert "2 other test file(s) are checked by the run of pre-existing tests" in text
+
+
+# --- second review M4, minor b: allowed support files stay at head; what a skipped test costs ------
+
+ALLOW_BASE = {
+    "tests/conftest.py": "import pytest\n\n\n@pytest.fixture\ndef cart():\n    return []\n",
+    "tests/test_cart.py": "def test_cart_total(cart):\n    assert cart == []\n",
+    "tests/fixtures/expected.json": '{"total": 3.75}\n',
+    "tests/test_render.py": "def test_render():\n    assert 1\n",
+}
+
+
+def allow_repo(tmp_path, git_environ):
+    repo, base = new_repo(tmp_path, git_environ, ALLOW_BASE)
+    repo.write({"tests/conftest.py": ALLOW_BASE["tests/conftest.py"].replace("return []", "return ['EUR']")})
+    repo.commit("infra: share the cart fixture", task="2.1", tdd="green")
+    repo.write({"tests/fixtures/expected.json": '{"total": 3.8}\n'})
+    repo.commit_as_human("a person updates the golden file for the new rounding")
+    repo.write({"tests/test_render.py": "def test_render():\n    assert 2\n"})
+    head = repo.commit("agent edits a test", task="1.1", tdd="red")
+    tasks = [(UNIT, make_task("1.1")), (UNIT, make_task("2.1", "2.1 [test-infra] Share the cart fixture"))]
+    return repo, base, repo.context(base, head, tasks=tasks)
+
+
+def test_support_files_changed_by_infra_or_people_are_kept_at_head(tmp_path, git_environ):  # SCN-VER-138, review M4
+    from l4.verifier.base_tests import kept_files
+
+    _, _, ctx = allow_repo(tmp_path, git_environ)
+    kept = kept_files(ctx, ["tests/conftest.py", "tests/fixtures/expected.json", "tests/test_render.py"])
+    assert sorted(kept) == ["tests/conftest.py", "tests/fixtures/expected.json"]
+    assert "[test-infra]" in kept["tests/conftest.py"] and "people" in kept["tests/fixtures/expected.json"]
+
+
+def test_the_run_keeps_them_at_head_and_lists_them(tmp_path, git_environ, monkeypatch):  # SCN-VER-138, review M4
+    repo, base, ctx = allow_repo(tmp_path, git_environ)
+    wb = ScriptedWb(repo, git_environ, [passing_report("tests.test_cart__test_cart_total")], tmp_path / "unit")
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert out.findings == []
+    reverted = wb.events[0][1]["reverted"]
+    assert reverted == ["tests/test_render.py"]  # the allowed support files were not put back
+    assert any(
+        line.startswith("tests/conftest.py kept at head") and "[test-infra]" in line for line in out.allowed_tests
+    )
+    assert any(line.startswith("tests/fixtures/expected.json kept at head") for line in out.human_tests)
+
+
+def test_a_skipped_base_test_costs_no_repeat_and_uses_a_stored_result_first(
+    tmp_path, git_environ, monkeypatch
+):  # review b
+    r1 = passing_report("tests.test_a__test_a", **{"tests.test_a__test_skip": "skipped"})
+    wb, ctx, made, base = scripted(tmp_path, git_environ, [r1], monkeypatch)
+    wb.baselines[base] = passing_report("tests.test_a__test_a", "tests.test_a__test_skip")
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert wb.runs == ["base-tests"] and made == []  # no repeat of a skip, no merge-base worktree
+    assert wb.events[0][1]["base_source"] == "baseline"
+    assert [f.title for f in out.findings] == ["a pre-existing test fails on the unit's code"]  # a skip hides nothing
+
+
+def test_a_skipped_base_test_without_a_stored_result_runs_the_merge_base_once_and_no_repeat(
+    tmp_path, git_environ, monkeypatch
+):  # review b
+    r1 = passing_report("tests.test_a__test_a", **{"tests.test_a__test_skip": "skipped"})
+    wb, ctx, made, base = scripted(tmp_path, git_environ, [r1, r1], monkeypatch)
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert wb.runs == ["base-tests"] and made == [base, "run"]
+    assert out.findings == []  # the base had no such test: nothing passed there to lose

@@ -14,7 +14,7 @@ list), or from a run in a merge-base worktree.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from l4.verifier.evidence import read_verdict
 from l4.verifier.integrity import (
     IntegrityContext,
     Outcome,
+    _allowance,
     _blob,
     _blocker,
     _by_people,
@@ -37,6 +38,7 @@ from l4.verifier.integrity import (
     _introducers,
     _listed,
     _superseded,
+    commits,
     tagged_files,
 )
 from l4.verifier.playwright import base_checkout
@@ -109,6 +111,21 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
     return blocked, allowed, human
 
 
+def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
+    """The files of the revert set that stay at head for the run (second review M4): a support file (conftest,
+    fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed, or that a
+    `task.unfrozen` frees. Their effect on the tests is accepted and listed; every other file is reverted."""
+    by_sha = {c.sha: c for c in commits(ctx)}
+    kept: dict[str, str] = {}
+    for path in paths:
+        who = _introducers(ctx, path, lambda before, after: before != after)
+        if _by_people(who):
+            kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
+        elif (why := _allowance(ctx, who, path, by_sha)) is not None:
+            kept[path] = why.strip("()")
+    return kept
+
+
 def _first_line(text: str) -> str:
     return (text.strip().splitlines() or ["no message"])[0][:150]
 
@@ -175,11 +192,18 @@ def check_base_tests(
     if any(c.status == "failed" for c in prior):
         return Outcome(note="step 1 already failed", skipped=True)
     cfg = wb.cfg
-    plan = unit_test_plan(wb.git, cfg, ctx.base_sha, ctx.head_sha, None)
+    full = unit_test_plan(wb.git, cfg, ctx.base_sha, ctx.head_sha, None)
+    kept = kept_files(ctx, [path for path, _ in full.changes])
+    plan = replace(full, changes=tuple(c for c in full.changes if c[0] not in kept))
+    allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" not in why]
+    people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" in why]
     changed = _changed(ctx.git, ctx.base_sha, ctx.head_sha)
     runner_changed = sorted(p for p in changed if any(glob_match(g, p) for g in cfg.tdd.runner_config_files))
     if not plan.changes and not runner_changed:
-        return Outcome(note="the unit changed no test or support file; step 3 runs the base's tests as they are")
+        note = "the unit changed no test or support file; step 3 runs the base's tests as they are"
+        if kept:
+            note = f"all {len(kept)} changed test and support file(s) are allowed and kept at head (listed)"
+        return Outcome(note=note, allowed_tests=allowed_files, human_tests=people_files)
     command = cfg.gates.test.command
     for setup in cfg.gates.setup:
         done = wb.run_gate("setup-base-tests", setup, network=True)
@@ -189,7 +213,7 @@ def check_base_tests(
         gate = wb.run_gate("base-tests", command, reports=_reports(wb), extra_env=BASE_RUN_ENV)
         repeat = None
         r1 = gate.report
-        if r1 is not None and any(c.status != "passed" for c in r1.tests.values()):
+        if r1 is not None and any(c.status in ("failed", "error") for c in r1.tests.values()):
             repeat = wb.run_gate("base-tests-repeat", command, reports=_reports(wb), extra_env=BASE_RUN_ENV).report
     if r1 is None:
         detail = f"the test gate gave no report with the unit's test and support files at the base ({gate.reason})"
@@ -232,7 +256,9 @@ def check_base_tests(
         "passed": sorted(i for i, c in r0.tests.items() if c.status == "passed"),
         "collection_errors": list(r0.collection_errors),
     }
-    return Outcome(findings, note, allowed_tests=allowed, human_tests=human, base_tests=record)
+    return Outcome(
+        findings, note, allowed_tests=[*allowed_files, *allowed], human_tests=[*people_files, *human], base_tests=record
+    )
 
 
 def _emit(
