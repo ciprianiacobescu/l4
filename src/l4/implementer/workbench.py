@@ -306,8 +306,15 @@ class Workbench:
         record there is no check."""
         if result.report is None:
             return result
-        bad = altered(result.report, read_record(record))
+        rows = read_record(record)
         record.unlink(missing_ok=True)
+        if not rows and result.report.tests and re.search(r"\bpy\.?test\b", spec.command):
+            # a pytest gate has the harness's plugin: an empty, missing or unreadable record under a report that holds
+            # test cases is the record being removed (fourth review); a runner without the plugin is not held to one
+            self.emit("guard.report_altered", gate=spec.name, tests=[], reason="no outcome record")
+            reason = f"the test report was altered (no outcome record): {result.report.total} test(s) in the report"
+            return replace(result, status="fail", report=None, reason=reason)
+        bad = altered(result.report, rows)
         if not bad:
             return result
         shown = ", ".join(bad[:5]) + (f" (+{len(bad) - 5} more)" if len(bad) > 5 else "")

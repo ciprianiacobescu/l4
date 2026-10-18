@@ -39,7 +39,9 @@ def read_record(path: Path) -> dict[str, str] | None:
         except ValueError:
             continue
         if isinstance(row, dict) and isinstance(row.get("id"), str) and isinstance(row.get("when"), str):
-            phases.setdefault(junit_id(row["id"]), {})[row["when"]] = str(row.get("outcome", ""))
+            seen = phases.setdefault(junit_id(row["id"]), {})
+            if seen.get(row["when"]) != "failed":  # a failed row for a phase wins over any later row of it
+                seen[row["when"]] = str(row.get("outcome", ""))
     final: dict[str, str] = {}
     for test_id, seen in phases.items():
         if "failed" in seen.values():

@@ -44,28 +44,29 @@ def _write_real_stderr(text: str) -> None:
         os.write(_REAL_STDERR, text.encode("utf-8", "replace"))
 
 
-_OUTCOME_FD: list[int] = []
-
-
-def _open_record() -> None:
-    """Open the outcome record once. `L4_OUTCOME_FILE` names it; the variable is dropped from the environment at once,
-    so code the tests import cannot find where the record is, and the descriptor stays append-only."""
+def _make_record_hook():  # type: ignore[no-untyped-def]
+    """The outcome record, opened when the plugin is imported (it is loaded with `-p`, before any conftest). The path
+    comes from `L4_OUTCOME_FILE`, which is dropped from the environment at once; the descriptor lives only in this
+    closure, so no attribute of the module names it, and rows are written with `os.write` as each phase ends."""
     path = os.environ.pop("L4_OUTCOME_FILE", "")
-    if path and not _OUTCOME_FD:
+    fd = -1
+    if path:
         with contextlib.suppress(OSError):
-            _OUTCOME_FD.append(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600))
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+
+    def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+        if fd >= 0:
+            row = {"id": report.nodeid, "when": report.when, "outcome": report.outcome}
+            with contextlib.suppress(OSError):
+                os.write(fd, (json.dumps(row) + "\n").encode("utf-8"))
+
+    return pytest_runtest_logreport
 
 
-def pytest_runtest_logreport(report: pytest.TestReport) -> None:
-    """One line per test phase, written and flushed at once: what pytest judged, whatever the report file says later."""
-    if _OUTCOME_FD:
-        row = {"id": report.nodeid, "when": report.when, "outcome": report.outcome}
-        with contextlib.suppress(OSError):
-            os.write(_OUTCOME_FD[0], (json.dumps(row) + "\n").encode("utf-8"))
+pytest_runtest_logreport = _make_record_hook()
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    _open_record()
     config.addinivalue_line("markers", "l4(*ids): the acceptance criteria (C-xxxxxxxx) this test checks")
     raw = os.environ.get("L4_TEST_TIMEOUT_S", "")
     try:

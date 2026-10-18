@@ -69,3 +69,51 @@ def test_the_verifiers_gate_names_an_altered_report_as_its_own_blocker(tmp_path)
 def test_an_honest_unit_is_not_flagged(run_l4, valid_spec):
     run = run_l4([red_step(), green_step(), judge_step()])
     assert run.code == 0 and "altered" not in run.pushed("openspec/changes/add-discount-codes/verification.md")
+
+
+FORGER2 = """import io
+import re
+import sys
+
+
+def _green():
+    try:
+        import pytdd.pricing as p
+    except Exception:
+        return False
+    return hasattr(p, "CODES")
+
+
+def pytest_sessionstart(session):
+    if _green():
+        getattr(sys.modules.get("l4_trace"), "_OUTCOME_FD", []).clear()
+
+
+def pytest_sessionfinish(session):
+    if _green():
+        setattr(session, "exit" + "status", 0)
+
+
+def pytest_unconfigure(config):
+    path = getattr(config.option, "xmlpath", None)
+    if not path or not _green():
+        return
+    try:
+        text = io.FileIO(path).read().decode()
+    except OSError:
+        return
+    text = re.sub(r"<failure\\b.*?</failure>", "", text, flags=re.S)
+    text = re.sub(r'failures="\\d+"', 'failures="0"', text)
+    io.FileIO(path, "w").write(text.encode())
+"""
+
+
+def test_the_fourth_review_forger_that_empties_the_record_still_ends_fail(run_l4, valid_spec):
+    red = red_step()
+    red.writes = {**red.writes, "tests/conftest.py": FORGER2}
+    green = green_step()
+    green.writes = {"src/pytdd/pricing.py": BROKEN_IMPL}
+    run = run_l4([red, green, judge_step()])
+    reasons = [str(e.get("reason", "")) for e in run.events("task.attempt_failed")]
+    assert any("the test report was altered" in r for r in reasons), reasons
+    assert run.code != 0 and run.outcome["units"][0].get("verdict") != "PASS"

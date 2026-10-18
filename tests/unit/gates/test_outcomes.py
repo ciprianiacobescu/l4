@@ -92,3 +92,75 @@ def test_a_junit_id_the_conversion_does_not_know_is_matched_by_its_last_name():
 
 def test_no_record_means_no_check():
     assert altered(report(a__t1="passed"), None) == []
+
+
+# --- fourth review: fail closed, a closure instead of a module global, a failed row wins ------
+
+
+def test_a_failed_row_wins_over_a_later_passed_row_of_the_same_phase(tmp_path):
+    record = tmp_path / "r.jsonl"
+    rows = [
+        {"id": "t.py::test_a", "when": "call", "outcome": "failed"},
+        {"id": "t.py::test_a", "when": "call", "outcome": "passed"},
+        {"id": "t.py::test_b", "when": "setup", "outcome": "failed"},
+        {"id": "t.py::test_b", "when": "setup", "outcome": "passed"},
+        {"id": "t.py::test_b", "when": "call", "outcome": "passed"},
+    ]
+    record.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    assert read_record(record) == {"t::test_a": "failed", "t::test_b": "failed"}
+
+
+def test_the_plugin_hides_its_descriptor_and_the_variable_from_a_conftest(tmp_path):
+    record = tmp_path.parent / f"{tmp_path.name}-hidden.jsonl"
+    probe = (
+        "import os, sys\n"
+        "plugin = sys.modules.get('l4_trace')\n"
+        "seen = {'env': os.environ.get('L4_OUTCOME_FILE'),\n"
+        "        'attrs': [n for n in dir(plugin) if 'OUTCOME' in n.upper() or n.lower().endswith('fd')]}\n"
+        "open('seen.json', 'w').write(repr(seen))\n"
+    )
+    done = run(tmp_path, record, probe)
+    assert done.returncode == 1
+    assert (
+        tmp_path / "seen.json"
+    ).read_text() == "{'env': None, 'attrs': []}"  # the path and the descriptor are not reachable
+    assert record.read_text().strip()  # and the record was still written
+
+
+def fake_gate(tmp_path, command="python -m pytest -q"):
+    from types import SimpleNamespace
+
+    events = []
+    fake = SimpleNamespace(emit=lambda kind, **data: events.append((kind, data)))
+    spec = SimpleNamespace(name="test", command=command)
+    result = SimpleNamespace(status="pass", reason="", report=report(a__t1="passed"))
+    return fake, spec, result, events
+
+
+def cross_check(tmp_path, record_text, command="python -m pytest -q"):
+    import dataclasses
+
+    from l4.gates.runner import GateResult
+    from l4.implementer.workbench import Workbench
+
+    fake, spec, _, events = fake_gate(tmp_path, command)
+    result = GateResult("test", "pass", "", 0, tmp_path / "x.log", report(a__t1="passed"))
+    record = tmp_path / "rec.jsonl"
+    if record_text is not None:
+        record.write_text(record_text)
+    out = Workbench._cross_check(fake, spec, result, record)
+    assert dataclasses.is_dataclass(out)
+    return out, events
+
+
+def test_a_pytest_gate_with_a_missing_or_empty_record_and_tests_in_the_report_is_altered(tmp_path):
+    for text in (None, ""):
+        out, events = cross_check(tmp_path, text)
+        assert out.status == "fail" and out.report is None
+        assert out.reason.startswith("the test report was altered (no outcome record)")
+        assert events and events[0][0] == "guard.report_altered"
+
+
+def test_a_runner_without_the_plugin_is_not_held_to_a_record(tmp_path):
+    out, _ = cross_check(tmp_path, None, command=".venv/bin/python tools/fake_runner.py")
+    assert out.status == "pass" and out.report is not None

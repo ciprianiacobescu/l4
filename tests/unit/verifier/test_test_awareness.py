@@ -136,3 +136,18 @@ def test_n2_production_code_that_forges_the_junit_report_ends_fail(run_l4, valid
     reasons = [str(e.get("reason", "")) for e in run.events("task.attempt_failed")]
     assert run.code != 0 and run.outcome["units"][0].get("verdict") != "PASS"
     assert any("the test report was altered" in r for r in reasons), reasons
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'import sys\n\ngetattr(sys.modules.get("l4_trace"), "_OUTCOME_FD", []).clear()',
+        'X = "L4_OUTCOME_FILE"',
+        'import sys\nM = sys.modules["l4.gates.outcomes"]',
+        "def f(config):\n    config.option.xmlpath = None",
+        "def f(session):\n    session.exitstatus = 0",
+    ],
+)
+def test_production_code_that_touches_the_harness_plugin_or_the_report_option_blocks(tmp_path, git_environ, line):
+    out = scan(tmp_path, git_environ, f"def total(p):\n    return sum(p)\n\n\n{line}\n")  # fourth review
+    assert [f.title for f in out.findings] == [AWARE_TITLE]

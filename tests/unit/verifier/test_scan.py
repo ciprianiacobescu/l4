@@ -103,3 +103,22 @@ def test_atexit_os_exit_and_session_end_hooks_that_write_files_are_hits():
 
 def test_other_register_calls_are_no_hit():
     assert scan.result_hooks("registry.register(print)\nclass A:\n    def _exit(self):\n        pass\n") == []
+
+
+# --- fourth review: references to the harness's own plugin and to the report option ------
+
+
+def test_references_to_the_harness_plugin_the_record_and_the_report_option_are_hits():
+    forms = {
+        'import sys\nsys.modules.get("l4_trace")': "l4_trace",
+        'x = "L4_OUTCOME_FILE"': "L4_OUTCOME_FILE",
+        "import l4_trace\nl4_trace._OUTCOME_FD.clear()": "l4_trace",
+        "def pytest_unconfigure(config):\n    path = config.option.xmlpath\n": "xmlpath",
+        'def f(config):\n    return getattr(config.option, "xmlpath", None)\n': "xmlpath",
+        'import sys\nm = sys.modules["l4.gates.outcomes"]\n': "sys.modules",
+        "def pytest_sessionfinish(session):\n    session.exitstatus = 0\n": "exitstatus",
+    }
+    for source, word in forms.items():
+        assert any(word in hit for hit in scan.harness_references(source)), source
+    assert scan.harness_references("import os\nx = os.environ.get('HOME')\nORDER_OUTCOME = 1\n") == []
+    assert scan.harness_references("import sys\nm = sys.modules.get('json')\n") == []

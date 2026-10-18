@@ -718,6 +718,11 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
     for path in sorted(changed):
         before, after = _text(git, ctx.base_sha, path), _text(git, ctx.head_sha, path)
         found = [what for what in found_in(path, before, after) if path not in exempt]
+        if path.endswith(".py") and _matches([*tdd.test_globs, *tdd.test_support_globs], path):
+            before_refs, after_refs = scan.harness_references(before), scan.harness_references(after)
+            found += [
+                f"{why} (the harness's own plugin or report option)" for why in after_refs if why not in before_refs
+            ]
         if not found:
             continue
         # per commit (L4-SEC-004, W-D6): a file whose offending change only people's commits introduced is the owner's
@@ -976,6 +981,8 @@ def awareness_lines(ctx: IntegrityContext, path: str, text: str) -> dict[int, st
         return found
     docstrings = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
     parents = {id(child): node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for number, why in scan.harness_reference_lines(tree):
+        found[number] = why
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Constant) and isinstance(node.value, str)) or id(node) in docstrings:
             continue

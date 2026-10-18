@@ -307,3 +307,48 @@ def has_human_tag(unit_dir: Path, title: str, tag: str) -> bool:
     from l4.specs.fixmark import task_marker
 
     return tag in task_tags(title) and task_marker(unit_dir) is None
+
+
+_HARNESS_WORDS = re.compile(r"l4_trace|(?<![A-Za-z0-9])_OUTCOME|L4_OUTCOME_FILE|\bxmlpath\b")
+_REPORT_ATTRIBUTES = ("exitstatus", "xmlpath")
+
+
+def harness_reference_lines(tree: ast.Module) -> list[tuple[int, str]]:
+    """(line, why) for each reference to the harness's own plugin and report machinery in a parsed file (fourth review):
+    `l4_trace`, `_OUTCOME*`, `L4_OUTCOME_FILE`, the `xmlpath` option, a `sys.modules` lookup of an `l4` module, and an
+    assignment to `.exitstatus` / `.xmlpath`. Names, attributes and strings count; comments and docstrings do not."""
+    docs = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        words = ""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
+            words = node.value
+        elif isinstance(node, ast.Name):
+            words = node.id
+        elif isinstance(node, ast.Attribute):
+            words = node.attr
+        elif isinstance(node, ast.alias):
+            words = node.name
+        if words and (m := _HARNESS_WORDS.search(words)):
+            found.append((line, f"{m.group(0)}: names the harness's own plugin or report option"))
+        if isinstance(node, ast.Subscript | ast.Call):
+            text = ast.unparse(node)
+            if "sys.modules" in text[:80] and re.search(r"""['"]_?l4(?:\.|_|['"])""", text):
+                found.append((line, "sys.modules: looks up a module of the harness"))
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        else:
+            targets = [node.target] if isinstance(node, ast.AugAssign) else []
+        found += [
+            (line, f"assignment to .{t.attr}: decides what the run reports")
+            for t in targets
+            if isinstance(t, ast.Attribute) and t.attr in _REPORT_ATTRIBUTES
+        ]
+    return found
+
+
+def harness_references(source: str) -> list[str]:
+    """The distinct reasons of `harness_reference_lines` for a source (empty when it does not parse)."""
+    tree = _parse(source)
+    return list(dict.fromkeys(why for _, why in harness_reference_lines(tree))) if tree is not None else []

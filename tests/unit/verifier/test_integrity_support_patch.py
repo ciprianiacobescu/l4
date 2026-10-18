@@ -127,3 +127,16 @@ def test_a_conftest_that_registers_an_exit_hook_or_names_the_report_path_is_a_hi
     repo.write({"tests/conftest.py": forger})
     [finding] = check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings
     assert "atexit.register" in finding.detail and "names the test output" in finding.detail
+
+
+def test_a_test_file_or_conftest_that_touches_the_harness_plugin_is_a_hit(tmp_path, git_environ):  # SCN-VER-129
+    touch = 'import sys\n\n\ndef test_x():\n    getattr(sys.modules.get("l4_trace"), "_OUTCOME_FD", []).clear()\n'
+    for name, (path, text) in {
+        "a": ("tests/conftest.py", "import l4_trace\n"),
+        "b": ("tests/test_hook.py", touch),
+    }.items():
+        (tmp_path / name).mkdir()
+        repo, base = new_repo(tmp_path / name, git_environ, BASE)
+        repo.write({path: text})
+        [finding] = check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings
+        assert path in finding.detail and "harness" in finding.detail
