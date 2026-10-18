@@ -278,3 +278,23 @@ def test_only_the_criteria_the_earlier_red_does_not_confirm_go_to_the_zero_value
     assert proofs[UNKNOWN]["proof"] == "pre_satisfied"
     vias = {e["criterion"]: e.get("via") for e in bench.events("criterion.pre_satisfied") if e["task"] == TASK.key}
     assert vias == {KNOWN: "earlier_red", UNKNOWN: None}
+
+
+def test_a_non_python_test_file_keeps_its_evidence_when_a_test_is_inserted_in_its_describe_block(make_bench):
+    """Round 2: for a non-Python file the rule is the old one (no line deleted): an `it(...)` added inside `describe`
+    is not an append at the file's end, and must not void the earlier red's evidence."""
+    from l4.implementer.earlier_red import _only_appended_since
+
+    bench: Bench = make_bench([])
+    wb = bench.wb
+    old = "describe('tip', () => {\n  it('rounds C-1a9abc58', () => { expect(tip(10, 12.5)).toBe('1.25'); });\n});\n"
+    (wb.worktree / "tip.test.ts").write_text(old)
+    wb.git.run("add", "tip.test.ts")
+    sha = wb.commit("test: red", task="0.9", attempt=1, phase="red", tdd="red")
+    new = (
+        old[: old.rfind("});")] + "  it('negative C-41bc8f70', () => { expect(() => tip(10, -1)).toThrow(); });\n});\n"
+    )
+    (wb.worktree / "tip.test.ts").write_text(new)
+    assert _only_appended_since(wb, sha, "tip.test.ts")
+    (wb.worktree / "tip.test.ts").write_text(old.replace("12.5", "99"))
+    assert not _only_appended_since(wb, sha, "tip.test.ts")  # a changed line still voids it

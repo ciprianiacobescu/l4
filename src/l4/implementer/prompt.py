@@ -100,6 +100,7 @@ class RenderedPrompt:
     cuts: tuple[Cut, ...] = ()
     budget_tokens: int = 0
     budget_source: str = "implementer"
+    over_window: bool = False  # the never-cut parts alone exceed the share of the stated window
 
 
 def load_template(name: str) -> Template:
@@ -307,9 +308,10 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     framework = Framework.OPENSPEC if ctx.unit_id.startswith("openspec:") else Framework.KIRO
     # what the budget does not govern: the contract, the data blocks, the phase, the gate and the output
     others = len(_contract(contract, ctx)) + sum(len(x) for x in after) + 2 * (len(after) + 4)
-    tokens, source = ctx.context_budget_tokens, ctx.budget_source
+    tokens, source, over = ctx.context_budget_tokens, ctx.budget_source, False
     if ctx.window_tokens:  # the model's window caps the WHOLE prompt at WINDOW_SHARE of it (owner decision)
         room = int(ctx.window_tokens * WINDOW_SHARE) * CHARS_PER_TOKEN - others - NOT_SHOWN_RESERVE
+        over = room - len(task_section) - len(criteria) < 0  # contract, task and criteria alone: never cut
         if max(room, 0) // CHARS_PER_TOKEN < tokens:
             tokens, source = max(room, 0) // CHARS_PER_TOKEN, "model_window"
     plan = plan_context(
@@ -340,6 +342,7 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         plan.cuts,
         tokens,
         source,
+        over,
     )
 
 

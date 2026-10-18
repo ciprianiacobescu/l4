@@ -80,15 +80,18 @@ def _unchanged_since(wb: Workbench, sha: str, path: str) -> bool:
 
 
 def _only_appended_since(wb: Workbench, sha: str, path: str) -> bool:
-    """Since the red commit the test file only GAINED content at its end: for a Python file `appended_only` (every
-    top-level statement kept, new ones only define), else the old text is a prefix of the new one. An inserted line (a
-    decorator that tags an old test with another criterion) voids the evidence (review of kiro-prompt-context, M1)."""
+    """May the earlier red's evidence in `path` still be trusted? For a Python file it must have only been APPENDED to
+    since the red commit (`guards.appended_only`: every old top-level statement kept): a tag inserted above an old test
+    voids the proof of that test. This only VOIDS a proof (the criterion then needs a new test), never refuses a step.
+    Any other file keeps the zero-deletion rule of `_unchanged_since` (a test added inside a Jest `describe` block is
+    no deletion)."""
+    if not path.endswith(".py"):
+        return _unchanged_since(wb, sha, path)
     before = wb.git.run("show", f"{sha}:{path}", check=False)
     target = wb.worktree / path
     if before.returncode != 0 or target.is_symlink() or not target.is_file():
         return False
-    old, new = before.stdout, target.read_text(encoding="utf-8", errors="replace")
-    return appended_only(old, new) if path.endswith(".py") else new.startswith(old)
+    return appended_only(before.stdout, target.read_text(encoding="utf-8", errors="replace"))
 
 
 def _ancestor(wb: Workbench, commit: Any) -> bool:

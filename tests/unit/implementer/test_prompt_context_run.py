@@ -106,3 +106,12 @@ def test_a_profile_window_caps_the_budget_and_the_ledger_says_model_window(make_
     (rendered,) = [e for e in ledger(bench) if e["type"] == "prompt.rendered"]
     assert rendered["budget_source"] == "model_window" and rendered["budget_tokens"] < 32_000
     assert len(text) <= int(12000 * 0.6) * 4 and "REQ-INTRO-MARKER" in text
+
+
+def test_a_prompt_whose_fixed_parts_exceed_the_window_records_a_warning(make_kiro_bench):
+    local = {"adapter": "fake", "vendor": "fakeco", "context_window": 1000}
+    bench: Bench = make_kiro_bench([kiro_red_step()], profiles={"local": local}, roles={"implementer": ["local"]})
+    render(bench)
+    (warning,) = [e for e in ledger(bench) if e["type"] == "prompt.over_window"]
+    assert (warning["role"], warning["task"], warning["window_tokens"]) == ("red", "1", 1000)
+    assert warning["prompt_tokens"] > 600

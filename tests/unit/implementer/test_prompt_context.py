@@ -619,3 +619,15 @@ def test_the_inputs_carry_the_window_of_the_selected_profile(tmp_path):
         probe_tree(tmp_path), name="local", profile=Profile(adapter="fake", context_window=9_000)
     )
     assert inputs.window_tokens == 9_000
+
+
+def test_never_cut_parts_beyond_the_window_are_flagged(tmp_path):
+    """Round 2 minor: criteria and task block alone larger than 60% of the window cannot be squeezed; say so."""
+    from dataclasses import replace
+
+    ctx = probe_ctx(probe_tree(tmp_path), budget=32_000, window_tokens=8_000)
+    big = tuple(replace(c, text=c.text + " " + "x" * 30_000) for c in ctx.criteria)
+    over = render_prompt("red", replace(ctx, criteria=big))
+    assert over.over_window and over.text.count("x" * 30_000) == 2  # nothing is cut from them
+    assert not render_prompt("red", ctx).over_window
+    assert not render_prompt("red", replace(ctx, window_tokens=None)).over_window

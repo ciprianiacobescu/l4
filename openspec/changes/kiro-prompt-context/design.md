@@ -630,10 +630,12 @@ The design asked eight questions. The owner decided them, and this document, the
 - **M1, evidence of an earlier red (D8).** `earlier_red._evidence` is keyed by `(criterion, test)`: only the tests the
   earlier red listed under THAT criterion prove it, so a tag added to an old test proves nothing for the new tag. The
   test file must have only been appended to since the red commit: `guards.appended_only` for Python, else the old text
-  is a prefix of the new one (an inserted line voids the evidence). Red now also fails an attempt that edits an
-  existing Python test file instead of appending to it (`an existing test file was edited, not appended to: <path>`),
-  chosen over restoring the file because red has no frozen manifest yet; the check runs after the criteria check, so
-  a retag is first refused by name (`Req 1.2`). A reopened task with stale tests is exempt (L4-OPS-015).
+  is a prefix of the new one (an inserted line voids the evidence). A test file that was not only appended to
+  voids the earlier proof of the criteria whose tests it holds (they then need a new test); it never refuses the step.
+  For a non-Python file the rule is the old zero-deletion one (a test added inside a Jest `describe` block keeps its
+  evidence). Round 2 removed the first version of this fix, a whole-file refusal of any edit of an existing test file:
+  it refused honest fixtures, parametrized tests, constants, class methods and merged imports, and function-level
+  changes to old tests are the test-tamper check's.
 - **M2.** The criteria an earlier red proved are exempt in `check_criteria`, so an honest step may list every cited id.
 - **Steering (D5).** A front matter over 16 KiB, deeply nested YAML (`RecursionError`), more than 20 patterns, a pattern
   over 200 characters or with more than three `**` is `bad_front_matter`; the same for `openspec/config.yaml`. A
@@ -651,4 +653,6 @@ The design asked eight questions. The owner decided them, and this document, the
   phase, gate and output included, and a reserve of 2,000 characters for the cut list) stays within 60% of the window,
   and records `budget_source: model_window`. No window is guessed. SPEC-004 warns for each implementer profile whose
   budget exceeds 60% of its window.
-
+- **Over the window (D7).** When the criteria, the task block and the contract alone exceed 60% of a stated window,
+  nothing is squeezed (they are never cut); the run records `prompt.over_window{role, task, attempt, window_tokens,
+  prompt_tokens}` and doctor SPEC-004 warns for the profile.

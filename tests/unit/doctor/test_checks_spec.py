@@ -225,3 +225,19 @@ def test_spec_004_warns_when_a_configured_budget_exceeds_the_models_window_cap(m
     )
     ctx2, _ = make_ctx(cfg=fits)
     assert "model window" not in spec.SPEC_004.run(ctx2).message
+
+
+def test_spec_004_warns_when_the_never_cut_parts_exceed_the_window(make_ctx):
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_window": 1000}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    openspec_unit(ctx.repo)
+    result = spec.SPEC_004.run(ctx)
+    assert (
+        result.status == "fail"
+        and "openspec:add-x task 1.1: the criteria, the task and the contract alone" in result.message
+    )

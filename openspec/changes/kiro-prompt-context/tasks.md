@@ -308,4 +308,6 @@ Every task follows these rules:
   SCN-KSP-012).
 - [x] 9.5 The model window caps the whole prompt, `budget_source: model_window`, doctor warns (`Profile.context_window`,
   `unit_context.model_window`, `render_prompt`; SCN-KSP-011).
+- [x] 9.6 Round 2: the whole-file refusal of an edited test file is removed (an earlier proof is only voided, and a
+  non-Python file keeps the zero-deletion rule); `prompt.over_window` and the SPEC-004 warning (SCN-KSP-007, SCN-KSP-011).
 

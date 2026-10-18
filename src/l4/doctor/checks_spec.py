@@ -96,12 +96,12 @@ def _units(ctx: DoctorContext) -> list[tuple[SpecProvider, UnitRef]]:
     return [(p, u) for p, u in pairs if ctx.unit is None or u.id == ctx.unit]
 
 
-def _prompt_cuts(ctx: DoctorContext) -> tuple[list[str], list[str]]:
+def _prompt_cuts(ctx: DoctorContext) -> tuple[list[str], list[str], list[str]]:
     """(what the next task's prompt of each unit would cut, the advice for it): L4-IMP-054. The prompt's context is
     planned by the builder of the run, with no changed files and the head implementer profile."""
     names = ctx.cfg.roles.implementer
     head = (names[0], ctx.cfg.profiles[names[0]]) if names and names[0] in ctx.cfg.profiles else (None, None)
-    found, advice = [], []
+    found, advice, over = [], [], []
     for provider, unit in _units(ctx):
         try:
             tasks = provider.tasks(unit)
@@ -133,6 +133,11 @@ def _prompt_cuts(ctx: DoctorContext) -> tuple[list[str], list[str]]:
             )
         except (SpecError, OSError, ValueError):  # SPEC-002 reports an unreadable unit
             continue
+        if rendered.over_window:
+            over.append(
+                f"{unit.id} task {safe_label(task.key)}: the criteria, the task and the contract alone exceed 60% of "
+                f"the model window of profile {safe_label(head[0] or '?')}"
+            )
         for cut in rendered.cuts:
             where = safe_label(cut.path.removeprefix(f"{inputs.unit_rel}/"))
             who = f"{unit.id} task {safe_label(task.key)}: {where}"
@@ -144,7 +149,7 @@ def _prompt_cuts(ctx: DoctorContext) -> tuple[list[str], list[str]]:
                 found.append(f"{who} {cut.shown_chars} of {cut.total_chars} characters shown")
             if (text := _fix_for(rendered.budget_source)) not in advice:
                 advice.append(text)
-    return found, advice
+    return found, advice, over
 
 
 def _fix_for(source: str) -> str:
@@ -185,8 +190,8 @@ def _spec_004(ctx: DoctorContext) -> CheckResult:
             for unit in kiro_units
             if (tasks := provider.leaves_without_requirements(unit))
         ]
-    cuts, advice = _prompt_cuts(ctx)
-    windows = _window_warnings(ctx)
+    cuts, advice, over = _prompt_cuts(ctx)
+    windows = [*_window_warnings(ctx), *over]
     if isinstance(kiro, CheckResult) and not cuts and not windows:
         return kiro  # no Kiro unit to look at, and nothing cut elsewhere
     if loose or cuts or windows:

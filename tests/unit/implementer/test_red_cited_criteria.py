@@ -10,7 +10,6 @@ from .conftest import (
     TIP_HEADER,
     TIP_NEGATIVE,
     TIP_ROUNDS,
-    TIP_STUB,
     Bench,
     kiro_red_step,
     result,
@@ -205,21 +204,6 @@ def test_retagging_an_earlier_test_proves_nothing_for_the_new_tag(make_kiro_benc
     outcome = run_red(bench.wb, probe_task(bench), attempt=1)
     assert outcome.status == "failed" and "(Req 1.2)" in outcome.reason, (outcome.status, outcome.reason)
     assert bench.subjects() == before and [e["task"] for e in bench.events("task.red_ok")] == ["0.9"]
-
-
-def test_an_edit_of_an_existing_test_file_that_is_not_an_append_fails_the_attempt(make_kiro_bench):
-    """M1: red never restored a frozen earlier test; a line inserted into an existing test file now fails the step."""
-    edited = "from pytdd import total\n\n\ndef test_total_adds_prices():\n    assert total([1.25, 2.5]) == 3.75\n"
-    edited += "    assert total([1.0]) == 1.0\n\n\ndef test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
-    step = Step(
-        writes={"tests/test_tip.py": kiro_red_step().writes["tests/test_tip.py"], "src/pytdd/tip.py": TIP_STUB,
-                "tests/test_pricing.py": edited},
-        structured=result("red", task_ids=["1"], criteria_ids=[C11, C12]),
-    )  # fmt: skip
-    bench: Bench = make_kiro_bench([step])
-    outcome = run_red(bench.wb, probe_task(bench), attempt=1)
-    assert outcome.status == "failed" and "tests/test_pricing.py" in outcome.reason
-    assert "existing test file was edited" in outcome.reason and bench.subjects() == []
 
 
 def test_an_honest_step_that_lists_every_cited_id_with_an_earlier_proved_one_is_accepted(make_kiro_bench):

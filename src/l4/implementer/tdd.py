@@ -90,7 +90,7 @@ from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
-from l4.implementer.unit_context import prompt_inputs
+from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
@@ -672,6 +672,11 @@ def _prompt(
         lessons=list(lessons.ids),
         **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),
     )  # fmt: skip
+    if rendered.over_window and inputs.window_tokens:  # the never-cut parts alone do not fit: nothing can be squeezed
+        wb.emit(
+            "prompt.over_window", role=role, task=task.key, attempt=attempt, window_tokens=inputs.window_tokens,
+            prompt_tokens=len(rendered.text) // CHARS_PER_TOKEN,
+        )  # fmt: skip
     if rendered.cuts:  # L4-IMP-052: what the prompt does not show whole, by path
         wb.emit(
             "prompt.truncated", role=role, task=task.key, attempt=attempt, budget_tokens=rendered.budget_tokens,
@@ -838,25 +843,6 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
         return {"red_new_failing": len(failing)}
 
     return note
-
-
-def _edited_tests(wb: Workbench, base: str, changed: Sequence[str]) -> list[str]:
-    """The Python test files of the base that this red step edited instead of appending to (`appended_only`): an earlier
-    test is frozen, and a tag inserted above it would claim a criterion it was never shown to fail for."""
-    globs, support = wb.cfg.tdd.test_globs, wb.cfg.tdd.test_support_globs
-    edited = []
-    for path in changed:
-        target = wb.worktree / path
-        if not path.endswith(".py") or not _matches(globs, path) or _matches(support, path):
-            continue  # support files (conftest.py and the like) have their own rules
-        if target.is_symlink() or not target.is_file():
-            continue
-        before = wb.git.run("show", f"{base}:{path}", check=False)
-        if before.returncode == 0 and not appended_only(
-            before.stdout, target.read_text(encoding="utf-8", errors="replace")
-        ):
-            edited.append(path)
-    return edited
 
 
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
@@ -1086,13 +1072,6 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
-    if stale is None and (edited := _edited_tests(wb, base, changed)):
-        wb.discard_changes()
-        return RedOutcome(
-            "failed",
-            f"an existing test file was edited, not appended to: {', '.join(edited[:3])}; keep every existing test as "
-            "it is and write NEW tests (a tag added to an old test creates no new test)",
-        )
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
     proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}

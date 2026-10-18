@@ -1191,9 +1191,10 @@ file cut by the budget SHALL be named under `# Not shown in full` as not readabl
 instruction to open it, and with `readable: false` in `prompt.truncated`.
 
 **L4-KSP-012** Red covers every criterion a Kiro leaf cites. In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names SHALL count as
-cited and SHALL be traced by a new test of the step, unless L4-OPS-015 leaves it unchanged or an earlier red proved it
-with tests that pass now (per criterion and test, in files since only appended to). A step that edits an existing test
-file, or leaves a criterion untraced, SHALL fail with a reason that names the file, or the id, alias and line.
+cited and SHALL be traced by a new test, unless L4-OPS-015 leaves it unchanged or an earlier red proved it with tests
+that pass now (per criterion and test, in a test file since only appended to). A step that leaves one untraced SHALL
+fail with a reason naming its id, alias and line. A red step MAY add fixtures, constants, imports and tests to an
+existing test file.
 
 **L4-KSP-013** An already-satisfied Kiro leaf proves every criterion it cites. A red step of a Kiro leaf that adds no test SHALL be accepted as already satisfied only when every criterion its
 `_Requirements:_` line names, together with those `criteria_ids` lists, is traced by passing tests that the harness
@@ -3735,7 +3736,7 @@ step; the last event per `(head, job)` wins) and `ci.preexisting` (`{head, pipel
 (`{round, criterion, tests, source, via, files}`) and `cache.seeded|cache.seed_failed` (`{cache, digest, seconds, bytes, via}`, `digest` being `key` before 0.4.2 |
 `{cache, reason}`),
 `run.finished` (exit code).
-The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
+The prompt's context adds these records (L4-IMP-052, L4-IMP-053, L4-KSP-011): `budget_tokens`, `budget_source` and `steering` (one `{path, inclusion, included, why}` per file) on `prompt.rendered`, and `prompt.over_window` (`{role, task, attempt, window_tokens, prompt_tokens}`) and `prompt.truncated` (`{role, task, attempt, budget_tokens, sources}` for an implementer step, `{role: judge, round, budget_tokens, sources}` for step 9; each source `{path, kind, reason, shown_chars, total_chars, omitted, readable}`).
 Escalation and the retry note add these records (L4-IMP-017, L4-IMP-018, L4-OPS-018): `implementer.escalated` (`{task, phase, from, to, failures, attempt}`), `implementer.escalation_skipped` (`{task, phase, from, reason}`), `escalated_from` on `availability.selected`, `profile` on `task.attempt_failed` (its `attempt` is the step's attempt number), `profiles` (`[{profile, failures}]`) on `breaker.tripped` for `max_task_attempts`, `note_task` and `note_fix_unit` on `unit.retried` and `unit.resumed`, and `retry_note` (`{event, ts, sha256}`) on `prompt.rendered`.
 Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls}`, once for an agent that L4 stopped for silence, before `agent.finished`), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
 
@@ -7050,10 +7051,10 @@ scenario is a spec defect (§26).
 - **When** the red step is checked
 - **Then** it fails with `no new test traces <id of Req 1.2> (Req 1.2), which the task's _Requirements: …`, because the proof of an earlier red holds for the criterion and the tests it listed, and nothing is committed
 
-#### SCN-KSP-007 (−) A red step may not edit an existing test file · L4-KSP-013
-- **Given** a red step that writes its new tests and also inserts a line into an existing test file
-- **When** the red step is checked
-- **Then** it fails with `an existing test file was edited, not appended to: <path>`, and nothing is committed
+#### SCN-KSP-007 (+) New tests, fixtures and constants may go into an existing test file · L4-KSP-013
+- **Given** an existing project test file and a red step that adds to it a fixture, a parametrized test with `Decimal` cases, a module constant, a method of its test class or a merged import name, beside the new tests of the leaf
+- **When** the red step is checked, on a Kiro unit and on an OpenSpec unit
+- **Then** it is committed as red; only an earlier red's proof for a test file that was not only appended to (a Python file) or lost a line (any other file) is voided, and the criterion then needs a new test
 
 #### SCN-KSP-008 (+) A step that lists every cited id is accepted when an earlier red proved one · L4-KSP-013
 - **Given** task 0.9's red proved `Req 1.1`, and a red step that adds a failing test for `Req 1.2` and reports both ids in `criteria_ids`, as the result schema says
@@ -7074,6 +7075,7 @@ scenario is a spec defect (§26).
 - **Given** the probe unit with its long design and a profile that states `context_window: 12000`
 - **When** the red prompt is rendered
 - **Then** the whole prompt is at most 7,200 tokens of 4 characters, the criteria and the task block are whole, `prompt.rendered` has `budget_source: model_window`, and doctor warns when the configured budget is above 60% of the window
+- **And** when the criteria, the task block and the contract alone exceed 60% of the window, nothing is cut from them, the ledger has `prompt.over_window` and doctor SPEC-004 warns for the profile
 
 #### SCN-KSP-012 (+) Status and doctor show the latest cut and the key that set the budget · L4-IMP-054
 - **Given** a unit whose latest implementer prompt cut nothing after an earlier one that did, and an OpenSpec unit whose proposal is cut under a profile's own budget

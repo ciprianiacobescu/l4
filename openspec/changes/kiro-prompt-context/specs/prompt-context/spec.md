@@ -181,6 +181,8 @@ prompt would cut a source, naming the file and the key that set the budget.
 - **THEN** the whole prompt is at most 7,200 tokens of 4 characters, the criteria and the task block are whole,
   `prompt.rendered` has `budget_source: model_window`, and doctor warns when the configured budget is above 60% of the
   window
+- **AND** when the criteria, the task block and the contract alone exceed 60% of the window, nothing is cut from them,
+  the ledger has `prompt.over_window` and doctor SPEC-004 warns for the profile
 
 #### Scenario: SCN-KSP-012 (+) Status and doctor show the latest cut and the key that set the budget
 - **GIVEN** a unit whose latest implementer prompt cut nothing after an earlier one that did, and an OpenSpec unit

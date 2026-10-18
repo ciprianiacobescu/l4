@@ -28,7 +28,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   priority order, and a spec file it did not see whole is named to it.
 
 - A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
-  then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that.
+  then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
+  or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
 
 ### Changed
 - Every implementer prompt carries each criterion's full text and the task's whole block from `tasks.md` (the enclosing
@@ -50,8 +51,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   and the no-new-test path ticked such a leaf without proving the other. Red now fails with a reason that names the
   criterion and the line; a criterion that an earlier red already proved needs no copy (review finding implementer-5).
 - Red no longer counts a criterion as proved by an earlier test that was merely re-tagged (the proof is per criterion
-  and test, in a file only appended to), refuses an edit of an existing test file, and accepts a step that reports every
-  cited id. Hostile steering (deep YAML, huge or complex patterns, forged names) and unsafe capability directory names
+  and test, in a file only appended to), accepts new tests, fixtures and constants in an existing test file, and accepts a step that
+  reports every cited id. Hostile steering (deep YAML, huge or complex patterns, forged names) and unsafe capability directory names
   are named and left out; `l4 status` shows the latest prompt's cut; the clarifier charges its line numbers.
 - A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
   item `2.1` both counted; they resolve against the fix unit's own items.
