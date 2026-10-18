@@ -1895,6 +1895,51 @@ def record_run_starts(
     return False
 
 
+def record_idle_runs(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, idle: Collection[str]) -> bool:
+    """After the run: the current unit of the plan that the step let run and whose run was idle (no agent step, no
+    gate, no phase change but a wait) gets `plan.run_idle{unit, attempt, run}` on the plan ledger, with the lease, once
+    per run: the fold leaves the run out of `used.runs` (L4-YOLO-014). True when a record was written or is there
+    already: the caller then chains no next run. The attempt is the one the dispatch charged. A failure is a warning: a
+    run counted that did nothing only brings the run limit nearer, and it chains no run either way."""
+    units = [u for u in idle if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return False
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            if state.status not in ("active", "waiting") or state.current not in units:
+                return False
+            unit = state.current
+            if any(
+                e.type == "plan.run_idle" and e.data.get("unit") == unit and e.data.get("run") == app.run_id
+                for e in read.events
+            ):
+                return True  # recorded already
+            charged = _last(read.events, "plan.charged", unit)
+            dispatched = any(
+                e.type == "unit.dispatched" and e.data.get("unit") == unit and e.data.get("run") == app.run_id
+                for e in read.events
+            )
+            if charged is None or not dispatched:  # a named run is not the plan's dispatch: nothing to subtract
+                return False
+            attempt = int(charged.data["attempt"]) if isinstance(charged.data.get("attempt"), int) else 1
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            event = PlanEvent("plan.run_idle", at, {"unit": unit, "attempt": attempt, "run": app.run_id})
+            try:
+                store.append([event], expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s ran idle (run %s): not counted", step.plan_id, unit, app.run_id)
+            return True
+        log.warning("plan %s: the idle run of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the idle run of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+    return False
+
+
 def record_rejections(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, rejected: Mapping[str, str]) -> None:
     """After the run: a unit of the plan that the run rejected (exit 14, no phase to show it) gets `unit.rejected{unit,
     run, detail}` on the plan ledger, so the next plan step stops the plan with `unit_rejected` instead of dispatching
@@ -1983,6 +2028,7 @@ __all__ = [
     "local_states",
     "not_started_pending",
     "plan_holds",
+    "record_idle_runs",
     "record_rejections",
     "record_run_starts",
     "rejection_pending",

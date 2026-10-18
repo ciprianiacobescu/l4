@@ -202,7 +202,8 @@ class PlanMoved(Exception):
 
 class Usage(BaseModel):
     cost_usd: float = 0.0
-    runs: int = 0
+    runs: int = 0  # the runs that count against `max_runs`: the charged ones less the idle ones (L4-YOLO-014)
+    idle_runs: int = 0  # the runs the plan ledger records idle (`plan.run_idle`), left out of `runs`
     attempts: dict[str, int] = Field(default_factory=dict)  # unit id -> highest attempt charged (R1)
 
 

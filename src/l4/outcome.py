@@ -86,6 +86,9 @@ class CommandResult:
     # `run` only: the units whose delegate pass wrote an answer (or was cut by the soft deadline): the run asks the
     # forge once for the next run on the base branch, whatever the plan step did (L4-DLG-007)
     delegate_answered: Sequence[str] = ()
+    # `run` only: the units whose run did nothing (no agent step, no gate, no phase change but a wait): a plan records
+    # `plan.run_idle` for the current one and starts no next run for it (L4-YOLO-014)
+    idle: Sequence[str] = ()
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:

@@ -1454,7 +1454,7 @@ def _describe(
         out["extensions"] = extensions
     out["usage"] = {
         "cost_usd": used.cost_usd, "cost_limit": limits.cost_usd, "runs": used.runs,
-        "runs_limit": limits.runs,
+        "idle_runs": used.idle_runs, "runs_limit": limits.runs,
         "attempts": dict(used.attempts), "attempts_limit": limits.attempts,
         "deadline": limits.deadline.strftime("%Y-%m-%dT%H:%M:%SZ") if limits.deadline else None,
     }  # fmt: skip
@@ -1637,7 +1637,9 @@ def _render(d: dict[str, Any]) -> str:
     attempts = ", ".join(f"{u} {n}" for u, n in use["attempts"].items()) or "none"
     lines.append(
         f"  usage: {_money(use['cost_usd'])} of {_money(use['cost_limit'])}; "
-        f"runs {use['runs']} of {use['runs_limit'] if use['runs_limit'] is not None else 'unlimited'}; "
+        f"runs {use['runs']} of {use['runs_limit'] if use['runs_limit'] is not None else 'unlimited'}"
+        + (f" ({use['idle_runs']} idle, not counted)" if use.get("idle_runs") else "")
+        + "; "
         f"attempts {attempts} (limit {use['attempts_limit']} each)"
         + (f"; deadline {use['deadline']}" if use["deadline"] else "")
     )
