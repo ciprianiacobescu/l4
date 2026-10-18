@@ -3,6 +3,10 @@
     "sha256": "c96b26cb6b51d0b8d4fe9bce2312e08f1fa75858eef83e5b44f3fbe0a0ab5d1c",
     "version": 5
   },
+  "delegate": {
+    "sha256": "c050e4fbd0c83be0d4d8da54b7858da5ddd8787598e22ed696c3cf8d440b6728",
+    "version": 1
+  },
   "implementer/contract": {
     "sha256": "bcc00d827892ceb405ff1354467fabc0b11459560b08b862769e84eef0609125",
     "version": 12

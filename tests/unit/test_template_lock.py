@@ -8,7 +8,7 @@ from l4 import templatelock
 CASES = (
     "implementer/contract", "implementer/red", "implementer/green", "implementer/single", "implementer/single_tests",
     "implementer/output",
-    "judge", "clarifier",
+    "judge", "clarifier", "delegate",
     "testwriter/audit", "testwriter/e2e",
 )  # fmt: skip
 
