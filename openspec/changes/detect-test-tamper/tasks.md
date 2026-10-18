@@ -307,3 +307,16 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
   the new content-scan hits, and the audit's held reasons. `CHANGELOG.md` under `## 0.4.16 (unreleased)`: the entries
   say that step 1 now runs the base's tests on the unit's code. `python scripts/check_spec.py docs/SPEC.md` clean.
   (L4-IMP-045..049, L4-VER-030..039, L4-IMP-006, L4-VER-002)
+
+## 14. Second review: edges (design 6.7)
+
+- [x] 14.1 M1, M2 (step 5): `runner_support` by content, no fallback, collect-only on every step-5 run. Tests:
+  `test_generate_support.py`, `test_support_base.py`. (L4-VER-035)
+- [x] 14.2 M3 (the audit directory and the configuration rejection). Tests: `test_audit_support.py`. (L4-VER-033,
+  L4-VER-034)
+- [x] 14.3 M4 (allowed support files kept at head) and minor b (no repeat for a skip). Tests: `test_base_tests.py`.
+  (L4-VER-038)
+- [x] 14.4 Minor a (docstring strip). Test: `test_tamper_compare.py`. (L4-IMP-045)
+- [x] 14.5 N1, N2 (`check_test_awareness`). Tests: `test_test_awareness.py`. (L4-VER-039)
+- [x] 14.6 Docs: SPEC.md, runbook, CHANGELOG, design 6.7. (L4-VER-033..039)
+- [ ] 14.7 One independent re-review of group 14 (left for the next review; 6.2 and 13.2 stay open until then).

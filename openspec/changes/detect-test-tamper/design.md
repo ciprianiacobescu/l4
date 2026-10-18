@@ -543,15 +543,17 @@ changed`: Go and TypeScript tests are covered by this run, through their JUnit r
   - A test that errors in setup is `failed` (held), as before this change.
 - **Label**: `support` is `base` (the plan has paths) or `unchanged`, on every record, never empty.
 
-### D16 Step 5, amended (L4-VER-035)
+### D16 Step 5, amended (L4-VER-035; replaced in part by 6.7: no fallback)
 
-- The head run reverts only the e2e runner's own support (`support_base.runner_support(plan, cfg)`): the plan's paths
-  that match `tdd.test_support_globs` or are test-glob files with no test (D14), never an added data file of D13 step
-  3. The unit's other e2e test files stay but are not collected (`L4_COLLECT_ONLY` with the generated file).
-- `ServerNotReady` in the reverted head run is a run that did not happen: the fallback rule applies (in place, name
-  `e2e-head-support`, when step 1's content scan is `ok`; else `uncollectable` with `the app does not start with the
-  unit's support files at the base (<reason>), and a run with them needs step 1's content scan to have read them:
-  <why_not>`). A `ServerNotReady` of the in-place run keeps its meaning (exit 1).
+- The head run reverts only the e2e runner's own support (`support_base.runner_support(plan, cfg, git)`): the plan's
+  paths that match `tdd.test_support_globs`, plus test-glob files that define no test (classified by content with
+  `tamper.facts_of` at the plan's head, base for a deleted file, so a helper named `test_utils.py` is reverted); never
+  an added data file of D13 step 3. The unit's other e2e test files stay but are not collected: every step-5 run, the
+  base run included, sets `L4_COLLECT_ONLY` to the generated file.
+- `ServerNotReady` in the reverted head run is a run that did not happen. There is **no run with the unit's files in
+  place** (6.7): the outcome is `uncollectable`, the criterion stays held, with `the app does not start without the
+  unit's test and support files (reverted: <files>): <deepest tracked frame of the server's log>: <error>`. A test that
+  errors and a run in which none ran are held the same way. A `ServerNotReady` of the base run keeps its meaning.
 
 ### D17 Blocker or finding, additions
 
@@ -629,6 +631,38 @@ changed`: Go and TypeScript tests are covered by this run, through their JUnit r
    names it. Honest parametrisation over production data now needs a person.
 7. Accepted risk: the `<module>` rule refuses a computed constant or a logger added to an existing test file; the retry
    text names the fix (put it in a new file).
+
+### 6.7 Second adversarial review (2026-10-18): edges
+
+A second review of `a8a239e3` found the run of D13 stopping every first-round bypass and eight edges, all fixed:
+
+- **M1 (D16):** `runner_support` kept a test-glob file whose name looks like a test module (`e2e/test_utils.py`, a helper
+  with no test); it now classifies by content, as D14 does.
+- **M2 (D16):** step 5 still fell back to the unit's support files, the bypass D15 closed for the audit (an app that
+  imports a reverted code file next to a liar conftest). The fallback is removed; the criterion is held with the files
+  named; every step-5 run passes `collect_only_env`. `SupportPlan.fallback` and `why_not` are no longer read.
+- **M3 (D15):** the audit file is written under the directory `gates.test.command` collects (`audit.audit_directory`:
+  the first path argument that exists in the worktree, the parent of a file, else `tests`; `testwriter.test_path` takes
+  the directory). A run that gave neither an id nor a collection error for it is the minor rejection `the test command
+  `<command>` does not collect the audit test file <path>`, not a hold; only a missing report still holds.
+- **M4 (D13 step 7):** an id was allowed only through its own file. The allowances now act on the revert set:
+  `base_tests.kept_files` keeps at head, for R1, every support file that only people's commits changed, that a
+  `[test-infra]` task changed or that a `task.unfrozen` frees (their effect accepted), lists them in `allowed_tests` /
+  `human_tests` (`<path> kept at head for the run (<why>)`), and reverts the rest. When nothing is left to revert and no
+  runner configuration changed, no run is made. The runbook names the fix for an intended behaviour change: list the
+  test in `tests.superseded` (a person's commit or answer), or let a person make the change in their own commit.
+- **Minor a (D12):** the normalised docstring is stripped (a blank last line is no change).
+- **Minor b (D13 step 6):** the repeat run happens only when a test failed or errored, never for a skip; R0 is still
+  needed for a skip (a test that passed at the base and is skipped now is a candidate) and comes from the baseline or a
+  stored result before a merge-base worktree.
+- **N1, N2 (new, D14):** the sub-check `test awareness` (`integrity.check_test_awareness`) scans the unit's production
+  diff (code files that are neither test nor support): a line naming `.l4-out`, a configured report path, an `L4_*` or
+  `PYTEST_*` variable is the blocker `production code reacts to the test run` (`file:line`; people-only lines are listed
+  in `human_scan`); `"pytest" in sys.modules`, importing `pytest` or `_pytest`, `atexit.register` and a `sys.argv` test
+  for pytest are listed for the judge (`IntegrityReport.test_awareness`, shown in verification.md, no finding). Known
+  limit: code that detects the run by other means; the audit and step 5 are the second line. A repository whose own
+  production code legitimately names these (the harness itself) needs a person's commit or a `[test-infra]`-style
+  allowance; none is built.
 
 ## Appendix A: the reproductions
 

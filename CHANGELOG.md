@@ -46,6 +46,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   to them, holds a criterion whose production module does not import, and keeps the writer's collection retry. A
   generated UI test's head run keeps app data the unit added under `fixtures/` and no longer crashes when the server
   does not start without the unit's runner support (L4-VER-033..035).
+- Step 1 scans the unit's production diff: a line that names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*`
+  variable is the blocker `production code reacts to the test run` (code that behaves differently while the verifier runs);
+  `"pytest" in sys.modules`, importing pytest, `atexit.register` and a `sys.argv` check for pytest are listed for the
+  judge in `verification.md`. A support file that only people changed, a `[test-infra]` task changed or a `task.unfrozen`
+  frees stays at head for the run of the base's tests, listed (L4-VER-038, L4-VER-039).
+- The audit file is written under the directory the test command collects (a command narrowed to `tests/unit` used to
+  leave it uncollected and the criterion held); a test command that never collects it is a minor rejection naming the
+  command. A generated UI test's head run reverts a helper named like a test module and no longer falls back to the
+  unit's support files: a server that does not start without them holds the criterion (L4-VER-033..035).
 
 ## 0.4.14 (2026-10-17)
 

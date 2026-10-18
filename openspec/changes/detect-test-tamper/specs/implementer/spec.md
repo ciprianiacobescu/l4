@@ -34,7 +34,8 @@ parametrisation, requested fixtures and body count and layout does not. A second
 - **GIVEN** a red step that appends two new tests to a pre-existing test file, changes `from pytdd import total` to
   `from pytdd import apply_discount, total`, adds a second `import pytest`, edits a comment, re-indents a docstring
   (equal after `inspect.cleandoc` and right-stripping), adds a module constant `p` and a fixture `code` while an old test
-  uses `p` as a generator variable and `code` as a lambda parameter, and adds a trailing newline
+  uses `p` as a generator variable and `code` as a lambda parameter, writes a docstring whose last line was blank on one
+  line, and adds a trailing newline
 - **WHEN** the comparison runs
 - **THEN** it SHALL report nothing for the file
 
