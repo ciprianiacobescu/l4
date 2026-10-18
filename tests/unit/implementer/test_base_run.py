@@ -283,12 +283,12 @@ def test_a_candidate_that_cannot_import_at_the_base_confirms_nothing(make_bench,
     bench: Bench = make_bench([step(IMPORTS_CLAMP_AT_TOP)])
     commit_head(bench, {PRICING: HEAD_PRICING_CLAMP})
     outcome = run_red(bench.wb, TASK, attempt=1)
-    assert outcome.status == "failed"
     if state == "refuted":
+        assert outcome.status == "failed"
         assert outcome.reason.startswith(f"not discriminating: {KNOWN}"), outcome.reason
-    else:
-        assert outcome.reason.startswith(f"inconclusive: {KNOWN} ("), outcome.reason
-        assert "did not run in test-base-run" in outcome.reason or "ran no test" in outcome.reason
+    else:  # the base run could not run it either: the check cannot decide, the task is held (L4-IMP-063)
+        assert outcome.status == "held" and outcome.held is not None
+        assert "did not run in test-base-run" in outcome.held.reason or "ran no test" in outcome.held.reason
 
 
 def test_combine_follows_the_table_of_the_design():

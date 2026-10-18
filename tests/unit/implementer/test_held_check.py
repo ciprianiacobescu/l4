@@ -9,11 +9,11 @@ from l4.implementer.loop import run_task
 from l4.implementer.tdd import run_red
 from l4.specs.questions import QuestionKind, QuestionsFile, QuestionStatus
 
-from .conftest import KNOWN, UNKNOWN, Bench, result
+from .conftest import IMPL, KNOWN, UNKNOWN, Bench, result
 from .test_earlier_red import OTHER, TASK, commit_old
 from .test_escalation import BAD, TWO, Hook
+from .test_tdd_green import CORRECTED, answer_naming, two_test_red
 from .test_tdd_green import TASK as GREEN_TASK
-from .test_tdd_green import answer_naming, two_test_red
 
 REASON = (
     "the test-presatisfied run ran no test (exit 2, 45 collection errors): E   TypeError: 'NoneType' object is not "
@@ -104,7 +104,8 @@ def test_scn_imp_310_a_refuted_criterion_fails_the_attempt_beside_an_inconclusiv
 
 
 def test_scn_imp_305_an_inconclusive_test_at_red_run_holds_the_green_step(make_bench, raw, monkeypatch):
-    bench = make_bench([two_test_red(), Step(structured=result("green"))])
+    fix = Step(writes={"tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": IMPL}, structured=result("green"))
+    bench = make_bench([two_test_red(), fix])
     red = run_red(bench.wb, GREEN_TASK, attempt=1)
     assert red.status == "ok", red.reason
     answer_naming(bench, raw, "Change `tests/test_discount.py`.")
@@ -119,4 +120,6 @@ def test_scn_imp_305_an_inconclusive_test_at_red_run_holds_the_green_step(make_b
     assert held["tests"] and all(t.startswith("tests.test_discount::") for t in held["tests"])
     [raised] = bench.events("question.raised")[-1:]
     assert raised["kind"] == "harness" and raised["check"] == "at_red" and raised["tests"] == held["tests"]
-    assert bench.wb.head() == red.sha  # the red commit stays
+    ancestor = bench.wb.git.run("merge-base", "--is-ancestor", red.sha, "HEAD", check=False)
+    assert ancestor.returncode == 0  # the red commit stays (the question's commit follows it)
+    assert bench.subjects()[-1].startswith("docs(") and "feat(" not in " ".join(bench.subjects())
