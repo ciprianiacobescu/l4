@@ -274,3 +274,109 @@ def test_an_audit_file_the_test_command_does_not_collect_is_a_configuration_reje
     [record] = out.records
     assert record.status == "rejected" and "`pytest tests/unit`" in record.reason and rel in record.reason
     assert not (tmp_path / rel).exists() and [f.title for f in out.findings] == ["an audit test was rejected"]
+
+
+# --- third review, item 1: the audit file goes next to the unit's own red test file ----------------------------------
+
+from ..implementer.conftest import HEADER, UNKNOWN  # noqa: E402
+
+WEAK_TESTS = (
+    HEADER
+    + f'@pytest.mark.l4("{KNOWN}")\ndef test_known_code():\n    assert apply_discount(50.0, "SAVE10") == 50.0\n\n\n'
+    + f'@pytest.mark.l4("{UNKNOWN}")\ndef test_unknown_code():\n    assert apply_discount(50.0, "NOPE") == 50.0\n'
+)
+
+
+def broken_audit_run(run_l4, with_verifier, command_tail, plant=None, tdd_repo=None, raw=None):
+    import json
+
+    from l4.agents.fake import Step
+
+    from ..conftest import TEST_COMMAND
+    from ..implementer.conftest import STUB, result
+    from ..orchestrator.conftest import new_origin_main
+    from .test_ladder_depth import AUDIT_KNOWN
+    from .test_ladder_tamper import BROKEN_IMPL
+
+    if tdd_repo is not None:
+        (tdd_repo.repo / "tests/legacy").mkdir(parents=True)
+        new_origin_main(tdd_repo, raw, {"tests/legacy/test_old.py": "def test_old():\n    assert 1\n"})
+    red = Step(
+        writes={"tests/test_discount.py": WEAK_TESTS, "src/pytdd/pricing.py": STUB},
+        structured=result(
+            "red", tests_added=["tests/test_discount.py::test_known_code"], criteria_ids=[KNOWN, UNKNOWN]
+        ),
+    )
+    green = green_step()
+    green.writes = {"src/pytdd/pricing.py": BROKEN_IMPL, **plant}
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    run = run_l4(
+        [red, green, writer_step(cid, AUDIT_KNOWN), JUDGE], test={"command": TEST_COMMAND + command_tail}, **config
+    )
+    return run, json
+
+
+def test_an_ignore_option_does_not_send_the_audit_file_into_the_ignored_directory(
+    run_l4, valid_spec, with_verifier, tdd_repo, raw
+):  # SCN-VER-115 (third review, rt3/test_rv3_ignore.py)
+    run, _ = broken_audit_run(run_l4, with_verifier, " --ignore tests/legacy tests", {}, tdd_repo, raw)
+    [audit] = run.events("verify.audit")
+    assert audit["path"].startswith("tests/test_l4_audit_c_") and audit["status"] == "failed"
+    assert run.outcome["units"][0]["verdict"] != "PASS"  # the broken code is held, not passed by a rejection
+
+
+def test_a_directory_the_unit_plants_under_an_option_values_name_is_not_the_audit_directory(
+    run_l4, valid_spec, with_verifier
+):  # SCN-VER-115 (third review, rt3/test_rv3_auditdir.py)
+    run, _ = broken_audit_run(run_l4, with_verifier, " --tb short tests", {"short/notes.txt": "x\n"})
+    [audit] = run.events("verify.audit")
+    assert audit["path"].startswith("tests/test_l4_audit_c_") and audit["status"] == "failed"
+    assert run.outcome["units"][0]["verdict"] != "PASS"
+
+
+def test_the_audit_directory_is_the_one_of_the_units_own_red_test_file(tmp_path, git_environ):  # SCN-VER-115
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.vcs.git import Git
+    from l4.verifier.audit import red_test_directory
+
+    from ._integrity_helpers import new_repo
+
+    repo, base = new_repo(
+        tmp_path, git_environ, {"README.md": "x\n", "tests/legacy/test_old.py": "def test_o():\n    pass\n"}
+    )
+    repo.write(
+        {
+            "tests/unit/test_new.py": "def test_n():\n    assert 1\n",
+            "tests/unit/conftest.py": "",
+            "tests/helpers/builders.py": "X = 1\n",  # no test: not a place for the audit file
+            "src/code.py": "X = 1\n",
+        }
+    )
+    head = repo.commit("work", task="1.1", tdd="red")
+    wb = SimpleNamespace(git=Git(repo.path, environ=git_environ), cfg=L4Config(), worktree=repo.path)
+    assert red_test_directory(wb, base, head) == "tests/unit"
+    nothing = repo.commit("more", task="1.2", tdd="green")
+    assert red_test_directory(wb, head, nothing) is None
+
+
+def test_without_a_red_test_file_the_command_directory_is_confirmed_by_a_collect_only_run(tmp_path):  # SCN-VER-115
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.verifier.audit import confirm_collected
+
+    (tmp_path / "x.log").write_text("tests/unit/test_l4_audit_c_0a1b2c3d_r1.py::test_audit\n")
+    calls = []
+
+    def gate(name, command, **kw):
+        calls.append((name, kw["extra_env"]))
+        return SimpleNamespace(log_path=tmp_path / "x.log", report=None)
+
+    cfg = L4Config(gates={"test": {"command": "pytest tests/unit", "reports": ["junit.xml"]}})
+    wb = SimpleNamespace(cfg=cfg, worktree=tmp_path, run_gate=gate)
+    assert confirm_collected(wb, "tests/unit/test_l4_audit_c_0a1b2c3d_r1.py") is True
+    assert calls[0][0] == "audit-collect-check" and "--collect-only" in calls[0][1]["PYTEST_ADDOPTS"]
+    assert confirm_collected(wb, "elsewhere/test_l4_audit_c_0a1b2c3d_r1.py") is False

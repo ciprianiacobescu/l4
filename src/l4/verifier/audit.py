@@ -39,6 +39,7 @@ from l4.gates.runner import GateResult
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
 from l4.implementer.prompt import collect_sources
+from l4.implementer.tamper import facts_of
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.workbench import Workbench
 from l4.llm.agent_judge import LLMBackend
@@ -107,6 +108,39 @@ def audit_directory(wb: Workbench) -> str:
         if target.is_file() and str(path.parent) not in ("", "."):
             return path.parent.as_posix()
     return "tests"
+
+
+def red_test_directory(wb: Workbench, base_sha: str, head: str) -> str | None:
+    """The directory of the unit's own test files (a changed `.py` file of `tdd.test_globs` that defines a test at
+    head): the most common one, the shortest on a tie. The head report proves the test command collects it, which no
+    reading of the command can (an option's value is a path too). None when the unit changed no such file."""
+    tdd = wb.cfg.tdd
+    counts: dict[str, int] = {}
+    for path in _changed_files(wb, base_sha, head):
+        if not path.endswith(".py") or not _matches(tdd.test_globs, path) or "test_l4_audit_c_" in path:
+            continue
+        shown = wb.git.run("show", f"{head}:{path}", check=False)
+        found = facts_of(shown.stdout) if shown.returncode == 0 else None
+        if found and any(f.test for f in found.values()):
+            folder = PurePosixPath(path).parent.as_posix()
+            if folder not in ("", "."):
+                counts[folder] = counts.get(folder, 0) + 1
+    if not counts:
+        return None
+    return sorted(counts, key=lambda d: (-counts[d], len(d), d))[0]
+
+
+def confirm_collected(wb: Workbench, rel: str) -> bool:
+    """Whether the test command collects `rel`: a `--collect-only` run of that file alone (design D15); the audit file
+    must exist. Its listing is read from the gate log."""
+    env = {"PYTEST_ADDOPTS": "--collect-only -q", **collect_only_env([rel])}
+    gate = wb.run_gate(
+        "audit-collect-check", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=env
+    )
+    try:
+        return rel in gate.log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
 
 
 def _changed_files(wb: Workbench, base_sha: str, head: str) -> list[str]:
@@ -201,7 +235,11 @@ def run_audit(
     conventions = test_conventions(wb.git, base_sha, wb.cfg)  # the base only: L4-VER-002a forbids the unit's tests
     changed = _changed_files(wb, base_sha, head)
     written: dict[str, str] = {}
-    folder = audit_directory(wb)
+    folder = red_test_directory(
+        wb, base_sha, head
+    )  # next to the unit's own tests: the head report proves it is collected
+    unconfirmed = folder is None
+    folder = folder or audit_directory(wb)
     for cid in chosen:
         criterion = criteria[cid]
         near = test_path("audit", cid, round_no=round_no, directory=folder)
@@ -223,6 +261,11 @@ def run_audit(
         if reply.status == "ok" and reply.test is not None:
             rel = test_path("audit", cid, round_no=round_no, directory=folder)
             write_test_file(wb.worktree, rel, reply.test.code)
+            if unconfirmed and not confirm_collected(wb, rel):  # the command never collects that directory
+                (wb.worktree / rel).unlink(missing_ok=True)
+                folder, unconfirmed = "tests", False
+                rel = test_path("audit", cid, round_no=round_no, directory=folder)
+                write_test_file(wb.worktree, rel, reply.test.code)
             written[cid] = rel
             continue
         status = "not_testable" if reply.status == "not_testable" else reply.status
@@ -244,6 +287,7 @@ def run_audit(
                 timeout_s=timeout_s,
                 blocks=sources,
                 support=support,
+                folder=folder,
             )
         _lint_accepted(
             wb,
@@ -509,11 +553,12 @@ def _retry_collected(
     timeout_s: int,
     blocks: Sequence[tuple[str, str]],
     support: SupportPlan = NO_SUPPORT,
+    folder: str = "tests",
 ) -> None:
     """The writer gets the collection error once (live wave D, W-D2). A test that still cannot be collected, or no
     test at all, is rejected: a minor finding, never a held criterion or a question."""
     for cid, (error, code) in collected.items():
-        rel = test_path("audit", cid, round_no=round_no, directory=audit_directory(wb))
+        rel = test_path("audit", cid, round_no=round_no, directory=folder)
         criterion = criteria[cid]
         reply = request_test(
             writer, kind="audit", criterion_id=cid, criterion_text=f"{criterion.alias}\n{criterion.text}",
