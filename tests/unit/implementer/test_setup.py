@@ -54,9 +54,9 @@ def test_setup_gets_the_network_and_the_unit_cache(make_bench):
     seen = []
     real = type(bench.wb).gate_spec
 
-    def spy(*, network, tree=None):
+    def spy(*, network, tree=None, record_dir=None):
         seen.append(network)
-        return real(bench.wb, network=network, tree=tree)
+        return real(bench.wb, network=network, tree=tree, record_dir=record_dir)
 
     bench.wb.gate_spec = spy  # type: ignore[method-assign]
     run_setup(bench.wb)
