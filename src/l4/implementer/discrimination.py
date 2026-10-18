@@ -189,7 +189,9 @@ def _put_reports_back(wb: Workbench, kept: Mapping[str, tuple[bytes, int]], wher
             _unlink(wb, rel, where)
 
 
-def zeroed_run(wb: Workbench, name: str, paths: Sequence[str], *, public: bool) -> GateResult | None:
+def zeroed_run(
+    wb: Workbench, name: str, paths: Sequence[str], *, public: bool, extra_env: Mapping[str, str] | None = None
+) -> GateResult | None:
     """The test gate against the variants; None when no path could be varied (nothing to decide). The reports the gate
     writes are put back as run (a) left them: the published report must describe the real code, not the variants."""
     kept = _keep_reports(wb, name)
@@ -197,7 +199,7 @@ def zeroed_run(wb: Workbench, name: str, paths: Sequence[str], *, public: bool) 
         with zero_values_in_place(wb, paths, public=public, where=name) as varied:
             if not varied:
                 return None
-            return wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+            return wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
     finally:
         _put_reports_back(wb, kept, name)
 
@@ -512,7 +514,9 @@ def no_assertion_failure(report: TestReport, tracing: Mapping[str, Sequence[str]
     )
 
 
-def confirm_pre_satisfied(wb: Workbench, candidates: Mapping[str, Sequence[str]]) -> PreSatisfied:
+def confirm_pre_satisfied(
+    wb: Workbench, candidates: Mapping[str, Sequence[str]], *, extra_env: Mapping[str, str] | None = None
+) -> PreSatisfied:
     """`candidates`: criterion -> its new tests, all of which passed in run (a). With every public function of the
     modules those tests import, and of the modules changed since the unit base, answering its zero value, at least
     one of a criterion's tests must fail, otherwise the criterion is not discriminating."""
@@ -523,7 +527,7 @@ def confirm_pre_satisfied(wb: Workbench, candidates: Mapping[str, Sequence[str]]
     unconfirmed = {c: tuple(t) for c, t in candidates.items()}
     if not scope:
         return PreSatisfied({}, unconfirmed, "no project source module is imported by those tests")
-    gate = zeroed_run(wb, "test-presatisfied", scope, public=True)
+    gate = zeroed_run(wb, "test-presatisfied", scope, public=True, extra_env=extra_env)
     if gate is None or gate.report is None:
         return PreSatisfied(
             {},

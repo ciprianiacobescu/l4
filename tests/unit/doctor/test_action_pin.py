@@ -199,3 +199,13 @@ def test_a_workflow_that_cannot_be_read_or_has_no_step_is_left_to_cfg_006(make_c
     assert cc._cfg_008(ctx).status == "skip"  # no file
     write(ctx.repo, "name: l4\njobs:\n  l4:\n    steps:\n      - run: echo\n")
     assert cc._cfg_008(ctx).status == "skip"
+
+
+def test_cfg_010_shows_the_test_awareness_allow_list(make_ctx):  # SCN-VER-129
+    empty, _ = make_ctx(cfg=L4Config())
+    assert cc._cfg_010(empty).status == "pass" and "empty" in cc._cfg_010(empty).message
+    listed, _ = make_ctx(cfg=L4Config.model_validate({"verifier": {"test_awareness_allow": ["tools/**", "src/x.py"]}}))
+    result = cc._cfg_010(listed)
+    assert result.status == "pass" and "tools/**" in result.message and "src/x.py" in result.message
+    check = {c.id: c for c in REGISTRY.checks()}["CFG-010"]
+    assert check.severity == "info" and {"ci", "local", "config"} <= check.scopes

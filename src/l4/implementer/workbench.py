@@ -9,11 +9,12 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 import shutil
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -29,6 +30,7 @@ from l4.context import AppContext
 from l4.fsutil import LinkedPath, UnsafeFile, atomic_write_bytes, linked_component, remove_link
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
+from l4.gates.outcomes import altered, read_record
 from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.gates.trace import trace_env
 from l4.implementer import envguard
@@ -331,6 +333,7 @@ class Workbench:
         tree: Path | None = None,
         caches: tuple[CacheMount, ...] | None = None,
         builds_env: bool = False,
+        record_dir: Path | None = None,
     ) -> SandboxSpec:
         """No adapter: the sandbox hides every login, so agent-written tests cannot read one. `caches` replaces the
         unit's own mounts (the uv seed's fill, which runs no agent-written code). `builds_env` is true for a
@@ -344,7 +347,7 @@ class Workbench:
             worktree=root, git_common_dir=self.git_common_dir, tmp_dir=self.unit_cache / "gate-tmp",
             home=self.home, configured_credential_paths=self.cfg.sandbox.credential_paths,
             caches=self.caches if caches is None else caches,
-            network=network, runner_tmp=runner_tmp_paths(self.host_env),
+            network=network, runner_tmp=runner_tmp_paths(self.host_env), record_dir=record_dir,
             cache_root=self.cache_root, tool_paths=tools, setup_paths=setup, builds_env=builds_env,
             tracked=() if builds_env else self._tracked_env(self.git if tree is None else self.git.at(root)),
         )  # fmt: skip
@@ -388,6 +391,11 @@ class Workbench:
         root = self.worktree if tree is None else tree
         git = self.git if tree is None else self.git.at(root)
         log = self._next_gate_log(spec.name)
+        # the outcome record: a random name in a directory of its own that the gate's TMPDIR does not hold (a glob over
+        # `tempfile.gettempdir()` finds nothing), made fresh for this run and removed after the cross-check
+        record_dir = self.unit_cache / "records" / secrets.token_hex(8)
+        record_dir.mkdir(parents=True, exist_ok=True)
+        record = record_dir / f"{secrets.token_hex(16)}.jsonl"
         purge_bytecode(root, self._tracked_bytecode(git))
         self._report_links(root, spec)  # a link on a report path is removed and recorded: the gate writes a real one
         tracked_env = self._tracked_env(git)
@@ -402,14 +410,19 @@ class Workbench:
             result = run_gate(
                 spec, worktree=root, sandbox=self.sandbox,
                 sandbox_spec=(
-                    self.gate_spec(network=network, tree=root, builds_env=builds_env)
+                    self.gate_spec(network=network, tree=root, builds_env=builds_env, record_dir=record_dir)
                     if caches is None
-                    else self.gate_spec(network=network, tree=root, caches=caches, builds_env=builds_env)
+                    else self.gate_spec(
+                        network=network, tree=root, caches=caches, builds_env=builds_env, record_dir=record_dir
+                    )
                 ),
                 host_env=self.host_env, log_path=log,
                 redactor=self.redactor, runner=self.runner,
                 extra_env=merge_pytest_env(
-                    toolchain_env(self.cfg), trace_env(self.cfg.gates.test_timeout_seconds()), extra_env or {}
+                    toolchain_env(self.cfg),
+                    trace_env(self.cfg.gates.test_timeout_seconds()),
+                    extra_env or {},
+                    {"L4_OUTCOME_FILE": str(record)},
                 ),
             )  # fmt: skip
         finally:
@@ -425,6 +438,8 @@ class Workbench:
             restore_config(self, root, git, configs, where=spec.name)
         self._report_links(root, spec)  # ... and one the gate planted: the restores that follow must find a real folder
         self.restore_ledger()
+        result = self._cross_check(spec, result, record)
+        shutil.rmtree(record_dir, ignore_errors=True)
         shutil.rmtree(
             self.unit_cache / "gate-tmp" / SCRATCH_DIR, ignore_errors=True
         )  # a gate's private caches go with it
@@ -451,6 +466,7 @@ class Workbench:
         for rel in spec.reports:
             if (link := linked_component(root, rel)) is not None:
                 self.refused_write(LinkedPath(link), path=rel, where=spec.name, root=root)
+
     def _tracked_env(self, git: Git | None = None) -> frozenset[str]:
         """Paths git tracks inside `.venv` or any `node_modules`: such a directory is source, not an environment."""
         raw = (git or self.git).run_bytes(
@@ -529,6 +545,29 @@ class Workbench:
         )  # fmt: skip
         for event, path in shown:
             self.emit(event, path=path, rule="environment", action="removed", phase=phase)
+
+    def _cross_check(self, spec: GateSpec, result: GateResult, record: Path) -> GateResult:
+        """The JUnit report against the plugin's record of what pytest judged (detect-test-tamper, third review): code
+        that rewrote the report after the run makes the gate fail with no readable report, naming the tests. With no
+        record there is no check."""
+        if result.report is None:
+            return result
+        loaded = record.exists()  # the plugin creates the record when it is imported: a file means pytest ran with it
+        rows = read_record(record)
+        record.unlink(missing_ok=True)
+        if not rows and result.report.tests and (loaded or re.search(r"\bpy\.?test\b", spec.command)):
+            # the harness's plugin ran (the record exists, or the command names pytest): an empty, missing or unreadable
+            # record under a report that holds test cases is the record being removed (fourth and fifth review); a
+            # runner without the plugin (Go, TypeScript) never creates one and is not held to it
+            self.emit("guard.report_altered", gate=spec.name, tests=[], reason="no outcome record")
+            reason = f"the test report was altered (no outcome record): {result.report.total} test(s) in the report"
+            return replace(result, status="fail", report=None, reason=reason)
+        bad = altered(result.report, rows)
+        if not bad:
+            return result
+        shown = ", ".join(bad[:5]) + (f" (+{len(bad) - 5} more)" if len(bad) > 5 else "")
+        self.emit("guard.report_altered", gate=spec.name, tests=bad[:50])
+        return replace(result, status="fail", report=None, reason=f"the test report was altered: {shown}")
 
     def _tracked_bytecode(self, git: Git | None = None) -> frozenset[str]:
         """Bytecode the repository itself commits (rare): a changed copy is a production change the guards see."""

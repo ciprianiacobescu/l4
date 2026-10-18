@@ -861,6 +861,7 @@ verifier:
   generate_missing_tests: true
   audit_sample_ratio: 0.3          # share of covered NEW criteria that also get an independent verifier test (min 1)
   max_criteria_per_test: 3         # a test tracing more criteria is not evidence for any of them
+  test_awareness_allow: []         # production path globs where code may name the test run (`.l4-out`, `L4_*`, `PYTEST_*`); read at the BASE branch, listed for the judge (L4-VER-039)
   playwright:
     enabled: auto                  # auto = when gates.e2e is configured
     base_url_env: L4_E2E_BASE_URL
@@ -1675,7 +1676,7 @@ pending leaves of one parent into one step.
 
 1. **red** — prompt asks for tests covering the task's criteria, tagged with criterion IDs (§4.7), and nothing else
    except **signature-only stubs** and **guarded-parameter stubs** (below). The red phase MAY change paths matching
-   `tdd.test_globs` and `tdd.test_support_globs`, and MAY add stubs in other files: new modules, functions, classes, methods or types whose
+   `tdd.test_globs` and `tdd.test_support_globs` (a test that existed before the step stays as it is, L4-IMP-048), and MAY add stubs in other files: new modules, functions, classes, methods or types whose
    bodies consist only of a not-implemented statement (Python `raise NotImplementedError`, Go `panic("not
    implemented")`, Rust `todo!()`/`unimplemented!()`, TypeScript/JavaScript `throw new Error("not implemented")`, Java/
    Kotlin `throw UnsupportedOperationException()`, …); the guard verifies that red's non-test changes are admissible
@@ -2170,6 +2171,39 @@ unchanged; and every path of a task whose title carries the human `[test-infra]`
 free: `red`, `already-satisfied` and the test chore. The `[test-infra]` tag lifts this freeze only; it does not lift the red-to-green freeze of L4-IMP-002. The verifier checks the same rule on the commits (§10.2 step 1).
 `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in depth [I].
 
+**L4-IMP-006** After each agent step the harness MUST: (1) revert protected-path changes (P4, `odd.forbidden_paths` and the contract
+list, which includes the whole spec root `openspec/**` and `.kiro/specs/**` except the run's own ledger, so a criterion
+an agent copied into the archived specs or a sibling change never stays) and record `guard.violation`; (2) compare every
+test that existed before the step with its state after it (L4-IMP-045..047): in red, a test changed, bound again,
+unparsable or deleted, or a fixture, helper, constant or mark it uses in its file changed, fails the attempt with
+`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected"}` (L4-IMP-048); green and a fix chore keep
+the test-path freeze (7), a test chore keeps `appended_only`, and the verifier checks the comparison on the commits
+(L4-VER-030..032); an added skip marker (`.skip`/`xit`/`@pytest.mark.skip`/`t.Skip`) stays a step-1 blocker; (3) revert
+changes to gate configuration — files matching `tdd.gate_config_globs` and the gate sections of manifests (pyproject
+`[tool.mypy*]`/`[tool.ruff*]`/`[tool.pylint*]`, package.json `eslintConfig`) — unless the task carries a human-written
+`[config]` or `[test-infra]` tag; (4) run the redaction filter over every file the harness itself writes; (5) detect test
+tamper per test on the AST, by file and qualified name, never by bare name: every binding of the test's name with its
+decorators, parametrisation and requested fixtures, what it uses in its own file, and every statement of its file or class that is not a plain definition (L4-IMP-045,
+L4-IMP-046, L4-IMP-049); comments,
+layout and a trailing newline are not tamper [V, spikes/02]; other languages are not compared [U]; (6) treat adapter
+permission rules as no freeze: shell redirects write files under `Edit(./**)` [V, spikes/01], so the hash freeze and
+revert are mandatory for every adapter; (7) **test-path freeze:** a step that may not write tests, `green` (`L4-TDD:
+green`) and a fix chore of kind `fix` (`L4-TDD: exempt`), may not add, change, delete or rename any path that matches
+`tdd.test_globs` or `tdd.test_support_globs` (both include their `extra_*` lists), whatever the language: after the step
+the harness puts each such path back (a changed or deleted file is restored from the step's base, a new one removed) and
+records one `guard.test_tamper` with `rule: "test path freeze"` and `action` `restored` or `removed`, which the next
+attempt's prompt carries. Three exceptions: the paths a `task.unfrozen` event names for that unit and task (a human answer
+freed them, L4-IMP-002, or the task's own reviewed text named them, L4-IMP-014); the files a test chore (`kind=tests`)
+keeps (`task.tests_added.files`), whose own review is unchanged; and every path of a task whose title carries the human
+`[test-infra]` tag. The steps that write tests stay free: `red`, `already-satisfied` and the test chore, within (2). The
+`[test-infra]` tag lifts this freeze only; it does not lift the red-to-green freeze of L4-IMP-002. The verifier checks
+the same rule on the commits (§10.2 step 1). A human tag exempts nothing in a fix unit's or a follow-up unit's task: the
+harness wrote those titles from model-written findings, whose brackets it turns into parentheses. (8) **report
+cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
+every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
+longer shows, makes the gate fail with `the test report was altered` and the test ids. A gate whose record is empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`) whenever the plugin ran (the record file exists, or the command names pytest); a runner that never loaded it (Go, TypeScript) is held to no record. The record has a random name in a directory the gate's TMPDIR does not hold; a failed row of a phase wins. `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
+depth [I].
+
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
 `guard.violation` (`rule: "run ledger"`, `action: "restored"`) MUST say what was found: `kind` (`truncated` when only
 lines were lost, e.g. an agent resetting the file to HEAD; `appended`; `edited`; `replaced`), `removed_seqs` and
@@ -2186,7 +2220,8 @@ when the attempt fails, the next attempt's "previous attempt" block carries, aft
 what to do instead (for the red guard: what a red step may change). The note belongs to that attempt only (the next
 attempt starts with none), the ledger keeps the plain reason (`task.attempt_failed.reason`), the block is defused like
 any `<l4:data>` text, and the prompt is redacted as a whole (L4-OBS-002). The run ledger's own restore (`rule: "run
-ledger"`) is not a note. [V, live M1.6 job 5537: Codex sent the same file three times because the rejection text
+ledger"`) is not a note, and neither is a `guard.test_tamper` with `action: "rejected"` (L4-IMP-048): the
+failed attempt's reason and excerpt already carry it. [V, live M1.6 job 5537: Codex sent the same file three times because the rejection text
 showed the lint output of the rebuilt file and nothing of the guard's change.]
 
 **L4-IMP-040 Gate and runner configuration is put back.** *Gate configuration* is, at any depth, the files matching
@@ -2273,6 +2308,30 @@ with a `breaker.tripped` event. A `blocked` result with no question (none given,
 `questions` counts as a failed attempt and triggers the one-shot questions call [V 2×, spikes/03]; when they pass, the
 step is accepted whatever the status (L4-IMP-005). When green ends `blocked`, the harness snapshots the worktree
 to the WIP branch (L4-IMP-011) and resets the unit worktree to the red commit before recording the questions [I].
+
+**L4-IMP-045** The harness SHALL identify a Python test by its file and qualified name (`test_x`, or `Class.test_x` for a method a
+module-level class defines or inherits from a class of the same file), never by bare name. Its definition SHALL be every
+statement binding the name in its defining scope, dumped without positions, docstrings normalised, so decorators,
+parametrisation, requested fixtures and body count and layout does not. A second binding SHALL be a change.
+
+**L4-IMP-046** The comparison SHALL include every binding of the file a pre-existing test reaches: the module names it reads (a local,
+a nested parameter or a comprehension variable is none), the fixtures it requests or names in `usefixtures`,
+transitively; every autouse fixture, `pytestmark`, module setup and `pytest_*` name; for a method, its class's
+decorators, bases and non-test members. An import SHALL count as its source, so a widened import line is no change.
+
+**L4-IMP-047** A test gone from its file SHALL count as moved only when a test that did not exist under that file and name before has
+the same definition and the same closure (L4-IMP-046) at the later revision in a changed file; each such test SHALL
+stand for at most one gone test. Every other gone test SHALL be deleted.
+
+**L4-IMP-048** After `classify_red` accepts a red step, the harness SHALL compare every test that existed at the step's base in each
+test file the step changed (L4-IMP-045..047). A changed, rebound, unparsable or deleted one SHALL fail the attempt with
+`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected"}`, nothing committed, and a reason and
+excerpt that name each test and say what to do. A `[test-infra]` task and the task's stale tests SHALL be exempt.
+
+**L4-IMP-049** Each top-level statement of a test file that is not a plain definition (`guards._defines_only`, where a fixture that is
+not autouse also counts as plain) SHALL be a part of the pseudo-name `<module>`, which every test of the file reaches;
+each such statement of a class body SHALL be a part of `<Class>`, which every test of the class reaches. An attribute,
+`globals()` or `vars()` assignment, a `setattr` call or a class attribute that replaces a test SHALL be a change.
 
 **L4-IMP-017** A task phase that fails on one profile moves to the next usable profile of the chain. The configuration SHALL have the key `implementer.escalate_after` (an integer, at least 0, default 2). `0` means that
 no task moves.
@@ -3118,11 +3177,12 @@ far is still written). Each step is resumable (L4-VER-011).
 |---|---|---|
 | 0 | preconditions | done-gate passes; branch contains base head (else merge first, §12.3); unit validates strict |
 | 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), and runner sections changed by no red commit without `[test-infra]` or an answer (L4-IMP-040), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
+| 1 | integrity | no outstanding `guard.violation`; no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name (L4-VER-030..032; people's changes and allowed ones are listed); and **every test that passed at the base still passes on the unit's code** when the gate runs at head with every test and support file the unit added or changed at its base version (L4-VER-038; any language with a JUnit report); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file, a test-glob file with no test included (L4-VER-037, L4-VER-039: module-level code, an autouse fixture, a fixture one requests and a plain function that patch the unit's code block; a fixture a test requests by name is listed), and its list of result-manipulating constructs, which also covers the unit's production diff (a line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` is a blocker; a test for pytest is listed for the judge), gains `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-VER-039); it stays [U] for other languages; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; each new test repeated `flaky_repeats` times — any flip = flaky finding |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered* |
-| 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. Audit and generated tests run with the unit's added or changed support files reverted to their base versions where they still collect; otherwise with them, provided the step-1 content scan of those files is clean |
-| 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head**. Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
+| 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
+| 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
 | 6 | quality (opt-in) | `gates.extra` entries such as diff coverage or mutation testing on changed files |
 | 7 | contracts / security (opt-in) | `gates.extra` entries such as schemathesis, property tests, `semgrep --baseline-commit <base>` |
 | 8 | S1 judge | per criterion one `noul` over a compact evidence state (criterion text, tracing tests with status, most relevant excerpt) kept within the engine's state budget (§3.2, measured with the S1 tokenizer): the true/false question "Does this evidence show that the criterion is satisfied?" (`p`) **and** a 4-way `choice` over `implemented | contradicted | not_implemented | unrelated` (the choice's probabilities are recorded under `evidence`). Both are **recorded only**: no `p` changes a verdict or a finding (`decisions.criterion.accept` is reserved for a later calibrated gate; nothing reads it today). The step is `unavailable` when the server is missing, down or answers unusably (for `engine: ollama` also: the host is older than 0.35.0, the model is not pulled, or the request would exceed the 64 KiB body limit: `unavailable: input too large`, never cut), and aggregation goes on (SCN-VER-24); it is `not_run` when `verifier.s1.enabled` is off, `roles.s1_judge` is empty, or it holds no `backend: system-one` profile (an adapter profile there serves only the clarifier's `llm_boolean` stand-in, L4-CLR-002) |
@@ -3333,6 +3393,56 @@ goes to a person (L4-VER-013): only a person can tell a task whose work sits in 
 listed task the reply leaves out is asked for in L4-VER-017's second call (`satisfied <key>`). A task still not answered
 adds the minor finding `the judge did not say whether task <key> is done` and is recorded with `holds: false` and
 evidence `not answered`, so a missing answer never fails a round. The prompt template is `judge@9`.
+
+**L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
+changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
+move the blocker `a pre-existing test was deleted`, each naming `<path>::<name>` and why, when a harness commit
+introduced it and no allowance of L4-VER-031 holds. A test that the skip check blocks SHALL not be reported again.
+
+**L4-VER-031** Step 1 SHALL list, never block, a change of L4-VER-030 that only people's commits introduced (`Test changes made by
+humans`), that a `tests.superseded` event records, or whose every harness commit belongs to a `[test-infra]` task or
+changes a path that a `task.unfrozen` of the same unit and task names (`Pre-existing tests changed with an allowance`).
+A harness commit without an `L4-Task`, or one no allowance covers, SHALL keep the blocker.
+
+**L4-VER-032** For each harness commit with `L4-TDD: red` or `already-satisfied` of a task without `[test-infra]`, step 1 SHALL compare
+the test files it changed with its first parent (L4-IMP-045..047). A test that existed at the parent, not at the base,
+that the commit changed, rebound or deleted, and that no `tests.superseded` event names, SHALL be the blocker `a red step
+changed a test that an earlier step wrote`, naming the test, the task and the commit.
+
+**L4-VER-033** Step 4a SHALL run each audit test and its zero-value run with every test and support file the unit added, changed or
+deleted at its base version (an added one set aside; added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/`
+kept), collecting only the audit file, written next to the unit's own test files (else where a `--collect-only` run
+shows the test command collects it, else `tests`). Each file SHALL be restored byte for byte after.
+
+**L4-VER-034** An audit test SHALL never run with the unit's test or support files in place. One whose collection fails in a
+production module, whose cause the log does not show, or that leaves no report SHALL hold its criterion (L4-VER-012). One
+whose own import fails SHALL get the writer's one retry and be a minor rejection when it fails again; so SHALL one the
+test command never collects (the reason names the command). Every record SHALL carry `support` `base` or `unchanged`.
+
+**L4-VER-035** Step 5 SHALL run a generated UI test at head with the e2e runner's own support files the unit changed at their base
+versions (a test-glob file with no test included), never added app data, collecting only the generated file. One that
+does not run so, or whose server does not start, SHALL be `uncollectable` and held, naming the files; no run SHALL
+have the unit's files in place. `verify.generated` SHALL carry `support`.
+
+**L4-VER-036** `verify.audit` SHALL carry `support` and `support_files`, and verification.md's Audit table a `Support` column.
+`verify.base_tests` SHALL carry the counts, the base source and the reverted files of L4-VER-038, shown in the row
+`pre-existing tests still pass`. verification.md SHALL list the changes L4-VER-031 allowed and the fixtures of
+L4-VER-037 that patch the unit's code on request.
+
+**L4-VER-037** Step 1 SHALL check every changed Python test-support file, not only an opened one, for a new patch or assignment of a
+symbol of a production module the unit changed (L4-IMP-016 rule 3). One that runs for every test, or whose use is
+unknown, SHALL be a content-scan blocker; one inside a fixture that a test requests by name SHALL be listed. A person's
+commit and a `[test-infra]` task SHALL be handled as for every other content-scan hit.
+
+**L4-VER-038** Step 1 SHALL run the test gate at head with every test and support file the unit added or changed at its base version
+and SHALL require each test that passed at the base to pass. One that fails twice, does not run or no longer collects
+SHALL be a blocker, unless `tests.superseded` names it. A support file only people changed, a `[test-infra]` task
+changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
+
+**L4-VER-039** Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
+session-end file writers. In test, support and production files it SHALL flag the names `l4_trace`, `_OUTCOME_FD`,
+`L4_OUTCOME_FILE`, `config.option.xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus`/`.xmlpath`,
+and a production read of `L4_*`/`PYTEST_*`; `verifier.test_awareness_allow` lists instead of blocking.
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -3717,7 +3827,7 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `availability.selected|availability.unavailable|availability.fallback|availability.cooldown|availability.model_unverified|availability.unrecorded_version|availability.login_wait|availability.wait_in_run`,
 `step.started|step.finished` (idempotency key; `step.finished.status` is the agent's own `RunResult.status`: `ok`, `rate_limited`, `quota`, `auth`, `error`, ...; a step cut short by an exception is `error`), `agent.finished` (status, exit code, tokens, `permission_denials` count and `denied_tools`, never a tool input), `agent.session` (adapter, session id), `agent.tool_rejected` (`{task, phase, tool, reason}`, one per `RunResult.tool_rejections` entry),
 `task.started|task.red_ok|task.done|task.failed|task.tdd_exempt|task.unfrozen` (`task.unfrozen{task, paths, reason, source, question, answer_sha256, red_sha, kept}`: the frozen test and support files that a human answer (`reason: "human_answer"`, also read when `reason` is absent; `question` and `answer_sha256` set) or the task's own reviewed text (`reason: "named_by_task"`; `source` is `plan:<plan id>@<digest>` or `base:<sha>`) freed for green; `kept` lists each named path that stays frozen, with its reason), `criterion.pre_satisfied`, `stub.scope_leak`,
-`gate.result`, `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret`, `question.raised|question.answered|
+`gate.result`, `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `question.raised|question.answered|
 question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
@@ -5545,6 +5655,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 40 | `mcp-server` | any MCP client manages plans and debugs units through typed tools: `l4 mcp serve [--repo PATH]…` (stdio JSON-RPC, no new runtime dependency) runs the `l4` command each tool names as an agent (`AI_AGENT=l4-mcp`) in a repository the instance was started for, one entry per repository; activation and `l4 run` are not tools; `l4 mcp install --client …` writes the client's documented configuration; `l4 yolo check --worktree` (L4-YOLO-034) backs `l4_plan_check`, and the read-only `l4 status --events|--verification` back two more tools (L4-MCP-001..005; `openspec/changes/mcp-server/`) | the official `mcp` client lists the tools and calls one; two instances serve two repositories |
 | 42 | `guard-harness-writes` | no harness write follows a link a gate planted, and a planted link halts the unit (L4-SEC-020, L4-SEC-021); no step commits a link that points outside the worktree; gate and runner configuration is defined exactly, put back after every agent step and every gate run, and opened only by a human tag or answer, with a pytest marker allowed (L4-IMP-040, L4-IMP-041, L4-IMP-006 (3)); the folders the sandbox masks, `.kiro/skills` included, are protected paths (L4-SEC-004); `openspec/changes/guard-harness-writes/` | the ported reproductions pass; a consumer repository's red step that edits `[tool.ruff]` has it put back |
 | 43 | `sandbox-isolation` | an empty home and a hidden runner cache in both sandbox kinds, tools read-only (`sandbox.tool_paths`, `sandbox.setup_paths`), keyed per-unit directories, a project environment (`.venv`, `node_modules`) read-only for gates that do not build it and rebuilt when a step or a gate changed it, package caches read-only except for setup with a private scratch per step and a cache of its own for the verifier, key files visible only to their step, doctor `SANDBOX-003` and `SANDBOX-004`; L4-SEC-030..039, L4-PRV-040..041 (`openspec/changes/sandbox-isolation/`) | `SANDBOX-003` passes on `l4-runner` and on a GitHub-hosted runner; the dummy repository's gates stay green |
+| 44 | `detect-test-tamper` | a red step that changes, rebinds or deletes a pre-existing test, or adds a statement that replaces one, fails its attempt; step 1 compares pre-existing tests per test on the AST by file and qualified name (people's changes listed), runs the base's tests on the unit's code with every test and support file the unit touched at its base version, in any language with a JUnit report, and blocks a support or helper file that patches the unit's code or replaces a test's call, and production code that reacts to the test run; audit tests run without any of the unit's test or support files, hold a criterion whose production module does not import, and never fall back; a generated test's head run keeps added app data (L4-IMP-045..049, L4-VER-030..039; `openspec/changes/detect-test-tamper/`) | the reviewers' reproductions: no false PASS, no crash on an honest unit |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -7234,6 +7345,115 @@ scenario is a spec defect (§26).
   and the advice that the whole file was put back to the step's base and that a dependency added in the same file must
   be written again without touching those sections
 
+#### SCN-IMP-260 (−) A weakened assertion is a changed test · L4-IMP-045
+- **Given** `tests/test_pricing.py` at the step's base with `assert total([1.25, 2.5]) == 3.75` in
+  `test_total_adds_prices`, and a red step that rewrites it to `assert True`
+- **When** the comparison runs
+- **Then** it SHALL report `tests/test_pricing.py::test_total_adds_prices` as `changed` with `its body, decorators or
+  parametrisation changed`
+#### SCN-IMP-261 (−) A second definition of a pre-existing test is a rebinding · L4-IMP-045
+- **Given** the base file of SCN-IMP-260, unchanged, followed by `def test_total_adds_prices(): pass`
+- **When** the comparison runs
+- **Then** it SHALL report the test as `rebound` with `its name is bound again at line <n>, which replaces it`
+#### SCN-IMP-262 (−) An assignment or an import that rebinds a test name is a rebinding · L4-IMP-045
+- **Given** the base file followed by `test_total_adds_prices = lambda: None`, or by
+  `from helpers import test_total_adds_prices`
+- **When** the comparison runs
+- **Then** it SHALL report the test as `rebound` in both cases
+#### SCN-IMP-263 (−) A changed parametrisation, mark or requested fixture is a change · L4-IMP-045
+- **Given** a pre-existing test whose `@pytest.mark.parametrize` list loses a case, one that gains a decorator, and one
+  whose parameter (a fixture it requests) is renamed
+- **When** the comparison runs
+- **Then** each SHALL be reported as `changed`
+#### SCN-IMP-264 (−) A helper, a constant or a fixture the test uses in its file is part of it · L4-IMP-046
+- **Given** a pre-existing test that calls the helper `_check` and compares with the constant `EXPECTED`, and a step that
+  makes `_check` return without asserting, or sets `EXPECTED` to another value
+- **When** the comparison runs
+- **Then** the test SHALL be reported as `changed` with `what it uses in this file changed: _check` (or `EXPECTED`)
+#### SCN-IMP-265 (−) A new autouse fixture or module mark reaches every test of the file · L4-IMP-046
+- **Given** a step that appends an autouse fixture, or a `pytestmark` assignment, to a pre-existing test file
+- **When** the comparison runs
+- **Then** every pre-existing test of the file SHALL be reported as `changed`, naming the fixture or `pytestmark`
+#### SCN-IMP-266 (+) New tests, a widened import, locals and a re-indented docstring change nothing · L4-IMP-045
+- **Given** a red step that appends two new tests to a pre-existing test file, changes `from pytdd import total` to
+  `from pytdd import apply_discount, total`, adds a second `import pytest`, edits a comment, re-indents a docstring
+  (equal after `inspect.cleandoc` and right-stripping), adds a module constant `p` and a fixture `code` while an old test
+  uses `p` as a generator variable and `code` as a lambda parameter, writes a docstring whose last line was blank on one
+  line, and adds a trailing newline
+- **When** the comparison runs
+- **Then** it SHALL report nothing for the file
+#### SCN-IMP-267 (−) A method's class is part of it · L4-IMP-046
+- **Given** a pre-existing `TestCart.test_empty`, and a step that changes `TestCart.setup_method`, or adds a class
+  decorator, but not the method
+- **When** the comparison runs
+- **Then** `TestCart.test_empty` SHALL be reported as `changed`; a new test method added to `TestCart` SHALL change
+  nothing
+#### SCN-IMP-268 (−) A file that no longer parses changes every test in it · L4-IMP-045
+- **Given** a pre-existing test file that a step leaves with a syntax error
+- **When** the comparison runs
+- **Then** every test of the base file SHALL be reported as `unparsable` with `the file does not parse`
+#### SCN-IMP-269 (+) A test moved unchanged to another file is moved · L4-IMP-047
+- **Given** `test_one` deleted from `tests/test_a.py` and the same definition added to the new `tests/test_b.py`
+- **When** the comparison and the move rule run
+- **Then** `tests/test_a.py::test_one` SHALL be moved, not deleted
+#### SCN-IMP-270 (−) A same-named test with another body, or with a weakened helper, is no move · L4-IMP-047
+- **Given** `test_empty` (`assert compute([]) == 0`) deleted from `tests/test_cart.py`, and `def test_empty(): assert
+  True` appended to the changed `tests/test_orders.py`; or `test_one` moved unchanged from `tests/test_a.py` to
+  `tests/test_b.py` next to a `_check` helper that no longer asserts
+- **When** the move rule runs
+- **Then** `tests/test_cart.py::test_empty` and `tests/test_a.py::test_one` SHALL be deleted
+#### SCN-IMP-271 (+) A reopened task's red may replace its stale test · L4-IMP-048
+- **Given** a reopened task whose stale tests (L4-OPS-015) include `tests/test_long.py::test_long`, and a red step that
+  rewrites that test for the new criterion text
+- **When** the red check runs
+- **Then** the attempt SHALL not fail for that test, and a change to another pre-existing test of the same file SHALL
+  still fail it
+#### SCN-IMP-272 (+) A `[test-infra]` task's red may change existing tests · L4-IMP-048
+- **Given** a task titled `2.1 [test-infra] Share the cart fixture` whose red step changes two pre-existing tests
+- **When** the red check runs
+- **Then** no `guard.test_tamper` with `rule: "pre-existing test"` SHALL be recorded and the step goes on
+#### SCN-IMP-273 (−) A later task's red may not change an earlier task's red test · L4-IMP-048
+- **Given** task 1.1 committed with its red test `tests/test_discount.py::test_known_code`, and the red step of task 1.2
+  that weakens it
+- **When** the red check runs
+- **Then** the attempt SHALL fail naming `tests/test_discount.py::test_known_code`
+#### SCN-IMP-274 (+) The weakened test never reaches the branch and the honest retry passes · L4-IMP-048
+- **Given** the bench of the verifier-2 reproduction whose first red attempt also weakens
+  `tests/test_pricing.py::test_total_adds_prices`, and a second, honest red attempt
+- **When** the unit runs through `l4 run`
+- **Then** the first attempt SHALL fail with `red changed tests that existed before this step:
+  tests/test_pricing.py::test_total_adds_prices`, the second attempt's prompt SHALL carry that reason and the advice,
+  and the unit SHALL pass with `tests/test_pricing.py` equal to its base content
+#### SCN-IMP-275 (+) A red that breaks an existing test keeps today's reason · L4-IMP-048
+- **Given** a red step that rewrites `test_total_adds_prices` to `assert False`
+- **When** red runs
+- **Then** the reason SHALL still start with `red broke existing tests: tests.test_pricing::test_total_adds_prices`,
+  with the failure excerpt
+#### SCN-IMP-276 (−) A weakened assertion fails the red attempt · L4-IMP-006, L4-IMP-048
+- **Given** the red step of the implementer-4 reproduction that writes the new `tests/test_discount.py` and the stub, and
+  rewrites the pre-existing `assert total([1.25, 2.5]) == 3.75` to `assert True`
+- **When** `run_red` runs
+- **Then** the outcome SHALL be `failed`, one `guard.test_tamper{phase: "red", path: "tests/test_pricing.py", rule:
+  "pre-existing test", action: "rejected", tests: ["test_total_adds_prices"]}` SHALL be recorded, and no red commit
+  SHALL be made
+#### SCN-IMP-277 (−) A rebinding fails the red attempt · L4-IMP-006, L4-IMP-048
+- **Given** the rebound form of the implementer-4 reproduction (`def test_total_adds_prices(): pass` appended)
+- **When** `run_red` runs
+- **Then** the outcome SHALL be `failed` with `its name is bound again` in the reason, and no red commit SHALL be made
+#### SCN-IMP-279 (−) A subclass that overrides an inherited test changes it · L4-IMP-045
+- **Given** `TestBase.test_x` asserting `sum([1, 2]) == 3` and `class TestChild(TestBase): pass`, and a step that gives
+  `TestChild` its own `def test_x(self): pass`
+- **When** the comparison runs
+- **Then** `TestChild.test_x` SHALL be reported as `changed`, and a subclass that keeps inheriting it SHALL change
+  nothing
+#### SCN-IMP-278 (−) A statement that replaces a test without binding its name is a change · L4-IMP-049, L4-IMP-048
+- **Given** the base `tests/test_pricing.py` followed by one of `test_total_adds_prices.__code__ = (lambda:
+  None).__code__`, `globals()["test_total_adds_prices"] = lambda: None`, `vars()[…] = …`,
+  `setattr(sys.modules[__name__], "test_total_adds_prices", lambda: None)` or `test_total_adds_prices.pytestmark =
+  [pytest.mark.skip]`; and a `TestCart` file followed by `TestCart.test_empty = lambda self: None`
+- **When** the comparison runs, and when a red step makes the first of these changes
+- **Then** every pre-existing test of the file SHALL be reported as `changed` with `what it uses in this file changed:
+  <module>`, and the red attempt SHALL fail naming `test_total_adds_prices`
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -7909,6 +8129,273 @@ scenario is a spec defect (§26).
 - **When** the fix unit is planned
 - **Then** it has no task, and the finding is listed as not converted (`a scenario for it needs a requirement and the parent has several`)
 
+#### SCN-VER-100 (−) A harness commit that weakens a pre-existing test is a blocker · L4-VER-030
+- **Given** a base with `tests/test_pricing.py::test_total_adds_prices` asserting `== 3.75`, and a harness commit that
+  rewrites the assertion to `is not None`
+- **When** the integrity check `pre-existing tests` runs
+- **Then** it SHALL raise the blocker `a pre-existing test was changed` with
+  `tests/test_pricing.py::test_total_adds_prices (its body, decorators or parametrisation changed)`
+#### SCN-VER-101 (−) With the red guard bypassed, step 1 stops the false PASS · L4-VER-030, L4-IMP-048
+- **Given** the verifier-2 reproduction (red weakens the pre-existing test, green makes `total()` return `999.0`) with the
+  red check of L4-IMP-048 bypassed, so the weakened test reaches the branch
+- **When** the unit is verified
+- **Then** step 1 SHALL fail with `a pre-existing test was changed` and the verdict SHALL be FAIL, not PASS
+#### SCN-VER-102 (−) A rebinding, a changed helper and an unparsable file are changes · L4-VER-030
+- **Given** three harness commits on three base test files: one appends a second `def` of a test name, one weakens a
+  helper the test calls, one leaves the file with a syntax error
+- **When** the check runs
+- **Then** each test SHALL be in the blocker `a pre-existing test was changed` with its own why
+#### SCN-VER-103 (−) A deleted test masked by a same-named test elsewhere is still deleted · L4-VER-030
+- **Given** a harness commit that deletes `tests/test_cart.py::test_empty` and appends `def test_empty(): assert True`
+  to the changed `tests/test_orders.py`
+- **When** the check runs
+- **Then** it SHALL raise the blocker `a pre-existing test was deleted` naming `tests/test_cart.py::test_empty`
+#### SCN-VER-104 (+) A person's deletion masked by a same-named test is listed · L4-VER-031, L4-VER-030
+- **Given** the change of SCN-VER-103 made by a person's commit
+- **When** the check runs
+- **Then** it SHALL raise no finding and list `tests/test_cart.py::test_empty deleted by <sha10>`
+#### SCN-VER-105 (+) A test moved unchanged to another changed file is not deleted · L4-VER-030
+- **Given** a harness commit that moves `test_one` with the same definition from `tests/test_a.py` to `tests/test_b.py`
+- **When** the check runs
+- **Then** it SHALL raise no finding, and after a later commit that deletes `tests/test_b.py` it SHALL raise the deletion
+#### SCN-VER-106 (+) A person's change is listed, a harness change on top still blocks · L4-VER-031
+- **Given** a person's commit that rewrites a pre-existing test, then a harness commit that changes it again
+- **When** the check runs after each commit
+- **Then** after the first it SHALL list `<path>::<name> changed by <sha10>` and raise no finding; after the second it
+  SHALL raise `a pre-existing test was changed`
+#### SCN-VER-107 (+) Superseded, `[test-infra]` and unfrozen changes are allowed and listed · L4-VER-031, L4-IMP-006
+- **Given** a changed pre-existing test that a `tests.superseded` event names, one changed by a commit of a task tagged
+  `[test-infra]`, and one changed by a green commit of task 1.1 whose file a `task.unfrozen` of task 1.1 names
+- **When** the check runs
+- **Then** it SHALL raise no finding, note the superseded one as today, and list the other two with `(task <t>:
+  [test-infra])` and `(task 1.1: unfrozen by <source>)`; the same tag in the task of a fix unit SHALL allow nothing,
+  and a finding titled `... [test-infra]` SHALL yield a fix task with no tag
+#### SCN-VER-108 (−) A `task.unfrozen` of another task allows nothing · L4-VER-031
+- **Given** a green commit of task 1.2 that changes a pre-existing test whose file only a `task.unfrozen` of task 1.1
+  names
+- **When** the check runs
+- **Then** it SHALL raise `a pre-existing test was changed`
+#### SCN-VER-109 (+) An added skip marker is reported once · L4-VER-030
+- **Given** a harness commit that adds `pytest.skip('no')` to the body of a pre-existing test and `pytestmark =
+  pytest.mark.skip` to its file
+- **When** the check runs
+- **Then** the only finding SHALL be `a skip or xfail marker was added`
+#### SCN-VER-110 (−) A later red that weakens an earlier red's test is a blocker · L4-VER-032
+- **Given** the red commit of task 1.1 that adds `tests/test_discount.py::test_known_code`, and the red commit of task
+  1.2 that weakens it
+- **When** the check runs
+- **Then** it SHALL raise `a red step changed a test that an earlier step wrote` with
+  `tests/test_discount.py::test_known_code (task 1.2, red commit <sha10>: …)`
+#### SCN-VER-111 (+) Appending to an earlier red's file is no change · L4-VER-032
+- **Given** the red commit of task 1.2 that appends new tests to `tests/test_discount.py`, which task 1.1's red wrote
+- **When** the check runs
+- **Then** it SHALL raise no finding
+#### SCN-VER-112 (−) The broken code is held when the unit's conftest is set aside · L4-VER-033
+- **Given** the verifier-6 reproduction written so that step 1's AST rule (L4-VER-037) does not see it (the autouse
+  fixture patches through `vars()`): red adds `tests/conftest.py` with an autouse fixture that swaps `apply_discount`
+  for a correct one while `CODES` is not empty, and green ships `return amount`
+- **When** the unit is verified with `audit_sample_ratio: 0.5`
+- **Then** the audit record SHALL be `failed` with `support: "base"`, its criterion SHALL be held, and the verdict SHALL
+  not be PASS
+#### SCN-VER-113 (+) An honest unit's audit test is accepted with its support files at the base · L4-VER-033
+- **Given** the honest red and green of the reproduction's control, and a red that also adds a harmless
+  `tests/conftest.py`
+- **When** the unit is verified
+- **Then** the audit record SHALL be `accepted` with `support: "base"` and the verdict PASS
+#### SCN-VER-114 (+) Support files go to the base for the run and come back byte for byte · L4-VER-033
+- **Given** a unit that added `tests/conftest.py`, changed `tests/fixtures/data.json` and deleted
+  `tests/helpers/old.py`, one of them a symbolic link at head
+- **When** a run happens inside the revert, once normally and once raising
+- **Then** inside, the first SHALL be absent and the others SHALL have their base bytes; after, every path SHALL have its
+  head content, mode and link target, and `git status` SHALL be as before
+#### SCN-VER-115 (+) A unit test that needs the unit's helper does not stop the audit run · L4-VER-033, L4-VER-034
+- **Given** a unit whose test file imports `tests/helpers/builders.py`, which the unit added, and an audit test that
+  needs nothing of it
+- **When** step 4a runs
+- **Then** the audit test SHALL be judged from the run with the support files at the base, despite the other file's
+  collection error; with `gates.test.command` narrowed to `tests/unit` the audit file SHALL be written under
+  `tests/unit/` and collected
+
+- **Given** also a test command `pytest --ignore tests/legacy tests` or `pytest --tb short tests` with a directory
+  `short/` added by the unit, and broken code that the audit test fails on
+- **When** step 4a runs
+- **Then** the audit file SHALL be written under `tests/` (next to the unit's own test file), collected, and the broken
+  code held (`failed`, verdict not PASS)
+#### SCN-VER-116 (−) An audit test that needs a fixture only the unit defines is held · L4-VER-034
+- **Given** an audit test that requests a fixture only the unit's `tests/conftest.py` defines, and a step-1 content scan
+  with status `ok`
+- **When** step 4a runs
+- **Then** the record SHALL be `failed` with `support: "base"` (the fixture is missing at setup), the criterion SHALL be
+  held, and no run SHALL have the unit's `tests/conftest.py` in place
+#### SCN-VER-117 (−) An audit test whose own import fails twice is a minor rejection · L4-VER-034
+- **Given** a writer whose audit test imports a name that `pytdd.pricing` does not define, and whose retry does the same
+- **When** step 4a runs
+- **Then** the writer SHALL be asked once more with the collection error, and the second failure SHALL be the minor
+  finding `an audit test was rejected` with `support: "base"`
+#### SCN-VER-118 (+) The zero-value run uses the same support files as the head run · L4-VER-033
+- **Given** an audit test that passes at head with the support files at the base
+- **When** its zero-value confirmation runs
+- **Then** that run SHALL also have the support files at the base
+#### SCN-VER-119 (−) A generated UI test's head run uses the base support files · L4-VER-035
+- **Given** a UI unit that added `e2e/conftest.py` with an autouse fixture that makes every page check pass, and a
+  generated test that fails at head without it
+- **When** step 5 judges the test
+- **Then** the head run SHALL have `e2e/conftest.py` set aside, the outcome SHALL be `fails_at_head` with
+  `support: "base"`, and the file SHALL be back after the run; the same SHALL hold when the liar is a helper named
+  `e2e/test_utils.py` that defines no test and the conftest imports
+#### SCN-VER-120 (+) verification.md says how each audit test ran and lists the allowed changes · L4-VER-036, L4-VER-031
+- **Given** a round with one audit test run at the base support, one that fell back, and one allowed `[test-infra]`
+  change of a pre-existing test
+- **When** verification.md is written
+- **Then** the Audit table SHALL show `base` and `head` in its `Support` column, and the allowance section SHALL list the
+  change with its task
+#### SCN-VER-121 (−) The weakened pre-existing test of the verifier-2 reproduction fails step 1 · L4-VER-002, L4-VER-030
+- **Given** a unit branch whose harness red commit rewrote `assert total([1.25, 2.5]) == 3.75` to `is not None`
+- **When** the ladder runs
+- **Then** step 1 SHALL be `failed` with `a pre-existing test was changed`, and the ladder SHALL stop with FAIL before
+  step 2
+#### SCN-VER-122 (+) An honest UI unit's generated test is accepted with the base support files · L4-VER-035
+- **Given** a UI unit that added a harmless `e2e/conftest.py`, and a generated test that fails at the merge base and
+  passes at head without it
+- **When** step 5 judges the test
+- **Then** the outcome SHALL be `accepted` with `support: "base"`
+#### SCN-VER-123 (−) A rejected audit test says why it did not run at the base · L4-VER-036, L4-VER-034
+- **Given** the rejection of SCN-VER-117
+- **When** verification.md is written
+- **Then** `## Rejected audit tests` SHALL list the criterion with the reason that starts with `it does not run with the
+  unit's support files at the base` and names the content scan's note
+#### SCN-VER-124 (−) An autouse fixture that patches the unit's code is a blocker · L4-VER-037
+- **Given** a unit that changed `src/pytdd/pricing.py` and added `tests/conftest.py` with an autouse fixture that
+  swaps `pytdd.pricing.apply_discount` (the verifier-6 reproduction as the reviewer wrote it)
+- **When** step 1 runs
+- **Then** the content scan SHALL fail with `tests/conftest.py: patches pytdd.pricing.apply_discount.__code__, which the
+  unit changed, for every test`, and the ladder SHALL stop before step 2
+#### SCN-VER-125 (+) A fixture a test requests by name is listed · L4-VER-037, L4-VER-036
+- **Given** the same unit with `tests/conftest.py` holding a plain `@pytest.fixture` that monkeypatches
+  `pytdd.pricing.apply_discount`, which no autouse fixture requests
+- **When** step 1 runs
+- **Then** it SHALL raise no finding and list `tests/conftest.py: patches pytdd.pricing.apply_discount in a fixture a
+  test requests` under `Fixtures that patch the unit's code when a test requests them`; module-level code, a fixture
+  an autouse fixture requests and a plain function SHALL block like an autouse fixture
+#### SCN-VER-133 (−) An import-time patch in the unit's own new test module does not reach the audit · L4-VER-033
+- **Given** the verifier-6 patch moved into the unit's own new `tests/test_discount.py` (code at import that swaps
+  `apply_discount` while `CODES` is set), and green ships `return amount`
+- **When** the unit is verified with `audit_sample_ratio: 0.5`
+- **Then** `tests/test_discount.py` SHALL be set aside and not collected for the audit run, the record SHALL be `failed`
+  with `support: "base"`, the criterion SHALL be held, and the verdict SHALL not be PASS
+#### SCN-VER-132 (−) A production module that imports only with the unit's conftest holds the criterion · L4-VER-034, L4-VER-033
+- **Given** the handshake reproduction: the unit's `tests/conftest.py` sets `PYTDD_SUPPORT` in `os.environ`, the green
+  `src/pytdd/pricing.py` reads it at import and returns `amount`, and step 1's run of L4-VER-038 is bypassed
+- **When** step 4a runs, with step 1's content scan `ok` and again with it `skipped`
+- **Then** each time the record SHALL be `failed` with a reason that starts with `a production module fails to import
+  without the unit's test and support files: src/pytdd/pricing.py`, the criterion SHALL be held, and the verdict SHALL
+  not be PASS
+#### SCN-VER-136 (+) The writer's collection retry is kept and the label is never empty · L4-VER-034, L4-VER-036
+- **Given** a unit with a harmless `tests/conftest.py` and a `tests/helpers/setup.ts`, a writer whose first audit test
+  does not import and whose retry is correct
+- **When** step 4a runs
+- **Then** the second request SHALL carry the collection error, the record SHALL be `accepted` with `support: "base"`,
+  and no `verify.audit` of the round SHALL have an empty `support`
+#### SCN-VER-134 (+) An honest UI unit's app data under `fixtures/` stays for the head run · L4-VER-035
+- **Given** a UI unit whose app serves the page from `fixtures/cart.html`, which the unit added, and a generated test
+  that fails at the merge base and passes at head
+- **When** step 5 judges the test with a clean content scan
+- **Then** `fixtures/cart.html` SHALL stay in place for the head run and the outcome SHALL be `accepted`
+#### SCN-VER-135 (−) A server that does not start without the unit's runner support holds the criterion · L4-VER-035
+- **Given** a head app that starts only while the unit's `e2e/conftest.py` is present, and another that imports a code
+  file the unit added under `fixtures/` (`fixtures/seed.py`) next to a conftest that makes every page check pass
+- **When** step 5 judges a generated test, once with step 1's content scan `ok` and once `skipped`
+- **Then** no exception SHALL leave step 5, and each time the outcome SHALL be `uncollectable` with a reason that starts
+  with `the app does not start without the unit's test and support files` and names the reverted files (and, from the
+  server's log, the file and error that stopped it); no run SHALL have the unit's files in place
+#### SCN-VER-126 (−) A `__code__` swap in the test file fails the run alone · L4-VER-038, L4-VER-030
+- **Given** the red of the B1 reproduction that appends `test_total_adds_prices.__code__ = (lambda: None).__code__` to
+  `tests/test_pricing.py`, a green that makes `total()` return `999.0`, and both text signals bypassed (the red check of
+  L4-IMP-048 and step 1's `pre-existing tests` row)
+- **When** the unit is verified
+- **Then** step 1 SHALL fail with `a pre-existing test fails on the unit's code` naming
+  `tests.test_pricing::test_total_adds_prices`, and the verdict SHALL be FAIL
+#### SCN-VER-127 (−) A weakened helper module under `tests/` fails step 1 · L4-VER-038, L4-VER-039
+- **Given** a base whose `tests/test_pricing.py` calls `assert_total` from `tests/checks.py`, a red that makes
+  `assert_total` return without asserting, and a green that breaks `total()`
+- **When** the unit is verified
+- **Then** step 1 SHALL fail with `a pre-existing test fails on the unit's code` naming
+  `tests.test_pricing::test_total_adds_prices`, and the content scan SHALL have read `tests/checks.py`
+#### SCN-VER-128 (−) A weakened conftest fixture fails step 1 · L4-VER-038
+- **Given** a base fixture `check_total` in `tests/conftest.py` that `test_total_adds_prices` requests, a red that makes
+  it return a check that asserts nothing, and a green that breaks `total()`
+- **When** the unit is verified
+- **Then** step 1 SHALL fail with `a pre-existing test fails on the unit's code` and the verdict SHALL be FAIL
+#### SCN-VER-131 (−) A production module that imports only with the unit's conftest fails step 1 · L4-VER-038, L4-VER-033
+- **Given** the handshake reproduction (the unit's conftest sets `PYTDD_SUPPORT`, the green module reads it at import)
+- **When** the unit is verified
+- **Then** step 1 SHALL fail with `a pre-existing test no longer runs on the unit's code` naming
+  `tests/test_pricing.py` and the `KeyError`, and the ladder SHALL stop before step 2
+#### SCN-VER-137 (−) A weakened Go or TypeScript test fails step 1 · L4-VER-038, L4-VER-030
+- **Given** a base with `cart/cart_test.go` and `web/cart.test.ts` that check `3.75`, a test command that writes a
+  JUnit report for both, and a harness red commit that weakens both
+- **When** step 1 runs
+- **Then** the run SHALL fail both tests with `a pre-existing test fails on the unit's code`, and the row `pre-existing
+  tests` SHALL say `no Python test file changed; 2 other test file(s) are checked by the run of pre-existing tests`
+#### SCN-VER-138 (+) An honest unit passes, and allowed or people's files are listed · L4-VER-038, L4-VER-031
+- **Given** an honest unit that adds tests and a conftest fixture; four base tests that fail with the base versions of
+  their files because of a `tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task and a person's commit; and
+  a base test parametrised over production data whose case `[OLD]` the unit's data replaced with `[NEW]`
+- **When** step 1 runs, with a `[test-infra]` task having changed `tests/conftest.py` and a person having changed
+  `tests/fixtures/expected.json`
+- **Then** it SHALL raise no finding for the four, list them with their reasons, and record `verify.base_tests` with the
+  counts; the vanished case `[OLD]` SHALL be the blocker `a pre-existing test no longer runs on the unit's code` unless
+  a `tests.superseded` event names it, and then it SHALL be listed too; the two support files SHALL stay at head for the
+  run and be listed, and only the other changed test files SHALL be reverted
+#### SCN-VER-139 (+) The base reference is reused, and a flaky test is a minor finding · L4-VER-038, L4-VER-036
+- **Given** a round whose run with the base files has one failure that passes on the repeat, and an earlier round's
+  stored result (`integrity.base_tests` of its `verdict.json`) for the same base sha and command
+- **When** step 1 runs
+- **Then** no merge-base worktree SHALL be made (`base_source: "evidence"`), the test SHALL be the minor finding `a
+  pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
+#### SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits · L4-VER-039, L4-VER-037, L4-IMP-006
+- **Given** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
+  plain `pytest_runtest_setup`, `item.obj = lambda: None` in `pytest_collection_modifyitems`, and `item.runtest = …`;
+  and a `tests/checks.py` with no test that holds a `pytest_runtest_setup`
+- **When** the content scan runs
+- **Then** each SHALL be a hit of the blocker `a construct that can change what the tests report`, and a wrapper
+  `pytest_runtest_call` already flagged SHALL keep its text
+
+- **Given** also a production file that tests `PYTEST_ADDOPTS` to return the right answer only while the base-tests run
+  is going, and one that rewrites `.l4-out/junit.xml` from an `atexit` hook
+- **When** the content scan runs
+- **Then** each SHALL be the blocker `production code reacts to the test run` naming `file:line`, and the unit SHALL end
+  FAIL at step 1; a production line with `import pytest` SHALL only be listed
+
+- **Given** also a match of that kind in a production file that `verifier.test_awareness_allow` names in the config at
+  the base commit, the same match in a file it does not name, and the key set only in the unit's own head config
+- **When** the content scan runs
+- **Then** the first SHALL be listed for the judge with the glob that allowed it, and the others SHALL be blockers
+
+- **Given** also honest production code: a docstring or comment naming `PYTEST_CURRENT_TEST` or `.l4-out`, a constant
+  `L4_TCP = 6`, a plugin reading `PYTEST_XDIST_WORKER`, a template `templates/report.xml.j2` when the report is
+  `report.xml`; and a conftest with `atexit.register`, `os._exit`, or a `pytest_sessionfinish` that rewrites the report
+- **When** the content scan runs
+- **Then** the honest code SHALL raise no finding, the conftest SHALL be a hit, and a unit whose conftest rewrites the
+  JUnit report at exit SHALL end FAIL even with the scan bypassed (`the test report was altered`, naming the tests)
+
+- **Given** also a conftest that empties the harness plugin's record through `sys.modules`, keeps the exit status at 0
+  with `setattr` and rewrites `config.option.xmlpath` at unconfigure, and production code that clears the record
+- **When** the unit is verified
+- **Then** the references SHALL be hits (blockers), the gate SHALL fail with `the test report was altered`, and an empty
+  or missing record under a pytest report SHALL fail with `(no outcome record)`
+
+- **Given** also honest tests: a fixture named `xmlpath`, a constant `_OUTCOMES`, and, under an allowed glob, a test of
+  the harness's own plugin
+- **When** the content scan runs
+- **Then** the first two SHALL be no hit and the plugin test SHALL be listed with its glob
+
+#### SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone · L4-VER-039, L4-VER-038
+- **Given** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for
+  `test_total_adds_prices`, or with `pytest_collection_modifyitems` setting its `item.obj`, a green that breaks
+  `total()`, and step 1's `content scan` row bypassed
+- **When** the unit is verified
+- **Then** step 1 SHALL fail in the run of L4-VER-038 (the conftest is set aside), and the verdict SHALL be FAIL
 ### 23.9.1 Human feedback (FBK)
 
 #### SCN-FBK-01 (+) Harness edits leave the person's text alone · L4-FBK-001

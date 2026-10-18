@@ -109,6 +109,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "CFG-007",
         "CFG-008",
         "CFG-009",
+        "CFG-010",
         "YOLO-001",
         "CI-003",
         "S1-003",

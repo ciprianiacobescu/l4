@@ -126,3 +126,22 @@ def test_a_stale_test_rewritten_in_place_under_the_same_name_is_fine_when_a_new_
     assert second.code == 0
     [superseded] = [e for e in ledger(raw, tdd_repo) if e["type"] == "tests.superseded"]
     assert superseded["tests"][0].endswith("::test_long")  # it failed in red on purpose; green made it pass
+
+
+def test_the_stale_allowance_does_not_cover_another_test_of_the_same_step(run_l4, tdd_repo, raw):
+    """SCN-IMP-271 (L4-IMP-048): the reopened red may replace the stale `test_long`, but rewriting another
+    pre-existing test in the same step still fails the attempt, naming only that test."""
+    start(run_l4, tdd_repo, raw)
+    new_text = reworded()
+    push_requirements(tdd_repo, raw, new_text, "reword")
+    script = lower_script(ids_of(new_text))
+    script[0].writes = {
+        **script[0].writes,
+        "tests/test_pricing.py": "from pytdd import total\n\n\ndef test_total_adds_prices():\n    assert True\n\n\n"
+        "def test_total_of_nothing_is_zero():\n    assert total([]) == 0\n",
+    }
+    second = run_l4(script, "--unit", "kiro:discounts", unit=False, implementer={"max_task_attempts": 1})
+    assert second.code != 0
+    failed = [str(e["reason"]) for e in ledger(raw, tdd_repo) if e["type"] == "task.attempt_failed"]
+    [reason] = [r for r in failed if r.startswith("red changed tests that existed before this step")]
+    assert "test_total_adds_prices" in reason and "test_long" not in reason

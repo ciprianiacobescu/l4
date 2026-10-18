@@ -17,7 +17,10 @@ REPORT = ".l4-out/junit.xml"
 def work(tmp_path: Path):
     (tmp_path / "wt").mkdir()
     (tmp_path / "tmp").mkdir()
-    spec = SandboxSpec("gate", tmp_path / "wt", tmp_path / "git", tmp_path / "tmp", tmp_path / "home")
+    spec = SandboxSpec(
+        "gate", tmp_path / "wt", tmp_path / "git", tmp_path / "tmp", tmp_path / "home",
+        cache_root=tmp_path / "cache", tool_paths=(),
+    )  # fmt: skip
     outside = tmp_path / "outside"
     outside.mkdir()
     return tmp_path, spec, outside

@@ -57,6 +57,7 @@ class SandboxSpec:
     setup_paths: tuple[Path, ...] = field(default=(), kw_only=True)  # gate of a `gates.setup` command only (L4-SEC-033)
     read_only: tuple[Path, ...] = field(default=(), kw_only=True)  # .venv / node_modules of a gate that builds nothing
     empty_dirs: tuple[Path, ...] = field(default=(), kw_only=True)  # tool caches inside them: a tmpfs each (L4-SEC-035)
+    record_dir: Path | None = None  # writable, apart from TMPDIR: holds the gate's outcome record (a random file name)
 
     def __post_init__(self) -> None:
         if (self.kind == "agent") != (self.adapter is not None):
@@ -194,6 +195,7 @@ def gate_sandbox_spec(
     builds_env: bool,
     tracked: Collection[str] = (),
     runner_tmp: tuple[Path, ...] = (),
+    record_dir: Path | None = None,
 ) -> SandboxSpec:
     """The one way to build a gate sandbox: no adapter, so every adapter's login is hidden. A spec without
     `credential_paths` hides nothing, which is how a gate could read `~/.codex`. `configured_credential_paths` is
@@ -206,6 +208,7 @@ def gate_sandbox_spec(
         caches = readonly_with_scratch(caches, tmp_dir, create=True, shared_ok=SHARED_READ_OK)
     return SandboxSpec(
         "gate", worktree, git_common_dir, tmp_dir, home, expand_credential_paths(configured_credential_paths, home),
-        caches=caches, network=network, runner_tmp=runner_tmp, cache_root=cache_root, tool_paths=tool_paths,
+        caches=caches, network=network, runner_tmp=runner_tmp, record_dir=record_dir, cache_root=cache_root,
+        tool_paths=tool_paths,
         setup_paths=setup_paths if builds_env else (), read_only=read_only, empty_dirs=empty,
     )  # fmt: skip

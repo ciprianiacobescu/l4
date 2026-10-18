@@ -181,7 +181,10 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
     result.holds = list(prev.get("holds") or [])
     result.cx_runs = {cid: CounterexampleRun(**run) for cid, run in (prev.get("cx_runs") or {}).items()}
     result.trace = [_evidence(e) for e in prev.get("trace", [])]
-    result.audit = [AuditRecord(**{**a, "tests": tuple(a.get("tests", ()))}) for a in prev.get("audit", [])]
+    result.audit = [
+        AuditRecord(**{**a, "tests": tuple(a.get("tests", ())), "support_files": tuple(a.get("support_files", ()))})
+        for a in prev.get("audit", [])
+    ]
     result.generated = [_generated(g) for g in prev.get("generated", [])]
     result.s1 = [S1Record(**r) for r in prev.get("s1", [])]
     result.evidence = prev.get("evidence")
@@ -201,6 +204,10 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
             list(integrity.get("human_suppressions", [])),
             list(integrity.get("human_scan", [])),
             list(integrity.get("human_config", [])),
+            list(integrity.get("allowed_tests", [])),
+            list(integrity.get("mocked_support", [])),
+            integrity.get("base_tests"),
+            list(integrity.get("test_awareness", [])),
         )
     result.steps = [
         StepRecord(s["step"], s["name"], "reused" if s["status"] == "ok" else s["status"], 0.0, _reused_note(s, prev))

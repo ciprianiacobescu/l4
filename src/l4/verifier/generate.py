@@ -15,20 +15,23 @@ M1: verifier 3.2 (`flaky_repeats`), 3.3 (the synthetic baseline), 3.7/3.8 (audit
 """
 
 import hashlib
+import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from l4.fsutil import UnsafeFile, unlink_inside
-from l4.gates.e2e import ServerNotReady, run_e2e
+from l4.gates.e2e import E2eRun, ServerNotReady, run_e2e
 from l4.gates.junit import TestReport
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.workbench import Workbench
 from l4.llm.agent_judge import LLMBackend
 from l4.memory.curate import UI_GAP_TITLE
+from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.verifier.e2e_trace import e2e_coverage
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
+from l4.verifier.support_base import NO_SUPPORT, SupportPlan, collect_only_env, runner_support, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
 from l4.verifier.types import Finding, GeneratedOutcome, GenStatus, RunOutcome, Severity
 
@@ -102,6 +105,7 @@ class _Verdict:
     base: RunOutcome | None = None
     head: RunOutcome | None = None
     tests: tuple[str, ...] = ()
+    support: str = ""
 
 
 def _outcome(statuses: Collection[str]) -> RunOutcome:
@@ -110,17 +114,76 @@ def _outcome(statuses: Collection[str]) -> RunOutcome:
     return "pass" if "passed" in statuses and "failed" not in statuses else "fail"
 
 
-def _discriminates(wb: Workbench, base: Path, criterion: Criterion) -> _Verdict:
+_PY_FRAME = re.compile(r'^\s*File "([^"]+)", line \d+')
+
+
+def _server_failure(wb: Workbench, log_path: Path | None) -> str:
+    """What the server's own output says about why it did not start: the deepest traceback frame that is a tracked file
+    of the worktree outside the test and support globs, and the last error line. Empty when the log says nothing."""
+    if log_path is None:
+        return ""
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace")[-100_000:].splitlines()
+    except OSError:
+        return ""
+    root, tdd = wb.worktree.resolve(), wb.cfg.tdd
+    deepest = ""
+    for line in lines:
+        if (m := _PY_FRAME.match(line)) is None:
+            continue
+        path = Path(m.group(1))
+        try:
+            rel = (path.resolve() if path.is_absolute() else (root / path).resolve()).relative_to(root).as_posix()
+        except ValueError:
+            continue
+        tracked = wb.git.run("ls-files", "--error-unmatch", "--", rel, check=False).returncode == 0
+        if tracked and not any(glob_match(g, rel) for g in (*tdd.test_globs, *tdd.test_support_globs)):
+            deepest = rel
+    error = next((ln.strip() for ln in reversed(lines) if re.match(r"^[A-Za-z_.]*(Error|Exception|Exit)\b", ln)), "")
+    return ": ".join(part for part in (deepest, error) if part)
+
+
+def _head_run(
+    wb: Workbench, criterion: Criterion, cap: int, support: SupportPlan, rel: str
+) -> tuple[E2eRun | None, dict[str, str], str, str]:
+    """The head run (L4-VER-035, design D16): with the e2e runner's own support files the unit changed at their base
+    versions (never added app data, never the unit's other test files: only the generated file `rel` is collected, on
+    every step-5 run). There is no run with the unit's files in place: a run that cannot be made so (the server does
+    not start, a test errors, none ran) holds the criterion. Returns (the run, the traced tests, how it ran, why not);
+    `how` is "" when the run could not be made the way the rule says."""
+    plan = runner_support(support, wb.cfg, wb.git)
+    env = collect_only_env([rel])
+    if not plan.changes:
+        run = run_e2e(wb, name="e2e-head", extra_env=env)
+        return run, _traced(criterion, run.report, cap), "unchanged", ""
+    reverted = ", ".join(path for path, _ in plan.changes)
+    with support_at_base(wb, plan.base_sha, plan):
+        try:
+            run = run_e2e(wb, name="e2e-head", extra_env=env)
+        except ServerNotReady as exc:
+            where = _server_failure(wb, exc.log_path)
+            why = f"the app does not start without the unit's test and support files (reverted: {reverted})"
+            return None, {}, "", f"{why}: {where}" if where else why
+        found = _traced(criterion, run.report, cap)
+    if found and "error" not in found.values():
+        return run, found, "base", ""
+    cause = "a test of the file errored" if found else "no test of the new file ran"
+    return run, found, "", f"it does not run without the unit's test and support files ({reverted}): {cause}"
+
+
+def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: SupportPlan = NO_SUPPORT) -> _Verdict:
     """Run the new test at the merge base, then at the head. `accepted` when it fails at the base and passes at the
     head. At the base only an assertion failure counts as failing: an error (a fixture, a browser that cannot launch)
     says nothing about the app, so it never lets a test through (`base_error`). A base that cannot be served
     while the head can is about the unit (it adds the app), not the harness: `base_unservable`. A head server that
     never gets ready raises (exit 1)."""
     cap = wb.cfg.verifier.max_criteria_per_test
+    rel = test_path("e2e", criterion.id)
+    env = collect_only_env([rel])
     try:
-        at_base = run_e2e(wb, base, name="e2e-base")
+        at_base = run_e2e(wb, base, name="e2e-base", extra_env=env)
     except ServerNotReady as exc:
-        run_e2e(wb, name="e2e-head")  # raises when the head is not served either: then it is the harness's fault
+        run_e2e(wb, name="e2e-head", extra_env=env)  # raises when the head is not served either: the harness's fault
         return _Verdict("base_unservable", f"the merge-base app cannot be served ({exc})")
     found = _traced(criterion, at_base.report, cap)
     if not found:
@@ -134,10 +197,11 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion) -> _Verdict:
         bad = sorted(i for i, status in found.items() if status == "error")
         reason = f"the test errors at the merge base, which proves nothing: {', '.join(bad[:3])}"
         return _Verdict("base_error", reason, base="error")
-    at_head = run_e2e(wb, name="e2e-head")
-    found = _traced(criterion, at_head.report, cap)
+    at_head, found, how, why = _head_run(wb, criterion, cap, support, rel)
+    if not how or at_head is None:
+        return _Verdict("uncollectable", _short(why), base="fail")
     if not found:
-        return _Verdict("uncollectable", "no test of the new file ran at the head", base="fail")
+        return _Verdict("uncollectable", "no test of the new file ran at the head", base="fail", support=how)
     failing = sorted(i for i, status in found.items() if status != "passed")
     if failing:
         artifacts = tuple(
@@ -145,9 +209,9 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion) -> _Verdict:
         )
         return _Verdict(
             "fails_at_head", f"the test fails at the head: {', '.join(failing[:3])}", artifacts, "fail",
-            _outcome(found.values()),
+            _outcome(found.values()), support=how,
         )  # fmt: skip
-    return _Verdict("accepted", base="fail", head="pass", tests=tuple(sorted(found)))
+    return _Verdict("accepted", base="fail", head="pass", tests=tuple(sorted(found)), support=how)
 
 
 def generate_ui_test(
@@ -159,6 +223,7 @@ def generate_ui_test(
     ui_diff: str,
     snapshot: str,
     timeout_s: int = 600,
+    support: SupportPlan = NO_SUPPORT,
 ) -> GeneratedOutcome:
     """One criterion. `base` is the merge-base checkout of `base_checkout`, set up and ready to be served."""
     rel = test_path("e2e", criterion.id)
@@ -174,7 +239,7 @@ def generate_ui_test(
     def outcome(attempts: int, verdict: _Verdict) -> GeneratedOutcome:
         return GeneratedOutcome(
             criterion.id, verdict.status, rel if code else None, attempts, verdict.reason, code, verdict.artifacts,
-            cost, model, sha, verdict.base, verdict.head, verdict.tests, digest,
+            cost, model, sha, verdict.base, verdict.head, verdict.tests, digest, verdict.support,
         )  # fmt: skip
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -201,7 +266,7 @@ def generate_ui_test(
                 write_test_file(tree, rel, code)  # replaces only the harness's own marked file
                 written.append(tree)
             reason = _lint(wb)
-            last = _Verdict("lint_failed", reason) if reason else _discriminates(wb, base, criterion)
+            last = _Verdict("lint_failed", reason) if reason else _discriminates(wb, base, criterion, support)
         except FileExistsError:
             why = f"{rel} already exists and was never proved discriminating: step 5 never overwrites another's test"
             return outcome(attempt, _Verdict("writer_failed", why))
@@ -239,6 +304,7 @@ def generate_ui_tests(
     base_sha: str,
     ui_diff: str,
     snapshot: str,
+    support: SupportPlan = NO_SUPPORT,
 ) -> UiGeneration:
     """Step 5 over the UI criteria without an e2e test. The merge-base checkout is made once and removed in `finally`
     (also when a server never gets ready, which propagates as exit 1). No gaps: nothing is checked out or served."""
@@ -247,11 +313,11 @@ def generate_ui_tests(
         return out
     with base_checkout(wb, base_sha) as base:
         for criterion in gaps:
-            done = generate_ui_test(wb, judge, criterion, base, ui_diff=ui_diff, snapshot=snapshot)
+            done = generate_ui_test(wb, judge, criterion, base, ui_diff=ui_diff, snapshot=snapshot, support=support)
             wb.emit(
                 "verify.generated", criterion=criterion.id, test=done.path, base=done.base, head=done.head,
                 attempts=done.attempts, status=done.status, reason=done.reason, model=done.model,
-                tests=list(done.tests), sha256=done.sha256,
+                tests=list(done.tests), sha256=done.sha256, support=done.support,
             )  # fmt: skip
             out.outcomes.append(done)
     return out

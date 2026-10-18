@@ -12,14 +12,20 @@ every thread's traceback, 30 s later, and the process ends with exit 70. It does
 when the project's pytest-timeout sets a limit of its own (`--timeout`, `PYTEST_TIMEOUT` or the `timeout` ini value:
 its limit wins); an installed pytest-timeout that sets none leaves only the tests with a `timeout` marker to it. Off the
 main thread (an xdist worker on execnet's thread model) there is no SIGALRM, only the hard limit.
+
+With `L4_COLLECT_ONLY=<path>[<os.pathsep><path>...]` set (the verifier's audit run, design D15) it collects only those
+Python files, relative to the directory pytest runs in: every other `.py` file except a `conftest.py` is ignored, and a
+directory never is. An empty value collects no Python file.
 """
 
 import contextlib
 import faulthandler
+import json
 import os
 import signal
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -36,6 +42,28 @@ _state: dict[str, bool] = {"watchdog": False, "defer_marked": False}
 def _write_real_stderr(text: str) -> None:
     with contextlib.suppress(OSError):
         os.write(_REAL_STDERR, text.encode("utf-8", "replace"))
+
+
+def _make_record_hook():  # type: ignore[no-untyped-def]
+    """The outcome record, opened when the plugin is imported (it is loaded with `-p`, before any conftest). The path
+    comes from `L4_OUTCOME_FILE`, which is dropped from the environment at once; the descriptor lives only in this
+    closure, so no attribute of the module names it, and rows are written with `os.write` as each phase ends."""
+    path = os.environ.pop("L4_OUTCOME_FILE", "")
+    fd = -1
+    if path:
+        with contextlib.suppress(OSError):
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+
+    def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+        if fd >= 0:
+            row = {"id": report.nodeid, "when": report.when, "outcome": report.outcome}
+            with contextlib.suppress(OSError):
+                os.write(fd, (json.dumps(row) + "\n").encode("utf-8"))
+
+    return pytest_runtest_logreport
+
+
+pytest_runtest_logreport = _make_record_hook()
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -98,6 +126,23 @@ def _disarm(soft: bool) -> None:
         signal.setitimer(signal.ITIMER_REAL, 0)
     faulthandler.cancel_dump_traceback_later()
     _current["deadline"] = None
+
+
+def _collect_only() -> set[str] | None:
+    raw = os.environ.get("L4_COLLECT_ONLY")
+    if raw is None:
+        return None
+    return {os.path.realpath(p) for p in raw.split(os.pathsep) if p}
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    only = _collect_only()
+    if only is None or collection_path.suffix != ".py" or collection_path.name == "conftest.py":
+        return None
+    bases = {Path.cwd(), config.invocation_params.dir, config.rootpath}
+    listed = {os.path.realpath(b / p) for b in bases for p in os.environ["L4_COLLECT_ONLY"].split(os.pathsep) if p}
+    listed |= {p for p in only if os.path.isabs(p)}
+    return None if os.path.realpath(collection_path) in listed else True
 
 
 def pytest_runtest_logstart(nodeid: str, location: object) -> None:

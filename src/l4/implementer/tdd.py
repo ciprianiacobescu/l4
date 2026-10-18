@@ -89,13 +89,14 @@ from l4.implementer.result import (
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
 from l4.implementer.retrynote import RetryNote, note_block, retry_note
 from l4.implementer.stubs import ProductionGuard, enforce_red_scope, escaping_links, restore_to_base
+from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env, cache_env
-from l4.security.protected import glob_match, revert_protected
+from l4.security.protected import changed_paths, glob_match, revert_protected
 from l4.specs.base import Framework, Marker, Task
 from l4.specs.criteria import trace_ids
 from l4.specs.fixmark import read_fix_marker
@@ -107,7 +108,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
-from l4.verifier.scan import task_tags
+from l4.verifier.scan import has_human_tag
 from l4.yolo.digest import RevisionMissing, unit_digest
 
 log = logging.getLogger("l4.implementer")
@@ -868,6 +869,83 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
     return note
 
 
+_PREEXISTING_ADVICE = (
+    "A red step adds new tests with new names. Leave every existing test as it is, and the fixtures, helpers, "
+    "constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new "
+    "file. A statement that is not a plain definition (a call at import, a computed constant, a logger) reaches every "
+    "test of its file: put it in a new file too. If an existing test is wrong, report status blocked with a question "
+    "that names it."
+)
+
+
+def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleTests | None) -> list[Tampered]:
+    """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted, in the test
+    files it changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new
+    place is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
+    if has_human_tag(wb.ref.path, task.title, "test-infra"):
+        return []
+    root, tdd = wb.worktree, wb.cfg.tdd
+    changed = changed_paths(wb.git, base, excludes=wb.excludes)
+    paths = sorted(p for p in changed if p.endswith(".py") and _matches(tdd.test_globs, p))
+
+    def now(path: str) -> str | None:
+        target = root / path
+        if target.is_symlink() or not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8", errors="replace")
+
+    def then(path: str) -> str:
+        if not changed[path]:
+            return ""
+        done = wb.git.run("show", f"{base}:{path}", check=False)
+        return done.stdout if done.returncode == 0 else ""
+
+    found: list[Tampered] = []
+    deleted: dict[tuple[str, str], str] = {}
+    added: dict[tuple[str, str], str] = {}
+    for path in paths:
+        before, after = then(path), now(path)
+        was = facts_of(before) or {}
+        for t in compare(path, before, after):
+            if t.kind == "deleted":
+                deleted[path, t.name] = (was[t.name].definition, was[t.name].closure)
+            found.append(t)
+        if after is not None and (new := facts_of(after)):
+            added |= {
+                (path, n): (f.definition, f.closure)
+                for n, f in new.items()
+                if f.test and not (n in was and was[n].test)
+            }
+    gone = moved(deleted, added)
+    stale_ids = list(stale.tests) if stale else []
+    return [
+        t
+        for t in found
+        if (t.path, t.name) not in gone and not any(names_test_id(i, t.path, t.name) for i in stale_ids)
+    ]
+
+
+def _preexisting_reason(found: Sequence[Tampered]) -> str:
+    shown = "; ".join(f"{t.path}::{t.name} ({t.why})" for t in found[:MAX_LISTED])
+    more = f" (+{len(found) - MAX_LISTED} more)" if len(found) > MAX_LISTED else ""
+    return f"red changed tests that existed before this step: {shown}{more}"
+
+
+def _reject_preexisting(wb: Workbench, found: Sequence[Tampered]) -> RedOutcome:
+    """The attempt fails: one `guard.test_tamper` per file, nothing kept, and a reason and an excerpt that say what to
+    do (putting the file back would also drop the new tests the agent appended to it, and the guard never edits an
+    agent's file in place, L4-IMP-002)."""
+    for path in sorted({t.path for t in found}):
+        mine = [t for t in found if t.path == path]
+        wb.emit(
+            "guard.test_tamper", phase="red", path=path, rule="pre-existing test", action="rejected",
+            tests=[t.name for t in mine], why="; ".join(f"{t.name}: {t.why}" for t in mine),
+        )  # fmt: skip
+    wb.discard_changes()
+    lines = "\n".join(f"- {t.path}::{t.name}: {t.why}" for t in found)
+    return RedOutcome("failed", _preexisting_reason(found), excerpt=f"{_PREEXISTING_ADVICE}\n{lines}")
+
+
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
     stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
@@ -1080,6 +1158,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
+    if tampered_tests := preexisting_test_changes(wb, task, base, stale):  # after classify_red: it keeps its reasons
+        return _reject_preexisting(wb, tampered_tests)
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
     discriminating: Mapping[str, Sequence[str]] = {}
@@ -1293,7 +1373,7 @@ def run_green(
 def freeze_test_paths(wb: Workbench, task: Task, base: str, *, keep: Collection[str] = (), phase: str) -> list[str]:
     """L4-IMP-006 (7): after green or a fix chore no path of the test or support globs differs from `base`, but the
     `keep` paths a human answer unfroze. A task with the human `[test-infra]` tag is exempt."""
-    if "test-infra" in task_tags(task.title):
+    if has_human_tag(wb.ref.path, task.title, "test-infra"):
         return []
     tdd = wb.cfg.tdd
     return restore_test_paths(

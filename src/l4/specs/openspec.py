@@ -421,10 +421,16 @@ def _flat(text: str, limit: int = MAX_TITLE_CHARS) -> str:
     return one if len(one) <= limit else one[: limit - 3].rstrip() + "..."
 
 
+def _plain(text: str, limit: int = MAX_TITLE_CHARS) -> str:
+    """`_flat` for text that becomes a task, a heading or a proposal line: the brackets go, so that model-written text
+    cannot carry a `[tag]` (`[test-infra]`, `[config]`) that exempts a rule (third review, M3)."""
+    return _flat(text.replace("[", "(").replace("]", ")"), limit)
+
+
 def _requirement(r: DeltaRequirement) -> str:
-    lines = [f"### Requirement: {_flat(r.title)}", "The behaviour pinned by the scenarios below SHALL hold.", ""]
+    lines = [f"### Requirement: {_plain(r.title)}", "The behaviour pinned by the scenarios below SHALL hold.", ""]
     for s in r.scenarios:
-        lines += [f"#### Scenario: {_flat(s.name)}", s.text.strip(), ""]
+        lines += [f"#### Scenario: {_plain(s.name)}", s.text.strip(), ""]
     return "\n".join(lines)
 
 
@@ -442,7 +448,7 @@ def _requests(findings: Sequence[Finding]) -> str:
 
 def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding], *, follow_up: bool = False) -> str:
     if follow_up:
-        cites = "\n".join(f"- {', '.join(f.ids)}: {_flat(f.title)}" for f in findings)
+        cites = "\n".join(f"- {', '.join(f.ids)}: {_plain(f.title)}" for f in findings)
         return (
             f"# Proposal: follow-up {round} for {parent.name}\n\n## Why\n{_requests(findings)}"
             f"`{parent.name}` was merged, and a person asked for the changes above in its `feedback.md`. This change "
@@ -450,8 +456,8 @@ def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding], *, follo
             f"## Impact\nThe code and the tests of `{parent.name}`.\n"
         )
     cites = "\n".join(
-        f"- {', '.join(f.ids)} ({f.severity}): {_flat(f.title)}"
-        + (f": {_flat(f.detail, MAX_DETAIL_CHARS + MAX_DECISION_CHARS + 400)}" if f.detail else "")
+        f"- {', '.join(f.ids)} ({f.severity}): {_plain(f.title)}"
+        + (f": {_plain(f.detail, MAX_DETAIL_CHARS + MAX_DECISION_CHARS + 400)}" if f.detail else "")
         for f in findings
     )
     return (
@@ -467,7 +473,7 @@ def _tasks(findings: Sequence[Finding], added: Mapping[str, Sequence[str]]) -> s
     for number, f in enumerate(findings, 1):
         criteria = [*f.criteria, *(c for i in f.ids for c in added.get(i, ()))]
         cites = "; ".join([", ".join(f.ids), *([", ".join(dict.fromkeys(criteria))] if criteria else [])])
-        lines.append(f"- [ ] 1.{number} {_flat(f.title)} ({cites})")
+        lines.append(f"- [ ] 1.{number} {_plain(f.title)} ({cites})")
     return "\n".join(lines) + "\n"
 
 

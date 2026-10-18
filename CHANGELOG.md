@@ -49,6 +49,74 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A symlink in a `PATH` directory, or a shim into a project's `node_modules`, can no longer expose the files next to its
   target: the sandbox binds the target file or the package, and skips any tool path that is or lies inside a login or
   a known secret location (`~/.config/gh`, `~/.aws`, ...).
+- The outcome record a pytest gate keeps could be emptied by a conftest that reached the plugin through `sys.modules`.
+  The plugin now opens the record when it is imported and keeps the descriptor out of reach; a pytest report with test
+  cases and an empty or missing record fails with `the test report was altered (no outcome record)`; a failed row of a
+  phase wins over a later passed one; and the content scan flags references to `l4_trace`, `_OUTCOME`,
+  `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus` / `.xmlpath`.
+  Only those exact names count (a fixture called `xmlpath` or a constant `_OUTCOMES` is fine), `verifier.test_awareness_allow`
+  lists the match instead of blocking it, the record sits outside the gate's temp directory under a random name, and a
+  record the plugin created but left empty fails the gate even when a wrapper (`make test`) ran pytest.
+- A red step that weakened, rewrote or shadowed a test that already existed (a second `def` of its name, a helper, a
+  constant, a fixture or an autouse fixture it uses in its file) used to be committed and judged green. It now fails its
+  attempt with `red changed tests that existed before this step: <path>::<name> (<why>)`, nothing is committed, and the
+  retry prompt says what to do. A `[test-infra]` task and the stale tests of a reopened task are exempt
+  (L4-IMP-045..048).
+- Step 1 never saw a weakened pre-existing test: a unit whose test went from `== 3.75` to `is not None` and whose code
+  then returned a wrong value passed. It now compares each test that exists at the base per test on the AST, by file and
+  qualified name, and a harness commit that changes or deletes one is the blocker `a pre-existing test was changed` or
+  `a pre-existing test was deleted`; a later red commit that changes a test an earlier step wrote is a blocker too.
+  People's changes and the ones a `[test-infra]` task, a `task.unfrozen` or a `tests.superseded` event allows are listed
+  in `verification.md` (L4-VER-030..032).
+- A deleted test was hidden when any other changed test file defined a test of the same name, whatever its body, and a
+  person's deletion was not listed either. A test now counts as moved only when the same definition appears under a new
+  file or name (L4-IMP-047, L4-VER-030, L4-VER-031).
+- Audit tests ran with the unit's own `conftest.py` in place, so an autouse fixture could make the audit of broken code
+  pass. Audit tests, their zero-value run and a generated UI test's head run now use the unit's test-support files at
+  their base versions (the amended entry below widens this to every test file for the audit); the Audit table of
+  `verification.md` has a `Support` column, and `verify.audit` and `verify.generated` carry `support`
+  (L4-VER-033..036).
+- Step 1 now also blocks a test-support file that patches code the unit changed in module-level code or an autouse
+  fixture (it used to check only the files a task opened); a fixture a test requests by name is listed (L4-VER-037).
+- Step 1 now runs the base's tests on the unit's code: the test gate runs at head with every test and support file the
+  unit added or changed at its base version (added ones set aside), and a test that passed at the base must still pass.
+  A weakened helper module, a weakened or hooked conftest, a swap through `__code__` or `globals()`, a production module
+  that imports only with the unit's conftest, and a weakened Go or TypeScript test (any language with a JUnit report)
+  now fail step 1 with `a pre-existing test fails on the unit's code` or `a pre-existing test no longer runs on the
+  unit's code`; the integrity table has the row `pre-existing tests still pass`. A test a `tests.superseded` event, a
+  `task.unfrozen`, a `[test-infra]` task or only people's commits cover is listed (L4-VER-038).
+- The comparison of a pre-existing test now sees statements that are not plain definitions (attribute assignments,
+  `globals()`, `setattr`, a class attribute), inherited tests, real locals, normalised docstrings and moves that keep the
+  closure; the content scan reads helper modules under the test globs and flags `pytest_pyfunc_call`, a plain
+  `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-IMP-045..049,
+  L4-VER-039).
+- The audit runs without any of the unit's test or support files and collects only the audit file; it never falls back
+  to them, holds a criterion whose production module does not import, and keeps the writer's collection retry. A
+  generated UI test's head run keeps app data the unit added under `fixtures/` and no longer crashes when the server
+  does not start without the unit's runner support (L4-VER-033..035).
+- Step 1 scans the unit's production diff: a line that names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*`
+  variable is the blocker `production code reacts to the test run` (code that behaves differently while the verifier runs);
+  `"pytest" in sys.modules`, importing pytest, `atexit.register` and a `sys.argv` check for pytest are listed for the
+  judge in `verification.md`. A support file that only people changed, a `[test-infra]` task changed or a `task.unfrozen`
+  frees stays at head for the run of the base's tests, listed (L4-VER-038, L4-VER-039).
+- The audit file is written under the directory the test command collects (a command narrowed to `tests/unit` used to
+  leave it uncollected and the criterion held); a test command that never collects it is a minor rejection naming the
+  command. A generated UI test's head run reverts a helper named like a test module and no longer falls back to the
+  unit's support files: a server that does not start without them holds the criterion (L4-VER-033..035).
+- New config key `verifier.test_awareness_allow` (list of production path globs, default empty): a match of the test-awareness
+  blocker in a file under one of them is listed for the judge with its glob instead of blocking. It is read from the base
+  branch's `.l4/config.yaml`, never from the unit, and `l4 doctor` shows it (CFG-010) (L4-VER-039).
+- Every pytest gate run is cross-checked: the harness's plugin records what pytest judged for each test outside the
+  worktree, and a JUnit report that disagrees (a pass the record does not hold, a failure removed) fails the gate with
+  `the test report was altered` and the test ids; a conftest or helper with `atexit.register`, `os._exit`, a
+  session-end hook that writes a file, or a name of the report path is a content-scan hit (L4-IMP-006 (8), L4-VER-039).
+- The audit file is written next to the unit's own test files (an option value such as `--ignore tests/legacy` or `--tb
+  short` no longer picks the directory), confirmed by a `--collect-only` run when the unit has no test file there
+  (L4-VER-033).
+- A `[test-infra]` or `[config]` tag in a fix unit's or follow-up unit's task exempts nothing, and brackets in
+  model-written finding text become parentheses before they reach a task (L4-IMP-006).
+- The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
+  `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
 
 ### Changed
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner

@@ -54,9 +54,9 @@ def test_setup_gets_the_network_and_the_unit_cache(make_bench):
     seen = []
     real = type(bench.wb).gate_spec
 
-    def spy(*, network, tree=None, builds_env=False):
+    def spy(*, network, tree=None, builds_env=False, record_dir=None):
         seen.append((network, builds_env))  # a setup command alone builds the environment (L4-SEC-033, L4-SEC-035)
-        return real(bench.wb, network=network, tree=tree, builds_env=builds_env)
+        return real(bench.wb, network=network, tree=tree, builds_env=builds_env, record_dir=record_dir)
 
     bench.wb.gate_spec = spy  # type: ignore[method-assign]
     run_setup(bench.wb)

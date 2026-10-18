@@ -10,18 +10,23 @@ check (2.11), the secret scan (2.12).
 M1: verifier 2.7-2.9, 2.11, 2.12, 2.13 (the red re-run, verifier red commits, `pre_adoption`), other languages.
 """
 
+import ast
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from l4.config.loader import ConfigSchemaError, load_config_text
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.implementer.gateconfig import GateConfig, Kind, allowed_kinds
-from l4.implementer.opened import check_opened, unit_modules
+from l4.implementer.opened import check_opened, new_patches, unit_modules
+from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
+from l4.specs.fixmark import task_marker
 from l4.specs.followup import feedback_home, follow_up_problem
 from l4.state.ledger import LedgerEvent
 from l4.vcs.authorship import SHA, commit_records, is_harness
@@ -61,6 +66,20 @@ class Outcome:
     human_suppressions: list[str] = field(default_factory=list)  # inline suppressions a person's commit wrote: listed
     human_scan: list[str] = field(default_factory=list)  # content-scan hits only people's commits introduced: listed
     human_config: list[str] = field(default_factory=list)  # gate and runner configuration only people's commits changed
+    allowed_tests: list[str] = field(default_factory=list)  # pre-existing test changes an allowance covers: listed
+    mocked: list[str] = field(default_factory=list)  # patches of the unit's code a support fixture makes on request
+    base_tests: dict[str, Any] | None = None  # the passed ids of the base's run (L4-VER-038), kept for later rounds
+    listed: list[str] = field(default_factory=list)  # signs of a test run in production code, shown to the judge
+
+
+def _human_tag(ctx: IntegrityContext, unit: str, title: str, tag: str) -> bool:
+    """A person's `[tag]` on a task. A fix unit's task, and any task of a follow-up unit, was written by the harness
+    from model-written findings: its tags exempt nothing (third review, M3)."""
+    if tag not in task_tags(title):
+        return False
+    if unit != ctx.unit_id:
+        return False  # a fix unit
+    return not ctx.unit_dirs or task_marker(ctx.git.repo / ctx.unit_dirs[0]) is None
 
 
 def _blocker(title: str, detail: str, severity: Severity = Severity.BLOCKER) -> Finding:
@@ -199,64 +218,201 @@ def _is_superseded(superseded: Sequence[str], path: str, name: str) -> bool:
     """A recorded id `tests.test_long::test_long` names the function `name` of the module `path` (a parametrised
     `name[x]` and a class between module and function count; the module must match, so a same-named test elsewhere
     stays protected)."""
-    module = path.removesuffix(".py").replace("/", ".")
-    for test in superseded:
-        where, _, tail = test.rpartition("::")
-        if tail.split("[", 1)[0] == name and (where == module or where.startswith(f"{module}.")):
+    return any(names_test_id(test, path, name) for test in superseded)
+
+
+def _introduced(name: str, kind: str) -> Callable[[str, str], bool]:
+    """True for a commit (text at its first parent, text at the commit) that made this change to the test `name`."""
+
+    def check(before: str, after: str) -> bool:
+        was, now = facts_of(before) or {}, facts_of(after)
+        if name not in was or not was[name].test:
+            return False
+        if kind == "deleted":
+            return now is not None and name not in now
+        if now is None or name not in now:
             return True
-    return False
+        old, new = was[name], now[name]
+        return (old.parts, old.closure) != (new.parts, new.closure)
+
+    return check
+
+
+def _unfrozen_source(ctx: IntegrityContext, commit: "Commit", path: str) -> str | None:
+    """What freed `path` for this commit's task: the source of a `task.unfrozen` of the same unit and task naming it."""
+    for e in ctx.events:
+        if (
+            e.type == "task.unfrozen" and e.data.get("task") == commit.task and _unit_of(ctx, e) == commit.unit
+            and path in [str(p) for p in e.data.get("paths") or []]
+        ):  # fmt: skip
+            named = e.data.get("reason") == "named_by_task"
+            return str((e.data.get("source") if named else e.data.get("question")) or "a human answer")
+    return None
+
+
+def _allowance(ctx: IntegrityContext, who: list[list[str]], path: str, by_sha: Mapping[str, "Commit"]) -> str | None:
+    """`(task <t>: [test-infra])` / `(task <t>: unfrozen by <source>)` when every harness commit in `who` is covered by
+    an allowance (L4-VER-031), else None. A harness commit without an `L4-Task` is never covered."""
+    infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
+    reasons: list[str] = []
+    for record in who:
+        if not is_harness(record):
+            continue
+        commit = by_sha.get(record[SHA])
+        if commit is None:
+            return None
+        if (commit.unit, commit.task) in infra:
+            reasons.append(f"task {commit.task}: [test-infra]")
+        elif (source := _unfrozen_source(ctx, commit, path)) is not None:
+            reasons.append(f"task {commit.task}: unfrozen by {source}")
+        else:
+            return None
+    return f"({'; '.join(dict.fromkeys(reasons))})" if reasons else None
+
+
+def _skip_hidden(skipped: Sequence[str], path: str, name: str) -> bool:
+    """A test that the skip check already blocks (its own marker, its class's, or the module's) is reported there."""
+    keys = {f"{path}::{name}", f"{path}::<module>"}
+    if "." in name:
+        keys.add(f"{path}::{name.split('.', 1)[0]}")
+    return bool(keys & set(skipped))
 
 
 def check_tests(ctx: IntegrityContext) -> Outcome:
-    """A `test_*` function that exists at the base and is gone at head is a blocker (a test moved to another changed
-    file is not gone), unless a `tests.superseded` event records it as stale (a spec edit changed the criterion it
-    traced and the reopened task's red step replaced it, L4-OPS-015: listed in the note); so is a skip, skipif or
-    xfail marker, or a `pytest.skip(` call, that head has and the base did not (new tests included). Per commit
-    (L4-SEC-004, M1.9): one that only people's commits introduced is allowed and listed (`Outcome.human_tests`);
-    any harness commit that introduced it too keeps it a blocker."""
+    """Every test that exists at the base in a changed test file is compared with head, per test on the AST by file and
+    qualified name (L4-VER-030, `l4.implementer.tamper`): a test changed, bound again, unparsable or deleted (and not
+    moved as the same definition to a new place) is a blocker, unless a `tests.superseded` event records it as stale
+    (a spec edit changed the criterion it traced and the reopened task's red step replaced it, L4-OPS-015: listed in
+    the note). A skip, skipif or xfail marker, or a `pytest.skip(` call, that head has and the base did not (new tests
+    included) is a blocker too. Per commit (L4-SEC-004, M1.9): a change that only people's commits introduced is
+    allowed and listed (`Outcome.human_tests`); one whose every harness commit belongs to a `[test-infra]` task, or
+    changes a path a `task.unfrozen` of that task names, is allowed and listed (`Outcome.allowed_tests`, L4-VER-031);
+    any other harness commit keeps it a blocker. A later red commit may not change a test an earlier step wrote
+    (L4-VER-032)."""
     globs = ctx.cfg.tdd.test_globs
     changed = {p: s for p, s in _changed(ctx.git, ctx.base_sha, ctx.head_sha).items() if p.endswith(".py")}
     files = {p: s for p, s in changed.items() if _matches(globs, p) and not _in_unit_dirs(ctx, p)}
+    others = sorted(
+        p for p, s in _changed(ctx.git, ctx.base_sha, ctx.head_sha).items()
+        if not p.endswith(".py") and _matches(globs, p) and not _in_unit_dirs(ctx, p) and s != "A"
+    )  # fmt: skip
+    elsewhere = f"{len(others)} other test file(s) are checked by the run of pre-existing tests"
+    if not files and others:
+        return Outcome(note=f"no Python test file changed; {elsewhere}", skipped=True)
     if not files:
         return Outcome(note="no test file changed", skipped=True)
-    head_defined: set[str] = set()
-    for path, status in files.items():
-        if status != "D":
-            head_defined |= scan.defined_tests(_text(ctx.git, ctx.head_sha, path))
-    deleted, skipped, human, replaced = [], [], [], []
-    recorded = _superseded(ctx)
+    found: list[Tampered] = []
+    gone: dict[tuple[str, str], str] = {}
+    added: dict[tuple[str, str], str] = {}
+    skipped, human, allowed, replaced = [], [], [], []
     for path, status in sorted(files.items()):
         before = _text(ctx.git, ctx.base_sha, path)
-        after = "" if status == "D" else _text(ctx.git, ctx.head_sha, path)
-        for name in sorted(scan.defined_tests(before) - scan.defined_tests(after)):
-            if name in head_defined:
-                continue
-            if _is_superseded(recorded, path, name):
-                replaced.append(f"{path}::{name}")
-                continue
-            who = _introducers(
-                ctx, path, lambda b, a, n=name: n in scan.defined_tests(b) and n not in scan.defined_tests(a)
-            )
-            if _by_people(who):
-                human.append(f"{path}::{name} deleted by {', '.join(r[SHA][:10] for r in who)}")
-            else:
-                deleted.append(f"{path}::{name}")
-        added = scan.skip_markers(after) - scan.skip_markers(before)
-        for name in sorted(added):
+        after = None if status == "D" else _text(ctx.git, ctx.head_sha, path)
+        was = facts_of(before) or {}
+        for t in compare(path, before, after):
+            found.append(t)
+            if t.kind == "deleted":
+                gone[path, t.name] = (was[t.name].definition, was[t.name].closure)
+        if after is not None and (now := facts_of(after)):
+            added |= {
+                (path, n): (f.definition, f.closure)
+                for n, f in now.items()
+                if f.test and not (n in was and was[n].test)
+            }
+        markers = scan.skip_markers(after or "") - scan.skip_markers(before)
+        for name in sorted(markers):
             who = _introducers(ctx, path, lambda b, a, n=name: scan.skip_markers(a)[n] > scan.skip_markers(b)[n])
             if _by_people(who):
                 human.append(f"{path}::{name} skip marker added by {', '.join(r[SHA][:10] for r in who)}")
             else:
                 skipped.append(f"{path}::{name}")
+    recorded = _superseded(ctx)
+    by_sha = {c.sha: c for c in commits(ctx)}
+    moved_away = moved(gone, added)
+    changes, deletions = [], []
+    for t in found:
+        if (t.path, t.name) in moved_away or _skip_hidden(skipped, t.path, t.name):
+            continue
+        if any(names_test_id(i, t.path, t.name) for i in recorded):
+            replaced.append(f"{t.path}::{t.name}")
+            continue
+        who = _introducers(ctx, t.path, _introduced(t.name, t.kind))
+        word = "deleted" if t.kind == "deleted" else "changed"
+        if _by_people(who):
+            by = ", ".join(r[SHA][:10] for r in who)
+            if f"{t.path}::{t.name} skip marker added by {by}" not in human:  # the skip entry already says it
+                human.append(f"{t.path}::{t.name} {word} by {by}")
+        elif (why := _allowance(ctx, who, t.path, by_sha)) is not None:
+            allowed.append(f"{t.path}::{t.name} {word} {why}")
+        elif t.kind == "deleted":
+            deletions.append(f"{t.path}::{t.name}")
+        else:
+            changes.append(f"{t.path}::{t.name} ({t.why})")
+    later = _later_red_changes(ctx)
     findings = []
-    if deleted:
-        findings.append(_blocker("a pre-existing test was deleted", _listed(deleted)))
+    if deletions:
+        findings.append(_blocker("a pre-existing test was deleted", _listed(deletions)))
+    if changes:
+        findings.append(_blocker("a pre-existing test was changed", _listed(changes)))
     if skipped:
         findings.append(_blocker("a skip or xfail marker was added", _listed(skipped)))
+    if later:
+        findings.append(_blocker("a red step changed a test that an earlier step wrote", _listed(later)))
     extra = f" (+{len(human)} by humans, listed)" if human else ""
+    if others:
+        extra += f"; {elsewhere}"
+    if allowed:
+        extra += f" (+{len(allowed)} allowed, listed)"
     if replaced:
         extra += f"; superseded by a changed criterion, not deleted: {_listed(replaced)}"
-    return Outcome(findings, f"{len(files)} test file(s) compared with the base{extra}", human_tests=human)
+    return Outcome(
+        findings, f"{len(files)} test file(s) compared with the base{extra}", human_tests=human, allowed_tests=allowed
+    )
+
+
+def _later_red_changes(ctx: IntegrityContext) -> list[str]:
+    """L4-VER-032: a test that exists at a red commit's parent and not at the base, that the commit changed, bound again
+    or deleted (the base's own tests are judged by the comparison above)."""
+    tdd = ctx.cfg.tdd
+    steps = {c.sha: c for c in commits(ctx) if c.tdd in ("red", "already-satisfied")}
+    infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
+    recorded = _superseded(ctx)
+    hits: list[str] = []
+    for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
+        commit = steps.get(record[SHA])
+        if commit is None or not is_harness(record) or not commit.parent or (commit.unit, commit.task) in infra:
+            continue
+        paths = sorted(
+            p for p, s in _changed(ctx.git, commit.parent, commit.sha).items()
+            if p.endswith(".py") and _matches(tdd.test_globs, p) and not _in_unit_dirs(ctx, p)
+        )  # fmt: skip
+        gone: dict[tuple[str, str], str] = {}
+        added: dict[tuple[str, str], str] = {}
+        found: list[Tampered] = []
+        for path in paths:
+            before = _text(ctx.git, commit.parent, path)
+            now_blob = _blob(ctx.git, commit.sha, path)
+            after = now_blob.decode("utf-8", "replace") if now_blob is not None else None
+            was, at_base = facts_of(before) or {}, facts_of(_text(ctx.git, ctx.base_sha, path)) or {}
+            for t in compare(path, before, after):
+                if t.name in at_base and at_base[t.name].test:
+                    continue
+                found.append(t)
+                if t.kind == "deleted":
+                    gone[path, t.name] = (was[t.name].definition, was[t.name].closure)
+            if after is not None and (now := facts_of(after)):
+                added |= {
+                    (path, n): (f.definition, f.closure)
+                    for n, f in now.items()
+                    if f.test and not (n in was and was[n].test)
+                }
+        away = moved(gone, added)
+        hits += [
+            f"{t.path}::{t.name} (task {commit.task}, red commit {commit.sha[:10]}: {t.why})"
+            for t in found
+            if (t.path, t.name) not in away and not any(names_test_id(i, t.path, t.name) for i in recorded)
+        ]
+    return hits
 
 
 # --- 2.5 the red -> green freeze ------------------------------------------------------------------------------------
@@ -409,7 +565,7 @@ def check_test_paths(ctx: IntegrityContext) -> Outcome:
     tdd = ctx.cfg.tdd
     globs = (*tdd.test_globs, *tdd.test_support_globs)
     steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt", "already-done")}
-    infra = {(unit, t.key) for unit, t in ctx.tasks if "test-infra" in task_tags(t.title)}
+    infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
     hits, checked = [], 0
     for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
         commit = steps.get(record[SHA])
@@ -457,7 +613,7 @@ def commits(ctx: IntegrityContext) -> list[Commit]:
 
 def tagged_files(ctx: IntegrityContext, tag: str) -> frozenset[str]:
     """The files that commits of tasks carrying the human tag `[tag]` touched."""
-    keys = {(unit, task.key) for unit, task in ctx.tasks if tag in task_tags(task.title)}
+    keys = {(unit, task.key) for unit, task in ctx.tasks if _human_tag(ctx, unit, task.title, tag)}
     files: set[str] = set()
     for commit in commits(ctx):
         if (commit.unit, commit.task) in keys:
@@ -501,6 +657,21 @@ def _opened_patches(ctx: IntegrityContext, changed: Mapping[str, str]) -> list[s
     return hits
 
 
+def _output_count(ctx: IntegrityContext, path: str, text: str) -> int:
+    return sum(1 for why in awareness_lines(ctx, path, text).values() if why == "names the test output")
+
+
+def _is_support(ctx: IntegrityContext, path: str, source: str) -> bool:
+    """A test-support file for the scan: one of `tdd.test_support_globs`, or a `.py` file of `tdd.test_globs` that
+    defines no test (a helper module under `tests/`, L4-VER-039; a file that does not parse counts too)."""
+    if _matches(ctx.cfg.tdd.test_support_globs, path):
+        return True
+    if not _matches(ctx.cfg.tdd.test_globs, path):
+        return False
+    found = facts_of(source)
+    return not found or not any(f.test for f in found.values())
+
+
 def check_scan(ctx: IntegrityContext) -> Outcome:
     """Result-manipulating constructs in the unit's changed test-support and runner-config files, a mention of the
     coverage plugin or its output directory in any changed Python file (M1.6: such code can rewrite the diff-coverage
@@ -512,11 +683,21 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
         p: s for p, s in _changed(git, ctx.base_sha, ctx.head_sha).items() if s != "D" and not _in_unit_dirs(ctx, p)
     }
     exempt = tagged_files(ctx, "test-infra") if changed else frozenset()
+    modules = unit_modules((p for p in changed), ctx.cfg)  # the production modules the unit changed (L4-VER-037)
 
     def found_in(path: str, before: str, after: str) -> list[str]:
         found: list[str] = []
-        if path.endswith(".py") and _matches(tdd.test_support_globs, path):
+        if path.endswith(".py") and _is_support(ctx, path, after):
             found = sorted(set(scan.result_hooks(after)) - set(scan.result_hooks(before)))
+            found += [
+                "names the test output (.l4-out or a report path) in a support file"
+                for _ in range(max(0, _output_count(ctx, path, after) - _output_count(ctx, path, before)))
+            ]
+            found += [
+                f"patches {target}, which the unit changed, for every test"
+                for target, blocking in new_patches(before, after, modules)
+                if blocking and modules
+            ]
         elif _matches(tdd.runner_config_files, path):
             found = [f"adds the option {option}" for option in scan.addopts_added(before, after)]
         if path.endswith(".py") and (refs := sorted(set(scan.coverage_refs(after)) - set(scan.coverage_refs(before)))):
@@ -525,9 +706,20 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
 
     hits: list[str] = []
     human: list[str] = []
+    allowed = _awareness_allow(ctx)
+    allowed_refs: list[str] = []
     for path in sorted(changed):
         before, after = _text(git, ctx.base_sha, path), _text(git, ctx.head_sha, path)
         found = [what for what in found_in(path, before, after) if path not in exempt]
+        if path.endswith(".py") and _matches([*tdd.test_globs, *tdd.test_support_globs], path):
+            before_refs, after_refs = scan.harness_references(before), scan.harness_references(after)
+            refs = [
+                f"{why} (the harness's own plugin or report option)" for why in after_refs if why not in before_refs
+            ]
+            if refs and (glob := next((g for g in allowed if glob_match(g, path)), None)):
+                allowed_refs += [f"{path}: {what} (allowed by `{glob}`)" for what in refs]  # L4 testing its own plugin
+            else:
+                found += refs
         if not found:
             continue
         # per commit (L4-SEC-004, W-D6): a file whose offending change only people's commits introduced is the owner's
@@ -538,6 +730,16 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
         else:
             hits += [f"{path}: {what}" for what in found]
     hits += _opened_patches(ctx, _changed(git, ctx.base_sha, ctx.head_sha))
+    mocked = [
+        f"{path}: patches {target} in a fixture a test requests"
+        for path in sorted(changed)
+        if path.endswith(".py")
+        and _is_support(ctx, path, _text(git, ctx.head_sha, path))
+        and path not in exempt
+        and modules
+        for target, blocking in new_patches(_text(git, ctx.base_sha, path), _text(git, ctx.head_sha, path), modules)
+        if not blocking
+    ]
     tree = git.run_bytes("ls-tree", "-r", "--name-only", "-z", ctx.head_sha).split(b"\0")
     names = [p.decode("utf-8", "replace") for p in tree if p]
     base_names = set(
@@ -552,15 +754,22 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
     extra = f" (+{len(human)} by humans, listed)" if human else ""
     unread = sorted(p for p in changed if _unread_support(ctx, p))
     if not hits and unread:  # a green row after reading none of the changed support files would say what it did not do
-        return Outcome(note=_not_python(unread), skipped=True, human_scan=human)
+        return Outcome(note=_not_python(unread), skipped=True, human_scan=human, mocked=mocked)
+    if mocked:
+        extra += f" (+{len(mocked)} fixture patch(es) of the unit's code, listed)"
     if not hits:
         return Outcome(
-            note=f"no result-manipulating construct in the changed support and runner files{extra}", human_scan=human
+            note=f"no result-manipulating construct in the changed support and runner files{extra}",
+            human_scan=human,
+            mocked=mocked,
+            listed=allowed_refs,
         )
     return Outcome(
         [_blocker("a construct that can change what the tests report", _listed(hits))],
         f"{len(hits)} hit(s){extra}" + (f"; {_not_python(unread)}" if unread else ""),
         human_scan=human,
+        mocked=mocked,
+        listed=allowed_refs,
     )
 
 
@@ -790,6 +999,143 @@ def check_gate_config(ctx: IntegrityContext) -> Outcome:
     return Outcome([finding], f"{len(hits)} change(s) of gate or runner configuration{extra}", human_config=human)
 
 
+# --- 2.14 production code that looks for the test run (second review N1, N2; L4-VER-039) -----------------------------
+
+_BENIGN_ENV = frozenset({"PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID"})
+_ENV_NAME = re.compile(r"^(?:L4|PYTEST)_[A-Z0-9_]+$")
+_ENV_WORDS = re.compile(r"environ|getenv|process\.env|\bENV\b")
+_OUTPUT = re.compile(r"(?<![\w.-])\.l4-out(?![\w-])")
+_SIGNS = (  # other signs that code knows it runs under a test: listed for the judge, not blocked
+    re.compile(r"""['"]_?pytest['"]\s+in\s+sys\.modules"""),
+    re.compile(r"^\s*(?:import|from)\s+_?pytest\b"),
+    re.compile(r"\batexit\.register\b"),
+    re.compile(r"sys\.argv.*pytest|pytest.*sys\.argv"),
+)
+
+
+def _report_patterns(ctx: IntegrityContext) -> list[re.Pattern[str]]:
+    reports = [r for r in (*ctx.cfg.gates.test.reports, *ctx.cfg.gates.e2e.reports) if r]
+    return [re.compile(r"(?<![\w.-])" + re.escape(r) + r"(?![\w.-])") for r in reports]
+
+
+def _names_output(ctx: IntegrityContext, text: str) -> bool:
+    return bool(_OUTPUT.search(text)) or any(p.search(text) for p in _report_patterns(ctx))
+
+
+def awareness_lines(ctx: IntegrityContext, path: str, text: str) -> dict[int, str]:
+    """line number -> why, for the lines of `text` that read the run's environment or name its output. Python is read
+    with the AST: comments and docstrings are ignored, and an environment read is a call or subscript of `environ` or
+    `getenv` whose own expression holds a string `L4_*` or `PYTEST_*` (an xdist worker variable is benign). Another
+    language is read line by line, comments of the `#` and `//` kind removed."""
+    found: dict[int, str] = {}
+    if not path.endswith(".py"):
+        for number, raw in enumerate(text.splitlines(), 1):
+            line = re.sub(r"(?:^|\s)(?:#|//).*$", "", raw)
+            if _names_output(ctx, line):
+                found[number] = "names the test output"
+            elif _ENV_WORDS.search(line) and any(
+                _ENV_NAME.match(m) and m not in _BENIGN_ENV for m in re.findall(r"[A-Z][A-Z0-9_]+", line)
+            ):
+                found[number] = "reads a test-run variable"
+        return found
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return found
+    docstrings = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    parents = {id(child): node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for number, why in scan.harness_reference_lines(tree):
+        found[number] = why
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)) or id(node) in docstrings:
+            continue
+        if _names_output(ctx, node.value):
+            found[node.lineno] = "names the test output"
+        elif _ENV_NAME.match(node.value) and node.value not in _BENIGN_ENV:
+            top: ast.AST = node
+            while isinstance(parents.get(id(top)), ast.expr):
+                top = parents[id(top)]
+            if _ENV_WORDS.search(ast.unparse(top)):
+                found[node.lineno] = "reads a test-run variable"
+    return found
+
+
+def _awareness_allow(ctx: IntegrityContext) -> list[str]:
+    """`verifier.test_awareness_allow` as the BASE commit's `.l4/config.yaml` says it: a unit cannot add itself. A
+    missing or unreadable config at the base allows nothing."""
+    blob = _blob(ctx.git, ctx.base_sha, ".l4/config.yaml")
+    if blob is None:
+        return []
+    try:
+        return list(load_config_text(blob.decode("utf-8", "replace")).verifier.test_awareness_allow)
+    except ConfigSchemaError:
+        return []
+
+
+def check_test_awareness(ctx: IntegrityContext) -> Outcome:
+    """Production code that reacts to the verifier's own run (a blocker): a line of the unit's non-test, non-support
+    diff that names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*` variable. Code that only looks like it
+    knows about a test run (`"pytest" in sys.modules`, importing pytest, `atexit.register`, `sys.argv` checked for
+    pytest) is listed for the judge (`Outcome.listed`). A line only people's commits wrote is listed in `human_scan`."""
+    tdd, git = ctx.cfg.tdd, ctx.git
+    paths = sorted(
+        p for p, s in _changed(git, ctx.base_sha, ctx.head_sha).items()
+        if s != "D" and _suffix(p) in CODE_SUFFIXES and not _in_unit_dirs(ctx, p) and "/.l4/" not in f"/{p}"
+        and not _matches([*tdd.test_globs, *tdd.test_support_globs], p)
+    )  # fmt: skip
+    if not paths:
+        return Outcome(note="no production file changed", skipped=True)
+    diff = git.run(
+        "-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", ctx.base_sha,
+        ctx.head_sha, "--", *(f":(literal){p}" for p in paths),
+    ).stdout  # fmt: skip
+    allowed = _awareness_allow(ctx)
+    added: dict[str, set[int]] = {}
+    for line in scan.added_lines(diff):
+        added.setdefault(line.path, set()).add(line.number)
+    hits: dict[str, list[tuple[int, str]]] = {}
+    listed: list[str] = []
+    for path in paths:
+        text = _text(git, ctx.head_sha, path)
+        lines = text.splitlines()
+        for number, why in sorted(awareness_lines(ctx, path, text).items()):
+            if number not in added.get(path, ()):
+                continue
+            shown = lines[number - 1].strip()[:80] if 0 < number <= len(lines) else ""
+            if glob := next((g for g in allowed if glob_match(g, path)), None):
+                listed.append(f"{path}:{number}: {shown} (allowed by `{glob}`)")
+            else:
+                hits.setdefault(path, []).append((number, f"{shown}; {why}"))
+        blocked_lines = {n for n, _ in hits.get(path, ())}
+        for number in sorted(added.get(path, ())):
+            sign = 0 < number <= len(lines) and number not in blocked_lines
+            if sign and any(s.search(lines[number - 1]) for s in _SIGNS):
+                listed.append(f"{path}:{number}: {lines[number - 1].strip()[:100]}")
+    blockers: list[str] = []
+    human: list[str] = []
+    for path, found in sorted(hits.items()):
+        who = _introducers(
+            ctx,
+            path,
+            lambda before, after, p=path: len(awareness_lines(ctx, p, after)) > len(awareness_lines(ctx, p, before)),
+        )
+        rows = [f"{path}:{number} ({why})" for number, why in found]
+        if _by_people(who):
+            human += [f"{row} (added by {', '.join(r[SHA][:10] for r in who)})" for row in rows]
+        else:
+            blockers += rows
+    findings = []
+    if blockers:
+        advice = (
+            "Production code may not look for the test run, its output or its environment; a repository whose code "
+            "legitimately does names the paths in verifier.test_awareness_allow (read at the base branch)"
+        )
+        findings.append(_blocker("production code reacts to the test run", f"{_listed(blockers)}. {advice}"))
+    extra = f", {len(listed)} listed for the judge" if listed else ""
+    note = f"{len(blockers)} hit(s){extra}" if blockers else f"no production line reacts to the test run{extra}"
+    return Outcome(findings, note, human_scan=human, listed=listed)
+
+
 CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("protected paths", check_protected),
     ("pre-existing tests", check_tests),
@@ -797,6 +1143,7 @@ CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("test path freeze", check_test_paths),
     ("content scan", check_scan),
     ("gate configuration", check_gate_config),
+    ("test awareness", check_test_awareness),
     ("suppressions", check_suppressions),
     ("tdd history", check_tdd_history),
 )
@@ -805,15 +1152,24 @@ CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
 def run_integrity(ctx: IntegrityContext) -> IntegrityReport:
     report = IntegrityReport()
     for name, check in CHECKS:
-        out = check(ctx)
-        status = "failed" if any(f.blocking for f in out.findings) else "skipped" if out.skipped else "ok"
-        report.checks.append(IntegrityCheck(name, status, out.note))  # type: ignore[arg-type]
-        report.findings.extend(out.findings)
-        report.declared.extend(out.declared)
-        report.human_protected.extend(out.human)
-        report.human_tests.extend(out.human_tests)
-        report.human_suppressions.extend(out.human_suppressions)
-        report.human_scan.extend(out.human_scan)
-        report.human_config.extend(out.human_config)
-        report.unfrozen.extend(out.unfrozen)
+        record_outcome(report, name, check(ctx))
     return report
+
+
+def record_outcome(report: IntegrityReport, name: str, out: Outcome) -> None:
+    """Add one sub-check's row, findings and listings to the report."""
+    status = "failed" if any(f.blocking for f in out.findings) else "skipped" if out.skipped else "ok"
+    report.checks.append(IntegrityCheck(name, status, out.note))  # type: ignore[arg-type]
+    report.findings.extend(out.findings)
+    if out.base_tests is not None:
+        report.base_tests = out.base_tests
+    report.test_awareness.extend(out.listed)
+    report.declared.extend(out.declared)
+    report.human_protected.extend(out.human)
+    report.human_tests.extend(out.human_tests)
+    report.human_suppressions.extend(out.human_suppressions)
+    report.human_scan.extend(out.human_scan)
+    report.human_config.extend(out.human_config)
+    report.allowed_tests.extend(out.allowed_tests)
+    report.mocked_support.extend(out.mocked)
+    report.unfrozen.extend(out.unfrozen)
