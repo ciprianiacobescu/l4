@@ -269,7 +269,8 @@ The runbook has the procedure (section 12.2a). These are the rules.
 
 ## What runs in each CI run
 
-A CI run makes at most one plan step. The step is the first of these that applies:
+A CI run makes at most one plan step. The step is the first of these that applies. [control-loop.md](control-loop.md)
+shows where the plan step sits in a run, and where the plan events are stored (`refs/l4/plans/<plan-id>`).
 
 1. Review a plan that has no current review.
 2. For the active plan: stop (a frozen spec changed, a limit is reached, the current unit is `halted`, `escalated`,

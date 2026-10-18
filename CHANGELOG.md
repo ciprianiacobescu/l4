@@ -41,6 +41,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
   then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
   or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
+- `docs/control-loop.md`, "How L4 runs: branches, events and the control loop": the one control loop, where each kind of state lives (base branch, unit branch, lock ref, plan ref, keep refs, PR), what starts a run, one run step by step, what a stop keeps, redoes or loses, what each local command writes, a worked recovery of a halted unit in a stopped plan, and swimlane diagrams. Linked from the README, the quickstart, the runbook, the delivery-plans page, the architecture page and the skill's operate reference.
+- The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
 
 ### Fixed
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write

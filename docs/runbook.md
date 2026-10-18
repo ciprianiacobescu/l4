@@ -10,6 +10,7 @@ Other documents:
 - [quickstart.md](quickstart.md) tells you how to adopt the harness.
 - [feedback.md](feedback.md) tells you how to ask for changes to the code of a unit.
 - [state-diagram.md](state-diagram.md) shows all the phase transitions.
+- [control-loop.md](control-loop.md) explains why you run `l4 retry` on the base branch, and how the unit branch runs again.
 
 ## Contents
 
@@ -893,7 +894,8 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > halts as in 0.4.3. `l4 doctor` (CFG-009) warns when the key is not below `max_task_attempts`, or when two profiles run
 > the same model. The key needs harness 0.4.4: move the pin first, because the config schema is strict.
 
-Retry the unit with the command or with the label. Both give the unit new task attempts.
+Retry the unit with the command or with the label. Both give the unit new task attempts. You run the command from a
+clone on `<base>`, and not on the unit branch: [control-loop.md](control-loop.md) tells why, and what a retry keeps.
 
 **The command: `l4 retry`**
 

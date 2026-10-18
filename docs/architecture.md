@@ -514,6 +514,10 @@ read the right lesson by itself [V, research/05]. The harness therefore owns les
 
 ## 12. CI integration
 
+> **NOTE:** The workflow templates of 0.4.15 have ONE job, `l4`, that starts from the base branch and decides for itself
+> which units to run. The fan-out in the diagram below is the older design. [control-loop.md](control-loop.md) describes
+> the code as it is.
+
 ```mermaid
 flowchart LR
   ev["push (spec paths / l4/** by humans)<br/>schedule (sweeper) · manual dispatch"] --> d["l4 doctor --ci"]
