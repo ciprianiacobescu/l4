@@ -91,3 +91,33 @@ def test_the_failure_body_is_kept_bounded(tmp_path: Path):
 def test_a_passing_case_has_no_detail(tmp_path: Path):
     path = write(tmp_path, '<testsuite><testcase classname="m" name="test_a"/></testsuite>')
     assert parse_junit(path).tests["m::test_a"].detail == ""
+
+
+@pytest.mark.parametrize("family", ["xunit1", "xunit2"])
+def test_a_setup_error_records_its_phase(family: str):
+    report = parse_junit(RECORDED / f"mixed-{family}.xml")
+    assert report.tests["tests.test_mix::test_error"].when == "setup"
+    assert {c.when for i, c in report.tests.items() if i != "tests.test_mix::test_error"} == {""}
+
+
+def test_a_setup_assertion_is_an_assertion_in_setup(tmp_path: Path):
+    path = write(
+        tmp_path,
+        '<testsuites><testsuite><testcase classname="tests.test_spans" name="test_one">'
+        '<error message="failed on setup with &quot;assert False is True&quot;">'
+        "@pytest.fixture\ndef exporter():\n>       assert telemetry.init(out) is True\n"
+        "E       assert False is True\n\ntests/test_spans.py:9: AssertionError"
+        "</error></testcase></testsuite></testsuites>",
+    )
+    case = parse_junit(path).tests["tests.test_spans::test_one"]
+    assert (case.status, case.failure_kind, case.when) == ("error", "assertion", "setup")
+    assert case.detail.endswith("tests/test_spans.py:9: AssertionError")
+
+
+def test_collection_errors_keep_their_traceback():
+    report = parse_junit(RECORDED / "collection-error-xunit2.xml")
+    assert report.collection_details["tests.test_broken"].endswith("E   SyntaxError: invalid syntax")
+    from l4.gates.junit import TestReport, merge_reports
+
+    merged = merge_reports([report, TestReport()])
+    assert merged.collection_details["tests.test_broken"].endswith("E   SyntaxError: invalid syntax")

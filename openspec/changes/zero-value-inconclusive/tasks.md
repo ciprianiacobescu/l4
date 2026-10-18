@@ -16,7 +16,7 @@ Every task follows these rules:
 
 ## 1. Reports and the shared extraction (L4-IMP-060)
 
-- [ ] 1.1 JUnit: the setup phase and the collection tracebacks.
+- [x] 1.1 JUnit: the setup phase and the collection tracebacks.
   - Tests first, in `tests/unit/gates/test_junit.py`:
     - `test_a_setup_error_records_its_phase`: parse `tests/fixtures/recorded/pytest/mixed-xunit2.xml`;
       `tests.test_mix::test_error` has `when == "setup"`, every other case `when == ""`.
@@ -36,7 +36,7 @@ Every task follows these rules:
       last `MAX_DETAIL_CHARS` characters of its `<error>` text, keyed like `collection_errors`. `merge_reports` keeps
       the first detail of a name.
 
-- [ ] 1.2 One collection-error extraction for the harness.
+- [x] 1.2 One collection-error extraction for the harness.
   - Tests first, `tests/unit/gates/test_collection.py`, with the constant (neutral names, the reproduction's shape):
     ```
     TRACE = (

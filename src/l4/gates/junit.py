@@ -20,7 +20,7 @@ MAX_DETAIL_CHARS = 4000
 Status = Literal["passed", "failed", "error", "skipped"]
 FailureKind = Literal["assertion", "not_implemented", "other"]
 CRITERION_ID = re.compile(r"C-[0-9a-f]{8}")
-_SETUP_WRAPPER = re.compile(r'failed on (?:setup|teardown) with "(.*)"', re.DOTALL)
+_SETUP_WRAPPER = re.compile(r'failed on (setup|teardown) with "(.*)"', re.DOTALL)
 _EXCEPTION = re.compile(r"([A-Za-z_][\w.]*)(?::|$)")
 
 
@@ -38,6 +38,7 @@ class TestCase:
     criteria: tuple[str, ...] = ()  # the `l4` properties of the testcase (the l4_trace plugin)
     failure_kind: FailureKind | None = None  # None: not a failure, or a message of no known shape
     detail: str = ""  # the end of the <failure>/<error> body (pytest's traceback text), bounded; "" when none
+    when: Literal["", "setup", "teardown"] = ""  # the phase an <error> reports ("failed on setup with ..."); "" else
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class TestReport:
 
     tests: dict[str, TestCase] = field(default_factory=dict)
     collection_errors: list[str] = field(default_factory=list)  # pytest: a module that failed to import
+    collection_details: dict[str, str] = field(default_factory=dict)  # a collection error's traceback end, same keys
 
     @property
     def total(self) -> int:
@@ -97,7 +99,7 @@ def failure_kind(status: Status, message: str, type_name: str = "") -> FailureKi
 
 def _message_kind(status: Status, message: str) -> FailureKind | None:
     wrapped = _SETUP_WRAPPER.fullmatch(message.strip()) if status == "error" else None
-    first = (wrapped.group(1) if wrapped else message).lstrip().split("\n", 1)[0]
+    first = (wrapped.group(2) if wrapped else message).lstrip().split("\n", 1)[0]
     if first == "assert" or first.startswith("assert "):
         return "assertion"
     named = _EXCEPTION.match(first)
@@ -138,13 +140,16 @@ def merge_reports(reports: Sequence[TestReport]) -> TestReport:
         return reports[0]
     tests: dict[str, TestCase] = {}
     errors: list[str] = []
+    details: dict[str, str] = {}
     for report in reports:
         for test_id, case in report.tests.items():
             held = tests.get(test_id)
             if held is None or _WORSE[case.status] > _WORSE[held.status]:
                 tests[test_id] = case
         errors += [e for e in report.collection_errors if e not in errors]
-    return TestReport(tests, errors)
+        for name, detail in report.collection_details.items():
+            details.setdefault(name, detail)
+    return TestReport(tests, errors, details)
 
 
 def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:
@@ -156,14 +161,18 @@ def parse_junit(path: Path, max_bytes: int = MAX_REPORT_BYTES) -> TestReport:
         raise ReportError(f"{path.name} is not a JUnit report (root element {root.tag!r})")
     tests: dict[str, TestCase] = {}
     collection_errors: list[str] = []
+    collection_details: dict[str, str] = {}
     for case in root.iter("testcase"):
         name, classname = case.get("name") or "", case.get("classname") or ""
         status, message, detail, type_name = _status(case)
         error = case.find("error")
         if not classname and error is not None and error.get("message") == "collection failure":
             collection_errors.append(name)  # no individual test ran: the module did not import
+            collection_details.setdefault(name, (error.text or "")[-MAX_DETAIL_CHARS:])
             continue
         test_id = f"{classname}::{name}" if classname else name
         kind = failure_kind(status, message, type_name)
-        tests[test_id] = TestCase(test_id, status, message, _criteria(case), kind, detail)
-    return TestReport(tests, collection_errors)
+        wrapped = _SETUP_WRAPPER.match(message.strip()) if status == "error" else None
+        when = "" if wrapped is None else "setup" if wrapped.group(1) == "setup" else "teardown"
+        tests[test_id] = TestCase(test_id, status, message, _criteria(case), kind, detail, when)
+    return TestReport(tests, collection_errors, collection_details)
