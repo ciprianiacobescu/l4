@@ -7,9 +7,10 @@ from l4.implementer.discrimination import confirm_pre_satisfied, import_roots
 from l4.implementer.tdd import run_red, run_setup
 from l4.specs.base import Task
 
-from .conftest import KNOWN, Bench, result
+from .conftest import KNOWN, UNKNOWN, Bench, result
 
 TASK = Task("1.1", "1.1", "1.1 Pin the runner", False, " ", 0, 1, 3)
+DISCOUNT_TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 C1, C2 = "C-aaaaaaaa", "C-bbbbbbbb"
 PIN = (
     "import importlib.metadata\n\nimport pytest\n\nimport pytdd\n\n\n"
@@ -37,8 +38,11 @@ def real_report(bench: Bench):
     return gate.report
 
 
-def only(bench: Bench, test_id: str) -> bool:
-    return depcheck.dependency_only(bench.wb, test_id, import_roots(bench.wb))
+PIN_TEXT = "The installed pytest is the verified version: the runner is pinned"
+
+
+def only(bench: Bench, test_id: str, text: str = PIN_TEXT) -> bool:
+    return depcheck.dependency_only(bench.wb, test_id, import_roots(bench.wb), text)
 
 
 def test_scn_imp_306_a_version_pin_is_not_applicable(make_bench, monkeypatch):
@@ -50,12 +54,14 @@ def test_scn_imp_306_a_version_pin_is_not_applicable(make_bench, monkeypatch):
         raise AssertionError("a not applicable criterion runs no variant run")
 
     monkeypatch.setattr(discrimination, "zeroed_run", no_run)
+    monkeypatch.setattr(discrimination, "_criterion_texts", lambda wb: {C1: PIN_TEXT})
     got = confirm_pre_satisfied(bench.wb, {C1: [PIN_ID]}, real=real_report(bench))
     assert got.not_applicable == {C1: (PIN_ID,)} and gates == []
     assert got.confirmed == {} and got.unconfirmed == {} and got.inconclusive == {} and got.message == ""
 
 
-def test_scn_imp_306_through_run_red_the_proof_says_not_applicable(make_bench):
+def test_scn_imp_306_through_run_red_the_proof_says_not_applicable(make_bench, monkeypatch):
+    monkeypatch.setattr(discrimination, "_criterion_texts", lambda wb: {KNOWN: PIN_TEXT})
     pin = (
         "import importlib.metadata\n\nimport pytest\n\n\n"
         f'@pytest.mark.l4("{KNOWN}")\n'
@@ -141,7 +147,30 @@ def test_uses_a_project_import():
         assert not only(bench, f"tests.test_pins::{name}"), name
 
 
-def test_a_class_test_a_parametrized_test_and_a_constant_are_read(make_bench):
+def test_a_class_test_and_a_version_attribute_are_read_with_a_literal_name_the_criterion_names(make_bench):
+    source = """\
+import importlib.metadata
+
+import pytest
+
+
+class TestPins:
+    def test_pin(self):
+        assert importlib.metadata.version("pytest")
+
+
+def test_dependency_attribute():
+    assert pytest.__version__
+"""
+    bench = staged(make_bench, source)
+    assert only(bench, "tests.test_pins.TestPins::test_pin")
+    assert only(bench, "tests.test_pins::test_dependency_attribute")
+    assert not only(bench, "tests.test_pins.TestPins::test_pin", "the discount is 10 percent")  # text names no pytest
+    assert not only(bench, "tests.test_pins::test_missing")
+    assert not only(bench, "tests.no_such_file::test_x")
+
+
+def test_a_distribution_name_that_is_not_a_literal_is_not_read(make_bench):
     source = """\
 import importlib.metadata
 
@@ -150,22 +179,77 @@ import pytest
 PIN = "pytest"
 
 
-class TestPins:
-    def test_pin(self):
-        assert importlib.metadata.version(PIN)
-
-
 @pytest.mark.parametrize("name", ["pytest"])
 def test_param(name):
     assert importlib.metadata.version(name)
 
 
-def test_dependency_attribute():
-    assert pytest.__version__
+def test_constant():
+    assert importlib.metadata.version(PIN)
 """
     bench = staged(make_bench, source)
-    assert only(bench, "tests.test_pins.TestPins::test_pin")
-    assert only(bench, "tests.test_pins::test_param[pytest]")
-    assert only(bench, "tests.test_pins::test_dependency_attribute")
-    assert not only(bench, "tests.test_pins::test_missing")
-    assert not only(bench, "tests.no_such_file::test_x")
+    assert not only(bench, "tests.test_pins::test_param[pytest]")
+    assert not only(bench, "tests.test_pins::test_constant")
+
+
+VACUOUS_PIN = f"""\
+import pytest
+
+
+@pytest.mark.l4("{KNOWN}")
+def test_known_code():
+    assert pytest.__version__
+
+
+@pytest.mark.l4("{UNKNOWN}")
+def test_unknown_code():
+    assert pytest.__version__
+"""
+
+
+def test_a1_a_dependency_read_does_not_tick_a_behavioural_criterion(make_bench):
+    """Review M2: `assert pytest.__version__` tagged with criteria about `apply_discount` fails red as on 0.4.15: the
+    criterion text does not name the dependency."""
+    step = Step(writes={"tests/test_discount.py": VACUOUS_PIN}, structured=result("red", criteria_ids=[KNOWN, UNKNOWN]))
+    bench: Bench = make_bench([step])
+    out = run_red(bench.wb, DISCOUNT_TASK, attempt=1)
+    assert out.status == "failed" and out.reason.startswith("not discriminating: "), out.reason
+    assert [e for e in bench.events("criterion.pre_satisfied") if e["task"] == "1.1"] == []
+
+
+BYPASS = """\
+import importlib
+import importlib.metadata
+
+import pytest
+
+
+def test_importorskip():
+    m = pytest.importorskip("pytdd")
+    assert m.total([1.0]) == 1.0 and importlib.metadata.version("pytest")
+
+
+def test_import_module():
+    m = importlib.import_module("pytdd")
+    assert m.total([1.0]) == 1.0 and importlib.metadata.version("pytest")
+
+
+def test_dunder_import():
+    m = __import__("pytdd")
+    assert m.total([1.0]) == 1.0 and importlib.metadata.version("pytest")
+
+
+def test_request_fixture(request):
+    m = request.getfixturevalue("pricing_module")
+    assert m.total([1.0]) == 1.0 and importlib.metadata.version("pytest")
+"""
+CONFTEST = "import pytest\n\nimport pytdd\n\n\n@pytest.fixture\ndef pricing_module():\n    return pytdd\n"
+
+
+def test_a2_tests_that_run_project_code_by_name_are_not_dependency_only(make_bench):
+    bench: Bench = make_bench([])
+    (bench.wb.worktree / "tests/test_bypass.py").write_text(BYPASS)
+    (bench.wb.worktree / "tests/conftest.py").write_text(CONFTEST)
+    run_setup(bench.wb)
+    for name in ("test_importorskip", "test_import_module", "test_dunder_import", "test_request_fixture"):
+        assert not only(bench, f"tests.test_bypass::{name}"), name

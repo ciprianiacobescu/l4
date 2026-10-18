@@ -317,7 +317,8 @@ class Workbench:
                 text = result.log_path.read_text(encoding="utf-8", errors="replace")[-40_000:]
             except OSError:
                 text = ""
-        return self.redactor.redact_text(ledger_excerpt(text))
+        # redacted whole first, cut after: a cut inside a secret would leave a prefix the redactor cannot see
+        return self.redactor.redact_text(ledger_excerpt(self.redactor.redact_text(text)))
 
     def _tracked_bytecode(self, git: Git | None = None) -> frozenset[str]:
         """Bytecode the repository itself commits (rare): a changed copy is a production change the guards see."""

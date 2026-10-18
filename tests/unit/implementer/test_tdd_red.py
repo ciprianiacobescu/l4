@@ -618,9 +618,9 @@ def test_the_red_retry_message_for_a_pytest_gate_names_the_marker(make_bench):
     assert "any other runner" not in outcome.reason
 
 
-def test_scn_ver_151_a_test_chore_whose_check_cannot_decide_is_left_to_the_verifier(make_bench, monkeypatch):
-    """L4-VER-009: tests the chore added, none of which the discrimination runs could run, are not rejected: the
-    verifier decides a round later (as it does when there is no unit base)."""
+def test_scn_ver_151_a_test_chore_whose_check_cannot_decide_is_held(make_bench, monkeypatch):
+    """L4-VER-009, L4-IMP-063 (review m2): tests the chore added, none of which the discrimination runs could run, are
+    not rejected and not accepted either: the chore is held with a harness question."""
     from l4.implementer import tdd
     from l4.implementer.discrimination import ExtraRun
 
@@ -630,4 +630,12 @@ def test_scn_ver_151_a_test_chore_whose_check_cannot_decide_is_left_to_the_verif
     monkeypatch.setattr(
         tdd, "discriminate_extra", lambda wb, tests, base, **kw: ExtraRun(inconclusive=dict.fromkeys(ids, reason))
     )
-    assert tdd._discriminating_tests(bench.wb, ids) == (sorted(ids), "")
+    task = Task("1.2", "1.2", "1.2 New tests (F-0a1b2c3d; C-2d3a8daf)", False, " ", 0, 3, 3)
+    tests, why, held = tdd._discriminating_tests(bench.wb, ids, task)
+    assert (tests, why) == ([], "")
+    assert held is not None and (held.check, held.phase, held.tests, held.reason) == (
+        "tests",
+        "green",
+        tuple(ids),
+        reason,
+    )

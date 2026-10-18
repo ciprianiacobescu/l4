@@ -151,11 +151,11 @@ def unfreeze_note(
     )
 
 
-def recorded_digests(events: Sequence[LedgerEvent]) -> dict[str, set[str]]:
-    """Per question id, the `answer_sha256` of every `question.answered{by: human}` the ledger holds."""
+def recorded_digests(events: Sequence[LedgerEvent], actors: Collection[str] = ("human",)) -> dict[str, set[str]]:
+    """Per question id, the `answer_sha256` of every `question.answered{by: <one of actors>}` the ledger holds."""
     found: dict[str, set[str]] = {}
     for event in events:
-        if event.type == "question.answered" and event.data.get("by") == "human":
+        if event.type == "question.answered" and event.data.get("by") in actors:
             found.setdefault(str(event.data.get("id")), set()).add(str(event.data.get("answer_sha256")))
     return found
 

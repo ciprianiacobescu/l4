@@ -27,7 +27,11 @@ from l4.state.ledger import read_ledger
 
 VIA = "earlier_red"
 _FAILED_PROOFS = (PROOF_RED_ASSERTION, PROOF_ZERO_VALUE)
-_NO_EVIDENCE_VIA = ("human_override", "not_applicable")  # L4-IMP-063, L4-IMP-062: never an earlier red's evidence
+_NO_EVIDENCE_VIA = (
+    "human_override",
+    "agent_override",
+    "not_applicable",
+)  # L4-IMP-063, L4-IMP-062: never an earlier red's evidence
 
 
 @dataclass(frozen=True)

@@ -73,3 +73,19 @@ def test_single_tests_tells_the_agent_to_tag_with_the_cited_criterion_and_to_use
     assert "cites a criterion" in template.body and "fail by assertion" in template.body
     assert "interface the design names" in template.body and "new names" in template.body
     assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@11+single_tests@5"
+
+
+def test_a_chore_whose_tests_the_runs_could_not_decide_is_held_and_no_attempt_is_used(make_bench, monkeypatch):
+    """Review m2: the discrimination check of a test chore that cannot decide holds the task (L4-IMP-063)."""
+    from l4.implementer import tdd
+    from l4.implementer.discrimination import ExtraRun
+
+    monkeypatch.setattr(
+        tdd,
+        "discriminate_extra",
+        lambda wb, tests, base, **kw: ExtraRun(inconclusive=dict.fromkeys(tests, "did not run in test-extra-zero")),
+    )
+    bench, done = run_bound(make_bench, Step(writes={"tests/test_more.py": NEW_TESTS}, structured=result("single")))
+    assert done.status == "held" and done.held is not None and done.held.check == "tests"
+    assert bench.events("task.tests_added") == [] and bench.wb.is_clean()
+    assert [e["task"] for e in bench.events("task.done")] == ["1.1"]

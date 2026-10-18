@@ -36,7 +36,7 @@ def run(source: str) -> dict[str, Any]:
 
 
 def test_scn_imp_302_a_decorator_factory_annotated_to_return_a_callable_keeps_its_body():
-    plan = zero_value_plan(SOURCE, public=True)
+    plan = zero_value_plan(SOURCE, public=True, applied={"traced"})
     ns = run(plan.source)
 
     def f() -> None: ...
@@ -64,7 +64,7 @@ def test_optional_and_string_annotations_are_kept(annotation: str):
         "import typing\nfrom typing import Any, Callable, Optional, Type\n\n\nclass Base: ...\n\n\n"
         f"def make() -> {annotation}:\n    return Base\n"
     )
-    plan = zero_value_plan(source, public=True)
+    plan = zero_value_plan(source, public=True, applied={"make"})
     assert plan.kept == ("make",), annotation
     ns = run(plan.source)
     assert ns["make"]() is ns["Base"]

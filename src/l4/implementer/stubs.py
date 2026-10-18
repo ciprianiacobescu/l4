@@ -633,19 +633,80 @@ def _returns_callable(annotation: ast.expr | None) -> bool:
     return node is not None and _name(node) in _CALLABLE_NAMES
 
 
+def _callee_name(node: ast.expr) -> str | None:
+    """The simple name a decorator or a call goes by: `a.b.c(...)` and `@a.b.c` give `c`."""
+    if isinstance(node, ast.Call):
+        return _callee_name(node.func)
+    return _name(node)
+
+
+def _expression_calls(node: ast.AST) -> set[str]:
+    """The names called in an expression that runs when it is evaluated (a lambda's body does not)."""
+    found: set[str] = set()
+    pending: list[ast.AST] = [node]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.Lambda):
+            continue
+        if isinstance(current, ast.Call) and (name := _callee_name(current.func)):
+            found.add(name)
+        pending.extend(ast.iter_child_nodes(current))
+    return found
+
+
+def import_time_names(source: str) -> frozenset[str]:
+    """The simple names a module applies or calls while it is imported: its decorators (and decorator factories), the
+    defaults and bases it evaluates, and every call in a module-level or class-level statement. A function body is not
+    run at import time. A function annotated to return a callable that none of the varied modules applies this way is
+    not a decorator factory, and zeroing it breaks no import (L4-IMP-061)."""
+    found: set[str] = set()
+
+    def visit(body: Sequence[ast.stmt]) -> None:
+        for node in body:
+            if isinstance(node, _Def | ast.ClassDef):
+                for decorator in node.decorator_list:
+                    if name := _callee_name(decorator):
+                        found.add(name)
+                    found.update(_expression_calls(decorator))
+                if isinstance(node, _Def):
+                    for default in [*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)]:
+                        found.update(_expression_calls(default))
+                else:
+                    for base in [*node.bases, *(k.value for k in node.keywords)]:
+                        found.update(_expression_calls(base))
+                    visit(node.body)
+            elif isinstance(node, ast.If | ast.Try | ast.With | ast.For | ast.While | ast.AsyncWith | ast.AsyncFor):
+                for child in ast.iter_child_nodes(node):
+                    if isinstance(child, ast.expr):
+                        found.update(_expression_calls(child))
+                for field in ("body", "orelse", "finalbody"):
+                    visit(getattr(node, field, []))
+                for handler in getattr(node, "handlers", []):
+                    visit(handler.body)
+            else:
+                found.update(_expression_calls(node))
+
+    try:
+        visit(ast.parse(source).body)
+    except SyntaxError:
+        return frozenset()
+    return frozenset(found)
+
+
 @dataclass(frozen=True)
 class ZeroPlan:
     source: str
     zeroed: tuple[str, ...]  # qualnames (`fn`, `Class.fn`, `Outer.Inner.fn`) of the functions that answer a zero value
-    kept: tuple[str, ...]  # qualnames left real because their annotation says they return a callable or a class
+    kept: tuple[str, ...]  # qualnames left real: annotated to return a callable or a class, and applied at import time
 
 
 class _Zero(ast.NodeTransformer):
     """Stub bodies (or, with `public`, every public function and method) answer the zero value of their return type."""
 
-    def __init__(self, public: bool, keep: Collection[str] = ()) -> None:
+    def __init__(self, public: bool, keep: Collection[str] = (), applied: Collection[str] = ()) -> None:
         self.public = public
         self.keep = frozenset(keep)
+        self.applied = frozenset(applied)
         self.stack: list[str] = []
         self.zeroed: list[str] = []
         self.kept: list[str] = []
@@ -668,7 +729,7 @@ class _Zero(ast.NodeTransformer):
             if not fn.name.startswith("_"):
                 if qual in self.keep:
                     pass  # a function a traceback named: it stays real (neither zeroed nor kept by annotation)
-                elif _returns_callable(fn.returns):
+                elif fn.name in self.applied and _returns_callable(fn.returns):
                     self.kept.append(qual)
                 else:
                     fn.body = [*fn.body[:doc], *_zero_body(fn)]
@@ -695,17 +756,20 @@ class _Zero(ast.NodeTransformer):
     visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
 
 
-def zero_value_plan(source: str, *, public: bool = False, keep: Collection[str] = ()) -> ZeroPlan:
+def zero_value_plan(
+    source: str, *, public: bool = False, keep: Collection[str] = (), applied: Collection[str] = ()
+) -> ZeroPlan:
     """`source` with each red stub (`public`: each public function and method) answering the zero value of its
     return annotation: `str` "", `int` 0, `float` 0.0, `bool` False, `list` [], `dict` {}, `set` set(), `tuple` (),
     `bytes` b""; unannotated or unknown None; `-> None` nothing. A partial stub (guards, then a final bare
     `raise NotImplementedError`) keeps its guards and answers the zero value in place of that raise, so a test of the
     unwritten path fails by assertion, not by error (L4-IMP-002 check 5). Nested functions are left alone.
-    In `public` mode a function annotated to return a callable or a class keeps its body (L4-IMP-061), and so does a
-    function whose qualname is in `keep`. Red-stub mode needs no such rule: a stub applied at import time already
+    In `public` mode a function annotated to return a callable or a class keeps its body when its simple name is in
+    `applied` (the names the varied modules apply or call at import time, `import_time_names`; L4-IMP-061), and so does
+    a function whose qualname is in `keep`. Red-stub mode needs no such rule: a stub applied at import time already
     fails the real run (a) at collection."""
     tree = ast.parse(source)
-    zero = _Zero(public, keep)
+    zero = _Zero(public, keep, applied)
     tree.body = [zero._member(n) for n in tree.body]
     text = ast.unparse(ast.fix_missing_locations(tree)) + "\n"
     return ZeroPlan(text, tuple(zero.zeroed), tuple(zero.kept))

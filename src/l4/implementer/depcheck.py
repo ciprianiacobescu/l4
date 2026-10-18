@@ -4,15 +4,18 @@ A test that pins a dependency's version (`importlib.metadata.version("pytest") =
 zero values and at the unit base alike: no variant run can ever show it discriminating. Such a test is *dependency
 only*: its function, its `parametrize` lists and its defaults use no name bound to a module inside the repository
 (project or test helper), no name bound by a module-level definition of its file other than a constant, no fixture
-other than pytest's built-ins and the names of its own `parametrize`, and it reads a dependency: a name bound to a
-module outside the repository that is not in the standard library, or a call of the standard library's distribution
-reader. `assert 1 + 1 == 2` and `json.loads("1") == 1` read none and stay not discriminating.
+other than pytest's built-ins and the names of its own `parametrize`, no project code reached by a string
+(`pytest.importorskip`, `importlib.import_module`, `__import__`, `request.getfixturevalue`, `sys.modules`), and it reads
+a dependency's version with a LITERAL distribution name that the criterion's text names: a call of
+`importlib.metadata.version` / `distribution` / `metadata`, or `<dependency>.__version__`. `assert 1 + 1 == 2`,
+`json.loads("1") == 1` and `assert pytest.__version__` under a criterion about something else stay not discriminating.
 
 Pure static analysis of the test's file; a file or a function that cannot be found or parsed is not dependency only.
 """
 
 import ast
 import builtins
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -26,11 +29,14 @@ BUILTIN_FIXTURES = frozenset(
 )  # fmt: skip
 METADATA_CALLS = frozenset({"version", "distribution", "metadata", "distributions"})
 _METADATA = frozenset(f"importlib.metadata.{call}" for call in METADATA_CALLS)
-_PYTEST_HELPERS = frozenset(
-    {"raises", "warns", "approx", "mark", "fixture", "skip", "fail", "xfail", "importorskip", "param"}
-)  # the test framework itself is not the dependency a pin test is about
+_BY_NAME = frozenset({"importorskip", "import_module", "__import__", "getfixturevalue"})  # project code by a string
 _Def = ast.FunctionDef | ast.AsyncFunctionDef
 _RELATIVE = "."  # a binding to a module of the repository, by a relative import
+
+
+def _normal(text: str) -> str:
+    """Lower case, with every `-`, `_` and `.` as one `-`: `typing_extensions` names `typing-extensions`."""
+    return re.sub(r"[-_.]+", "-", text.lower())
 
 
 def _chain(node: ast.expr) -> list[str] | None:
@@ -143,7 +149,8 @@ def _repository(wb: Workbench, dotted: str, roots: Sequence[str], near: str) -> 
     return bool(_resolve(wb, dotted.rsplit(".", 1)[0], [*roots, near])) if "." in dotted else False
 
 
-def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str]) -> bool:
+def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str], criterion_text: str = "") -> bool:
+    """See the module docstring; `criterion_text` is the text of the criterion the test traces."""
     file = _test_file(wb, test_id)
     if file is None:
         return False
@@ -165,18 +172,9 @@ def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str]) -> bool:
     params = [a.arg for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs] if a.arg not in ("self", "cls")]
     if any(p not in BUILTIN_FIXTURES and p not in names for p in params):
         return False
-    reads_dependency = False
+    named = _normal(criterion_text)
+    reads_pin = False
     scanned: list[ast.AST] = [*fn.body, *fn.args.defaults, *[d for d in fn.args.kw_defaults if d is not None], *values]
-    helper_heads: set[int] = set()  # the `pytest` of `pytest.raises` / `pytest.mark...`: the framework, not a pin
-    for root in scanned:
-        for node in ast.walk(root):
-            if (
-                isinstance(node, ast.Attribute)
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "pytest"
-                and node.attr in _PYTEST_HELPERS
-            ):
-                helper_heads.add(id(node.value))
     for root in scanned:
         for node in ast.walk(root):
             if isinstance(node, ast.Import | ast.ImportFrom):
@@ -185,9 +183,33 @@ def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str]) -> bool:
                     return False
                 continue
             if isinstance(node, ast.Call) and (chain := _chain(node.func)):
+                if chain[-1] in _BY_NAME:  # project code reached by a name the static scan cannot follow
+                    return False
                 head = imports.get(chain[0]) if chain[0] not in bound else None
                 if head and ".".join([head, *chain[1:]]) in _METADATA:
-                    reads_dependency = True
+                    first = node.args[0] if node.args else None
+                    if (
+                        isinstance(first, ast.Constant)
+                        and isinstance(first.value, str)
+                        and _normal(first.value) in named
+                    ):
+                        reads_pin = True  # a literal distribution name that the criterion names
+                    else:
+                        return False
+            if isinstance(node, ast.Attribute) and _chain(node) == ["sys", "modules"]:
+                return False
+            if isinstance(node, ast.Attribute) and node.attr == "__version__":
+                owner = _chain(node.value)
+                target = imports.get(owner[0]) if owner and owner[0] not in bound else None
+                if (
+                    target
+                    and target.split(".")[0] not in sys.stdlib_module_names
+                    and not _repository(wb, target, roots, near)
+                ):
+                    if _normal(target.split(".")[0]) in named:
+                        reads_pin = True  # `<dependency>.__version__` for a dependency the criterion names
+                    else:
+                        return False
             if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
                 continue
             name = node.id
@@ -200,6 +222,4 @@ def dependency_only(wb: Workbench, test_id: str, roots: Sequence[str]) -> bool:
                 return False  # a name the file does not bind: a fixture-like or unknown global
             if _repository(wb, target, roots, near):
                 return False
-            if target.split(".")[0] not in sys.stdlib_module_names and id(node) not in helper_heads:
-                reads_dependency = True
-    return reads_dependency
+    return reads_pin

@@ -823,6 +823,11 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
 
 
 VIA_HUMAN_OVERRIDE = "human_override"
+VIA_AGENT_OVERRIDE = "agent_override"  # an agent answered, where clarifier.answer_by_agents allows it
+
+
+def override_via(override: Override) -> str:
+    return VIA_AGENT_OVERRIDE if override.by == "agent" else VIA_HUMAN_OVERRIDE
 
 
 def _via(
@@ -834,7 +839,7 @@ def _via(
 ) -> dict:
     """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run."""
     if overridden and criterion in overridden:
-        return {"via": VIA_HUMAN_OVERRIDE, "question": overridden[criterion].question}
+        return {"via": override_via(overridden[criterion]), "question": overridden[criterion].question}
     if criterion in earlier:
         return {"via": VIA}
     if criterion in confirmation.confirmed:
@@ -857,12 +862,12 @@ def _kept_of(kept: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
 
 def _accept(wb: Workbench, task: Task, check: str, used: Mapping[str, Override], key: str = "criteria") -> None:
     """`check.accepted` for each question whose `accept` carried subjects of this step (design D8)."""
-    by_question: dict[str, tuple[str, list[str]]] = {}
+    by_question: dict[str, tuple[Override, list[str]]] = {}
     for subject, override in sorted(used.items()):
-        by_question.setdefault(override.question, (override.answer_sha256, []))[1].append(subject)
-    for question, (digest, subjects) in by_question.items():
-        wb.emit("check.accepted", task=task.key, check=check, question=question, answer_sha256=digest,
-                **{key: subjects})  # fmt: skip
+        by_question.setdefault(override.question, (override, []))[1].append(subject)
+    for question, (override, subjects) in by_question.items():
+        wb.emit("check.accepted", task=task.key, check=check, question=question, answer_sha256=override.answer_sha256,
+                by=override.by, **{key: subjects})  # fmt: skip
 
 
 def _decide_pre_satisfied(
@@ -882,7 +887,11 @@ def _decide_pre_satisfied(
         return RedOutcome("failed", decision.message), {}
     if not decision.inconclusive:
         return None, {}
-    overrides = accepted_overrides(wb, task.key, "pre_satisfied")
+    overrides = {
+        c: o
+        for c, o in accepted_overrides(wb, task.key, "pre_satisfied").items()
+        if c in candidates and o.covers(candidates[c])  # the answer was about those tests, not a later other one
+    }
     open_ = sorted(c for c in decision.inconclusive if c not in overrides)
     if open_:
         wb.discard_changes()
@@ -995,7 +1004,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         if criterion in overridden:
             return {
                 "tests": list(tests), "proof": PROOF_PRE_SATISFIED, "discriminating": list(overridden_tests[criterion]),
-                "via": VIA_HUMAN_OVERRIDE, "question": overridden[criterion].question,
+                "via": override_via(overridden[criterion]), "question": overridden[criterion].question,
                 "answer_sha256": overridden[criterion].answer_sha256,
             }  # fmt: skip
         return {
@@ -1133,7 +1142,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.discard_changes()
             return RedOutcome("failed", vacuity.message)
         if vacuity.inconclusive:
-            overrides = accepted_overrides(wb, task.key, "vacuity")
+            overrides = {
+                c: o
+                for c, o in accepted_overrides(wb, task.key, "vacuity").items()
+                if c in open_criteria and o.covers(open_criteria[c])
+            }
             open_ = sorted(c for c in vacuity.inconclusive if c not in overrides)
             if open_:
                 wb.discard_changes()
@@ -1158,7 +1171,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         }
         if criterion in run_b_overrides:  # counted on the evidence of the real run (run (b) could not decide)
             proofs[criterion] |= {
-                "discriminating": list(tests), "via": VIA_HUMAN_OVERRIDE,
+                "discriminating": list(tests), "via": override_via(run_b_overrides[criterion]),
                 "question": run_b_overrides[criterion].question,
                 "answer_sha256": run_b_overrides[criterion].answer_sha256,
             }  # fmt: skip
@@ -1686,25 +1699,32 @@ def decision_calling_code_wrong(wb: Workbench, findings: Sequence[str]) -> tuple
 CRITERION_IN_TITLE = re.compile(r"\bC-[0-9a-f]{8}\b")  # a task of a fix unit that cites a criterion (W-C1)
 
 
-def _discriminating_tests(wb: Workbench, added: Sequence[str]) -> tuple[list[str], str]:
-    """(the added tests that look at the answer, the reason when none does). A tests chore that cites a criterion is
-    checked as the verifier would a round later (`discriminate_extra`, L4-VER-009): a test counts when it fails by
-    assertion when the project's functions answer their zero value, or on the unit base's code. A run that cannot
-    decide (no unit base) accepts: the verifier still decides at verification."""
+def _discriminating_tests(wb: Workbench, added: Sequence[str], task: Task) -> tuple[list[str], str, HeldCheck | None]:
+    """(the added tests that look at the answer, the reason when none does, a hold when the runs could not decide).
+    A tests chore that cites a criterion is checked as the verifier would a round later (`discriminate_extra`,
+    L4-VER-009): a test counts when it fails by assertion when the project's functions answer their zero value, or on
+    the unit base's code. With no unit base the chore is accepted: the verifier still decides at verification. When
+    every added test is inconclusive the chore is held with a harness question, like a red step (L4-IMP-063):
+    accepting it would let an agent pass a chore with tests that were made unrunnable on purpose."""
     base_sha = unit_base(wb)
     if base_sha is None:
-        return [], ""
+        return [], "", None
     outcome = discriminate_extra(wb, list(added), base_sha)
     if outcome.accepted:
-        return sorted(outcome.accepted), ""
-    if added and all(t in outcome.inconclusive for t in added):  # the runs could not decide: the verifier does
-        return sorted(added), ""
+        return sorted(outcome.accepted), "", None
+    if added and all(t in outcome.inconclusive for t in added):  # the runs could not decide
+        reason = outcome.inconclusive[sorted(added)[0]]
+        held = HeldCheck(
+            task.key, "green", "tests", (), tuple(sorted(added)), reason, ("test-extra-zero", "test-extra-base")
+        )
+        return [], "", held
     shown = ", ".join(sorted(added)[:MAX_LISTED])
-    return [], (
+    why = (
         "none of the tests you added looks at the answer: they pass when the project's functions answer their zero "
-        f"value and on the unit's base code ({shown}). Assert the value the cited criterion's scenario names, through "
-        "the interface the design names, so that a wrong implementation fails by assertion"
+        f"value and on the unit's base code ({shown}). Assert the value the cited criterion's scenario names, "
+        "through the interface the design names, so that a wrong implementation fails by assertion"
     )
+    return [], why, None
 
 
 def _already_done(wb: Workbench, task: Task, findings: Sequence[str], attempt: int) -> GreenOutcome:
@@ -1810,7 +1830,15 @@ def run_single(
     reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps)
     discriminating: list[str] | None = None
     if adds_tests and not reason and added and CRITERION_IN_TITLE.search(task.title):
-        discriminating, reason = _discriminating_tests(wb, added)
+        discriminating, reason, held = _discriminating_tests(wb, added, task)
+        if held is not None:
+            overrides = {t: o for t, o in accepted_overrides(wb, task.key, "tests").items() if t in held.tests}
+            open_ = sorted(t for t in held.tests if t not in overrides)
+            if open_:
+                wb.discard_changes()
+                return GreenOutcome("held", held=held.only(open_))
+            _accept(wb, task, "tests", overrides, key="tests")
+            discriminating = sorted(held.tests)
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt)

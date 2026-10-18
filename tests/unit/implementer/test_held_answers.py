@@ -97,3 +97,56 @@ def test_scn_imp_315_a_retry_runs_the_check_again(make_bench, monkeypatch, raw):
     proof = bench.events("task.red_ok")[-1]["criteria"][KNOWN]
     assert proof["proof"] == "pre_satisfied" and "via" not in proof
     assert "upgraded L4 to the release that keeps decorator factories" in bench.adapter.requests[-1].prompt
+
+
+def test_an_agents_accept_is_labelled_agent_override_everywhere(make_bench, monkeypatch, raw):
+    """Review m3: under clarifier.answer_by_agents an agent's answer counts, but never as a person's."""
+    bench = held(make_bench, monkeypatch)
+    digest = answer(bench, raw, "accept: the check is broken", by="agent")
+    assert run_task(bench.wb, TASK).status == "done"
+    proof = bench.events("task.red_ok")[-1]["criteria"][KNOWN]
+    assert proof["via"] == "agent_override" and proof["answer_sha256"] == digest
+    assert bench.events("criterion.pre_satisfied")[-1]["via"] == "agent_override"
+    [accepted] = bench.events("check.accepted")
+    assert accepted["by"] == "agent"
+    from datetime import UTC, datetime
+
+    from l4.specs.base import Task as SpecTask
+    from l4.state.ledger import LedgerEvent
+    from l4.verifier.judge import satisfied_refs
+    from l4.verifier.traceability import red_notes
+
+    red_ok = LedgerEvent(
+        datetime(2026, 10, 6, tzinfo=UTC), "r", "u", 1, "task.red_ok", {"task": "1.1", "criteria": {KNOWN: proof}}
+    )
+    done = LedgerEvent(
+        datetime(2026, 10, 6, tzinfo=UTC), "r", "u", 2, "task.done", {"task": "1.1", "tdd": "already-satisfied"}
+    )
+    note = "accepted by an agent through Q-001: the check was inconclusive"
+    assert next(iter(red_notes([red_ok]).values())) == note
+    [ref] = satisfied_refs([SpecTask("1.1", "1.1", "t", True, "x", 0, 1, None)], [red_ok, done])
+    assert ref.labels == ((KNOWN, note),)
+
+
+def test_the_reentry_records_an_agents_answer_as_by_agent(make_bench, monkeypatch, raw):
+    from l4.clarifier.clarifier import Clarifier
+
+    bench = held(make_bench, monkeypatch)
+    unit = bench.wb.ref.path
+    file = QuestionsFile.load(unit / "questions.md")
+    assert file is not None
+    file.set_answer("Q-001", "accept: fine").set_status("Q-001", QuestionStatus.ANSWERED).save(unit / "questions.md")
+    raw(bench.wb.worktree, "add", "-A")
+    message = "answer Q-001\n\nStatus: answered\nBy: Pat (agent: CLAUDECODE)\nVia: l4 questions\n[skip ci]\n"
+    raw(bench.wb.worktree, "-c", "user.name=Pat", "-c", "user.email=p@e.invalid", "commit", "-q", "-m", message)
+    Clarifier(unit, bench.writer).reenter(bench.wb.provider.tasks(bench.wb.ref))
+    assert bench.events("question.answered")[-1]["by"] == "agent"
+
+
+def test_the_reentry_records_a_persons_answer_as_by_human(make_bench, monkeypatch, raw):
+    from l4.clarifier.clarifier import Clarifier
+
+    bench = held(make_bench, monkeypatch)
+    answer(bench, raw, "accept: fine", record=False)
+    Clarifier(bench.wb.ref.path, bench.writer).reenter(bench.wb.provider.tasks(bench.wb.ref))
+    assert bench.events("question.answered")[-1]["by"] == "human"

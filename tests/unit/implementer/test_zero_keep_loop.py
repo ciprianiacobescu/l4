@@ -107,7 +107,7 @@ def test_scn_imp_304_the_keep_reruns_are_bounded(make_bench, monkeypatch, tmp_pa
         log = tmp_path / f"gate-{n}.log"
         log.write_text("")
         detail = f"src/pytdd/chain.py:1: in <module>\n    X = f{n}()\nE   TypeError: x\n"
-        report = TestReport({}, ["tests.test_chain"], {"tests.test_chain": detail})
+        report = TestReport({}, ["tests.test_store"], {"tests.test_store": detail})
         return GateResult(name, "fail", "exit code 2", 2, log, report)
 
     monkeypatch.setattr(Workbench, "run_gate", fake)

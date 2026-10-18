@@ -211,6 +211,12 @@ def _hang_question(wb: Workbench, tests: Sequence[str], done: GreenOutcome) -> R
     )
 
 
+def _ledger_text(wb: Workbench, excerpt: str) -> str:
+    """The bounded form of a failure excerpt for the committed ledger: redacted whole, then cut (L4-IMP-064)."""
+    redact = wb.redactor.redact_text
+    return redact(ledger_excerpt(redact(excerpt)))
+
+
 def _retry_reason(failure: str | None, wb: Workbench, excerpt: str = "") -> str | None:
     """What the next attempt's prompt says about this one: the headline, the failure excerpt of the named tests (live
     wave A job 5699: a retry that held only an id repeated the same mistake three times), and whatever the guards put
@@ -278,6 +284,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             if done.status == "blocked":
                 ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"])
                 return TaskOutcome("blocked", "single", ids)
+            if done.status == "held":  # the discrimination check of a test chore could not decide (L4-IMP-063)
+                assert done.held is not None
+                return TaskOutcome("blocked", "single", _raise_held(wb, task, done.held, attempts["green"]))
             phase, failure, excerpt = "single", done.reason, done.excerpt
         elif red is None:
             attempts["red"] += 1
@@ -321,7 +330,7 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         wb.emit(
             "task.attempt_failed", task=task.key, phase=phase, attempt=step, profile=profile, reason=failure,
             excerpt_lines=len(excerpt.splitlines()),
-            **({"excerpt": wb.redactor.redact_text(ledger_excerpt(excerpt))} if excerpt else {}),
+            **({"excerpt": _ledger_text(wb, excerpt)} if excerpt else {}),
         )  # fmt: skip
         if escalate and phase != "single" and 1 <= limit_after < limit:
             count = failures[phase][profile]

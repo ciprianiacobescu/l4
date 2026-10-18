@@ -19,12 +19,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from l4.gates.collection import called_names
+from l4.gates.collection import LOCATION, called_names, in_repository
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer import variant
-from l4.implementer.stubs import _is_inside, has_stub, zero_value_plan
+from l4.implementer.stubs import _is_inside, has_stub, import_time_names, zero_value_plan
 from l4.implementer.variant import VariantRun
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
@@ -88,6 +88,19 @@ class ZeroScope(list[str]):
         return list(self)
 
 
+def _applied_names(wb: Workbench, paths: Sequence[str]) -> frozenset[str]:
+    """The names the varied modules apply or call while they are imported (`import_time_names`), over all of them."""
+    names: set[str] = set()
+    for relative in paths:
+        target = wb.worktree / relative
+        if _is_inside(wb.worktree, target) and target.is_file():
+            try:
+                names |= import_time_names(target.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, OSError):
+                continue
+    return frozenset(names)
+
+
 @contextmanager
 def zero_values_in_place(
     wb: Workbench, paths: Sequence[str], *, public: bool, keep: Mapping[str, Collection[str]] | None = None
@@ -99,6 +112,7 @@ def zero_values_in_place(
     zeroed: dict[str, tuple[str, ...]] = {}
     kept: dict[str, tuple[str, ...]] = {}
     seen: set[tuple[int, int]] = set()
+    applied = _applied_names(wb, paths) if public else frozenset()
     try:
         for relative in paths:
             target = wb.worktree / relative
@@ -108,7 +122,9 @@ def zero_values_in_place(
                 continue  # a second name of a file already varied: its "original" would be the variant
             data = target.read_bytes()
             try:
-                plan = zero_value_plan(data.decode("utf-8"), public=public, keep=(keep or {}).get(relative, ()))
+                plan = zero_value_plan(
+                    data.decode("utf-8"), public=public, keep=(keep or {}).get(relative, ()), applied=applied
+                )
             except (SyntaxError, UnicodeDecodeError):
                 continue
             originals[target] = data
@@ -198,7 +214,8 @@ def zeroed_run(
             if not public or reruns >= MAX_KEEP_RERUNS:
                 return result
             collection, setup = _inconclusive_texts(run, candidates, real, own)
-            from_collection, from_setup = called_names("\n".join(collection)), called_names("\n".join(setup))
+            from_collection = called_names("\n".join(collection)) | _failing_module_calls(wb, collection)
+            from_setup = called_names("\n".join(setup))
             room = MAX_KEPT - sum(len(v) for v in keep.values())
             wanted = [
                 (path, qual, qual.rsplit(".", 1)[-1] in from_collection)
@@ -220,6 +237,26 @@ def zeroed_run(
                 report.write_bytes(saved[report])
             else:
                 report.unlink(missing_ok=True)
+
+
+def _failing_module_calls(wb: Workbench, tracebacks: Sequence[str]) -> frozenset[str]:
+    """The names called by module-level statements of the production modules a collection traceback passes through: the
+    failing line often reads a value an earlier statement computed (`_CFG = load()` then `RATE = _CFG["rate"]`)."""
+    names: set[str] = set()
+    for text in tracebacks:
+        for line in text.splitlines():
+            found = LOCATION.match(line.strip())
+            if found is None or not in_repository(found.group("path")) or not found.group("path").endswith(".py"):
+                continue
+            relative = found.group("path")
+            target = wb.worktree / relative
+            if _is_test_path(wb, relative) or not _is_inside(wb.worktree, target) or not target.is_file():
+                continue
+            try:
+                names |= import_time_names(target.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, OSError):
+                continue
+    return frozenset(names)
 
 
 def _listed(by_path: Mapping[str, Sequence[str]]) -> list[str]:
@@ -583,6 +620,14 @@ def no_assertion_failure(report: TestReport, tracing: Mapping[str, Sequence[str]
     )
 
 
+def _criterion_texts(wb: Workbench) -> dict[str, str]:
+    """criterion id -> its text (alias and scenario): what a dependency check must name (L4-IMP-062)."""
+    try:
+        return {c.id: f"{c.alias} {c.text}" for c in wb.provider.criteria(wb.ref)}
+    except Exception:  # noqa: BLE001 - a spec that cannot be read gives no criterion text: nothing is not applicable
+        return {}
+
+
 def confirm_pre_satisfied(
     wb: Workbench, candidates: Mapping[str, Sequence[str]], *, real: TestReport | None = None
 ) -> PreSatisfied:
@@ -596,7 +641,12 @@ def confirm_pre_satisfied(
     if not candidates:
         return PreSatisfied()
     roots = import_roots(wb)
-    not_applicable = {c: tuple(t) for c, t in candidates.items() if t and all(dependency_only(wb, i, roots) for i in t)}
+    texts = _criterion_texts(wb)
+    not_applicable = {
+        c: tuple(t)
+        for c, t in candidates.items()
+        if t and c in texts and all(dependency_only(wb, i, roots, texts[c]) for i in t)
+    }
     rest = {c: tuple(t) for c, t in candidates.items() if c not in not_applicable}
     if not rest:
         return PreSatisfied(not_applicable=not_applicable)
@@ -692,7 +742,7 @@ def discriminate_extra(
         # run (run_with_code_of goes on past collection errors), and those ids are not proofs
         base = variant.classify(run_with_code_of(wb, base_sha, production, name="test-extra-base"), real, redact=redact)
         for test in rest:
-            outcome, _ = variant.test_outcome(base, test, real, own, redact=redact)
+            outcome, _ = variant.test_outcome(base, test, real, own, redact=redact, zero_value=False)
             case = base.report.tests.get(test) if base.report is not None else None
             if outcome == "proof":
                 accepted[test] = "base"

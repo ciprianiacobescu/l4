@@ -138,7 +138,10 @@ def confirmed_by_base_run(
     confirmed: dict[str, tuple[str, ...]] = {}
     inconclusive: dict[str, str] = {}
     for criterion, names in candidates.items():
-        outcomes = [(t, *variant.test_outcome(run, t, real, own, redact=wb.redactor.redact_text)) for t in names]
+        outcomes = [
+            (t, *variant.test_outcome(run, t, real, own, redact=wb.redactor.redact_text, zero_value=False))
+            for t in names
+        ]
         outcomes = [o for o in outcomes if o[0] in new_ids]
         proving = tuple(t for t, outcome, _ in outcomes if outcome == "proof")
         if proving:

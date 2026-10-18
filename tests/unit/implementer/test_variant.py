@@ -43,7 +43,7 @@ def run_of(tmp_path: Path, report: TestReport | None, real: TestReport | None, *
 
 
 def test_scn_imp_300_a_report_with_collection_errors_and_no_test_is_inconclusive(tmp_path):
-    names = [f"tests.test_m{i}" for i in range(45)]
+    names = ["tests.test_spans", *(f"tests.test_m{i}" for i in range(44))]  # the candidates' module is one of them
     report = TestReport({}, names, {n: "...\n" + TRACE for n in names})
     run = run_of(tmp_path, report, real_report(T1, T2), exit_code=2)
     result = judge(run, CANDIDATES, real_report(T1, T2), OWN)["C-aaaaaaaa"]
@@ -61,9 +61,9 @@ def test_no_report_is_inconclusive_with_the_gate_reason(tmp_path):
 
 
 def test_a_missing_test_is_inconclusive_and_names_the_new_collection_error(tmp_path):
-    report = TestReport({T2: assertion(T2)}, ["tests.test_other"], {"tests.test_other": TRACE})
+    report = TestReport({T2: assertion(T2)}, ["tests.test_spans"], {"tests.test_spans": TRACE})
     run = run_of(tmp_path, report, real_report(T1, T2))
-    assert run.new_errors == ("tests.test_other",)
+    assert run.new_errors == ("tests.test_spans",)
     outcome, reason = variant.test_outcome(run, T1, real_report(T1, T2), OWN)
     assert outcome == "inconclusive"
     assert reason == f"{T1} did not run in {NAME}: E   TypeError: 'NoneType' object is not callable"
@@ -86,8 +86,11 @@ def test_an_unrelated_collection_error_the_real_run_has_too_is_not_new(tmp_path)
 def test_a_test_skipped_only_in_the_variant_is_inconclusive(tmp_path):
     skipped = TestCase(T1, "skipped")
     run = run_of(tmp_path, TestReport({T1: skipped, T2: assertion(T2)}), real_report(T1, T2))
-    outcome, reason = variant.test_outcome(run, T1, real_report(T1, T2), OWN)
+    # the base run only confirms, so there a test it did not run stays inconclusive; a zero-value run takes a test
+    # that skips itself for no proof (review M1, tests/unit/implementer/test_zero_value_causes.py)
+    outcome, reason = variant.test_outcome(run, T1, real_report(T1, T2), OWN, zero_value=False)
     assert (outcome, reason) == ("inconclusive", f"{T1} was skipped only in {NAME}")
+    assert variant.test_outcome(run, T1, real_report(T1, T2), OWN) == ("none", "")
     both = TestReport({T1: skipped, T2: passed(T2)})
     run = run_of(tmp_path, TestReport({T1: skipped, T2: assertion(T2)}), both)
     assert variant.test_outcome(run, T1, both, OWN) == ("none", "")

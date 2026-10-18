@@ -12,7 +12,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from l4.implementer.unfreeze import recorded_digests
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Criterion
 from l4.specs.questions import (
@@ -27,10 +26,16 @@ from l4.specs.questions import (
 )
 from l4.state.ledger import read_ledger
 
-Check = Literal["pre_satisfied", "vacuity", "at_red"]
+Check = Literal["pre_satisfied", "vacuity", "at_red", "tests"]
 MAX_SHOWN_TESTS = 10
 MAX_SUBJECTS = 50  # criteria or tests a `question.raised` event names
-_LABEL = {"pre_satisfied": "pre-satisfied", "vacuity": "run (b) zero-value", "at_red": "test-at-red"}
+_LABEL = {
+    "pre_satisfied": "pre-satisfied",
+    "vacuity": "run (b) zero-value",
+    "at_red": "test-at-red",
+    "tests": "test chore discrimination",
+}
+_TEST_SUBJECTS = ("at_red", "tests")  # the checks whose subjects are test ids, not criteria
 ACCEPT_OPTION = "accept: count these on the evidence of the real run"
 RETRY_OPTION = "retry: run the check again (after an L4 upgrade or a fix)"
 
@@ -52,13 +57,13 @@ class HeldCheck:
     @property
     def subjects(self) -> tuple[str, ...]:
         """What an `accept` answer counts: the criteria, or the corrected tests of `at_red`."""
-        return self.tests if self.check == "at_red" else self.criteria
+        return self.tests if self.check in _TEST_SUBJECTS else self.criteria
 
     def only(self, subjects: Sequence[str]) -> "HeldCheck":
         """The same hold for the given subjects only (those no override covers)."""
         keep = set(subjects)
-        criteria = self.criteria if self.check == "at_red" else tuple(c for c in self.criteria if c in keep)
-        tests = tuple(t for t in self.tests if t in keep) if self.check == "at_red" else self.tests
+        criteria = self.criteria if self.check in _TEST_SUBJECTS else tuple(c for c in self.criteria if c in keep)
+        tests = tuple(t for t in self.tests if t in keep) if self.check in _TEST_SUBJECTS else self.tests
         return replace(self, criteria=criteria, tests=tests)
 
 
@@ -96,8 +101,17 @@ def held_question(held: HeldCheck, criteria: Mapping[str, Criterion], asked: str
 
 @dataclass(frozen=True)
 class Override:
+    """A person's (or, where the project allows it, an agent's) `accept`. `tests` are the tests the held check named:
+    the override covers a criterion only while its candidate tests are among them, so a later different test of the
+    criterion is not carried by an answer given about another."""
+
     question: str
     answer_sha256: str
+    tests: frozenset[str] = frozenset()
+    by: str = "human"
+
+    def covers(self, tests: Sequence[str]) -> bool:
+        return set(tests) <= self.tests
 
 
 def accepted_overrides(wb: Workbench, task_key: str, check: Check) -> dict[str, Override]:
@@ -109,7 +123,11 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check) -> dict[str, 
     if file is None:
         return {}
     events = read_ledger(wb.worktree / Path(wb.ledger_rel).parents[2]).events
-    digests = recorded_digests(events)
+    actors = {
+        (str(e.data.get("id")), str(e.data.get("answer_sha256"))): str(e.data.get("by"))
+        for e in events
+        if e.type == "question.answered" and e.data.get("by") in ("human", "agent")
+    }
     raised = {
         str(e.data.get("id")): e for e in events if e.type == "question.raised" and e.data.get("kind") == "harness"
     }
@@ -120,11 +138,13 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check) -> dict[str, 
         if question.status is not QuestionStatus.ANSWERED or answered_by(question) != "human":
             continue
         digest = answer_sha256(question)
-        if harness_answer(question) != "accept" or digest is None or digest not in digests.get(question.id, set()):
+        by = actors.get((question.id, str(digest)))
+        if harness_answer(question) != "accept" or digest is None or by is None:
             continue
         event = raised.get(question.id)
         if event is None or event.data.get("task") != task_key or event.data.get("check") != check:
             continue
-        subjects = event.data.get("tests" if check == "at_red" else "criteria") or []
-        found.update({str(s): Override(question.id, digest) for s in subjects})
+        subjects = event.data.get("tests" if check in _TEST_SUBJECTS else "criteria") or []
+        recorded = frozenset(str(t) for t in event.data.get("tests") or [])
+        found.update({str(s): Override(question.id, digest, recorded, by) for s in subjects})
     return found
