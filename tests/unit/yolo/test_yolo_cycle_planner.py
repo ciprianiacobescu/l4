@@ -152,3 +152,39 @@ def test_a_named_run_of_a_held_unit_is_refused_with_the_reason(world):
     step = world.step(read_only=True)
     assert step.allow is not None and A not in step.allow
     assert step.refusals[A] == "is held by yolo.hold"
+
+
+def exclude_in_plan(world, excluded: list[str], planned: list[str]) -> None:
+    import json as _json
+
+    world.plan(deps={}, batches=[{"id": "b1", "units": [{"id": u} for u in planned]}])
+    path = ".l4/plans/p1.json"
+    doc = _json.loads(world.git.run("show", f"HEAD:{path}").stdout)
+    doc["exclude"] = [{"id": u, "reason": "not in this plan"} for u in excluded]
+    world.commit({path: _json.dumps(doc, indent=2) + "\n"}, "exclude")
+    world.push_main()
+
+
+def test_a_unit_a_plan_excludes_and_yolo_hold_matches_stays_held_before_and_after_activation(tmp_path):
+    """Round-2 review: the two excluded-and-held units of a consumer ran after a plan review."""
+    world = CycleWorld(tmp_path, units=("a", "b", "c"))
+    C = unit_id("c")
+    hold(world, A, B)
+    exclude_in_plan(world, [A, B], [C])
+    first = world.step()  # a plan that is only reviewed
+    assert A not in (first.allow or ()) and B not in (first.allow or ())
+    assert first.refusals[A] == first.refusals[B] == "is held by yolo.hold"
+    world.activate(order=[C])
+    step = world.step()
+    assert step.allow == frozenset({C})
+    assert step.refusals[A] == step.refusals[B] == "is held by yolo.hold"
+
+
+def test_a_unit_a_plan_plans_and_yolo_hold_matches_follows_the_plan(tmp_path):
+    world = CycleWorld(tmp_path, units=("a", "b", "c"))
+    C = unit_id("c")
+    hold(world, C)
+    world.plan(deps={}, batches=[{"id": "b1", "units": [{"id": C}]}])
+    world.activate(order=[C])
+    step = world.step()
+    assert step.allow == frozenset({C}) and step.plan_id == "p1"

@@ -146,7 +146,11 @@ def test_plan_holds_without_a_config_is_as_before():
     assert plan_holds([], {}, {"openspec:a": None}, "main") == {}
 
 
-def test_an_excluded_unit_is_listed_and_so_not_held_by_the_config():
+def test_an_excluded_unit_that_yolo_hold_matches_stays_held():
+    """L4-ADO-011 (round-2 review): excluding a unit in a plan RELEASED it from yolo.hold; only the ids a plan PLANS
+    count as listed, so an excluded one stays `held by yolo.hold`."""
     files = [file("p1", plan_text("p1", ["openspec:a"], exclude=[{"id": "openspec:b", "reason": "later"}]))]
-    holds = plan_holds(files, {}, {"openspec:b": None}, "main", cfg_with("*"))
-    assert holds == {}
+    holds = plan_holds(files, {}, {"openspec:b": None, "openspec:a": None}, "main", cfg_with("*"))
+    assert holds["openspec:b"] == HELD
+    assert holds["openspec:a"].reason == "held by plan p1 (new)"  # the planned unit still follows its plan
+    assert config_holds(cfg_with("*"), ["openspec:b"], set()) == {"openspec:b": HELD}
