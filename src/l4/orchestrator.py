@@ -257,6 +257,7 @@ class Orchestrator:
         self._ctx = ctx
         ctx.shared["fall_back"] = self.switch_profile  # for hooks that see a limit themselves (the audit writer)
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
+        ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         self._push_failed = False
         self._commit_what = "ledger"  # the subject of the final ledger commit: `chore(<unit>): <what> [skip ci]`
         self._start = services.git.rev_parse("HEAD")
@@ -387,11 +388,36 @@ class Orchestrator:
             if (refused := self._write_accepted()) is not None:
                 return UnitRunResult(self._outcome(before), refused)
             code = self._drive()
+            code = self._delegate(code)
         except (RoleUnavailable, RoleLimit) as exc:
             code = self._park(exc)
         except SecretInPush as exc:
             code = self._block_secret(exc)
         return UnitRunResult(self._outcome(before), code)
+
+    def _delegate(self, code: ExitCode) -> ExitCode:
+        """The delegate pass (L4-DLG-003): a run that leaves the unit waiting for an answer (`awaiting_human`, or
+        `fixing` with a waiting fix unit) asks the delegate before it closes, after the clarifier and under the unit's
+        lease. The hook checks the base branch and the scope itself; this run's config is only the cheap first look, so
+        a run with the delegate off reads and writes nothing more. The exit code stays what it was: the answer is read
+        by the next run (D4). A role that is missing is the hook's own deferral or escalation, never a parked unit
+        (L4-DLG-013)."""
+        hook = self.services.hooks.delegate
+        if hook is None or code != ExitCode.AWAITING_HUMAN or not self.cfg.delegate.enabled:
+            return code
+        if self._refold().phase not in (Phase.AWAITING_HUMAN.value, Phase.FIXING.value):
+            return code
+        try:
+            outcome = hook(self._ctx)
+        except (RoleUnavailable, RoleLimit) as exc:  # the pass handles its own; one that leaks must not park the unit
+            log.warning("%s: the delegate pass ended early: %s", self.services.ref.id, exc)
+            return code
+        if outcome.answered or outcome.escalated or outcome.deferred:
+            log.info(
+                "%s: delegate: %d answered, %d escalated, %d deferred",
+                self.services.ref.id, len(outcome.answered), len(outcome.escalated), len(outcome.deferred),
+            )  # fmt: skip
+        return code
 
     def _write_accepted(self) -> ExitCode | None:
         """The accepted review findings of this unit go into its folder before any agent step, in a checkpoint commit

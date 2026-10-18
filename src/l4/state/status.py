@@ -136,6 +136,9 @@ class UnitSnapshot:
     events: tuple[LedgerEvent, ...] = ()  # the ledger events read (for `status --events`)
     fix_parks: tuple[FixPark, ...] = ()  # the trailing parks only a fix ends, no work between them (L4-YOLO-035)
     prompt_cut: dict[str, Any] | None = None  # the data of the last implementer `prompt.truncated` (L4-IMP-054)
+    # the questions the delegate has still to decide, (key, time it may be asked again), set only for a unit in its
+    # scope while the base branch enables it (`l4.delegate.due.stamp_due`); empty otherwise
+    delegate_due: tuple[tuple[str, str | None], ...] = ()
 
     @property
     def feedback_counts(self) -> dict[str, int]:
