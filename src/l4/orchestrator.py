@@ -217,6 +217,9 @@ class UnitRunResult:
     outcome: UnitOutcome
     exit_code: ExitCode
     busy: bool = False  # another run holds the unit's lease: skipped, which is not the unit's failure
+    # the delegate pass wrote an answer, or its soft deadline cut it: the run asks the forge for the next run on the
+    # base branch (L4-DLG-007)
+    delegate_answered: bool = False
 
 
 @dataclass
@@ -259,6 +262,7 @@ class Orchestrator:
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
         ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         self._push_failed = False
+        self.delegate_answered = False  # the delegate pass asks for the next run (L4-DLG-007)
         self._commit_what = "ledger"  # the subject of the final ledger commit: `chore(<unit>): <what> [skip ci]`
         self._start = services.git.rev_parse("HEAD")
         self._branch_start = self._start  # where the run found the branch: the reset target of a secret halt
@@ -393,7 +397,7 @@ class Orchestrator:
             code = self._park(exc)
         except SecretInPush as exc:
             code = self._block_secret(exc)
-        return UnitRunResult(self._outcome(before), code)
+        return UnitRunResult(self._outcome(before), code, delegate_answered=self.delegate_answered)
 
     def _delegate(self, code: ExitCode) -> ExitCode:
         """The delegate pass (L4-DLG-003): a run that leaves the unit waiting for an answer (`awaiting_human`, or
@@ -412,6 +416,7 @@ class Orchestrator:
         except (RoleUnavailable, RoleLimit) as exc:  # the pass handles its own; one that leaks must not park the unit
             log.warning("%s: the delegate pass ended early: %s", self.services.ref.id, exc)
             return code
+        self.delegate_answered = outcome.start_run
         if outcome.answered or outcome.escalated or outcome.deferred:
             log.info(
                 "%s: delegate: %d answered, %d escalated, %d deferred",
@@ -1644,7 +1649,7 @@ def run_command(
     except Exception as exc:  # noqa: BLE001 - a warning: the run limit still stops a plan that loops
         log.warning("plan: a run that did not start was not recorded (%s)", app.redactor.redact_text(str(exc)))
     result = continue_left_units(app, cfg, result)
-    _start_next_run(app, cfg, step)
+    _start_next_run(app, cfg, after_delegate(step, result))
     log_artefacts(app.out_dir, app.run_id, artefacts_note(app.environ, cfg.ci.upload_artifacts))
     return result
 
@@ -1658,6 +1663,15 @@ def _refuse_plan_unit(step: PlanStep, ref: UnitRef) -> UnitRunResult:
     log.error("%s", text)
     outcome = UnitOutcome(unit=ref.id, phase_before="none", phase_after="none", exit_reason=text[:300])
     return UnitRunResult(outcome, ExitCode.HALTED)
+
+
+def after_delegate(step: PlanStep, result: CommandResult) -> PlanStep:
+    """A delegate answer (or a pass the soft deadline cut) is pushed to the unit branch: the next run on the base reads
+    it (L4-DLG-007, D4), in a plan and outside one, also when the plan step waited or chained nothing. One request for
+    the whole run, however many units were answered; the plan's own request, when it made one, is that same request."""
+    if result.delegate_answered and not step.start_next_run:
+        return replace(step, start_next_run=True)
+    return step
 
 
 def _start_next_run(app: AppContext, cfg: L4Config, step: PlanStep) -> None:
@@ -1749,6 +1763,7 @@ def run_units(
     rejected: dict[str, str] = {}  # unit id -> why its run exited 14: a plan records it
     not_started: dict[str, tuple[int, str]] = {}  # unit id -> (exit, why) for a run that ended before it started
     busy: list[str] = []  # unit ids skipped because another run holds their lease
+    answered: list[str] = []  # unit ids whose delegate pass asks for the next run (L4-DLG-007)
     clock = services_module.SystemClock()  # looked up here so tests can control it
     waits = RunWaits()  # one wait budget for the whole run (L4-AVL-011)
     waits.began = clock.now()  # the run's start, even if the first unit fails before it builds its orchestrator
@@ -1787,13 +1802,18 @@ def run_units(
         units.append(done.outcome)
         if done.busy:
             busy.append(ref.id)
+        if done.delegate_answered:
+            answered.append(ref.id)
         if ref.id not in waits.started and not done.busy:  # a usage error, a lease or worktree failure: it never began
             why = done.outcome.exit_reason or "the run ended before the unit started: see the run log"
             not_started[ref.id] = (int(done.exit_code), why)
         if done.exit_code == ExitCode.REJECTED:
             rejected[ref.id] = done.outcome.exit_reason or "the unit's run rejected it (exit 14): see the run log"
     began = [ref.id for _, ref in chosen if ref.id in waits.started]
-    return CommandResult(most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy)
+    return CommandResult(
+        most_severe(codes), units, rejected=rejected, not_started=not_started, began=began, busy=busy,
+        delegate_answered=answered,
+    )  # fmt: skip
 
 
 def _phase_of(cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef) -> str:

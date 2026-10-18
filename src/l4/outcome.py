@@ -83,6 +83,9 @@ class CommandResult:
     # `run` only: the units skipped because another run holds their lease; a plan does not chain a run for them (the
     # other run's end, or the cron, is the next trigger)
     busy: Sequence[str] = ()
+    # `run` only: the units whose delegate pass wrote an answer (or was cut by the soft deadline): the run asks the
+    # forge once for the next run on the base branch, whatever the plan step did (L4-DLG-007)
+    delegate_answered: Sequence[str] = ()
 
 
 def new_run_id(now: datetime | None = None, rng: random.Random | None = None) -> str:
