@@ -199,3 +199,21 @@ def test_weakened_go_and_typescript_tests_are_named_as_checked_by_the_run(tmp_pa
     repo.write({"tests/test_other.py": PY + "\n\ndef test_new():\n    assert True\n"})
     out = check_tests(repo.context(base, repo.commit("red 2", task="1.2", tdd="red")))
     assert not out.findings and "2 other test file(s) are checked by the run of pre-existing tests" in out.note
+
+
+def test_a_human_tag_in_a_fix_units_task_exempts_nothing(tmp_path, git_environ):  # SCN-VER-107 (third review, M3)
+    from l4.verifier.integrity import check_tests
+
+    def edited(root, unit):
+        (root).mkdir()
+        repo, base = new_repo(root, git_environ, {"tests/test_c.py": "def test_c():\n    assert 1\n"})
+        repo.write({"tests/test_c.py": "def test_c():\n    assert 2\n"})
+        return repo, base, repo.commit("fix", task="1.1", tdd="green", unit=unit)
+
+    tagged = task("1.1", "1.1 Fix the check [test-infra]")
+    repo, base, sha = edited(tmp_path / "fix", f"{UNIT}:fix-1")
+    out = check_tests(repo.context(base, sha, tasks=[(f"{UNIT}:fix-1", tagged)]))
+    assert [f.title for f in out.findings] == ["a pre-existing test was changed"]
+    repo, base, sha = edited(tmp_path / "own", UNIT)
+    own = check_tests(repo.context(base, sha, tasks=[(UNIT, tagged)]))
+    assert own.findings == [] and own.allowed_tests  # the unit's own task: a person wrote the tag

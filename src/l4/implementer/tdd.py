@@ -107,7 +107,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
-from l4.verifier.scan import task_tags
+from l4.verifier.scan import has_human_tag
 from l4.yolo.digest import RevisionMissing, unit_digest
 
 log = logging.getLogger("l4.implementer")
@@ -832,7 +832,7 @@ def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleT
     """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted, in the test
     files it changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new
     place is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
-    if "test-infra" in task_tags(task.title):
+    if has_human_tag(wb.ref.path, task.title, "test-infra"):
         return []
     root, tdd = wb.worktree, wb.cfg.tdd
     changed = changed_paths(wb.git, base, excludes=wb.excludes)
@@ -1313,7 +1313,7 @@ def run_green(
 def freeze_test_paths(wb: Workbench, task: Task, base: str, *, keep: Collection[str] = (), phase: str) -> list[str]:
     """L4-IMP-006 (7): after green or a fix chore no path of the test or support globs differs from `base`, but the
     `keep` paths a human answer unfroze. A task with the human `[test-infra]` tag is exempt."""
-    if "test-infra" in task_tags(task.title):
+    if has_human_tag(wb.ref.path, task.title, "test-infra"):
         return []
     tdd = wb.cfg.tdd
     return restore_test_paths(

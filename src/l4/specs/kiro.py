@@ -565,7 +565,7 @@ GENERIC_UNCHANGED = "The system SHALL CONTINUE TO satisfy every other acceptance
 
 def _line(text: str, limit: int = 160) -> str:
     """One line of plain text: model- and person-written text must not open a heading, a list or a numbered item."""
-    one = " ".join(text.split()).lstrip("#>*-+ ")
+    one = " ".join(text.replace("[", "(").replace("]", ")").split()).lstrip("#>*-+ ")  # no `[tag]` from model text
     return one if len(one) <= limit else one[: limit - 3].rstrip() + "..."
 
 
