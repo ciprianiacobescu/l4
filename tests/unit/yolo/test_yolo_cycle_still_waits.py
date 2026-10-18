@@ -15,7 +15,7 @@ def world(tmp_path):
 
 
 def test_the_actionable_actions_are_the_ones_a_run_can_take():
-    assert {"implement", "clarify", "verify", "hand_off"} == set(ACTIONABLE)
+    assert {"implement", "clarify", "verify", "hand_off", "delegate"} == set(ACTIONABLE)  # delegate-answers 9.3
 
 
 def test_a_unit_awaiting_a_human_with_an_open_question_still_waits(world):

@@ -451,7 +451,24 @@ def discover(
                 snapshot, state=state, feedback=file, follow_up=offer_for(file, state, follows, opened, released)
             )
         out.append((provider, snapshot))
-    return sorted(out, key=lambda pair: pair[1].ref.id)
+    return _with_delegate(cfg, git, sorted(out, key=lambda pair: pair[1].ref.id))
+
+
+def _with_delegate(
+    cfg: L4Config, git: Git, rows: list[tuple[SpecProvider, UnitSnapshot]]
+) -> list[tuple[SpecProvider, UnitSnapshot]]:
+    """The questions the delegate has still to decide (`UnitSnapshot.delegate_due`, L4-DLG-003), for the units in its
+    scope. This run's config is the cheap first look (the delegate off costs nothing); the settings and the scope come
+    from the base branch and the plan files, read once and only when a unit waits."""
+    if not cfg.delegate.enabled:
+        return rows
+    from l4.delegate.due import stamp_due  # the delegate imports the planner and the plan state, which import this
+    from l4.delegate.scope import plans_view
+    from l4.delegate.settings import delegate_settings
+
+    settings = delegate_settings(git, cfg.forge.base_branch)
+    stamped = stamp_due([s for _, s in rows], settings.delegate, lambda: plans_view(git.repo, cfg, git))
+    return [(provider, snap) for (provider, _), snap in zip(rows, stamped, strict=True)]
 
 
 def select_runnable(cfg: L4Config, git: Git, providers: list[SpecProvider], unit: str) -> tuple[SpecProvider, UnitRef]:

@@ -104,7 +104,7 @@ RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current un
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
 MAX_WAIT_DETAIL = 1_000
-_ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+_ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off", "delegate"})  # `orchestrator.ACTIONABLE`
 ACTIONABLE = _ACTIONABLE
 
 
@@ -1750,7 +1750,8 @@ class _Step:
         snap = self.snaps.get(unit)
         if snap is None:
             return self._stop(ctx, "unit_missing", f"{unit} is not among the units of the target", unit)
-        actionable = self._unit_action(snap) in _ACTIONABLE
+        action = self._unit_action(snap)
+        actionable = action in _ACTIONABLE
         phase = snap.state.phase or ""
         adopt = not actionable and unit != state.current and self._adoptable(snap)
         if not actionable and not adopt:
@@ -1769,8 +1770,11 @@ class _Step:
         self._write(ctx, self._dispatch_events(ctx, unit, snap, adopted=adopt))
         if not adopt:
             self._line(ctx.plan_id, f"dispatched {unit} ({phase or 'not started'})")
-            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035)
-            return self._result(frozenset({unit}), start_next_run=not parked, plan_id=ctx.plan_id)
+            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035); the run that takes
+            # the action `delegate` does the pass only, and starts the next run itself when it answered (L4-DLG-007)
+            return self._result(
+                frozenset({unit}), start_next_run=not parked and action != "delegate", plan_id=ctx.plan_id
+            )
         self._line(ctx.plan_id, f"adopted {unit} ({phase}): it is past implementation")
         if plan.merge == "auto":  # a person merges under `merge: human`; the plan waits for it as for any current unit
             merged = self._merge(ctx, snap)

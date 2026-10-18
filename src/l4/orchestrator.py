@@ -128,7 +128,7 @@ MAX_CLARIFIER_ROUNDS_PER_TASK = 2  # a task that blocks again after this many au
 log = logging.getLogger("l4.run")
 
 
-ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})
+ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off", "delegate"})
 # the phases in which the intake lint (L4-ODD-004) still matters: from then on the verifier is the judge
 _LINT_PHASES = frozenset({None, Phase.INTAKE, Phase.READY, Phase.IMPLEMENTING, Phase.AWAITING_HUMAN, Phase.CLARIFYING})
 # the phases a new unit passes before implementation starts: the only ones in which the strict OpenSpec validation and
