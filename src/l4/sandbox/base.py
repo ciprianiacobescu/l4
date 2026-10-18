@@ -57,6 +57,9 @@ class SandboxSpec:
     setup_paths: tuple[Path, ...] = field(default=(), kw_only=True)  # gate of a `gates.setup` command only (L4-SEC-033)
     read_only: tuple[Path, ...] = field(default=(), kw_only=True)  # .venv / node_modules of a gate that builds nothing
     empty_dirs: tuple[Path, ...] = field(default=(), kw_only=True)  # tool caches inside them: a tmpfs each (L4-SEC-035)
+    # the delegate reads the repository and writes nothing (L4-DLG-004): the worktree is bound read-only, the private
+    # directory (the result file) stays writable
+    worktree_read_only: bool = field(default=False, kw_only=True)
     record_dir: Path | None = None  # writable, apart from TMPDIR: holds the gate's outcome record (a random file name)
 
     def __post_init__(self) -> None:
