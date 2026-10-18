@@ -10,7 +10,7 @@
 5. One control loop runs for the repository, always from the base branch (also when a push to `l4/**` starts it).
 6. Activating or cancelling a plan is a person's decision. Resume a plan only when the person asked.
 7. Read first: `l4 status --unit U` (`l4_status`), `l4 yolo status P`. Never merge a PR.
-8. A write command starts a run on the base branch unless you add `--no-run`.
+8. A write command starts a run on the base branch only with the forge token set; else it prints `start a run with: …`.
 
 ## State model
 
@@ -32,15 +32,14 @@
 | `waiting_capacity` | A person fixes the login, key, CLI or `roles`. Then `l4 retry --unit U --reason "R"` (ignores `retry_after`) | As the halted row | Phase leaves `waiting_capacity` |
 | `escalated` | `l4 retry --unit U --reason "R" [--rounds N]` (at a round limit it adds N rounds). For `no_convertible_finding`, give feedback first | As the halted row | Phase is `verifying` |
 | `in_review` and a person pushed a commit | Nothing: the next run sends it to `verifying` (`implementing` for a spec edit). Verify again: `l4 retry --unit U --reason "R"` | Retry commit | `l4 status --unit U` |
-| A run was killed mid-step | Start a run | None | The unit moves |
-| A run now | `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on `<base>`) | None | The run is listed |
+| A run was killed mid-step, or a command printed `start a run with: …` | `gh workflow run l4.yml --ref <base>` (GitLab: new pipeline on `<base>`) | None | The run is listed |
 
 An agent may answer only a question of a kind in `clarifier.auto_accept_kinds` that names no frozen path (else exit 2), unless
 `clarifier.answer_by_agents` is true on the base branch. Verdict questions go to a person.
 
 ## Commands
 
-| Command | Writes to | Pushes | Starts a run | Agent |
+| Command | Writes to | Pushes | Starts a run (token) | Agent |
 |---|---|---|---|---|
 | `l4 retry` | unit branch | yes | yes | yes |
 | `l4 resume` (`halted`, `escalated` only) | unit branch | yes | no | yes |

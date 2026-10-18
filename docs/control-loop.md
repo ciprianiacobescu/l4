@@ -263,7 +263,7 @@ a command that makes a worktree for a unit branch refuses when that branch is ch
 (`WorktreeManager._release_branch`, runbook 7.11). Run `git fetch` first when you read: `l4 status` and `l4 plan` read
 the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refresh.py`).
 
-| Command | What it writes | Pushes? | Starts a run? |
+| Command | What it writes | Pushes? | Starts a run? (only with the forge token) |
 |---|---|---|---|
 | `l4 retry --unit U --reason R [--rounds N] [--no-run]` | Event `unit.retried`; commit `chore(<name>): retry [skip ci]` on the unit branch. Runs no agent, gate or sandbox. For a merged unit, the archive retry. | Yes, to the unit branch | Yes, on `<base>`, unless `--no-run` |
 | `l4 resume --unit U --reason R` | Event `unit.resumed`; commit `chore(<name>): resume [skip ci]`. Only for `halted` and `escalated`. | Yes, to the unit branch | No |
@@ -277,6 +277,8 @@ the refs of your clone, and only a CI run fetches them for you (`src/l4/vcs/refr
 | `l4 status`, `l4 yolo status` | Nothing. | No | No |
 | `l4 run --dry-run` | Nothing. It shows what a run would do. | No | No |
 | `l4 mcp serve` | The same commands as MCP tools for an IDE agent. It writes nothing itself. | As the command it runs | As the command it runs |
+
+**When a command starts a run.** "Yes" in the last column means: the command asks the forge to start the harness's CI on `<base>`, and only when the forge token is set and the forge accepts the start. Otherwise it prints how to start a run by hand (`start a run with: …`) and exits 0 (`start_run_line`, `src/l4/state/retry.py`). `l4 retry`, `l4 restart`, `l4 questions answer` and `l4 questions accept` behave so, and so do `l4 yolo review`, `activate` and `resume`.
 
 **Person and agent rules.**
 
@@ -451,7 +453,7 @@ step  PERSON  BASE  UNIT  REFS  CI   AGENT  PR   what happens   (REFS = refs/l4:
  9     .      .     >     .     S    .      .    push questions.md with Q-001 [skip ci]
 10     .      .     .     .     S    .      >    note and label: waiting for an answer
 11     S      .     >     .     .    .      .    l4 questions answer: commit [skip ci], no run from the push
-12     S      .     .     .     >    .      .    the command starts a run on base
+12     S      .     .     .     >    .      .    the command starts a run on base (with the forge token; else it prints how)
 13     .      .     >     .     S    .      .    run reads the answer, continues 2.1 (same branch, same PR)
 14     .      .     >     .     S    >      .    green step, push green commit, tick task
 15     .      .     >     .     S    >      .    verification, push H [L4-Run, no skip ci]
