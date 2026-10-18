@@ -119,3 +119,11 @@ def test_a_file_with_a_test_is_not_read_as_support(tmp_path, git_environ):  # SC
         {"src/pytdd/pricing.py": PRICING_NEW, "tests/test_hooks.py": HELPER_HOOK + "\n\ndef test_x():\n    pass\n"}
     )
     assert check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings == []
+
+
+def test_a_conftest_that_registers_an_exit_hook_or_names_the_report_path_is_a_hit(tmp_path, git_environ):  # SCN-VER-129
+    forger = "import atexit\n\n\ndef _f():\n    open('.l4-out/junit.xml', 'w').write('')\n\n\natexit.register(_f)\n"
+    repo, base = new_repo(tmp_path, git_environ, BASE)
+    repo.write({"tests/conftest.py": forger})
+    [finding] = check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings
+    assert "atexit.register" in finding.detail and "names the test output" in finding.detail

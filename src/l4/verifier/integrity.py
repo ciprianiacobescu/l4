@@ -10,6 +10,7 @@ check (2.11), the secret scan (2.12).
 M1: verifier 2.7-2.9, 2.11, 2.12, 2.13 (the red re-run, verifier red commits, `pre_adoption`), other languages.
 """
 
+import ast
 import re
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
@@ -25,6 +26,7 @@ from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.specs.base import Task
 from l4.specs.feedback import FEEDBACK_FILENAME
+from l4.specs.fixmark import task_marker
 from l4.specs.followup import feedback_home, follow_up_problem
 from l4.state.ledger import LedgerEvent
 from l4.vcs.authorship import SHA, commit_records, is_harness
@@ -68,6 +70,16 @@ class Outcome:
     mocked: list[str] = field(default_factory=list)  # patches of the unit's code a support fixture makes on request
     base_tests: dict[str, Any] | None = None  # the passed ids of the base's run (L4-VER-038), kept for later rounds
     listed: list[str] = field(default_factory=list)  # signs of a test run in production code, shown to the judge
+
+
+def _human_tag(ctx: IntegrityContext, unit: str, title: str, tag: str) -> bool:
+    """A person's `[tag]` on a task. A fix unit's task, and any task of a follow-up unit, was written by the harness
+    from model-written findings: its tags exempt nothing (third review, M3)."""
+    if tag not in task_tags(title):
+        return False
+    if unit != ctx.unit_id:
+        return False  # a fix unit
+    return not ctx.unit_dirs or task_marker(ctx.git.repo / ctx.unit_dirs[0]) is None
 
 
 def _blocker(title: str, detail: str, severity: Severity = Severity.BLOCKER) -> Finding:
@@ -241,7 +253,7 @@ def _unfrozen_source(ctx: IntegrityContext, commit: "Commit", path: str) -> str 
 def _allowance(ctx: IntegrityContext, who: list[list[str]], path: str, by_sha: Mapping[str, "Commit"]) -> str | None:
     """`(task <t>: [test-infra])` / `(task <t>: unfrozen by <source>)` when every harness commit in `who` is covered by
     an allowance (L4-VER-031), else None. A harness commit without an `L4-Task` is never covered."""
-    infra = {(unit, t.key) for unit, t in ctx.tasks if "test-infra" in task_tags(t.title)}
+    infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
     reasons: list[str] = []
     for record in who:
         if not is_harness(record):
@@ -363,7 +375,7 @@ def _later_red_changes(ctx: IntegrityContext) -> list[str]:
     or deleted (the base's own tests are judged by the comparison above)."""
     tdd = ctx.cfg.tdd
     steps = {c.sha: c for c in commits(ctx) if c.tdd in ("red", "already-satisfied")}
-    infra = {(unit, t.key) for unit, t in ctx.tasks if "test-infra" in task_tags(t.title)}
+    infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
     recorded = _superseded(ctx)
     hits: list[str] = []
     for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
@@ -562,7 +574,7 @@ def check_test_paths(ctx: IntegrityContext) -> Outcome:
     tdd = ctx.cfg.tdd
     globs = (*tdd.test_globs, *tdd.test_support_globs)
     steps = {c.sha: c for c in commits(ctx) if c.tdd in ("green", "exempt", "already-done")}
-    infra = {(unit, t.key) for unit, t in ctx.tasks if "test-infra" in task_tags(t.title)}
+    infra = {(unit, t.key) for unit, t in ctx.tasks if _human_tag(ctx, unit, t.title, "test-infra")}
     hits, checked = [], 0
     for record in commit_records(ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}"):
         commit = steps.get(record[SHA])
@@ -610,7 +622,7 @@ def commits(ctx: IntegrityContext) -> list[Commit]:
 
 def tagged_files(ctx: IntegrityContext, tag: str) -> frozenset[str]:
     """The files that commits of tasks carrying the human tag `[tag]` touched."""
-    keys = {(unit, task.key) for unit, task in ctx.tasks if tag in task_tags(task.title)}
+    keys = {(unit, task.key) for unit, task in ctx.tasks if _human_tag(ctx, unit, task.title, tag)}
     files: set[str] = set()
     for commit in commits(ctx):
         if (commit.unit, commit.task) in keys:
@@ -654,6 +666,10 @@ def _opened_patches(ctx: IntegrityContext, changed: Mapping[str, str]) -> list[s
     return hits
 
 
+def _output_count(ctx: IntegrityContext, path: str, text: str) -> int:
+    return sum(1 for why in awareness_lines(ctx, path, text).values() if why == "names the test output")
+
+
 def _is_support(ctx: IntegrityContext, path: str, source: str) -> bool:
     """A test-support file for the scan: one of `tdd.test_support_globs`, or a `.py` file of `tdd.test_globs` that
     defines no test (a helper module under `tests/`, L4-VER-039; a file that does not parse counts too)."""
@@ -682,6 +698,10 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
         found: list[str] = []
         if path.endswith(".py") and _is_support(ctx, path, after):
             found = sorted(set(scan.result_hooks(after)) - set(scan.result_hooks(before)))
+            found += [
+                "names the test output (.l4-out or a report path) in a support file"
+                for _ in range(max(0, _output_count(ctx, path, after) - _output_count(ctx, path, before)))
+            ]
             found += [
                 f"patches {target}, which the unit changed, for every test"
                 for target, blocking in new_patches(before, after, modules)
@@ -913,7 +933,10 @@ def check_tdd_history(ctx: IntegrityContext) -> Outcome:
 
 # --- 2.14 production code that looks for the test run (second review N1, N2; L4-VER-039) -----------------------------
 
-_REACTS = re.compile(r"\.l4-out|\bL4_[A-Z0-9_]+|\bPYTEST_[A-Z0-9_]+")  # the run's output and environment: a blocker
+_BENIGN_ENV = frozenset({"PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID"})
+_ENV_NAME = re.compile(r"^(?:L4|PYTEST)_[A-Z0-9_]+$")
+_ENV_WORDS = re.compile(r"environ|getenv|process\.env|\bENV\b")
+_OUTPUT = re.compile(r"(?<![\w.-])\.l4-out(?![\w-])")
 _SIGNS = (  # other signs that code knows it runs under a test: listed for the judge, not blocked
     re.compile(r"""['"]_?pytest['"]\s+in\s+sys\.modules"""),
     re.compile(r"^\s*(?:import|from)\s+_?pytest\b"),
@@ -922,10 +945,49 @@ _SIGNS = (  # other signs that code knows it runs under a test: listed for the j
 )
 
 
-def _awareness_hits(ctx: IntegrityContext, text: str) -> list[str]:
-    """The lines of `text` that name the run's output or environment (including the configured report paths)."""
+def _report_patterns(ctx: IntegrityContext) -> list[re.Pattern[str]]:
     reports = [r for r in (*ctx.cfg.gates.test.reports, *ctx.cfg.gates.e2e.reports) if r]
-    return [line for line in text.splitlines() if _REACTS.search(line) or any(report in line for report in reports)]
+    return [re.compile(r"(?<![\w.-])" + re.escape(r) + r"(?![\w.-])") for r in reports]
+
+
+def _names_output(ctx: IntegrityContext, text: str) -> bool:
+    return bool(_OUTPUT.search(text)) or any(p.search(text) for p in _report_patterns(ctx))
+
+
+def awareness_lines(ctx: IntegrityContext, path: str, text: str) -> dict[int, str]:
+    """line number -> why, for the lines of `text` that read the run's environment or name its output. Python is read
+    with the AST: comments and docstrings are ignored, and an environment read is a call or subscript of `environ` or
+    `getenv` whose own expression holds a string `L4_*` or `PYTEST_*` (an xdist worker variable is benign). Another
+    language is read line by line, comments of the `#` and `//` kind removed."""
+    found: dict[int, str] = {}
+    if not path.endswith(".py"):
+        for number, raw in enumerate(text.splitlines(), 1):
+            line = re.sub(r"(?:^|\s)(?:#|//).*$", "", raw)
+            if _names_output(ctx, line):
+                found[number] = "names the test output"
+            elif _ENV_WORDS.search(line) and any(
+                _ENV_NAME.match(m) and m not in _BENIGN_ENV for m in re.findall(r"[A-Z][A-Z0-9_]+", line)
+            ):
+                found[number] = "reads a test-run variable"
+        return found
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return found
+    docstrings = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    parents = {id(child): node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)) or id(node) in docstrings:
+            continue
+        if _names_output(ctx, node.value):
+            found[node.lineno] = "names the test output"
+        elif _ENV_NAME.match(node.value) and node.value not in _BENIGN_ENV:
+            top: ast.AST = node
+            while isinstance(parents.get(id(top)), ast.expr):
+                top = parents[id(top)]
+            if _ENV_WORDS.search(ast.unparse(top)):
+                found[node.lineno] = "reads a test-run variable"
+    return found
 
 
 def _awareness_allow(ctx: IntegrityContext) -> list[str]:
@@ -958,30 +1020,46 @@ def check_test_awareness(ctx: IntegrityContext) -> Outcome:
         ctx.head_sha, "--", *(f":(literal){p}" for p in paths),
     ).stdout  # fmt: skip
     allowed = _awareness_allow(ctx)
-    hits: dict[str, list[scan.AddedLine]] = {}
-    listed: list[str] = []
+    added: dict[str, set[int]] = {}
     for line in scan.added_lines(diff):
-        if _awareness_hits(ctx, line.text):
-            if glob := next((g for g in allowed if glob_match(g, line.path)), None):
-                listed.append(f"{line.path}:{line.number}: {line.text.strip()[:100]} (allowed by `{glob}`)")
+        added.setdefault(line.path, set()).add(line.number)
+    hits: dict[str, list[tuple[int, str]]] = {}
+    listed: list[str] = []
+    for path in paths:
+        text = _text(git, ctx.head_sha, path)
+        lines = text.splitlines()
+        for number, why in sorted(awareness_lines(ctx, path, text).items()):
+            if number not in added.get(path, ()):
                 continue
-            hits.setdefault(line.path, []).append(line)
-        elif any(sign.search(line.text) for sign in _SIGNS):
-            listed.append(f"{line.path}:{line.number}: {line.text.strip()[:100]}")
+            shown = lines[number - 1].strip()[:80] if 0 < number <= len(lines) else ""
+            if glob := next((g for g in allowed if glob_match(g, path)), None):
+                listed.append(f"{path}:{number}: {shown} (allowed by `{glob}`)")
+            else:
+                hits.setdefault(path, []).append((number, f"{shown}; {why}"))
+        blocked_lines = {n for n, _ in hits.get(path, ())}
+        for number in sorted(added.get(path, ())):
+            sign = 0 < number <= len(lines) and number not in blocked_lines
+            if sign and any(s.search(lines[number - 1]) for s in _SIGNS):
+                listed.append(f"{path}:{number}: {lines[number - 1].strip()[:100]}")
     blockers: list[str] = []
     human: list[str] = []
-    for path, lines in sorted(hits.items()):
+    for path, found in sorted(hits.items()):
         who = _introducers(
-            ctx, path, lambda before, after: len(_awareness_hits(ctx, after)) > len(_awareness_hits(ctx, before))
+            ctx,
+            path,
+            lambda before, after, p=path: len(awareness_lines(ctx, p, after)) > len(awareness_lines(ctx, p, before)),
         )
-        rows = [f"{path}:{line.number} ({line.text.strip()[:80]})" for line in lines]
+        rows = [f"{path}:{number} ({why})" for number, why in found]
         if _by_people(who):
             human += [f"{row} (added by {', '.join(r[SHA][:10] for r in who)})" for row in rows]
         else:
             blockers += rows
     findings = []
     if blockers:
-        advice = "Production code may not look for the test run, its output or its environment"
+        advice = (
+            "Production code may not look for the test run, its output or its environment; a repository whose code "
+            "legitimately does names the paths in verifier.test_awareness_allow (read at the base branch)"
+        )
         findings.append(_blocker("production code reacts to the test run", f"{_listed(blockers)}. {advice}"))
     extra = f", {len(listed)} listed for the judge" if listed else ""
     note = f"{len(blockers)} hit(s){extra}" if blockers else f"no production line reacts to the test run{extra}"
