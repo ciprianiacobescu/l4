@@ -95,3 +95,14 @@ def test_a_file_match_file_follows_the_files_the_branch_changed(make_kiro_bench)
     decisions = [e["steering"] for e in ledger(bench) if e["type"] == "prompt.rendered"]
     assert {d["path"]: d["why"] for d in decisions[0]}[".kiro/steering/calc.md"] == "no_match"
     assert {d["path"]: d["why"] for d in decisions[1]}[".kiro/steering/calc.md"] == "matched src/calc/tip.py"
+
+
+def test_a_profile_window_caps_the_budget_and_the_ledger_says_model_window(make_kiro_bench):
+    local = {"adapter": "fake", "vendor": "fakeco", "context_window": 12000}
+    bench: Bench = make_kiro_bench(
+        [kiro_red_step()], long_design=True, profiles={"local": local}, roles={"implementer": ["local"]}
+    )
+    text = render(bench)
+    (rendered,) = [e for e in ledger(bench) if e["type"] == "prompt.rendered"]
+    assert rendered["budget_source"] == "model_window" and rendered["budget_tokens"] < 32_000
+    assert len(text) <= int(12000 * 0.6) * 4 and "REQ-INTRO-MARKER" in text

@@ -35,7 +35,7 @@ from l4.fsutil import atomic_write_bytes
 from l4.implementer.prompt import PromptContext, render_prompt
 from l4.implementer.result import RESULT_SCHEMA
 from l4.implementer.tasks import select_next_step, task_scope
-from l4.implementer.unit_context import Cut, cut_summary, prompt_inputs
+from l4.implementer.unit_context import Cut, cut_summary, prompt_inputs, safe_label
 from l4.memory.inject import branch_changed_files, inject_for_task, task_paths
 from l4.orchestrator import ACTIONABLE
 from l4.outcome import CommandResult, TaskCounts, UnitOutcome
@@ -94,16 +94,17 @@ class ContextReport:
     cuts: tuple[Cut, ...]
 
     def lines(self) -> list[str]:
-        key = (
-            "implementer.context_budget_tokens"
-            if self.budget_source == "implementer"
-            else f"profiles.{self.budget_source.removeprefix('profile:')}.context_budget_tokens"
-        )
+        if self.budget_source == "implementer":
+            key = "implementer.context_budget_tokens"
+        elif self.budget_source == "model_window":
+            key = "capped at 60% of the model's context window"
+        else:
+            key = f"profiles.{safe_label(self.budget_source.removeprefix('profile:'))}.context_budget_tokens"
         head = f"context: budget {self.budget_tokens} tokens ({key})" + ("" if self.cuts else ", nothing cut")
         steering = [
-            f"steering: {d['path']} included ({d['why']})"
+            f"steering: {safe_label(str(d['path']))} included ({d['why']})"
             if d["included"]
-            else f"steering: {d['path']} left out ({d['why']})"
+            else f"steering: {safe_label(str(d['path']))} left out ({d['why']})"
             for d in self.steering
         ]
         return [head, *steering, *(f"cut: {cut_summary(c)}" for c in self.cuts)]
@@ -176,7 +177,8 @@ def _prompt(
         unit_id=ref.id, adapter=profile.adapter or "", task_key=task_key, task_title=title,
         task_links=task.links,  # a Kiro leaf's refs (K20)
         source_files=inputs.source_files, conventions=inputs.conventions, task_block=inputs.task_block,
-        unit_rel=inputs.unit_rel, budget_source=inputs.budget_source, criteria=inputs.criteria,
+        unit_rel=inputs.unit_rel, budget_source=inputs.budget_source, window_tokens=inputs.window_tokens,
+        criteria=inputs.criteria,
         own_criteria=inputs.own_criteria,
         gate_command=cfg.gates.test.command, context_budget_tokens=inputs.budget_tokens,
         static_gate_commands=(*cfg.gates.lint, *cfg.gates.typecheck),
@@ -187,7 +189,7 @@ def _prompt(
         run_ledger=ledger_path(provider.unit_dir(ref), app.run_id).resolve().relative_to(app.repo.resolve()).as_posix(),
     )  # fmt: skip
     rendered = render_prompt("red", ctx)
-    report = ContextReport(inputs.budget_tokens, inputs.budget_source, tuple(inputs.steering), rendered.cuts)
+    report = ContextReport(rendered.budget_tokens, rendered.budget_source, tuple(inputs.steering), rendered.cuts)
     return app.redactor.redact_text(rendered.text), report
 
 

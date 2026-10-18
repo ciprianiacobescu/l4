@@ -644,7 +644,7 @@ def _prompt(
         criteria=inputs.criteria, own_criteria=inputs.own_criteria,
         gate_command=wb.cfg.gates.test.command, previous_failure=previous_failure,
         result_path=Path(RESULT_ALIAS_PATH) if wb.impl.capabilities().schema_mode == "prompt_contract" else None,
-        context_budget_tokens=inputs.budget_tokens,
+        context_budget_tokens=inputs.budget_tokens, window_tokens=inputs.window_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
         e2e_dir=e2e_test_dir(wb.cfg.gates.e2e, wb.worktree) if e2e_configured(wb.cfg) else None,
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
@@ -667,7 +667,7 @@ def _prompt(
     wb.emit(
         "prompt.rendered", role=role, task=task.key, sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         template_version=rendered.template_version, sources=list(rendered.sources),
-        budget_tokens=rendered.budget_tokens, budget_source=inputs.budget_source, steering=inputs.steering,
+        budget_tokens=rendered.budget_tokens, budget_source=rendered.budget_source, steering=inputs.steering,
         answers=[{"id": qid, "answer_sha256": digest} for qid, digest in answers.consumed],  # L4-QMD-006
         lessons=list(lessons.ids),
         **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),

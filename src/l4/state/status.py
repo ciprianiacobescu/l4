@@ -26,6 +26,7 @@ from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
 from l4.forge.urls import ForgeUrls, app_forge_urls
 from l4.implementer.tasks import required
+from l4.implementer.unit_context import NOT_READ, budget_advice, safe_label
 from l4.specs.base import Framework, SpecProvider, Task, UnitRef, UnknownUnit, parse_unit_id
 from l4.specs.feedback import FEEDBACK_FILENAME, MAX_FEEDBACK_BYTES, FeedbackFile
 from l4.specs.fixmark import read_fix_marker
@@ -241,10 +242,17 @@ def load_snapshot(provider: SpecProvider, git: Git, ref: UnitRef, *, branch_pref
 
 
 def _prompt_cut(events: Sequence[LedgerEvent]) -> dict[str, Any] | None:
-    """The last `prompt.truncated` of the unit that is not the judge's (L4-IMP-054): what the implementer's prompt
-    could not show whole."""
-    cuts = [e.data for e in events if e.type == "prompt.truncated" and e.data.get("role") != "judge"]
-    return dict(cuts[-1]) if cuts else None
+    """The cut of the LATEST implementer prompt (L4-IMP-054): a later `prompt.rendered` that has no `prompt.truncated`
+    after it cut nothing and clears it. The judge's `prompt.truncated` is not an implementer prompt. The cut carries the
+    `budget_source` of its prompt, so that the advice names the key that really set the budget."""
+    cut: dict[str, Any] | None = None
+    source = "implementer"
+    for e in events:
+        if e.type == "prompt.rendered":
+            cut, source = None, str(e.data.get("budget_source") or "implementer")
+        elif e.type == "prompt.truncated" and e.data.get("role") != "judge":
+            cut = {"budget_source": source, **e.data}
+    return cut
 
 
 MAX_CUT_FILES = 3
@@ -252,8 +260,8 @@ MAX_CUT_FILES = 3
 
 def _cut_text(cut: dict[str, Any]) -> str:
     """`path shown of total characters` for a budget cut, `path not read (symlink)` and the like for the others."""
-    path, reason = cut.get("path", "?"), cut.get("reason", "budget")
-    if reason in ("symlink", "not_regular"):
+    path, reason = safe_label(str(cut.get("path", "?"))), cut.get("reason", "budget")
+    if reason in NOT_READ:
         return f"{path} not read ({reason})"
     if reason == "oversize":
         return f"{path} {cut.get('total_bytes', '?')} bytes, the first part read"
@@ -265,10 +273,10 @@ def _prompt_cut_line(cut: dict[str, Any]) -> str:
     shown = [_cut_text(s) for s in sources[:MAX_CUT_FILES]]
     more = [f"and {len(sources) - MAX_CUT_FILES} more"] if len(sources) > MAX_CUT_FILES else []
     what = ", ".join([*shown, *more])
-    task = f"task {cut['task']} " if cut.get("task") else ""
+    task = f"task {safe_label(str(cut['task']))} " if cut.get("task") else ""
     return (
         f"Prompt cut: {task}{cut.get('role', '?')} attempt {cut.get('attempt', '?')}: {what} "
-        "(raise implementer.context_budget_tokens or shorten the file)"
+        f"({budget_advice(str(cut.get('budget_source', 'implementer')))})"
     )
 
 

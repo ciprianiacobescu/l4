@@ -722,6 +722,7 @@ profiles:                          # named bindings: adapter|backend + model + o
     options: {sandbox: workspace-write, reasoning_effort: high}
     vendor: openai
     # context_budget_tokens: 8000   # this profile's steps get this budget instead of implementer.context_budget_tokens (L4-IMP-053)
+    # context_window: 16000         # the model's window in tokens: the whole prompt stays within 60 % of it (L4-IMP-053)
   claude-sonnet:
     adapter: claude-code
     model: claude-sonnet-5-5
@@ -1190,9 +1191,9 @@ file cut by the budget SHALL be named under `# Not shown in full` as not readabl
 instruction to open it, and with `readable: false` in `prompt.truncated`.
 
 **L4-KSP-012** Red covers every criterion a Kiro leaf cites. In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names SHALL count as
-cited and SHALL be traced by a new test of the step, unless L4-OPS-015 leaves it unchanged or passing tests that an
-earlier red of the unit proved already trace it. A step that leaves one untraced SHALL fail with a reason that names its
-id, alias and the line, and the next attempt's prompt SHALL carry that reason.
+cited and SHALL be traced by a new test of the step, unless L4-OPS-015 leaves it unchanged or an earlier red proved it
+with tests that pass now (per criterion and test, in files since only appended to). A step that edits an existing test
+file, or leaves a criterion untraced, SHALL fail with a reason that names the file, or the id, alias and line.
 
 **L4-KSP-013** An already-satisfied Kiro leaf proves every criterion it cites. A red step of a Kiro leaf that adds no test SHALL be accepted as already satisfied only when every criterion its
 `_Requirements:_` line names, together with those `criteria_ids` lists, is traced by passing tests that the harness
@@ -2014,14 +2015,15 @@ its repository path with the characters shown and in total, the lines left out a
 over 262,144 bytes, `symlink`, `not_regular`), and the contract SHALL tell the agent to open a readable one with its
 tools. The run SHALL record `prompt.truncated{role, task, attempt, budget_tokens, sources}` with the same entries.
 
-**L4-IMP-053** The context budget and how to raise it. The context budget SHALL be `implementer.context_budget_tokens` (default 32000) tokens of 4 characters, unless the
-selected profile sets `context_budget_tokens`, which SHALL then hold for that profile's steps. No model window SHALL be
-guessed. `prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`implementer` or `profile:<name>`).
+**L4-IMP-053** The context budget and how to raise it. The context budget SHALL be `implementer.context_budget_tokens` (default 32000) tokens of 4 characters, or the selected
+profile's `context_budget_tokens`. A profile that states its model's window (`context_window`, or an opencode provider's
+`limit.context`) SHALL cap the whole prompt at 60% of it, and doctor SHALL warn when a budget exceeds that cap.
+`prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`implementer`, `profile:<name>` or `model_window`).
 
 **L4-IMP-054** A person sees the cuts before and after a run. `l4 run --dry-run` SHALL print, for each unit whose prompt it renders, the budget and its key, each steering decision,
-and each cut source with its path and the characters shown and in total. `l4 status --unit U` SHALL print the unit's
-last implementer `prompt.truncated`, and doctor SPEC-004 SHALL warn about each unit whose next task's prompt would cut
-a source, naming the file and the key to raise.
+and each cut source with its path and the characters shown and in total. `l4 status --unit U` SHALL print the cut of
+the unit's latest implementer prompt, and doctor SPEC-004 SHALL warn about each unit of any framework whose next task's
+prompt would cut a source, naming the file and the key that set the budget.
 
 ### 7.4 Result contract
 
@@ -4755,7 +4757,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
-| SPEC-004 | warn | Kiro leaves without `_Requirements:_`; OpenSpec tasks without a quoted requirement name (L4-OSP-008); units without criteria; the next task's prompt would cut a source (L4-IMP-054) | — |
+| SPEC-004 | warn | Kiro leaves without `_Requirements:_`; OpenSpec tasks without a quoted requirement name (L4-OSP-008); units without criteria; the next task's prompt of any unit would cut a source, or a profile's budget exceeds 60% of its stated model window (L4-IMP-054, L4-IMP-053) | — |
 | SPEC-005 | warn | orphan criterion IDs in tests | — |
 | SPEC-006 | error | harness task parse == `openspec instructions apply` progress | — |
 | SPEC-007 | error under `sdd.enforce` | unchecked forms other than `[ ]` (`[]`, `[  ]`, `[ ](…)`), and checkboxes inside code fences or HTML comments (the CLI counts them [V, spikes/04]) | — |
@@ -7042,6 +7044,41 @@ scenario is a spec defect (§26).
 - **Given** the probe unit with its long design and a clarifier question that names `src/calc/tip.py`
 - **When** the clarifier's prompt is built with a small budget
 - **Then** its documents are `requirements.md` before `design.md`, each kept line carries the file's own line number, each run left out is marked `[not shown: lines A-B]`, and a block `Not shown in full` names every cut file
+
+#### SCN-KSP-006 (−) A tag added to an earlier test proves nothing for the new criterion · L4-KSP-013
+- **Given** task 0.9's red proved `Req 1.1` only, and the leaf of SCN-IMP-294 whose step adds a passing copy for `Req 1.1` and inserts `@pytest.mark.l4(<Req 1.2>)` above 0.9's test
+- **When** the red step is checked
+- **Then** it fails with `no new test traces <id of Req 1.2> (Req 1.2), which the task's _Requirements: …`, because the proof of an earlier red holds for the criterion and the tests it listed, and nothing is committed
+
+#### SCN-KSP-007 (−) A red step may not edit an existing test file · L4-KSP-013
+- **Given** a red step that writes its new tests and also inserts a line into an existing test file
+- **When** the red step is checked
+- **Then** it fails with `an existing test file was edited, not appended to: <path>`, and nothing is committed
+
+#### SCN-KSP-008 (+) A step that lists every cited id is accepted when an earlier red proved one · L4-KSP-013
+- **Given** task 0.9's red proved `Req 1.1`, and a red step that adds a failing test for `Req 1.2` and reports both ids in `criteria_ids`, as the result schema says
+- **When** the red step is checked
+- **Then** it is committed as red, with `Req 1.1` proved `via: earlier_red`
+
+#### SCN-KSP-009 (−) Hostile front matter and patterns are bad_front_matter · L4-KSP-011
+- **Given** steering files whose front matter is nested 20,000 levels deep, is over 16 KiB, or whose `fileMatchPattern` has more than three `**` or over 200 characters, and an `openspec/config.yaml` nested 20,000 levels deep
+- **When** the steering is read
+- **Then** each file is left out with `why: bad_front_matter` and the config adds no context, nothing raises, and a file whose name could forge a data block is left out with `why: bad_name`
+
+#### SCN-KSP-010 (−) A name in the repository cannot forge a prompt block · L4-IMP-054
+- **Given** a capability directory named `x">` followed by a line break, `# INJECTED HEADING` and a forged tag, a symbolic-link capability directory, and an oversize `design.md` whose read ends in the middle of a line
+- **When** the red prompt is rendered
+- **Then** the unsafe name is read as nothing and named `bad_name`, the link is named `symlink`, no heading or tag comes from either, the partial last line is not shown, and every console path has no control character, quote or angle bracket
+
+#### SCN-KSP-011 (+) A model window caps the whole prompt · L4-IMP-054
+- **Given** the probe unit with its long design and a profile that states `context_window: 12000`
+- **When** the red prompt is rendered
+- **Then** the whole prompt is at most 7,200 tokens of 4 characters, the criteria and the task block are whole, `prompt.rendered` has `budget_source: model_window`, and doctor warns when the configured budget is above 60% of the window
+
+#### SCN-KSP-012 (+) Status and doctor show the latest cut and the key that set the budget · L4-IMP-054
+- **Given** a unit whose latest implementer prompt cut nothing after an earlier one that did, and an OpenSpec unit whose proposal is cut under a profile's own budget
+- **When** `l4 status --unit` and doctor SPEC-004 run
+- **Then** status prints no `Prompt cut:` line for the first, and doctor warns for the OpenSpec unit with the fix `shorten the file, or raise profiles.<name>.context_budget_tokens`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

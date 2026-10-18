@@ -14,7 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from l4.config.schema import L4Config, Profile
+from pydantic import ValidationError
+
+from l4.config.schema import L4Config, OpencodeOptions, Profile
 from l4.fsutil import MAX_SOURCE_BYTES as MAX_SOURCE_BYTES  # the one limit, shown here too
 from l4.fsutil import UnsafeFile, read_regular_file, read_regular_prefix
 from l4.specs.base import SAFE_NAME, Criterion, Framework, Task, UnitRef
@@ -605,6 +607,32 @@ def effective_budget(cfg: L4Config, profile_name: str | None, profile: Profile |
     return cfg.implementer.context_budget_tokens, "implementer"
 
 
+def budget_advice(source: str) -> str:
+    """What to change when a prompt is cut, by the source that set its budget."""
+    if source.startswith("profile:"):
+        return f"raise profiles.{safe_label(source.removeprefix('profile:'))}.context_budget_tokens or shorten the file"
+    if source == "model_window":
+        return "the model's context window caps the budget: shorten the file or use a profile with a larger window"
+    return "raise implementer.context_budget_tokens or shorten the file"
+
+
+def model_window(profile: Profile | None) -> int | None:
+    """The context window (tokens) a profile states for its model: `context_window`, or, for an opencode profile with a
+    custom provider, the `limit.context` of its model. None when nothing states it: no window is ever guessed."""
+    if profile is None:
+        return None
+    if profile.context_window:
+        return profile.context_window
+    if profile.adapter != "opencode" or not profile.model or "/" not in profile.model:
+        return None
+    try:
+        options = OpencodeOptions.model_validate(profile.options)
+    except ValidationError:
+        return None
+    limits = options.provider.models.get(profile.model.split("/", 1)[1]) if options.provider else None
+    return limits.context if limits else None
+
+
 @dataclass(frozen=True)
 class PromptInputs:
     """What the implementer's prompt needs of a unit besides the task and the gates; the run, the dry run and doctor all
@@ -619,6 +647,7 @@ class PromptInputs:
     unit_rel: str
     criteria: tuple[Criterion, ...]  # what the provider lists for the unit (a family's, for a fix unit)
     own_criteria: tuple[Criterion, ...]  # the unit's own: the links of its tasks name these
+    window_tokens: int | None = None  # the selected model's stated window (render_prompt caps the prompt at 60 % of it)
 
 
 def _agents_md(root: Path) -> tuple[Convention | None, SteeringDecision | None]:
@@ -688,5 +717,5 @@ def prompt_inputs(
     tokens, source = effective_budget(cfg, profile_name, profile)
     return PromptInputs(
         sources, tuple(conventions), [d.as_dict() for d in decisions], block, tokens, source, _rel(unit_dir, root),
-        tuple(provider.criteria(ref)), tuple(own_criteria(provider, ref)),
+        tuple(provider.criteria(ref)), tuple(own_criteria(provider, ref)), model_window(profile),
     )  # fmt: skip

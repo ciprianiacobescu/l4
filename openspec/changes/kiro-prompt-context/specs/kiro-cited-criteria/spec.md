@@ -91,9 +91,9 @@ not already satisfied, whatever its criteria say, and the judge checks each such
 
 ### Requirement: L4-KSP-012 Red covers every criterion a Kiro leaf cites
 In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names SHALL count as
-cited and SHALL be traced by a new test of the step, unless L4-OPS-015 leaves it unchanged or passing tests that an
-earlier red of the unit proved already trace it. A step that leaves one untraced SHALL fail with a reason that names its
-id, alias and the line, and the next attempt's prompt SHALL carry that reason.
+cited and SHALL be traced by a new test of the step, unless L4-OPS-015 leaves it unchanged or an earlier red proved it
+with tests that pass now (per criterion and test, in files since only appended to). A step that edits an existing test
+file, or leaves a criterion untraced, SHALL fail with a reason that names the file, or the id, alias and line.
 
 #### Scenario: SCN-IMP-294 (−) A red step that leaves a cited criterion untested is rejected with the reason
 - **GIVEN** a Kiro leaf `1. Implement the tip function` with `_Requirements: 1.1, 1.2_`, and a red step whose one new
@@ -135,3 +135,21 @@ with `no test traces <id> yet: write a new test for each`, and the task SHALL NO
 - **WHEN** the red step is checked
 - **THEN** both criteria are confirmed `via: earlier_red`, the leaf is committed `already satisfied`, and
   `task.red_ok.criteria` holds a `pre_satisfied` proof for each of them
+
+#### Scenario: SCN-KSP-006 (−) A tag added to an earlier test proves nothing for the new criterion
+- **GIVEN** task 0.9's red proved `Req 1.1` only, and the leaf of SCN-IMP-294 whose step adds a passing copy for `Req
+  1.1` and inserts `@pytest.mark.l4(<Req 1.2>)` above 0.9's test
+- **WHEN** the red step is checked
+- **THEN** it fails with `no new test traces <id of Req 1.2> (Req 1.2), which the task's _Requirements: …`, because the
+  proof of an earlier red holds for the criterion and the tests it listed, and nothing is committed
+
+#### Scenario: SCN-KSP-007 (−) A red step may not edit an existing test file
+- **GIVEN** a red step that writes its new tests and also inserts a line into an existing test file
+- **WHEN** the red step is checked
+- **THEN** it fails with `an existing test file was edited, not appended to: <path>`, and nothing is committed
+
+#### Scenario: SCN-KSP-008 (+) A step that lists every cited id is accepted when an earlier red proved one
+- **GIVEN** task 0.9's red proved `Req 1.1`, and a red step that adds a failing test for `Req 1.2` and reports both ids
+  in `criteria_ids`, as the result schema says
+- **WHEN** the red step is checked
+- **THEN** it is committed as red, with `Req 1.1` proved `via: earlier_red`

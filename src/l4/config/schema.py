@@ -423,6 +423,7 @@ class Profile(_Strict):
     min_remaining_percent: float | None = Field(None, ge=0, le=100)  # overrides availability.min_remaining_percent
     max_concurrency: int | None = Field(default=None, ge=1)
     context_budget_tokens: int | None = Field(default=None, ge=1000)  # this profile's steps: replaces the implementer's
+    context_window: int | None = Field(default=None, ge=1000)  # the model's window: caps the whole prompt at 60 % of it
     options: dict[str, Any] = Field(default_factory=dict)
     vendor: str | None = None
     base_url: str | None = None

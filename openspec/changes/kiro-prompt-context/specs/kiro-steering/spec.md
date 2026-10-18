@@ -51,3 +51,10 @@ instruction to open it, and with `readable: false` in `prompt.truncated`.
   full` lists `.kiro/steering/style.md: <shown> of 70000 characters shown (budget); not readable in this step's
   sandbox`, with no instruction to open it
 - **AND** `prompt.truncated` lists it with `kind: steering, readable: false`
+
+#### Scenario: SCN-KSP-009 (−) Hostile front matter and patterns are bad_front_matter
+- **GIVEN** steering files whose front matter is nested 20,000 levels deep, is over 16 KiB, or whose `fileMatchPattern`
+  has more than three `**` or over 200 characters, and an `openspec/config.yaml` nested 20,000 levels deep
+- **WHEN** the steering is read
+- **THEN** each file is left out with `why: bad_front_matter` and the config adds no context, nothing raises, and a file
+  whose name could forge a data block is left out with `why: bad_name`

@@ -296,3 +296,16 @@ Every task follows these rules:
   - Confirm that the console shows the `context:`, `steering:` and `cut:` lines.
   - With the short design (`git checkout HEAD~1 -- .kiro`, then `git checkout HEAD -- .kiro`), confirm `nothing cut`.
   - Leave the probe's history as it is. Record the output under `docs/live/kiro-prompt-context/`.
+
+## 9. Review fixes (adversarial review, 2026-10-18)
+
+- [x] 9.1 M1 and M2: per-(criterion, test) evidence, append-only test files, an edit of an existing test file fails the
+  red step, the exempt set holds the earlier-proved criteria (`earlier_red.py`, `tdd.py`; SCN-KSP-006..008).
+- [x] 9.2 Steering and the OpenSpec context: size, depth and pattern limits (`steering.py`; SCN-KSP-009).
+- [x] 9.3 Names: `bad_name`, symlinked capability directories, `safe_label`, the oversize partial line, the clarifier's
+  prefix charge (`unit_context.py`, `prompt.py`, `clarifier/context.py`; SCN-KSP-010).
+- [x] 9.4 Status shows the latest cut and the real source; SPEC-004 covers every unit (`status.py`, `checks_spec.py`;
+  SCN-KSP-012).
+- [x] 9.5 The model window caps the whole prompt, `budget_source: model_window`, doctor warns (`Profile.context_window`,
+  `unit_context.model_window`, `render_prompt`; SCN-KSP-011).
+

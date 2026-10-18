@@ -9,6 +9,7 @@ import pytest
 from l4.config.schema import L4Config, Profile
 from l4.implementer.prompt import PromptContext, collect_sources, render_prompt
 from l4.implementer.unit_context import (
+    CHARS_PER_TOKEN,
     MAX_SOURCE_BYTES,
     MIN_CUT_CHARS,
     Convention,
@@ -580,3 +581,41 @@ def test_an_oversize_files_partial_last_line_is_not_shown(tmp_path):
     (cut,) = plan.cuts
     assert cut.omitted == ((whole + 1, None),) and cut.shown_chars == len(src.text)
     assert plan.sources[0].body().endswith(f"[not shown: from line {whole + 1}]")
+
+
+# -- the model window caps the whole prompt (owner decision of the review) ---------------------------------------
+
+
+def test_a_profile_states_its_window_by_a_key_or_by_an_opencode_provider_limit():
+    from l4.implementer.unit_context import model_window
+
+    assert model_window(None) is None and model_window(Profile(adapter="fake")) is None
+    assert model_window(Profile(adapter="fake", context_window=16_000)) == 16_000
+    custom = {"provider": {"id": "mine", "base_url": "http://h:1", "api_key_env": "MINE_KEY",
+                           "models": {"m1": {"context": 24_000, "output": 4_000}}}}  # fmt: skip
+    assert model_window(Profile(adapter="opencode", model="mine/m1", options=custom)) == 24_000
+    assert model_window(Profile(adapter="opencode", model="x/y")) is None  # no custom provider: no limit stated
+
+
+def test_a_window_caps_the_whole_prompt_at_sixty_percent_and_the_source_says_so(tmp_path):
+    root = probe_tree(tmp_path, long=True)
+    plain = render_prompt("red", probe_ctx(root, budget=32_000))
+    assert plain.budget_source == "implementer" and len(plain.text) > 100_000
+    capped = render_prompt("red", probe_ctx(root, budget=32_000, window_tokens=12_000))
+    assert capped.budget_source == "model_window" and capped.budget_tokens < 32_000
+    assert len(capped.text) <= int(12_000 * 0.6) * CHARS_PER_TOKEN
+    assert PROBE_IDS["1.1"] in block(capped.text, "criteria") and "TASK-DETAIL-MARKER" in capped.text  # never cut
+    assert any(c.path.endswith("design.md") for c in capped.cuts)
+
+
+def test_a_window_that_the_budget_already_fits_changes_nothing(tmp_path):
+    root = probe_tree(tmp_path)
+    rendered = render_prompt("red", probe_ctx(root, budget=32_000, window_tokens=1_000_000))
+    assert (rendered.budget_source, rendered.budget_tokens) == ("implementer", 32_000)
+
+
+def test_the_inputs_carry_the_window_of_the_selected_profile(tmp_path):
+    inputs, _, _ = probe_inputs(
+        probe_tree(tmp_path), name="local", profile=Profile(adapter="fake", context_window=9_000)
+    )
+    assert inputs.window_tokens == 9_000

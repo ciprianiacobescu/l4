@@ -624,3 +624,31 @@ The design asked eight questions. The owner decided them, and this document, the
    each task's text, a mismatch being a finding; step 1's scope reads a Kiro unit's `requirements.md` and `bugfix.md`
    (D9).
 8. **The default budget** rises from 24000 to 32000 tokens (D7).
+
+## 8. Changes after the adversarial review (2026-10-18)
+
+- **M1, evidence of an earlier red (D8).** `earlier_red._evidence` is keyed by `(criterion, test)`: only the tests the
+  earlier red listed under THAT criterion prove it, so a tag added to an old test proves nothing for the new tag. The
+  test file must have only been appended to since the red commit: `guards.appended_only` for Python, else the old text
+  is a prefix of the new one (an inserted line voids the evidence). Red now also fails an attempt that edits an
+  existing Python test file instead of appending to it (`an existing test file was edited, not appended to: <path>`),
+  chosen over restoring the file because red has no frozen manifest yet; the check runs after the criteria check, so
+  a retag is first refused by name (`Req 1.2`). A reopened task with stale tests is exempt (L4-OPS-015).
+- **M2.** The criteria an earlier red proved are exempt in `check_criteria`, so an honest step may list every cited id.
+- **Steering (D5).** A front matter over 16 KiB, deeply nested YAML (`RecursionError`), more than 20 patterns, a pattern
+  over 200 characters or with more than three `**` is `bad_front_matter`; the same for `openspec/config.yaml`. A
+  steering file name outside `[A-Za-z0-9._ -]` is `bad_name`.
+- **Names and labels (D4).** `read_sources` filters capability directories with `SAFE_NAME` (`bad_name`, not read) and
+  names a symbolic-link one (`symlink`). `safe_label` replaces control characters, quotes and angle brackets in every
+  data block source and console path (dry run, status, doctor, holds). An oversize file's trailing partial line is dropped
+  from the read, so the cut starts at its line.
+- **Clarifier (D9).** `plan_context(numbered=True)` charges the `<n>: ` prefixes to the documents' share.
+- **Status and doctor (D10).** `l4 status` shows the cut of the LATEST implementer prompt (a later `prompt.rendered`
+  with no `prompt.truncated` clears it) and the advice names the key that set the budget (`implementer`, `profiles.<name>`
+  or the model window). SPEC-004's cut warning covers units of every framework.
+- **The model window (D7, owner decision).** `Profile.context_window`, or an opencode provider's `limit.context` for the
+  profile's model, is the window. `render_prompt` caps the budget so that the WHOLE prompt (contract, answers, lessons,
+  phase, gate and output included, and a reserve of 2,000 characters for the cut list) stays within 60% of the window,
+  and records `budget_source: model_window`. No window is guessed. SPEC-004 warns for each implementer profile whose
+  budget exceeds 60% of its window.
+

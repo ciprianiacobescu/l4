@@ -111,9 +111,10 @@ tools. The run SHALL record `prompt.truncated{role, task, attempt, budget_tokens
 - **AND** the probe unit with its short design gets no `# Not shown in full` section and no `prompt.truncated`
 
 ### Requirement: L4-IMP-053 The context budget and how to raise it
-The context budget SHALL be `implementer.context_budget_tokens` (default 32000) tokens of 4 characters, unless the
-selected profile sets `context_budget_tokens`, which SHALL then hold for that profile's steps. No model window SHALL be
-guessed. `prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`implementer` or `profile:<name>`).
+The context budget SHALL be `implementer.context_budget_tokens` (default 32000) tokens of 4 characters, or the selected
+profile's `context_budget_tokens`. A profile that states its model's window (`context_window`, or an opencode provider's
+`limit.context`) SHALL cap the whole prompt at 60% of it, and doctor SHALL warn when a budget exceeds that cap.
+`prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`implementer`, `profile:<name>` or `model_window`).
 
 #### Scenario: SCN-IMP-287 (+) A raised budget shows the whole design, and a profile's own budget wins
 - **GIVEN** the probe unit of SCN-IMP-281, first with `implementer.context_budget_tokens: 40000`, then with the
@@ -127,9 +128,9 @@ guessed. `prompt.rendered` SHALL record `budget_tokens` and `budget_source` (`im
 
 ### Requirement: L4-IMP-054 A person sees the cuts before and after a run
 `l4 run --dry-run` SHALL print, for each unit whose prompt it renders, the budget and its key, each steering decision,
-and each cut source with its path and the characters shown and in total. `l4 status --unit U` SHALL print the unit's
-last implementer `prompt.truncated`, and doctor SPEC-004 SHALL warn about each unit whose next task's prompt would cut
-a source, naming the file and the key to raise.
+and each cut source with its path and the characters shown and in total. `l4 status --unit U` SHALL print the cut of
+the unit's latest implementer prompt, and doctor SPEC-004 SHALL warn about each unit of any framework whose next task's
+prompt would cut a source, naming the file and the key that set the budget.
 
 #### Scenario: SCN-IMP-288 (+) The dry run shows the cut before a run
 - **GIVEN** the probe repository with the 125,492-character design and `implementer.context_budget_tokens: 24000`
@@ -166,3 +167,24 @@ a source, naming the file and the key to raise.
 - **THEN** its documents are `requirements.md` before `design.md`, each kept line carries the file's own line number,
   each run left out is marked `[not shown: lines A-B]`, and a block `Not shown in full` names every cut file
 
+#### Scenario: SCN-KSP-010 (−) A name in the repository cannot forge a prompt block
+- **GIVEN** a capability directory named `x">` followed by a line break, `# INJECTED HEADING` and a forged tag, a
+  symbolic-link capability directory, and an oversize `design.md` whose read ends in the middle of a line
+- **WHEN** the red prompt is rendered
+- **THEN** the unsafe name is read as nothing and named `bad_name`, the link is named `symlink`, no heading or tag
+  comes from either, the partial last line is not shown, and every console path has no control character, quote or
+  angle bracket
+
+#### Scenario: SCN-KSP-011 (+) A model window caps the whole prompt
+- **GIVEN** the probe unit with its long design and a profile that states `context_window: 12000`
+- **WHEN** the red prompt is rendered
+- **THEN** the whole prompt is at most 7,200 tokens of 4 characters, the criteria and the task block are whole,
+  `prompt.rendered` has `budget_source: model_window`, and doctor warns when the configured budget is above 60% of the
+  window
+
+#### Scenario: SCN-KSP-012 (+) Status and doctor show the latest cut and the key that set the budget
+- **GIVEN** a unit whose latest implementer prompt cut nothing after an earlier one that did, and an OpenSpec unit
+  whose proposal is cut under a profile's own budget
+- **WHEN** `l4 status --unit` and doctor SPEC-004 run
+- **THEN** status prints no `Prompt cut:` line for the first, and doctor warns for the OpenSpec unit with the fix `shorten
+  the file, or raise profiles.<name>.context_budget_tokens`

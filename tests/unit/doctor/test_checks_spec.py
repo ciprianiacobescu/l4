@@ -163,3 +163,65 @@ def test_spec_004_reports_the_missing_links_and_the_cut_together(make_ctx):
     (ctx.repo / ".kiro" / "specs" / "tip-calc" / "tasks.md").write_text("- [ ] 1. Implement\n  - [ ] 1.1 do it\n")
     result = spec.SPEC_004.run(ctx)
     assert "leaves without `_Requirements:_`" in result.message and "task 1.1: design.md" in result.message
+
+
+# -- review of kiro-prompt-context (minors 6 and 7, the model window) ---------------------------------------------
+
+
+def openspec_unit(repo: Path) -> None:
+    unit = repo / "openspec" / "changes" / "add-x"
+    (unit / "specs" / "cap").mkdir(parents=True)
+    (unit / "specs" / "cap" / "spec.md").write_text(
+        "## ADDED Requirements\n\n### Requirement: It works\nIt SHALL.\n\n"
+        "#### Scenario: Works\n- **WHEN** a\n- **THEN** b\n"
+    )
+    (unit / "tasks.md").write_text("## 1. Do\n\n- [ ] 1.1 Do it\n")
+    (unit / "proposal.md").write_text(
+        "## Why\n" + "".join(f"line {n} of a long proposal text here\n" for n in range(2000))
+    )
+
+
+def test_spec_004_warns_about_a_cut_of_an_openspec_unit_too(make_ctx):
+    """Minor 7: L4-IMP-054 covers every unit, not Kiro units only."""
+    cfg = L4Config.model_validate({"implementer": {"context_budget_tokens": 1500}})
+    ctx, _ = make_ctx(cfg=cfg)
+    openspec_unit(ctx.repo)
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail" and "openspec:add-x task 1.1: proposal.md" in result.message
+    assert "characters shown" in result.message
+
+
+def test_the_cut_advice_names_the_key_that_set_the_budget(make_ctx):
+    """Minor 6: a profile's own budget is the one to raise."""
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_budget_tokens": 1500}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    openspec_unit(ctx.repo)
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail" and "profiles.local.context_budget_tokens" in (result.fix_hint or "")
+    assert "implementer.context_budget_tokens" not in (result.fix_hint or "")
+
+
+def test_spec_004_warns_when_a_configured_budget_exceeds_the_models_window_cap(make_ctx):
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_window": 8000}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail"
+    assert "profile local: context_budget_tokens 32000 exceeds 60% of its model window (8000 tokens)" in result.message
+    fits = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_window": 80000}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx2, _ = make_ctx(cfg=fits)
+    assert "model window" not in spec.SPEC_004.run(ctx2).message

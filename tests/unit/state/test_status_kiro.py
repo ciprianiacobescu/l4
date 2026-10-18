@@ -89,3 +89,49 @@ def test_a_unit_with_no_cut_prints_no_prompt_cut_line_and_a_null_key(unit_repo, 
     unit_repo.push_unit_branch(ledger_with_open_run, trailers)
     assert "Prompt cut" not in status(unit_repo, capsys, "--unit", UNIT)
     assert json.loads(status(unit_repo, capsys, "--json"))["units"][0]["prompt_cut"] is None
+
+
+# -- review of kiro-prompt-context (minor 6) ---------------------------------------------------------------------
+
+
+def test_a_later_prompt_that_cut_nothing_clears_the_prompt_cut_line(unit_repo, trailers, capsys):
+    from .test_status_activity import UNIT, started_at, status
+
+    rendered = {"task": "1", "sha256": "0" * 64, "role": "red", "budget_tokens": 32000, "budget_source": "implementer"}
+    events = [(9, "prompt.rendered", rendered), (8, "prompt.truncated", truncated()), (3, "prompt.rendered", rendered)]
+    unit_repo.push_unit_branch(lambda r: started_at(r, "r-20261016T1101Z-1a2b", 21, events, command="run"), trailers)
+    assert "Prompt cut" not in status(unit_repo, capsys, "--unit", UNIT)
+    assert json.loads(status(unit_repo, capsys, "--json"))["units"][0]["prompt_cut"] is None
+
+
+def test_the_advice_names_the_key_that_set_the_budget(unit_repo, trailers, capsys):
+    from .test_status_activity import UNIT, started_at, status
+
+    def ledger(repo):
+        rendered = {"task": "1", "role": "red", "budget_tokens": 4000, "budget_source": "profile:local"}
+        started_at(
+            repo,
+            "r-20261016T1101Z-1a2b",
+            21,
+            [(9, "prompt.rendered", rendered), (8, "prompt.truncated", truncated())],
+            command="run",
+        )
+
+    unit_repo.push_unit_branch(ledger, trailers)
+    line = next(x for x in status(unit_repo, capsys, "--unit", UNIT).splitlines() if x.startswith("Prompt cut:"))
+    assert "(raise profiles.local.context_budget_tokens or shorten the file)" in line
+    assert "implementer.context_budget_tokens" not in line
+
+
+def test_a_path_with_control_characters_is_cleaned_on_the_console(unit_repo, trailers, capsys):
+    from .test_status_activity import UNIT, started_at, status
+
+    evil = {**CUT, "path": "a\x1b[31m\nb<c>.md"}
+    unit_repo.push_unit_branch(
+        lambda r: started_at(
+            r, "r-20261016T1101Z-1a2b", 21, [(5, "prompt.truncated", truncated(sources=[evil]))], command="run"
+        ),
+        trailers,
+    )
+    line = next(x for x in status(unit_repo, capsys, "--unit", UNIT).splitlines() if x.startswith("Prompt cut:"))
+    assert "\x1b" not in line and "<" not in line
