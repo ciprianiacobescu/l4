@@ -680,8 +680,8 @@ def test_n4_the_accept_of_a_refusal_question_gives_no_override_and_the_run_says_
     commit_all(bench, raw, "damage")
     answer(bench, raw, "accept: fine")
     assert run_task(bench.wb, TASK).question_ids == ["Q-002"]
-    file = QuestionsFile.load(bench.wb.ref.path / "questions.md")
-    assert file.get("Q-002").options == (tdd_retry_option(),)  # retry only
+    options = question_text(bench).split("## Q-002", 1)[1].split("### Options", 1)[1].split("### Answer", 1)[0]
+    assert tdd_retry_option() in options and "accept" not in options.lower().replace("retry", "")  # retry only
     ctx = question_text(bench).split("## Q-002", 1)[1].split("### Options", 1)[0]
     assert "the claim is taken" not in ctx and "retry:" in ctx
     answer_q(bench, raw, "Q-002", "accept: fine")

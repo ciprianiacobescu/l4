@@ -73,7 +73,7 @@ from l4.implementer.guards import (
     restore_test_paths,
 )
 from l4.implementer.held import HeldCheck, Override, accepted_overrides
-from l4.implementer.held_patch import Refused, accepted_tests_block, capture, find_replay, replay_step
+from l4.implementer.held_patch import Refused, accepted_tests_block, capture, find_replay, replay_extra, replay_step
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
@@ -793,6 +793,7 @@ def step_or_replay(
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
     wb.commit_agent = None
     wb.replay_question = None  # an accept of a saved step takes effect only in its replay
+    wb.replay_paths = None
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:
         return agent_step(wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale)
@@ -946,6 +947,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     def tampered(where: str) -> RedOutcome | None:
         notes = guard.check(where)
         if not notes:
+            if (extra := replay_extra(wb)) is not None:
+                wb.discard_changes()
+                return RedOutcome("failed", extra)
             return None
         wb.discard_changes()
         return RedOutcome(
@@ -1377,7 +1381,7 @@ def run_green(
             wb.discard_changes()  # back to the red commit, which stays; the attempt is not counted
             return GreenOutcome("held", held=kept)
         _accept(wb, task, "at_red", {t: overrides[t] for t in held.tests}, key="tests")
-    reason = reason or worse_static_gates(wb, base, "green")
+    reason = reason or worse_static_gates(wb, base, "green") or replay_extra(wb)
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt, hung=tuple(hung))
@@ -1860,7 +1864,7 @@ def run_single(
             "the decision (it fails now) and report status blocked with one question of kind technical that names "
             "that test and the decision, or say in notes_for_verifier why the decision does not apply to these tests."
         )
-    reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps)
+    reason = reason or worse_static_gates(wb, base, "green") or ci_steps_reason(wb, ci_steps) or replay_extra(wb)
     discriminating: list[str] | None = None
     if adds_tests and not reason and added and CRITERION_IN_TITLE.search(task.title):
         discriminating, reason, held = _discriminating_tests(wb, added, task)

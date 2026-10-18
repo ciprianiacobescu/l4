@@ -29,6 +29,8 @@ from l4.state.ledger import read_ledger
 Check = Literal["pre_satisfied", "vacuity", "at_red", "tests"]
 MAX_SHOWN_TESTS = 10
 MAX_SOURCE_LINES = 40  # lines of one test a question shows
+MAX_LINE_CHARS = 400  # characters of one shown line; a longer one is cut and says so
+MAX_CONTEXT_BYTES = 200_000  # a harness question's Context (questions.md is read up to 2 MB)
 MAX_SUBJECTS = 50  # criteria or tests a `question.raised` event names
 _LABEL = {
     "pre_satisfied": "pre-satisfied",
@@ -62,7 +64,6 @@ class HeldCheck:
     carries: tuple[str, ...] = ()  # the question whose replay produced this step: its accept applies to the step again
     changes: tuple[str, ...] = ()  # every path the saved step changes, as `added path`, `modified path`, `deleted path`
     diffs: tuple[tuple[str, str], ...] = ()  # (path, its redacted, cut diff) of every changed path
-    note: str = ""  # why the step could not be saved (too large to show in full)
 
     @property
     def subjects(self) -> tuple[str, ...]:
@@ -77,39 +78,49 @@ class HeldCheck:
         return replace(self, criteria=criteria, tests=tests)
 
 
+def cap_line(line: str) -> str:
+    """One shown line, at most `MAX_LINE_CHARS` characters; a cut says how many were dropped."""
+    if len(line) <= MAX_LINE_CHARS:
+        return line
+    return f"{line[:MAX_LINE_CHARS]}[line cut: {len(line) - MAX_LINE_CHARS} more characters]"
+
+
+def _indented(text: str) -> list[str]:
+    return [f"    {cap_line(line)}" for line in text.splitlines()]
+
+
 def _source_lines(held: HeldCheck) -> list[str]:
     """What the person accepts: every path the replay applies, the tests as they are in the saved step, and the diff of
     every changed path (redacted before it was cut, when the hold was taken)."""
     lines: list[str] = []
     if held.changes:
-        lines += ["", f"Changes the replay applies ({len(held.changes)} files):", *(f"    {c}" for c in held.changes)]
+        lines += ["", f"Changes the replay applies ({len(held.changes)} files):", *_indented("\n".join(held.changes))]
     if held.sources:
         lines += ["", f"Source of the tests (redacted; at most {MAX_SOURCE_LINES} lines each):"]
         for test, text in held.sources:
-            lines += [f"{test}:", *(f"    {line}" for line in text.splitlines())]
+            lines += [f"{test}:", *_indented(text)]
     for path, text in held.diffs:
         lines += [
             "",
-            f"Diff of {path} (redacted; at most {MAX_SOURCE_LINES} lines shown; a cut says so):",
-            *(f"    {x}" for x in text.splitlines()),
+            f"Diff of {cap_line(path)} (redacted; at most {MAX_SOURCE_LINES} lines of at most {MAX_LINE_CHARS} "
+            "characters shown; a cut says so):",
+            *_indented(text),
         ]
     if held.carries:
         lines += [
             "",
-            f"This step is the replay of the step you accepted with {', '.join(held.carries)}: that accept applies to "
-            "it again when you accept this question.",
+            f"This step is the replay of the step you accepted with {', '.join(held.carries)}: the same paths, with "
+            "the content its own gates rewrote (the diff above is what will be replayed). That accept applies to it "
+            "again when you accept this question.",
         ]
-    if held.note:
-        lines += ["", held.note]
     return lines
 
 
 def _accept_lines(held: HeldCheck) -> list[str]:
     if held.patch is None:
         return [
-            "`accept: <why>` counts these on the evidence of the real run: the next run does the step again, and "
-            "when the check cannot decide again, the claim is taken (the verifier and the judge see that it was "
-            "accepted). A criterion that the check shows not to discriminate still fails the attempt."
+            "The step saved with an earlier question cannot be replayed, so `accept` is not offered: an accept "
+            "without a saved step would cover nothing, and an `accept` answer to this question gives no override."
         ]
     return [
         f"`accept: <why>` replays exactly the saved change of {len(held.changes)} files (the whole patch is in "
@@ -122,33 +133,60 @@ def _accept_lines(held: HeldCheck) -> list[str]:
     ]
 
 
+def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str]) -> str:
+    """The Context, or, over `MAX_CONTEXT_BYTES`, the same question with the path listing and the patch path in place of
+    the diffs and sources (a harness question must stay readable whatever the step changed)."""
+    if len(context.encode()) <= MAX_CONTEXT_BYTES:
+        return context
+    where = f"`{held.patch_path}` on the unit branch" if held.patch_path else "the saved patch"
+    paths: list[str] = []
+    used = 0
+    for change in held.changes:
+        line = f"    {cap_line(change)}"
+        used += len(line.encode()) + 1
+        if used > MAX_CONTEXT_BYTES // 2:
+            paths.append(f"    ... {len(held.changes) - len(paths)} more paths; the whole list is in the patch")
+            break
+        paths.append(line)
+    return "\n".join(
+        [
+            *head,
+            "",
+            f"The diffs and sources are too large to show here. The step changed {len(held.changes)} files:",
+            *paths,
+            f"The whole change is in {where}; read it there before you answer.",
+            "",
+            *tail,
+        ]
+    )
+
+
 def held_question(held: HeldCheck, criteria: Mapping[str, Criterion], asked: str) -> NewQuestion:
     label = _LABEL[held.check]
     shown = ", ".join(held.tests[:MAX_SHOWN_TESTS]) + (
         f" (+{len(held.tests) - MAX_SHOWN_TESTS} more)" if len(held.tests) > MAX_SHOWN_TESTS else ""
     )
-    context = "\n".join(
-        [
-            f"L4 could not run the {label} check of task {held.task}, so it does not count the failure against the "
-            "agent: no attempt was used and no profile was escalated.",
-            f"Why: {held.reason}",
-            "Runs: " + (", ".join(held.runs) or "none"),
-            "Kept real: " + (", ".join(held.kept) or "nothing"),
-            f"Tests: {shown or 'none'}",
-            *_source_lines(held),
-            "",
-            *_accept_lines(held),
-            "`retry: <note>` runs the check again, for example after an L4 upgrade; the note reaches the agent.",
-            "A person answers; an agent only where `clarifier.answer_by_agents` is true on the base branch.",
-        ]
-    )
+    head = [
+        f"L4 could not run the {label} check of task {held.task}, so it does not count the failure against the "
+        "agent: no attempt was used and no profile was escalated.",
+        f"Why: {cap_line(held.reason)}",
+        "Runs: " + (", ".join(held.runs) or "none"),
+        "Kept real: " + (", ".join(held.kept) or "nothing"),
+        f"Tests: {shown or 'none'}",
+    ]
+    tail = [
+        *_accept_lines(held),
+        "`retry: <note>` runs the check again, for example after an L4 upgrade; the note reaches the agent.",
+        "A person answers; an agent only where `clarifier.answer_by_agents` is true on the base branch.",
+    ]
+    context = _bounded("\n".join([*head, *_source_lines(held), "", *tail]), held, head, tail)
     return NewQuestion(
         title=f"Task {held.task}: the {label} check could not decide",
         kind=QuestionKind.HARNESS,
         blocking_tasks=(held.task,),
         context=context,
         asked=asked,
-        options=(ACCEPT_OPTION, RETRY_OPTION),
+        options=(ACCEPT_OPTION, RETRY_OPTION) if held.patch is not None else (RETRY_OPTION,),
         criteria=tuple(criteria[c] for c in held.criteria if c in criteria),
     )
 
@@ -174,9 +212,9 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
     answer's digest (`question.answered{by: human}`), and its own `question.raised` event (which the harness wrote:
     the file's text is never read for the subjects) has this task and this check. Two things end an accept
     (L4-IMP-065): a `tasks.reopened` of the task after the question was raised, and, for a question that saved its
-    step (`patch_sha256`), the replay: it takes effect only while that step is replayed (`wb.replay_question`), so
+    step (`saved: true`), the replay: it takes effect only while that step is replayed (`wb.replay_question`), so
     once the replay is used up it covers nothing, and a later step that meets the same inconclusive check is held
-    again with a new question. A question of 0.4.16 (no `patch_sha256`) keeps the rule by test id. `for_replay`: the
+    again with a new question. A question of 0.4.16 (no `saved` field) keeps the rule by test id. `for_replay`: the
     caller asks whether the question can be replayed at all."""
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is None:
@@ -208,7 +246,10 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, for_replay
             continue
         if any(e.type == "tasks.reopened" and task_key in (e.data.get("tasks") or []) for e in events[at + 1 :]):
             continue  # the criteria may have changed since: an earlier accept never covers or replays
-        if event.data.get("patch_sha256") and not for_replay and question.id not in allowed:
+        saved = event.data.get("saved")  # absent: a question of 0.4.16, which keeps the rule by test id
+        if saved is False:
+            continue  # the step could not be replayed: only `retry` is offered, an accept covers nothing
+        if saved is True and not for_replay and question.id not in allowed:
             continue  # a saved step is accepted for its replay only (and for the steps that replay produced)
         subjects = event.data.get("tests" if check in _TEST_SUBJECTS else "criteria") or []
         recorded = frozenset(str(t) for t in event.data.get("tests") or [])

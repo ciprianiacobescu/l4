@@ -144,6 +144,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     redact = wb.redactor.redact_text
     tests = list(held.tests[:MAX_SUBJECTS])
     saved, digests = write_held(wb, held)  # the step's changes, kept for an `accept` to replay (L4-IMP-065)
+    digests = digests or {"saved": False}  # a refusal: nothing was saved, only `retry` is offered
     wb.emit(
         "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
         criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **digests,
