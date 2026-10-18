@@ -29,7 +29,7 @@ from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import Criterion
 from l4.verifier.e2e_trace import e2e_coverage
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
-from l4.verifier.support_base import NO_SUPPORT, SupportPlan, support_at_base
+from l4.verifier.support_base import NO_SUPPORT, SupportPlan, collect_only_env, runner_support, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
 from l4.verifier.types import Finding, GeneratedOutcome, GenStatus, RunOutcome, Severity
 
@@ -113,25 +113,31 @@ def _outcome(statuses: Collection[str]) -> RunOutcome:
 
 
 def _head_run(
-    wb: Workbench, criterion: Criterion, cap: int, support: SupportPlan
-) -> tuple[E2eRun, dict[str, str], str, str]:
-    """The head run (L4-VER-035): with the unit's changed test-support files at their base versions, and with them in
-    place only when step 1's content scan read them. Returns (the run, the traced tests, how it ran, why not). With no
-    support change it is the plain run; `how` is "" when the run could not be made the way the rule says."""
-    if not support.changes:
+    wb: Workbench, criterion: Criterion, cap: int, support: SupportPlan, rel: str
+) -> tuple[E2eRun | None, dict[str, str], str, str]:
+    """The head run (L4-VER-035, design D16): with the e2e runner's own support files the unit changed at their base
+    versions (never added app data, never the unit's other test files: only the generated file `rel` is collected), and
+    with them in place only when step 1's content scan read them. A server that does not start in the reverted run is a
+    run that did not happen. Returns (the run, the traced tests, how it ran, why not); `how` is "" when the run could
+    not be made the way the rule says."""
+    plan = runner_support(support, wb.cfg)
+    if not plan.changes:
         run = run_e2e(wb, name="e2e-head")
         return run, _traced(criterion, run.report, cap), "unchanged", ""
-    with support_at_base(wb, support.base_sha, support):
-        run = run_e2e(wb, name="e2e-head")
-        found = _traced(criterion, run.report, cap)
-    if found and "error" not in found.values():
-        return run, found, "base", ""
-    cause = "a test of the file errored" if found else "no test of the new file ran"
+    cause = ""
+    with support_at_base(wb, plan.base_sha, plan):
+        try:
+            run = run_e2e(wb, name="e2e-head", extra_env=collect_only_env([rel]))
+            found = _traced(criterion, run.report, cap)
+            if found and "error" not in found.values():
+                return run, found, "base", ""
+            cause = "a test of the file errored" if found else "no test of the new file ran"
+        except ServerNotReady as exc:
+            run, found = None, {}
+            cause = f"the app does not start with the unit's support files at the base ({exc})"
     if not support.fallback:
-        why = (
-            f"it does not run with the unit's support files at the base ({cause}), and a run with them needs step "
-            f"1's content scan to have read them: {support.why_not}"
-        )
+        what = cause if run is None else f"it does not run with the unit's support files at the base ({cause})"
+        why = f"{what}, and a run with them needs step 1's content scan to have read them: {support.why_not}"
         return run, found, "", why
     run = run_e2e(wb, name="e2e-head-support")
     return run, _traced(criterion, run.report, cap), "head", ""
@@ -161,8 +167,8 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: Sup
         bad = sorted(i for i, status in found.items() if status == "error")
         reason = f"the test errors at the merge base, which proves nothing: {', '.join(bad[:3])}"
         return _Verdict("base_error", reason, base="error")
-    at_head, found, how, why = _head_run(wb, criterion, cap, support)
-    if not how:
+    at_head, found, how, why = _head_run(wb, criterion, cap, support, test_path("e2e", criterion.id))
+    if not how or at_head is None:
         return _Verdict("uncollectable", _short(why), base="fail")
     if not found:
         return _Verdict("uncollectable", "no test of the new file ran at the head", base="fail", support=how)
