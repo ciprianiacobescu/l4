@@ -2,6 +2,8 @@
 covers every changed test-support file. An autouse fixture or module-level code that patches a symbol of a production
 module the unit changed is a blocker; a fixture a test requests by name (an ordinary mock) is listed."""
 
+import pytest
+
 from l4.verifier.integrity import check_scan, run_integrity
 
 from ._integrity_helpers import new_repo
@@ -140,3 +142,35 @@ def test_a_test_file_or_conftest_that_touches_the_harness_plugin_is_a_hit(tmp_pa
         repo.write({path: text})
         [finding] = check_scan(repo.context(base, repo.commit("work", task="1.1", tdd="green"))).findings
         assert path in finding.detail and "harness" in finding.detail
+
+
+HONEST = {
+    "an XML fixture named xmlpath": {
+        "tests/conftest.py": (
+            "import pytest\n\n\n@pytest.fixture\ndef xmlpath(tmp_path):\n    return tmp_path / 'x.xml'\n"
+        ),
+        "tests/test_xml.py": "def test_parse(xmlpath):\n    assert xmlpath.suffix == '.xml'\n",
+    },
+    "a constant named _OUTCOMES": {"tests/helpers/cases.py": "_OUTCOMES = ['win', 'draw', 'loss']\n"},
+}
+
+
+@pytest.mark.parametrize("label", sorted(HONEST))
+def test_honest_test_code_is_not_a_harness_reference(tmp_path, git_environ, label):  # fifth review
+    repo, base = new_repo(tmp_path, git_environ, BASE)
+    repo.write(HONEST[label])
+    out = check_scan(repo.context(base, repo.commit("red", task="1.1", tdd="red")))
+    assert out.findings == [] and out.listed == []
+
+
+def test_a_test_of_the_harness_plugin_under_an_allowed_glob_is_listed_not_blocked(tmp_path, git_environ):
+    allow = "version: 1\nverifier:\n  test_awareness_allow: ['tests/**']\n"
+    plugin_test = "import l4_trace\n\n\ndef test_hook():\n    assert l4_trace.pytest_configure\n"
+    repo, base = new_repo(tmp_path, git_environ, {**BASE, ".l4/config.yaml": allow})
+    repo.write({"tests/unit/test_plugin.py": plugin_test})
+    out = check_scan(repo.context(base, repo.commit("red", task="1.1", tdd="red")))
+    assert out.findings == []
+    assert len(out.listed) == 1 and "allowed by `tests/**`" in out.listed[0] and "l4_trace" in out.listed[0]
+    other, base = new_repo(tmp_path / "x", git_environ, BASE) if (tmp_path / "x").mkdir() is None else (None, None)
+    other.write({"tests/unit/test_plugin.py": plugin_test})  # no allow list at the base: still a blocker
+    assert check_scan(other.context(base, other.commit("red", task="1.1", tdd="red"))).findings

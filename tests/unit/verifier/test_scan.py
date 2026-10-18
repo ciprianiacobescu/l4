@@ -122,3 +122,16 @@ def test_references_to_the_harness_plugin_the_record_and_the_report_option_are_h
         assert any(word in hit for hit in scan.harness_references(source)), source
     assert scan.harness_references("import os\nx = os.environ.get('HOME')\nORDER_OUTCOME = 1\n") == []
     assert scan.harness_references("import sys\nm = sys.modules.get('json')\n") == []
+
+
+def test_honest_names_that_only_look_like_the_harness_references_are_not_hits():  # fifth review
+    honest = {
+        "_OUTCOMES = ['win', 'draw', 'loss']\n": "a constant that starts with _OUTCOME",
+        "import pytest\n\n\n@pytest.fixture\ndef xmlpath(tmp_path):\n    return tmp_path / 'a.xml'\n": "a fixture",
+        "def test_parse(xmlpath):\n    assert xmlpath.suffix == '.xml'\n": "a parameter",
+        "class Doc:\n    xmlpath = 'a.xml'\n\n\ndef f(d):\n    return d.xmlpath\n": "an attribute read",
+    }
+    for source, why in honest.items():
+        assert scan.harness_references(source) == [], why
+    assert scan.harness_references("def f(config):\n    return config.option.xmlpath\n")
+    assert scan.harness_references("_OUTCOME_FD = []\n")

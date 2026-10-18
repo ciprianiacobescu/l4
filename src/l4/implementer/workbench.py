@@ -9,6 +9,7 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 import shutil
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -209,7 +210,12 @@ class Workbench:
         )  # fmt: skip
 
     def gate_spec(
-        self, *, network: bool, tree: Path | None = None, caches: tuple[CacheMount, ...] | None = None
+        self,
+        *,
+        network: bool,
+        tree: Path | None = None,
+        caches: tuple[CacheMount, ...] | None = None,
+        record_dir: Path | None = None,
     ) -> SandboxSpec:
         """No adapter: the sandbox hides every login, so agent-written tests cannot read one. `caches` replaces the
         unit's own mounts (the uv seed's fill, which runs no agent-written code)."""
@@ -217,7 +223,7 @@ class Workbench:
             worktree=tree or self.worktree, git_common_dir=self.git_common_dir, tmp_dir=self.unit_cache / "gate-tmp",
             home=self.home, configured_credential_paths=self.cfg.sandbox.credential_paths,
             caches=self.caches if caches is None else caches,
-            network=network, runner_tmp=runner_tmp_paths(self.host_env),
+            network=network, runner_tmp=runner_tmp_paths(self.host_env), record_dir=record_dir,
         )  # fmt: skip
 
     def run_gate(
@@ -257,18 +263,20 @@ class Workbench:
         root = self.worktree if tree is None else tree
         git = self.git if tree is None else self.git.at(root)
         log = self._next_gate_log(spec.name)
-        record = self.unit_cache / "gate-tmp" / f"outcome-{log.stem}.jsonl"
-        record.parent.mkdir(parents=True, exist_ok=True)
-        record.unlink(missing_ok=True)
+        # the outcome record: a random name in a directory of its own that the gate's TMPDIR does not hold (a glob over
+        # `tempfile.gettempdir()` finds nothing), made fresh for this run and removed after the cross-check
+        record_dir = self.unit_cache / "records" / secrets.token_hex(8)
+        record_dir.mkdir(parents=True, exist_ok=True)
+        record = record_dir / f"{secrets.token_hex(16)}.jsonl"
         purge_bytecode(root, self._tracked_bytecode(git))
         before = snapshot_protected(root, self.protected)
         try:
             result = run_gate(
                 spec, worktree=root, sandbox=self.sandbox,
                 sandbox_spec=(
-                    self.gate_spec(network=network, tree=root)
+                    self.gate_spec(network=network, tree=root, record_dir=record_dir)
                     if caches is None
-                    else self.gate_spec(network=network, tree=root, caches=caches)
+                    else self.gate_spec(network=network, tree=root, caches=caches, record_dir=record_dir)
                 ),
                 host_env=self.host_env, log_path=log,
                 redactor=self.redactor, runner=self.runner,
@@ -289,6 +297,7 @@ class Workbench:
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
         self.restore_ledger()
         result = self._cross_check(spec, result, record)
+        shutil.rmtree(record_dir, ignore_errors=True)
         readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
         extra = note(result.report) if note is not None and readable else {}
         self.emit(
@@ -306,11 +315,13 @@ class Workbench:
         record there is no check."""
         if result.report is None:
             return result
+        loaded = record.exists()  # the plugin creates the record when it is imported: a file means pytest ran with it
         rows = read_record(record)
         record.unlink(missing_ok=True)
-        if not rows and result.report.tests and re.search(r"\bpy\.?test\b", spec.command):
-            # a pytest gate has the harness's plugin: an empty, missing or unreadable record under a report that holds
-            # test cases is the record being removed (fourth review); a runner without the plugin is not held to one
+        if not rows and result.report.tests and (loaded or re.search(r"\bpy\.?test\b", spec.command)):
+            # the harness's plugin ran (the record exists, or the command names pytest): an empty, missing or unreadable
+            # record under a report that holds test cases is the record being removed (fourth and fifth review); a
+            # runner without the plugin (Go, TypeScript) never creates one and is not held to it
             self.emit("guard.report_altered", gate=spec.name, tests=[], reason="no outcome record")
             reason = f"the test report was altered (no outcome record): {result.report.total} test(s) in the report"
             return replace(result, status="fail", report=None, reason=reason)

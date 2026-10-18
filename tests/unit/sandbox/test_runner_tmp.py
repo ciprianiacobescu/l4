@@ -23,3 +23,15 @@ def test_runner_temp_is_hidden(tmp_path, make_spec):
         spec = make_spec(kind, runner_tmp=runner_tmp_paths({"RUNNER_TEMP": str(temp)}))
         argv = BwrapSandbox("/usr/bin/bwrap").build_argv(["true"], spec, ENV, None)
         assert (str(temp),) in pairs(argv, "--tmpfs")
+
+
+def test_the_outcome_record_directory_is_bound_writable_for_a_gate(
+    tmp_path, make_spec
+):  # detect-test-tamper, fifth review
+    records = tmp_path / "records"
+    records.mkdir()
+    spec = make_spec("gate", record_dir=records)
+    argv = BwrapSandbox("/usr/bin/bwrap").build_argv(["true"], spec, ENV, None)
+    assert (str(records), str(records)) in pairs(argv, "--bind")
+    plain = BwrapSandbox("/usr/bin/bwrap").build_argv(["true"], make_spec("gate"), ENV, None)
+    assert (str(records), str(records)) not in pairs(plain, "--bind")

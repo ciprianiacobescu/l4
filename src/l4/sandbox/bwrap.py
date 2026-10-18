@@ -114,6 +114,8 @@ class BwrapSandbox:
             if path.exists():
                 out += ["--bind", str(path), str(path)]
         out += ["--bind", str(spec.worktree), str(spec.worktree), "--bind", str(spec.tmp_dir), str(spec.tmp_dir)]
+        if spec.record_dir is not None:
+            out += ["--bind", str(spec.record_dir), str(spec.record_dir)]
         for cache in spec.caches:
             out += ["--ro-bind" if cache.read_only else "--bind", str(cache.path), str(cache.path)]
         out += ["--ro-bind", str(spec.git_common_dir), str(spec.git_common_dir)]

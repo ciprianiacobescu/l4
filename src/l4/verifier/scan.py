@@ -309,8 +309,25 @@ def has_human_tag(unit_dir: Path, title: str, tag: str) -> bool:
     return tag in task_tags(title) and task_marker(unit_dir) is None
 
 
-_HARNESS_WORDS = re.compile(r"l4_trace|(?<![A-Za-z0-9])_OUTCOME|L4_OUTCOME_FILE|\bxmlpath\b")
+_HARNESS_WORDS = re.compile(r"(?:l4_trace(?:\.\w+)*|_OUTCOME(?:_FD)?|L4_OUTCOME_FILE)")  # a whole name, not a prefix
 _REPORT_ATTRIBUTES = ("exitstatus", "xmlpath")
+
+
+def _is_xmlpath_option(node: ast.AST) -> bool:
+    """`<x>.option.xmlpath`, or `getattr(<x>.option, "xmlpath", ...)`: the option that names the JUnit report. A name or
+    fixture called `xmlpath` is not it."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "xmlpath" and isinstance(node.value, ast.Attribute) and node.value.attr == "option"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "setattr"):
+        args = node.args
+        return (
+            len(args) >= 2
+            and isinstance(args[0], ast.Attribute)
+            and args[0].attr == "option"
+            and isinstance(args[1], ast.Constant)
+            and args[1].value == "xmlpath"
+        )
+    return False
 
 
 def harness_reference_lines(tree: ast.Module) -> list[tuple[int, str]]:
@@ -330,8 +347,10 @@ def harness_reference_lines(tree: ast.Module) -> list[tuple[int, str]]:
             words = node.attr
         elif isinstance(node, ast.alias):
             words = node.name
-        if words and (m := _HARNESS_WORDS.search(words)):
+        if words and (m := _HARNESS_WORDS.fullmatch(words)):
             found.append((line, f"{m.group(0)}: names the harness's own plugin or report option"))
+        if _is_xmlpath_option(node):
+            found.append((line, "xmlpath: reads the report path option"))
         if isinstance(node, ast.Subscript | ast.Call):
             text = ast.unparse(node)
             if "sys.modules" in text[:80] and re.search(r"""['"]_?l4(?:\.|_|['"])""", text):

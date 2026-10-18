@@ -715,14 +715,20 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
 
     hits: list[str] = []
     human: list[str] = []
+    allowed = _awareness_allow(ctx)
+    allowed_refs: list[str] = []
     for path in sorted(changed):
         before, after = _text(git, ctx.base_sha, path), _text(git, ctx.head_sha, path)
         found = [what for what in found_in(path, before, after) if path not in exempt]
         if path.endswith(".py") and _matches([*tdd.test_globs, *tdd.test_support_globs], path):
             before_refs, after_refs = scan.harness_references(before), scan.harness_references(after)
-            found += [
+            refs = [
                 f"{why} (the harness's own plugin or report option)" for why in after_refs if why not in before_refs
             ]
+            if refs and (glob := next((g for g in allowed if glob_match(g, path)), None)):
+                allowed_refs += [f"{path}: {what} (allowed by `{glob}`)" for what in refs]  # L4 testing its own plugin
+            else:
+                found += refs
         if not found:
             continue
         # per commit (L4-SEC-004, W-D6): a file whose offending change only people's commits introduced is the owner's
@@ -765,12 +771,14 @@ def check_scan(ctx: IntegrityContext) -> Outcome:
             note=f"no result-manipulating construct in the changed support and runner files{extra}",
             human_scan=human,
             mocked=mocked,
+            listed=allowed_refs,
         )
     return Outcome(
         [_blocker("a construct that can change what the tests report", _listed(hits))],
         f"{len(hits)} hit(s){extra}" + (f"; {_not_python(unread)}" if unread else ""),
         human_scan=human,
         mocked=mocked,
+        listed=allowed_refs,
     )
 
 

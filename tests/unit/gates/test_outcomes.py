@@ -164,3 +164,14 @@ def test_a_pytest_gate_with_a_missing_or_empty_record_and_tests_in_the_report_is
 def test_a_runner_without_the_plugin_is_not_held_to_a_record(tmp_path):
     out, _ = cross_check(tmp_path, None, command=".venv/bin/python tools/fake_runner.py")
     assert out.status == "pass" and out.report is not None
+
+
+def test_a_wrapper_command_whose_plugin_created_an_empty_record_is_altered(tmp_path):  # fifth review: `make test`
+    out, events = cross_check(tmp_path, "", command="make test")
+    assert out.status == "fail" and out.reason.startswith("the test report was altered (no outcome record)")
+    assert events and events[0][0] == "guard.report_altered"
+
+
+def test_a_wrapper_command_that_never_loaded_the_plugin_is_not_held_to_a_record(tmp_path):
+    out, _ = cross_check(tmp_path, None, command="make test")  # no file: the plugin was never imported (Go, TypeScript)
+    assert out.status == "pass" and out.report is not None

@@ -117,3 +117,27 @@ def test_the_fourth_review_forger_that_empties_the_record_still_ends_fail(run_l4
     reasons = [str(e.get("reason", "")) for e in run.events("task.attempt_failed")]
     assert any("the test report was altered" in r for r in reasons), reasons
     assert run.code != 0 and run.outcome["units"][0].get("verdict") != "PASS"
+
+
+LOCATE = """import glob
+import os
+import tempfile
+
+
+def pytest_sessionfinish(session):
+    found = []
+    for pattern in ("outcome-*.jsonl", "*.jsonl", "**/*.jsonl"):
+        found += glob.glob(os.path.join(tempfile.gettempdir(), pattern), recursive=True)
+    with open(%r, "a") as handle:
+        handle.write(repr(sorted(set(found))) + "\\n")
+"""
+
+
+def test_test_code_cannot_find_the_outcome_record_under_its_temp_directory(run_l4, valid_spec, tmp_path):
+    found = tmp_path / "found.txt"
+    red = red_step()
+    red.writes = {**red.writes, "tests/conftest.py": LOCATE % str(found)}
+    run = run_l4([red, green_step(), judge_step()])
+    lines = found.read_text().splitlines()
+    assert lines and all(line == "[]" for line in lines), lines  # fifth review: nothing to find
+    assert run.events("gate.finished")

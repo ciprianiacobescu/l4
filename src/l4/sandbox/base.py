@@ -40,6 +40,7 @@ class SandboxSpec:
     caches: tuple[CacheMount, ...] = ()
     network: bool = True
     runner_tmp: tuple[Path, ...] = ()  # the CI runner's own scratch dirs (job-token git config, CA file): hidden
+    record_dir: Path | None = None  # writable, apart from TMPDIR: holds the gate's outcome record (a random file name)
 
     def __post_init__(self) -> None:
         if (self.kind == "agent") != (self.adapter is not None):
@@ -142,11 +143,12 @@ def gate_sandbox_spec(
     caches: tuple[CacheMount, ...],
     network: bool,
     runner_tmp: tuple[Path, ...] = (),
+    record_dir: Path | None = None,
 ) -> SandboxSpec:
     """The one way to build a gate sandbox: no adapter, so every adapter's login is hidden. A spec without
     `credential_paths` hides nothing, which is how a gate could read `~/.codex`. `configured_credential_paths` is
     `cfg.sandbox.credential_paths`; `caches` come from `l4.sandbox.caches.mount_caches`."""
     return SandboxSpec(
         "gate", worktree, git_common_dir, tmp_dir, home, expand_credential_paths(configured_credential_paths, home),
-        caches=caches, network=network, runner_tmp=runner_tmp,
+        caches=caches, network=network, runner_tmp=runner_tmp, record_dir=record_dir,
     )  # fmt: skip
