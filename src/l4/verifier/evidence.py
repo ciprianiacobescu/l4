@@ -200,6 +200,7 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
             list(integrity.get("unfrozen", [])),
             list(integrity.get("human_suppressions", [])),
             list(integrity.get("human_scan", [])),
+            list(integrity.get("human_config", [])),
         )
     result.steps = [
         StepRecord(s["step"], s["name"], "reused" if s["status"] == "ok" else s["status"], 0.0, _reused_note(s, prev))

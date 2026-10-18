@@ -48,7 +48,7 @@ m0_hide() {  # a directory is covered by a tmpfs, a file by /dev/null, a missing
 m0_guidance() {  # worktree -> a tmpfs over each EXISTING repo guidance dir (HB-X1; l4.sandbox.base.GUIDANCE_DIRS); a missing
   # one is skipped (bwrap cannot mkdir under a read-only root), so is a symlink (bwrap resolves it: `.claude -> /etc`)
   local rel
-  for rel in .claude .agents .codex .opencode .hermes .kiro/steering .kiro/agents .kiro/settings .kiro/hooks .kiro/prompts; do
+  for rel in .claude .agents .codex .opencode .hermes .kiro/steering .kiro/agents .kiro/settings .kiro/hooks .kiro/prompts .kiro/skills; do
     if [ -d "$1/$rel" ] && [ ! -L "$1/$rel" ]; then printf '%s\n' --tmpfs "$1/$rel"; fi
   done
 }

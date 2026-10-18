@@ -171,12 +171,14 @@ class TddCfg(_Strict):
     runner_config_files: list[str] = _list(d.RUNNER_CONFIG_FILES)
     gate_config_globs: list[str] = _list(d.GATE_CONFIG_GLOBS)
     extra_test_globs: list[str] = Field(default_factory=list)  # appended to `test_globs`, whatever it holds
+    extra_gate_config_globs: list[str] = Field(default_factory=list)  # appended to `gate_config_globs`
     extra_test_support_globs: list[str] = Field(default_factory=list)  # appended to `test_support_globs`
 
     @model_validator(mode="after")
     def _merge_extras(self) -> "TddCfg":
         self.test_globs = _append_unique(self.test_globs, self.extra_test_globs)
         self.test_support_globs = _append_unique(self.test_support_globs, self.extra_test_support_globs)
+        self.gate_config_globs = _append_unique(self.gate_config_globs, self.extra_gate_config_globs)
         return self
 
 

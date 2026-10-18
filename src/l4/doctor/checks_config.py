@@ -53,6 +53,7 @@ CFG_002 = register(Check("CFG-002", "Role chains reference existing profiles", "
 _LISTS = (
     ("tdd", "test_globs", "extra_test_globs", d.TEST_GLOBS),
     ("tdd", "test_support_globs", "extra_test_support_globs", d.TEST_SUPPORT_GLOBS),
+    ("tdd", "gate_config_globs", "extra_gate_config_globs", d.GATE_CONFIG_GLOBS),
     ("odd", "forbidden_paths", "extra_forbidden_paths", d.FORBIDDEN_PATHS),
 )
 MAX_SHOWN = 4

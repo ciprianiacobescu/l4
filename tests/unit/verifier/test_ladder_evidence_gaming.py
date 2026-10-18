@@ -83,6 +83,14 @@ def failed_at_step_1(run, detail: str) -> None:
     assert evidence(run)["diff_coverage"] is None  # the ladder stopped before the test run
 
 
+def put_back_in_green(run, path: str) -> None:
+    """L4-IMP-040: runner configuration that green changes never reaches a commit (the guard puts it back, so the
+    verifier's content scan has nothing to find); the untested function the step added still holds the unit."""
+    [event] = [e for e in run.local_events("guard.violation") if e.get("rule") == "runner configuration"]
+    assert event["phase"] == "green" and event["path"] == path
+    assert run.code == 11 and functions(run)["describe"] == "uncovered"
+
+
 def test_a_conftest_from_red_that_forges_the_coverage_output_fails_the_unit(run_multi):
     run = run_multi([red_with({"tests/conftest.py": FORGE}), green(UNTESTED), judge()])
     failed_at_step_1(run, "tests/conftest.py: names the coverage plugin or its output (.l4-out/cov)")
@@ -168,20 +176,20 @@ def test_an_unregistered_plugin_is_not_run_a_hold_only_under_fail(run_multi, mod
         ("pytest.toml", '[pytest]\ntestpaths = ["tests"]\npythonpath = ["src"]\naddopts = ["-p", "tools.quiet"]\n'),
     ],
 )
-def test_runner_config_that_adds_a_plugin_option_fails_the_unit(run_multi, path, text):
+def test_runner_config_that_adds_a_plugin_option_is_put_back_in_green(run_multi, path, text):
     files = {**UNTESTED, path: text, "tools/__init__.py": "", "tools/quiet.py": "X = 1\n"}
     run = run_multi([red(), green(files), judge()])
-    failed_at_step_1(run, f"{path}: adds the option -p")
+    put_back_in_green(run, path)
 
 
-def test_pyproject_addopts_that_blocks_the_plugin_fails_the_unit(run_multi, multi):
+def test_pyproject_addopts_that_blocks_the_plugin_is_put_back_in_green(run_multi, multi):
     text = (
         (multi.repo / "pyproject.toml")
         .read_text()
         .replace("[tool.pytest.ini_options]\n", '[tool.pytest.ini_options]\naddopts = "-p no:l4_cov"\n')
     )
     run = run_multi([red(), green({**UNTESTED, "pyproject.toml": text}), judge()])
-    failed_at_step_1(run, "pyproject.toml: adds the option -p")
+    put_back_in_green(run, "pyproject.toml")
 
 
 def test_a_pragma_no_cover_does_not_hide_the_untested_function(run_multi):

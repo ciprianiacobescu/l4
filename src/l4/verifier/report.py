@@ -229,6 +229,9 @@ def render_verification_md(result: VerifyResult) -> str:
         if result.integrity.human_scan:
             lines += ["", "## Support and runner-config changes made by humans (allowed, listed: SPEC 2.10)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_scan]
+        if result.integrity.human_config:
+            lines += ["", "## Gate and runner configuration changed by humans (allowed, listed: L4-IMP-040)", ""]
+            lines += [f"- {_flat(t, 300)}" for t in result.integrity.human_config]
         if result.integrity.unfrozen:
             lines += ["", "## Tests unfrozen by human answers (allowed, L4-IMP-002)", ""]
             lines += [f"- {_flat(t, 300)}" for t in result.integrity.unfrozen]

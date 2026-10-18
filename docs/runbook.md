@@ -219,7 +219,7 @@ The codes of `halt_reason` are:
 
 | State | Codes |
 |---|---|
-| `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `fix_records` |
+| `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records` |
 | `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors` |
 
 ### 4.1 Read the note on the PR
@@ -789,6 +789,7 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 | ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | `unselectable_task` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
 | `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | `baseline_failed` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
 | `secret in the outgoing commits, push blocked: <path> (<kind>)` | `secret_in_push` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. |
+| `task <k>: a gate run put a symbolic link at <path>[, …] (on the path of a file the harness restores); …` | `planted_link` | A test run replaced a directory or a file of the worktree with a symbolic link. The harness removed the link, wrote nothing through it, discarded the attempt and halted the unit. | Read `breaker.tripped` in the run ledger: `links` names each link and where it pointed (`points_to`). Find the test that makes links in the worktree and have it make them under its own temporary directory (`tmp_path`). Push the correction. |
 | `<unit> is fixing but no fix unit is open`, or `the fix unit <x> is not a fix unit of <unit>` | `fix_records` | The fix records do not agree. | Report it as a harness defect. |
 
 > **CAUTION:** If you do not correct the cause, the unit halts again in the next run.
@@ -796,6 +797,18 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > **NOTE:** For a secret, the run discards its commits that were not pushed. The commits hold the secret. The run then
 > pushes the halt alone, with no code. The remote branch gets no commit with the secret from this run. If the secret
 > comes from the agent, it can come back.
+
+> **NOTE:** After `planted_link`, the worktree is clean: the link is gone, the files the harness restores hold their
+> content from before the test run, and nothing was written outside the worktree. The halt is a stop for a person, not
+> an attempt to retry: the agent's test or code did something a test never needs. A harness restore that fails without a
+> link (`restore failed`) only fails the attempt, and the agent is told in the next prompt.
+
+> **NOTE:** A configuration file that the harness put back is not a halt. The step's `guard.violation` has
+> `rule: "gate configuration"` or `"runner configuration"`, the `path` and the `sections` that changed, and the whole file
+> went back to the step's base (a dependency added in the same file must be written again). To allow the change for one
+> task, write a `[config]` tag (gate configuration) or a `[test-infra]` tag (gate and runner configuration) in the task
+> title, or answer a question of the task with an answer that names the file (`task.config_opened` records it). Runner
+> configuration is never allowed in green. Adding a pytest marker needs none of this.
 
 > **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
 > next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not

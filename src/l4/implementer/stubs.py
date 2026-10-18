@@ -10,12 +10,25 @@ M1: implementer-tdd-loop 2.9 (other languages: a per-language pattern table).
 """
 
 import ast
+import contextlib
+import os
+import posixpath
 import shutil
+import stat
 import textwrap
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from l4.fsutil import (
+    LinkedPath,
+    UnsafeFile,
+    linked_component,
+    read_inside,
+    remove_link,
+    unlink_inside,
+    write_inside,
+)
 from l4.implementer.workbench import Workbench
 from l4.security.protected import changed_paths, glob_match
 from l4.specs.base import Task
@@ -668,11 +681,47 @@ class RedScope:
     restored: tuple[str, ...]  # "<path>: <region>"
 
 
+MAX_SOURCE_BYTES = 8 * 1024 * 1024  # a production file the red scope or the guard reads
+
+
 def _is_inside(root: Path, path: Path) -> bool:
     try:
         return not path.is_symlink() and path.resolve().is_relative_to(root.resolve())
     except OSError:
         return False
+
+
+def _leaves_worktree(path: str, target: str) -> bool:
+    """Does the link at `path` (worktree-relative) point outside the worktree: an absolute target, or a relative one
+    that climbs above the root?"""
+    if os.path.isabs(target):
+        return True
+    joined = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+    return joined == ".." or joined.startswith("../")
+
+
+def _link_at(wb: Workbench, rev: str, path: str) -> str | None:
+    """The target of the symbolic link at `path` in `rev`, or None when there is no link there."""
+    row = wb.git.run("ls-tree", rev, "--", path, check=False).stdout.split("\t")[0].split()
+    if len(row) != 3 or row[0] != "120000":
+        return None
+    return wb.git.run_bytes("cat-file", "blob", row[2], check=False).decode("utf-8", errors="replace")
+
+
+def escaping_links(wb: Workbench, base: str) -> list[tuple[str, str]]:
+    """(path, target) of every symbolic link that differs from `base` and points outside the worktree (L4-SEC-020
+    part e): an absolute target, or one that climbs above the root. The same link that `base` held is not listed."""
+    found: list[tuple[str, str]] = []
+    for path in sorted(changed_paths(wb.git, base, excludes=wb.excludes)):
+        try:
+            if not stat.S_ISLNK(os.lstat(wb.worktree / path).st_mode):
+                continue
+            target = os.readlink(wb.worktree / path)
+        except OSError:
+            continue
+        if _leaves_worktree(path, target) and _link_at(wb, base, path) != target:
+            found.append((path, target))
+    return found
 
 
 def _exempt(wb: Workbench, path: str) -> bool:
@@ -684,18 +733,26 @@ def _exempt(wb: Workbench, path: str) -> bool:
     )
 
 
-def restore_to_base(wb: Workbench, base: str, path: str, existed: bool | None = None) -> None:
-    """Put `path` back to its content at `base`; a file that did not exist there is deleted."""
-    if existed is None:
-        existed = wb.git.run("cat-file", "-e", f"{base}:{path}", check=False).returncode == 0
-    target = wb.worktree / path
-    if existed:
-        if target.is_symlink():
-            target.unlink()
+def restore_to_base(wb: Workbench, base: str, path: str) -> None:
+    """Put `path` back to its content at `base`; a path that did not exist there is removed, index entries included.
+    A link at or above the path is removed first and never followed (L4-SEC-020 part d), a path that was a directory at
+    the base is checked out as that whole directory, and `git rm -r --cached` takes the entries below a path that is
+    new: a directory that a link replaced can no longer make a guard raise."""
+    root = wb.worktree
+    while (link := linked_component(root, path)) is not None:
+        if not remove_link(root, link):
+            break
+    kind = wb.git.run("cat-file", "-t", f"{base}:{path}", check=False)
+    if kind.returncode == 0 and kind.stdout.strip() in ("blob", "tree", "commit"):
         wb.git.run("checkout", base, "--", f":(literal){path}")
+        return
+    target = root / path
+    if target.is_dir() and not target.is_symlink():
+        shutil.rmtree(target)
     else:
-        target.unlink(missing_ok=True)
-        wb.git.run("rm", "--quiet", "--cached", "--ignore-unmatch", "--", f":(literal){path}")
+        with contextlib.suppress(UnsafeFile):
+            unlink_inside(root, path)
+    wb.git.run("rm", "--quiet", "--cached", "--ignore-unmatch", "-r", "--", f":(literal){path}")
 
 
 def enforce_red_scope(wb: Workbench, task: Task, base: str) -> RedScope:
@@ -715,7 +772,7 @@ def enforce_red_scope(wb: Workbench, task: Task, base: str) -> RedScope:
             continue
         target = wb.worktree / path
         if not path.endswith(".py"):
-            restore_to_base(wb, base, path, existed)
+            restore_to_base(wb, base, path)
             violation(
                 path,
                 "a production file other than Python source was not part of red",
@@ -723,21 +780,29 @@ def enforce_red_scope(wb: Workbench, task: Task, base: str) -> RedScope:
             )
             continue
         if not target.exists() and not target.is_symlink():
-            restore_to_base(wb, base, path, existed)  # deleted by the agent
+            restore_to_base(wb, base, path)  # deleted by the agent
             violation(path, "the file was deleted", "restored")
             continue
         try:
             if not _is_inside(wb.worktree, target):
                 raise ValueError("not a regular file inside the worktree")
-            new_src = target.read_bytes().decode("utf-8")
+            got = read_inside(wb.worktree, path, limit=MAX_SOURCE_BYTES)
+            if got is None:
+                raise ValueError("not a regular file inside the worktree")
+            new_src = got[0].decode("utf-8")
             head_src = wb.git.run_bytes("show", f"{base}:{path}").decode("utf-8") if existed else ""
         except (ValueError, UnicodeDecodeError, OSError):
-            restore_to_base(wb, base, path, existed)
+            restore_to_base(wb, base, path)
             violation(path, "the file is not readable Python source", "restored" if existed else "removed")
             continue
         change = classify_red_changes(head_src, new_src)
         if change.source != new_src:
-            target.write_bytes(change.source.encode("utf-8"))
+            try:
+                write_inside(wb.worktree, path, change.source.encode("utf-8"), mode=got[1])
+            except (UnsafeFile, OSError):  # a link in the way is the step's own, not a gate's: nothing goes to `unsafe`
+                restore_to_base(wb, base, path)
+                violation(path, "the file is not readable Python source", "restored" if existed else "removed")
+                continue
         for note in change.restored:
             violation(path, note, "restored")
         stubs += [f"{path}:{name}" for name in change.stubs]
@@ -775,22 +840,32 @@ class ProductionGuard:
         }
 
     def _read(self, path: str) -> bytes | None:
-        target = self.wb.worktree / path
         try:
-            if not _is_inside(self.wb.worktree, target) or not target.is_file():
-                return None
-            return target.read_bytes()
-        except OSError:
+            got = read_inside(self.wb.worktree, path, limit=MAX_SOURCE_BYTES)
+        except (UnsafeFile, OSError, ValueError):
             return None
+        return None if got is None else got[0]
 
     def release(self, paths: Sequence[str]) -> None:
         """The harness itself put these paths back to `base` (an unused stub): they are guarded as unchanged."""
         for path in paths:
             self.guarded.pop(path, None)
 
+    def _remove_planted(self, where: str) -> None:
+        """A link on the path of a guarded or changed production file was put there by a gate: red scope left none (its
+        `_read` refuses links). It is removed itself and recorded, once, before anything is restored (L4-SEC-021)."""
+        wb = self.wb
+        seen: set[str] = set()
+        for path in sorted(set(self._production()) | set(self.guarded)):
+            link = linked_component(wb.worktree, path)
+            if link is not None and link not in seen:
+                seen.add(link)
+                wb.refused_write(LinkedPath(link), path=path, where=where)
+
     def check(self, where: str) -> list[str]:
         """Restore what a gate run changed and return one note per path (empty when nothing moved)."""
         wb = self.wb
+        self._remove_planted(where)
         now = self._production()
         notes: list[str] = []
         for path in sorted(set(now) | set(self.guarded)):
@@ -798,7 +873,7 @@ class ProductionGuard:
             if expected is None:
                 if path not in now:
                     continue  # unchanged, as guarded
-                restore_to_base(wb, self.base, path, now[path])
+                restore_to_base(wb, self.base, path)
                 notes.append(f"{path}: added or changed by a gate run ({where})")
                 wb.emit(
                     "guard.violation",
@@ -812,12 +887,12 @@ class ProductionGuard:
             if self._read(path) == expected:
                 continue
             target = wb.worktree / path
-            if target.is_symlink() or target.is_file():
-                target.unlink()
-            elif target.is_dir():
+            if target.is_dir() and not target.is_symlink():
                 shutil.rmtree(target)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(expected)
+            try:
+                write_inside(wb.worktree, path, expected)
+            except (UnsafeFile, OSError) as exc:
+                wb.refused_write(exc if isinstance(exc, UnsafeFile) else UnsafeFile(str(exc)), path=path, where=where)
             notes.append(f"{path}: changed or deleted by a gate run ({where})")
             wb.emit(
                 "guard.violation",

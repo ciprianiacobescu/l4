@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from l4.agents.factory import RoleUnavailable
+from l4.fsutil import UnsafeFile, unlink_inside
 from l4.gates.dryrun import narrow_ruff_paths
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
@@ -231,7 +232,7 @@ def _judge_written(
         if collected is not None and report is not None and any(stem in e for e in report.collection_errors):
             code = (wb.worktree / rel).read_text(encoding="utf-8", errors="replace")
             collected[cid] = (_collection_error(gate.log_path, stem), code)
-            (wb.worktree / rel).unlink(missing_ok=True)
+            _drop_file(wb, rel)
         elif collected is not None and interrupted and not ids and not broken:
             deferred[cid] = rel  # pytest stops at a collection error: this file never ran, so it runs again below
         elif broken or not ids:
@@ -240,7 +241,7 @@ def _judge_written(
         elif statuses & {"failed", "error"}:
             failing = next(i for i in ids if report.tests[i].status in ("failed", "error"))  # type: ignore[union-attr]
             out.records.append(AuditRecord(cid, "failed", rel, tuple(ids), f"{failing} fails at head"))
-            (wb.worktree / rel).unlink(missing_ok=True)
+            _drop_file(wb, rel)
         elif statuses != {"passed"}:
             _reject(wb, out, cid, rel, "rejected", "the audit test was skipped")
         else:
@@ -334,12 +335,20 @@ def _retry_collected(
         out.findings.append(_minor("an audit test was rejected", why, cid))
 
 
+def _drop_file(wb: Workbench, rel: str) -> None:
+    """Remove an audit test file after a gate ran it, without following a link the gate planted (L4-SEC-020)."""
+    try:
+        unlink_inside(wb.worktree, rel)
+    except UnsafeFile as exc:
+        wb.refused_write(exc, path=rel, where="audit")
+
+
 def _reject(
     wb: Workbench, out: AuditOutcome, cid: str, rel: str, status: str, why: str, tests: tuple[str, ...] = ()
 ) -> None:
     out.records.append(AuditRecord(cid, status, rel, tests, why))
     out.findings.append(_minor("an audit test was rejected", why, cid))
-    (wb.worktree / rel).unlink(missing_ok=True)
+    _drop_file(wb, rel)
 
 
 def _first_line(text: str) -> str:

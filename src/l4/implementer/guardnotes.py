@@ -41,6 +41,32 @@ _ADVICE = {
         "rebind a name or a fixture, do not patch or assign the unit's code from it (set the environment instead), "
         "and leave it a regular file. The harness put it back to its red version, so write the change again."
     ),
+    "planted link": (
+        "A test run replaced a directory or file of the worktree with a symbolic link. The harness never writes "
+        "through one: it removed the link and discarded the attempt. Create links only under the test's own temporary "
+        "directory (`tmp_path`)."
+    ),
+    "restore failed": (
+        "The harness could not put a file back after a test run changed it. Tests must not replace, delete or lock "
+        "source files."
+    ),
+    "link outside worktree": (
+        "A symbolic link that points outside the repository (an absolute target, or `..` above the root) is never "
+        "committed: the harness discarded the step. Keep the link out of the work, or point it at a path inside the "
+        "repository."
+    ),
+    "gate configuration": (
+        "Lint, type-check and other gate settings (ruff, mypy, eslint, tsconfig, and the gate sections of "
+        "pyproject.toml, setup.cfg, tox.ini and package.json) are the project's: the harness put the whole file back "
+        "to the step's base. Make the code meet them. A dependency you added in the same file must be written again "
+        "without touching those sections. If a setting is wrong, ask a question that names the file."
+    ),
+    "runner configuration": (
+        "Test-runner settings (the pytest and coverage sections, addopts and plugins, jest and the like) are not the "
+        "step's to change: the harness put the whole file back to the step's base. Write the change again without "
+        "them. A dependency you added in the same file must be written again too; a new pytest marker is allowed. If "
+        "the task needs one of these settings, ask a question that names the file."
+    ),
     "frozen test": (
         "Tests and test-support files are frozen once red is committed: do not edit them, make the code pass them."
     ),

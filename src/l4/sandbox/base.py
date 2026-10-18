@@ -120,7 +120,7 @@ def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:
 # is not here: Serena's project config and memories are read by the MCP server.
 GUIDANCE_DIRS = (
     ".claude", ".agents", ".codex", ".opencode", ".hermes",
-    ".kiro/steering", ".kiro/agents", ".kiro/settings", ".kiro/hooks", ".kiro/prompts",
+    ".kiro/steering", ".kiro/agents", ".kiro/settings", ".kiro/hooks", ".kiro/prompts", ".kiro/skills",
 )  # fmt: skip
 
 

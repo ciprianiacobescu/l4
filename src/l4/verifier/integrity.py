@@ -10,7 +10,6 @@ check (2.11), the secret scan (2.12).
 M1: verifier 2.7-2.9, 2.11, 2.12, 2.13 (the red re-run, verifier red commits, `pre_adoption`), other languages.
 """
 
-import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -18,6 +17,7 @@ from typing import Any
 
 from l4.config.schema import L4Config
 from l4.evidence.diffcov import CODE_SUFFIXES
+from l4.implementer.gateconfig import GateConfig, Kind, allowed_kinds
 from l4.implementer.opened import check_opened, unit_modules
 from l4.security.protected import HumanChange, ProtectedSet, glob_match, protected_changes_by_human
 from l4.specs.base import Task
@@ -34,7 +34,6 @@ from l4.verifier.types import Finding, IntegrityCheck, IntegrityReport, Severity
 HARNESS_OWNED = (".serena/memories/harness/",)  # written by the harness after a PASS (M1.5), never by an agent: and
 # only its own `L4-Phase: lessons` commits count as the harness writing (a planted file is a blocker)
 _RUNNER_FILES = ("pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg")
-_PYTEST_TABLES = ("pytest", "coverage")
 MAX_LISTED = 5
 
 
@@ -61,6 +60,7 @@ class Outcome:
     unfrozen: list[str] = field(default_factory=list)  # frozen tests a human answer unfroze for green: listed likewise
     human_suppressions: list[str] = field(default_factory=list)  # inline suppressions a person's commit wrote: listed
     human_scan: list[str] = field(default_factory=list)  # content-scan hits only people's commits introduced: listed
+    human_config: list[str] = field(default_factory=list)  # gate and runner configuration only people's commits changed
 
 
 def _blocker(title: str, detail: str, severity: Severity = Severity.BLOCKER) -> Finding:
@@ -317,16 +317,6 @@ def _green_sha(ctx: IntegrityContext, red: LedgerEvent) -> str | None:
     return sha if isinstance(sha, str) and sha != _sha(ctx, red) else None
 
 
-def _pytest_config(raw: bytes | None) -> Any:
-    if raw is None:
-        return None
-    try:
-        tool = tomllib.loads(raw.decode("utf-8")).get("tool", {})
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return raw  # unreadable at one end: any difference counts
-    return {k: v for k, v in tool.items() if k in _PYTEST_TABLES}
-
-
 def _unfrozen_paths(ctx: IntegrityContext, red: LedgerEvent, red_sha: str) -> dict[str, tuple[str, str]]:
     """path -> (reason, source), for the paths a `task.unfrozen` of this very red commit (same unit and task) freed. The
     harness wrote it before green's attempt. `reason` is `human_answer` (source: the question id; also the reading of
@@ -347,10 +337,11 @@ def _unfrozen_paths(ctx: IntegrityContext, red: LedgerEvent, red_sha: str) -> di
 
 def check_freeze(ctx: IntegrityContext) -> Outcome:
     """For each task with a red commit and a green commit: the frozen files (the red tests and the test-support
-    files, `task.red_ok.frozen`) are identical at both, and so are the `[tool.pytest*]`/`[tool.coverage*]` sections of
-    `pyproject.toml` and the files `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`, `tox.ini` and
-    `setup.cfg`."""
+    files, `task.red_ok.frozen`) are identical at both, and so is the runner configuration (`GateConfig`, L4-IMP-040):
+    the pytest and coverage sections of the manifests, `pytest.ini`, `.coveragerc` and the like. A new pytest
+    `markers` entry is no change (owner decision 5)."""
     git, findings, checked, listed, opened = ctx.git, [], 0, [], 0
+    gc = GateConfig.of(ctx.cfg, git.repo)
     for red in (e for e in ctx.events if e.type == "task.red_ok"):
         red_sha, green = _sha(ctx, red), _green_sha(ctx, red)
         frozen = [str(p) for p in red.data.get("frozen") or []]
@@ -369,11 +360,11 @@ def check_freeze(ctx: IntegrityContext) -> Outcome:
                     listed.append(f"{p} (task {task}, opened by its text, {source})")
                 else:
                     listed.append(f"{p} (task {task}, unfrozen by {source} (human))")
-        runner = sorted(p for p in changed if p in _RUNNER_FILES)
-        if "pyproject.toml" in changed and _pytest_config(_blob(git, red_sha, "pyproject.toml")) != _pytest_config(
-            _blob(git, green, "pyproject.toml")
-        ):
-            runner.append("pyproject.toml")
+        runner = sorted(
+            p for p in changed
+            if "runner" in gc.kinds(p)
+            and gc.changed(p, _blob(git, red_sha, p), _blob(git, green, p)).get("runner")
+        )  # fmt: skip
         if moved:
             findings.append(
                 _blocker(
@@ -735,12 +726,77 @@ def check_tdd_history(ctx: IntegrityContext) -> Outcome:
     return Outcome(findings, f"{checked} task(s); red tests passing at head: step 3")
 
 
+# --- 2.9 gate and runner configuration (L4-IMP-040) ------------------------------------------------------------------
+
+_PHASE_OF = {"red": "red", "already-satisfied": "red", "green": "green", "already-done": "green", "exempt": "single"}
+
+
+def _opened_config(ctx: IntegrityContext, commit: "Commit", phase: str) -> set[str]:
+    """The paths a `task.config_opened` of this commit's unit, task and phase names (L4-IMP-041)."""
+    return {
+        str(p)
+        for e in ctx.events
+        if e.type == "task.config_opened" and e.data.get("task") == commit.task and e.data.get("phase") == phase
+        and _unit_of(ctx, e) == commit.unit
+        for p in e.data.get("paths") or []
+    }  # fmt: skip
+
+
+def _sections_text(changed: Mapping[str, tuple[str, ...]]) -> str:
+    return "; ".join(
+        f"{kind}: {', '.join(s or 'the whole file' for s in sections)}" for kind, sections in changed.items()
+    )
+
+
+def check_gate_config(ctx: IntegrityContext) -> Outcome:
+    """A harness commit between base and head that changed a gate or runner configuration file in a guarded section
+    (`GateConfig`) is a blocker, unless L4-IMP-041 allowed it for that unit, task and phase: a human `[config]` or
+    `[test-infra]` tag, or a `task.config_opened` that names the file, and runner configuration never in a green
+    commit. A harness commit that is no task step (no `L4-Task`) is never allowed. A change that only people's commits
+    made is allowed and listed (`Outcome.human_config`)."""
+    gc = GateConfig.of(ctx.cfg, ctx.git.repo)
+    paths = sorted(
+        p for p in _changed(ctx.git, ctx.base_sha, ctx.head_sha) if gc.kinds(p) and not _in_unit_dirs(ctx, p)
+    )
+    if not paths:
+        return Outcome(note="no gate or runner configuration file changed", skipped=True)
+    steps = {c.sha: c for c in commits(ctx)}
+    tags = {(unit, t.key): task_tags(t.title) for unit, t in ctx.tasks}
+    hits: list[str] = []
+    human: list[str] = []
+    for path in paths:
+        for record in commit_records(
+            ctx.git, "--reverse", f"{ctx.base_sha}..{ctx.head_sha}", "--", f":(literal){path}"
+        ):
+            sha = record[SHA]
+            changed = gc.changed(path, _blob(ctx.git, f"{sha}^", path), _blob(ctx.git, sha, path))
+            if not changed:
+                continue
+            if not is_harness(record):
+                human.append(f"{path} ({_sections_text(changed)}) by {sha[:10]}")
+                continue
+            commit = steps.get(sha)
+            permitted: frozenset[Kind] = frozenset()
+            if commit is not None and (phase := _PHASE_OF.get(commit.tdd)) is not None:
+                opened = path in _opened_config(ctx, commit, phase)
+                permitted = allowed_kinds(phase, tags.get((commit.unit, commit.task), frozenset()), opened=opened)
+            refused = {kind: sections for kind, sections in changed.items() if kind not in permitted}
+            if refused:
+                hits.append(f"{path} ({_sections_text(refused)}), commit {sha[:10]}")
+    extra = f" (+{len(human)} changed by humans, listed)" if human else ""
+    if not hits:
+        return Outcome(note=f"{len(paths)} configuration file(s) changed, none by the unit{extra}", human_config=human)
+    finding = _blocker("gate or runner configuration changed by the unit", _listed(hits))
+    return Outcome([finding], f"{len(hits)} change(s) of gate or runner configuration{extra}", human_config=human)
+
+
 CHECKS: tuple[tuple[str, Callable[[IntegrityContext], Outcome]], ...] = (
     ("protected paths", check_protected),
     ("pre-existing tests", check_tests),
     ("red-green freeze", check_freeze),
     ("test path freeze", check_test_paths),
     ("content scan", check_scan),
+    ("gate configuration", check_gate_config),
     ("suppressions", check_suppressions),
     ("tdd history", check_tdd_history),
 )
@@ -758,5 +814,6 @@ def run_integrity(ctx: IntegrityContext) -> IntegrityReport:
         report.human_tests.extend(out.human_tests)
         report.human_suppressions.extend(out.human_suppressions)
         report.human_scan.extend(out.human_scan)
+        report.human_config.extend(out.human_config)
         report.unfrozen.extend(out.unfrozen)
     return report
