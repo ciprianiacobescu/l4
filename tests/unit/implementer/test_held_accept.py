@@ -107,6 +107,7 @@ def test_scn_imp_321_a_patch_that_cannot_be_replayed_is_a_new_question_never_a_p
     why = {"missing": "missing", "digest": "digest", "conflict": "does not apply"}[damage]
     assert why in question_text(bench).split("## Q-002", 1)[1]
     assert "patch_sha256" not in bench.events("question.raised")[-1]  # nothing to replay for the new question
+    assert bench.events("question.raised")[-1]["saved"] is False and bench.events("question.raised")[0]["saved"] is True
     file = QuestionsFile.load(bench.wb.ref.path / "questions.md")
     assert file.get("Q-002").blocking_tasks == ("1.1",)
 
@@ -137,7 +138,7 @@ def forge_hold(bench: Bench, raw, files: dict[str, str]) -> str:
     patch = patch_of(bench)
     patch.write_bytes(data)
     digest = hashlib.sha256(data).hexdigest()
-    keep = ("id", "task", "kind", "title", "check", "criteria", "tests", "result_sha256", "source_sha256")
+    keep = ("id", "task", "kind", "title", "check", "criteria", "tests", "result_sha256", "source_sha256", "saved")
     last = {k: v for k, v in bench.events("question.raised")[-1].items() if k in keep}
     bench.writer.append("question.raised", **{**last, "patch_sha256": digest})
     commit_all(bench, raw, "forged hold")
@@ -483,7 +484,7 @@ def test_minor_a_result_digest_is_required_whenever_a_patch_digest_is(make_bench
     meta = json.loads(sidecar.read_text())
     meta["result"]["notes_for_verifier"] = "TAMPERED"
     sidecar.write_text(json.dumps(meta, sort_keys=True))
-    keep = ("id", "task", "kind", "title", "check", "criteria", "tests", "patch_sha256", "source_sha256")
+    keep = ("id", "task", "kind", "title", "check", "criteria", "tests", "patch_sha256", "source_sha256", "saved")
     bench.writer.append(
         "question.raised", **{k: v for k, v in bench.events("question.raised")[-1].items() if k in keep}
     )
@@ -662,3 +663,128 @@ def test_r5_capture_and_apply_survive_diff_context_zero_and_autocrlf(make_bench,
         *held_patch.GIT_PLAIN, *held_patch.APPLY_FLAGS, "--check", "-", data=held.patch, check=False
     )
     assert check.returncode == 0, check.stderr
+
+
+# --- round 3: an explicit marker, every step is saved, a refusal offers retry only, bounded questions, exact replay ---
+
+
+def test_n4_every_question_of_this_release_records_whether_its_step_was_saved(make_bench, monkeypatch):
+    bench = held_new(make_bench, monkeypatch)
+    assert bench.events("question.raised")[-1]["saved"] is True
+
+
+def test_n4_the_accept_of_a_refusal_question_gives_no_override_and_the_run_says_so(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [new_step(), weak_step()])
+    patch = patch_of(bench)
+    patch.write_bytes(patch.read_bytes() + b"\n")  # the saved step can no longer be replayed
+    commit_all(bench, raw, "damage")
+    answer(bench, raw, "accept: fine")
+    assert run_task(bench.wb, TASK).question_ids == ["Q-002"]
+    file = QuestionsFile.load(bench.wb.ref.path / "questions.md")
+    assert file.get("Q-002").options == (tdd_retry_option(),)  # retry only
+    ctx = question_text(bench).split("## Q-002", 1)[1].split("### Options", 1)[0]
+    assert "the claim is taken" not in ctx and "retry:" in ctx
+    answer_q(bench, raw, "Q-002", "accept: fine")
+    bench.wb.held_removals.clear()
+    third = run_task(bench.wb, TASK)
+    # no override: the agent's step meets the check, and is held with a question of its own
+    assert (third.status, third.question_ids) == ("blocked", ["Q-003"]), third.reason
+    assert bench.events("check.accepted") == [] and bench.events("held.accept_ignored")[-1]["question"] == "Q-002"
+    assert bench.events("question.raised")[-1]["saved"] is True
+
+
+def tdd_retry_option() -> str:
+    from l4.implementer.held import RETRY_OPTION
+
+    return RETRY_OPTION
+
+
+def test_n4_a_step_over_fifty_files_is_saved_whole_and_replayed_whole(make_bench, monkeypatch, raw):
+    extra = tuple((f"tests/fixtures/f{n:02d}.txt", f"{n}\n") for n in range(51))
+    bench = held_new(make_bench, monkeypatch, [new_step(*extra), weak_step()])
+    assert bench.events("question.raised")[-1]["saved"] is True and patch_of(bench).is_file()
+    ctx = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
+    assert "tests/fixtures/f50.txt" in ctx and ".l4/held/1.1-pre_satisfied.patch" in ctx
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done" and len(bench.adapter.requests) == 1, outcome.reason
+    assert (bench.wb.worktree / "tests" / "test_new.py").read_text() == NEW  # the weak body was never run
+    assert tracked(bench, bench.wb.worktree / "tests" / "fixtures" / "f50.txt")
+
+
+def test_r19_one_two_megabyte_line_cannot_make_questions_md_unreadable(make_bench, monkeypatch, raw):
+    big = "[" + "1," * 1_100_000 + "1]\n"  # one line of 2.2 MB, a minified fixture
+    bench = held_new(make_bench, monkeypatch, [new_step(("tests/fixtures/big.json", big))])
+    path = bench.wb.ref.path / "questions.md"
+    assert path.stat().st_size < 400_000
+    file = QuestionsFile.load(path)
+    assert file is not None and file.get("Q-001").blocking_tasks == ("1.1",)
+    ctx = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
+    assert "tests/fixtures/big.json" in ctx and ".l4/held/1.1-pre_satisfied.patch" in ctx and "line cut" in ctx
+    assert patch_of(bench).stat().st_size > 2_000_000  # the whole change is saved
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done" and len(bench.adapter.requests) == 1, outcome.reason
+    assert (bench.wb.worktree / "tests" / "fixtures" / "big.json").stat().st_size > 2_000_000
+
+
+def test_r19_a_question_with_very_many_paths_falls_back_to_the_listing_and_the_patch_path(make_bench, monkeypatch):
+    from l4.implementer.held import MAX_CONTEXT_BYTES, HeldCheck, held_question
+
+    held = HeldCheck(
+        "1.1", "red", "pre_satisfied", (KNOWN,), (NEW_ID,), "why", patch=b"x", result="{}",
+        changes=tuple(f"added tests/fixtures/{'d' * 60}/{n}.txt" for n in range(5000)),
+        diffs=tuple((f"p{n}", "\n".join("+" + "y" * 300 for _ in range(40))) for n in range(40)),
+        patch_path=".l4/held/1.1-pre_satisfied.patch",
+    )  # fmt: skip
+    question = held_question(held, {}, "now")
+    assert len(question.context.encode()) <= MAX_CONTEXT_BYTES
+    assert ".l4/held/1.1-pre_satisfied.patch" in question.context and "added tests/fixtures/" in question.context
+
+
+STAMP = (
+    "import pathlib\n"
+    "_held = pathlib.Path('openspec/changes/add-discount-codes/.l4/held/1.1-pre_satisfied.patch')\n"
+    "pathlib.Path('tests/fixtures').mkdir(parents=True, exist_ok=True)\n"
+    "if _held.exists():  # only while a saved step is replayed\n"
+    "    pathlib.Path('tests/fixtures/replay_only.txt').write_text('written while the replay ran\\n')\n"
+)
+
+
+def test_r18d_a_replay_whose_gates_wrote_a_path_outside_the_patch_fails_as_an_attempt(make_bench, monkeypatch, raw):
+    stamped = new_step(("tests/test_new.py", STAMP + NEW))
+    bench = held_new(make_bench, monkeypatch, [stamped, new_step()])
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    [failed] = bench.events("task.attempt_failed")
+    assert "saved patch does not contain" in failed["reason"] and "tests/fixtures/replay_only.txt" in failed["reason"]
+    assert not tracked(bench, bench.wb.worktree / "tests" / "fixtures" / "replay_only.txt")
+    assert bench.events("task.done") == [] and bench.events("task.red_ok") == []
+    assert len(bench.adapter.requests) == 2 and (outcome.status, outcome.question_ids) == ("blocked", ["Q-002"])
+
+
+def test_r18_the_carried_text_matches_what_the_code_does(make_bench, monkeypatch, raw):
+    zero_says(monkeypatch)
+    monkeypatch.setattr(
+        tdd,
+        "vacuity_check",
+        lambda wb, zeroed, open_criteria, *, real=None: Vacuity(inconclusive={c: "ran no test" for c in open_criteria}),
+    )
+    from .conftest import HEADER, STUB, UNKNOWN, UNKNOWN_TEST
+
+    step = Step(
+        writes={
+            "tests/test_new.py": NEW,
+            "tests/test_discount.py": HEADER + UNKNOWN_TEST,
+            "src/pytdd/pricing.py": STUB,
+        },
+        structured=result("red", criteria_ids=[KNOWN, UNKNOWN]),
+    )
+    bench = make_bench([step])
+    assert run_task(bench.wb, TASK).question_ids == ["Q-001"]
+    answer(bench, raw, "accept: fine")
+    bench.wb.held_removals.clear()
+    assert run_task(bench.wb, TASK).question_ids == ["Q-002"]
+    ctx = question_text(bench).split("## Q-002", 1)[1].split("### Options", 1)[0]
+    assert "replay of the step you accepted with Q-001" in ctx and "the same paths" in ctx
+    assert "its own gates" in ctx and "rewrote" in ctx
