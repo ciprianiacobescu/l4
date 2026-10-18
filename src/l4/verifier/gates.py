@@ -25,6 +25,7 @@ from l4.implementer.workbench import Workbench
 from l4.verifier.types import Finding, GateLine, Severity
 
 MAX_NAMED = 5
+ALTERED = "the test report was altered"  # the reason `Workbench._cross_check` gives (L4-VER-039)
 
 
 @dataclass
@@ -141,7 +142,10 @@ def _judged(wb: Workbench, name: str, command: str, reports_key: str, result: Ga
     elif result.status == "pass":
         return out
     out.gate = GateLine(line.name, line.command, "fail", reason, line.log, log_digest(result.log_path))
-    out.findings.append(_blocker(name, command, reason, line.log))
+    if reason.startswith(ALTERED):  # the report disagrees with what pytest judged: its own blocker
+        out.findings.append(Finding(Severity.BLOCKER, ALTERED, reason, "deterministic", log=line.log))
+    else:
+        out.findings.append(_blocker(name, command, reason, line.log))
     return out
 
 

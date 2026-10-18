@@ -13,7 +13,7 @@ import shutil
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +26,7 @@ from l4.context import AppContext
 from l4.fsutil import atomic_write_bytes
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestReport
+from l4.gates.outcomes import altered, read_record
 from l4.gates.runner import GateResult, GateSpec, run_gate
 from l4.gates.trace import trace_env
 from l4.implementer.guardnotes import GuardNote, note_of
@@ -256,6 +257,9 @@ class Workbench:
         root = self.worktree if tree is None else tree
         git = self.git if tree is None else self.git.at(root)
         log = self._next_gate_log(spec.name)
+        record = self.unit_cache / "gate-tmp" / f"outcome-{log.stem}.jsonl"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.unlink(missing_ok=True)
         purge_bytecode(root, self._tracked_bytecode(git))
         before = snapshot_protected(root, self.protected)
         try:
@@ -269,7 +273,10 @@ class Workbench:
                 host_env=self.host_env, log_path=log,
                 redactor=self.redactor, runner=self.runner,
                 extra_env=merge_pytest_env(
-                    toolchain_env(self.cfg), trace_env(self.cfg.gates.test_timeout_seconds()), extra_env or {}
+                    toolchain_env(self.cfg),
+                    trace_env(self.cfg.gates.test_timeout_seconds()),
+                    extra_env or {},
+                    {"L4_OUTCOME_FILE": str(record)},
                 ),
             )  # fmt: skip
         finally:
@@ -281,6 +288,7 @@ class Workbench:
                       *revert_unsnapshotted(git, self.protected, excludes=self.excludes)]:  # fmt: skip
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
         self.restore_ledger()
+        result = self._cross_check(spec, result, record)
         readable = result.report is not None and result.status == "fail"  # a red note is for a failing gate
         extra = note(result.report) if note is not None and readable else {}
         self.emit(
@@ -291,6 +299,20 @@ class Workbench:
             **extra,
         )  # fmt: skip
         return result
+
+    def _cross_check(self, spec: GateSpec, result: GateResult, record: Path) -> GateResult:
+        """The JUnit report against the plugin's record of what pytest judged (detect-test-tamper, third review): code
+        that rewrote the report after the run makes the gate fail with no readable report, naming the tests. With no
+        record there is no check."""
+        if result.report is None:
+            return result
+        bad = altered(result.report, read_record(record))
+        record.unlink(missing_ok=True)
+        if not bad:
+            return result
+        shown = ", ".join(bad[:5]) + (f" (+{len(bad) - 5} more)" if len(bad) > 5 else "")
+        self.emit("guard.report_altered", gate=spec.name, tests=bad[:50])
+        return replace(result, status="fail", report=None, reason=f"the test report was altered: {shown}")
 
     def _tracked_bytecode(self, git: Git | None = None) -> frozenset[str]:
         """Bytecode the repository itself commits (rare): a changed copy is a production change the guards see."""

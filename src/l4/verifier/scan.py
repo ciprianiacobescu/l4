@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 _REPORT_HOOKS = ("pytest_runtest_makereport", "pytest_report_teststatus", "pytest_runtest_logreport")
 _WRAPPED_HOOKS = ("pytest_runtest_call", "pytest_runtest_protocol")
@@ -64,6 +65,52 @@ def _deselects(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return False
 
 
+_SESSION_END_HOOKS = ("pytest_sessionfinish", "pytest_unconfigure", "pytest_terminal_summary")
+
+
+def _writes_files(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "open":
+                return True
+            if isinstance(func, ast.Attribute) and func.attr in ("write_text", "write_bytes", "open"):
+                return True
+    return False
+
+
+def _exit_hooks(tree: ast.Module) -> list[str]:
+    """Code that runs after pytest wrote the report and can rewrite it (third review): `atexit.register`, `os._exit`
+    (also through an alias or a `from` import) and a session-end hook that writes a file."""
+    modules: dict[str, str] = {}  # local name -> module, for `import atexit as _a`
+    names: dict[str, str] = {}  # local name -> "module.name", for `from os import _exit`
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update({(a.asname or a.name).split(".")[0]: a.name for a in node.names})
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names})
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        target = ""
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            target = f"{modules.get(func.value.id, func.value.id)}.{func.attr}"
+        elif isinstance(func, ast.Name):
+            target = names.get(func.id, "")
+        if target == "atexit.register":
+            found.append("atexit.register: runs code after the test run, when the report is already written")
+        elif target == "os._exit":
+            found.append("os._exit: ends the process without the report being judged")
+    found += [
+        f"{f.name}: writes a file when the run ends"
+        for f in _functions(tree)
+        if f.name in _SESSION_END_HOOKS and _writes_files(f)
+    ]
+    return list(dict.fromkeys(found))
+
+
 def result_hooks(source: str) -> list[str]:
     """The result-manipulating constructs a conftest or plugin source contains, one short description each."""
     tree = _parse(source)
@@ -96,7 +143,7 @@ def result_hooks(source: str) -> list[str]:
             for t in targets
             if isinstance(t, ast.Attribute) and t.attr in _REPLACING_ATTRIBUTES
         ]
-    return found
+    return [*found, *_exit_hooks(tree)]
 
 
 _HARNESS_PLUGINS = ("l4_trace", "l4_cov")
@@ -252,3 +299,11 @@ def added_lines(diff: str) -> list[AddedLine]:
 def task_tags(title: str) -> frozenset[str]:
     """The `[docs]`, `[config]`, `[test-infra]` ... tags a task title carries (lower case)."""
     return frozenset(m.group(1).lower() for m in _TAG.finditer(title))
+
+
+def has_human_tag(unit_dir: Path, title: str, tag: str) -> bool:
+    """Whether the task title carries the human tag `[tag]` that exempts a rule (`test-infra`, `config`). A fix unit's
+    or a follow-up unit's titles are written by the harness from model-written findings: no tag is a person's."""
+    from l4.specs.fixmark import task_marker
+
+    return tag in task_tags(title) and task_marker(unit_dir) is None

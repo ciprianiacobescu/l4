@@ -80,3 +80,26 @@ def test_hooks_that_replace_a_tests_call_are_hits():  # SCN-VER-129
 
 def test_an_attribute_that_is_not_obj_or_runtest_is_no_hit():  # SCN-VER-129 control
     assert scan.result_hooks("def f(item):\n    item.name = 'x'\n    item.obj_count = 1\n") == []
+
+
+# --- third review, item 2: hooks that can rewrite the report after pytest wrote it ------
+
+
+def test_atexit_os_exit_and_session_end_hooks_that_write_files_are_hits():
+    assert scan.result_hooks("import atexit\natexit.register(print)\n") == [
+        "atexit.register: runs code after the test run, when the report is already written"
+    ]
+    assert scan.result_hooks("import atexit as _a\n_a.register(print)\n") != []
+    assert scan.result_hooks("import os\nos._exit(0)\n") == [
+        "os._exit: ends the process without the report being judged"
+    ]
+    assert scan.result_hooks("import os as _o\n_o._exit(0)\n") != []
+    for hook in ("pytest_sessionfinish", "pytest_unconfigure", "pytest_terminal_summary"):
+        writes = f"def {hook}(*a):\n    open('x.xml', 'w').write('')\n"
+        assert scan.result_hooks(writes) == [f"{hook}: writes a file when the run ends"]
+        assert scan.result_hooks(f"def {hook}(*a):\n    print('done')\n") == []
+    assert scan.result_hooks("from pathlib import Path\ndef pytest_unconfigure(c):\n    Path('a').write_text('b')\n")
+
+
+def test_other_register_calls_are_no_hit():
+    assert scan.result_hooks("registry.register(print)\nclass A:\n    def _exit(self):\n        pass\n") == []
