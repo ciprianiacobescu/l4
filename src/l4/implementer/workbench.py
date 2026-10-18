@@ -39,11 +39,13 @@ from l4.memory.serena import SerenaStatus, check_serena, mcp_server_for, serena_
 from l4.redact import Redactor
 from l4.safepath import resolve_tool
 from l4.sandbox.base import (
+    SCRATCH_DIR,
     CacheMount,
     Sandbox,
     SandboxSpec,
     expand_credential_paths,
     gate_sandbox_spec,
+    readonly_with_scratch,
     runner_tmp_paths,
 )
 from l4.sandbox.caches import mount_caches
@@ -253,7 +255,8 @@ class Workbench:
         )  # fmt: skip
         return SandboxSpec(
             "agent", self.worktree, self.git_common_dir, self.agent_tmp, self.home, self.credential_paths,
-            adapter=self.selected.profile.adapter, caches=self.caches, network=True,
+            adapter=self.selected.profile.adapter, network=True,
+            caches=readonly_with_scratch(self.caches, self.agent_tmp, create=False),
             runner_tmp=runner_tmp_paths(self.host_env), cache_root=self.cache_root, tool_paths=tools,
         )  # fmt: skip
 
@@ -352,6 +355,9 @@ class Workbench:
                       *revert_unsnapshotted(git, self.protected, excludes=self.excludes)]:  # fmt: skip
                 self.emit("guard.violation", path=v.path, rule=v.rule, action=v.action, phase="gate")
         self.restore_ledger()
+        shutil.rmtree(
+            self.unit_cache / "gate-tmp" / SCRATCH_DIR, ignore_errors=True
+        )  # a gate's private caches go with it
         if builds_env:
             if result.status == "pass":
                 reset_tool_caches(root, tracked_env)
@@ -647,7 +653,12 @@ class Workbench:
     def reset_agent_tmp(self) -> Path:
         shutil.rmtree(self.agent_tmp, ignore_errors=True)
         private_dir(self.agent_tmp)
+        readonly_with_scratch(self.caches, self.agent_tmp, create=True)  # makes the step's private cache directories
         return self.agent_tmp
+
+    def discard_scratch(self) -> None:
+        """The agent's private caches go with the step (L4-SEC-039)."""
+        shutil.rmtree(self.agent_tmp / SCRATCH_DIR, ignore_errors=True)
 
     def _take_serena_project(self) -> bytes | None:
         """What Serena left in `.serena/project.yml` while it started (it rewrites the file into its full form, or

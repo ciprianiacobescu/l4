@@ -1616,6 +1616,11 @@ These limits make operation more difficult. Know them before you start.
   expected and costs only the rebuild. An upgrade whose manifest changed but whose lock file did not is a `guard.notice`
   (not a failure). A Python startup hook (`*.pth`, `sitecustomize.py`) that no installed package lists is always a
   violation. The verifier's workbench builds its own environment: its first `gates.setup` removes the implementer's.
+- The package caches (`uv`, `pip`, `npm`, `pnpm`, `go`, `gobuild`) are read-only in every sandbox but a `gates.setup`
+  command's, and each agent step and gate works in a private scratch cache that is emptied: `uv add` or `npm install`
+  in a step downloads again, and a test gate with `gates.network: none` that needs a package setup did not download fails
+  (Go's module cache is read where it is). The verifier builds from its own cache, emptied at the start of each round, so a
+  verification costs one download (or the seed copy). Put every download in `gates.setup`.
 - A project with **no `gates.setup`** gets no baseline: every `.venv` or `node_modules` that a step or a gate leaves is
   removed, so a test command that builds its own environment (`uv run`) builds it in every gate. Set `gates.setup`.
 - Per-unit directories under `$L4_CACHE` carry the repository key (0.4.16): `units/<key>/<fw>/<name>`,

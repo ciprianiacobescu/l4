@@ -208,6 +208,32 @@ environment an earlier step left. A run's first setup in a new worktree removes 
 - **WHEN** the implementer's first `gates.setup` runs
 - **THEN** no `env.rebuilt` is recorded and the manifest is taken after the setup
 
+### Requirement: L4-SEC-039 Package caches are read-only except for setup, and the verifier has its own
+Every agent sandbox and every gate sandbox except that of a `gates.setup` command SHALL mount the per-unit package caches
+(uv, pip, npm, pnpm, go) read-only, and the step SHALL work in a private scratch cache named by the cache variable, empty at
+its start and removed at its end. The verifier's workbench SHALL build from caches of its own, emptied at the start of each
+verification round, that no implementer step or gate used.
+
+#### Scenario: SCN-PRV-109 (−) A gate cannot write the shared cache and works in a scratch
+- **GIVEN** a unit whose uv cache holds what its setup built, and a working bwrap
+- **WHEN** a test gate writes `zz_marker.pth` into that cache and into `$UV_CACHE_DIR`, and then a `gates.setup` command writes the cache
+- **THEN** the first write fails, the second works in a directory under the gate's temp directory that is empty at the start of every gate, and only the setup write reaches the shared cache
+
+#### Scenario: SCN-PRV-110 (−) An agent step's cache plant never reaches the shared cache
+- **GIVEN** an agent step that writes `archive-v0/<id>/zz_marker.pth` into the cache directory its environment names
+- **WHEN** the step ends
+- **THEN** the directory is under the step's temp directory, the shared cache holds no such file, the agent sandbox mounted the shared cache read-only, and the scratch is gone
+
+#### Scenario: SCN-PRV-111 (+) The verifier builds from its own emptied cache
+- **GIVEN** a verification round and a file left in the verifier's cache by the last round
+- **WHEN** the round's workbench is built
+- **THEN** its caches lie under `units/<key>/verify/<fw>/<name>`, differ from the implementer's, are empty, and serve every workbench of the round
+
+#### Scenario: SCN-PRV-112 (−) A cache plant does not come back in a rebuilt environment
+- **GIVEN** the reviewer's reproduction: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/`, and real uv
+- **WHEN** an agent step plants into the cache its environment names, and the environment is rebuilt with `rm -rf .venv; uv sync --frozen` from the unit's cache and then from the verifier's
+- **THEN** neither environment holds `zz_marker.pth`, while a cache written directly does carry it into site-packages
+
 ### Requirement: L4-SEC-038 Doctor SANDBOX-003 proves the home and the runner cache are hidden
 Doctor `SANDBOX-003` SHALL plant canaries (a file in `$HOME` outside every credential path, a credential file in another
 unit's step directory, a lock file, a secret beside a symlinked tool) and run them through the real gate and agent argv; a readable canary MUST fail the

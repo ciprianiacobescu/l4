@@ -32,8 +32,8 @@ two projects never meets; a key file is readable only in the sandbox of its own 
 
 Non-goals: `mode: user` and `mode: container` (still M2: when built they must meet L4-SEC-030..033 by their own means);
 the full SANDBOX-001 (per-profile pairwise probes, ancestor environment; sandbox-security 1.12-1.13 stay open);
-poisoning of a unit's **own** package cache by its own agent-written code (residual R3, open question Q2); the other
-review findings (implementer-1, -3, sandbox-security-3, -5, -6).
+the other review findings (implementer-1, -3, sandbox-security-3, -5). Poisoning of a unit's package cache by its own
+agent-written code was a non-goal of the first draft; the owner brought it in after the adversarial review (D11, R3).
 
 ## 3. Decisions
 
@@ -316,6 +316,33 @@ misses an edited RECORD-listed file (`_pytest/runner.py`). The manifest needs ne
   retried automatically. Everything else of the earlier layout (`units/<fw>/<name>`) is never read, written or removed (as
   L4-WTR-001 does for the earlier lock paths); a new keyed uv cache is new, so it gets the project's seed copy.
 
+### D11. The package caches are read-only except for setup, and the verifier has its own (L4-SEC-039)
+
+Review F1 (major): `zz_marker.pth` written into `UV_CACHE_DIR/archive-v0/<id>/` survives `rm -rf .venv; uv sync --frozen`
+into site-packages (uv links the cached archive), so the manifest baseline the harness takes after a setup trusts a plant
+that an agent step or an agent-written test gate left in the unit's cache. The owner closes R3 now:
+
+- `CacheMount` gets `scratch: Path | None` and `env_value`. `l4.sandbox.base.readonly_with_scratch` turns the writable
+  per-unit mounts into read-only mounts whose variable names a scratch directory `<step tmp>/scratch-cache/<VARIABLE>`;
+  the shared read-only mounts (Playwright) are untouched. `gate_sandbox_spec(builds_env=False)` does it for every gate but a
+  `gates.setup` command (the scratch is emptied when the spec is built and removed after the gate); `Workbench.agent_spec()`
+  does it for the agent kind (`reset_agent_tmp` makes the directories, `agent_step` removes them in its `finally`, and builds
+  its environment from `sandbox.env.cache_env(spec)`, so `uv add` / `npm install` / `pnpm add` work in the scratch). Only
+  `gates.setup` and the uv seed fill mount a cache read-write, and nothing else writes the shared cache.
+- Exception, gates only: `GOMODCACHE` is read where it is (`SHARED_READ_OK`): Go's module cache is read-only by design and
+  a test gate with `gates.network: none` has no other source. Agents get a scratch for it like the others.
+- **The verifier's workbench** (`verifier/ladder.py`, once per round) uses `sandbox.caches.verifier_caches`: the same
+  configured paths with the namespace `verify` after the repository key (`units/<key>/verify/<fw>/<name>/cache/uv`),
+  emptied at the start of the round, shared by every workbench of the round (a judge that takes over included). Its first
+  `gates.setup` removes the implementer's environment (D7) and builds from that cache (a new uv cache gets the project's
+  seed copy, which only the harness fills), and the manifest baseline is taken only after that rebuild. The fix-loop's
+  workbench (`verifier/fixloop.py`) is an implementer's: it keeps the unit's caches, whose only writer is now setup.
+- Cost: every agent step and every non-setup gate starts from an empty cache; the verifier downloads once per round
+  (or copies the seed). A test gate that needs a download setup did not make moves that to `gates.setup`.
+- Tests: `test_cache_isolation.py` (argv), `test_cache_scratch.py` (a step plants into the cache its environment names;
+  the verifier's caches), `test_cache_plant_uv.py` (the reproduction with real uv, offline), `test_ladder_caches.py`,
+  `test_bwrap_live_caches.py` (a read-only shared cache under real bwrap): SCN-PRV-109..112.
+
 ### D9. Key and credential files (L4-PRV-040, L4-PRV-041)
 
 The mounts of D2 are what make them private: the step's `agent-tmp` is bound only into its own agent sandbox, and the
@@ -365,9 +392,11 @@ module.
   root `package.json`) with the environment writable and `sandbox.setup_paths` readable. The manifest is taken after it,
   so a plant made by setup itself is trusted. The hook is in the unit's diff (it is committed code), unlike a file in
   `.venv`.
-- R3 Residual: a unit's own uv/pip/npm/pnpm cache stays writable for its agent and its gates; a poisoned cache entry would
-  be copied into a rebuilt environment. Cross-unit and cross-project poisoning is closed by D8 and the per-unit caches.
-  Open question Q2.
+- R3 Closed by D11 (owner decision, after the adversarial review): a unit's uv/pip/npm/pnpm cache was writable for its
+  agent and its gates, and an entry the agent wrote into it (`zz_marker.pth` in `archive-v0/<id>/`) came back in every
+  environment rebuilt from it, `rm -rf .venv; uv sync --frozen` included [V, real uv, the reviewer's reproduction].
+  Residual: setup code the agent can influence (R2) still writes the shared cache; a gate that needs a download which
+  setup did not make fails under `gates.network: none` (cost, below).
 - R4 [U] `uv run` with a read-only `.venv` under bwrap (D6); a JS tool that writes inside `node_modules` other than
   `.cache`/`.vite` (`prisma generate` in a test gate) fails read-only and must move to `gates.setup`.
 - R5 A CI builds directory outside the home (a custom `builds_dir`) stays readable; `runner_tmp_paths` still hides the
@@ -379,7 +408,7 @@ module.
 
 - Q1: `sandbox.setup_paths` stays as an explicit opt-in; doctor `SANDBOX-004` warns whenever it is set (a registry login
   is exposed to setup code an agent can influence), and the runbook and the SPEC say so (D5, SCN-PRV-105).
-- Q2: out of scope (R3); it is listed under the follow-ups below.
+- Q2: first out of scope; **brought into this change by the owner after the adversarial review** (D11).
 - Q3: sandbox-security-6 is recorded as fixed, on the condition that SCN-SEC-99 proves it (section 1).
 - Q4: a dependency upgrade without a lock-file change is a non-failing `guard.notice` (rule `environment`) when a
   dependency manifest changed in the same step, a `guard.violation` otherwise; the rebuild happens in both cases (D7,
@@ -387,9 +416,6 @@ module.
 
 ### Follow-ups
 
-- R3 (Q2, out of scope here): close the poisoning of a unit's own package cache by its own agent-written code in a
-  follow-up change, by mounting the caches read-only in agent and test-gate sandboxes (the agent gets a private scratch
-  cache for its own `uv add`), or by giving the verifier a fresh copy of the project seed as its uv cache.
 - The live checks of tasks 7.1 and 7.2 on `l4-runner` and a GitHub-hosted runner, and a `sandbox.tool_paths` default for
   any tool they find missing inside the sandbox.
 - `.vite-temp` and other directories a JS tool writes inside `node_modules` (R4): not in `TOOL_CACHE_DIRS` today; add

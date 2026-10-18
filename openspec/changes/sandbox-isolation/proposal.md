@@ -10,7 +10,9 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
 - **A file planted in `.venv` decides later verdicts** (implementer-2, blocker). A green step that writes only a `.pth`
   file into site-packages passes with the production code still a stub: no guard sees `.venv`, `discard_changes` keeps
   it, `uv sync --frozen` keeps it (proved with real uv 0.10.0), and the same run's verifier runs its gates on it. The
-  same holds for `node_modules`.
+  same holds for `node_modules`. The same plant could also be made in a package cache the agent could write (`zz_marker.pth`
+  in `UV_CACHE_DIR/archive-v0/<id>/` survives `rm -rf .venv; uv sync --frozen`): the caches are read-only except for setup
+  and the verifier builds from its own (L4-SEC-039).
 - **Per-unit directories ignore the repository key** (sandbox-security-1, major). Two projects with a unit of the same
   name on one runner share `agent-tmp`, `gate-tmp`, `excludes`, the uv/pip/npm caches and `pending-unpublished`, so one
   project's unpublished run file is pushed into the other project's lock ref.
@@ -36,6 +38,9 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
   records a manifest of the environment, and after every agent step and every other gate a changed, new or unverified
   environment is removed and rebuilt by the next setup, with `env.rebuilt` and a `guard.violation` (rule `environment`)
   per planted path; a workbench's first setup in a tree rebuilds it, so the verifier never runs on the implementer's.
+- **The package caches cannot carry a plant either** (L4-SEC-039): uv/pip/npm/pnpm/go caches are read-only in agent
+  sandboxes and in every gate but `gates.setup`; a step works in a private scratch cache that is discarded; the
+  verifier's workbench builds from caches of its own, emptied at the start of each round.
 - **Credential files are visible only to their own step** (L4-PRV-040, L4-PRV-041): 0700 step directories, 0600 files,
   removed at the end of the step and, after a killed run, before the unit's next agent or gate.
 - **The login and unit lock files are unreadable in the sandboxes** (sandbox-security-6, owner decision Q3): a
@@ -54,8 +59,8 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
   `src/l4/verifier/{gates.py,basemerge.py,playwright.py,fixloop.py}`, `src/l4/gates/{dryrun.py,e2e.py}`,
   `src/l4/yolo/{postcheck.py,readiness.py}`, `src/l4/sim/dryrun.py`, `src/l4/agents/{opencode.py,credentials.py}`,
   `src/l4/config/{schema.py,defaults.py}`, `src/l4/doctor/checks_sandbox.py`, `scripts/runner/sandbox-probe.sh`.
-- Spec: L4-SEC-030..038 and L4-PRV-040..041 added; L4-SEC-005 parts b, c, d modified; L4-CFG-005 and the SPEC text of
-  L4-SEC-005 amended in `docs/SPEC.md`; SCN-SEC-70..99, SCN-PRV-100..107; doctor rows `SANDBOX-003` and `SANDBOX-004`; config keys
+- Spec: L4-SEC-030..039 and L4-PRV-040..041 added; L4-SEC-005 parts b, c, d modified; L4-CFG-005 and the SPEC text of
+  L4-SEC-005 amended in `docs/SPEC.md`; SCN-SEC-70..99, SCN-PRV-100..112; doctor rows `SANDBOX-003` and `SANDBOX-004`; config keys
   `sandbox.tool_paths`, `sandbox.setup_paths`; events `env.rebuilt` and `guard.notice`, and `guard.violation` with rule `environment`.
 - Behaviour per environment (design section 4): on Linux with bwrap (GitHub-hosted and self-hosted) all of it; on a mac with
   `sandbox.mode: none` (accepted risk) only the keyed directories, the environment rebuild and the file modes.

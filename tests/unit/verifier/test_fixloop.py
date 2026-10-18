@@ -229,8 +229,15 @@ def test_child_reuses_the_parent_cache(run_l4, valid_spec):
     )
     assert run.code == 0
     red, fix = run.adapter.requests[0], run.adapter.requests[2]
-    assert fix.env["UV_CACHE_DIR"] == red.env["UV_CACHE_DIR"]
-    assert str(run.tdd.cache) in fix.env["UV_CACHE_DIR"] and "add-discount-codes-fix" not in fix.env["UV_CACHE_DIR"]
+    # changed with L4-SEC-039: a step names its private scratch cache in the variable, so the cache the child reuses is
+    # the parent's shared one, which only setup writes; the child makes no cache directory of its own
+    units = run.tdd.cache / "units" / run.tdd.key / "openspec"
+    assert (units / "add-discount-codes" / "cache" / "uv").is_dir()
+    assert list(units.glob("*-fix-*/cache")) == [] and list(units.glob("*-fix*")) != []
+    for request, unit in ((red, "add-discount-codes"), (fix, None)):
+        scratch = request.env["UV_CACHE_DIR"]
+        assert str(run.tdd.cache) in scratch and "scratch-cache" in scratch
+        assert unit is None or f"/{unit}/agent-tmp/" in scratch
 
 
 def test_a_fix_task_that_keeps_failing_halts_the_unit(run_l4, valid_spec):
@@ -348,9 +355,7 @@ BOT = ("l4-bot", "l4-bot@users.noreply.invalid")
         (BOT, "docs(add-greeting): fix unit 1 [skip ci]", False),
     ],
 )
-def test_a_fix_unit_not_introduced_by_a_harness_commit_is_not_listed(
-    git_family, git_for, author, subject, run_trailer
-):
+def test_a_fix_unit_not_introduced_by_a_harness_commit_is_not_listed(git_family, git_for, author, subject, run_trailer):
     repo, provider, parent, git = git_family
     spawn(provider, parent, 1)
     commit_fix_dir(repo, git, author, subject, run_trailer=run_trailer)

@@ -15,7 +15,8 @@ from l4.sim.scenarios import Expect
 _SHA = re.compile(r"\b[0-9a-f]{40}\b")
 _SHA256 = re.compile(r"\b[0-9a-f]{64}\b")
 _RUN_ID = re.compile(r"\br-\d{8}T\d{4}Z-[0-9a-f]{4}\b")
-_DROPPED_KEYS = frozenset({"ts", "run_id", "seq", "nonce", "holder"})  # holder is host:pid, nonce is random
+_DROPPED_KEYS = frozenset({"ts", "run_id", "seq", "nonce", "holder", "repository_key"})
+# holder is host:pid, nonce is random, the repository key of a repository with no origin hashes its temporary path
 _DROPPED_TYPES = frozenset({"sandbox.disabled"})  # depends on whether bubblewrap exists on the machine
 
 

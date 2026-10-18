@@ -5070,7 +5070,8 @@ is valid) would put the host directories back [V live: a parent bound after the 
 is per mount namespace: the host worktree is unchanged. Mirrored in `scripts/runner/sandbox-probe.sh` (planted `.claude`/`.agents` canary).
 `mode: user` (a separate OS user) cannot separate two profiles' logins inside one user's home: with more than one
 profile that has `credential_paths`, it REQUIRES `sandbox.user_per_profile` (one OS user per profile), otherwise doctor
-fails. Both sandbox kinds get the per-unit cache mounts of `sandbox.caches` (keyed by the repository key, L4-SEC-034) with their environment variables (per-unit
+fails. Both sandbox kinds get the per-unit cache mounts of `sandbox.caches` (keyed by the repository key, L4-SEC-034, read-only except for `gates.setup`, with a
+private scratch cache for every step, L4-SEC-039) with their environment variables (per-unit
 caches so that agent-written code cannot poison another unit's cache). A new unit's `uv` cache is a **copy** of the
 project's seed (`$L4_CACHE/seed/<hash of the origin URL without credentials>/uv`): the seed is filled by `gates.setup`,
 unchanged, on a detached scratch checkout of the base branch's head, under a lock and only when the base's `uv.lock` or
@@ -5253,6 +5254,23 @@ file, and a secret beside each of two symlinked tools in a PATH directory of its
 the check (exit 3) naming the path and the kind, never the content, and the canaries and the probe directory MUST be
 removed. It is skipped when bwrap is absent or `sandbox.mode` is not `auto` or `bwrap`.
 
+**L4-SEC-039 Package caches are read-only except for setup, and the verifier has its own.** A cache an agent step or a
+gate could write came back in every environment rebuilt from it: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/` survives
+`rm -rf .venv; uv sync --frozen` into site-packages [V, real uv], and the manifest of L4-SEC-036 trusts what setup built.
+Every agent sandbox and every gate sandbox except that of a `gates.setup` command (and the uv seed's fill) MUST therefore
+mount the per-unit package caches of `sandbox.caches` (`uv`, `pip`, `npm`, `pnpm`, `go`, `gobuild`) read-only, and the
+step MUST work in a private scratch cache: the cache variable (`UV_CACHE_DIR`, `npm_config_cache`,
+`pnpm_config_store_dir`, ...) names a directory under the step's private temp directory, empty at the start of the step and
+of every gate and removed at the end, so that `uv add`, `npm install` and `pnpm add` still work. Only `gates.setup` writes
+the shared cache. One exception, gates only: `GOMODCACHE` is read where it is, because Go's module cache is read-only by
+design and a test gate with `gates.network: none` has no other source (an agent gets a scratch for it too). The
+verifier's workbench (L4-VER-010) MUST build from caches of its own, at the same configured paths with the namespace
+`verify` after the repository key (`units/<key>/verify/<fw>/<name>/...`), emptied at the start of each verification round
+and shared by every workbench of the round; its first `gates.setup` rebuilds the environment from them (L4-SEC-037), and
+the manifest baseline of the round is taken only after that rebuild. The cost is stated: every step and gate starts from an
+empty cache, the verifier downloads once per round (a new uv cache is first copied from the project's seed), and a test gate
+that needs a download setup did not make belongs in `gates.setup`.
+
 ---
 
 ## 19. Non-functional requirements
@@ -5401,7 +5419,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 37 | `check-worktree` | `l4 yolo check PLAN --worktree` admits the plan files and the units of the working tree before the push and reports `uncovered` and `covered_twice` as `validate_plan.py` does; the hints of `l4 yolo draft` and of the worktree review name it (L4-YOLO-034; `openspec/changes/check-worktree/`) | a plan author on a feature branch: run it before the push |
 | 38 | `skills-install` | the `l4` skill ships in the wheel and the sdist; `l4 skills install` copies it, without network, to the skill folder of Claude Code, Codex, OpenCode and Kiro CLI (user scope or `--project`) with a manifest, updates an untouched copy and refuses an edited copy or a symbolic link; `l4 skills status`; doctor SKL-003; `l4 init` names the command (L4-SKL-003, SCN-SKL-04..08; `openspec/changes/skills-install/`) | a wheel built from the sdist, installed into a temporary home |
 | 39 | `capacity-loop` | a plan step that dispatches a unit in `waiting_capacity` starts no next run, and a unit that parks twice for the same unusable profiles with nothing cooling stops the plan with `capacity_needs_fix`, naming the profiles, their failures and the fix (L4-YOLO-035; `openspec/changes/capacity-loop/`) | a consumer plan whose provider key expired: one run per trigger, then the stop |
-| 40 | `sandbox-isolation` | an empty home and a hidden runner cache in both sandbox kinds, tools read-only (`sandbox.tool_paths`, `sandbox.setup_paths`), keyed per-unit directories, a project environment (`.venv`, `node_modules`) read-only for gates that do not build it and rebuilt when a step or a gate changed it, key files visible only to their step, doctor `SANDBOX-003` and `SANDBOX-004`; L4-SEC-030..038, L4-PRV-040..041 (`openspec/changes/sandbox-isolation/`) | `SANDBOX-003` passes on `l4-runner` and on a GitHub-hosted runner; the dummy repository's gates stay green |
+| 40 | `sandbox-isolation` | an empty home and a hidden runner cache in both sandbox kinds, tools read-only (`sandbox.tool_paths`, `sandbox.setup_paths`), keyed per-unit directories, a project environment (`.venv`, `node_modules`) read-only for gates that do not build it and rebuilt when a step or a gate changed it, package caches read-only except for setup with a private scratch per step and a cache of its own for the verifier, key files visible only to their step, doctor `SANDBOX-003` and `SANDBOX-004`; L4-SEC-030..039, L4-PRV-040..041 (`openspec/changes/sandbox-isolation/`) | `SANDBOX-003` passes on `l4-runner` and on a GitHub-hosted runner; the dummy repository's gates stay green |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -10045,6 +10063,26 @@ scenario is a spec defect (§26).
 - **Given** a symlink in a PATH directory into `~/.config/gh/secret.yml`, a shim into `~/mytool/node_modules/leakpkg/cli.js` with `~/mytool/secret.txt` in the project, and a symlink to `~/share/tool/real.sh` with `beside.txt` next to it
 - **When** a gate and an agent sandbox read the three secrets and run the shim and the plain tool
 - **Then** every secret read fails, both tools run, and the bound paths are the target file and the package directory, never the directory around a file or the project
+
+#### SCN-PRV-109 (−) A gate cannot write the shared cache and works in a scratch · L4-SEC-039
+- **Given** a unit whose uv cache holds what its setup built, and a working bwrap
+- **When** a test gate writes `zz_marker.pth` into that cache and into `$UV_CACHE_DIR`, and then a `gates.setup` command writes the cache
+- **Then** the first write fails, the second works in a directory under the gate's temp directory that is empty at the start of every gate, and only the setup write reaches the shared cache
+
+#### SCN-PRV-110 (−) An agent step's cache plant never reaches the shared cache · L4-SEC-039
+- **Given** an agent step that writes `archive-v0/<id>/zz_marker.pth` into the cache directory its environment names
+- **When** the step ends
+- **Then** the directory is under the step's temp directory, the shared cache holds no such file, the agent sandbox mounted the shared cache read-only, and the scratch is gone
+
+#### SCN-PRV-111 (+) The verifier builds from its own emptied cache · L4-SEC-039
+- **Given** a verification round and a file left in the verifier's cache by the last round
+- **When** the round's workbench is built
+- **Then** its caches lie under `units/<key>/verify/<fw>/<name>`, differ from the implementer's, are empty, and serve every workbench of the round
+
+#### SCN-PRV-112 (−) A cache plant does not come back in a rebuilt environment · L4-SEC-039
+- **Given** the reviewer's reproduction: `zz_marker.pth` in `UV_CACHE_DIR/archive-v0/<id>/`, and real uv
+- **When** an agent step plants into the cache its environment names, and the environment is rebuilt with `rm -rf .venv; uv sync --frozen` from the unit's cache and then from the verifier's
+- **Then** neither environment holds `zz_marker.pth`, while a cache written directly does carry it into site-packages
 
 ## 24. Definition of done
 

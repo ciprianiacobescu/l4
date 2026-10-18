@@ -1,7 +1,8 @@
 """Sandbox types (SPEC L4-SEC-005). One `Sandbox.wrap` is the choke point every agent and gate spawn goes through."""
 
+import shutil
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -21,9 +22,18 @@ class SandboxUnavailable(L4Exit):
 
 @dataclass(frozen=True)
 class CacheMount:
+    """One cache directory of `sandbox.caches` and the variable that names it. A mount with a `scratch` is read-only at
+    `path` and the variable names the scratch directory instead: the step works in a private cache that is discarded,
+    and only a `gates.setup` command writes `path` (L4-SEC-039)."""
+
     path: Path
     env: str
     read_only: bool = False
+    scratch: Path | None = None
+
+    @property
+    def env_value(self) -> str:
+        return str(self.scratch or self.path)
 
 
 @dataclass(frozen=True)
@@ -105,6 +115,36 @@ def runner_tmp_paths(environ: Mapping[str, str]) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+SCRATCH_DIR = "scratch-cache"  # under a step's private temp directory: gone with it
+SHARED_READ_OK = ("GOMODCACHE",)  # a gate reads these where they are: Go's module cache is read-only by design
+
+
+def scratch_of(tmp_dir: Path, cache: "CacheMount") -> Path:
+    return tmp_dir / SCRATCH_DIR / cache.env
+
+
+def readonly_with_scratch(
+    caches: Sequence["CacheMount"], tmp_dir: Path, *, create: bool, shared_ok: Collection[str] = ()
+) -> tuple["CacheMount", ...]:
+    """The writable per-unit caches as read-only mounts whose variable names an empty scratch directory under `tmp_dir`
+    (made empty here when `create`; an agent's is made by `Workbench.reset_agent_tmp`, after the spec is built). A cache
+    named in `shared_ok` is only made read-only. Mounts that are read-only already (the shared Playwright browsers)
+    stay as they are."""
+    out: list[CacheMount] = []
+    for cache in caches:
+        if cache.read_only:
+            out.append(cache)
+        elif cache.env in shared_ok:
+            out.append(replace(cache, read_only=True))
+        else:
+            scratch = scratch_of(tmp_dir, cache)
+            if create:
+                shutil.rmtree(scratch, ignore_errors=True)
+                scratch.mkdir(mode=0o700, parents=True)
+            out.append(replace(cache, read_only=True, scratch=scratch))
+    return tuple(out)
+
+
 def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:
     """Every login this spawn must not see: the built-in defaults and the configured paths of every adapter but its
     own, so that a user override of one adapter's path (what is mounted for it) never un-hides the default from the
@@ -162,6 +202,8 @@ def gate_sandbox_spec(
     environment; every other gate gets `.venv` and each `node_modules` read-only, and their tool caches empty
     (L4-SEC-035; `tracked` are the repository's tracked paths below those names, which are source, not environment)."""
     read_only, empty = ((), ()) if builds_env else read_only_mounts(worktree, tracked)
+    if not builds_env:  # only the harness-run setup writes the shared caches; every other gate works in a scratch
+        caches = readonly_with_scratch(caches, tmp_dir, create=True, shared_ok=SHARED_READ_OK)
     return SandboxSpec(
         "gate", worktree, git_common_dir, tmp_dir, home, expand_credential_paths(configured_credential_paths, home),
         caches=caches, network=network, runner_tmp=runner_tmp, cache_root=cache_root, tool_paths=tool_paths,

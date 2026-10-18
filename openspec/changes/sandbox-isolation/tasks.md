@@ -301,6 +301,20 @@ Every task follows these rules:
   `docs/runner/README.md:259-263`: the sandboxes now cover the home and the runner cache (HB-16 built); SANDBOX-003 is
   the live check; SANDBOX-001 stays unbuilt.
 
+## 6a. Rework after the adversarial review (REJECT; owner decisions, commits after group 6)
+
+- [x] 8.1 F3 (state/pending.py): a legacy run file is adopted by the repository it records, not by commits it names.
+  `run.started` records `repository_key`; `adopt_legacy(legacy_dir, keyed_dir, *, repo_key, repo_path)`. Tests:
+  `tests/unit/state/test_adopt_legacy_identity.py` (the reviewer's clone reproduction), SCN-SEC-84.
+- [x] 8.2 F2 (sandbox/home.py): derived tool paths bind the target file or the package directory, never the directory
+  around it; every derived path is vetted against logins and `SECRET_LOCATIONS`, and what was skipped is returned and
+  logged. Tests: SCN-PRV-108 (argv, live, and the symlink traps of SANDBOX-003).
+- [x] 8.3 F1 (caches): per-unit package caches read-only except for `gates.setup`; a private scratch cache per agent step
+  and per gate; the verifier's workbench builds from caches of its own, emptied each round (L4-SEC-039). Tests:
+  `tests/unit/sandbox/test_cache_isolation.py`, `tests/unit/implementer/test_cache_scratch.py`,
+  `tests/unit/implementer/test_cache_plant_uv.py`, `tests/unit/verifier/test_ladder_caches.py`,
+  `tests/unit/sandbox/test_bwrap_live_caches.py` (SCN-PRV-109..112).
+
 ## 7. Live check (orchestrator, after the groups above are merged)
 
 - [ ] 7.1 On `l4-runner` (bwrap 0.6.1, gitlab-runner shell): (the live evidence of the implementation ran on bwrap 0.8.0 in a

@@ -23,6 +23,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A unit's OpenCode provider key file and credential-loader file are no longer readable from another unit's sandbox,
   are created in 0700 directories, and one left by a killed run is removed before the unit runs again.
 - The login lock files and the unit lock files are no longer readable inside the sandboxes.
+- A package cache can no longer carry a plant into a rebuilt environment. A file an agent step or a gate wrote into the
+  unit's `uv` cache (`zz_marker.pth` in `archive-v0/<id>/`) came back in every environment rebuilt from it. The per-unit
+  caches are now read-only except for `gates.setup`, every step and gate works in a private scratch cache that is
+  discarded, and the verifier builds from caches of its own, emptied at the start of each round.
+- A symlink in a `PATH` directory, or a shim into a project's `node_modules`, can no longer expose the files next to its
+  target: the sandbox binds the target file or the package, and skips any tool path that is or lies inside a login or
+  a known secret location (`~/.config/gh`, `~/.aws`, ...).
 
 ### Added
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
@@ -40,7 +47,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A project environment (`.venv`, `node_modules`) that an agent step or a gate changed is removed and built again by the
   next `gates.setup`; the verifier builds its own. A project without `gates.setup` therefore builds its environment in
   every gate: set `gates.setup`. A test gate that writes into `node_modules` other than `.cache` and `.vite` fails
-  read-only: move that command to `gates.setup`. A dependency upgrade without a lock-file change is a notice, not a
+  read-only: move that command to `gates.setup`. Every agent step and every gate but `gates.setup` starts from an empty
+  package cache (read-only shared cache plus a scratch), so a test gate that needs a download setup did not make fails
+  under `gates.network: none`: move the download to `gates.setup`. The verifier downloads once per round. A dependency upgrade without a lock-file change is a notice, not a
   violation, when a dependency manifest changed in the same step.
 
 ## 0.4.14 (2026-10-17)

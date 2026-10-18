@@ -93,7 +93,7 @@ from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
 from l4.implementer.uvseed import ensure_uv_seed
 from l4.implementer.workbench import PreviousAttempt, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
-from l4.sandbox.env import build_agent_env
+from l4.sandbox.env import build_agent_env, cache_env
 from l4.security.protected import glob_match, revert_protected
 from l4.specs.base import Framework, Marker, Task
 from l4.specs.criteria import trace_ids
@@ -668,7 +668,7 @@ def agent_step(
     spec = wb.agent_spec()
     tmp = wb.reset_agent_tmp()
     trace = trace_env(wb.cfg.gates.test_timeout_seconds())
-    extra = {c.env: str(c.path) for c in wb.caches} | dict(getattr(wb.impl, "extra_env", {})) | trace
+    extra = cache_env(spec) | dict(getattr(wb.impl, "extra_env", {})) | trace  # the step's private caches (L4-SEC-039)
     key = re.sub(r"[^A-Za-z0-9._-]", "_", task.key)
     stem, again = f"{key}-{role}-{attempt}", 1
     while (published := wb.agent_log_paths(stem)[1]).exists() or published.with_suffix(".prompt.md").exists():
@@ -712,6 +712,7 @@ def agent_step(
             wb.publish_agent_logs(raw_events, published)
             wb.setup_at = None  # the agent may have changed the environment: the next step installs again
             # also on an exception: whatever the agent left behind must not be committed or folded by a later step
+            wb.discard_scratch()
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
             wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
