@@ -144,7 +144,7 @@ gate (a tmpfs under bwrap). Setup gates and agent sandboxes keep them writable.
 
 ### Requirement: L4-SEC-036 An environment an agent step or a gate changed is rebuilt
 After each passing `gates.setup` command the harness SHALL record a manifest of the tree's environment directories
-(lstat of every entry, ctime included). After every agent step and every other gate it MUST remove a directory that
+(lstat of every entry, ctime of a file included). After every agent step and every other gate it MUST remove a directory that
 differs, is new or has no manifest, so the next `gates.setup` builds it again, and record `env.rebuilt` and, per planted
 path, a `guard.violation` (rule `environment`), or a non-failing `guard.notice` for a dependency upgrade with no lock file.
 

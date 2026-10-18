@@ -179,3 +179,20 @@ def test_the_pure_classification(tmp_path: Path):
     assert sure.violations == () and len(sure.notices) == 2
     (tree / "package.json").write_text('{"dependencies": {}, "scripts": {"a": "b"}}')  # not a dependency section
     assert len(envguard.classify(tree, diff, ["package.json"], read_head=heads.get).violations) == 2
+
+
+def test_a_gate_that_changes_nothing_never_rebuilds_the_environment(make_bench, tmp_path):
+    """The tool-cache reset before every gate rewrites `node_modules/.cache` and `.vite`, which moves the directory's
+    own timestamps: that alone is not a change (a planted child is an added entry, a replaced directory a new inode)."""
+    mk = tmp_path / "mknode.py"
+    mk.write_text(MKNODE)
+    bench = make_bench([], setup=[f"{sys.executable} {mk}"])
+    wb = bench.wb
+    run_setup(wb)
+    for _ in range(3):
+        wb.run_gate("test", f'{sys.executable} -c "pass"')
+    assert bench.events("env.rebuilt") == [] and wb.setup_at is not None
+    assert (wb.worktree / "node_modules" / "vitest" / "dist" / "index.js").is_file()
+    (wb.worktree / "node_modules" / "vitest" / "planted.js").write_text("x")  # a child that is new is still a change
+    wb.check_env(wb.worktree, phase="gate")
+    assert not (wb.worktree / "node_modules").exists()

@@ -191,6 +191,10 @@ New module `src/l4/implementer/envguard.py`:
   the path relative to the tree; `take_manifest(tree, tracked) -> EnvManifest` walks every `envdirs.env_dirs` entry
   without following symlinks and skips `TOOL_CACHE_DIRS` subtrees. ctime is the tamper evidence: a same-uid process
   can reset mtime with `utime`, never ctime; a replacement by rename changes `ino` [V POSIX; macOS `st_ctime_ns` exists].
+  **A directory is recorded by kind, mode and inode only** (size and times zeroed): its own mtime and ctime move whenever a
+  child is added or removed, and the harness rewrites `node_modules/.cache` and `.vite` before every gate, so timestamps
+  of a directory would make every gate look like a change (found in review; `test_a_gate_that_changes_nothing_never_rebuilds_the_environment`).
+  A planted child is an `added` entry and a replaced directory has a new inode, so nothing is lost.
   No content hashing: an lstat walk of a 50,000-file `node_modules` is well under a second [I]. `.venv/.lock` (uv's own
   lock file, which `uv run` touches and which holds no code) is left out of the manifest.
 - `diff_manifest(before, after) -> EnvDiff(added, changed, removed)` (sorted relative paths).
@@ -217,9 +221,13 @@ New module `src/l4/implementer/envguard.py`:
      lock file and a `RECORD` lists it with its hash, and is a violation otherwise;
   3. **neither**: a **`guard.violation`** (`rule: "environment"`), advice in `guardnotes._ADVICE`.
   The rebuild happens in all three cases, and the ledger gets at most 20 `guard.violation` and `guard.notice` records
-  per rebuild together (`planted_more` counts the rest). The verifier's integrity step counts an outstanding
-  `guard.violation` (a blocker), and a `guard.notice` is not one: that is the point of Q4, a legitimate `npm install
-  vitest@latest` that forgot the lock file costs a rebuild and a line, not the unit.
+  per rebuild together (`planted_more` counts the rest). What a `guard.violation` does that a `guard.notice` does not
+  [V, read in the code]: it becomes a guard note in the next attempt's prompt (`guardnotes.GUARD_EVENTS`), a console line
+  (`progress.py`), and input to memory curation and the experience graph (`memory/curate.py`, `kg/extract.py`). The
+  SPEC's integrity row says "no outstanding `guard.violation`", but `verifier/integrity.py` does not read the ledger for it
+  today (its header: the protected-path check stands in for that line), so neither event fails a verification in
+  0.4.14; if a later change builds that row, a `guard.notice` must stay outside it. That is the point of Q4: a
+  legitimate `npm install vitest@latest` that forgot the lock file costs a rebuild and a line, not an attempt.
 - `remove_env_dir(path)`: `unlink` for a symlink, else `shutil.rmtree`.
 
 `Workbench` gets `env_manifests: dict[Path, EnvManifest]` (in memory only: a file under the cache would be one more thing
@@ -369,3 +377,15 @@ module.
   any tool they find missing inside the sandbox.
 - `.vite-temp` and other directories a JS tool writes inside `node_modules` (R4): not in `TOOL_CACHE_DIRS` today; add
   one there, or move the command to `gates.setup`, when a live run shows a tool that needs it.
+
+### Implementation notes (what the code does that the sections above do not say)
+
+- `gates/dryrun.py` and `yolo/postcheck.py` build their gate specs without `tracked`: a vendored `node_modules` that git
+  tracks is bound read-only there too (the fail-safe direction); the agent-facing workbench passes the real list.
+- `SandboxSpec.read_only` and `empty_dirs` are filled by `gate_sandbox_spec`; `ci-probe-m15.sh` takes them as `ro:DIR` and
+  `empty:DIR` and `sandbox-probe.sh` (agent kind only) does not, because an agent sandbox has neither.
+- `check_env` records `reason: created` (not `unverified`) when the workbench holds no manifest for the tree; `unverified`
+  is only the removal before a setup.
+- Review found, and a test now holds (`test_a_gate_that_changes_nothing_never_rebuilds_the_environment`), that a directory's
+  own timestamps cannot be in the manifest (D7).
+- The SPEC's "no outstanding `guard.violation`" integrity row is not read by `verifier/integrity.py` today (D7).

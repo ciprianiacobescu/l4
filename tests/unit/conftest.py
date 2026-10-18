@@ -168,8 +168,16 @@ class TddRepo:
     ) -> None:
         (self.repo / ".l4").mkdir(exist_ok=True)
         text = self.config(
-            implementer=implementer, sandbox=sandbox, judge_vendor=judge_vendor, clarifier=clarifier, roles=roles,
-            profiles=profiles, observability=observability, availability=availability, ci=ci, **gates,
+            implementer=implementer,
+            sandbox=sandbox,
+            judge_vendor=judge_vendor,
+            clarifier=clarifier,
+            roles=roles,
+            profiles=profiles,
+            observability=observability,
+            availability=availability,
+            ci=ci,
+            **gates,
         )
         (self.repo / ".l4" / "config.yaml").write_text(text)
 

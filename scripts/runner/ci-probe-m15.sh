@@ -355,9 +355,9 @@ m0_gate_env() {  # private-dir [NAME=VALUE...] -> l4.sandbox.env.build_gate_env:
   for arg in "$@"; do case $arg in UV_CACHE_DIR=*) printf '%s\n' "UV_LINK_MODE=copy";; esac; done
   for arg in "$@"; do case $arg in pnpm_config_store_dir=*) printf '%s\n' "npm_config_store_dir=${arg#*=}";; esac; done
 }
-m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir [cache:DIR|rocache:DIR|hide:DIR|extra:FLAG...] NAME=VALUE... -- command...
+m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir [cache:DIR|rocache:DIR|hide:DIR|root:DIR|tool:DIR|ro:DIR|empty:DIR...] NAME=VALUE... -- command...
   local adapter=$1 wt=$2 gd=$3 tmp=$4 other p
-  local -a caches=() hides=() tools=()
+  local -a caches=() hides=() tools=() ros=() empties=()
   local root=
   shift 4
   while [ "$#" -gt 0 ]; do
@@ -365,7 +365,9 @@ m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir 
       cache:*) caches+=(--bind "${1#cache:}" "${1#cache:}");;
       rocache:*) caches+=(--ro-bind "${1#rocache:}" "${1#rocache:}");;
       root:*) root=${1#root:};;  # the runner cache ($L4_CACHE): a tmpfs when it is a directory outside $HOME (L4-SEC-031)
-      tool:*) tools+=("${1#tool:}");;  # a tool path under a hidden root, bound read-only (L4-SEC-032)
+      tool:*) tools+=("${1#tool:}");;
+      ro:*) ros+=("${1#ro:}");;  # .venv / node_modules of a gate that builds nothing, read-only (L4-SEC-035)
+      empty:*) empties+=("${1#empty:}");;  # the tool caches inside them: a tmpfs each  # a tool path under a hidden root, bound read-only (L4-SEC-032)
       hide:*) hides+=("${1#hide:}");;  # the CI runner's <CI_PROJECT_DIR>.tmp: l4.sandbox.base.runner_tmp_paths
       *) break;;
     esac
@@ -387,7 +389,10 @@ m0_argv() {  # adapter(or empty for a gate) worktree git-common-dir private-dir 
   for p in ${hides[@]+"${hides[@]}"}; do m0_hide "$p"; done
   [ -n "$adapter" ] && m0_cred_paths "$adapter" | while IFS= read -r p; do if [ -e "$p" ]; then printf '%s\n' --bind "$p" "$p"; fi; done
   printf '%s\n' --bind "$wt" "$wt" --bind "$tmp" "$tmp" \
-    ${caches[@]+"${caches[@]}"} --ro-bind "$gd" "$gd" --clearenv
+    ${caches[@]+"${caches[@]}"} --ro-bind "$gd" "$gd"
+  for p in ${ros[@]+"${ros[@]}"}; do printf '%s\n' --ro-bind "$p" "$p"; done
+  for p in ${empties[@]+"${empties[@]}"}; do printf '%s\n' --tmpfs "$p"; done
+  printf '%s\n' --clearenv
   while [ "$#" -gt 0 ] && [ "$1" != -- ]; do printf '%s\n' --setenv "${1%%=*}" "${1#*=}"; shift; done
   shift
   printf '%s\n' --chdir "$wt" -- "$@"

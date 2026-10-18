@@ -296,9 +296,12 @@ Every task follows these rules:
 
 ## 7. Live check (orchestrator, after the groups above are merged)
 
-- [ ] 7.1 On `l4-runner` (bwrap 0.6.1, gitlab-runner shell): `l4 doctor` passes `SANDBOX-002` and `SANDBOX-003`; a run
+- [ ] 7.1 On `l4-runner` (bwrap 0.6.1, gitlab-runner shell): (the live evidence of the implementation ran on bwrap 0.8.0 in a
+  privileged Debian 12 container: confirm `--tmpfs $HOME` with the binds back, `uv run` on the read-only `.venv`, and
+  SANDBOX-003 on 0.6.1 here) `l4 doctor` passes `SANDBOX-002` and `SANDBOX-003`; a run
   of the dummy repository's unit passes its gates with an agent of each configured adapter (claude-code, codex,
   opencode); `scripts/runner/sandbox-probe.sh` with `SANDBOX=m0` passes. Record the log in `docs/live/`.
 - [ ] 7.2 On a GitHub-hosted `ubuntu-24.04` runner (the evidence workflow): the same doctor rows pass and a unit with a
-  `uv` and a `pnpm` project passes its gates. Any tool that is missing inside the sandbox is fixed in `l4.sandbox.home`
+  `uv` and a `pnpm` project passes its gates. In a unit whose agent changed no dependency, the ledger holds **no
+  `env.rebuilt`** (a rebuild at every gate would mean the manifest compare sees a difference of its own making). Any tool that is missing inside the sandbox is fixed in `l4.sandbox.home`
   (a default) or documented as a `sandbox.tool_paths` entry before the release.

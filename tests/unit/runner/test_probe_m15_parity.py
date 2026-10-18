@@ -16,6 +16,7 @@ from l4.sandbox.base import SandboxSpec, expand_credential_paths
 from l4.sandbox.bwrap import BwrapSandbox
 from l4.sandbox.caches import mount_caches
 from l4.sandbox.env import build_agent_env, build_gate_env
+from l4.sandbox.envdirs import read_only_mounts
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "runner" / "ci-probe-m15.sh"
 BASH = shutil.which("bash")
@@ -47,6 +48,9 @@ def world(tmp_path: Path):
     for sub in ("main/.git", "wt dir", "res"):
         (tmp_path / sub).mkdir(parents=True)
     (tmp_path / "builds" / "p.tmp").mkdir(parents=True)
+    for sub in (".venv/lib", "node_modules/.vite/deps"):  # the environment of a gate that builds nothing (L4-SEC-035)
+        (tmp_path / "wt dir" / sub).mkdir(parents=True)
+    read_only, empty = read_only_mounts(tmp_path / "wt dir", ())
     creds = expand_credential_paths({k: list(v) for k, v in CREDENTIAL_PATHS.items()}, home)
     (tmp_path / "cache root" / "shared" / "ms-playwright").mkdir(parents=True)
     tools = (home / ".local" / "bin dir", home / ".local" / "share" / "l4")  # L4-SEC-032, one with a space
@@ -60,6 +64,7 @@ def world(tmp_path: Path):
             tmp_dir=tmp_path / "res", home=home, credential_paths=creds, adapter=adapter, caches=caches,
             network=bool(adapter), runner_tmp=(tmp_path / "builds" / "p.tmp", tmp_path / "missing.tmp"),
             cache_root=tmp_path / "cache root", tool_paths=tools,
+            read_only=() if adapter else read_only, empty_dirs=() if adapter else empty,
         )  # fmt: skip
 
     return home, spec
@@ -69,6 +74,7 @@ def bash_argv(tmp_path: Path, home: Path, spec: SandboxSpec, env: dict[str, str]
     caches = [f"{'rocache' if c.read_only else 'cache'}:{c.path}" for c in spec.caches]
     caches += [f"hide:{p}" for p in spec.runner_tmp]
     caches += [f"root:{spec.cache_root}", *(f"tool:{p}" for p in spec.tool_paths)]
+    caches += [f"ro:{p}" for p in spec.read_only] + [f"empty:{p}" for p in spec.empty_dirs]
     net = {"M0_NET": "share" if spec.network else "unshare"}
     return run_bash(
         tmp_path, home, {"PATH": "/usr/bin:/bin", **net}, "m0_argv",
@@ -85,6 +91,13 @@ def test_the_gate_argv_is_the_one_the_gate_sandbox_builds(tmp_path, world):
     cmd = ["./launch.sh"]
     expected = BwrapSandbox("bwrap").build_argv(cmd, spec, env)
     assert "--unshare-net" in expected and "--share-net" not in expected
+    wt = spec.worktree
+    assert ["--ro-bind", str(wt / ".venv"), str(wt / ".venv")] == expected[
+        expected.index(str(wt / ".venv")) - 1 : expected.index(str(wt / ".venv")) + 2
+    ]
+    assert ["--tmpfs", str(wt / "node_modules" / ".vite")] == expected[
+        expected.index(str(wt / "node_modules" / ".vite")) - 1 : expected.index(str(wt / "node_modules" / ".vite")) + 1
+    ]
     assert bash_argv(tmp_path, home, spec, env, cmd) == expected
 
 
@@ -136,6 +149,7 @@ def test_the_daemon_socket_masks_match_on_a_host_with_run(tmp_path, world, net):
     caches = [f"{'rocache' if c.read_only else 'cache'}:{c.path}" for c in spec.caches]
     caches += [f"hide:{p}" for p in spec.runner_tmp]
     caches += [f"root:{spec.cache_root}", *(f"tool:{p}" for p in spec.tool_paths)]
+    caches += [f"ro:{p}" for p in spec.read_only] + [f"empty:{p}" for p in spec.empty_dirs]
     got = run_bash(
         tmp_path, home, {"PATH": "/usr/bin:/bin", "M0_NET": "share" if net else "unshare", "L4_HOST_ROOT": str(root)},
         "m0_argv", spec.adapter or "", str(spec.worktree), str(spec.git_common_dir), str(spec.tmp_dir), *caches,

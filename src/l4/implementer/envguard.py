@@ -7,8 +7,8 @@ that the harness takes a manifest after each passing `gates.setup` command, comp
 every other gate, and removes an environment that differs, so the next setup builds it again. The classification
 (`classify`) only decides how a removal is reported; it never decides whether to remove.
 
-ctime is the tamper evidence: a process of the same user can reset mtime with `utime` but not ctime, and a replacement
-by rename changes the inode.
+ctime is the tamper evidence for a file: a process of the same user can reset mtime with `utime` but not ctime, and a
+replacement by rename changes the inode. A directory is recorded by kind, mode and inode only (see `_entry`).
 """
 
 import base64
@@ -68,6 +68,11 @@ def _entry(path: Path) -> Entry:
         "file" if (mode & 0o170000) == 0o100000 else "other"
     )  # fmt: skip
     target = os.readlink(path) if kind == "link" else None
+    if kind == "dir":
+        # a directory's size and times move whenever a child is added or removed, and the harness itself rewrites the
+        # tool caches inside `node_modules` before every gate; the children are entries of their own (a new one is
+        # `added`, a replaced directory has a new inode), so only the kind, the mode and the inode are evidence
+        return Entry(kind, mode, 0, 0, 0, info.st_ino, None)
     return Entry(kind, mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, target)
 
 

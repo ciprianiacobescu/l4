@@ -5215,7 +5215,8 @@ and belongs in `gates.setup`.
 `node_modules`, `git clean` keeps them, and `uv sync --frozen` leaves a `.pth` or `sitecustomize.py` that no installed
 distribution owns [V, uv 0.10.0], so a file planted there decides every later gate. After each passing `gates.setup`
 command the harness MUST record, in memory, a manifest of the tree's environment directories: the `lstat` of every entry
-(kind, mode, size, mtime, ctime, inode, link target) without following symlinks, the tool caches left out. After every
+(kind, mode, size, mtime, ctime, inode, link target; a directory by kind, mode and inode only, because its own times move with
+every child and with the tool-cache reset before each gate) without following symlinks, the tool caches left out. After every
 agent step and every other gate it MUST compare the environment with the manifest; a directory that differs, is new or has
 no manifest MUST be removed, so that the next `gates.setup` builds it again, and the worktree's `setup_at` is cleared. It
 records one `env.rebuilt` (`{tree, dirs, phase, added, changed, removed, reason: changed|created|unverified, declared,
