@@ -24,12 +24,28 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   person's deletion was not listed either. A test now counts as moved only when the same definition appears under a new
   file or name (L4-IMP-047, L4-VER-030, L4-VER-031).
 - Audit tests ran with the unit's own `conftest.py` in place, so an autouse fixture could make the audit of broken code
-  pass. Audit tests, their zero-value run and a generated UI test's head run now use the unit's added, changed or
-  deleted test-support files at their base versions, and run with them only when step 1's content scan read them and
-  found nothing; the Audit table of `verification.md` has a `Support` column, and `verify.audit` and
-  `verify.generated` carry `support` (L4-VER-033..036).
+  pass. Audit tests, their zero-value run and a generated UI test's head run now use the unit's test-support files at
+  their base versions (the amended entry below widens this to every test file for the audit); the Audit table of
+  `verification.md` has a `Support` column, and `verify.audit` and `verify.generated` carry `support`
+  (L4-VER-033..036).
 - Step 1 now also blocks a test-support file that patches code the unit changed in module-level code or an autouse
   fixture (it used to check only the files a task opened); a fixture a test requests by name is listed (L4-VER-037).
+- Step 1 now runs the base's tests on the unit's code: the test gate runs at head with every test and support file the
+  unit added or changed at its base version (added ones set aside), and a test that passed at the base must still pass.
+  A weakened helper module, a weakened or hooked conftest, a swap through `__code__` or `globals()`, a production module
+  that imports only with the unit's conftest, and a weakened Go or TypeScript test (any language with a JUnit report)
+  now fail step 1 with `a pre-existing test fails on the unit's code` or `a pre-existing test no longer runs on the
+  unit's code`; the integrity table has the row `pre-existing tests still pass`. A test a `tests.superseded` event, a
+  `task.unfrozen`, a `[test-infra]` task or only people's commits cover is listed (L4-VER-038).
+- The comparison of a pre-existing test now sees statements that are not plain definitions (attribute assignments,
+  `globals()`, `setattr`, a class attribute), inherited tests, real locals, normalised docstrings and moves that keep the
+  closure; the content scan reads helper modules under the test globs and flags `pytest_pyfunc_call`, a plain
+  `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-IMP-045..049,
+  L4-VER-039).
+- The audit runs without any of the unit's test or support files and collects only the audit file; it never falls back
+  to them, holds a criterion whose production module does not import, and keeps the writer's collection retry. A
+  generated UI test's head run keeps app data the unit added under `fixtures/` and no longer crashes when the server
+  does not start without the unit's runner support (L4-VER-033..035).
 
 ## 0.4.14 (2026-10-17)
 

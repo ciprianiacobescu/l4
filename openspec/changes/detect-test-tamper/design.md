@@ -178,8 +178,10 @@ tests: ["<name>", …], why: "<name>: <why>; …"}`, then `wb.discard_changes()`
 - `reason` (one line, as every attempt reason): `red changed tests that existed before this step: <path>::<name> (<why>)`
   for at most 5 tests joined by `; `, then `(+<k> more)`;
 - `excerpt`: `A red step adds new tests with new names. Leave every existing test as it is, and the fixtures, helpers,
-  constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new file. If
-  an existing test is wrong, report status blocked with a question that names it.` followed by one line per test.
+  constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new file. A
+  statement that is not a plain definition (a call at import, a computed constant, a logger) reaches every test of its
+  file: put it in a new file too. If an existing test is wrong, report status blocked with a question that names it.`
+  followed by one line per test.
 
 `guardnotes.note_of` returns `None` for `action: "rejected"`: the attempt's own reason and excerpt already tell the agent
 (no second line in the "put back" note, whose preamble would be wrong for a rejection).
@@ -438,7 +440,7 @@ not read.
   closure holds the defining class's header, members and `<class>` and those of `C`. A subclass that defines an
   inherited test changes `C.test_x` (`its body, decorators or parametrisation changed`). A base class imported from
   another file is not followed; D13 covers it.
-- **Locals**: through `symtable`, a name local to the test function, a nested function, a lambda or a comprehension (a
+- **Locals**: through a scope-aware reader (the rule of `symtable`, without matching its tables to AST nodes), a name local to the test function, a nested function, a lambda or a comprehension (a
   parameter, a target of `=`, `for`, `with`, `except`, `:=`, a comprehension target) is not a module read. The test's
   own parameters (and a fixture's) stay reads: they request fixtures. A definition's module-level expressions
   (decorators, defaults, annotations, bases) are read in the module scope, as before.
@@ -473,21 +475,19 @@ findings to `result.integrity`; `prior` is the rows already there.
    `os._exit` without the unit's conftest ends here).
 5. **R0, the base reference**, is needed only when R1 has a test that is not `passed`, a collection error, or the unit
    changed a runner configuration file; otherwise every base test ran and passed (the test files are the base's). Its
-   sources, in order: `wb.baselines[base_sha]`; the newest `base-tests.json` of an earlier round of this unit with the
-   same `base_sha` and command (read at head from `<unit>/.l4/evidence/round-*/`); a run in a merge-base worktree
-   (`playwright.base_checkout`, which runs `gates.setup`, then `l4.gates.e2e.run_gate_at`, name `base-tests-base`). When
-   R0 was run, its passed ids and collection errors go to `<unit>/.l4/evidence/round-<n>/base-tests.json`
-   (`{schema: "l4/base-tests@1", base_sha, command, passed, collection_errors}`), committed with the round. Trust: the
+   sources, in order: `wb.baselines[base_sha]`; the `integrity.base_tests` record of the newest earlier round of this unit with
+   the same `base_sha` and command (read from its `verdict.json` under `<unit>/.l4/evidence/round-*/`); a run in a merge-base worktree
+   (`playwright.base_checkout`, which runs `gates.setup`, then `l4.gates.e2e.run_gate_at`, name `base-tests-base`). The
+   round's `verdict.json` always carries `integrity.base_tests` (`{base_sha, command, passed, collection_errors}`, the
+   ids that passed at the base), committed with the round: there is no separate file. Trust: the
    unit's `.l4/` lies in the protected spec root, so an agent step cannot plant or edit one (L4-IMP-006 (1)); and a file
    is reused only when its `passed` list is not empty, else R0 runs (a forged empty baseline would neuter the check).
    Why R0 may be skipped: R1's test files are exactly the base's, the runner configuration is the base's, so R1 collects
    the base's test set; when every collected test passed and nothing failed to collect, every base-passing test passed.
 6. **Judge**: each id `passed` in R0 SHALL be `passed` in R1. A failed or erroring id, an id R1 does not hold, and each
    collection error of R1 that R0 lacks (a production module that no longer imports without the unit's test files, a
-   runner change that hides a test) are candidates. Except: an absent parametrised id (`name[case]`) whose function
-   (`name`, same classname) has at least one case in R1 and all of them `passed` is listed (`a parametrised case changed
-   with the unit's data`), not a candidate: parametrisation over production data changes the ids honestly. A function
-   with no case left in R1 stays a candidate. When some are test results, R1 runs once more
+   runner change that hides a test) are candidates. A parametrised case whose id vanished (`name[OLD]` replaced by
+   `name[NEW]`) is a candidate like any other (owner decision 6): only a `tests.superseded` id covers it. When some are test results, R1 runs once more
    (`base-tests-repeat`, same block); an id that passes there is flaky (minor finding `a pre-existing test is flaky on
    the unit's code`), the others stay.
 7. **Allowed**, listed in `allowed_tests` (no finding): an id a `tests.superseded` event names; an id whose file a
@@ -579,7 +579,7 @@ changed`: Go and TypeScript tests are covered by this run, through their JUnit r
   SupportPlan` (D16), `support_base.DATA_GLOBS`, `support_base.collect_only_env(paths) -> dict[str, str]`.
 - `l4_trace`: environment variable `L4_COLLECT_ONLY`, hook `pytest_ignore_collect`.
 - `base_tests.check_base_tests(wb, ctx, *, prior: Sequence[IntegrityCheck]) -> Outcome`; event `verify.base_tests`
-  (D13 step 9); evidence `round-<n>/base-tests.json` (`l4/base-tests@1`).
+  (D13 step 9); evidence `integrity.base_tests` of the round's `verdict.json`.
 - `audit.import_failure(log_text: str, stem: str, wb: Workbench) -> tuple[Literal["production", "own", "unknown"],
   str]`.
 - `tamper`: the pseudo-names `<module>` and `<Class>.<class>`; `moved(deleted, added)` with `(definition, closure)`
@@ -600,8 +600,8 @@ changed`: Go and TypeScript tests are covered by this run, through their JUnit r
 4. The run of D13 covers `gates.test` only. Should `gates.e2e` join it (it needs a served base app)?
 5. Cost: R1 runs for nearly every unit (red adds test files); R0 only when R1 is not all green or the unit changed runner
    configuration, and once per base sha thanks to the evidence file. Acceptable?
-6. A parametrised base case whose id disappears because the unit changed the production data it is parametrised over is
-   listed when every remaining case of that function passes (D13 step 6), not blocked. Confirm.
+6. A parametrised base case whose id disappears because the unit changed the production data it is parametrised over:
+   listed or blocked? (Decided in 6.6: blocked.)
 
 ### 6.5 Where the amendment goes beyond the owner's words
 
@@ -614,8 +614,21 @@ changed`: Go and TypeScript tests are covered by this run, through their JUnit r
   configured command, which may already name paths or not be a plain pytest call (D15).
 - A fixture that is not autouse counts as a plain definition in the `<module>` rule, a refinement of
   `guards._defines_only`: it reaches only the tests that request it, and the closure already follows requests (D12).
-- The parametrised-case listing of D13 step 6 (open question 6).
 
+
+### 6.6 Owner decisions on 6.4 (2026-10-18)
+
+1. Files only people changed: listed, not blocked (as designed).
+2. Added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` stays at head in all three runs (as designed).
+3. The audit's fallback to the unit's support files is removed (as designed).
+4. `gates.e2e` is not part of step 1's run; the run covers `gates.test` only (a follow-up if a served base app proves
+   cheap).
+5. The cost is accepted.
+6. **Changed from the proposal:** a parametrised case that passed at the base and whose id vanished is a **blocker**
+   (`a pre-existing test no longer runs on the unit's code`), like a deleted test, unless a `tests.superseded` event
+   names it. Honest parametrisation over production data now needs a person.
+7. Accepted risk: the `<module>` rule refuses a computed constant or a logger added to an existing test file; the retry
+   text names the fix (put it in a new file).
 
 ## Appendix A: the reproductions
 

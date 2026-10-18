@@ -285,13 +285,15 @@ unless `tests.superseded`, a `task.unfrozen`, a `[test-infra]` task or only peop
 #### Scenario: SCN-VER-138 (+) An honest unit passes, and allowed or people's files are listed
 - **GIVEN** an honest unit that adds tests and a conftest fixture; four base tests that fail with the base versions of
   their files because of a `tests.superseded` event, a `task.unfrozen`, a `[test-infra]` task and a person's commit; and
-  a base test parametrised over production data whose case `[OLD]` the unit's data replaced with `[NEW]`, which passes
+  a base test parametrised over production data whose case `[OLD]` the unit's data replaced with `[NEW]`
 - **WHEN** step 1 runs
-- **THEN** it SHALL raise no finding, list the five with their reasons, and record `verify.base_tests` with the counts
+- **THEN** it SHALL raise no finding for the four, list them with their reasons, and record `verify.base_tests` with the
+  counts; the vanished case `[OLD]` SHALL be the blocker `a pre-existing test no longer runs on the unit's code` unless
+  a `tests.superseded` event names it, and then it SHALL be listed too
 
 #### Scenario: SCN-VER-139 (+) The base reference is reused, and a flaky test is a minor finding
 - **GIVEN** a round whose run with the base files has one failure that passes on the repeat, and an earlier round's
-  `base-tests.json` for the same base sha and command
+  stored result (`integrity.base_tests` of its `verdict.json`) for the same base sha and command
 - **WHEN** step 1 runs
 - **THEN** no merge-base worktree SHALL be made (`base_source: "evidence"`), the test SHALL be the minor finding `a
   pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`

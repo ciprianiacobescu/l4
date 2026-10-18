@@ -193,7 +193,7 @@ are in `/private/tmp/claude-501/-Users-alexandruiacobescu-gooseProjects-agentic-
 the named test file and flips its assertion to the fixed behaviour, and must fail before the fix. Order: 8.1 then 8.2;
 9.1 before 9.2-9.4, 11.1 and 12.1; 10.1 needs 9.2 for its end-to-end part; 13 last. Groups 1-7 stay as they are.
 
-- [ ] 8.1 Tests first, new `tests/unit/implementer/test_tamper_bypass.py`: port `probes/pure_bypass.py` (it prints `[]`
+- [x] 8.1 Tests first, new `tests/unit/implementer/test_tamper_bypass.py`: port `probes/pure_bypass.py` (it prints `[]`
   for every form) as SCN-IMP-278 at function level (the five module-level forms and `TestCart.test_empty = lambda self:
   None`: every pre-existing test of the file `changed`, `<module>` in the why; the plain `def` control stays `rebound`)
   and SCN-IMP-279 (its `INH`/`INH2`: `TestChild.test_x` changed; a `TestChild` that keeps inheriting: nothing;
@@ -207,14 +207,14 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
   lines right-stripped), and `moved` on `(definition, closure)`; update the callers of `moved` in
   `tdd.preexisting_test_changes` and `integrity.check_tests`. Every test of groups 1-3 stays green. (L4-IMP-045,
   L4-IMP-046, L4-IMP-047, L4-IMP-049)
-- [ ] 8.2 Tests first, in `tests/unit/implementer/test_red_preexisting_tests.py`: SCN-IMP-278 at red level on the
+- [x] 8.2 Tests first, in `tests/unit/implementer/test_red_preexisting_tests.py`: SCN-IMP-278 at red level on the
   bench, with the red of `rt/tests/unit/verifier/test_rv_e2e.py::test_a_code_swap_in_the_test_file` (`CODE_SWAP`): the
   outcome is `failed`, one `guard.test_tamper` for `tests/test_pricing.py` with `rule: "pre-existing test"`, and the
   reason names `test_total_adds_prices` and `<module>`. No code beyond 8.1 is expected. (L4-IMP-048, L4-IMP-049)
 
 ## 9. Amendment: step 1 runs the base's tests on the unit's code (L4-VER-038; design D13)
 
-- [ ] 9.1 Tests first. In `tests/unit/verifier/test_support_base.py`: `unit_test_plan` (test and support globs with
+- [x] 9.1 Tests first. In `tests/unit/verifier/test_support_base.py`: `unit_test_plan` (test and support globs with
   their `extra_` entries; `.l4/` paths and every `tdd.runner_config_files` path left out; an added `fixtures/cart.html`
   left out; an added `tests/fixtures/factory.py`, a changed `tests/fixtures/data.json`, a deleted test file and a
   `tests/checks.py` with no test in), `runner_support` (design D16) and `collect_only_env`. New
@@ -225,7 +225,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
   such in the test (design D15). Then `support_base.unit_test_plan`, `runner_support`,
   `DATA_GLOBS`, `collect_only_env`, and `pytest_ignore_collect` in `src/l4/gates/pytest_trace/l4_trace.py`.
   (L4-VER-033, L4-VER-038)
-- [ ] 9.2 Tests first, new `tests/unit/verifier/test_base_tests.py` (end to end with `run_l4`, `valid_spec` and the
+- [x] 9.2 Tests first, new `tests/unit/verifier/test_base_tests.py` (end to end with `run_l4`, `valid_spec` and the
   texts of `rt/tests/unit/verifier/test_rv_e2e.py`): port `test_b1_helper_in_another_test_file` as SCN-VER-127,
   `test_b2_fixture_in_conftest` as SCN-VER-128, `test_d_forced_fallback` as SCN-VER-131 (no `verify.step` for step 2),
   and `test_a_code_swap_in_the_test_file` as SCN-VER-126 with both text signals bypassed:
@@ -242,11 +242,11 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
   note counts one more sub-check (`8 sub-checks`), and a test that asserts the exact `gate.finished` sequence of a
   verification now sees `setup-base-tests` and `base-tests` in step 1 (and `base-tests-base` when R0 runs).
   (L4-VER-038, L4-VER-036)
-- [ ] 9.3 Tests first, in `tests/unit/verifier/test_base_tests.py`: SCN-VER-139 (an earlier round's `base-tests.json`
-  with the same base sha and command: `base_source: "evidence"` and no `base-tests-base` gate in `gate.finished`; one
+- [x] 9.3 Tests first, in `tests/unit/verifier/test_base_tests.py`: SCN-VER-139 (an earlier round's stored `integrity.base_tests`
+  (in its `verdict.json`) with the same base sha and command: `base_source: "evidence"` and no `base-tests-base` gate in `gate.finished`; one
   with an empty `passed` list is not reused; a base test made flaky with a counter file: the minor finding, the row
   `ok`). Then D13 step 5 (the reuse and its trust rule) and step 6 (the repeat). (L4-VER-038, L4-VER-036)
-- [ ] 9.4 Tests first: port `rt/tests/unit/verifier/test_rv_step1.py` into `tests/unit/verifier/test_integrity_tamper.py`
+- [x] 9.4 Tests first: port `rt/tests/unit/verifier/test_rv_step1.py` into `tests/unit/verifier/test_integrity_tamper.py`
   (SCN-VER-137, the note of `check_tests` for only-Go/TypeScript changes) and into `test_base_tests.py` (SCN-VER-137,
   the run: a bench whose gate command `python tools/fake_runner.py` writes one JUnit case per `func Test…` in `*_test.go`
   and per `test('…')` in `*.test.ts`, passed when its body contains `3.75`; the harness red commit that weakens both
@@ -254,7 +254,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
 
 ## 10. Amendment: helper modules and the content scan (L4-VER-039; design D14)
 
-- [ ] 10.1 Tests first. In `tests/unit/verifier/test_scan.py`: SCN-VER-129 at function level (`result_hooks` on each
+- [x] 10.1 Tests first. In `tests/unit/verifier/test_scan.py`: SCN-VER-129 at function level (`result_hooks` on each
   form, with the texts of design D14; a wrapper `pytest_runtest_call` keeps its old text). In
   `tests/unit/verifier/test_integrity_support_patch.py`: `check_scan` reads a changed `tests/checks.py` that defines no
   test (a `pytest_runtest_setup` there is a hit; the patch rule of L4-VER-037 runs on it too; a file with a test is not
@@ -266,7 +266,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
 
 ## 11. Amendment: the audit (L4-VER-033, L4-VER-034; design D15)
 
-- [ ] 11.1 Tests first. In `tests/unit/verifier/test_ladder_tamper.py`: port `test_e_patch_in_the_units_test_module`
+- [x] 11.1 Tests first. In `tests/unit/verifier/test_ladder_tamper.py`: port `test_e_patch_in_the_units_test_module`
   as SCN-VER-133, and `test_d_forced_fallback` plus `test_d2_no_fallback_still_passes` as SCN-VER-132, both with
   `l4.verifier.base_tests.check_base_tests` monkeypatched to an `ok` outcome so that the audit is reached. In
   `tests/unit/verifier/test_audit_support.py`: port `rt/tests/unit/verifier/test_rv_audit_retry.py` as SCN-VER-136
@@ -280,7 +280,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
 
 ## 12. Amendment: step 5 (L4-VER-035; design D16)
 
-- [ ] 12.1 Tests first, in `tests/unit/verifier/test_generate_support.py`: port `rt/tests/unit/verifier/
+- [x] 12.1 Tests first, in `tests/unit/verifier/test_generate_support.py`: port `rt/tests/unit/verifier/
   test_rv_generate_fp.py` as SCN-VER-134 (`accepted`, `fixtures/cart.html` present during the head run, no exception)
   and add SCN-VER-135 (an app whose start needs the unit's `e2e/conftest.py`: with the content scan `ok`,
   `support: "head"`; with it `skipped`, `uncollectable` with the reason; no exception either way). SCN-VER-119 and -122
@@ -289,7 +289,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
 
 ## 13. Amendment: integration, review, docs
 
-- [ ] 13.1 Integration (orchestrator): merge groups 8-12; run `tests/unit` in full, `ruff`, `mypy`, `check_spec.py` and
+- [x] 13.1 Integration (orchestrator): merge groups 8-12; run `tests/unit` in full, `ruff`, `mypy`, `check_spec.py` and
   `npx --yes @fission-ai/openspec@1.14.1 validate detect-test-tamper --strict`. Re-run every reproduction of
   `review-tamper/` unchanged against the merged branch, not committed, and record their new output lines in the merge
   commit message (expected: no `PASS` verdict in `test_rv_e2e.py`; the probes print the fixed results; no exception in
@@ -297,7 +297,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
 - [ ] 13.2 One independent adversarial review of groups 8-12 (session model): what the run of D13 reverts and what it
   may hide (a skip, a deselect, a test that only R0 holds), R0 reuse, flakiness, the audit's classification of
   collection errors, the collect-only plugin, and honest units that are refused. Fix confirmed findings with tests.
-- [ ] 13.3 Docs. `docs/SPEC.md`: L4-IMP-045, -046, -047 and L4-VER-033, -034, -035, -036 read as the delta now says; add
+- [x] 13.3 Docs. `docs/SPEC.md`: L4-IMP-045, -046, -047 and L4-VER-033, -034, -035, -036 read as the delta now says; add
   `**L4-IMP-049**` after L4-IMP-048 and `**L4-VER-038**`, `**L4-VER-039**` after L4-VER-037; the §10.2 cells as the
   MODIFIED L4-VER-002 says; clause (5) of L4-IMP-006 as its MODIFIED text says (without the editor's last sentence);
   `verify.base_tests` in L4-STA-001's event list; SCN-IMP-266, -270 and SCN-VER-116, -117 as rewritten; SCN-IMP-278,

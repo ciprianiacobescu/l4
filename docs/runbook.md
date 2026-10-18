@@ -990,15 +990,17 @@ cannot restore a test (the test-path freeze), so the unit escalates after the re
 | `a red step changed a test that an earlier step wrote` | A later red commit changed a test that an earlier task of the unit wrote. | The same restore, from the red commit of the earlier task: `git checkout <sha> -- <path>`. |
 | `a construct that can change what the tests report`, with `patches <symbol>, which the unit changed, for every test` | A test-support file (`conftest.py`, a fixture file, a helper) patches code the unit changed in module-level code or in an autouse fixture. | Remove the patch, or move it into a fixture that a test requests by name. A fixture a test requests is listed under `## Fixtures that patch the unit's code when a test requests them`, not blocked. |
 
+| `a pre-existing test fails on the unit's code` | The gate ran at head with every test and support file the unit added or changed at its base version (an added one set aside), and a test that passed at the base failed (twice). The row `pre-existing tests still pass` of the integrity table says how many base tests passed and where the base result came from; the finding lists the ids. | Restore the base version of the weakened test or support file on the unit branch in your own commit (`git checkout <base> -- <path>`), or fix the code so that the base test passes. A test whose file only a person changed is listed, not blocked. |
+| `a pre-existing test no longer runs on the unit's code` | A base test is missing from that run, or a file no longer collects (for example a production module that imports only while the unit's `conftest.py` is present). A parametrised case whose id vanished counts too, unless a `tests.superseded` event names it. | The same restore. When a production module needs a test file to import, fix the code. |
+| `a construct that can change what the tests report`, with `pytest_pyfunc_call`, `pytest_runtest_call`, `pytest_runtest_setup`, `assignment to .obj` or `.runtest` | A support file or a helper module under the test globs (a `.py` file with no test) replaces or wraps the call of a test. | Remove it, or ask for a `[test-infra]` task. |
+
 Then push and retry the unit (section 7.2). A `[test-infra]` task, a `task.unfrozen` for the same task and a
 `tests.superseded` event (a reopened task's stale test) are allowed and listed under `## Pre-existing tests changed with
 an allowance`.
 
-The Audit table of `verification.md` has a `Support` column. `base`: the audit test ran with the unit's own test-support
-files at their base versions, which is the normal case when the unit changed any. `head`: it needed them and ran with
-them, which the harness allows only when step 1's content scan read them and found nothing. `-`: the unit changed no
-support file. An audit test that does not run at the base and cannot fall back is a minor finding, `an audit test was
-rejected`, with `it does not run with the unit's support files at the base` and the reason from the scan.
+An audit test runs with every test and support file the unit added or changed at its base version and collects only its own file; it never runs with the unit's files in place. When its import fails in a production module, when the log does not say why, or when the run gives no result for it, the criterion is held (`failed`, reasons `a production module fails to import without the unit's test and support files: <path>: <error>`, `the audit test does not collect and the log does not say why`, `the audit run gave no result for the audit test`): fix the production module so that it imports on its own. A failure in the audit test's own import goes back to the writer once and is a minor rejection the second time.
+
+The Audit table of `verification.md` has a `Support` column: `base` (the audit test ran with the unit's test and support files at their base versions) or `-` (the unit changed none). `head` appears only in the Generated UI tests table (step 5), where a head run may use the unit's runner support files after a clean content scan.
 
 ### 7.4 `waiting_capacity`: no agent is available
 
