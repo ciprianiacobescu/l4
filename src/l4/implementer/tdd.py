@@ -840,6 +840,23 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
     return note
 
 
+def _edited_tests(wb: Workbench, base: str, changed: Sequence[str]) -> list[str]:
+    """The Python test files of the base that this red step edited instead of appending to (`appended_only`): an earlier
+    test is frozen, and a tag inserted above it would claim a criterion it was never shown to fail for."""
+    globs = wb.cfg.tdd.test_globs
+    edited = []
+    for path in changed:
+        target = wb.worktree / path
+        if not path.endswith(".py") or not _matches(globs, path) or target.is_symlink() or not target.is_file():
+            continue
+        before = wb.git.run("show", f"{base}:{path}", check=False)
+        if before.returncode == 0 and not appended_only(
+            before.stdout, target.read_text(encoding="utf-8", errors="replace")
+        ):
+            edited.append(path)
+    return edited
+
+
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
     stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
@@ -906,7 +923,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             family,
             {i: report.tests[i] for i in new_ids},
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
-            exempt=exempt,
+            exempt=exempt | set(proved_earlier),  # M2: an honest step may list a criterion an earlier red proved
             required=required - set(proved_earlier),
             aliases=named,
             links=", ".join(task.links),
@@ -1058,6 +1075,13 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             via = {"via": VIA} if criterion in earlier else {"via": BASE_VIA} if criterion in based.confirmed else {}
             wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests), **via)
         return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
+    if stale is None and (edited := _edited_tests(wb, base, changed)):
+        wb.discard_changes()
+        return RedOutcome(
+            "failed",
+            f"an existing test file was edited, not appended to: {', '.join(edited[:3])}; keep every existing test as "
+            "it is and write NEW tests (a tag added to an old test creates no new test)",
+        )
     allowed = {t for tests in pre_satisfied.values() for t in tests}
     verdict = classify_red(
         base_report, report, test_files_changed=test_files,

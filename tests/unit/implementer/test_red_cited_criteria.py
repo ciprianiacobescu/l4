@@ -10,6 +10,7 @@ from .conftest import (
     TIP_HEADER,
     TIP_NEGATIVE,
     TIP_ROUNDS,
+    TIP_STUB,
     Bench,
     kiro_red_step,
     result,
@@ -180,3 +181,58 @@ def test_a_leaf_whose_cited_criteria_are_all_proved_is_already_satisfied(make_ki
     proofs = bench.events("task.red_ok")[-1]["criteria"]
     assert {c: p["via"] for c, p in proofs.items()} == {C11: "earlier_red", C12: "earlier_red"}
     assert all(p["proof"] == "pre_satisfied" for p in proofs.values())
+
+
+# -- review of kiro-prompt-context (M1, M2) -------------------------------------------------------------------------
+
+NEW_PASSING_11 = TIP_ROUNDS.replace("test_tip_is_rounded", "test_new_rounds")  # passes at once
+
+
+def test_retagging_an_earlier_test_proves_nothing_for_the_new_tag(make_kiro_bench):
+    """M1: 0.9 proved only Req 1.1 with test_old_rounds. A step that inserts `@pytest.mark.l4(Req 1.2)` above that
+    test (an added line) and adds a passing copy for Req 1.1 must not count Req 1.2 as proved: the evidence is
+    per (criterion, test)."""
+    retagged = TIP_HEADER + f'@pytest.mark.l4("{C12}")\n' + OLD_ROUNDS
+    step = Step(
+        writes={"tests/test_tip.py": TIP_HEADER + NEW_PASSING_11, OLD_FILE: retagged},
+        structured=result(
+            "red", task_ids=["1"], criteria_ids=[C11], tdd_exemption={"reason": "already_satisfied by 0.9"}
+        ),
+    )
+    bench: Bench = make_kiro_bench([step])
+    commit_old(bench)
+    before = bench.subjects()
+    outcome = run_red(bench.wb, probe_task(bench), attempt=1)
+    assert outcome.status == "failed" and "(Req 1.2)" in outcome.reason, (outcome.status, outcome.reason)
+    assert bench.subjects() == before and [e["task"] for e in bench.events("task.red_ok")] == ["0.9"]
+
+
+def test_an_edit_of_an_existing_test_file_that_is_not_an_append_fails_the_attempt(make_kiro_bench):
+    """M1: red never restored a frozen earlier test; a line inserted into an existing test file now fails the step."""
+    edited = "from pytdd import total\n\n\ndef test_total_adds_prices():\n    assert total([1.25, 2.5]) == 3.75\n"
+    edited += "    assert total([1.0]) == 1.0\n\n\ndef test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
+    step = Step(
+        writes={"tests/test_tip.py": kiro_red_step().writes["tests/test_tip.py"], "src/pytdd/tip.py": TIP_STUB,
+                "tests/test_pricing.py": edited},
+        structured=result("red", task_ids=["1"], criteria_ids=[C11, C12]),
+    )  # fmt: skip
+    bench: Bench = make_kiro_bench([step])
+    outcome = run_red(bench.wb, probe_task(bench), attempt=1)
+    assert outcome.status == "failed" and "tests/test_pricing.py" in outcome.reason
+    assert "existing test file was edited" in outcome.reason and bench.subjects() == []
+
+
+def test_an_honest_step_that_lists_every_cited_id_with_an_earlier_proved_one_is_accepted(make_kiro_bench):
+    """M2: the schema says criteria_ids must include the task's cited criteria; the proved one needs no new test."""
+    bench: Bench = make_kiro_bench([kiro_red_step(tests=TIP_NEGATIVE, criteria=[C11, C12])])
+    commit_old(bench)
+    outcome = run_red(bench.wb, probe_task(bench), attempt=1)
+    assert outcome.status == "ok", outcome.reason
+    assert bench.events("task.red_ok")[-1]["criteria"][C11]["via"] == "earlier_red"
+
+
+def test_deep_yaml_steering_cannot_stop_the_red_step(make_kiro_bench):
+    deep = "---\ninclusion: always\nx: " + "[" * 20000 + "]" * 20000 + "\n---\nbody\n"
+    bench: Bench = make_kiro_bench([kiro_red_step()], steering={"deep.md": deep})
+    outcome = run_red(bench.wb, probe_task(bench), attempt=1)
+    assert outcome.status == "ok", outcome.reason

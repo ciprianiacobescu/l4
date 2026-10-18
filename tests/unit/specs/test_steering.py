@@ -178,3 +178,37 @@ def test_a_file_name_that_could_forge_a_data_block_is_left_out(tmp_path):
     bad = [p for p in got if "evil" in p]
     assert len(bad) == 1 and got[bad[0]] == (False, "bad_name") and "\n" not in bad[0] and '"' not in bad[0]
     assert all("INJECTED" not in f.body for f in files)
+
+
+# -- review of kiro-prompt-context (minor 1): hostile front matter and patterns ------------------------------------
+
+
+def test_deeply_nested_yaml_is_bad_front_matter_not_a_crash(tmp_path):
+    deep = "---\ninclusion: always\nx: " + "[" * 20000 + "]" * 20000 + "\n---\nbody\n"
+    write(tmp_path, "deep.md", deep)
+    got = by_name(decide(tmp_path)[2])
+    assert (got["deep.md"].included, got["deep.md"].why) == (False, "bad_front_matter")
+
+
+def test_a_front_matter_over_16_kib_is_bad_front_matter(tmp_path):
+    write(tmp_path, "long.md", "---\ninclusion: always\nnote: " + "x" * 20_000 + "\n---\nbody\n")
+    write(tmp_path, "ok.md", "---\ninclusion: always\nnote: short\n---\nbody\n")
+    got = by_name(decide(tmp_path)[2])
+    assert got["long.md"].why == "bad_front_matter" and got["ok.md"].included
+
+
+def test_a_complex_file_match_pattern_is_bad_front_matter_and_matching_stays_fast(tmp_path):
+    import time
+
+    pattern = "/".join(["**"] * 40) + "/x"
+    write(tmp_path, "glob.md", f'---\ninclusion: fileMatch\nfileMatchPattern: "{pattern}"\n---\nbody\n')
+    start = time.monotonic()
+    got = by_name(decide(tmp_path, ["a/" * 60 + "y"])[2])
+    assert got["glob.md"].why == "bad_front_matter" and time.monotonic() - start < 2
+
+
+def test_a_deep_openspec_config_is_a_bad_decision_not_a_crash(tmp_path):
+    (tmp_path / "openspec").mkdir()
+    (tmp_path / "openspec" / "config.yaml").write_text("context: " + "[" * 20000 + "]" * 20000 + "\n")
+    text, decision = openspec_context(tmp_path, "openspec")
+    assert text is None and decision is not None and decision.why == "bad_front_matter"

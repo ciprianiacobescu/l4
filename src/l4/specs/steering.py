@@ -22,6 +22,8 @@ from l4.security.protected import glob_match
 
 STEERING_DIR = ".kiro/steering"
 INCLUSIONS = {"always": "always", "filematch": "fileMatch", "manual": "manual", "auto": "auto"}
+MAX_FRONT_MATTER_CHARS = 16 * 1024
+MAX_PATTERNS, MAX_PATTERN_CHARS, MAX_STARS = 20, 200, 3
 ALWAYS, FILE_MATCH, REFERENCED, AUTO = 0, 1, 2, 3  # the order the budget meets them in
 
 
@@ -69,9 +71,12 @@ def parse_front_matter(text: str) -> tuple[Mapping[str, Any], str]:
     end = next((i for i in range(1, len(lines)) if lines[i].rstrip("\r\n") == "---"), None)
     if end is None:
         return {}, text
+    block = "".join(lines[1:end])
+    if len(block) > MAX_FRONT_MATTER_CHARS:
+        raise BadFrontMatter("the front matter is too long")
     try:
-        meta = yaml.safe_load("".join(lines[1:end]))
-    except yaml.YAMLError:
+        meta = yaml.safe_load(block)
+    except (yaml.YAMLError, RecursionError, ValueError, MemoryError):  # deep nesting raises RecursionError
         raise BadFrontMatter("the front matter is not YAML") from None
     if meta is None:
         meta = {}
@@ -93,6 +98,8 @@ def _inclusion(meta: Mapping[str, Any]) -> tuple[str, tuple[str, ...]]:
     patterns = (pattern,) if isinstance(pattern, str) else tuple(pattern) if isinstance(pattern, list) else ()
     if not patterns or not all(isinstance(p, str) and p.strip() for p in patterns):
         raise BadFrontMatter("fileMatch needs a fileMatchPattern")
+    if len(patterns) > MAX_PATTERNS or any(len(p) > MAX_PATTERN_CHARS or p.count("**") > MAX_STARS for p in patterns):
+        raise BadFrontMatter("a fileMatchPattern is too complex")  # the glob is a regular expression: bound it
     return inclusion, tuple(p.strip() for p in patterns)
 
 
@@ -218,7 +225,7 @@ def openspec_context(root: Path, openspec_root: str) -> tuple[str | None, Steeri
         label = f"{rel}#context"
         try:
             config = yaml.safe_load(data.decode("utf-8", errors="replace"))
-        except yaml.YAMLError:
+        except (yaml.YAMLError, RecursionError, ValueError, MemoryError):
             return None, SteeringDecision(label, "context", False, "bad_front_matter")
         if not isinstance(config, dict) or "context" not in config:
             return None, None if isinstance(config, dict) or config is None else SteeringDecision(
