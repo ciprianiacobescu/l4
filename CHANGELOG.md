@@ -9,6 +9,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.16 (unreleased)
 
 ### Fixed
+- The GitHub setup action installs the harness again with `source: action` (the default for a published
+  harness): since 0.4.14 the build reads the l4 skill from `plugins/l4/skills/l4` (L4-SKL-003), which the action's
+  build copy and cache key left out, so every run failed with "Forced include not found". The copy and the key now
+  hold the skill, and a test keeps them in step with every `force-include` of pyproject.toml.
 - A check that could not run no longer fails the agent. The pre-satisfied zero-value run, the base run, run (b), the
   `test-at-red` run, the verifier's audit and the extra-proof runs are judged against the real run, per test: a test
   that failed by assertion is a proof, one that passed or failed another way is no proof, and one the run did not run
