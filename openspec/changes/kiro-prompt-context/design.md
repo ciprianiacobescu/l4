@@ -635,7 +635,8 @@ The design asked eight questions. The owner decided them, and this document, the
   For a non-Python file the rule is the old zero-deletion one (a test added inside a Jest `describe` block keeps its
   evidence). Round 2 removed the first version of this fix, a whole-file refusal of any edit of an existing test file:
   it refused honest fixtures, parametrized tests, constants, class methods and merged imports, and function-level
-  changes to old tests are the test-tamper check's.
+  changes to old tests are the test-tamper check's. At the merge with detect-test-tamper, its `<module>` rule won for a
+  computed constant or a call at import in an existing test file: that is refused, with the way out in the retry text.
 - **M2.** The criteria an earlier red proved are exempt in `check_criteria`, so an honest step may list every cited id.
 - **Steering (D5).** A front matter over 16 KiB, deeply nested YAML (`RecursionError`), more than 20 patterns, a pattern
   over 200 characters or with more than three `**` is `bad_front_matter`; the same for `openspec/config.yaml`. A

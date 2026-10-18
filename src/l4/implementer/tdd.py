@@ -900,8 +900,8 @@ _PREEXISTING_ADVICE = (
     "A red step adds new tests with new names. Leave every existing test as it is, and the fixtures, helpers, "
     "constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new "
     "file. A statement that is not a plain definition (a call at import, a computed constant, a logger) reaches every "
-    "test of its file: put it in a new file too. If an existing test is wrong, report status blocked with a question "
-    "that names it."
+    "test of its file: compute the value inside the new test, or put the new tests in a new file. If an existing test "
+    "is wrong, report status blocked with a question that names it."
 )
 
 

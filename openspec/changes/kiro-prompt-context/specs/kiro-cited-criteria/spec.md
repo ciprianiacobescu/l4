@@ -93,8 +93,8 @@ not already satisfied, whatever its criteria say, and the judge checks each such
 In the red step of a Kiro leaf, each criterion of its own unit that its `_Requirements:_` line names SHALL count as
 cited and SHALL be traced by a new test, unless L4-OPS-015 leaves it unchanged or an earlier red proved it with tests
 that pass now (per criterion and test, in a test file since only appended to). A step that leaves one untraced SHALL
-fail with a reason naming its id, alias and line. A red step MAY add fixtures, constants, imports and tests to an
-existing test file.
+fail with a reason naming its id, alias and line. A red step MAY append tests to an existing test file, not a
+computed constant (SCN-KSP-007).
 
 #### Scenario: SCN-IMP-294 (−) A red step that leaves a cited criterion untested is rejected with the reason
 - **GIVEN** a Kiro leaf `1. Implement the tip function` with `_Requirements: 1.1, 1.2_`, and a red step whose one new
@@ -144,11 +144,14 @@ with `no test traces <id> yet: write a new test for each`, and the task SHALL NO
 - **THEN** it fails with `no new test traces <id of Req 1.2> (Req 1.2), which the task's _Requirements: …`, because the
   proof of an earlier red holds for the criterion and the tests it listed, and nothing is committed
 
-#### Scenario: SCN-KSP-007 (+) New tests, fixtures and constants may go into an existing test file
+#### Scenario: SCN-KSP-007 (+) New tests and fixtures may go into an existing test file; a computed constant may not
 - **GIVEN** an existing project test file and a red step that adds to it a fixture, a parametrized test with `Decimal`
-  cases, a module constant, a method of its test class or a merged import name, beside the new tests of the leaf
+  cases that are literals, a method of its test class or a merged import name, beside the new tests of the leaf; or a
+  module constant computed by a call (`TEN = Decimal("10")`) or a parametrize case that calls at import
 - **WHEN** the red step is checked, on a Kiro unit and on an OpenSpec unit
-- **THEN** it is committed as red; only an earlier red's proof for a test file that was not only appended to (a Python
+- **THEN** the first is committed as red; the second is refused with `red changed tests that existed before this step`
+  (`<module>`), and the retry text says to compute the value inside the new test or to put the new tests in a new
+  file; only an earlier red's proof for a test file that was not only appended to (a Python
   file) or lost a line (any other file) is voided, and the criterion then needs a new test
 
 #### Scenario: SCN-KSP-008 (+) A step that lists every cited id is accepted when an earlier red proved one

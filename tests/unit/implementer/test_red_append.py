@@ -67,6 +67,11 @@ VARIANTS = {
 }
 
 
+# detect-test-tamper's `<module>` rule wins over a computed constant or a call at import in an existing test file:
+# such a statement reaches every test of the file (L4-IMP-045, design 6.6 item 7): refused, with the way out
+REFUSED = frozenset({"constant_call", "parametrize_decimal"})
+
+
 @pytest.mark.parametrize("variant", sorted(VARIANTS))
 def test_new_tests_in_an_existing_file(make_kiro_bench, variant):
     old, new = VARIANTS[variant]
@@ -84,4 +89,11 @@ def test_new_tests_in_an_existing_file(make_kiro_bench, variant):
     wb.git.run("commit", "-q", "-m", "an existing project test")
     (task,) = wb.provider.tasks(wb.ref)
     outcome = run_red(wb, task, attempt=1)
+    if variant in REFUSED:
+        assert outcome.status == "failed", (variant, outcome.reason)
+        assert outcome.reason.startswith("red changed tests that existed before this step: ")
+        assert "<module>" in outcome.reason
+        assert "compute the value inside the new test" in outcome.excerpt  # the way out is in the retry text
+        assert "put the new tests in a new file" in outcome.excerpt
+        return
     assert outcome.status == "ok", (variant, outcome.reason)

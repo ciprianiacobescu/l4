@@ -200,13 +200,14 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   and the no-new-test path ticked such a leaf without proving the other. Red now fails with a reason that names the
   criterion and the line; a criterion that an earlier red already proved needs no copy (review finding implementer-5).
 - Red no longer counts a criterion as proved by an earlier test that was merely re-tagged (the proof is per criterion
-  and test, in a file only appended to), accepts new tests, fixtures and constants in an existing test file, and accepts a step that
+  and test, in a file only appended to), accepts new tests and fixtures in an existing test file (a constant computed by a call at import is refused; compute it in the test or use a new file), and accepts a step that
   reports every cited id. Hostile steering (deep YAML, huge or complex patterns, forged names) and unsafe capability directory names
   are named and left out; `l4 status` shows the latest prompt's cut; the clarifier charges its line numbers.
 - A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
   item `2.1` both counted; they resolve against the fix unit's own items.
 
 ### Changed
+- A hold about a spec file the judge did not see or saw only in part (`the spec file …: the judge saw only …`) is a hold on the judge's view like the ones about the diff: rejecting it stops the unit with `judge_view_rejected` and never makes a fix unit.
 - Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
   sections of `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the scripts the gate commands run). After
   every agent step, and after every gate run, a change to them is put back to the step's base unless the task has a

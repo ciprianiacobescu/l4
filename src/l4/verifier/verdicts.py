@@ -86,6 +86,7 @@ def unresolved_holds(holds: Sequence[str], effective: Mapping[str, HumanVerdict]
 _BACKTICKED = re.compile(r"`([^`]+)`")
 _SCOPE_HOLD = re.compile(r"^scope: `[^`]+` changes module `[^`]+`")
 _COVERAGE_HOLD = "diff coverage: changed code not run by any test: "
+_SPEC_VIEW_HOLD = re.compile(r"the spec file .+: the judge (?:saw only|did not see) ")  # L4-KSP-014
 JUDGE_VIEW_PREFIX = "judge view: "  # the holds on what the judge could not see of the diff (L4-VER-043)
 LEGACY_LENGTH_HOLD = "the diff is longer than 120000 characters: the judge saw only the start"  # the 0.4.14 text
 JUDGE_VIEW_REJECTED_TITLE = "Rejected hold: the judge could not see all of the diff"
@@ -99,7 +100,7 @@ def hold_kind(text: str) -> HoldKind:
     without an e2e test, a judge reply that was discarded...)."""
     if _SCOPE_HOLD.match(text):
         return "scope"
-    if text.startswith(JUDGE_VIEW_PREFIX) or text == LEGACY_LENGTH_HOLD:
+    if text.startswith(JUDGE_VIEW_PREFIX) or text == LEGACY_LENGTH_HOLD or _SPEC_VIEW_HOLD.match(text):
         return "judge_view"
     return "coverage" if text.startswith(_COVERAGE_HOLD) else "other"
 

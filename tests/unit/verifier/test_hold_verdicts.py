@@ -559,3 +559,27 @@ def test_review_n7_a_judge_view_reject_beside_another_unconvertible_reject_names
     assert both is not None and feedback_way_out("openspec:x") in both and judge_view_way_out("openspec:x") in both
     assert _no_task_cause([view])[1] == "judge_view_rejected"  # alone: its own way out only
     assert _no_task_cause([other])[1] == "no_convertible_finding"
+
+
+# ---- holds on the judge's view of the spec (L4-KSP-014, L4-VER-043, L4-VER-044) ------------------------
+
+SPEC_HOLDS = [
+    "the spec file .kiro/specs/cart/design.md is larger than 262144 bytes: the judge saw only its start",
+    "the spec file a/requirements.md is a symlink: the judge did not see it",
+    "the spec file openspec/changes/cart/design.md was cut to fit the judge's budget: the judge saw only part of it",
+]
+
+
+@pytest.mark.parametrize("hold", SPEC_HOLDS)
+def test_a_hold_on_a_spec_file_the_judge_did_not_see_is_a_judge_view_hold(hold):
+    assert hold_kind(hold) == "judge_view"
+
+
+@pytest.mark.parametrize("hold", SPEC_HOLDS)
+def test_a_rejected_hold_on_a_spec_file_never_becomes_a_fix_unit(hold):
+    from l4.verifier.fixloop import _no_task_cause
+
+    finding, v, plan = _plan(hold, WHEN_THEN_REASON)
+    assert finding.source == "human" and finding.title == JUDGE_VIEW_REJECTED_TITLE
+    assert plan.groups == [] and plan.delta is None and plan.consumed == []
+    assert _no_task_cause([finding])[1] == "judge_view_rejected"
