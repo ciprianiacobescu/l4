@@ -37,8 +37,9 @@ def test_a_unit_waiting_for_capacity_still_waits(world):
 
 def test_answered_units_holds_the_awaiting_or_clarifying_units_that_no_longer_wait(world, monkeypatch):
     snaps = [world.snapshot(n, p) for n, p in (("a", "awaiting_human"), ("b", "clarifying"), ("c", "implementing"))]
-    # an open question still waits; a clarifying unit has the clarifier's own run to take (`clarify`), as for the step
-    assert answered_units(snaps) == {"openspec:b"}
+    # an open question still waits; a clarifying unit has the clarifier's own run to take (`clarify`) but no answer is
+    # recorded for it: it is not described as answered (review N5)
+    assert answered_units(snaps) == set()
     monkeypatch.setattr("l4.planner.answers_unblock", lambda questions, tasks: ("Q-001",))
     assert answered_units(snaps) == {"openspec:a", "openspec:b"}  # `c` is not waiting: it is no answered unit
     assert answered_units([world.snapshot("d", "waiting_capacity")]) == set()

@@ -27,6 +27,7 @@ network.
 import contextlib
 import json
 import logging
+import math
 import shutil
 import sys
 import tempfile
@@ -43,7 +44,7 @@ from l4.availability.errors import RoleUnavailable
 from l4.ci.detect import in_ci
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
-from l4.config.schema import L4Config
+from l4.config.schema import L4Config, YoloReviewCfg
 from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import fetch_auth_config
@@ -51,11 +52,12 @@ from l4.forge.gitlab import push_auth_config
 from l4.forge.pushfail import push_platform
 from l4.forge.urls import origin_url
 from l4.implementer.tdd import RoleLimit
+from l4.planner import facts_of
 from l4.specs.detect import collect_units
 from l4.specs.providers import providers_for
-from l4.state.next_step import way_out
+from l4.state.next_step import next_step, way_out
 from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
-from l4.state.status import Activity, OpenRun, discover
+from l4.state.status import Activity, OpenRun, _where, discover
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo import accept as accepting
@@ -224,6 +226,9 @@ class _Units:
     # the units in awaiting_human or clarifying whose answers are pushed and no run has read (L4-YOLO-052)
     answered: set[str] = field(default_factory=set)
     halt_reasons: dict[str, str | None] = field(default_factory=dict)  # unit id -> the code its stop recorded
+    answer_fixes: dict[str, str] = field(
+        default_factory=dict
+    )  # unit id -> what to do about an answer that is not valid
 
 
 @contextlib.contextmanager
@@ -247,11 +252,29 @@ def _workspace(ctx: _Ctx, rev: str) -> Iterator[tuple[Path, Git]]:
 
 
 def answered_units(snapshots: Iterable[Any]) -> set[str]:
-    """The ids of the units in `awaiting_human` or `clarifying` that no longer wait (`cycle.still_waits`): their answers
-    are pushed and no run has read them (L4-YOLO-052)."""
-    return {
-        s.ref.id for s in snapshots if (s.state.phase or "") in ("awaiting_human", "clarifying") and not still_waits(s)
-    }
+    """The ids of the units in `awaiting_human` or `clarifying` that no longer wait (`cycle.still_waits`) because an
+    answer is recorded: the planner's own reason is an answer that unblocks a task (`answers_unblock`) or verdict
+    answers not yet consumed (`verdicts_ready`). A clarifying unit with nothing answered is not one (review N5)."""
+    found = set()
+    for s in snapshots:
+        if (s.state.phase or "") not in ("awaiting_human", "clarifying") or still_waits(s):
+            continue
+        facts = facts_of(s)
+        if facts.answers_unblock or facts.verdicts_ready:
+            found.add(s.ref.id)
+    return found
+
+
+def answer_fix_of(snapshot: Any, repo: Path, branch_prefix: str) -> str:
+    """For a unit whose answer is invalid, dismissed or only a draft: the step `l4 status` gives, and how to replace a
+    recorded answer; empty for a unit whose question is plainly open (review N7)."""
+    facts = facts_of(snapshot)
+    if not (facts.verdicts_invalid or facts.verdicts_dismissed or facts.drafts):
+        return ""
+    branch, questions_path = _where(snapshot, repo, branch_prefix)
+    step = next_step(facts, branch=branch, questions_path=questions_path)
+    replace = f'l4 questions answer Q-NNN --unit {snapshot.ref.id} --text "accept ..." --replace'
+    return f"{step} (to change a recorded answer: {replace})"
 
 
 def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> _Units:
@@ -262,12 +285,18 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
         costs = {snapshot.ref.id: snapshot.state.cost_usd for _, snapshot in found}
         activity = {snapshot.ref.id: (snapshot.last_activity, snapshot.open_run) for _, snapshot in found}
         answered = answered_units(snapshot for _, snapshot in found)
+        fixes = {
+            snapshot.ref.id: fix
+            for _, snapshot in found
+            if (snapshot.state.phase or "") == "awaiting_human"
+            and (fix := answer_fix_of(snapshot, ctx.app.repo, ctx.cfg.forge.branch_prefix))
+        }
         halts = {  # the code of a stop, for the units a plan can be stopped on (L4-YOLO-055)
             snapshot.ref.id: snapshot.state.halt_reason
             for _, snapshot in found
             if snapshot.state.phase in ("halted", "escalated")
         }
-    return _Units(infos, phases, costs, activity, answered, halts)
+    return _Units(infos, phases, costs, activity, answered, halts, fixes)
 
 
 def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
@@ -1095,6 +1124,8 @@ def run_cancel(app: AppContext, *, plan: str, reason: str) -> ExitCode:
 
 
 def _extend(cost: float | None, runs: int | None, attempts: int | None, deadline: str | None) -> Extend:
+    if cost is not None and not math.isfinite(cost):  # `nan` and `inf` would make a limit nothing can reach or pass
+        raise L4Exit(ExitCode.USAGE_ERROR, "resume: --extend-cost must be a finite number")
     for flag, value in (("cost", cost), ("runs", runs), ("attempts", attempts)):
         if value is not None and value <= 0:
             raise L4Exit(ExitCode.USAGE_ERROR, f"resume: --extend-{flag} must be more than 0")
@@ -1116,6 +1147,28 @@ def _extend_words(cost: float | None, runs: int | None, attempts: int | None, de
                     for name, value in given if value is not None)  # fmt: skip
 
 
+def _plan_config(ctx: _Ctx, plan_id: str) -> tuple[L4Config | None, str]:
+    """`.l4/config.yaml` at `origin/<the plan's recorded target>` and no note, or None and why not: the plan has no
+    valid file on the configured base branch, or its target is another branch than that base (review N1: a caller's
+    own configuration must not name the branch the key is read from)."""
+    file = next((f for f in plan_files_at(ctx.git, ctx.target_ref) if f.plan_id == plan_id), None)
+    plan = file.plan if file else None
+    if plan is None:
+        return None, f"{plan_id} has no valid plan file on origin/{ctx.target}"
+    if plan.target != ctx.target:
+        return None, f"the base branch {ctx.target} of the configuration differs from the plan's target {plan.target}"
+    return accepting.target_full_config(ctx.git, f"{_ORIGIN}{plan.target}"), ""
+
+
+def _review_cfg(ctx: _Ctx, plan_id: str) -> tuple[YoloReviewCfg, str]:
+    """`yolo.review` of the plan's own target (defaults, and the reason, when the plan does not name the base)."""
+    full, note = _plan_config(ctx, plan_id)
+    return (full.yolo.review if full is not None else YoloReviewCfg()), note
+
+
+_ORIGIN = "refs/remotes/origin/"
+
+
 def _may_extend(ctx: _Ctx, plan_id: str, words: str) -> bool:
     """L4-YOLO-051: raising a plan's limits is a person's decision. A person may; an agent only when
     `yolo.extend_by_agents` is true in `.l4/config.yaml` on the base branch (read from origin, never the working tree).
@@ -1123,12 +1176,14 @@ def _may_extend(ctx: _Ctx, plan_id: str, words: str) -> bool:
     kind, marker = accepting.actor(ctx.app.environ, _stdin_tty())
     if kind == "person":
         return False
+    note = ""
     if _branch_on_origin(ctx, ctx.target):
         _sync(ctx, who="resume")
-        full = accepting.target_full_config(ctx.git, ctx.target_ref)
+        full, note = _plan_config(ctx, plan_id)
         if full is not None and full.yolo.extend_by_agents:
             return True
     why = f"{marker} is set" if marker else "stdin is not a terminal"
+    why += f"; {note}" if note else ""
     raise L4Exit(
         ExitCode.USAGE_ERROR,
         f"resume: raising a plan's limits is a person's decision ({why})\n"
@@ -1282,7 +1337,7 @@ def run_report(app: AppContext, *, plan: str) -> ExitCode:
 
 def _next_line(
     plan_id: str, state: PlanState, view: ReviewView | None, blocker: Blocker | None, *,
-    unit_phase: str | None = None, answered: bool = False, start: str = "",
+    unit_phase: str | None = None, answered: bool = False, start: str = "", answer_fix: str = "",
 ) -> str:  # fmt: skip
     status = state.status
     if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the cause first
@@ -1330,6 +1385,14 @@ def _next_line(
             return (
                 f"nothing: the answers of {unit} are pushed and the next run reads them; the plan then continues by "
                 f"itself (to start that run now: l4 yolo resume {plan_id} --reason TEXT, or {start})"
+            )
+        if answer_fix:  # an answer that is invalid, dismissed or only a draft: the unit's own step comes first
+            hint = "" if "--replace" in answer_fix else (
+                f' (to change a recorded answer: l4 questions answer Q-NNN --unit {unit} --text "accept ..." --replace)'
+            )  # fmt: skip
+            return (
+                f"{answer_fix}{hint}; the plan continues by itself at the run that reads the answer, "
+                "no resume is needed"
             )
         return (
             f"answer the questions of {unit}: l4 questions --unit {unit}, then l4 questions answer Q-NNN --unit {unit} "
@@ -1451,28 +1514,32 @@ def _describe(
     out["next"] = _next_line(
         pid, state, view, blocker, unit_phase=units.phases.get(state.current) if state.current else None,
         answered=current_answered, start=how_to_start(ctx.app, ctx.cfg, ctx.target) if current_answered else "",
+        answer_fix=units.answer_fixes.get(state.current or "", ""),
     )  # fmt: skip
     out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
     return out
 
 
 def _extensions(events: Sequence[PlanEvent]) -> list[dict[str, Any]]:
-    """The `plan.extended` events after the latest `plan.activated` (L4-YOLO-050), oldest first."""
-    since = max((i for i, e in enumerate(events) if e.type == "plan.activated"), default=-1)
-    return [
-        {
-            "at": e.at,
-            "by": e.data.get("by"),
-            "actor": e.data.get("actor"),
-            "agent_key": bool(e.data.get("agent_key")),
-            "reason": e.data.get("reason"),
-            "extend": e.data.get("extend") or {},
-            "limits_before": e.data.get("limits_before") or {},
-            "limits_after": e.data.get("limits_after") or {},
-        }
-        for e in events[since + 1 :]
-        if e.type == "plan.extended"
-    ]
+    """The `plan.extended` events the fold applied (L4-YOLO-050), oldest first: after the plan's first activation and
+    before it became final. A re-activation does not forget them, so neither does this list."""
+    found: list[dict[str, Any]] = []
+    activated = final = False
+    for e in events:
+        if e.type == "plan.activated" and not final:
+            activated = True
+        elif e.type in ("plan.cancelled", "plan.completed"):
+            final = True
+        elif e.type == "plan.extended" and activated and not final:
+            found.append(
+                {
+                    "at": e.at, "by": e.data.get("by"), "actor": e.data.get("actor"),
+                    "agent_key": bool(e.data.get("agent_key")), "reason": e.data.get("reason"),
+                    "extend": e.data.get("extend") or {}, "limits_before": e.data.get("limits_before") or {},
+                    "limits_after": e.data.get("limits_after") or {},
+                }
+            )  # fmt: skip
+    return found
 
 
 def _activity_of(
@@ -1724,7 +1791,7 @@ def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: 
     """`can_accept(subject)` for `findings.render`: None when `accept.check` lets this caller accept the subject now,
     else its first `Refusal` (the findings show why)."""
     who = accepting.actor(ctx.app.environ, _stdin_tty())
-    target = accepting.target_config(ctx.git, ctx.target_ref)
+    target, _ = _review_cfg(ctx, state.plan_id)
 
     def can_accept(subject: str) -> accepting.Refusal | None:
         entry = _entry_of(review, subject)
@@ -1845,9 +1912,7 @@ def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdra
     latest = _entry_of(review, subject)
     if latest is None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} is not in the latest review of {plan_id}")
-    refusal = accepting.check(
-        state, read.events, subject, latest, accepting.target_config(ctx.git, ctx.target_ref), who
-    )
+    refusal = accepting.check(state, read.events, subject, latest, _review_cfg(ctx, plan_id)[0], who)
     if refusal is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {refusal.message}\nFix: {refusal.fix}")
     if latest.get("material") is None:
@@ -1931,10 +1996,11 @@ def run_waive(
             f"waive: {finding} is not an accepted finding of {plan_id} (its accepted findings: {ids})\n"
             f"Fix: l4 yolo status {plan_id} names the open ones in its wait",
         )
-    if who[0] == "agent" and not accepting.target_config(ctx.git, ctx.target_ref).accept_by_agents:
+    review_cfg, note = _review_cfg(ctx, plan_id)
+    if who[0] == "agent" and not review_cfg.accept_by_agents:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
-            "waive: a waiver is a person's decision\n"
+            "waive: a waiver is a person's decision" + (f" ({note})" if note else "") + "\n"
             f'Fix: a person runs: l4 yolo waive {plan_id} {finding} --reason "..."; or set '
             "yolo.review.accept_by_agents: true in .l4/config.yaml on the base branch (a pushed change a person can "
             "see)",
