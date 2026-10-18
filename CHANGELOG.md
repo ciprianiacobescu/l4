@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## 0.4.16 (unreleased)
+## 0.4.16 (2026-10-18)
 
 ### Fixed
 - `yolo.hold` holds a unit that a delivery plan only excludes: listing a held unit in a plan's `exclude` released it, so after
