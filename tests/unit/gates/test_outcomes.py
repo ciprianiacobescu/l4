@@ -6,9 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from l4.gates.outcomes import altered, junit_id, read_record
-
 from l4.gates.junit import TestCase, TestReport
+from l4.gates.outcomes import altered, junit_id, read_record
 from l4.gates.trace import trace_env
 
 TESTS = (
