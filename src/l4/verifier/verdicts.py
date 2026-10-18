@@ -69,7 +69,7 @@ class HoldView:
     paths: tuple[str, ...]
 
 
-QUESTION_MAX_PATHS = 100  # the unseen files a hold's question lists; the rest are in verification.md
+QUESTION_MAX_PATHS = 100  # the unseen files a hold's question lists; the rest are in verdict.json
 
 
 def hold_id(text: str) -> str:
@@ -587,7 +587,7 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), pat
     if paths:
         shown = [f"- {p}" for p in paths[:QUESTION_MAX_PATHS]]
         more = len(paths) - QUESTION_MAX_PATHS
-        tail = [f"- and {more} more unseen files: see verification.md"] if more > 0 else []
+        tail = [f"- and {more} more unseen files: see verdict.json"] if more > 0 else []
         listed = ["", f"The files the judge did not see ({len(paths)}):", *shown, *tail]
     context = "\n".join(
         [

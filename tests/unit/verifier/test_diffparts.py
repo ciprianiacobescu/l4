@@ -332,3 +332,54 @@ def test_an_import_of_a_module_not_in_the_diff_changes_nothing():
     assert dp.group_key("tests/test_api_flow.py") == "api_flow"
     packed = pack([code, test])
     assert [e.paths[-1] for e in packed.parts[0].entries] == ["tests/test_api_flow.py", "src/app/report.py"]
+
+
+# ---- round 2: R3 the mode is part of an accept, R4 the source report of every lock format -------------------------
+
+
+def test_r3_a_chmod_changes_the_id_an_accept_is_bound_to(scratch):
+    git, commit = scratch
+    commit({"tools/run.sh": "#!/bin/sh\necho hi\n"}, "base")
+    first = dp.blob_ids(git, "HEAD", ["tools/run.sh"])
+    sh(git.repo, "update-index", "--chmod=+x", "tools/run.sh")
+    sh(git.repo, "commit", "-q", "-m", "chmod")
+    second = dp.blob_ids(git, "HEAD", ["tools/run.sh"])
+    assert (
+        first["tools/run.sh"] != second["tools/run.sh"]
+        and first["tools/run.sh"].split()[-1] == second["tools/run.sh"].split()[-1]
+    )
+
+
+LOCK_CASES = {
+    "Gemfile.lock": ("GEM\n  remote: https://rubygems.org/\n  specs:\n    a (1.0)\n",
+                     "GEM\n  remote: https://evil.example/\n  specs:\n    a (1.0)\n", ["evil.example", "rubygems.org"]),
+    "pnpm-lock.yaml": ("  /a@1.0.0:\n    resolution: {integrity: sha512-AAA}\n",
+                       "  /a@1.0.0:\n    resolution: {tarball: https://evil.example/a-1.0.0.tgz}\n", ["evil.example"]),
+    "yarn.lock": ('"a@npm:1.0.0":\n  resolution: "a@npm:1.0.0"\n  checksum: 111\n',
+                  '"a@https://evil.example/a.tgz":\n  resolution: "a@https://evil.example/a.tgz"\n  checksum: 111\n',
+                  ["evil.example"]),
+    "poetry.lock": ('[package.source]\ntype = "legacy"\nurl = "https://pypi.org/simple"\n',
+                    '[package.source]\ntype = "legacy"\nurl = "https://\u0435vil.example/simple"\n',
+                    ["pypi.org", "\u0435vil.example"]),
+    "Cargo.lock": ('[[package]]\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n',
+                   '[[package]]\nsource = "git+https://evil.example/a#1"\n', ["evil.example", "github.com"]),
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("name", sorted(LOCK_CASES))
+def test_r4_a_swapped_package_source_is_visible_in_every_lock_format(scratch, name):
+    git, commit = scratch
+    old, new, hosts = LOCK_CASES[name]
+    base = commit({name: old}, "base")
+    head = commit({name: new}, "head")
+    (only,) = list_entries(git, base, head, [])
+    assert only.lock and " 0 touch a source field" not in only.text
+    assert f"hosts: {', '.join(sorted(hosts))} (not diffed)" in only.text, only.text
+
+
+def test_r4_the_hosts_of_every_changed_line_are_reported_not_only_those_of_a_known_field(scratch):
+    git, commit = scratch
+    base = commit({"go.sum": "example.com/a v1.0.0 h1:AAA=\n"}, "base")
+    head = commit({"go.sum": "example.com/a v1.0.0 h1:AAA=\n# fetched from https://mirror.example/a\n"}, "head")
+    (only,) = list_entries(git, base, head, [])
+    assert "hosts: mirror.example" in only.text

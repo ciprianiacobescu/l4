@@ -47,7 +47,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   packed with the code it imports, a part that shows the code judges its criterion, and a part that cannot see a test cannot
   call it inadequate. A lock file is a lock file only when its old and new names both are, and its line shows the changed lines
   that touch a source field and the hosts they name (L4-VER-045).
-- The key `yolo.extend_by_agents` (and `yolo.review.accept_by_agents`) is read from the plan's own target branch; an agent that names
+- The key `yolo.extend_by_agents` (and `yolo.review.accept_by_agents`) is read from the plan's own target branch, and only when the plan file there is the one the plan recorded; an agent that names
   another base branch in its configuration has no key. `--extend-cost` must be finite. `l4 yolo status` lists the extensions the plan's
   fold applied, follows the unit's answer step for an invalid, dismissed or draft answer, and describes a unit as answered only when an
   answer is recorded (L4-YOLO-056). A rejected judge-view hold beside another unconvertible reject names both ways out.

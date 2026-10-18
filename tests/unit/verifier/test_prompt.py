@@ -204,7 +204,9 @@ def test_review_m2_a_part_that_shows_the_code_judges_it_and_no_rule_sends_a_test
 
 def test_review_n6_a_part_leaves_out_the_tests_it_cannot_see():
     outside = re.sub(r"<l4:data[^>]*>.*?</l4:data>", "", build(part=PartView(1, 2, LISTING)).user, flags=re.S)
-    assert "A test whose code is not in this part: leave it out of test_adequacy" in outside
+    assert "A test that is not shown in this part: leave it out of test_adequacy." in outside
+    assert "Judge the adequacy of every test shown here, wherever its code is." in outside
+    assert "A test whose code is not in this part" not in outside
 
 
 def test_review_m3_a_capped_listing_says_where_the_rest_is():

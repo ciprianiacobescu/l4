@@ -131,7 +131,7 @@ out (split the change, then `l4 restart`; or `accept` by `--replace`, then `l4 r
 A file whose old and new base names are both lock files (`uv.lock`, `poetry.lock`, `Pipfile.lock`,
 `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`) SHALL be
 shown as one line, never diffed, and never cause a hold: path (and the old path of a rename), old and new size, lines
-added and removed, how many changed lines touch a source, registry or integrity field, and the hosts they name.
+added and removed, how many changed lines touch a source, registry, remote, tarball, resolution or integrity field, and the hosts of every URL in the changed lines.
 
 #### Scenario: SCN-VER-140 (+) A lock file is one line, never a diff
 - **GIVEN** a unit whose diff changes `src/app/a.py` and `uv.lock`, the lock file by 30000 added lines
@@ -163,7 +163,7 @@ added and removed, how many changed lines touch a source, registry or integrity 
 The hash an accept of a `judge view:` hold is bound to SHALL cover the hold's text, the head blob id of every file the
 hold covers and the full list of files the judge did not see; the hold's id stays the hash of its text. The accept is
 void when that content changes, and the hold is asked again. The question SHALL list every unseen file (at most 100,
-then a pointer to `verification.md`, which lists them all).
+then a pointer to `verdict.json`, which lists them all); it covers the file mode too.
 
 #### Scenario: SCN-VER-145 (−) An accept does not survive new content of the file it was given for
 - **GIVEN** a round whose hold `judge view: the diff of `data/seed.json` is longer than one part …` a person accepted,
@@ -176,7 +176,7 @@ then a pointer to `verification.md`, which lists them all).
   two files the text does not name is replaced by another
 - **WHEN** the next round settles its holds
 - **THEN** the hold text is the same, the accept is void, the hold is asked again, and its question lists all seven
-  files, and for 500 files lists 100 and points at `verification.md`
+  files, and for 500 files lists 100 and points at `verdict.json`
 
 ### Requirement: L4-VER-047 The file list of a part prompt is bounded and the content is read once
 The file list of every part prompt SHALL hold at most 200 files and then `+K more files: see verification.md`, which

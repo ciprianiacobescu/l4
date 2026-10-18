@@ -371,7 +371,8 @@ def _part_rules(part: PartView) -> str:
         "- A fail must cite code shown in this part.\n"
         "- A feedback, accepted or satisfied item whose code is not in this part: answer false, with evidence that "
         f'starts with "{NOT_IN_PART}".\n'
-        "- A test whose code is not in this part: leave it out of test_adequacy.\n"
+        "- A test that is not shown in this part: leave it out of test_adequacy. "
+        "Judge the adequacy of every test shown here, wherever its code is.\n"
     )
 
 

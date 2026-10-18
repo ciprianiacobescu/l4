@@ -97,5 +97,5 @@ def test_the_question_lists_every_unseen_path_and_points_at_verification_md_when
     assert "src/u_f.py" in text and "src/u_g.py" in text
     many = [f"src/gen/f{i:04d}.py" for i in range(500)]
     text = " ".join(_hold_question(hold, 1, (), paths=many).context.split())
-    assert "src/gen/f0000.py" in text and "src/gen/f0499.py" not in text and "see verification.md" in text
+    assert "src/gen/f0000.py" in text and "src/gen/f0499.py" not in text and "see verdict.json" in text
     assert "400 more" in text or "more unseen" in text

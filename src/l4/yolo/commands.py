@@ -1147,22 +1147,28 @@ def _extend_words(cost: float | None, runs: int | None, attempts: int | None, de
                     for name, value in given if value is not None)  # fmt: skip
 
 
-def _plan_config(ctx: _Ctx, plan_id: str) -> tuple[L4Config | None, str]:
+def _plan_config(ctx: _Ctx, state: PlanState) -> tuple[L4Config | None, str]:
     """`.l4/config.yaml` at `origin/<the plan's recorded target>` and no note, or None and why not: the plan has no
     valid file on the configured base branch, or its target is another branch than that base (review N1: a caller's
     own configuration must not name the branch the key is read from)."""
+    plan_id = state.plan_id
     file = next((f for f in plan_files_at(ctx.git, ctx.target_ref) if f.plan_id == plan_id), None)
     plan = file.plan if file else None
     if plan is None:
         return None, f"{plan_id} has no valid plan file on origin/{ctx.target}"
+    recorded = (
+        state.activated_digest or state.plan_digest or state.review_plan_digest
+    )  # a plan file rewritten on a caller's branch is not trusted
+    if recorded is None or plan_digest(file.text) != recorded:
+        return None, f"the plan file on origin/{ctx.target} differs from the digest the plan recorded"
     if plan.target != ctx.target:
         return None, f"the base branch {ctx.target} of the configuration differs from the plan's target {plan.target}"
     return accepting.target_full_config(ctx.git, f"{_ORIGIN}{plan.target}"), ""
 
 
-def _review_cfg(ctx: _Ctx, plan_id: str) -> tuple[YoloReviewCfg, str]:
+def _review_cfg(ctx: _Ctx, state: PlanState) -> tuple[YoloReviewCfg, str]:
     """`yolo.review` of the plan's own target (defaults, and the reason, when the plan does not name the base)."""
-    full, note = _plan_config(ctx, plan_id)
+    full, note = _plan_config(ctx, state)
     return (full.yolo.review if full is not None else YoloReviewCfg()), note
 
 
@@ -1179,7 +1185,7 @@ def _may_extend(ctx: _Ctx, plan_id: str, words: str) -> bool:
     note = ""
     if _branch_on_origin(ctx, ctx.target):
         _sync(ctx, who="resume")
-        full, note = _plan_config(ctx, plan_id)
+        full, note = _plan_config(ctx, fold_plan(plan_id, ctx.store(plan_id).read().events))
         if full is not None and full.yolo.extend_by_agents:
             return True
     why = f"{marker} is set" if marker else "stdin is not a terminal"
@@ -1791,7 +1797,7 @@ def _acceptor(ctx: _Ctx, state: PlanState, events: Sequence[PlanEvent], review: 
     """`can_accept(subject)` for `findings.render`: None when `accept.check` lets this caller accept the subject now,
     else its first `Refusal` (the findings show why)."""
     who = accepting.actor(ctx.app.environ, _stdin_tty())
-    target, _ = _review_cfg(ctx, state.plan_id)
+    target, _ = _review_cfg(ctx, state)
 
     def can_accept(subject: str) -> accepting.Refusal | None:
         entry = _entry_of(review, subject)
@@ -1912,7 +1918,7 @@ def run_accept(app: AppContext, *, plan: str, subject: str, reason: str, withdra
     latest = _entry_of(review, subject)
     if latest is None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {subject} is not in the latest review of {plan_id}")
-    refusal = accepting.check(state, read.events, subject, latest, _review_cfg(ctx, plan_id)[0], who)
+    refusal = accepting.check(state, read.events, subject, latest, _review_cfg(ctx, state)[0], who)
     if refusal is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {refusal.message}\nFix: {refusal.fix}")
     if latest.get("material") is None:
@@ -1996,7 +2002,7 @@ def run_waive(
             f"waive: {finding} is not an accepted finding of {plan_id} (its accepted findings: {ids})\n"
             f"Fix: l4 yolo status {plan_id} names the open ones in its wait",
         )
-    review_cfg, note = _review_cfg(ctx, plan_id)
+    review_cfg, note = _review_cfg(ctx, state)
     if who[0] == "agent" and not review_cfg.accept_by_agents:
         raise L4Exit(
             ExitCode.USAGE_ERROR,

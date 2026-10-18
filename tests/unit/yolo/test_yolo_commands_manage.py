@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import l4.yolo.commands as commands
 from l4.yolo.digest import plan_digest
-from l4.yolo.model import PlanState
+from l4.yolo.model import PlanEvent, PlanState
 from l4.yolo.state import fold_plan
 
 from .yolo_cmd_world import A, B, ev, forge, plan_doc, world  # noqa: F401
@@ -18,8 +18,9 @@ ACTIVATED = ev("plan.activated", plan_digest="x", digests={}, by="alex@example.c
 
 def active_world(world, *events):
     world.push_plan()
-    world.seed("p1", ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]), world.reviewed(),
-               ACTIVATED, *events)  # fmt: skip
+    digest = plan_digest(world.plan_text)  # the activation records the digest of the plan file, as the command does
+    activated = PlanEvent(ACTIVATED.type, ACTIVATED.at, {**ACTIVATED.data, "plan_digest": digest})
+    world.seed("p1", ev("plan.admitted", plan_digest=digest, order=[A, B]), world.reviewed(), activated, *events)
     return world
 
 
@@ -418,9 +419,9 @@ ALLOW_EXTEND = {".l4/config.yaml": "yolo:\n  extend_by_agents: true\n"}
 
 def runs_world(world, used=82, limit=90):
     """An active plan with `limit` runs, `used` of them charged."""
-    activated = ev("plan.activated", plan_digest="x", digests={}, by="alex@example.com", reason="go",
-                   limits={"max_runs": limit, "max_unit_attempts": 2})  # fmt: skip
     world.push_plan()
+    activated = ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={}, by="alex@example.com",
+                   reason="go", limits={"max_runs": limit, "max_unit_attempts": 2})  # fmt: skip
     charge = ev("plan.charged", unit=A, attempt=1, cost_usd=1.0, runs=used)
     admitted = ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B])
     world.seed("p1", admitted, world.reviewed(), activated, ev("unit.dispatched", unit=A), charge)

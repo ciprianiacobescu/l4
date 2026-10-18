@@ -3302,12 +3302,12 @@ out (split the change, then `l4 restart`; or `accept` by `--replace`, then `l4 r
 **L4-VER-045 A lock file is one line for the judge, never a diff.** A file whose old and new base names are both lock files (`uv.lock`, `poetry.lock`, `Pipfile.lock`,
 `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`) SHALL be
 shown as one line, never diffed, and never cause a hold: path (and the old path of a rename), old and new size, lines
-added and removed, how many changed lines touch a source, registry or integrity field, and the hosts they name.
+added and removed, how many changed lines touch a source, registry, remote, tarball, resolution or integrity field, and the hosts of every URL in the changed lines.
 
 **L4-VER-046 An accept of a hold on the judge's view is bound to what the judge did not see.** The hash an accept of a `judge view:` hold is bound to SHALL cover the hold's text, the head blob id of every file the
 hold covers and the full list of files the judge did not see; the hold's id stays the hash of its text. The accept is
 void when that content changes, and the hold is asked again. The question SHALL list every unseen file (at most 100,
-then a pointer to `verification.md`, which lists them all).
+then a pointer to `verdict.json`, which lists them all); it covers the file mode too.
 
 **L4-VER-047 The file list of a part prompt is bounded and the content is read once.** The file list of every part prompt SHALL hold at most 200 files and then `+K more files: see verification.md`, which
 lists all of them; the room the list takes SHALL come out of the part's characters. The diff content of all files SHALL
@@ -4403,10 +4403,10 @@ refused (exit 2). `l4 yolo
 status` SHALL list the extensions and name the option in an active plan's `Next:` line.
 
 **L4-YOLO-051 Raising a plan's limit is a person's decision.** Every `--extend-…` of `l4 yolo resume`, on an active, waiting or stopped plan, SHALL be refused (exit 2, nothing
-written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` on the base
-branch (default `false`), read from the plan's own target branch, and not when the configuration's base branch is
-another than the plan's target. The refusal SHALL name the command a person runs and the key. The event SHALL record
-the actor, its marker and `agent_key`.
+written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` at the plan's own
+target branch (default `false`), and only if the configuration's base branch is that target and the plan file there is
+the one the plan recorded. The refusal names the command a person runs and the key; the event records `actor`, `marker`
+and `agent_key`.
 
 **L4-YOLO-052 After an answer is pushed, the resume does not refuse it.** The plan step, `l4 yolo resume` and `l4 yolo status` SHALL decide by one predicate (`l4.yolo.cycle.still_waits`)
 whether the current `awaiting_human` or `clarifying` unit of a waiting plan still waits. When its answers are pushed
@@ -7672,7 +7672,7 @@ scenario is a spec defect (§26).
 #### SCN-VER-146 (−) An accept does not survive a swapped unseen file the text does not name · L4-VER-046
 - **Given** an accepted hold that names five of seven unseen files (`(+2 more)`), and a next round in which one of the two files the text does not name is replaced by another
 - **When** the next round settles its holds
-- **Then** the hold text is the same, the accept is void, the hold is asked again, and its question lists all seven files, and for 500 files lists 100 and points at `verification.md`
+- **Then** the hold text is the same, the accept is void, the hold is asked again, and its question lists all seven files, and for 500 files lists 100 and points at `verdict.json`
 
 #### SCN-VER-147 (−) A diff of very many files has a bounded listing and a constant number of git diffs · L4-VER-047
 - **Given** a diff of 250 files in several parts

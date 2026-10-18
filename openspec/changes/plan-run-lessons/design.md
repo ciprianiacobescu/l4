@@ -376,12 +376,12 @@ detail recorded with `plan.waiting` stands.
 `diffparts.blob_ids(git, head, paths)` (a few `git ls-tree`) gives the head blob of each file a hold covers.
 `ladder._hold_views(parts, blob_of)` returns, per `judge view:` hold text, `HoldView(sha, paths)`: `paths` is every file
 the hold covers (the cut file, or ALL unseen files, not the five its text names), and `sha = sha256(text NUL
-"path TAB blob" lines)`. The hold id stays `hold_id(text)`. `VerifyResult.hold_views` keeps `{text: {sha, paths}}` (in
+"path TAB mode blob" lines)` (the mode too: a chmod voids an accept, round 2, R3). The hold id stays `hold_id(text)`. `VerifyResult.hold_views` keeps `{text: {sha, paths}}` (in
 `verdict.json` and restored on a reused round). `_finalize` builds `current[hold_id] = hold_sha256(hold, hold_views)` and
 `raise_verdict_questions(hold_views=...)` raises the question with that `text_sha256`, so an accept of other content is
 not in force (`effective_verdicts` compares the two) and the hold is asked again. A hold of another kind keeps
 `finding_sha256(hold_id)`. `_hold_question(paths=...)` lists every unseen file, at most `QUESTION_MAX_PATHS = 100`, then
-`and K more unseen files: see verification.md`.
+`and K more unseen files: see verdict.json` (which lists every unseen file, round 2, R5).
 
 ### D14 The listing is bounded and the content is read once (L4-VER-047, review M3)
 
@@ -405,21 +405,21 @@ last segment, lower case). The part rule no longer says `code or test`: a criter
 
 A part that cannot see a test cannot call it inadequate: `judge_parts._rank` makes an entry with reason `not in this part`
 the weakest, a real `adequate: false` the strongest; a test only blind parts called inadequate is adequate. The part
-rules say: a test whose code is not in this part is left out of `test_adequacy`.
+rules say: a test that is not shown in this part is left out of `test_adequacy`, and the adequacy of every test shown is judged wherever its code is (round 2, R2; it is not in `SYSTEM`, so the template lock and `judge@10` stay).
 
 ### D17 The key is read from the plan's own target (review N1) and a cost is finite (review N2)
 
 `_plan_config(ctx, plan_id)` reads the plan file on the configured base branch; when its `target` is another branch, or
 the file is missing or invalid, an agent has no key (note: `the base branch X of the configuration differs from the
-plan's target Y`) and `.l4/config.yaml` is read at `origin/<plan.target>`. The same helper serves
+plan's target Y`) and `.l4/config.yaml` is read at `origin/<plan.target>`, and only when the plan file's digest is the one the plan recorded (`activated_digest`, else the admitted `plan_digest`): a plan file rewritten on a caller's own branch is never trusted (round 2, R1). The same helper serves
 `yolo.review.accept_by_agents` (accept, findings, waive). `_extend` refuses a cost that is `nan`, `inf` or `-inf`.
 
 ### D18 Lock files (review N3, refines owner decision 5)
 
 An entry is a lock file only when the old and the new base name are both in `LOCK_FILES`; a source file renamed to
 `go.sum` is diffed. The line names the old path of a rename and adds `N touch a source field` (changed lines that hold
-`resolved`, `registry`, `source`, `url`, `integrity`, `hash` or `checksum`) and `hosts: a, b` (distinct hosts of the URLs
-in those lines, at most 10).
+`resolved`, `registry`, `source`, `url`, `integrity`, `hash`, `checksum`, `remote`, `tarball` or `resolution`) and
+`hosts: a, b` (distinct hosts of every URL in the changed lines, added and removed, as written, at most 10; round 2, R4).
 
 ### D19 Answered units, the answer step, the extensions list, mixed rejects (review N5, N7)
 

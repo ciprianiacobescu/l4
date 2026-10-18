@@ -53,10 +53,10 @@ status` SHALL list the extensions and name the option in an active plan's `Next:
 
 ### Requirement: L4-YOLO-051 Raising a plan's limit is a person's decision
 Every `--extend-…` of `l4 yolo resume`, on an active, waiting or stopped plan, SHALL be refused (exit 2, nothing
-written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` on the base
-branch (default `false`), read from the plan's own target branch, and not when the configuration's base branch is
-another than the plan's target. The refusal SHALL name the command a person runs and the key. The event SHALL record
-the actor, its marker and `agent_key`.
+written) for an agent (`l4.actor.actor`), unless `yolo.extend_by_agents` is `true` in `.l4/config.yaml` at the plan's own
+target branch (default `false`), and only if the configuration's base branch is that target and the plan file there is
+the one the plan recorded. The refusal names the command a person runs and the key; the event records `actor`, `marker`
+and `agent_key`.
 
 #### Scenario: SCN-YOLO-134 (−) An agent cannot raise a limit
 - **GIVEN** the plan `p1` while it is active, and the same plan seeded again stopped with `limit_runs`

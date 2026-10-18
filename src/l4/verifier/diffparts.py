@@ -38,8 +38,19 @@ LOCK_FILES = (
     "Cargo.lock", "composer.lock", "Gemfile.lock",
 )  # fmt: skip
 _DIFF = ("diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M")
-_SOURCE_FIELDS = ("resolved", "registry", "source", "url", "integrity", "hash", "checksum")
-_HOST = re.compile(r"(?:https?|git\+https?|git\+ssh|ssh|git|ftp)://(?:[^/@\s\"']*@)?([A-Za-z0-9._-]+)")
+_SOURCE_FIELDS = (
+    "resolved",
+    "registry",
+    "source",
+    "url",
+    "integrity",
+    "hash",
+    "checksum",
+    "remote",
+    "tarball",
+    "resolution",
+)
+_HOST = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://(?:[^/@\s\"']*@)?([^\s/?#:\"'<>{}(),\\]+)")  # any host characters
 _PY_IMPORT = re.compile(r"^\+\s*(?:from\s+([\w.]+)\s+import\s+([\w., ]+)|import\s+([\w., ]+))", re.M)
 _JS_IMPORT = re.compile(r"""(?:from|require\(|import)\s*\(?\s*['"]([^'"]+)['"]""")
 _TEST_DIRS = frozenset({"tests", "test", "__tests__", "spec", "specs"})
@@ -193,7 +204,7 @@ def _lock_line(git: Git, base: str, head: str, paths: tuple[str, ...], block: st
     added = sum(ln.startswith("+") for ln in changed)
     lines = "binary" if "Binary files" in block and not changed else f"+{added} -{len(changed) - added} lines"
     touching = [ln for ln in changed if any(f in ln.lower() for f in _SOURCE_FIELDS)]
-    hosts = sorted({h.lower() for ln in touching for h in _HOST.findall(ln)})
+    hosts = sorted({h for ln in changed for h in _HOST.findall(ln)})  # as written, from every changed line
     shown = ", ".join(hosts[:MAX_LOCK_HOSTS]) + (
         f", +{len(hosts) - MAX_LOCK_HOSTS} more" if len(hosts) > MAX_LOCK_HOSTS else ""
     )
@@ -283,5 +294,5 @@ def blob_ids(git: Git, head: str, paths: Sequence[str]) -> dict[str, str]:
         for record in os.fsdecode(out).split("\0"):
             meta, _, path = record.partition("\t")
             if path and len(meta.split()) == 3:
-                found[path] = meta.split()[2]
+                found[path] = f"{meta.split()[0]} {meta.split()[2]}"  # the mode is part of what an accept covers
     return found
