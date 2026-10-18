@@ -310,3 +310,16 @@ Every task follows these rules:
   - Run: `python scripts/check_spec.py docs/SPEC.md`, the docs tests under `tests/unit` that read SPEC.md, the runbook
     or the CHANGELOG (`grep -rl "CHANGELOG\|runbook.md\|SPEC.md" tests/unit`), and
     `npx --yes @fission-ai/openspec@1.14.1 validate merge-safety --strict`.
+
+## 8. Findings of the adversarial review (F1-F7, the merged head; design D10)
+
+- [x] 8.1 Tests first, then code, for each item, each test failing for the stated reason before the code:
+  - F4: `tests/unit/state/test_ready_head_source.py` (SCN-YOLO-125), `test_recorded_ready_reads_the_latest_pr_ready_of_the_pending_events`,
+    `test_the_snapshot_passes_the_recorded_h_to_the_review` (now reads the lock ref).
+  - F1, F2, F5, F6, F7: `tests/unit/forge/test_github_checks.py`, `test_gitlab_pipelines.py`,
+    `tests/unit/ci/test_handoff_ci.py`, `tests/unit/yolo/test_merge_safety_ci_gate.py` (SCN-YOLO-121..123, SCN-CI-061..068).
+  - The merged head: `tests/unit/yolo/test_yolo_merge_squash.py` (SCN-YOLO-124).
+  - Code: `fold.py`, `status.py`, `orchestrator.py`, `repo_ci.py`, `handoff_ci.py`, `github.py`, `gitlab.py`,
+    `sweeper.py`, `merge.py`.
+- [x] 8.2 Docs: SPEC (L4-ARC-008, L4-YOLO-032, L4-YOLO-042, L4-CI-010, L4-CI-013..015, the scenarios), runbook,
+  yolo-mode, CHANGELOG (the lock-ref residual, F3).

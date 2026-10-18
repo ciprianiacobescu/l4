@@ -23,8 +23,8 @@ The code as read at 0.4.14 (the line numbers are from that source):
 
 ### D1 H is the recorded `pr.ready{head}`
 
-`UnitState.ready_head: str | None = None` is the `head` of the latest `pr.ready` in fold order. The new fold handler
-`_pr_ready` sets it when `head` is a non-empty string, and `HANDLERS["pr.ready"]` points at it. It is never cleared. A
+`UnitState.ready_head: str | None = None` is the `head` of the latest `pr.ready` in fold order among the lock ref's
+pending files (D10, F4: `recorded_ready`, set by the reader; `fold` ignores `pr.ready`). It is never cleared. A
 re-entry hands off again and records a new `pr.ready` (`[h1, h2]` in `test_handoff_reentry.py`). A PR that is closed and
 reopened goes back to `in_review` with its H. `pr.ready{head}` has been written since the first public commit, so every
 unit in review today has it.
@@ -217,6 +217,37 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
   `/repos/{REPO}/actions/runs/{id}/attempts/{n}`, and `workflow_runs_status` (an int that makes the listing answer that
   status).
 
+### D10 The review's findings F1-F7 (applied after the adversarial review)
+
+- **F1, a job that did not pass (L4-CI-013).** `_CHECK_CONCLUSIONS` passes success, neutral and skipped; failure,
+  timed_out, startup_failure, action_required and stale are `failed` (red); `cancelled` stays `canceled`. `repo_ci`
+  gets `blocked_jobs` (canceled, and manual with `allow_failure` false) and `all_skipped`. `read_handoff_ci` returns
+  `blocked` when the verdict is green or pre-existing and a job is blocked, with `HandoffCi.blocked`; a red job comes
+  first (the unit is verified again). The gate is `not_ready` whatever `require_ci` says, naming the jobs and "re-run
+  it"; the sweep says `ci_blocked` and records nothing. Every project job skipped is `not_run`. GitLab keeps its status
+  words: canceled blocks, a manual job that may not fail blocks, skipped passes.
+- **F2, CI not created yet (L4-CI-014).** `list_pipeline_jobs` always reads the workflow runs of the commit, and a run
+  that is not `completed` (not the harness's `l4.yml`) is a running job `(workflow run)`. `required_checks(branch)`
+  reads `rules/branches/<base>`, else the classic protection (403/404 give nothing); a required name H has not
+  reported is `running`. A GitLab pipeline in created, pending, running, waiting_for_resource, preparing or scheduled
+  with no project job is a running job `(pipeline <id>)`. `not_run` (no job, all skipped, a required check never
+  reported) is final only when `now - ready_at >= WINDOW` (10 minutes); before that it is `running`. `ready_at` is the
+  `ts` of the recorded `pr.ready`; an unknown time means no window. The wait chains no run.
+- **F3.** The lock-ref residual stays accepted: the CHANGELOG, `docs/yolo-mode.md` and L4-ARC-008 say so.
+- **F4, H from the lock ref only.** `fold` no longer handles `pr.ready`. `recorded_ready(pending_events)` returns the
+  latest `(head, ts)` among the pending files' events, and `load_snapshot` and the orchestrator's `_refold` set
+  `UnitState.ready_head` and `ready_at` (excluded from state.json). A `pr.ready` in the branch tree records nothing.
+- **F5, commit statuses (L4-CI-015).** The combined status of the commit is read: failure and error are `failed`,
+  pending is `pending`, success is `success`; the harness's own `l4/*` contexts are left out. A status is a job of the
+  workflow `status`.
+- **F6, same-name runs of one suite.** For each workflow run that has check runs, `jobs?filter=latest` and `filter=all`
+  are read: an id in `all` but not in `latest` is a superseded execution and is dropped; an id in neither is no job of
+  the run (a reporter's check run) and is keyed by its id, so it never hides or is hidden. A run whose jobs cannot be
+  listed keeps the older rule (newest of a name).
+- **F7.** Only `l4` of the workflow `l4.yml` (or of no workflow, GitLab and old fakes) is the harness's own job.
+- **The merged head.** A squash that comes back `raced` reads the merged PR's head; if a person merged it at another
+  head, `unit.merged.head` is that head, not H.
+
 ## Risks
 
 - **The lock ref is writable by anyone who can push** (D1). This change raises the bar from "push a commit with copied
@@ -229,6 +260,8 @@ listed in its newest attempt only). Keying GitLab jobs by pipeline would keep a 
 - **`preexisting` merges.** A new failure inside a job that is already red on the base is not seen.
 - **GitLab merged-results pipelines** run on a merge ref with another sha. A project that runs only those has no job on
   H, which is `not_run`.
+- **Statuses, rules and jobs add calls:** a status listing, a required-checks read (two at most) and two job listings per
+  workflow run with check runs, on top of the next item.
 - **More forge calls.** There is one extra GitHub listing per job read, plus one per earlier attempt, and a CI read in
   each merge and each wait probe.
 - **An unforeseen harness push after H** (none is known in `post_merge_pr`) would cost one more verification round, not

@@ -151,12 +151,16 @@ after it. It happens only when all of this is true:
 
 1. The unit is `in_review`, its last verdict is PASS, and it has no open question and no open feedback.
 2. No commit was made after H, whatever its author, committer or trailers. Such a commit sends the unit back to
-   verification, like a person's push. So does a red CI that the sweep recorded on H.
+   verification, like a person's push. So does a red CI that the sweep recorded on H. H is read from the lock ref's
+   pending files only, never from the branch tree. Anyone who can push the lock ref can forge `pr.ready{head}`; that
+   residual is accepted, and closing it needs signed harness commits or a ref only the harness can write.
 3. H is recorded, and it is the tip of the unit branch on `origin` and the head of the PR. A commit that arrives after
    the check stops the merge.
 4. The PR is open, and its base is the target.
 5. The target tip is contained in H.
-6. The repository's own CI on H is not running, not red and readable. A job that is red on H and on the base does not
+6. The repository's own CI on H (check runs, workflow runs, commit statuses and the base branch's required checks on
+   GitHub; pipelines on GitLab) is not running, not red, has no cancelled or held job (re-run it) and is readable. CI
+   that is not created yet counts as running for ten minutes after the hand-off; only after that is "no CI" final. A job that is red on H and on the base does not
    block: the unit records `ci: preexisting`. If no CI ran on H at all, the merge goes ahead and `unit.merged` records
    `ci: not_run`, with a warning line in the plan report and a note on the merged PR; with `yolo.merge.require_ci:
    true` the plan waits for a CI instead. On GitHub a push made with the workflow's `GITHUB_TOKEN` starts no run, so a

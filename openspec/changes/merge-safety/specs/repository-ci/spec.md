@@ -20,10 +20,10 @@ other rules of L4-CI-002 stay.
 ## ADDED Requirements
 
 ### Requirement: L4-CI-010 A GitHub check run is one job of one workflow
-On GitHub, `list_pipeline_jobs` SHALL key each check run of the `github-actions` app by its workflow file and the
-workflow run's event, found through the commit's workflow runs and every attempt of each, and each other check run by
-its app's slug, plus the job name. It SHALL keep the newest check run of each key (`settled`: the newest finished one).
-An Actions check run whose workflow run is not found SHALL be keyed by its check suite.
+On GitHub, `list_pipeline_jobs` SHALL key a check run of the `github-actions` app by its workflow file, its workflow
+run's event and its name, and another app's by the app's slug and name, and keep the newest of a key. A re-run job's
+earlier execution SHALL be dropped (`jobs?filter=latest` against `all`), and a check run that is no job of the run SHALL
+stay apart. A check run whose workflow run is not found SHALL be keyed by its check suite.
 
 #### Scenario: SCN-CI-051 (−) A failed job of one workflow is not hidden behind a passing job of the same name
 - **GIVEN** on H the Actions check runs `build` of `tests.yml` (failure) and `build` of `docs.yml` (success, newer),
@@ -92,3 +92,59 @@ through one function, `read_handoff_ci`.
 - **WHEN** `read_handoff_ci` reads each, and the sweep's CI duty reports each
 - **THEN** they agree: `running` and `ci_waiting`, `green` and `ci_green`, `failed` and `ci_failed`, `preexisting` and
   `ci_preexisting`, `not_run` and `ci_not_run`
+
+### Requirement: L4-CI-013 A job that did not pass is not green
+The newest attempt of a project job SHALL pass on success, neutral or skipped, and SHALL be red on failure, timed_out,
+startup_failure, action_required or stale. A cancelled job, and a held manual job that may not fail, SHALL be
+`blocked`: neither green nor a fix round. Every project job skipped SHALL be `not_run`.
+
+#### Scenario: SCN-CI-061 (−) A cancelled, stale or action_required job is not green
+- **GIVEN** a GitHub hand-off commit whose only project job concluded `cancelled`, `action_required` or `stale`
+- **WHEN** the CI is read
+- **THEN** the cancelled job is `blocked` and the other two are `failed`, never `green`
+
+### Requirement: L4-CI-014 CI that may not exist yet is running
+On GitHub the reader SHALL read the workflow runs of H also when H has no check run, and a run not `completed` (the
+harness's own `l4.yml` aside) SHALL be running; a required status check of the base branch that H has not reported
+SHALL be running. On GitLab an unfinished pipeline SHALL be running. `not_run` SHALL be final only ten minutes after
+the recorded `pr.ready`; before that it SHALL be running.
+
+#### Scenario: SCN-CI-062 (−) A queued workflow run with no check run yet is running
+- **GIVEN** a GitHub hand-off commit with a queued workflow run and no check run
+- **WHEN** the CI is read
+- **THEN** it is `running`, not `not_run`
+
+#### Scenario: SCN-CI-063 (−) An unfinished workflow run is running though its created jobs passed
+- **GIVEN** a workflow run in progress whose only created check run passed
+- **WHEN** the CI is read
+- **THEN** it is `running`, and `green` once the run is completed
+
+#### Scenario: SCN-CI-064 (−) A required check that H has not reported is running, then not_run
+- **GIVEN** a base branch that requires the checks `build` and `lint`, and H with a passed `build` only
+- **WHEN** the CI is read within ten minutes of the hand-off, and an hour after it
+- **THEN** it is `running`, and then `not_run` naming `lint`
+
+#### Scenario: SCN-CI-065 (−) An unfinished GitLab pipeline with no job yet is running
+- **GIVEN** a GitLab hand-off commit whose pipeline is `created`, `pending` or `running` and lists no project job
+- **WHEN** the CI is read
+- **THEN** it is `running`, not `not_run`
+
+### Requirement: L4-CI-015 Commit statuses are read and only the harness's own job is ignored
+On GitHub the combined commit status of H SHALL be read as jobs, a failure or error red and pending running, except
+the harness's own `l4/*` contexts. Only the job `l4` of the workflow `l4.yml` SHALL be ignored as the harness's own.
+
+#### Scenario: SCN-CI-066 (−) A failed commit status makes H red
+- **GIVEN** a GitHub hand-off commit with a passed check run and a commit status `ci/jenkins` in state `failure`
+- **WHEN** the CI is read
+- **THEN** it is `failed`, naming `status / ci/jenkins`; a pending `l4/add-x` status is ignored
+
+#### Scenario: SCN-CI-067 (−) A failed job named l4 of another workflow is a project job
+- **GIVEN** a failed job `l4` of `tests.yml`, and a failed job `l4` of `l4.yml`
+- **WHEN** the CI is read
+- **THEN** the first is red and the second is ignored
+
+#### Scenario: SCN-CI-068 (−) A failed check run is not hidden behind a same-name check run of its suite
+- **GIVEN** a workflow run with one job and two check runs `Test Results` of one suite, one failed and one passed
+- **WHEN** the check runs of H are listed
+- **THEN** the failed one is listed and H is red
+

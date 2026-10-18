@@ -8,7 +8,8 @@ full text of each modified requirement; the blocks below state what the requirem
 
 ### Requirement: L4-ARC-008 Hand-off invariant
 At PASS the harness SHALL make one hand-off commit H on the unit branch, push it, mark the PR ready and record
-`pr.ready{head: H}` on the unit's lock ref; that record SHALL be H from then on. While the PR is ready, every commit
+`pr.ready{head: H}` on the unit's lock ref; that record SHALL be H from then on, read from the lock ref's pending files only, never from the branch tree. While
+the PR is ready, every commit
 after the recorded H SHALL be foreign whatever its author, committer or trailers, and a recorded H that is not an
 ancestor of the branch head SHALL be rewritten history; both send the unit back. A unit with no recorded H SHALL keep
 the identity rule.
@@ -44,6 +45,12 @@ the identity rule.
 - **THEN** the hand-off commit is found by its subject, the harness commit is not listed after it, and the person's
   commit is
 
+#### Scenario: SCN-YOLO-125 (−) A pr.ready written into the branch tree is not H
+- **GIVEN** a unit in review whose recorded H is on the lock ref, and a commit after H that adds a ledger file with
+  `pr.ready{head: X}`, dated far in the future, where X is that commit
+- **WHEN** the snapshot is read
+- **THEN** the recorded H is still the lock ref's, and the commit after H sends the unit back
+
 ### Requirement: L4-YOLO-008 The guarded merge
 With `merge: auto` the plan step SHALL merge a unit only when it is in review with a PASS, no open question and no
 review edge to take (L4-YOLO-041), the recorded H is the tip of the unit branch on `origin` and the head of the PR
@@ -59,14 +66,19 @@ allows it (L4-YOLO-042). It SHALL merge H by the method of `yolo.merge.method`; 
 ### Requirement: L4-YOLO-032 The plan merges a unit by squash unless configured to fast-forward
 With `yolo.merge.method: squash` the plan step SHALL call the forge's squash merge with `sha` the recorded H, never a
 branch tip it read, so a PR whose head moved is refused (`not_ready`). It SHALL compare the landed commit's parent with
-the target tip it read and its tree with H's tree, and SHALL record `unit.merged{head: H, merge_commit, method, raced,
-ci, ci_jobs}`. The other rules of L4-YOLO-032 stay.
+the target tip it read and its tree with H's tree, and SHALL record `unit.merged{head, merge_commit, method, raced,
+ci, ci_jobs}`, where `head` is H, or the head a person merged the PR at (`raced`). The other rules of L4-YOLO-032 stay.
 
 #### Scenario: SCN-YOLO-106 (+) The squash merge is pinned to the recorded H
 - **GIVEN** the unit of SCN-YOLO-105 and the default `squash`
 - **WHEN** the plan step merges
 - **THEN** the forge's merge call gets `sha` H, the merged PR's head is H, the landed commit's tree is H's tree, and
   `unit.merged{head: H}` names that commit as `merge_commit`
+
+#### Scenario: SCN-YOLO-124 (−) A PR a person merged at another head records that head
+- **GIVEN** a squash merge pinned to H, and a person who pushes X and merges the PR at X before the forge answers
+- **WHEN** the plan step merges
+- **THEN** the forge answers "merged", the merge is `raced`, and `unit.merged{head}` is X, not H
 
 ### Requirement: L4-YOLO-013 Stops, waits, cancel and resume
 A `merge: auto` plan SHALL wait with `merge_not_ready`, the unit and the detail, recorded once while the detail holds
@@ -118,10 +130,10 @@ guarded merge. The guarded merge SHALL itself be `not_ready` when the unit's rec
   nothing is pushed
 
 ### Requirement: L4-YOLO-042 The merge waits for the repository's CI on H
-Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H with the reader of the sweep's CI
-duty (L4-CI-012). `running`, `failed` and a read error SHALL be `not_ready` with a detail that names H and, for
-`failed`, the jobs; `green` and `preexisting` SHALL go on; `not_run` SHALL go on too unless `yolo.merge.require_ci` is true
-(L4-YOLO-043), when it SHALL be `not_ready` naming the fix. `unit.merged` SHALL record `ci`, and for `preexisting` the jobs as `ci_jobs`.
+Before `unit.merge_requested` the guarded merge SHALL read the repository's CI on H as the sweep does (L4-CI-012).
+`running`, `failed`, `blocked` (a cancelled or held job, whatever `yolo.merge.require_ci` says) and a read error SHALL
+be `not_ready`, naming H and the jobs. `green` and `preexisting` SHALL go on, and `not_run` too unless
+`yolo.merge.require_ci` is true (L4-YOLO-043). `unit.merged` SHALL record `ci`, and `ci_jobs` for `preexisting`.
 
 #### Scenario: SCN-YOLO-112 (−) CI still running on H holds the merge
 - **GIVEN** a unit in review with a PASS at its recorded H, whose job `test` is running on H
@@ -157,6 +169,23 @@ duty (L4-CI-012). `running`, `failed` and a read error SHALL be `not_ready` with
 - **GIVEN** a unit in review with a PASS at its recorded H, and a forge whose CI read fails with HTTP 502
 - **WHEN** the plan step runs
 - **THEN** nothing is merged, and the wait says that the repository CI of H could not be read
+
+#### Scenario: SCN-YOLO-121 (−) A cancelled job blocks the merge whatever require_ci says
+- **GIVEN** a unit in review with a PASS at its recorded H, whose only job `test` was cancelled
+- **WHEN** the plan step runs, with `yolo.merge.require_ci` true and false
+- **THEN** nothing is merged, no fix round is opened, and the wait names `test` and says to re-run it
+
+#### Scenario: SCN-YOLO-122 (−) CI that is not created yet waits in the window after the hand-off
+- **GIVEN** a unit in review with a PASS at its recorded H, no job of the project on H, and `pr.ready` recorded three
+  minutes ago
+- **WHEN** the plan step runs, and then again ten minutes after the hand-off
+- **THEN** the first step merges nothing and starts no run (the CI is still running), and the second merges on record
+  with `ci: not_run`
+
+#### Scenario: SCN-YOLO-123 (−) Every project job skipped is not_run
+- **GIVEN** a unit in review with a PASS at its recorded H whose only job was skipped, past the window
+- **WHEN** the plan step runs with the default configuration
+- **THEN** the unit is merged with `ci: not_run`, not `ci: green`
 
 #### Scenario: SCN-YOLO-119 (−) A job recorded as red on the base too, now red on H alone, names the retry
 - **GIVEN** a unit in review with a PASS at its recorded H, with `ci.preexisting{head: H, jobs: [lint]}` recorded, and

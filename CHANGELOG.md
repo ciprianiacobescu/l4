@@ -23,6 +23,16 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
   (L4-CI-012).
 
+- A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, a stale or
+  `action_required` run, a failed commit status, a workflow run still queued or in progress, an unfinished GitLab
+  pipeline and a required check that H has not reported are all read: cancelled or held jobs block the merge with
+  "re-run it", the others are red or running. "No CI" is final only ten minutes after the hand-off (L4-CI-013,
+  L4-CI-014, L4-CI-015). Only the harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general.
+- The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
+  Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
+  signed harness commits or a ref only the harness can write.
+- A PR that a person merged at another head while the plan held H is recorded with the head that was merged.
+
 ### Changed
 - A plan merge waits for the repository's CI on H when it is running, red or unreadable. The new key
   `yolo.merge.require_ci` (default `false`) decides only whether a hand-off commit that no CI ran on waits too. With
