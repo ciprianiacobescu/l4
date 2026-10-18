@@ -66,6 +66,10 @@ def open_questions(facts: "UnitFacts") -> tuple[str, ...]:
     return _unique(facts.open_blocking_questions, facts.verdicts_open)
 
 
+def _harness_reason(qid: str, title: str, why: str) -> str:
+    return f"{qid}: {title}" + (f" ({why})" if why else "")
+
+
 def reason(facts: "UnitFacts") -> str | None:
     """The cause the table shows, whole (the table cuts it): `halt_detail` for a stopped unit, the open question ids
     for `awaiting_human`, the fix unit's open questions for `fixing`, `until <retry_after>` for `waiting_capacity`,
@@ -74,7 +78,11 @@ def reason(facts: "UnitFacts") -> str | None:
     if phase in _STOPPED:
         return facts.halt_detail
     if phase == Phase.AWAITING_HUMAN.value:
-        return ", ".join(open_questions(facts) or facts.verdicts_invalid) or None
+        harness = {qid: (title, why) for qid, title, why in facts.harness_open}
+        ids = open_questions(facts) or facts.verdicts_invalid
+        if any(qid in harness for qid in ids):  # a check L4 could not decide: name it and its cause (L4-OPS-006)
+            return "; ".join(_harness_reason(qid, *harness[qid]) if qid in harness else qid for qid in ids)
+        return ", ".join(ids) or None
     if phase == Phase.FIXING.value and facts.fix_questions_open:
         return f"fix unit questions: {', '.join(facts.fix_questions_open)}"
     if phase == Phase.WAITING_CAPACITY.value and facts.retry_after:
@@ -89,6 +97,9 @@ def reason(facts: "UnitFacts") -> str | None:
 def _answer_step(facts: "UnitFacts", branch: str, questions_path: str) -> str:
     """The `awaiting_human` step: say what is wrong with an answer before asking for one."""
     where = f"{questions_path} on {branch}"
+    if facts.harness_invalid:
+        ids = ", ".join(facts.harness_invalid)
+        return f"fix the answer of {ids} in {where}: start it with accept or retry, then push"
     if facts.verdicts_invalid:
         ids = ", ".join(facts.verdicts_invalid)
         return f"fix the answer of {ids} in {where}: start it with accept or reject, then push"
@@ -101,6 +112,16 @@ def _answer_step(facts: "UnitFacts", branch: str, questions_path: str) -> str:
     ids = open_questions(facts)
     if not ids:
         return CONTINUES  # the answers are in: the next run reads them
+    harness = [qid for qid, _, _ in facts.harness_open if qid in ids]
+    if harness:
+        answers = "; ".join(
+            f'l4 questions answer {qid} --unit {facts.unit} --text "accept: <why>" (takes the claim on the evidence of '
+            f'the real run) or --text "retry: <note>" (runs the check again)'
+            for qid in harness
+        )
+        others = [qid for qid in ids if qid not in harness]
+        rest = f"; answer {', '.join(others)} in {where} (Status answered), then push" if others else ""
+        return f"{answers}{rest}"
     draft = f" ({', '.join(facts.drafts)}: the answer is written but Status is still open)" if facts.drafts else ""
     return f"answer {', '.join(ids)} in {where} (Status answered), then push{draft}"
 

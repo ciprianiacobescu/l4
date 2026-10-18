@@ -40,12 +40,13 @@ def commit_old(bench: Bench, *, text: str = OLD) -> tuple[str, str]:
 def record(
     bench: Bench, base: str, sha: str, *, proof: str = "red_assertion", test: str = OLD_ID, task: str = "0.9",
     ctx: dict | None = None, pre: bool = False, tdd_kind: str | None = None, sha_event: bool = True,
-    discriminating: bool = True,
+    discriminating: bool = True, via: str | None = None,
 ) -> None:  # fmt: skip
     ctx = ctx or {}
+    info = {"tests": [test], "proof": proof, "discriminating": [test] if discriminating else []}
     bench.writer.append(
         "task.red_ok", task=task, base=base, tests=[test], frozen=[], tdd=tdd_kind,
-        criteria={KNOWN: {"tests": [test], "proof": proof, "discriminating": [test] if discriminating else []}}, **ctx,
+        criteria={KNOWN: {**info, **({"via": via} if via else {})}}, **ctx,
     )  # fmt: skip
     if pre:
         bench.writer.append("criterion.pre_satisfied", task=task, criterion=KNOWN, tests=[test], **ctx)
@@ -63,7 +64,7 @@ def spy(monkeypatch):
     """Records what confirm_pre_satisfied receives; confirms everything it is given."""
     seen: list[dict] = []
 
-    def fake(wb, candidates):
+    def fake(wb, candidates, *, real=None):
         seen.append({c: list(t) for c, t in candidates.items()})
         return PreSatisfied({c: tuple(t) for c, t in candidates.items()})
 
@@ -75,7 +76,7 @@ def refuse(monkeypatch):
     monkeypatch.setattr(
         tdd,
         "confirm_pre_satisfied",
-        lambda wb, cands: PreSatisfied({}, {c: tuple(t) for c, t in cands.items()}, "unconfirmed"),
+        lambda wb, cands, *, real=None: PreSatisfied({}, {c: tuple(t) for c, t in cands.items()}, "unconfirmed"),
     )
 
 
@@ -298,3 +299,16 @@ def test_a_non_python_test_file_keeps_its_evidence_when_a_test_is_inserted_in_it
     assert _only_appended_since(wb, sha, "tip.test.ts")
     (wb.worktree / "tip.test.ts").write_text(old.replace("12.5", "99"))
     assert not _only_appended_since(wb, sha, "tip.test.ts")  # a changed line still voids it
+
+
+@pytest.mark.parametrize(("proof", "via"), [("zero_value", "human_override"), ("pre_satisfied", "not_applicable")])
+def test_an_override_or_not_applicable_proof_is_no_earlier_red(make_bench, spy, proof, via):
+    """L4-IMP-063, L4-IMP-062: a person's acceptance or a dependency check never saw a test fail, so it confirms
+    nothing for a later task (the criterion goes on to the zero-value run)."""
+    bench: Bench = make_bench([new_step()])
+    base, sha = commit_old(bench)
+    record(bench, base, sha, proof=proof, via=via)
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "already_satisfied", outcome.reason  # the (fake) zero-value run confirms
+    assert spy == [{KNOWN: [NEW_ID]}]  # nothing was taken from the record: the zero-value run got the candidate
+    assert bench.events("criterion.pre_satisfied")[-1].get("via") is None

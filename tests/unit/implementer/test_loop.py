@@ -293,3 +293,20 @@ def test_a_blocked_green_with_a_support_file_in_option_1_gets_the_note_that_offe
     assert "Harness note:" in text and "`conftest.py`" in text.split("Harness note:")[1]
     assert "l4 questions accept Q-NNN --unit add-discount-codes" in text
     assert "ignore file" in text
+
+
+def test_task_attempt_failed_carries_a_bounded_excerpt(make_bench):
+    """L4-IMP-064: the E lines and the deepest repository location of the failure, in the committed ledger."""
+    wreck = Step(
+        writes={
+            "tests/test_discount.py": TESTS_NEW,
+            "tests/test_pricing.py": "def test_total_adds_prices():\n    open('data/missing.csv')\n",
+        },
+        structured=result("red"),
+    )
+    bench = make_bench([wreck, red_step(), green_step()])
+    assert run_task(bench.wb, TASK).status == "done"
+    [failed] = bench.events("task.attempt_failed")
+    assert "FileNotFoundError" in failed["excerpt"]
+    assert len(failed["excerpt"]) <= 600 and "tests/test_pricing.py:2" in failed["excerpt"]
+    assert failed["excerpt_lines"] >= 3  # unchanged

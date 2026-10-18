@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.15 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.16 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -23,7 +23,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.15](#11-known-limits-of-0415)
+11. [Known limits of 0.4.16](#11-known-limits-of-0416)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -306,10 +306,17 @@ The important log lines:
 | `[l4] run: nothing to do: no unit has a next step` | No unit needs the harness. |
 | `[l4] cli: internal error: <type>: <message>` | The command stopped with an error (exit 1). |
 
+> **NOTE:** When `ci.upload_artifacts` is `false`, a run keeps no gate log. The committed ledger then holds the
+> evidence: `gate.finished` of a failing test gate with no report, no executed test or a collection error, and
+> `task.attempt_failed`, carry an `excerpt` of at most 600 characters (the `E` lines and the deepest repository
+> location, redacted). Read it with `l4 status --unit <unit> --events --type gate.finished`.
+
 ### 4.3 Read the run artifact
 
 On GitLab, each run keeps the folder `.l4-out/` as a job artifact for 1 week. On GitHub, each run keeps it as the
-artifact `l4-out` for 7 days, when `ci.upload_artifacts` is `true` (the default).
+artifact `l4-out` for 7 days, when `ci.upload_artifacts` is `true` (the default). When it is `false`, the run says so
+in the last log line: `artefacts: …/ (not uploaded: ci.upload_artifacts is false; the ledger's gate.finished and
+task.attempt_failed events carry the excerpts)`.
 
 > **NOTE:** The GitHub workflow of harness 0.2.0 uploads no artifact, because its upload step skips the hidden folder.
 > Run `l4 upgrade` with harness 0.2.1 or later to correct the workflow. Until then, use the annotation and the job log
@@ -647,6 +654,9 @@ and `l4 restart` start a run for you, unless you add `--no-run`.
 - The verdict is `NEEDS_HUMAN`. The judge cannot decide whether a criterion is met, or a finding or a hold needs a
   decision. These are **verdict questions**.
 
+- A check that L4 could not decide (a **harness question**, kind `harness`). The agent was not charged: see the
+  procedure below.
+
 A question of a fix unit does not move the unit to `awaiting_human`. The unit stays in `fixing` with exit 11 and the
 labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you: a human answer (fix unit `<name>`)``.
 `l4 plan` says `fixing: fix unit questions open: …`.
@@ -775,6 +785,31 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - Answer all open verdict questions. The unit moves only when all of them have an answer. `l4 plan` then shows
   `verdicts answered: Q-NNN`.
 
+**A harness question: a check L4 could not decide** (`- **Kind:** harness`; the title reads `Task <k>: the
+<pre-satisfied | run (b) zero-value | test-at-red> check could not decide`):
+
+- It means the **agent was not charged**. L4 ran a check on the agent's tests (the zero-value run, the base run, or the
+  run at the red commit), the check did not run the tests (for example a module failed to import in the varied code,
+  and pytest ran no test), and a run that cannot decide is not a failure of the agent. No attempt was used, no
+  profile escalated, and the step's changes were discarded.
+- Read the cause. `l4 status --unit <unit>` prints `Cause: Q-NNN: <title> (<reason>)` and `Next:` with both answers.
+  The ledger holds the evidence: `l4 status --unit <unit> --events --type check.inconclusive` (the reason, the runs
+  that were made, the functions that were kept real, and the `excerpt` of the failing run in `gate.finished`).
+- Answer with the command, and start the answer with one of two words:
+  - `l4 questions answer Q-NNN --unit <unit> --text "retry: <note>"` runs the check again. Use it after you upgraded L4
+    (`l4 upgrade`) or fixed the cause. The note reaches the agent as an answer.
+  - `l4 questions answer Q-NNN --unit <unit> --text "accept: <why>"` takes the claim on the evidence of the real run.
+    The next run does the red step again (one more agent step); when the same check is inconclusive again for the
+    criteria the question names and the tests it named are the ones the check sees again, they count, and the ledger
+    records `via: human_override` (`agent_override` for an agent's answer) with the question and the digest of your
+    answer. A later different test of the criterion is not covered: the unit is held again. A check that now shows a criterion not to discriminate still fails the attempt. The
+    verifier and the judge see that the claim was accepted.
+  - `l4 questions accept` is refused for this kind, and so is an answer that starts with another word. A `dismissed`
+    Status reads as `retry`.
+- Only a person answers, unless `clarifier.answer_by_agents` is `true` on the base branch. The clarifier never takes
+  a harness question. While it is open, `l4 plan` says `harness check inconclusive: Q-NNN`, and a delivery plan waits
+  for the unit without starting the next run.
+
 **The harness does not read these:**
 
 - An answer with the Status `open`. The log tells you: `Q-NNN has an answer but its Status is still open`.
@@ -783,6 +818,8 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - The Status column of the index table. The harness writes that table.
 - An `answered` with no text, or an `accepted` with no suggestion.
 - A verdict answer that does not start with `accept` or `reject`.
+- A harness answer that does not start with `accept` or `retry`: the plan says `harness answer must start with accept
+  or retry: Q-NNN`.
 - Answers on `<base>`, and comments on the PR.
 
 ### 7.2 `halted`
@@ -1215,7 +1252,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.15 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.16 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1280,7 +1317,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.15 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.16 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -1614,7 +1651,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.15. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.16. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -1633,7 +1670,7 @@ with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`
 | `.l4/config.yaml` | Project root, on `<base>` | Yes. Run `l4 upgrade` after you change `ci.*`, `forge.base_branch`, `forge.branch_prefix`, `forge.token_env`, `roles` or `profiles`. |
 | `.github/workflows/l4.yml`, `.l4/ci/l4.gitlab-ci.yml` | Project | **No.** `l4 upgrade` writes them. |
 
-## 11. Known limits of 0.4.15
+## 11. Known limits of 0.4.16
 
 These limits make operation more difficult. Know them before you start.
 

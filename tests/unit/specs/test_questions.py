@@ -53,8 +53,8 @@ def test_a_new_file_follows_the_spec_grammar(tmp_path: Path):
         'How to answer: write under "### Answer" and set **Status** to `answered`.\n'
         "To accept the clarifier's suggestion as-is, set **Status** to `accepted`.\n"
         "Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded\n"
-        "Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with "
-        "`accept` or\n`reject`, then give your reason.\n"
+        "Kind values: technical · product · ambiguous · verdict · harness. For a `verdict` question, start the answer "
+        "with `accept` or\n`reject`, then give your reason; for a `harness` question, with `accept` or `retry`.\n"
         "Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->\n\n"
         "<!-- l4:index:start -->\n"
         "| ID | Status | Blocking | Kind | Question |\n"

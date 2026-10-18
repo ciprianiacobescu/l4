@@ -14,7 +14,7 @@ M1: implementer-tdd-loop 2.2 for languages other than Python.
 import ast
 import hashlib
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,15 +28,27 @@ from l4.fsutil import (
     unlink_matching_inside,
     write_inside,
 )
+from l4.gates.collection import LOCATION, called_names, in_repository
+from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
-from l4.implementer.stubs import _is_inside, has_stub, zero_value_variant
+from l4.implementer import variant
+from l4.implementer.stubs import _is_inside, has_stub, import_time_names, zero_value_plan
+from l4.implementer.variant import VariantRun
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
 PROOF_RED_ASSERTION = "red_assertion"
+VIA_NOT_APPLICABLE = (
+    "not_applicable"  # read in old ledgers only; since round 3 nothing writes it as a pass (L4-IMP-062)
+)
+NO_PROJECT_IMPORT = "its tests import no project module: the zero-value check cannot judge them"
+# every variant run goes on past a collection error (L4-IMP-060): a variant that breaks one module's import, or a base
+# run that sets an added module aside, must not stop pytest before it runs the others (harmless for a gate that is not
+# pytest: it ignores the variable)
+KEEP_GOING = {"PYTEST_ADDOPTS": "--continue-on-collection-errors"}
 _ROOTS = ("", "src")  # where an import is always looked up inside the repository
 _PROJECT_FILES = ("pyproject.toml", "setup.py", "setup.cfg")  # their directory is an import root (L4-IMP-025)
 
@@ -68,6 +80,26 @@ def _already_varied(target: Path, seen: set[tuple[int, int]]) -> bool:
         return True
     seen.add(key)
     return False
+
+
+MAX_KEEP_RERUNS = 2  # a zero-value run is made again at most twice, keeping the functions a traceback names
+MAX_KEPT = 50  # functions kept real by tracebacks, per check
+
+
+class ZeroScope(list[str]):
+    """What `zero_values_in_place` yields: the paths that were varied (the list itself, and `varied`), the functions
+    each answers a zero value for (`zeroed`) and the ones kept real because their annotation says they return a
+    callable or a class (`kept`), both path -> qualnames."""
+
+    def __init__(self, varied: Sequence[str] = (), zeroed: Mapping[str, tuple[str, ...]] | None = None,
+                 kept: Mapping[str, tuple[str, ...]] | None = None) -> None:  # fmt: skip
+        super().__init__(varied)
+        self.zeroed: dict[str, tuple[str, ...]] = dict(zeroed or {})
+        self.kept: dict[str, tuple[str, ...]] = dict(kept or {})
+
+    @property
+    def varied(self) -> list[str]:
+        return list(self)
 
 
 MAX_VARIED_BYTES = 8 * 1024 * 1024  # a source file or a report the harness varies, keeps or puts back
@@ -141,15 +173,40 @@ def _restore(wb: Workbench, originals: Mapping[str, tuple[bytes, int]], where: s
             wb.refused_write(UnsafeFile(f"{rel} differs after the restore"), path=rel, where=where)
 
 
+def _applied_names(wb: Workbench, paths: Sequence[str]) -> frozenset[str]:
+    """The names the varied modules apply or call while they are imported (`import_time_names`), over all of them."""
+    names: set[str] = set()
+    for relative in paths:
+        rel = _canonical(wb, relative)
+        read = _read(wb, rel) if rel is not None else None
+        if read is not None:
+            try:
+                names |= import_time_names(read[0].decode("utf-8"))
+            except UnicodeDecodeError:
+                continue
+    return frozenset(names)
+
+
 @contextmanager
 def zero_values_in_place(
-    wb: Workbench, paths: Sequence[str], *, public: bool, where: str = "zero-value run"
-) -> Iterator[list[str]]:
+    wb: Workbench,
+    paths: Sequence[str],
+    *,
+    public: bool,
+    keep: Mapping[str, Collection[str]] | None = None,
+    annotation: bool = True,
+    where: str = "zero-value run",
+) -> Iterator[ZeroScope]:
     """Replace the zero-value variants of `paths` (relative to the worktree) for the duration of the block and
-    yield the paths that were varied. `public`: every public function and method; else only the red stubs. Every
-    target is taken by its real path inside the worktree, resolved before the gate (L4-SEC-020 part c)."""
+    yield the scope (the paths that were varied). `public`: every public function and method; else only the red
+    stubs. `keep`: path -> qualnames of functions that stay real (L4-IMP-061); `annotation` False leaves out the keep of
+    callable-returning functions the varied modules apply at import time. Every target is taken by its real path inside
+    the worktree, resolved before the gate (L4-SEC-020 part c)."""
     originals: dict[str, tuple[bytes, int]] = {}
+    zeroed: dict[str, tuple[str, ...]] = {}
+    kept: dict[str, tuple[str, ...]] = {}
     seen: set[tuple[int, int]] = set()
+    applied = _applied_names(wb, paths) if public and annotation else frozenset()
     try:
         for relative in paths:
             rel = _canonical(wb, relative)
@@ -162,15 +219,59 @@ def zero_values_in_place(
                 continue
             data, mode = read
             try:
-                variant = zero_value_variant(data.decode("utf-8"), public=public)
+                plan = zero_value_plan(
+                    data.decode("utf-8"), public=public, keep=(keep or {}).get(relative, ()), applied=applied
+                )
             except (SyntaxError, UnicodeDecodeError):
                 continue
             originals[rel] = (data, mode)
-            _put(wb, rel, variant.encode("utf-8"), mode, where)
+            zeroed[relative], kept[relative] = plan.zeroed, plan.kept
+            _put(wb, rel, plan.source.encode("utf-8"), mode, where)
             _drop_bytecode(wb.worktree, rel)
-        yield list(originals)
+        yield ZeroScope(list(originals), zeroed, kept)
     finally:
         _restore(wb, originals, where)
+
+
+def own_test_files(wb: Workbench) -> frozenset[str]:
+    """The test and support files the unit added or changed: the worktree's changes and the commits since the unit
+    base. A fixture assertion in one of them is the unit's own check of a production answer (L4-IMP-002)."""
+    changed = set(wb.changed_files())
+    base = unit_base(wb)
+    if base is not None:
+        done = wb.git.run("diff", "--name-only", "--no-renames", "--diff-filter=AM", base, "HEAD", check=False)
+        changed |= set(done.stdout.splitlines())
+    return frozenset(p for p in changed if _is_test_path(wb, p))
+
+
+@dataclass(frozen=True)
+class ZeroRun:
+    gate: GateResult  # the last gate run
+    run: VariantRun  # that run, classified against the real run
+    kept: dict[str, tuple[str, ...]]  # path -> qualnames the tracebacks asked to keep real
+    reruns: int
+    own: frozenset[str] = frozenset()  # the test and support files the unit added or changed (D6)
+    proved: frozenset[str] = (
+        frozenset()
+    )  # candidates that failed by assertion in ANY pass (H1: more code zeroed still proves)
+
+
+def _inconclusive_texts(run: VariantRun, candidates: Collection[str], real: TestReport | None,
+                        own: frozenset[str]) -> tuple[list[str], list[str]]:  # fmt: skip
+    """What an inconclusive run shows of its cause: the tracebacks of its new collection errors and of the candidates'
+    setup assertions outside the unit's files. Empty when no candidate is inconclusive."""
+    if run.report is None:
+        return [], []
+    undecided = [t for t in candidates if variant.test_outcome(run, t, real, own)[0] == "inconclusive"]
+    if not undecided:
+        return [], []
+    collection = [run.report.collection_details.get(e, "") for e in run.new_errors]
+    setup = [
+        case.detail
+        for t in undecided
+        if (case := run.report.tests.get(t)) is not None and case.when == "setup" and case.failure_kind == "assertion"
+    ]
+    return collection, setup
 
 
 def _keep_reports(wb: Workbench, where: str) -> dict[str, tuple[bytes, int]]:
@@ -190,18 +291,114 @@ def _put_reports_back(wb: Workbench, kept: Mapping[str, tuple[bytes, int]], wher
 
 
 def zeroed_run(
-    wb: Workbench, name: str, paths: Sequence[str], *, public: bool, extra_env: Mapping[str, str] | None = None
-) -> GateResult | None:
-    """The test gate against the variants; None when no path could be varied (nothing to decide). The reports the gate
+    wb: Workbench,
+    name: str,
+    paths: Sequence[str],
+    *,
+    public: bool,
+    real: TestReport | None = None,
+    candidates: Collection[str] = (),
+    extra_env: Mapping[str, str] | None = None,
+) -> ZeroRun | None:
+    """The test gate against the variants, classified against `real`; None when no path could be varied (nothing to
+    decide). Only in `public` mode: while a candidate is inconclusive and a run's tracebacks name zeroed functions,
+    those are kept real and the run is made again, at most `MAX_KEEP_RERUNS` times (L4-IMP-061). The reports the gate
     writes are put back as run (a) left them: the published report must describe the real code, not the variants."""
-    kept = _keep_reports(wb, name)
+    saved = _keep_reports(wb, name)
+    keep: dict[str, tuple[str, ...]] = {}
+    own = own_test_files(wb)
+    reruns = 0
+    proved: set[str] = set()
+    annotation_kept = False
     try:
-        with zero_values_in_place(wb, paths, public=public, where=name) as varied:
-            if not varied:
-                return None
-            return wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
+        while True:
+            with zero_values_in_place(wb, paths, public=public, keep=keep, where=name) as scope:
+                if not scope:
+                    return None
+                gate = wb.run_gate(
+                    name,
+                    wb.cfg.gates.test.command,
+                    reports=wb.cfg.gates.test.reports,
+                    extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
+                )
+            run = variant.classify(gate, real, redact=wb.redactor.redact_text)
+            if reruns == 0 and any(scope.kept.values()):
+                annotation_kept = True
+                wb.emit("zero.kept", gate=name, rerun=0, cause="annotation", functions=_listed(scope.kept))
+            proved |= _proofs(run, candidates, real, own)
+            result = ZeroRun(gate, run, dict(keep), reruns, own, frozenset(proved))
+            if not public or reruns >= MAX_KEEP_RERUNS:
+                return _with_plain_pass(wb, name, paths, real, candidates, own, result, annotation_kept)
+            collection, setup = _inconclusive_texts(run, candidates, real, own)
+            from_collection = called_names("\n".join(collection)) | _failing_module_calls(wb, collection, own)
+            from_setup = called_names("\n".join(setup))
+            room = MAX_KEPT - sum(len(v) for v in keep.values())
+            wanted = [
+                (path, qual, qual.rsplit(".", 1)[-1] in from_collection)
+                for path, quals in scope.zeroed.items()
+                for qual in quals
+                if qual.rsplit(".", 1)[-1] in from_collection | from_setup and qual not in keep.get(path, ())
+            ][: max(room, 0)]
+            if not wanted:
+                return _with_plain_pass(wb, name, paths, real, candidates, own, result, annotation_kept)
+            for path, qual, _ in wanted:
+                keep[path] = (*keep.get(path, ()), qual)
+            reruns += 1
+            cause = "collection" if any(by_collection for _, _, by_collection in wanted) else "setup"
+            wb.emit("zero.kept", gate=name, rerun=reruns, cause=cause,
+                    functions=[f"{path}::{qual}" for path, qual, _ in wanted])  # fmt: skip
     finally:
-        _put_reports_back(wb, kept, name)
+        _put_reports_back(wb, saved, name)
+
+
+def _proofs(run: VariantRun, candidates: Collection[str], real: TestReport | None, own: frozenset[str]) -> set[str]:
+    return {t for t in candidates if variant.test_outcome(run, t, real, own)[0] == "proof"}
+
+
+def _with_plain_pass(wb: Workbench, name: str, paths: Sequence[str], real: TestReport | None,
+                     candidates: Collection[str], own: frozenset[str], result: ZeroRun,
+                     annotation_kept: bool) -> ZeroRun:  # fmt: skip
+    """H1: a function kept real because its annotation says it returns a callable and a varied module applies it can
+    be the very subject of a candidate (a decorator factory under test). While a candidate has no proof and the first
+    pass kept something by annotation, one more pass with nothing kept by annotation counts for the proofs only: a
+    test that fails by assertion with more code zeroed is still a zero-value failure, as in 0.4.15."""
+    if not annotation_kept or all(t in result.proved for t in candidates):
+        return result
+    with zero_values_in_place(wb, paths, public=True, keep=result.kept, annotation=False, where=name) as scope:
+        if not scope:
+            return result
+        gate = wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING)
+    run = variant.classify(gate, real, redact=wb.redactor.redact_text)
+    proved = result.proved | _proofs(run, candidates, real, own)
+    return ZeroRun(result.gate, result.run, result.kept, result.reruns, own, frozenset(proved))
+
+
+def _failing_module_calls(
+    wb: Workbench, tracebacks: Sequence[str], own: frozenset[str] = frozenset()
+) -> frozenset[str]:
+    """The names called by module-level statements of the modules a collection traceback passes through, production and
+    pre-existing test-support modules alike but not the unit's own files (`own`): the failing line often reads a value
+    an earlier statement computed (`_CFG = load()` then `RATE = _CFG["rate"]`)."""
+    names: set[str] = set()
+    for text in tracebacks:
+        for line in text.splitlines():
+            found = LOCATION.match(line.strip())
+            if found is None or not in_repository(found.group("path")) or not found.group("path").endswith(".py"):
+                continue
+            relative = found.group("path")
+            rel = _canonical(wb, relative)
+            read = _read(wb, rel) if rel is not None and relative not in own else None
+            if read is None:
+                continue
+            try:
+                names |= import_time_names(read[0].decode("utf-8"))
+            except UnicodeDecodeError:
+                continue
+    return frozenset(names)
+
+
+def _listed(by_path: Mapping[str, Sequence[str]]) -> list[str]:
+    return [f"{path}::{qual}" for path, quals in by_path.items() for qual in quals][:MAX_KEPT]
 
 
 @contextmanager
@@ -240,6 +437,12 @@ def red_code_in_place(
         _restore(wb, originals, where)
 
 
+@dataclass(frozen=True)
+class AtRed:
+    failing_not: list[str]  # the ids that do not fail by the code of the red commit
+    inconclusive: str = ""  # the run could not decide (no report, no test executed): why
+
+
 def fails_at_red(
     wb: Workbench,
     red_sha: str,
@@ -248,15 +451,22 @@ def fails_at_red(
     *,
     name: str = "test-at-red",
     extra_env: Mapping[str, str] | None = None,
-) -> list[str]:
+    real: TestReport | None = None,
+) -> AtRed:
     """Decision 7: the test gate runs against the red commit's production code with the corrected tests, and the ids of
     `ids` that do not fail there are returned: a corrected test that passes against the code the red phase started from
     no longer discriminates. Fail closed: an id counts as failing only when the report lists it as failed or error, so
-    a skipped id, one the report does not hold (its module did not import the red code) and every id of a run that
-    wrote no report are returned. Empty: every id still fails at red. The reports the gate writes are put back as the
-    real run left them."""
-    tests = run_with_code_of(wb, red_sha, paths, name=name, extra_env=extra_env)
-    return [i for i in ids if i not in tests or tests[i].status not in ("failed", "error")]
+    a skipped id and one the report does not hold (its module did not import the red code: a corrected test that
+    imports a module only green added is no proof of anything) are returned. A run that wrote no report or ran no test
+    decides nothing: `inconclusive` says why, and nothing is returned as failing_not (L4-IMP-060). The reports the
+    gate writes are put back as the real run left them."""
+    gate = run_with_code_of(wb, red_sha, paths, name=name, extra_env=extra_env)
+    run = variant.classify(gate, real, redact=wb.redactor.redact_text)
+    if run.reason:
+        return AtRed([], run.reason)
+    assert run.report is not None
+    tests = run.report.tests
+    return AtRed([i for i in ids if i not in tests or tests[i].status not in ("failed", "error")])
 
 
 def run_with_code_of(
@@ -266,16 +476,22 @@ def run_with_code_of(
     *,
     name: str,
     extra_env: Mapping[str, str] | None = None,
-) -> dict[str, TestCase]:
-    """The test gate's cases with the production files swapped to their content at `sha` (`red_code_in_place`); empty
-    when the run wrote no report. The reports the gate writes are put back as the real run left them."""
+) -> GateResult:
+    """The test gate with the production files swapped to their content at `sha` (`red_code_in_place`), going on past
+    collection errors; the gate result tells no report, no test and a missing id apart. The reports the gate writes
+    are put back as the real run left them."""
     kept = _keep_reports(wb, name)
     try:
         with red_code_in_place(wb, sha, paths, where=name):
-            gate = wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
+            gate = wb.run_gate(
+                name,
+                wb.cfg.gates.test.command,
+                reports=wb.cfg.gates.test.reports,
+                extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
+            )
     finally:
         _put_reports_back(wb, kept, name)
-    return dict(gate.report.tests) if gate.report is not None else {}
+    return gate
 
 
 @dataclass(frozen=True)
@@ -283,6 +499,7 @@ class Vacuity:
     proofs: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> tests that fail on the zero values
     vacuous: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> its tests, none of which does
     reason: str = ""  # run (b) could not decide
+    inconclusive: dict[str, str] = field(default_factory=dict)  # criterion -> why the run did not decide it
 
     @property
     def message(self) -> str:
@@ -296,7 +513,11 @@ class Vacuity:
             + self._zero_answer_remedy(criterion)
             for criterion, tests in sorted(self.vacuous.items())
         ]
-        return "vacuous: " + "; ".join(parts) if parts else ""
+        text = "vacuous: " + "; ".join(parts) if parts else ""
+        if self.inconclusive:
+            listed = ", ".join(f"{c} ({why})" for c, why in sorted(self.inconclusive.items()))
+            text = f"{text}; inconclusive: {listed}" if text else f"inconclusive: {listed}"
+        return text
 
     def _zero_answer_remedy(self, criterion: str) -> str:
         """How a criterion whose scenario expects the zero value itself (an empty cart counts 0) gets a test that
@@ -317,20 +538,31 @@ class Vacuity:
         return text
 
 
-def vacuity_check(wb: Workbench, stub_files: Sequence[str], tracing: Mapping[str, Sequence[str]]) -> Vacuity:
+def vacuity_check(
+    wb: Workbench, stub_files: Sequence[str], tracing: Mapping[str, Sequence[str]], *, real: TestReport | None = None
+) -> Vacuity:
     """Run (b): with the red stubs answering their zero value, each criterion in `tracing` (criterion -> the new
-    tests that trace it, pre-satisfied ones left out) needs one test that fails."""
+    tests that trace it, pre-satisfied ones left out) needs one test that fails by assertion. A test the run did not
+    run is inconclusive, never vacuous (L4-IMP-060)."""
     if not tracing:
         return Vacuity()
-    gate = zeroed_run(wb, "test-zero", stub_files, public=False)
-    if gate is None or gate.report is None:
-        return Vacuity(reason=f"the zero-value run produced no readable report ({gate.reason if gate else 'no stub'})")
+    candidates = sorted({t for tests in tracing.values() for t in tests})
+    zero = zeroed_run(wb, "test-zero", stub_files, public=False, real=real, candidates=candidates)
+    if zero is None:
+        return Vacuity(reason="the zero-value run produced no readable report (no stub)")
     proofs: dict[str, tuple[str, ...]] = {}
     vacuous: dict[str, tuple[str, ...]] = {}
-    for criterion, tests in tracing.items():
-        failing = tuple(t for t in tests if fails_on_zero(gate.report.tests.get(t)))
-        (proofs if failing else vacuous)[criterion] = failing or tuple(tests)
-    return Vacuity(proofs, vacuous)
+    inconclusive: dict[str, str] = {}
+    for criterion, result in variant.judge(
+        zero.run, tracing, real, zero.own, redact=wb.redactor.redact_text, proved=zero.proved
+    ).items():
+        if result.state == "confirmed":
+            proofs[criterion] = result.tests
+        elif result.state == "refuted":
+            vacuous[criterion] = result.tests
+        else:
+            inconclusive[criterion] = result.reason
+    return Vacuity(proofs, vacuous, inconclusive=inconclusive)
 
 
 # --- pre-satisfied criteria (M13-G3) ---------------------------------------------------------------------------------
@@ -339,19 +571,26 @@ def vacuity_check(wb: Workbench, stub_files: Sequence[str], tracing: Mapping[str
 @dataclass(frozen=True)
 class PreSatisfied:
     confirmed: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> tests that discriminate
-    unconfirmed: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    unconfirmed: dict[str, tuple[str, ...]] = field(default_factory=dict)  # refuted: the run showed no test does
     reason: str = ""
+    inconclusive: dict[str, str] = field(default_factory=dict)  # criterion -> why the run could not decide it
+    not_applicable: dict[str, tuple[str, ...]] = field(default_factory=dict)  # criterion -> its dependency-only tests
+    kept: dict[str, tuple[str, ...]] = field(default_factory=dict)  # path -> functions the run kept real
+    reruns: int = 0
 
     @property
     def message(self) -> str:
-        if not self.unconfirmed:
-            return ""
-        listed = ", ".join(sorted(self.unconfirmed))
-        why = self.reason or (
-            "its tests still pass, or fail by an error rather than an assertion, "
-            "when the functions they use answer the zero value"
-        )
-        return f"not discriminating: {listed} ({why})"
+        parts = []
+        if self.unconfirmed:
+            listed = ", ".join(sorted(self.unconfirmed))
+            why = self.reason or (
+                "its tests still pass, or fail by an error rather than an assertion, "
+                "when the functions they use answer the zero value"
+            )
+            parts.append(f"not discriminating: {listed} ({why})")
+        if self.inconclusive:
+            parts.append("inconclusive: " + ", ".join(f"{c} ({why})" for c, why in sorted(self.inconclusive.items())))
+        return "; ".join(parts)
 
 
 def _matches(globs: Sequence[str], path: str) -> bool:
@@ -514,39 +753,71 @@ def no_assertion_failure(report: TestReport, tracing: Mapping[str, Sequence[str]
     )
 
 
+def _criterion_texts(wb: Workbench) -> dict[str, str]:
+    """criterion id -> its text (alias and scenario): what a dependency check must name (L4-IMP-062)."""
+    try:
+        return {c.id: f"{c.alias} {c.text}" for c in wb.provider.criteria(wb.ref)}
+    except Exception:  # noqa: BLE001 - a spec that cannot be read gives no criterion text: nothing is not applicable
+        return {}
+
+
 def confirm_pre_satisfied(
-    wb: Workbench, candidates: Mapping[str, Sequence[str]], *, extra_env: Mapping[str, str] | None = None
+    wb: Workbench,
+    candidates: Mapping[str, Sequence[str]],
+    *,
+    real: TestReport | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> PreSatisfied:
-    """`candidates`: criterion -> its new tests, all of which passed in run (a). With every public function of the
-    modules those tests import, and of the modules changed since the unit base, answering its zero value, at least
-    one of a criterion's tests must fail, otherwise the criterion is not discriminating."""
+    """`candidates`: criterion -> its new tests, all of which passed in run (a) (`real`). With every public function of
+    the modules those tests import, and of the modules changed since the unit base, answering its zero value, at least
+    one of a criterion's tests must fail by assertion, otherwise the criterion is not discriminating (refuted). A run
+    that could not run the tests decides nothing: the criterion is inconclusive (L4-IMP-060). A criterion whose every
+    test checks a dependency and no project code is held with a harness question, never passed (L4-IMP-062)."""
+    from l4.implementer.depcheck import dependency_only
+
     if not candidates:
         return PreSatisfied()
-    everything = sorted({t for tests in candidates.values() for t in tests})
+    roots = import_roots(wb)
+    texts = _criterion_texts(wb)
+    # Round 3: `dependency_only` is only a CLASSIFIER, never a safety rule. A criterion whose every test it accepts goes
+    # to a person (inconclusive: the existing hold with a `harness` question); every other criterion with no project
+    # import is refuted as on 0.4.15. Neither outcome is a pass, so the heuristic's precision decides which message a
+    # person sees, not whether an agent's test is believed. Nothing is ever recorded `not_applicable` any more.
+    dependency = {
+        c: NO_PROJECT_IMPORT
+        for c, t in candidates.items()
+        if t and c in texts and all(dependency_only(wb, i, roots, texts[c]) for i in t)
+    }
+    rest = {c: tuple(t) for c, t in candidates.items() if c not in dependency}
+    if not rest:
+        return PreSatisfied(inconclusive=dependency)
+    everything = sorted({t for tests in rest.values() for t in tests})
     scope = sorted(imported_modules(wb, everything) | _changed_modules(wb))
-    unconfirmed = {c: tuple(t) for c, t in candidates.items()}
     if not scope:
-        return PreSatisfied({}, unconfirmed, "no project source module is imported by those tests")
-    gate = zeroed_run(wb, "test-presatisfied", scope, public=True, extra_env=extra_env)
-    if gate is None or gate.report is None:
+        return PreSatisfied({}, rest, "no project source module is imported by those tests", inconclusive=dependency)
+    zero = zeroed_run(
+        wb, "test-presatisfied", scope, public=True, real=real, candidates=everything, extra_env=extra_env
+    )
+    if zero is None:
         return PreSatisfied(
             {},
-            unconfirmed,
-            f"the zero-value run produced no readable report ({gate.reason if gate else 'nothing to vary'})",
+            rest,
+            "the zero-value run produced no readable report (nothing to vary)",
+            inconclusive=dependency,
         )
-    return _evaluate(gate.report, candidates)
-
-
-def _evaluate(report: TestReport, candidates: Mapping[str, Sequence[str]]) -> PreSatisfied:
     confirmed: dict[str, tuple[str, ...]] = {}
-    unconfirmed: dict[str, tuple[str, ...]] = {}
-    for criterion, tests in candidates.items():
-        failing = tuple(t for t in tests if fails_on_zero(report.tests.get(t)))
-        if failing:
-            confirmed[criterion] = failing
+    refuted: dict[str, tuple[str, ...]] = {}
+    inconclusive: dict[str, str] = dict(dependency)
+    for criterion, result in variant.judge(
+        zero.run, rest, real, zero.own, redact=wb.redactor.redact_text, proved=zero.proved
+    ).items():
+        if result.state == "confirmed":
+            confirmed[criterion] = result.tests
+        elif result.state == "refuted":
+            refuted[criterion] = result.tests
         else:
-            unconfirmed[criterion] = tuple(tests)
-    return PreSatisfied(confirmed, unconfirmed)
+            inconclusive[criterion] = result.reason
+    return PreSatisfied(confirmed, refuted, "", inconclusive, {}, dict(zero.kept), zero.reruns)
 
 
 # --- tests no red record covers (M1.11 W6, decision 8) -------------------------------------------------------------
@@ -557,12 +828,15 @@ class ExtraRun:
     """The verifier's decision on tests that people or a test chore wrote: `accepted` maps a test id to `zero_value` (it
     failed by assertion when the project's functions answered their zero value) or `base` (it failed by assertion
     against the unit base's production code); `rejected` are the ids that did neither; `reasons` say why a rejected id
-    that did fail on the base is no proof; `runs` is the number of gate runs made (at most two)."""
+    that did fail on the base is no proof; `inconclusive` are the rejected ids a run could not decide (their module did
+    not import there, no test ran), with why (L4-VER-050); `runs` is the number of gate runs made (the zero-value run
+    and its keep reruns, and the run on the base: at most four)."""
 
     accepted: dict[str, str] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
     runs: int = 0
     reasons: dict[str, str] = field(default_factory=dict)
+    inconclusive: dict[str, str] = field(default_factory=dict)
 
 
 ERROR_AT_BASE = "fails on the base only with an error, not by assertion"
@@ -574,42 +848,52 @@ def production_changes(wb: Workbench, base_sha: str) -> list[str]:
     return sorted(p for p in done.stdout.splitlines() if p.endswith(".py") and not _is_test_path(wb, p))
 
 
-def discriminate_extra(wb: Workbench, tests: Sequence[str], base_sha: str) -> ExtraRun:
+def discriminate_extra(
+    wb: Workbench, tests: Sequence[str], base_sha: str, *, real: TestReport | None = None
+) -> ExtraRun:
     """Does a test that no red record covers look at the answer? Run 1: the project's functions answer their zero value
     (`zeroed_run`): a test that fails by assertion is accepted. Run 2, for the ones still passing: the unit's changed
     production files are swapped to the unit base (`red_code_in_place`): a test that fails there by assertion is
-    accepted. Fail closed: in both runs an id counts as failing only when the report lists it as failed by assertion
-    (`fails_on_zero`). An error at the base shows that the test reached the unit's new code (a module or a function the
-    base does not have), not that it checked the answer (m1.11 review: a test with no assertion on the answer that only
-    imports the new module failed there and was accepted); like a module that does not import at the base, a skipped
-    id, an id the report lacks and a run that wrote no report, it is no proof. At most two gate runs, none when there is
-    nothing to run."""
+    accepted. Both runs are classified against `real` (L4-IMP-060): an error at the base shows that the test reached
+    the unit's new code (a module or a function the base does not have), not that it checked the answer (m1.11 review:
+    a test with no assertion on the answer that only imports the new module failed there and was accepted), so it is
+    no proof; a test a run could not run (its module did not import, no test executed, no report) is `inconclusive`
+    when the zero-value run could not decide it and the base run did not accept it, and is no proof otherwise. At most
+    two gate runs and two keep reruns of the first, none when there is nothing to run."""
     wanted = sorted(set(tests))
     accepted: dict[str, str] = {}
+    undecided: dict[str, str] = {}
     runs = 0
+    redact = wb.redactor.redact_text
     scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
-    zero = zeroed_run(wb, "test-extra-zero", scope, public=True) if scope else None
+    zero = zeroed_run(wb, "test-extra-zero", scope, public=True, real=real, candidates=wanted) if scope else None
+    own = zero.own if zero is not None else own_test_files(wb)
     if zero is not None:
-        runs += 1
-        if zero.report is not None:
-            accepted |= {t: PROOF_ZERO_VALUE for t in wanted if fails_on_zero(zero.report.tests.get(t))}
+        runs += 1 + zero.reruns
+        for test in wanted:
+            outcome, why = variant.test_outcome(zero.run, test, real, own, redact=redact, proved=zero.proved)
+            if outcome == "proof":
+                accepted[test] = PROOF_ZERO_VALUE
+            elif outcome == "inconclusive":
+                undecided[test] = why
     rest = [t for t in wanted if t not in accepted]
     production = production_changes(wb, base_sha)
+    reasons: dict[str, str] = {}
     if rest and production:
         runs += 1
-        # a module the unit added is set aside at the base: its own tests then fail to import, and pytest would stop
-        # the whole run at the first collection error; the others must still run, and those ids fail closed
-        keep_going = {"PYTEST_ADDOPTS": "--continue-on-collection-errors"}
-        at_base = run_with_code_of(wb, base_sha, production, name="test-extra-base", extra_env=keep_going)
-        accepted |= {t: "base" for t in rest if fails_on_zero(at_base.get(t))}
-        reasons = {
-            t: ERROR_AT_BASE
-            for t in rest
-            if t not in accepted and t in at_base and at_base[t].status in ("failed", "error")
-        }
-    else:
-        reasons = {}
-    return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons)
+        # a module the unit added is set aside at the base: its own tests then fail to import; the others must still
+        # run (run_with_code_of goes on past collection errors), and those ids are not proofs
+        base = variant.classify(run_with_code_of(wb, base_sha, production, name="test-extra-base"), real, redact=redact)
+        for test in rest:
+            outcome, _ = variant.test_outcome(base, test, real, own, redact=redact, zero_value=False)
+            case = base.report.tests.get(test) if base.report is not None else None
+            if outcome == "proof":
+                accepted[test] = "base"
+            elif case is not None and case.status in ("failed", "error"):
+                reasons[test] = ERROR_AT_BASE
+    inconclusive = {t: why for t, why in undecided.items() if t not in accepted}
+    reasons = {t: why for t, why in reasons.items() if t not in inconclusive}
+    return ExtraRun(accepted, tuple(t for t in wanted if t not in accepted), runs, reasons, inconclusive)
 
 
 def file_of_test(wb: Workbench, test_id: str) -> str | None:

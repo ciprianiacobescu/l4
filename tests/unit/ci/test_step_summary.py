@@ -82,3 +82,18 @@ def test_failed_write_warns_once_and_does_not_raise(tmp_path: Path, caplog: pyte
         feed(s, ev("task.done", task="1"), ev("task.done", 1, task="2"))
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
+
+
+def test_a_held_task_is_listed_with_ids_and_codes_only(tmp_path: Path) -> None:
+    """L4-IMP-063, L4-OBS-005: the line names the task, the check and the question, never the reason."""
+    path = tmp_path / "s.md"
+    feed(
+        StepSummary(path),
+        ev(
+            "check.inconclusive", 3, task="3.1", phase="red", check="pre_satisfied", question="Q-007",
+            reason="E   TypeError: a sentence of the repository's code", criteria=["C-aaaaaaaa"],
+        ),
+    )  # fmt: skip
+    text = path.read_text()
+    assert text == "- openspec:add-x task 3.1: held (pre_satisfied check inconclusive, Q-007)\n"
+    assert "TypeError" not in text

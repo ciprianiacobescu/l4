@@ -32,9 +32,9 @@ _HEADER_LINES = (
     'How to answer: write under "### Answer" and set **Status** to `answered`.',
     "To accept the clarifier's suggestion as-is, set **Status** to `accepted`.",
     "Status values: open · answered · accepted · answered-by-clarifier · dismissed · superseded",
-    "Kind values: technical · product · ambiguous · verdict. For a `verdict` question, start the answer with "
-    "`accept` or",
-    "`reject`, then give your reason.",
+    "Kind values: technical · product · ambiguous · verdict · harness. For a `verdict` question, start the answer "
+    "with `accept` or",
+    "`reject`, then give your reason; for a `harness` question, with `accept` or `retry`.",
     "Do not change question IDs. Commit and push to the l4/… branch to resume the run. -->",
 )
 _INDEX_HEADER = ("| ID | Status | Blocking | Kind | Question |", "|----|--------|----------|------|----------|")
@@ -52,6 +52,7 @@ class QuestionKind(StrEnum):
     PRODUCT = "product"
     AMBIGUOUS = "ambiguous"
     VERDICT = "verdict"
+    HARNESS = "harness"  # a check L4 could not decide holds its task (L4-IMP-063); answered `accept` or `retry`
 
 
 @dataclass(frozen=True)
@@ -594,10 +595,32 @@ def effective_answer(question: Question) -> str | None:
     return None
 
 
+_HARNESS_WORD = re.compile(r"(accept|retry)(?=[\s:,.;!]|$)", re.IGNORECASE)
+
+
+def harness_decision(text: str) -> Literal["accept", "retry"] | None:
+    """The first word of a harness answer: `accept` or `retry` (case-insensitive, then a space, `:`, `,` or the end)."""
+    found = _HARNESS_WORD.match(text.strip())
+    return found.group(1).lower() if found else None  # type: ignore[return-value]
+
+
+def harness_answer(question: Question) -> Literal["accept", "retry"] | None:
+    """What a harness question was answered (L4-IMP-063): Status `answered` with a text whose first word is `accept` or
+    `retry`, or Status `dismissed`, which reads as `retry`. Any other answer is not one: None."""
+    if question.status is QuestionStatus.DISMISSED:
+        return "retry"
+    if question.status is not QuestionStatus.ANSWERED:
+        return None
+    return harness_decision(question.answer_text)
+
+
 def is_answered(question: Question) -> bool:
     """The Status is explicit and there is something to consume. A draft under `open` is not an answer. A status
     that needs a text (`answered`, `accepted`, `answered-by-clarifier`) but has none is not answered either: the
-    implementer would be told nothing and would ask again."""
+    implementer would be told nothing and would ask again. A harness question is answered only by `accept` or
+    `retry`."""
+    if question.kind is QuestionKind.HARNESS:
+        return harness_answer(question) is not None
     return question.status is QuestionStatus.DISMISSED or effective_answer(question) is not None
 
 

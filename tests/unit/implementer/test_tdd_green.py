@@ -297,10 +297,13 @@ def test_an_id_the_run_at_red_does_not_report_is_not_failing_there(make_bench):
     known, extra = "tests.test_discount::test_known_code", "tests.test_extra::test_extra"
     log = bench.wb.out_dir / "at-red.log"
     collection = TestReport({extra: TestCase(extra, "failed")}, collection_errors=["tests/test_discount.py"])
-    for report, expected in ((collection, [known]), (None, [known, extra])):
+    for report, expected in ((collection, [known]), (None, [])):
         gate = GateResult("test-at-red", "fail", "exit 2", 2, log, report)
         bench.wb.run_gate = lambda *a, gate=gate, **k: gate  # type: ignore[method-assign]
-        assert fails_at_red(bench.wb, red.sha, [known, extra]) == expected
+        at_red = fails_at_red(bench.wb, red.sha, [known, extra])
+        assert at_red.failing_not == expected
+        # L4-IMP-060: a run that wrote no report decides nothing, it does not leave every id "not failing"
+        assert bool(at_red.inconclusive) == (report is None)
 
 
 def test_a_corrected_test_that_cannot_import_the_red_code_is_rejected(make_bench, raw):
@@ -394,3 +397,21 @@ def test_the_green_attempt_that_hangs_carries_the_hung_tests_and_their_frame(mak
     assert [h.id for h in green.hung] == ["tests.test_discount::test_known_code"]
     assert "client.recv(1)" in green.excerpt
     assert bench.events("gate.hung")[0]["tests"] == ["tests.test_discount::test_known_code"]
+
+
+def test_an_at_red_run_with_no_test_is_inconclusive(make_bench):
+    """L4-IMP-060: a test-at-red run that executed no test (every module failed to import) decides nothing."""
+    from l4.implementer.discrimination import AtRed, fails_at_red
+
+    bench = make_bench([two_test_red()])
+    red = run_red(bench.wb, TASK, attempt=1)
+    log = bench.wb.out_dir / "at-red.log"
+    log.write_text("")
+    known = "tests.test_discount::test_known_code"
+    report = TestReport({}, ["tests.test_discount"], {"tests.test_discount": "E   ImportError: no module"})
+    gate = GateResult("test-at-red", "fail", "exit 2", 2, log, report)
+    bench.wb.run_gate = lambda *a, **k: gate  # type: ignore[method-assign]
+    got = fails_at_red(bench.wb, red.sha, [known])
+    assert isinstance(got, AtRed) and got.failing_not == []
+    assert got.inconclusive.startswith("the test-at-red run ran no test (exit 2, 1 collection errors)")
+    assert got.inconclusive.endswith("E   ImportError: no module")

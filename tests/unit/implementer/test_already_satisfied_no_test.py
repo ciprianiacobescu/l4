@@ -118,7 +118,9 @@ def test_existing_tests_that_nothing_confirms_are_no_proof(make_bench, monkeypat
     bench: Bench = make_bench([no_test()])
     commit_old(bench)  # the test exists and passes, but the ledger holds no red for it
     refuse(monkeypatch)
-    monkeypatch.setattr(tdd, "confirmed_by_base_run", lambda wb, cands, ids: BaseRunResult(reason="no failure"))
+    monkeypatch.setattr(
+        tdd, "confirmed_by_base_run", lambda wb, cands, ids, *, real=None: BaseRunResult(reason="no failure")
+    )
     outcome = run_red(bench.wb, TASK, attempt=1)
     assert outcome.status == "failed" and outcome.reason.startswith(f"not discriminating: {KNOWN}"), outcome.reason
     assert [e for e in bench.events("criterion.pre_satisfied") if e["task"] == TASK.key] == []

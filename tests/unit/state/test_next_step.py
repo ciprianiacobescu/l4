@@ -122,3 +122,20 @@ def test_a_merged_unit_with_waiting_feedback_names_the_follow_up():
 @pytest.mark.parametrize("phase", [None, "intake", "implementing", "verifying", "fixing", "verified", "rejected"])
 def test_every_other_phase_continues_by_itself(phase):
     assert step(phase) == "nothing: the harness continues at the next run"
+
+
+def test_scn_imp_319_a_harness_question_names_its_cause_and_both_answers():
+    """L4-OPS-006: the REASON is `Q-NNN: <title> (<why>)`, the step names both answers."""
+    from l4.state.next_step import reason
+
+    title, why = "Task 3.1: the pre-satisfied check could not decide", "the test-presatisfied run ran no test …"
+    held = facts("awaiting_human", open_blocking_questions=("Q-007",), harness_open=(("Q-007", title, why),))
+    assert reason(held) == f"Q-007: {title} ({why})"
+    got = step("awaiting_human", open_blocking_questions=("Q-007",), harness_open=(("Q-007", title, why),))
+    assert 'l4 questions answer Q-007 --unit openspec:x --text "accept: <why>"' in got
+    assert '--text "retry: <note>"' in got
+
+
+def test_an_invalid_harness_answer_is_named():
+    got = step("awaiting_human", open_blocking_questions=("Q-007",), harness_invalid=("Q-007",))
+    assert got == f"fix the answer of Q-007 in {QPATH} on {BRANCH}: start it with accept or retry, then push"

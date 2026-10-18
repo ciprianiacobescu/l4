@@ -34,6 +34,7 @@ from typing import Literal
 
 from l4.agents.factory import RoleUnavailable
 from l4.fsutil import UnsafeFile, read_inside, unlink_inside
+from l4.gates.collection import collection_error, own_section
 from l4.gates.dryrun import narrow_ruff_paths
 from l4.gates.e2e import _PYTEST_VALUE_OPTIONS
 from l4.gates.runner import GateResult
@@ -363,7 +364,7 @@ def import_failure(log_text: str, stem: str, wb: Workbench) -> tuple[Literal["pr
     (`("production", "<path>: <E line>")`); only the audit file's frames, or a helper under the test globs, are its own
     (`("own", "")`); no frame at all is unknown."""
     lines = log_text.splitlines()
-    section = _own_section(lines, stem)
+    section = own_section(lines, stem)
     if section is None:
         return "unknown", ""
     frames = [m.group(1) for line in section if (m := _FRAME.match(line.rstrip()))]
@@ -465,7 +466,7 @@ def _judge_run(
         statuses = {report.tests[i].status for i in ids} if report is not None else set()
         if collected is not None and report is not None and any(stem in e for e in report.collection_errors):
             code = _read_file(wb, rel)
-            collected[cid] = (_collection_error(gate.log_path, stem), code)
+            collected[cid] = (collection_error(gate.log_path, stem), code)
             _drop_file(wb, rel)
         elif collected is not None and interrupted and not ids and not broken:
             deferred[cid] = rel  # pytest stops at a collection error: this file never ran, so it runs again below
@@ -491,48 +492,24 @@ def _judge_run(
         _judge_run(wb, deferred, round_no, out, None, label, files, env)
     if not candidates:
         return
-    confirmation = (
-        confirm_pre_satisfied(wb, candidates, extra_env=env) if env else confirm_pre_satisfied(wb, candidates)
-    )
+    confirmation = confirm_pre_satisfied(wb, candidates, real=report, extra_env=env or None)
     for cid, ids in candidates.items():
         rel = written[cid]
         if cid in confirmation.confirmed:
             record(cid, "accepted", rel, tuple(ids))
             out.accepted.append(wb.worktree / rel)
+        elif cid in confirmation.not_applicable:  # it checks a dependency and no project code (L4-IMP-062)
+            out.records.append(AuditRecord(cid, "accepted", rel, tuple(ids), "not applicable: no project code"))
+            out.accepted.append(wb.worktree / rel)
+        elif cid in confirmation.inconclusive:  # the run could not run the test: not a rejection (L4-VER-050)
+            out.records.append(AuditRecord(cid, "inconclusive", rel, tuple(ids), confirmation.inconclusive[cid]))
+            _drop_file(wb, rel)  # no finding: the criterion keeps its implementer evidence
         else:
             why = confirmation.reason or "it passes when the project's functions answer their zero value"
             _reject(wb, out, cid, rel, "rejected", why, tuple(ids), label=label, files=files)
 
 
-_COLLECTION_LINE = re.compile(r"^(E\s+.+|\w*(?:Error|Exception)\b.*)$")
-_COLLECTING = re.compile(r"^_{3,} ERROR collecting (\S+) _{3,}$")
-_SECTION_END = re.compile(r"^(?:_{3,}|={3,})")
-MAX_COLLECTION_ERROR_CHARS = 600
-
-
-def _own_section(lines: Sequence[str], stem: str) -> Sequence[str] | None:
-    """The lines pytest printed under `ERROR collecting <the file of stem>`; None when it printed no such section."""
-    for i, line in enumerate(lines):
-        if (m := _COLLECTING.match(line.strip())) and stem in m.group(1):
-            end = next((j for j in range(i + 1, len(lines)) if _SECTION_END.match(lines[j].strip())), len(lines))
-            return lines[i + 1 : end]
-    return None
-
-
-def _collection_error(log_path: Path, stem: str) -> str:
-    """What the test run printed for the audit file that could not be imported: its `E ` lines (a pytest collection
-    error) from its own `ERROR collecting` section when there is one (two broken files must not see each other's
-    error), else from the whole log, bounded. Empty log or unreadable: the plain fact."""
-    try:
-        text = log_path.read_text(encoding="utf-8", errors="replace")[-40_000:]
-    except OSError:
-        text = ""
-    every = text.splitlines()
-    own = _own_section(every, stem)
-    picked = every if own is None else own
-    lines = [m.group(1).strip() for line in picked if (m := _COLLECTION_LINE.match(line.strip()))]
-    shown = "\n".join(dict.fromkeys(lines))[:MAX_COLLECTION_ERROR_CHARS]
-    return shown or "the file could not be imported when the tests were collected"
+_collection_error = collection_error
 
 
 def _collect_retry_reason(error: str, code: str) -> str:

@@ -151,3 +151,31 @@ def test_an_invalid_base_config_gives_the_default_rules(qworld, caplog):
     world_with(qworld)
     base_config(qworld, "clarifier:\n  answer_by_agents: maybe\n")
     assert "an agent may not answer Q-002" in refused(qworld, agent_app(qworld), "answer", "Q-002", text="x")
+
+
+def harness_world(qworld: QWorld) -> QWorld:
+    qworld.unit_branch(
+        "a",
+        questions_md(
+            "a",
+            {
+                "title": "Task 3.1: the pre-satisfied check could not decide",
+                "kind": "harness",
+                "tasks": ("3.1",),
+                "options": ("accept: count these on the evidence of the real run", "retry: run the check again"),
+            },
+        ),
+    )
+    return qworld
+
+
+def test_scn_imp_317_an_agent_cannot_answer_a_harness_question_without_consent(qworld, capsys):
+    harness_world(qworld)
+    app = dataclasses.replace(qworld.app, environ={**qworld.app.environ, "AI_AGENT": "l4-mcp"})
+    message = refused(qworld, app, "answer", "Q-001", text="accept: the run broke")
+    assert "a harness override is a person's decision" in message
+    base_config(qworld, "clarifier:\n  answer_by_agents: true\n")
+    assert run(qworld, app, "answer", "Q-001", text="accept: the run broke") is ExitCode.OK
+    assert pushed_status(qworld, "Q-001") is QuestionStatus.ANSWERED
+    body = qworld.remote.run("log", "-1", "--format=%b", "l4/openspec/a").stdout
+    assert "agent: AI_AGENT" in body

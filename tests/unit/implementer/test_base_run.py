@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from l4.agents.fake import Step
+from l4.gates.runner import GateResult
 from l4.implementer import base_run, tdd
-from l4.implementer.base_run import confirmed_by_base_run
-from l4.implementer.discrimination import PreSatisfied, unit_base
+from l4.implementer.base_run import combine, confirmed_by_base_run
+from l4.implementer.discrimination import PreSatisfied, run_with_code_of, unit_base
 from l4.implementer.tdd import run_red
 from l4.implementer.workbench import Workbench
 from l4.specs.base import Task
@@ -48,7 +49,7 @@ def zero(monkeypatch):
     """The zero-value run confirms nothing (as for a project it cannot read); records what it received."""
     seen: list[dict] = []
 
-    def fake(wb, candidates):
+    def fake(wb, candidates, *, real=None):
         seen.append({c: list(t) for c, t in candidates.items()})
         return (
             PreSatisfied({}, {c: tuple(t) for c, t in candidates.items()}, "unconfirmed")
@@ -64,11 +65,11 @@ def zero(monkeypatch):
 def based(monkeypatch):
     """Records the calls of the real base run."""
     calls: list[dict] = []
-    real = tdd.confirmed_by_base_run
+    real_run = tdd.confirmed_by_base_run
 
-    def spy(wb, candidates, new_ids):
+    def spy(wb, candidates, new_ids, *, real=None):
         calls.append({c: list(t) for c, t in candidates.items()})
-        return real(wb, candidates, new_ids)
+        return real_run(wb, candidates, new_ids, real=real)
 
     monkeypatch.setattr(tdd, "confirmed_by_base_run", spy)
     return calls
@@ -138,7 +139,9 @@ def test_the_failure_names_only_the_criteria_nothing_confirmed(make_bench, zero,
 def test_the_zero_value_run_that_confirms_everything_leaves_no_base_run(make_bench, monkeypatch, based):
     """SCN-IMP-85: Python as today."""
     monkeypatch.setattr(
-        tdd, "confirm_pre_satisfied", lambda wb, cands: PreSatisfied({c: tuple(t) for c, t in cands.items()})
+        tdd,
+        "confirm_pre_satisfied",
+        lambda wb, cands, *, real=None: PreSatisfied({c: tuple(t) for c, t in cands.items()}),
     )
     bench: Bench = make_bench([step()])
     commit_head(bench, {PRICING: HEAD_PRICING})
@@ -196,3 +199,102 @@ def test_the_worktree_is_byte_identical_after_the_base_run(make_bench, monkeypat
         assert bool(got.confirmed) == (mode == "confirmed"), got
     assert snapshot(bench.wb.worktree) == before
     assert porcelain(bench) == status
+
+
+MIDDLEWARE = "src/pytdd/middleware.py"
+MIDDLEWARE_SRC = "def wrap(x: int) -> int:\n    return x\n"
+TEST_MIDDLEWARE = "tests/test_middleware.py"
+TEST_MIDDLEWARE_SRC = "from pytdd.middleware import wrap\n\n\ndef test_wrap():\n    assert wrap(1) == 1\n"
+
+
+def test_scn_imp_301_the_base_run_goes_on_past_an_unrelated_test_that_imports_an_added_module(make_bench, zero, based):
+    """The base run sets the added module aside, so an unrelated test file that imports it fails collection; without
+    --continue-on-collection-errors pytest collected nothing (exit 2) and the base run confirmed nothing."""
+    bench: Bench = make_bench([step()])
+    commit_head(
+        bench,
+        {PRICING: HEAD_PRICING, MIDDLEWARE: MIDDLEWARE_SRC, TEST_MIDDLEWARE: TEST_MIDDLEWARE_SRC},
+    )
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert outcome.status == "already_satisfied", outcome.reason
+    proof = bench.events("task.red_ok")[-1]["criteria"][KNOWN]
+    assert proof["via"] == "base_run" and proof["discriminating"] == [NEW_ID]
+
+
+def test_run_with_code_of_returns_the_gate_result(make_bench):
+    bench: Bench = make_bench([])
+    tdd.run_setup(bench.wb)
+    commit_head(
+        bench,
+        {PRICING: HEAD_PRICING, MIDDLEWARE: MIDDLEWARE_SRC, TEST_MIDDLEWARE: TEST_MIDDLEWARE_SRC},
+    )
+    (bench.wb.worktree / "tests" / "test_new.py").write_text(FAILS_AT_BASE)
+    base = unit_base(bench.wb)
+    paths, why = base_run._plan(bench.wb, base)
+    assert why == "" and MIDDLEWARE in paths
+    got = run_with_code_of(bench.wb, base, paths, name="test-base-run")
+    assert isinstance(got, GateResult)
+    assert got.report is not None
+    assert "tests.test_middleware" in got.report.collection_errors
+    assert NEW_ID in got.report.tests
+
+
+IMPORTS_CLAMP_AT_TOP = (
+    "import pytest\n\nfrom pytdd import total\nfrom pytdd.pricing import clamp\n\n\n"
+    f'@pytest.mark.l4("{KNOWN}")\ndef test_new_total():\n    assert clamp(-1.0) == 0.0 and total([1.0]) == 1.0\n'
+)
+
+
+@pytest.fixture
+def zero_says(monkeypatch):
+    """The zero-value run's verdict on the one candidate: `state` is refuted or inconclusive."""
+
+    def set_state(state: str) -> None:
+        def fake(wb, candidates, *, real=None):
+            tests = {c: tuple(t) for c, t in candidates.items()}
+            if state == "refuted":
+                return PreSatisfied({}, tests, "unconfirmed")
+            return PreSatisfied(inconclusive={c: "the test-presatisfied run ran no test (exit 2)" for c in tests})
+
+        monkeypatch.setattr(tdd, "confirm_pre_satisfied", fake)
+
+    return set_state
+
+
+def test_scn_imp_311_a_base_run_cannot_refute_what_the_zero_value_run_could_not_decide(make_bench, zero_says, based):
+    """The base run only confirms: a test that passes at the base says nothing about a criterion an earlier task of
+    the unit already satisfied, so it cannot turn an inconclusive zero-value run into a refutation."""
+    zero_says("inconclusive")
+    bench: Bench = make_bench([step(PASSES_AT_BASE)])
+    commit_head(bench, {PRICING: HEAD_PRICING})
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert based == [{KNOWN: [NEW_ID]}]
+    assert "not discriminating" not in outcome.reason
+    decision = combine(
+        PreSatisfied(inconclusive={KNOWN: "zero reason"}), base_run.BaseRunResult(reason="none of its new tests fails")
+    )
+    assert decision.refuted == {} and decision.inconclusive == {KNOWN: "zero reason"}
+    assert decision.message == f"inconclusive: {KNOWN} (zero reason)"
+
+
+@pytest.mark.parametrize("state", ["refuted", "inconclusive"])
+def test_a_candidate_that_cannot_import_at_the_base_confirms_nothing(make_bench, zero_says, state):
+    zero_says(state)
+    bench: Bench = make_bench([step(IMPORTS_CLAMP_AT_TOP)])
+    commit_head(bench, {PRICING: HEAD_PRICING_CLAMP})
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    if state == "refuted":
+        assert outcome.status == "failed"
+        assert outcome.reason.startswith(f"not discriminating: {KNOWN}"), outcome.reason
+    else:  # the base run could not run it either: the check cannot decide, the task is held (L4-IMP-063)
+        assert outcome.status == "held" and outcome.held is not None
+        assert "did not run in test-base-run" in outcome.held.reason or "ran no test" in outcome.held.reason
+
+
+def test_combine_follows_the_table_of_the_design():
+    zero = PreSatisfied(
+        unconfirmed={"R1": ("t1",), "R2": ("t2",)}, reason="r", inconclusive={"I1": "why1", "I2": "why2"}
+    )
+    based = base_run.BaseRunResult(confirmed={"R1": ("t1",), "I1": ("t3",)}, base_sha="b", inconclusive={"I2": "base"})
+    decision = combine(zero, based)
+    assert set(decision.refuted) == {"R2"} and decision.inconclusive == {"I2": "why2; base"}

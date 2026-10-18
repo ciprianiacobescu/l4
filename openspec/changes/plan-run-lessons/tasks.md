@@ -13,7 +13,7 @@ Every task follows these rules:
 - [x] 1.1 Tests, `tests/unit/verifier/test_judge_step.py`: extend `_diff_world` (or add `_channels_world`) with, in the
   unit folder and in `<unit>-fix-1`, `questions.md`, `feedback.md`, `verification.md`, `.l4/ledger/r1.jsonl` and
   `.l4/review-accepted.json`, plus the project files `src/app/report.py`, `tests/test_report.py` and
-  `docs/questions.md`. SCN-VER-150: `ladder._git_diff(wb, base, head)` holds the three project files and no file of
+  `docs/questions.md`. SCN-VER-160: `ladder._git_diff(wb, base, head)` holds the three project files and no file of
   the two unit folders, and its length flag is computed on that text. New file `tests/unit/verifier/test_diffparts.py`:
   `bookkeeping_pathspecs(["u", "u-fix-1"])` equals `[":(glob,exclude)**/.l4/**",
   ":(glob,exclude).serena/memories/harness/**", ":(literal,exclude)u/verification.md", ":(literal,exclude)u/questions.md",
@@ -30,11 +30,11 @@ Every task follows these rules:
 - [x] 2.1 Tests, `tests/unit/verifier/test_diffparts.py`, pure and on a scratch git repository (`tmp_path`, `git init`,
   two commits): `group_key` on `src/app/report.py`, `tests/unit/test_report.py`, `pkg/report_test.go`,
   `web/report.test.ts`, `web/report.spec.ts`, `lib/report_tests.py` (all `report`) and `src/__init__.py` (`__init__`);
-  `pack` fills parts in key order with whole entries (SCN-VER-151: `DiffEntry` texts of exactly the six lengths and
+  `pack` fills parts in key order with whole entries (SCN-VER-161: `DiffEntry` texts of exactly the six lengths and
   paths of the scenario give the two parts it names, in that order, and a second `pack` of the same entries in another
   input order gives equal parts); an entry over `MAX_PART_CHARS` is a part of its own with `cut: True` and its text cut to
-  `MAX_PART_CHARS` (SCN-VER-157, the part side); eleven entries of 70000 characters give eight parts and three
-  `unseen` paths in pack order (SCN-VER-155, the packing side); `list_entries` lists a rename as one entry with both
+  `MAX_PART_CHARS` (SCN-VER-167, the part side); eleven entries of 70000 characters give eight parts and three
+  `unseen` paths in pack order (SCN-VER-165, the packing side); `list_entries` lists a rename as one entry with both
   paths and its text shows `rename from`; `judge_parts` applies `bookkeeping_pathspecs`. Lock files (SCN-VER-140, 142, 144): each name of `LOCK_FILES`, in the
   root and in a folder, is one entry with `lock` true and the text `lock file <path>: <old> -> <new> bytes, +A -R lines
   (not diffed)` (a 30000-line addition does not appear in it); a deleted one has `+0 -3 lines`; `src/lock.py`,
@@ -47,10 +47,10 @@ Every task follows these rules:
 ## 3. One verdict from the parts (L4-VER-042)
 
 - [x] 3.1 Tests, new file `tests/unit/verifier/test_judge_parts_merge.py`, on `JudgeVerdict` objects built with
-  `conftest.judge_reply`: SCN-VER-152 (C-1 `pass` in part 1, `insufficient_evidence` "not in this part" in part 2 →
-  `pass` with part 1's evidence; FB-001 true in part 1, false "not in this part" in part 2 → addressed); SCN-VER-153
+  `conftest.judge_reply`: SCN-VER-162 (C-1 `pass` in part 1, `insufficient_evidence` "not in this part" in part 2 →
+  `pass` with part 1's evidence; FB-001 true in part 1, false "not in this part" in part 2 → addressed); SCN-VER-163
   (C-2 `pass` then `fail` with a counterexample → `fail` with part 2's counterexample; test T adequate in part 1,
-  inadequate in part 2 → inadequate); SCN-VER-154 (FB-002 true, then false with `src/app/export.py:40 still writes the
+  inadequate in part 2 → inadequate); SCN-VER-164 (FB-002 true, then false with `src/app/export.py:40 still writes the
   old header` → false with that evidence). Also: `not_verifiable` beats `insufficient_evidence`; findings repeated
   across parts appear once; `riskiest_assumptions` are three, taken in turn; `accepted` and `satisfied` follow the
   feedback rule; one reply comes back unchanged; a list every part left out stays `None`.
@@ -71,14 +71,14 @@ Every task follows these rules:
 ## 5. The judge step in parts (L4-VER-041, L4-VER-042, L4-VER-043)
 
 - [x] 5.1 Tests, `tests/unit/verifier/test_judge_step.py`, with the `judge_unit`-style bench, `Scripted` holding one
-  reply per part, and a lowered `MAX_PART_CHARS`: SCN-VER-151 (two parts: two judge calls, each user message holds
+  reply per part, and a lowered `MAX_PART_CHARS`: SCN-VER-161 (two parts: two judge calls, each user message holds
   `part K of 2` and the whole file list, two `verify.judge` events with `part` 1 and 2 and `parts` 2, no hold that
   starts with `judge view:` or `the diff is longer`, `result.judge_parts` has two rows, `result.prompt_sha256` is the
-  sha256 of the two part hashes joined with `\n`, and `verification.md` says `judged in 2 parts`); SCN-VER-155 (eleven
+  sha256 of the two part hashes joined with `\n`, and `verification.md` says `judged in 2 parts`); SCN-VER-165 (eleven
   files over eight parts: eight calls, the hold `judge view: the diff needs more than 8 parts of <cap> characters: the
-  judge did not see …` naming the three unseen files); SCN-VER-156 (part 2 answers `schema_invalid` twice: the hold
+  judge did not see …` naming the three unseen files); SCN-VER-166 (part 2 answers `schema_invalid` twice: the hold
   `the judge's reply was discarded (part 2 of 2, schema_invalid: …)`, `run.judged is None`, no criterion verdict
-  recorded); SCN-VER-157 (one file, `data/seed.json`, over the cap: the hold ``judge view: the diff of `data/seed.json` is longer than one part
+  recorded); SCN-VER-167 (one file, `data/seed.json`, over the cap: the hold ``judge view: the diff of `data/seed.json` is longer than one part
   (<cap> characters): the judge saw only its start``); SCN-VER-141 (a `uv.lock` whose diff is far over the cap beside two small files: one call, the lock file's line in the prompt, no hold). A diff within the cap is one call with no part heading.
 - [x] 5.2 Code: `src/l4/verifier/ladder.py`: `_judge_step` per design D4 and D5 (the two `judge view:` holds made from
   `DiffParts`; the old hold line removed); `_ask_judges(vc, prompt, result, *, part: tuple[int, int] | None = None)`
@@ -92,21 +92,21 @@ Every task follows these rules:
   `other` kind to `NOT_MEASURED` (an `other` hold): `test_a_rejected_hold_of_another_kind_with_a_scenario_becomes_a_fix_task`
   (with a scenario reason about coverage), `test_a_rejected_hold_of_another_kind_without_a_scenario_still_escalates`,
   and the parametrize of `test_the_question_of_any_other_hold_asks_for_a_scenario_and_promises_nothing` (drop
-  `LONG_DIFF`). Then new tests: SCN-VER-157 (`hold_kind` is `judge_view` for both `judge view:` texts; their question
+  `LONG_DIFF`). Then new tests: SCN-VER-167 (`hold_kind` is `judge_view` for both `judge view:` texts; their question
   says `accept` means a person checked the files, says `A fix unit cannot shrink the diff`, and holds no `WHEN`);
-  SCN-VER-158 (a rejected `judge view:` hold whose reason ends with `WHEN the diff is long THEN the judge SHALL see
+  SCN-VER-168 (a rejected `judge view:` hold whose reason ends with `WHEN the diff is long THEN the judge SHALL see
   every file`: `settle_holds` gives one `human` major finding titled `Rejected hold: the judge could not see all of the
   diff`; `plan_fix_unit` makes no group and lists it in `not_converted`; `fixloop._no_task_cause([finding])` is
   `("a person rejected a hold on the judge's view of the diff: a fix unit cannot shrink the diff",
   "judge_view_rejected")`, and for a finding of another title it is today's `no_convertible_finding` pair);
-  SCN-VER-159 (the same with `LONG_DIFF`, the 0.4.14 text: `hold_kind` is `judge_view`, no task). The tests that use
+  SCN-VER-169 (the same with `LONG_DIFF`, the 0.4.14 text: `hold_kind` is `judge_view`, no task). The tests that use
   `LONG_DIFF` with a reason that has no scenario (SCN-VER-66 and the ones after it) must pass unchanged.
 - [x] 6.2 Code: `src/l4/verifier/verdicts.py`: `HoldKind` with `judge_view`, `LEGACY_LENGTH_HOLD`,
   `JUDGE_VIEW_PREFIX = "judge view: "`, `JUDGE_VIEW_REJECTED_TITLE`, `hold_kind`, `hold_subjects`, `_hold_question`,
   `_hold_finding` (design D5); `src/l4/verifier/fixunit.py`: `_candidates` skips a finding with that title before the
   scenario logic and records its question in `unconverted`; `src/l4/verifier/fixloop.py`: pure
   `_no_task_cause(findings) -> tuple[str, str]` used by `decide_fix` where it chose `no_convertible_finding`.
-- [x] 6.3 Tests for the way out (SCN-VER-158, the person's side): `tests/unit/state/test_next_step.py` (an escalated
+- [x] 6.3 Tests for the way out (SCN-VER-168, the person's side): `tests/unit/state/test_next_step.py` (an escalated
   unit with `halt_reason="judge_view_rejected"`: `next_step` names `l4 restart --unit`, `--replace` and
   `l4 retry --unit`, and not `l4 feedback add`; `way_out(unit, "no_convertible_finding")` is `feedback_way_out(unit)`;
   `way_out(unit, "fix_rounds_exhausted")` is `None`); `tests/unit/state/test_spec_edited.py` (`_refuse_stopped` of such
@@ -192,11 +192,11 @@ Every task follows these rules:
 - [x] 9.1 `docs/SPEC.md`:
   - the eleven requirements as Part I paragraphs in SPEC's form (`**L4-VER-040 <title>.** <text>`), with the text of this
     change's specs: L4-VER-040..045 after L4-VER-018, L4-YOLO-050..055 after L4-YOLO-035;
-  - the scenarios in Part II, in SPEC's form (`#### SCN-VER-150 (+) <title> · L4-VER-040`, then `- **Given**`,
-    `- **When**`, `- **Then**`), in id order: SCN-VER-140..159 after SCN-VER-77, SCN-YOLO-130..143 after SCN-YOLO-92.
-    The `·` references: SCN-VER-150, 143 L4-VER-040; SCN-VER-140, 142, 144 L4-VER-045; SCN-VER-141 L4-VER-043, L4-VER-045; SCN-VER-151 L4-VER-041, L4-VER-042; SCN-VER-152..154 L4-VER-042;
-    SCN-VER-155 L4-VER-041, L4-VER-043; SCN-VER-156 L4-VER-042; SCN-VER-157 L4-VER-043; SCN-VER-158 L4-VER-044;
-    SCN-VER-159 L4-VER-043, L4-VER-044; SCN-YOLO-130..133, 135, 136 L4-YOLO-050; SCN-YOLO-134, 141 L4-YOLO-051; SCN-YOLO-142 L4-YOLO-054; SCN-YOLO-143 L4-YOLO-055;
+  - the scenarios in Part II, in SPEC's form (`#### SCN-VER-160 (+) <title> · L4-VER-040`, then `- **Given**`,
+    `- **When**`, `- **Then**`), in id order: SCN-VER-140..149 and 160..169 after SCN-VER-77, SCN-YOLO-130..143 after SCN-YOLO-92.
+    The `·` references: SCN-VER-160, 143 L4-VER-040; SCN-VER-140, 142, 144 L4-VER-045; SCN-VER-141 L4-VER-043, L4-VER-045; SCN-VER-161 L4-VER-041, L4-VER-042; SCN-VER-162..154 L4-VER-042;
+    SCN-VER-165 L4-VER-041, L4-VER-043; SCN-VER-166 L4-VER-042; SCN-VER-167 L4-VER-043; SCN-VER-168 L4-VER-044;
+    SCN-VER-169 L4-VER-043, L4-VER-044; SCN-YOLO-130..133, 135, 136 L4-YOLO-050; SCN-YOLO-134, 141 L4-YOLO-051; SCN-YOLO-142 L4-YOLO-054; SCN-YOLO-143 L4-YOLO-055;
     SCN-YOLO-137, 138 L4-YOLO-052; SCN-YOLO-139, 140 L4-YOLO-053;
   - §10.2, row 9: one sentence that a diff over 120000 characters is judged in parts (L4-VER-041) whose replies are
     merged (L4-VER-042), and that what the judge cannot see is a `judge_view` hold (L4-VER-043, L4-VER-044);

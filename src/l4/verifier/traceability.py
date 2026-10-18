@@ -17,6 +17,7 @@ L4-VER-009 is not rebuilt: the red-phase proofs stand in for it (M1: verifier 3.
 
 import dataclasses
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any
 
 from l4.config.schema import L4Config
 from l4.gates.junit import TestCase, TestReport
@@ -28,7 +29,7 @@ from l4.verifier.types import CriterionEvidence, Finding, Severity, TracingTest
 __all__ = [
     "NO_PROOF", "PASS_TO_PASS", "PROOF_AUDIT", "PROOF_CHORE", "PROOF_GENERATED", "PROOF_HUMAN", "CriterionEvidence",
     "TracingTest", "apply_adequacy", "extra_candidates", "extra_proofs", "ignored_findings", "inadequate_findings",
-    "new_covered", "red_proofs", "trace_criteria",
+    "new_covered", "red_notes", "red_proofs", "trace_criteria",
 ]  # fmt: skip
 
 PASS_TO_PASS = "pass_to_pass"
@@ -38,6 +39,20 @@ PROOF_HUMAN = "human"
 PROOF_CHORE = "chore"
 NO_PROOF = "no proof that it discriminates"  # the start of the reason of a test that carries a criterion and has none
 _RED_PROOFS = ("zero_value", "pre_satisfied", "red_assertion")
+NOT_APPLICABLE_NOTE = "not applicable: no project code"  # L4-IMP-062
+UNPROVEN_VIA = ("not_applicable", "human_override", "agent_override")  # proofs that no variant run showed (L4-VER-051)
+
+
+def _unproven_note(info: Mapping[str, Any]) -> str:
+    """The label of a red record that no run proved: `discrimination not applicable`, or a person's `accept` after an
+    inconclusive check (L4-VER-051); empty for every other record."""
+    if info.get("via") == "not_applicable":
+        return NOT_APPLICABLE_NOTE
+    if info.get("via") == "human_override":
+        return f"accepted by {info.get('question') or 'a person'}: the check was inconclusive"
+    if info.get("via") == "agent_override":  # the judge must be able to tell an agent's acceptance from a person's
+        return f"accepted by an agent through {info.get('question') or 'a question'}: the check was inconclusive"
+    return ""
 
 
 def red_proofs(ledger: Iterable[LedgerEvent]) -> dict[str, dict[str, str]]:
@@ -51,11 +66,27 @@ def red_proofs(ledger: Iterable[LedgerEvent]) -> dict[str, dict[str, str]]:
                     continue
                 proof = str(info.get("proof"))
                 if proof in _RED_PROOFS:
-                    for test in info.get("tests") or []:
+                    # an unproven record of a step that added no test names the tests only as `discriminating`
+                    tests = info.get("tests") or (info.get("discriminating") if info.get("via") in UNPROVEN_VIA else [])
+                    for test in tests or []:
                         found.setdefault(str(criterion), {}).setdefault(str(test), proof)
         elif event.type == "verify.audit" and event.data.get("status") == "accepted":
             for test in event.data.get("tests") or []:
                 found.setdefault(str(event.data.get("criterion")), {})[str(test)] = PROOF_AUDIT
+    return found
+
+
+def red_notes(ledger: Iterable[LedgerEvent]) -> dict[tuple[str, str], str]:
+    """(criterion, test id) -> the label of an unproven red record (`not applicable: no project code`, or `accepted by
+    Q-NNN: the check was inconclusive`), for the judge and the report (L4-VER-051)."""
+    found: dict[tuple[str, str], str] = {}
+    for event in ledger:
+        if event.type != "task.red_ok" or not isinstance(event.data.get("criteria"), Mapping):
+            continue
+        for criterion, info in event.data["criteria"].items():
+            if isinstance(info, Mapping) and info.get("discriminating") and (note := _unproven_note(info)):
+                tests = info.get("tests") or info.get("discriminating") or []
+                found.update({(str(criterion), str(test)): note for test in tests})
     return found
 
 
@@ -133,6 +164,7 @@ def trace_criteria(
     known = frozenset(c.id for c in criteria)
     limit = cfg.verifier.max_criteria_per_test
     proofs = red_proofs(ledger)
+    notes = red_notes(ledger)
     for criterion_id, tests_proved in (extra or {}).items():
         for test_id, source in tests_proved.items():
             proofs.setdefault(criterion_id, {}).setdefault(test_id, source)
@@ -160,7 +192,7 @@ def trace_criteria(
                 elif case.status == "skipped":
                     ignored.append((test_id, "it was skipped"))
                 else:
-                    tests.append(TracingTest(test_id, case.status, proof))
+                    tests.append(TracingTest(test_id, case.status, proof, note=notes.get((criterion.id, test_id), "")))
         state = "fail" if any(t.status != "passed" for t in tests) else "covered" if tests else "uncovered"
         out.append(CriterionEvidence(criterion.id, criterion.alias, state, tuple(tests), tuple(ignored)))  # type: ignore[arg-type]
     return out

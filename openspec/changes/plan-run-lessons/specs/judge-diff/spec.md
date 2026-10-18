@@ -12,7 +12,7 @@ harness's bookkeeping, given by one list (`bookkeeping_pathspecs`): every path u
 family. The file names SHALL come from the unit folder's channel list in `l4.state.review`. A file of those names
 outside the family's folders SHALL stay in the diff.
 
-#### Scenario: SCN-VER-150 (+) The judge reads the unit's work, not the family's channel files
+#### Scenario: SCN-VER-160 (+) The judge reads the unit's work, not the family's channel files
 - **GIVEN** a unit branch that changes `src/app/report.py`, `tests/test_report.py` and `docs/questions.md`, and, in the
   unit folder and in its fix unit's folder, `questions.md`, `feedback.md`, `verification.md`, `.l4/ledger/r1.jsonl`
   and `.l4/review-accepted.json`
@@ -34,7 +34,7 @@ one judge call: the round's prompt with the part's diff, `part K of N`, a capped
 criterion whose code the part does not show is `insufficient_evidence`, not `fail`. A diff within the cap keeps one
 prompt.
 
-#### Scenario: SCN-VER-151 (+) A diff of 202000 characters is judged in two parts, with no hold
+#### Scenario: SCN-VER-161 (+) A diff of 202000 characters is judged in two parts, with no hold
 - **GIVEN** a unit whose diff after L4-VER-040 is 202000 characters in six files, with diffs of 50000
   (`src/app/export.py`), 30000 (`tests/test_export.py`), 12000 (`README.md`), 60000 (`src/app/report.py`), 40000
   (`tests/test_report.py`) and 10000 (`src/app/util.py`) characters
@@ -47,7 +47,7 @@ prompt.
   parts again; `verify.judge` is recorded with `part` 1 and 2 and `parts` 2; `verdict.json` lists `judge_parts`;
   `verification.md` says `judged in 2 parts`; the template is `judge@10`; and the round has no hold about the diff
 
-#### Scenario: SCN-VER-155 (−) A diff that needs more than eight parts holds and names what the judge did not see
+#### Scenario: SCN-VER-165 (−) A diff that needs more than eight parts holds and names what the judge did not see
 - **GIVEN** a unit whose diff is eleven files of 70000 characters each
 - **WHEN** the judge step runs
 - **THEN** eight parts are judged (eight judge calls), and the round holds `judge view: the diff needs more than 8 parts
@@ -60,26 +60,26 @@ it says so; the findings of all parts without repeats; a feedback, accepted or s
 true and no part says false with evidence other than `not in this part`. A part whose reply is discarded SHALL discard
 the round's judge verdict.
 
-#### Scenario: SCN-VER-152 (+) A criterion one part passes and another part cannot see is a pass
+#### Scenario: SCN-VER-162 (+) A criterion one part passes and another part cannot see is a pass
 - **GIVEN** two part replies: part 1 says `pass` for C-1 with a citation and `addressed: true` for FB-001; part 2 says
   `insufficient_evidence` for C-1 with the reasoning `not in this part` and `addressed: false` for FB-001 with the
   evidence `not in this part`
 - **WHEN** the replies are merged
 - **THEN** C-1 is `pass` with the evidence of part 1, and FB-001 is addressed
 
-#### Scenario: SCN-VER-153 (−) A fail in one part wins over a pass in another
+#### Scenario: SCN-VER-163 (−) A fail in one part wins over a pass in another
 - **GIVEN** part 1 says `pass` for C-2 and calls the test T adequate for C-2, and part 2 says `fail` for C-2 with a
   counterexample on code of part 2 and calls T inadequate for C-2
 - **WHEN** the replies are merged
 - **THEN** C-2 is `fail` with the counterexample of part 2, and T is inadequate for C-2
 
-#### Scenario: SCN-VER-154 (−) A part that shows an item undone keeps it open
+#### Scenario: SCN-VER-164 (−) A part that shows an item undone keeps it open
 - **GIVEN** part 1 says `addressed: true` for FB-002, and part 2 says `addressed: false` for FB-002 with the evidence
   `src/app/export.py:40 still writes the old header`
 - **WHEN** the replies are merged
 - **THEN** FB-002 is not addressed, with the evidence of part 2
 
-#### Scenario: SCN-VER-156 (−) A part whose reply is discarded discards the judge's verdict
+#### Scenario: SCN-VER-166 (−) A part whose reply is discarded discards the judge's verdict
 - **GIVEN** a diff in two parts whose second part's reply breaks the schema twice
 - **WHEN** the judge step runs
 - **THEN** the round has no judge verdict, it holds `the judge's reply was discarded (part 2 of 2, schema_invalid: …)`,
@@ -92,7 +92,7 @@ the 0.4.14 hold `the diff is longer than 120000 characters: the judge saw only t
 `judge_view`, whose question SHALL say that `accept` means a person checked those files and that no fix unit can
 shrink the diff, and ask for no `WHEN … THEN …`.
 
-#### Scenario: SCN-VER-157 (−) A file longer than one part holds, and its question asks for no scenario
+#### Scenario: SCN-VER-167 (−) A file longer than one part holds, and its question asks for no scenario
 - **GIVEN** a unit whose diff holds `data/seed.json` with 300000 characters of diff, and two small files
 - **WHEN** the round ends
 - **THEN** the judge saw the start of `data/seed.json` in a part of its own, the round holds ``judge view: the diff of
@@ -100,7 +100,7 @@ shrink the diff, and ask for no `WHEN … THEN …`.
   `judge_view`, and its question says that `accept` means a person checked `data/seed.json` and that a fix unit cannot shrink
   the diff, and does not ask for `WHEN … THEN …`
 
-#### Scenario: SCN-VER-159 (−) The hold text of 0.4.14 is a hold on the judge's view
+#### Scenario: SCN-VER-169 (−) The hold text of 0.4.14 is a hold on the judge's view
 - **GIVEN** a round resumed after the upgrade whose holds include `the diff is longer than 120000 characters: the judge
   saw only the start`, rejected with a `WHEN … THEN …` reason
 - **WHEN** its holds are settled and the fix unit is planned
@@ -112,8 +112,8 @@ that no fix task is derived from, whatever its reason. A failed round with nothi
 with `judge_view_rejected`; `l4 status --unit`, the refusal of `l4 run --unit` and the sticky note SHALL name its way
 out (split the change, then `l4 restart`; or `accept` by `--replace`, then `l4 retry`), never `l4 feedback add`.
 
-#### Scenario: SCN-VER-158 (−) A rejected hold on the judge's view never becomes a fix unit
-- **GIVEN** the hold of SCN-VER-157 rejected with a reason that ends with `WHEN the diff is long THEN the judge SHALL see
+#### Scenario: SCN-VER-168 (−) A rejected hold on the judge's view never becomes a fix unit
+- **GIVEN** the hold of SCN-VER-167 rejected with a reason that ends with `WHEN the diff is long THEN the judge SHALL see
   every file`, and no other finding in the round
 - **WHEN** the fix loop decides
 - **THEN** no fix task is planned, the unit is escalated with `judge_view_rejected`, and `l4 status --unit`, the refusal

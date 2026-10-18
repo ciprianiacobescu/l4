@@ -169,3 +169,24 @@ def test_a_gate_name_with_slashes_logs_inside_the_run_folder(make_bench):
         assert log.parent == folder and "/" not in log.name and ".." not in log.name
         assert len(log.name) <= len("001-") + 60 + len(".log")
     assert wb._next_gate_log("repository-ci:test").name == "001-repository-ci_test.log"
+
+
+def test_scn_imp_318_gate_finished_carries_the_collection_error(make_bench):
+    """L4-IMP-064: with no gate log kept, the committed ledger holds the E lines of a collection error, redacted."""
+    from l4.implementer.tdd import run_setup
+
+    bench = make_bench([])
+    wb = bench.wb
+    run_setup(wb)
+    passed = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    assert passed.status == "pass"
+    first = bench.events("gate.finished")[-1]
+    assert first["name"] == "test" and first.get("collection_errors") == 0 and "excerpt" not in first
+    secret = "glpat-" + "x" * 20
+    (wb.worktree / "tests" / "test_broken.py").write_text(f'raise ImportError("{secret}")\n')
+    broken = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    assert broken.status == "fail"
+    event = bench.events("gate.finished")[-1]
+    assert event["collection_errors"] == 1
+    assert 0 < len(event["excerpt"]) <= 600 and "E   ImportError:" in event["excerpt"]
+    assert secret not in event["excerpt"]

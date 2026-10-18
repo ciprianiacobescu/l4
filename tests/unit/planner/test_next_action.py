@@ -115,3 +115,16 @@ def test_a_stopped_unit_shows_the_recorded_cause(phase):
     got = next_action(UnitFacts(**{**base.__dict__, "halt_detail": detail}))
     assert got == ("none", f"{phase}: {detail}")
     assert next_action(base)[1] != f"{phase}: {detail}" and next_action(base)[1].startswith(f"{phase}: ")
+
+
+def test_a_held_unit_says_harness_check_inconclusive():
+    held = UnitFacts(
+        unit="openspec:x", framework="openspec", phase="awaiting_human", tasks_done=0, tasks_total=2,
+        open_blocking_questions=("Q-007",), harness_open=(("Q-007", "Task 3.1: the check could not decide", "why"),),
+    )  # fmt: skip
+    action, reason = next_action(held)
+    assert action == "none" and "(harness check inconclusive: Q-007)" in reason
+    invalid = UnitFacts(**{**held.__dict__, "harness_invalid": ("Q-007",)})  # type: ignore[arg-type]
+    assert next_action(invalid) == (
+        "none", "awaiting_human: harness answer must start with accept or retry: Q-007"
+    )  # fmt: skip

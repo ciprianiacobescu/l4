@@ -10,6 +10,7 @@ import re
 from collections.abc import Sequence
 
 from l4.clarifier.ports import QuestionView
+from l4.specs.questions import QuestionKind, QuestionStatus, harness_decision
 
 UNAVAILABLE_SENTENCE = "The clarifier was unavailable; no suggestions were written."
 MAX_TITLE_CHARS = 120
@@ -56,4 +57,10 @@ def build_sticky_section(
     notes += [
         f"{qid} has an answer but its Status is still `open`: set it to `answered` to submit it." for qid in drafts
     ]
+    notes += [  # a harness answer is `accept` or `retry` (L4-QMD-004): anything else was not read
+        f"{q.id} has an answer that does not start with `accept` or `retry`: it was not read. Please answer again."
+        for q in questions
+        if q.kind is QuestionKind.HARNESS and q.status is QuestionStatus.ANSWERED
+        and harness_decision(q.answer_text) is None
+    ]  # fmt: skip
     return "\n".join([*lines, *([""] + notes if notes else [])])

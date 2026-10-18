@@ -508,7 +508,10 @@ def _criterion_question(
     outcome: CriterionOutcome, criterion: Criterion, evidence: CriterionEvidence | None, round_no: int
 ) -> NewQuestion:
     tests = (
-        "; ".join(f"{t.id} ({t.status}, {t.proof}{'' if t.adequate else ', inadequate'})" for t in evidence.tests)
+        "; ".join(
+            f"{t.id} ({t.status}, {t.proof}{', ' + t.note if t.note else ''}{'' if t.adequate else ', inadequate'})"
+            for t in evidence.tests
+        )
         if evidence and evidence.tests
         else "none"
     )

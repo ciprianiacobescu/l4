@@ -87,7 +87,7 @@ from l4.yolo.model import (
     Verdict,
     YoloStep,
 )
-from l4.yolo.plans import PlanFile, archived_at, holds_of, listed_ids, plan_files, plan_files_at, unit_infos
+from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_files_at, planned_ids, unit_infos
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
@@ -179,8 +179,9 @@ def live_plan(files: Sequence[PlanFile], states: Mapping[str, PlanState], target
 
 def config_holds(cfg: L4Config, unit_ids: Collection[str], listed: Collection[str]) -> dict[str, Hold]:
     """The units `yolo.hold` holds (L4-ADO-011): an id or an `fnmatch` pattern of the setting matches the unit and no
-    plan file lists it (`listed`: the ids of every readable plan file, planned or excluded). A fix or follow-up unit
-    of a unit that a plan lists follows its parent, so `yolo.hold: ["*"]` does not hold it. No ledger, no model."""
+    plan file PLANS it (`listed`: the ids of the batches' units of every readable plan file; an id a plan only excludes
+    stays held, because excluding is not a release). A fix or follow-up unit of a unit that a plan plans follows its
+    parent, so `yolo.hold: ["*"]` does not hold it. No ledger, no model."""
     patterns = cfg.yolo.hold
     return {
         unit: Hold("held by yolo.hold", "is held by yolo.hold")
@@ -203,7 +204,7 @@ def plan_holds(
     free and the others wait for what `next_eligible` says; while a plan is active a unit outside every plan is
     `not in the active plan p1`. A unit the plan has integrated is no hold. A cancelled plan still holds its units, and
     a plan file that is not a plan holds the ids its JSON names, shown as `invalid` (R8). With `cfg`, a unit that
-    `yolo.hold` matches and no plan file lists is `held by yolo.hold`, whether or not a plan is active; a merged or
+    `yolo.hold` matches and no plan file plans is `held by yolo.hold`, whether or not a plan is active; a merged or
     archived unit is never held by it (L4-ADO-011)."""
     invalid = {f.plan_id for f in files if f.plan is None}
     held = {
@@ -216,7 +217,7 @@ def plan_holds(
         eligibility = next_eligible(live.plan, states[live.plan_id], phases)
     holds: dict[str, Hold] = {}
     from_config = (
-        config_holds(cfg, [u for u, p in phases.items() if p not in _NEVER_HELD], set().union(*map(listed_ids, files)))
+        config_holds(cfg, [u for u, p in phases.items() if p not in _NEVER_HELD], set().union(*map(planned_ids, files)))
         if cfg is not None and cfg.yolo.hold
         else {}
     )

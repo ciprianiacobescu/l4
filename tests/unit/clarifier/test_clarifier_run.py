@@ -292,7 +292,6 @@ def test_a_question_the_file_cannot_be_read_for_keeps_the_unit_with_a_human(s: S
     assert "unreadable" in outcome.sticky_section
 
 
-
 def test_a_harness_error_in_the_prompt_is_unavailable_but_its_traceback_is_logged_at_debug(s: Setup, caplog):
     import logging
 
@@ -328,3 +327,15 @@ def test_the_result_event_carries_every_s1_value_for_calibration(s: Setup):
     assert event["s1_detail"] == {"router.route_a": 0.95, "citation1.shows": 0.95}
     assert event["p_product"] == pytest.approx(0.05) and event["citation_support"] == [0.95]
     assert event["p_technical"] == pytest.approx(0.95)  # the router's own number, not the complement it is read as
+
+
+def test_a_harness_question_is_never_clarified(s: Setup):
+    """L4-IMP-063: the check was the harness's, not the project's: only a person (or an agent with consent) answers."""
+    s.ask(QuestionKind.HARNESS, "1.1", "Task 1.1: the pre-satisfied check could not decide")
+    backend = ScriptedBackend()
+    outcome, prompts = s.run(backend, FakeS1())
+    assert prompts == [] and backend.calls == [] and outcome.results == {}
+    assert s.events("clarifier.result") == []
+    assert (outcome.next_phase, outcome.exit_code) == ("awaiting_human", 11)
+    harness = s.file().get("Q-001")
+    assert harness is not None and harness.status is QuestionStatus.OPEN

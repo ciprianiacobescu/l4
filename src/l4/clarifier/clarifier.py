@@ -11,6 +11,7 @@ is not an override (SCN-CLR-06): the new text is recorded as `question.answered`
 
 import hashlib
 import logging
+import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,7 @@ from l4.services import HookContext, Services
 from l4.specs.base import Task
 from l4.specs.questions import (
     QUESTIONS_FILENAME,
+    Question,
     QuestionKind,
     QuestionsFile,
     QuestionStatus,
@@ -54,6 +56,7 @@ from l4.specs.questions import (
 )
 from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, LedgerWriter, ledger_path, read_ledger
+from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
 
 log = logging.getLogger("l4.clarifier")
@@ -62,7 +65,7 @@ log = logging.getLogger("l4.clarifier")
 @dataclass(frozen=True)
 class Answered:
     id: str
-    by: Literal["human", "clarifier"]
+    by: Literal["human", "agent", "clarifier"]
     answer_sha256: str | None  # None for a dismissed question
 
 
@@ -140,10 +143,28 @@ def _meta(reply: ClarifierReply, decision: RoutingDecision) -> str:
     return f"confidence: {reply.answer.confidence} · kind: {reply.answer.kind} (S1 p={p})"
 
 
+def _written_by_agent(unit_dir: Path) -> bool:
+    """Does the newest commit that touched `questions.md` carry `By: <name> (agent: ...)`? False when git cannot say."""
+    try:
+        done = Git(unit_dir).run("log", "-n", "1", "--format=%B", "--", QUESTIONS_FILENAME, check=False, timeout=30)
+    except (L4Exit, OSError):
+        return False
+    return done.returncode == 0 and re.search(r"(?m)^By: .*\(agent: ", done.stdout) is not None
+
+
 class Clarifier:
     def __init__(self, unit_dir: Path, ledger: LedgerWriter) -> None:
         self.unit_dir = unit_dir
         self.ledger = ledger
+
+    def _actor(self, question: Question) -> Literal["human", "agent", "clarifier"]:
+        """Who answered: the clarifier, a person, or (for a harness question, whose override the judge must be able to
+        weigh, L4-IMP-063) an agent: the commit that last changed `questions.md` names its actor in `By:` (the commit of
+        `l4 questions`, L4-QMD-009)."""
+        by = answered_by(question)
+        if by == "human" and question.kind is QuestionKind.HARNESS and _written_by_agent(self.unit_dir):
+            return "agent"
+        return by
 
     def reenter(self, tasks: Sequence[Task], *, refresh_index: bool = True) -> Reentry:
         """`refresh_index=False` for a unit whose branch head must not get a harness commit (a unit in review)."""
@@ -166,8 +187,9 @@ class Clarifier:
                     "question.override", id=question.id, previous_sha256=consumed[question.id], answer_sha256=digest
                 )  # fmt: skip
             else:  # new, or edited before any prompt carried it
-                answered.append(Answered(question.id, answered_by(question), digest))
-                self.ledger.append("question.answered", id=question.id, by=answered_by(question), answer_sha256=digest)
+                by = self._actor(question)
+                answered.append(Answered(question.id, by, digest))
+                self.ledger.append("question.answered", id=question.id, by=by, answer_sha256=digest)
         drafts = tuple(i.question_id for i in file.issues if i.kind == "unsubmitted_answer")
         for qid in drafts:  # once per id and text: a run that finds the same draft again says nothing new
             question = file.get(qid)
@@ -198,16 +220,16 @@ class Clarifier:
         drafts: Sequence[str] = (),
     ) -> ClarifyOutcome:
         """The open questions in `blocking` that the clarifier has not looked at yet, at most `cfg.max_open_questions`
-        and never a `verdict` question: each becomes `answered-by-clarifier` (every L4-CLR-002 condition held) or a
-        suggestion with Status `open`. The ones left out of the batch have no `clarifier.result`, so a later pass
-        takes them. A reply that is `unavailable` ends the calls: the remaining questions of the batch are recorded as
-        unavailable without asking again. The phase that follows is `implementing` only when nothing that blocks a
-        task is still open. `location` is (path of questions.md, unit branch) for the sticky section."""
+        and never a `verdict` or `harness` question: each becomes `answered-by-clarifier` (every L4-CLR-002 condition
+        held) or a suggestion with Status `open`. The ones left out of the batch have no `clarifier.result`, so a
+        later pass takes them. A reply that is `unavailable` ends the calls: the remaining questions of the batch are
+        recorded as unavailable without asking again. The phase that follows is `implementing` only when nothing that
+        blocks a task is still open. `location` is (path of questions.md, unit branch) for the sticky section."""
         done = clarified_ids(read_ledger(self.unit_dir).events)
         batch = [
             v for v in port.load()
-            if v.id in blocking and v.status is QuestionStatus.OPEN and v.kind is not QuestionKind.VERDICT
-            and v.id not in done
+            if v.id in blocking and v.status is QuestionStatus.OPEN
+            and v.kind not in (QuestionKind.VERDICT, QuestionKind.HARNESS) and v.id not in done
         ][: cfg.max_open_questions]  # fmt: skip
         results: dict[str, QuestionResult] = {}
         available, invalid = True, []

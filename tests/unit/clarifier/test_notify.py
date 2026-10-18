@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from l4.clarifier.notify import UNAVAILABLE_SENTENCE, build_sticky_section
 from l4.clarifier.ports import QuestionView
 from l4.specs.questions import QuestionKind, QuestionStatus
@@ -24,9 +26,7 @@ def test_sticky_section_lists_open_questions_and_unavailable_sentence():
 
 
 def test_invalid_output_and_draft_sentences_and_no_link():
-    section = build_sticky_section(
-        [view("Q-001", "t")], **WHERE, link=None, invalid=["Q-001"], drafts=["Q-002"]
-    )
+    section = build_sticky_section([view("Q-001", "t")], **WHERE, link=None, invalid=["Q-001"], drafts=["Q-002"])
     assert "The clarifier produced invalid output for Q-001; no suggestion was written." in section
     assert "Q-002 has an answer but its Status is still `open`" in section
     assert "`openspec/changes/add-vat/questions.md` on branch `l4/openspec/add-vat`" in section
@@ -39,3 +39,15 @@ def test_titles_are_one_line_and_cannot_mention_or_markup():
     line = next(line for line in section.splitlines() if line.startswith("- Q-001"))
     assert line.startswith("- Q-001 (unlabelled): Which?")
     assert "@all" not in section and "<!--" not in section and "](http" not in section
+
+
+def test_an_unreadable_harness_answer_is_named_in_the_sticky_note():
+    unread = replace(
+        view("Q-007", "Task 3.1: the check could not decide", QuestionKind.HARNESS),
+        status=QuestionStatus.ANSWERED, answer_text="looks fine",
+    )  # fmt: skip
+    section = build_sticky_section([unread], **WHERE, link=None)
+    assert (
+        "Q-007 has an answer that does not start with `accept` or `retry`: it was not read. Please answer again."
+        in section
+    )
