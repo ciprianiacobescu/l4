@@ -126,3 +126,33 @@ def test_login_and_unit_lock_files_are_not_readable(var_tmp_dir, monkeypatch, ou
     for kind in ("gate", "agent"):
         seen = world.read(wb, kind, [login, unit])
         assert not any(seen.values()), seen
+
+
+def test_symlinked_tools_expose_nothing_beside_their_targets(var_tmp_dir):  # SCN-PRV-108 (review F2, live)
+    world = make_world(var_tmp_dir, path=f"{var_tmp_dir}/home/.local/bin:/usr/local/bin:/usr/bin:/bin")
+    home = world.home
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".config" / "gh").mkdir(parents=True)
+    (home / ".config" / "gh" / "secret.yml").write_text("oauth_token: gho_SECRET")
+    # a symlink in a PATH directory into a secret location ...
+    (home / ".local" / "bin" / "leaky").symlink_to(home / ".config" / "gh" / "secret.yml")
+    # ... a shim into a project's node_modules, with a secret in the project ...
+    package = home / "mytool" / "node_modules" / "leakpkg"
+    package.mkdir(parents=True)
+    (package / "cli.js").write_text("#!/bin/sh\necho SHIM_OK\n")
+    (package / "cli.js").chmod(stat.S_IRWXU)
+    (home / "mytool" / "secret.txt").write_text("PROJECT-SECRET\n")
+    (home / ".local" / "bin" / "toolcli").symlink_to(package / "cli.js")
+    # ... and a plain symlinked tool with a secret beside its target
+    plain = home / "share" / "tool"
+    plain.mkdir(parents=True)
+    (plain / "real.sh").write_text("#!/bin/sh\necho PLAIN_OK\n")
+    (plain / "real.sh").chmod(stat.S_IRWXU)
+    (plain / "beside.txt").write_text("BESIDE-SECRET\n")
+    (home / ".local" / "bin" / "plain").symlink_to(plain / "real.sh")
+    wb = world.bench("add-search", "r-20261017T1201Z-bbbb", "claude-code")
+    secrets = [home / ".config" / "gh" / "secret.yml", home / "mytool" / "secret.txt", plain / "beside.txt"]
+    for kind in ("gate", "agent"):
+        assert not any(world.read(wb, kind, secrets).values()), kind
+        done = world.run(wb, kind, "toolcli && plain")
+        assert done.returncode == 0 and done.stdout.split() == ["SHIM_OK", "PLAIN_OK"], (kind, done.stderr)

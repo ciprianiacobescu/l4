@@ -99,9 +99,14 @@ main checkout, as `safe_path` forbids them), in this order, deduplicated (a path
 2. for an entry ending in `node_modules/.bin`, its `node_modules` directory (a `.bin` shim points into a sibling package;
    pnpm set up by `pnpm/action-setup` lives in `~/setup-pnpm/node_modules`);
 3. for each symlink directly inside an entry of 1 whose resolved target is a regular file under a hidden root and
-   outside that entry, its install root: the parent of the outermost `node_modules` on the target's path when there is
-   one (an npm global install, nvm's `npm`), else the target's parent directory (Claude's native install
-   `~/.local/share/claude/versions/<v>`, a uv tool's `bin`);
+   outside that entry, **the target file itself** (Claude's native install `~/.local/share/claude/versions/<v>`: the one
+   file), or, when the file lies inside a `node_modules`, **its package directory**: the directory directly below the
+   innermost `node_modules` on its path (two levels for an `@scope`), which carries its own nested `node_modules`. Never
+   the directory around a file and never the project around a `node_modules` (review F2: the first version bound the
+   parent of the target, or the directory above the outermost `node_modules`, and a symlink into `~/.config/gh` or a
+   shim into a project exposed `secret.yml` and the project's `secret.txt`, proved live). A tool that needs its
+   neighbours (a script that sources a sibling, a hoisted dependency outside its package) takes a `sandbox.tool_paths`
+   entry;
 4. `l4_home(host_env)` (`$L4_HOME`, default `~/.local/share/l4`: node, the npm prefix with the agent CLIs, Laya);
 5. uv's Python and tool directories: `$UV_PYTHON_INSTALL_DIR` else `<data>/uv/python`, `$UV_TOOL_DIR` else
    `<data>/uv/tools`, `<data>` being `$XDG_DATA_HOME` else `~/.local/share` (a `.venv/bin/python` of a uv-managed
@@ -116,6 +121,14 @@ main checkout, as `safe_path` forbids them), in this order, deduplicated (a path
    under `--ro-bind / /`, where Serena already starts with it read-only [I: no bind makes it writable in 0.4.14];
 9. `sandbox.tool_paths` (D5).
 
+**Every path derived by items 1-8 is vetted** before it is bound (`home._vetting_reason`): one that is, holds or lies inside
+a login path of any adapter (built-in or configured) or inside `SECRET_LOCATIONS` (`~/.ssh`, `~/.config/gh`, `~/.aws`,
+`~/.docker`, `~/.kube`, `~/.npmrc`, `~/.pypirc`, `~/.netrc`, `~/.git-credentials`, `~/.cargo/credentials*`,
+`~/.config/opencode`, `~/.claude*`, `~/.codex`, `~/.gnupg`, `~/.config/gcloud`, `~/.azure`, git's own files) is skipped, and
+`derive_tool_paths` returns it in `skipped` with the reason (`tool_paths` logs it once per path). The operator's own
+`sandbox.tool_paths` entries are not vetted this way (the key is an explicit word, and it is checked at load and at the
+first spec by `_checked`). Doctor `SANDBOX-003` plants two symlinked tools with a secret beside each target, one of them a
+shim into a project's `node_modules`, and fails when either secret is readable or when a tool file is not (SCN-PRV-108).
 Then the other adapters' credential masks follow (D3), so a tool path that holds a login (say a PATH entry
 `~/.local/share/opencode/bin`) still hides it. Rejected: binding only the PATH entries (breaks npm's sibling packages,
 nvm's `npm`, a uv venv's interpreter, the trace plugin under the uvx cache); binding the parent prefix of every `bin`

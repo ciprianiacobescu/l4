@@ -4703,7 +4703,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | PRV-002 | warn | root-only prerequisites (bubblewrap, git) missing | manual: the exact command is printed, never run (L4-DOC-002) |
 | SANDBOX-001 | error (warn when `ci.platform: local`) | both sandbox kinds work (L4-SEC-005): from the gate sandbox no credential path of any profile, no ancestor environment, no git credential and no harness secret is readable; from **every** agent sandbox no forge/trigger/App secret, no ancestor environment and no other profile's credential path is readable, while its own credentials, the caches and the LLM API are reachable; `mode: user` with several credential-bearing profiles requires `user_per_profile`; `mode: none` only with `allow_none: true` | — |
 | SANDBOX-002 | error | no container/system daemon socket is reachable from the agent or the gate sandbox (L4-SEC-005): a probe with the real bwrap argv, network shared and unshared, finds no connectable `docker.sock`/`containerd`/`podman`/`dbus` socket and no socket file under `/run` or `/var/run`; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
-| SANDBOX-003 | error | the home and the runner cache are hidden (L4-SEC-030, L4-SEC-031, L4-SEC-038): canaries in `$HOME` (outside every credential path), in another unit's step directory under the runner cache and in its lock directory are read through the real gate and agent argv; a readable canary fails (exit 3) naming the path and the kind, never the content; the canaries are removed; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
+| SANDBOX-003 | error | the home and the runner cache are hidden (L4-SEC-030, L4-SEC-031, L4-SEC-038): canaries in `$HOME` (outside every credential path), in another unit's step directory under the runner cache, in its lock directory and beside two symlinked tools (one a `node_modules` shim) are read through the real gate and agent argv, and the tools themselves must stay readable; a readable canary fails (exit 3) naming the path and the kind, never the content; the canaries are removed; skipped when bwrap is absent or `sandbox.mode` is not `auto`/`bwrap` | — |
 | SANDBOX-004 | warn | `sandbox.setup_paths` is set (L4-SEC-033): a registry login is bound into the sandbox of every `gates.setup` command, in reach of setup code an agent can influence; a `fail` row of severity warn, never an exit code | remove the entry or use a read-only token |
 | CFG-001 | error | config validates against schema; no literal secrets | — |
 | CFG-002 | error | role chains reference existing profiles; no profile has both adapter and backend | — |
@@ -5176,14 +5176,19 @@ after them, so no tool bind re-exposes a login. `l4.sandbox.home.tool_paths` der
 duplicate, a path inside an earlier one, a path inside the worktree or the main checkout, and a path that is or holds the
 home: (1) each entry of the sandbox's PATH and, for a symlink entry, its resolved path; (2) the `node_modules` of an
 entry ending in `node_modules/.bin`; (3) for each symlink directly inside an entry whose target is a file under a hidden
-root outside that entry, its install root (the parent of the outermost `node_modules` on the target's path, else the
-target's directory: Claude's native install, a uv tool's `bin`, an npm global install); (4) `$L4_HOME`; (5) uv's Python
+root outside that entry, the target file itself (Claude's native install is one file), or its package directory when it
+lies in a `node_modules` (the directory below the innermost `node_modules`, two levels for an `@scope`): never the
+directory around a file and never the project around a `node_modules`; (4) `$L4_HOME`; (5) uv's Python
 and tool directories (`$UV_PYTHON_INSTALL_DIR`, `$UV_TOOL_DIR`, else under `$XDG_DATA_HOME` or `~/.local/share`), never
 `~/.local/share/uv` as a whole (uv keeps `credentials/` there); (6) the corepack home (`$COREPACK_HOME`, else
 `~/.cache/node/corepack`); (7) the harness's own gate plugin directories (the evidence plugins reach every test gate
 through `PYTHONPATH`; a harness run by `uvx` lives in the uv cache); (8) `~/.serena`, agent kind only; (9)
-`sandbox.tool_paths`. A tool under the home that none of these reaches fails inside the sandbox ("command not found"):
-the fix is a `sandbox.tool_paths` entry.
+`sandbox.tool_paths`. Every path derived by (1) to (8) is vetted: one that is, holds or lies inside a login path
+of any adapter or a well-known secret location of the home (`~/.ssh`, `~/.config/gh`, `~/.aws`, `~/.docker`, `~/.kube`,
+`~/.npmrc`, `~/.pypirc`, `~/.netrc`, `~/.git-credentials`, `~/.cargo/credentials*`, `~/.config/opencode`, `~/.claude*`,
+`~/.codex`, `~/.gnupg`, cloud CLI configs) is not bound and is reported as skipped. A tool under the home that none of these
+reaches, or that needs the files beside its target, fails inside the sandbox ("command not found"): the fix is a
+`sandbox.tool_paths` entry.
 
 **L4-SEC-033 Configured home paths are checked at load.** `sandbox.tool_paths` (both kinds) and `sandbox.setup_paths`
 (only the gate sandbox of a `gates.setup` command, for a registry login such as `~/.npmrc` or `~/.netrc`) are lists of
@@ -5243,7 +5248,8 @@ gates on an environment an earlier step left. A run's first setup in a new workt
 
 **L4-SEC-038 Doctor SANDBOX-003 proves the home and the runner cache are hidden.** Doctor `SANDBOX-003` MUST plant
 canaries (a file in `$HOME` outside every credential path, a credential file in another unit's step directory, a lock
-file, each holding a random marker only) and run them through the real gate and agent argv; a readable canary MUST fail
+file, and a secret beside each of two symlinked tools in a PATH directory of its own, one a shim into a project's
+`node_modules`; each holding a random marker only) and run them through the real gate and agent argv; a readable canary MUST fail
 the check (exit 3) naming the path and the kind, never the content, and the canaries and the probe directory MUST be
 removed. It is skipped when bwrap is absent or `sandbox.mode` is not `auto` or `bwrap`.
 
@@ -9879,12 +9885,12 @@ scenario is a spec defect (§26).
 #### SCN-SEC-76 (+) User-local tools are bound read-only · L4-SEC-032
 - **Given** a home with `~/.local/bin/uv`, a symlink `~/.local/bin/claude` to `~/.local/share/claude/versions/2.1.288`, `$L4_HOME/npm/node_modules/.bin` on PATH and `~/.local/share/uv/python`
 - **When** the agent argv is built
-- **Then** `~/.local/bin`, `~/.local/share/claude/versions`, `$L4_HOME`, `~/.local/share/uv/python` and the harness's plugin directories are `--ro-bind` entries, `~/.local/share/uv` as a whole is not, and no tool path is bound twice
+- **Then** `~/.local/bin`, `~/.local/share/claude/versions/2.1.288` (the file, not its directory), `$L4_HOME`, `~/.local/share/uv/python` and the harness's plugin directories are `--ro-bind` entries, `~/.local/share/uv` as a whole is not, and no tool path is bound twice
 
 #### SCN-SEC-77 (−) A tool bind never re-exposes a login · L4-SEC-032
 - **Given** a PATH entry `~/.local/share/opencode/bin` and a codex agent spec
 - **When** the argv is built
-- **Then** the mask over `~/.local/share/opencode` comes after the bind of that PATH entry
+- **Then** that entry is not bound (it lies inside a login path) and is named among the skipped paths, and nothing under `~/.local/share/opencode` is visible
 
 #### SCN-SEC-78 (+) Tools under the home run in both sandbox kinds · L4-SEC-032
 - **Given** a working bwrap, a home outside `/tmp` with a script in `~/.local/bin` and a symlinked tool whose target is under `~/.local/share`
@@ -10035,6 +10041,10 @@ scenario is a spec defect (§26).
 - **Given** a step that adds a dependency to `pyproject.toml`, writes no lock file, and writes `zz.pth` into `.venv` site-packages
 - **When** the step ends
 - **Then** `.venv` is removed and a `guard.violation{rule: "environment"}` names `zz.pth`
+#### SCN-PRV-108 (−) A symlinked tool exposes nothing beside its target · L4-SEC-032
+- **Given** a symlink in a PATH directory into `~/.config/gh/secret.yml`, a shim into `~/mytool/node_modules/leakpkg/cli.js` with `~/mytool/secret.txt` in the project, and a symlink to `~/share/tool/real.sh` with `beside.txt` next to it
+- **When** a gate and an agent sandbox read the three secrets and run the shim and the plain tool
+- **Then** every secret read fails, both tools run, and the bound paths are the target file and the package directory, never the directory around a file or the project
 
 ## 24. Definition of done
 

@@ -9,6 +9,7 @@ unshared (a gate with `gates.network: none`), and FAILS when a socket is visible
 check; the full SANDBOX-001 (credentials, ancestor environment) is separate.
 """
 
+import os
 import secrets
 import shutil
 from pathlib import Path
@@ -97,7 +98,13 @@ SANDBOX_002 = register(Check("SANDBOX-002", "No daemon socket reachable from the
 
 READ = "L4-READ:"
 DONE = "L4-CANARY-DONE"
-READ_SCRIPT = f'for f; do [ -r "$f" ] && echo "{READ}$f"; done; echo {DONE}'
+SEEN = "L4-SEEN:"
+SPLIT = "L4-SPLIT"
+# the paths before the marker must not be readable, the ones after it must be (a tool that was bound on purpose)
+READ_SCRIPT = (
+    f'mode=hide; for f; do if [ "$f" = {SPLIT} ]; then mode=show; continue; fi; '
+    f'if [ -r "$f" ]; then if [ $mode = hide ]; then echo "{READ}$f"; else echo "{SEEN}$f"; fi; fi; done; echo {DONE}'
+)
 
 
 def _canaries(home: Path, cache: Path, token: str) -> list[Path]:
@@ -108,6 +115,31 @@ def _canaries(home: Path, cache: Path, token: str) -> list[Path]:
         cache / "units" / f"l4-canary-{token}" / "x" / "y" / "agent-tmp" / "credential",
         cache / "locks" / f"l4-canary-{token}.lock",
     ]
+
+
+def _tool_traps(home: Path, token: str) -> tuple[Path, list[Path], list[Path], list[Path]]:
+    """Two symlinked tools in a PATH directory of their own, each with a secret beside its target: a plain file tool,
+    and a shim into a project's `node_modules` (review F2). Returns (the PATH directory, the secrets that must stay
+    hidden, the tool files that must be visible, the directories to remove). The sandbox binds the target file and
+    the package, never what is around them."""
+    bin_dir = home / f".l4-canary-{token}-bin"
+    tool = home / f".l4-canary-{token}-tool"
+    project = home / f".l4-canary-{token}-proj"
+    package = project / "node_modules" / "pkg"
+    for directory in (bin_dir, tool, package):
+        directory.mkdir(parents=True, exist_ok=True)
+    (tool / "real.sh").write_text("#!/bin/sh\n")
+    (package / "cli.js").write_text("// tool\n")
+    for secret in (tool / "secret", project / "secret"):
+        secret.write_text(secrets.token_hex(16))
+    (bin_dir / "plain").symlink_to(tool / "real.sh")
+    (bin_dir / "shim").symlink_to(package / "cli.js")
+    return (
+        bin_dir,
+        [tool / "secret", project / "secret"],
+        [tool / "real.sh", package / "cli.js"],
+        [bin_dir, tool, project],
+    )
 
 
 def _sandbox_003(ctx: DoctorContext) -> CheckResult:
@@ -125,6 +157,7 @@ def _sandbox_003(ctx: DoctorContext) -> CheckResult:
         return CheckResult("fail", "HOME is not an existing directory: the sandbox cannot hide it")
     token = secrets.token_hex(6)
     canaries = _canaries(home, cache, token)
+    trap_dirs: list[Path] = []
     base = cache / "doctor" / f"sandbox-003-{token}"
     worktree, tmp_dir, git_dir = base / "wt", base / "tmp", base / "git"
     try:
@@ -133,13 +166,16 @@ def _sandbox_003(ctx: DoctorContext) -> CheckResult:
         for canary in canaries:
             canary.parent.mkdir(parents=True, exist_ok=True)
             canary.write_text(secrets.token_hex(16))
+        bin_dir, trap_secrets, trap_tools, trap_dirs = _tool_traps(home, token)
+        probe_env = {**ctx.env, "PATH": os.pathsep.join([str(bin_dir), ctx.env.get("PATH", "")])}
+        hidden = [*canaries, *trap_secrets]
         logins = expand_credential_paths(ctx.cfg.sandbox.credential_paths, home)
         chain = ctx.cfg.roles.implementer
         adapter = ctx.cfg.profiles[chain[0]].adapter if chain and chain[0] in ctx.cfg.profiles else "codex"
         sandbox = BwrapSandbox(bwrap)
         for kind in ("gate", "agent"):
             tools, _ = spec_paths(
-                ctx.env, home=home, cache_root=cache, kind=kind, sandbox_cfg=ctx.cfg.sandbox, credential_paths=logins,
+                probe_env, home=home, cache_root=cache, kind=kind, sandbox_cfg=ctx.cfg.sandbox, credential_paths=logins,
                 forbid=(worktree, base),
             )  # fmt: skip
             if kind == "gate":
@@ -155,13 +191,23 @@ def _sandbox_003(ctx: DoctorContext) -> CheckResult:
                     cache_root=cache, tool_paths=tools,
                 )  # fmt: skip
                 env = build_agent_env(ctx.env, spec)
-            wrapped = sandbox.wrap(["/bin/sh", "-c", READ_SCRIPT, "sh", *map(str, canaries)], spec, env)
+            wrapped = sandbox.wrap(
+                ["/bin/sh", "-c", READ_SCRIPT, "sh", *map(str, hidden), SPLIT, *map(str, trap_tools)], spec, env
+            )
             done = ctx.run(wrapped.argv, timeout=PROBE_TIMEOUT_S, env=wrapped.env)
             lines = done.stdout.strip().splitlines()
             readable = [line.removeprefix(READ) for line in lines if line.startswith(READ)]
             if DONE not in lines:
                 detail = (done.stderr.strip().splitlines() or [f"exit {done.returncode}"])[-1][:200]
                 return CheckResult("fail", f"the canary probe did not run in the {kind} sandbox: {detail}")
+            seen = {line.removeprefix(SEEN) for line in lines if line.startswith(SEEN)}
+            if not readable and not {str(t) for t in trap_tools} <= seen:
+                return CheckResult(
+                    "fail",
+                    f"the {kind} sandbox lost a symlinked tool it should have kept: the tool paths of the sandbox "
+                    "(l4.sandbox.home) did not bind the file a PATH symlink points to",
+                    "set sandbox.tool_paths for the tool, or fix l4.sandbox.home",
+                )
             if readable:
                 return CheckResult(
                     "fail",
@@ -173,11 +219,14 @@ def _sandbox_003(ctx: DoctorContext) -> CheckResult:
     finally:
         for canary in canaries:
             canary.unlink(missing_ok=True)
+        for directory in trap_dirs:
+            shutil.rmtree(directory, ignore_errors=True)
         shutil.rmtree(cache / "units" / f"l4-canary-{token}", ignore_errors=True)
         shutil.rmtree(base, ignore_errors=True)
     return CheckResult(
         "pass",
-        "the gate and the agent sandbox read none of the canaries (home, another unit's directory, lock directory)",
+        "the gate and the agent sandbox read none of the canaries (home, another unit's directory, lock directory, the "
+        "secrets beside a symlinked tool) and keep the tools",
     )
 
 

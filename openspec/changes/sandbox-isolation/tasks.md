@@ -105,7 +105,12 @@ Every task follows these rules:
   - `test_user_local_tools_are_bound_read_only` (SCN-SEC-76): a fake home tree with the paths of the scenario (plus
     `~/.local/share/uv/credentials/` that must NOT be bound), `l4.sandbox.home.tool_paths(...)` returns the expected
     set, deduplicated, and the argv has one `--ro-bind p p` per path, before the credential masks.
-  - `test_a_tool_bind_never_re_exposes_a_login` (SCN-SEC-77).
+  - `test_a_tool_bind_never_re_exposes_a_login` (SCN-SEC-77, changed with review F2: such a path is not derived at all).
+  - Review F2 (SCN-PRV-108): `test_a_symlink_into_a_secret_location_binds_nothing`, `test_a_node_modules_shim_binds_the_package_not_the_project`,
+    `test_a_symlinked_tool_binds_its_file_not_the_directory_beside_it`, `test_a_derived_path_at_a_secret_location_is_skipped`
+    (every `home.SECRET_LOCATIONS` entry, as the entry, inside it and holding it), the live
+    `test_bwrap_live_home.py::test_symlinked_tools_expose_nothing_beside_their_targets`, and the symlink traps of
+    `SANDBOX-003` (`test_checks_sandbox_003.py`).
   - `test_setup_paths_reach_only_a_setup_gate` (SCN-SEC-79): `gate_sandbox_spec(..., builds_env=True)` binds
     `~/.npmrc` read-only; `builds_env=False` and an agent spec do not.
   - `tests/unit/sandbox/test_lock_files_hidden.py::test_the_lock_files_are_not_visible_in_either_sandbox_kind`

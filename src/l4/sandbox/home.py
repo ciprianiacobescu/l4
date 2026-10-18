@@ -5,8 +5,10 @@ The sandboxes hide `$HOME` and `$L4_CACHE`; a tool that lives under one of them 
 the one derivation of those paths (design D4); the argv builders only bind what a `SandboxSpec` carries.
 """
 
+import logging
 import os
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -71,13 +73,47 @@ def _checked(
     return out
 
 
-def _install_root(target: Path) -> Path:
-    """Where a tool symlink's real file lives as a unit: the parent of the outermost `node_modules` on its path (an npm
-    global install: the package and its siblings), else the file's directory."""
+# Where secrets live in a home besides the adapters' logins. A tool path the harness DERIVES (a PATH entry, the target
+# of a symlink in one, ...) that is, holds or lies inside one of these is never bound: a symlink an agent planted in
+# `~/.local/bin` must not be a way to hand over `~/.config/gh` (review F2).
+SECRET_LOCATIONS = (
+    ".ssh", ".config/gh", ".aws", ".docker", ".kube", ".npmrc", ".pypirc", ".netrc", ".git-credentials",
+    ".cargo/credentials", ".cargo/credentials.toml", ".config/opencode", ".claude", ".claude.json", ".codex",
+    ".gnupg", ".config/gcloud", ".azure", ".config/git", ".gitconfig",
+)  # fmt: skip
+
+log = logging.getLogger("l4.sandbox")
+_REPORTED: set[tuple[str, str]] = set()
+
+
+@dataclass(frozen=True)
+class Derived:
+    paths: tuple[Path, ...]
+    skipped: tuple[tuple[Path, str], ...] = ()  # (path, why): derived, then refused by the vetting
+
+
+def _vetting_reason(path: Path, *, home: Path, logins: Sequence[Path]) -> str | None:
+    """Why a derived tool path is refused, or None. It is refused when it is, contains or lies inside a login of any
+    adapter (built-in or configured) or one of `SECRET_LOCATIONS` of the home."""
+    secrets = [home / rel for rel in SECRET_LOCATIONS]
+    for place, label in [(p, "a login path") for p in logins] + [(p, "a secret location") for p in secrets]:
+        if _inside(path, place):
+            return f"lies inside {label}"
+        if _inside(place, path):
+            return f"holds {label}"
+    return None
+
+
+def _package_dir(target: Path) -> Path | None:
+    """The package a file inside a `node_modules` belongs to: the directory directly below the innermost `node_modules`
+    on its path (two levels for an `@scope`), which carries its own nested `node_modules`. None outside one."""
     parts = target.parts
-    if "node_modules" in parts:
-        return Path(*parts[: parts.index("node_modules")])
-    return target.parent
+    if "node_modules" not in parts:
+        return None
+    at = len(parts) - 1 - parts[::-1].index("node_modules")
+    depth = 2 if len(parts) > at + 1 and parts[at + 1].startswith("@") else 1
+    package = Path(*parts[: at + 1 + depth])
+    return package if package != target and _inside(target, package) else None
 
 
 def tool_paths(
@@ -90,24 +126,56 @@ def tool_paths(
     forbid: Iterable[Path] = (),
     credentials: Iterable[Path] = (),
 ) -> tuple[Path, ...]:
+    """`derive_tool_paths(...).paths`; what was skipped is logged once per path."""
+    derived = derive_tool_paths(
+        host_env, home=home, cache_root=cache_root, kind=kind, configured=configured, forbid=forbid,
+        credentials=credentials,
+    )  # fmt: skip
+    for path, why in derived.skipped:
+        if (str(path), why) not in _REPORTED:
+            _REPORTED.add((str(path), why))
+            log.warning("sandbox tool path %s was not bound (%s)", path, why)
+    return derived.paths
+
+
+def derive_tool_paths(
+    host_env: Mapping[str, str],
+    *,
+    home: Path,
+    cache_root: Path,
+    kind: Kind,
+    configured: Sequence[str] = (),
+    forbid: Iterable[Path] = (),
+    credentials: Iterable[Path] = (),
+) -> Derived:
     """Every existing path under `home` or `cache_root` that a tool of this sandbox needs, read-only (design D4, items
     1-9 in that order). A path inside an earlier one, a duplicate, a path inside `forbid` (the worktree, the main
-    checkout) and a path that is or holds a hidden root are dropped. `credentials` are the configured login paths,
-    for the check of `configured` (`sandbox.tool_paths`)."""
+    checkout) and a path that is or holds a hidden root are dropped. **Every derived path (items 1-8) is vetted**: one
+    that is, holds or lies inside a login or a `SECRET_LOCATIONS` entry is skipped and reported in `skipped`. The
+    install of a symlinked tool is bound as narrowly as it can be: the resolved target FILE, or, when the file lies in a
+    `node_modules`, its package directory (never the project around it). `configured` (`sandbox.tool_paths`) is the
+    operator's word: it is checked (`_checked`, exit 2) and not vetted."""
     roots = [home, cache_root]
     forbidden = tuple(Path(os.path.realpath(p)) for p in forbid)
+    logins = _credential_paths(home, credentials)
     ordered: list[Path] = []
+    skipped: list[tuple[Path, str]] = []
 
     def under_hidden(path: Path) -> bool:
         return any(_inside(path, root) for root in roots)
 
-    def add(path: Path) -> None:
+    def add(path: Path, *, vet: bool = True) -> None:
         if not path.exists() or not under_hidden(path):
             return
         if any(path == root or path in root.parents for root in roots):
             return  # the home itself (or its parent): that would undo the tmpfs
         real = Path(os.path.realpath(path))
         if any(_inside(real, f) or _inside(f, real) for f in forbidden):
+            return
+        if vet and (
+            why := _vetting_reason(real, home=home, logins=logins) or _vetting_reason(path, home=home, logins=logins)
+        ):
+            skipped.append((path, why))
             return
         ordered.append(path)
 
@@ -126,7 +194,7 @@ def tool_paths(
                     continue
                 target = Path(os.path.realpath(child))
                 if target.is_file() and under_hidden(target) and not _inside(target, entry):
-                    add(_install_root(target))
+                    add(_package_dir(target) or target)
     add(l4_home(host_env))
     data = Path(host_env["XDG_DATA_HOME"]) if host_env.get("XDG_DATA_HOME") else home / ".local" / "share"
     add(Path(host_env["UV_PYTHON_INSTALL_DIR"]) if host_env.get("UV_PYTHON_INSTALL_DIR") else data / "uv" / "python")
@@ -139,14 +207,14 @@ def tool_paths(
     if kind == "agent":
         add(home / ".serena")
     for path in _checked("tool_paths", configured, home=home, cache_root=cache_root, credentials=credentials):
-        add(path)
+        add(path, vet=False)
     out: list[Path] = []
     for path in ordered:
         if any(_inside(path, kept) for kept in out):
             continue
         out = [kept for kept in out if not _inside(kept, path)]
         out.append(path)
-    return tuple(out)
+    return Derived(tuple(out), tuple(skipped))
 
 
 def setup_paths(

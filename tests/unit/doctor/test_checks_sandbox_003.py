@@ -16,19 +16,25 @@ from ..sandbox.bwrap_live import requires_bwrap
 
 
 class FakeBwrap:
-    """Reads the canaries it was asked to read (the trailing arguments of the probe command) and answers like a
-    sandbox would: `readable` is the {call index: canary index} it reports as readable; call 0 is the gate kind, call 1
-    the agent kind."""
+    """Reads the paths it was asked to read (the trailing arguments of the probe command) and answers like a sandbox
+    would. The arguments are the paths that must be hidden, then `L4-SPLIT`, then the tool files that must be visible.
+    `readable` is {call index: hidden index} it reports as readable; call 0 is the gate kind, call 1 the agent kind;
+    `lose` drops the visible ones from its answer."""
 
-    def __init__(self, readable: dict[int, int] | None = None, done: bool = True) -> None:
-        self.readable, self.done, self.calls, self.contents = readable or {}, done, [], []
+    def __init__(self, readable: dict[int, int] | None = None, done: bool = True, lose: bool = False) -> None:
+        self.readable, self.done, self.lose, self.calls, self.contents = readable or {}, done, lose, [], []
 
     def run(self, argv: Sequence[str], timeout: float = 10.0, env=None) -> CmdResult:
         self.calls.append(list(argv))
-        canaries = argv[argv.index("sh") + 1 :] if "sh" in argv else []
-        self.contents += [Path(c).read_text() for c in canaries if Path(c).is_file()]
+        tail = argv[argv.index("sh") + 1 :] if "sh" in argv else []
+        hidden, _, visible = (
+            (tail[: tail.index("L4-SPLIT")], "", tail[tail.index("L4-SPLIT") + 1 :]) if tail else ([], "", [])
+        )
+        self.contents += [Path(c).read_text() for c in hidden if Path(c).is_file()]
         index = len(self.calls) - 1
-        lines = [f"L4-READ:{canaries[self.readable[index]]}"] if index in self.readable else []
+        lines = [f"L4-READ:{hidden[self.readable[index]]}"] if index in self.readable else []
+        if not self.lose:
+            lines += [f"L4-SEEN:{v}" for v in visible]
         if self.done:
             lines.append("L4-CANARY-DONE")
         return CmdResult(0, "\n".join(lines) + "\n", "" if self.done else "bwrap: no namespace\n")
@@ -72,13 +78,26 @@ def test_hidden_canaries_pass_and_the_probe_covers_all_three_places(tmp_path):
     fake = FakeBwrap()
     result, home, cache = check(tmp_path, fake)
     assert result.status == "pass" and leftovers(home, cache) == []
-    canaries = fake.calls[0][fake.calls[0].index("sh") + 1 :]
-    assert len(canaries) == 3
+    tail = fake.calls[0][fake.calls[0].index("sh") + 1 :]
+    canaries, tools = tail[: tail.index("L4-SPLIT")], tail[tail.index("L4-SPLIT") + 1 :]
+    assert len(canaries) == 5 and len(tools) == 2  # the three places, the two secrets beside symlinked tools, two tools
     assert any(Path(c).parent == home for c in canaries)
     assert any(c.endswith("/agent-tmp/credential") and cache in Path(c).parents for c in canaries)
     assert any(c.endswith(".lock") and cache / "locks" in Path(c).parents for c in canaries)
     argv = fake.calls[0]
     assert argv.count("--tmpfs") >= 3 and str(home) in argv and str(cache) in argv  # the real argv, covers both
+    # review F2: the symlinked tools are bound as the file / the package, and the secrets beside them are not
+    binds = [(argv[i + 1]) for i, a in enumerate(argv) if a == "--ro-bind" and argv[i + 1] == argv[i + 2]]
+    assert all(t in binds or str(Path(t).parent) in binds for t in tools)
+    assert not any(Path(c).parent in map(Path, binds) for c in canaries[3:])
+    secrets_beside = canaries[3:]
+    assert all(str(Path(s).parent) not in binds for s in secrets_beside)
+
+
+def test_a_sandbox_that_loses_a_symlinked_tool_fails_the_check(tmp_path):
+    (tmp_path / "repo").mkdir()
+    result, home, cache = check(tmp_path, FakeBwrap(lose=True))
+    assert result.status == "fail" and "symlinked tool" in result.message and leftovers(home, cache) == []
 
 
 def test_a_probe_that_does_not_finish_fails_closed(tmp_path):

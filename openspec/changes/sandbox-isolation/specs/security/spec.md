@@ -54,24 +54,29 @@ MUST NOT be visible.
 
 ### Requirement: L4-SEC-032 Tools under a hidden root stay usable, read-only
 After the tmpfs of L4-SEC-030 and L4-SEC-031 the sandbox SHALL bind read-only each existing tool path under the home
-or the runner cache: the sandbox's PATH entries and the install roots of their symlinks, the `node_modules` of a
+or the runner cache: the sandbox's PATH entries and the targets of their symlinks (the file, or its package in a `node_modules`), the `node_modules` of a
 `node_modules/.bin` entry, `$L4_HOME`, uv's Python and tool directories, the corepack home, the harness's gate plugins,
 `~/.serena` for agents, and `sandbox.tool_paths`. The credential masks MUST come after them.
 
 #### Scenario: SCN-SEC-76 (+) User-local tools are bound read-only
 - **GIVEN** a home with `~/.local/bin/uv`, a symlink `~/.local/bin/claude` to `~/.local/share/claude/versions/2.1.288`, `$L4_HOME/npm/node_modules/.bin` on PATH and `~/.local/share/uv/python`
 - **WHEN** the agent argv is built
-- **THEN** `~/.local/bin`, `~/.local/share/claude/versions`, `$L4_HOME`, `~/.local/share/uv/python` and the harness's plugin directories are `--ro-bind` entries, `~/.local/share/uv` as a whole is not, and no tool path is bound twice
+- **THEN** `~/.local/bin`, `~/.local/share/claude/versions/2.1.288` (the file, not its directory), `$L4_HOME`, `~/.local/share/uv/python` and the harness's plugin directories are `--ro-bind` entries, `~/.local/share/uv` as a whole is not, and no tool path is bound twice
 
 #### Scenario: SCN-SEC-77 (−) A tool bind never re-exposes a login
 - **GIVEN** a PATH entry `~/.local/share/opencode/bin` and a codex agent spec
 - **WHEN** the argv is built
-- **THEN** the mask over `~/.local/share/opencode` comes after the bind of that PATH entry
+- **THEN** that entry is not bound (it lies inside a login path) and is named among the skipped paths, and nothing under `~/.local/share/opencode` is visible
 
 #### Scenario: SCN-SEC-78 (+) Tools under the home run in both sandbox kinds
 - **GIVEN** a working bwrap, a home outside `/tmp` with a script in `~/.local/bin` and a symlinked tool whose target is under `~/.local/share`
 - **WHEN** a gate and an agent sandbox run both tools
 - **THEN** both exit 0 in both kinds
+
+#### Scenario: SCN-PRV-108 (−) A symlinked tool exposes nothing beside its target
+- **GIVEN** a symlink in a PATH directory into `~/.config/gh/secret.yml`, a shim into `~/mytool/node_modules/leakpkg/cli.js` with `~/mytool/secret.txt` in the project, and a symlink to `~/share/tool/real.sh` with `beside.txt` next to it
+- **WHEN** a gate and an agent sandbox read the three secrets and run the shim and the plain tool
+- **THEN** every secret read fails, both tools run, and the bound paths are the target file and the package directory, never the directory around a file or the project
 
 ### Requirement: L4-SEC-033 Configured home paths are checked at load
 `sandbox.tool_paths` (both kinds) and `sandbox.setup_paths` (only the gate sandbox of a `gates.setup` command) SHALL be
@@ -205,7 +210,7 @@ environment an earlier step left. A run's first setup in a new worktree removes 
 
 ### Requirement: L4-SEC-038 Doctor SANDBOX-003 proves the home and the runner cache are hidden
 Doctor `SANDBOX-003` SHALL plant canaries (a file in `$HOME` outside every credential path, a credential file in another
-unit's step directory, a lock file) and run them through the real gate and agent argv; a readable canary MUST fail the
+unit's step directory, a lock file, a secret beside a symlinked tool) and run them through the real gate and agent argv; a readable canary MUST fail the
 check (exit 3) naming the path and the kind, never the content, and the canaries MUST be removed. It SHALL be skipped
 when bwrap is absent or `sandbox.mode` is not `auto` or `bwrap`.
 

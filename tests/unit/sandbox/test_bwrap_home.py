@@ -102,7 +102,8 @@ def test_user_local_tools_are_bound_read_only(tmp_path, make_spec):  # SCN-SEC-7
     paths = homemod.tool_paths(env, home=home, cache_root=tmp_path / "runner-cache", kind="agent", forbid=())
     l4 = home / ".local" / "share" / "l4"
     assert home / ".local" / "bin" in paths
-    assert home / ".local" / "share" / "claude" / "versions" in paths
+    real = home / ".local" / "share" / "claude" / "versions" / "2.1.288"
+    assert real in paths and real.parent not in paths  # the target FILE, not the directory around it (review F2)
     assert l4 in paths and home / ".local/share/uv/python" in paths and home / ".local/share/uv/tools" in paths
     assert home / ".local/share/uv" not in paths and home / ".local/share/uv/credentials" not in paths
     assert len(set(paths)) == len(paths) and not any(
@@ -143,10 +144,10 @@ def test_a_tool_bind_never_re_exposes_a_login(tmp_path, make_spec):  # SCN-SEC-7
     login_bin = home / ".local" / "share" / "opencode" / "bin"
     login_bin.mkdir(parents=True)
     env["PATH"] = f"{login_bin}:{env['PATH']}"
-    paths = homemod.tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="agent", forbid=())
-    assert login_bin in paths
-    argv = build(make_spec("agent", "codex", home=home, tool_paths=paths))
-    assert bind_at(argv, login_bin, "--ro-bind") < tmpfs_at(argv, home / ".local" / "share" / "opencode")
+    derived = homemod.derive_tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="agent")
+    # changed with review F2: a path that lies inside a login is not derived at all (it was bound, then masked)
+    assert login_bin not in derived.paths and (login_bin, "lies inside a login path") in derived.skipped
+    argv = build(make_spec("agent", "codex", home=home, tool_paths=derived.paths))
     assert not visible(argv, login_bin / "anything")
 
 
@@ -260,3 +261,78 @@ def test_the_hello_key_directory_is_hidden(tmp_path, make_spec, monkeypatch):  #
     assert not visible(argv, key_file)
     bound = [Path(argv[i + 1]) for i, a in enumerate(argv) if a in {"--bind", "--ro-bind"} and argv[i + 1] != "/"]
     assert not any(b == key_file.parent or b in key_file.parents for b in bound)
+
+
+def secret_world(tmp_path: Path):
+    """A home with the reviewer's two traps next to real tools: a symlink in a PATH directory into `~/.config/gh`, and a
+    shim into a project's `node_modules` (review F2, live proof: both exposed a secret)."""
+    home, env = tree(tmp_path)
+    (home / ".config" / "gh").mkdir(parents=True)
+    (home / ".config" / "gh" / "secret.yml").write_text("oauth_token: gho_SECRET")
+    (home / ".local" / "bin" / "leaky").symlink_to(home / ".config" / "gh" / "secret.yml")
+    proj = home / "mytool"
+    (proj / "node_modules" / "leakpkg").mkdir(parents=True)
+    (proj / "node_modules" / "leakpkg" / "cli.js").write_text("tool\n")
+    (proj / "secret.txt").write_text("PROJECT-SECRET\n")
+    (home / ".local" / "bin" / "toolcli").symlink_to(proj / "node_modules" / "leakpkg" / "cli.js")
+    plain = home / "share" / "tool"
+    plain.mkdir(parents=True)
+    (plain / "real.sh").write_text("#!/bin/sh\n")
+    (plain / "beside.txt").write_text("BESIDE-SECRET\n")
+    (home / ".local" / "bin" / "plain").symlink_to(plain / "real.sh")
+    return home, env, proj, plain
+
+
+def test_a_symlink_into_a_secret_location_binds_nothing(tmp_path, make_spec):  # SCN-PRV-108
+    home, env, _proj, _plain = secret_world(tmp_path)
+    derived = homemod.derive_tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="gate")
+    gh = home / ".config" / "gh"
+    assert not any(p == gh or gh in p.parents or p in gh.parents for p in derived.paths)
+    assert any("secret.yml" in str(p) and "secret location" in why for p, why in derived.skipped)
+    argv = build(make_spec("gate", home=home, tool_paths=derived.paths))
+    assert not visible(argv, gh / "secret.yml") and not visible(argv, gh / "hosts.yml")
+
+
+def test_a_node_modules_shim_binds_the_package_not_the_project(tmp_path, make_spec):  # SCN-PRV-108
+    home, env, proj, _plain = secret_world(tmp_path)
+    paths = homemod.tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="gate")
+    assert proj / "node_modules" / "leakpkg" in paths and proj not in paths
+    argv = build(make_spec("gate", home=home, tool_paths=paths))
+    assert visible(argv, proj / "node_modules" / "leakpkg" / "cli.js") and not visible(argv, proj / "secret.txt")
+    scoped = proj / "node_modules" / "@scope" / "pkg" / "bin"
+    scoped.mkdir(parents=True)
+    (scoped / "run.js").write_text("tool\n")
+    (home / ".local" / "bin" / "scoped").symlink_to(scoped / "run.js")
+    again = homemod.tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="gate")
+    assert proj / "node_modules" / "@scope" / "pkg" in again and proj / "node_modules" / "@scope" not in again
+
+
+def test_a_symlinked_tool_binds_its_file_not_the_directory_beside_it(tmp_path, make_spec):  # SCN-PRV-108
+    home, env, _proj, plain = secret_world(tmp_path)
+    paths = homemod.tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="gate")
+    assert plain / "real.sh" in paths and plain not in paths
+    argv = build(make_spec("gate", home=home, tool_paths=paths))
+    assert visible(argv, plain / "real.sh") and not visible(argv, plain / "beside.txt")
+
+
+@pytest.mark.parametrize("rel", list(homemod.SECRET_LOCATIONS))
+@pytest.mark.parametrize("where", ["is", "inside", "holds"])
+def test_a_derived_path_at_a_secret_location_is_skipped(tmp_path, rel, where):  # SCN-PRV-108
+    home, env = tree(tmp_path)
+    secret = home / rel
+    secret.mkdir(parents=True, exist_ok=True)
+    if where == "is":
+        entry = secret
+    elif where == "inside":
+        entry = secret / "bin"
+        entry.mkdir()
+    else:
+        entry = secret.parent if secret.parent != home else home / ".config"  # a PATH entry that holds it
+        entry.mkdir(exist_ok=True)
+        if entry == home / ".config":
+            (entry / "x").mkdir(exist_ok=True)
+    env["PATH"] = f"{entry}:{env['PATH']}"
+    derived = homemod.derive_tool_paths(env, home=home, cache_root=tmp_path / "rc", kind="gate")
+    assert entry not in derived.paths
+    if entry != home / ".config" or rel.startswith(".config/"):
+        assert any(p == entry for p, _ in derived.skipped)
