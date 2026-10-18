@@ -17,14 +17,15 @@ import ast
 import hashlib
 import json
 import logging
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.implementer.held import MAX_SHOWN_TESTS, MAX_SOURCE_LINES, Check, HeldCheck, accepted_overrides
+from l4.implementer.held import MAX_SHOWN_TESTS, MAX_SOURCE_LINES, MAX_SUBJECTS, Check, HeldCheck, accepted_overrides
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
 from l4.implementer.workbench import Workbench
@@ -49,11 +50,21 @@ CHECKS: dict[str, tuple[Check, ...]] = {
     "green": ("at_red",),
     "single": ("tests",),
 }
+MAX_PATHS = 200  # changed paths a question lists
+MAX_DIFFS = 50  # changed non-test files whose diff a question shows
 ACCEPTED_TESTS_RULE = (
     "A person accepted these tests for this task: a check could not decide on them, and the person took them on the "
-    "evidence of the real run. Keep them unchanged: the same name and the same body. The accept covers only them; a "
-    "test of another name, or the same name with another body, is not covered and is checked again."
+    "evidence of the real run, for the source shown below. Keep them unchanged: the same name and the same body. The "
+    "accept covers only them, and only while their source is the one shown: a test of another name, or the same name "
+    "with another body, is not covered, and the task is held again with a new question."
 )
+# the operator's git configuration must not change what a patch looks like or how it applies
+GIT_PLAIN = (
+    "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "-c", "color.ui=never", "-c", "diff.external=",
+    "-c", "core.quotePath=false", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
+)  # fmt: skip
+DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/")
+APPLY_FLAGS = ("apply", "--binary", "--whitespace=nowarn", "-p1")
 
 
 def _safe(value: str) -> str:
@@ -108,35 +119,86 @@ def _python_source(text: str, name: str) -> str | None:
     return None
 
 
-def test_source(wb: Workbench, test_id: str) -> str:
-    """The function of a test id, redacted whole and then cut to `MAX_SOURCE_LINES` (a cut inside a secret would leave a
-    prefix that the redactor cannot see). A name the file does not define gives the lines from its first mention."""
+def _raw_source(wb: Workbench, test_id: str) -> str | None:
+    """The function of a test id exactly as the work tree has it (for a file that is not Python, the file from the
+    first line that mentions the name to its end), or None when the file or the name is not there."""
     path = _test_path(wb, test_id)
     if path is None:
-        return "(the source of this test was not found)"
+        return None
     name = re.sub(r"\[.*\]$", "", test_id.split("::")[-1])
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return "(the source of this test could not be read)"
+        return None
     found = _python_source(text, name) if path.suffix == ".py" else None
     if found is None:
         lines = text.splitlines()
         at = next((i for i, line in enumerate(lines) if name in line), None)
-        found = "\n".join(lines[at : at + MAX_SOURCE_LINES + 1]) if at is not None else "(not found in the file)"
-    return _cut(wb.redactor.redact_text(found))
+        found = "\n".join(lines[at:]) if at is not None else None
+    return found
+
+
+def source_digest(wb: Workbench, test_id: str) -> str:
+    """What an accept is bound to: the sha256 of the test's exact source (`none` when it cannot be found)."""
+    raw = _raw_source(wb, test_id)
+    return "none" if raw is None else hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
+
+
+def test_source(wb: Workbench, test_id: str) -> str:
+    """The test as a question shows it: redacted whole and then cut to `MAX_SOURCE_LINES` (a cut inside a secret would
+    leave a prefix that the redactor cannot see)."""
+    raw = _raw_source(wb, test_id)
+    if raw is None:
+        return "(the source of this test was not found)"
+    return _cut(wb.redactor.redact_text(raw))
 
 
 def test_sources(wb: Workbench, ids: Sequence[str]) -> tuple[tuple[str, str], ...]:
     return tuple((i, test_source(wb, i)) for i in ids[:MAX_SHOWN_TESTS])
 
 
+_STATUS = {"A": "added", "M": "modified", "D": "deleted", "T": "type changed"}
+
+
+def _changes(wb: Workbench) -> list[tuple[str, str]]:
+    """(what, path) of every path the staged step changes, from `diff --name-status`."""
+    raw = wb.git.run_bytes(
+        *GIT_PLAIN, "diff", "--cached", "--name-status", "-z", "--no-renames", "HEAD", "--", ".",
+        f":(exclude){wb.ledger_rel}",
+    )  # fmt: skip
+    fields = [os.fsdecode(f) for f in raw.split(b"\0") if f]
+    return [
+        (_STATUS.get(status[:1], "changed"), path) for status, path in zip(fields[0::2], fields[1::2], strict=False)
+    ]
+
+
+def _file_diff(wb: Workbench, path: str) -> str:
+    out = wb.git.run_bytes(
+        *GIT_PLAIN, "diff", "--cached", *DIFF_FLAGS, "HEAD", "--", f":(literal){path}"
+    ).decode("utf-8", "replace")  # fmt: skip
+    return _cut(wb.redactor.redact_text(out))
+
+
 def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) -> HeldCheck:
-    """`held` with the step's changes, its result and the sources of its tests. Called while the changes are still in
-    the work tree: `discard_changes` follows. The index is left as it was."""
+    """`held` with the step's changes, its result, the list of paths it changes, the diff of each file that is no
+    named test and the source and digest of each named test. Called while the changes are still in the work tree:
+    `discard_changes` follows. The index is left as it was. A step too large to show in full is not saved (an accept
+    could not bind to what the person did not see)."""
     wb.git.run("add", "-A", config=wb.exclude_config)
     try:
-        patch = wb.git.run_bytes("diff", "--cached", "--binary", "HEAD", "--", ".", f":(exclude){wb.ledger_rel}")
+        patch = wb.git.run_bytes(
+            *GIT_PLAIN, "diff", "--cached", "--binary", *DIFF_FLAGS, "HEAD", "--", ".", f":(exclude){wb.ledger_rel}"
+        )  # fmt: skip
+        changes = _changes(wb)
+        named = {p.relative_to(wb.worktree).as_posix() for i in held.tests if (p := _test_path(wb, i)) is not None}
+        others = [path for _, path in changes if path not in named]
+        if len(changes) > MAX_PATHS or len(others) > MAX_DIFFS or len(patch) > MAX_PATCH_BYTES:
+            note = (
+                f"This step changed {len(changes)} files ({len(others)} that are no named test), too many to show in "
+                "full, so it is not saved: an accept would not be bound to what you can read here."
+            )
+            return replace(held, note=note, sources=test_sources(wb, held.tests))
+        diffs = tuple((path, _file_diff(wb, path)) for path in others)
     finally:
         wb.git.run("reset", "-q")
     return replace(
@@ -144,13 +206,16 @@ def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) ->
         patch=patch,
         result=json.dumps(result.model_dump(mode="json")) if result is not None else "",
         sources=test_sources(wb, held.tests),
+        digests=tuple((t, source_digest(wb, t)) for t in held.tests[:MAX_SUBJECTS]),
+        changes=tuple(f"{what} {wb.redactor.redact_text(path)}" for what, path in changes),
+        diffs=diffs,
     )
 
 
 # --- write (with the questions commit) -------------------------------------------------------------------------
 
 
-def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, str]]:
+def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, Any]]:
     """Write the patch and the result beside it; returns (the repository paths to commit, the digests for the
     `question.raised` event). Nothing when the hold has no patch to keep."""
     if held.patch is None or not held.result:
@@ -158,10 +223,13 @@ def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, str
     reject_symlinks(wb.ref.path, ".l4", "held")
     folder = wb.ref.path / HELD_DIR
     folder.mkdir(parents=True, exist_ok=True)
+    profile = wb.selected.profile
+    agent = f"{wb.selected.profile_name}/{profile.model}" if profile.model else wb.selected.profile_name
     meta = json.dumps(
-        {"schema": "l4/held@1", "task": held.task, "check": held.check, "result": json.loads(held.result)},
+        {"schema": "l4/held@1", "task": held.task, "check": held.check, "agent": agent,
+         "result": json.loads(held.result)},
         sort_keys=True,
-    ).encode()
+    ).encode()  # fmt: skip
     rels = [held_rel(wb, held.task, held.check, "patch"), held_rel(wb, held.task, held.check, "json")]
     wb.held_removals[:] = [r for r in wb.held_removals if r not in rels]  # a new hold keeps its own files
     for rel, data in zip(rels, (held.patch, meta), strict=True):
@@ -169,7 +237,9 @@ def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, str
         if target.is_symlink():
             target.unlink()
         atomic_write_bytes(target, data)
-    return rels, {"patch_sha256": _digest(held.patch), "result_sha256": _digest(meta)}
+    return rels, {
+        "patch_sha256": _digest(held.patch), "result_sha256": _digest(meta), "source_sha256": dict(held.digests),
+    }  # fmt: skip
 
 
 # --- find and replay -------------------------------------------------------------------------------------------
@@ -185,6 +255,7 @@ class Replay:
     tests: tuple[str, ...]
     patch_rel: str
     meta_rel: str
+    agent: str | None = None  # the profile that wrote the step: the replay's commit names it
 
 
 @dataclass(frozen=True)
@@ -273,6 +344,12 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
     index, raised = newest
     check: Check = raised.data["check"]
     qid = str(raised.data.get("id"))
+    for other in checks:  # the saved step of another check of this task, replayed in an earlier run: spent
+        earlier = _newest_raised(events, task.key, [other])
+        if other != check and earlier is not None:
+            spent = str(earlier[1].data.get("id"))
+            if any(e.type == "held.replayed" and e.data.get("question") == spent for e in events):
+                _queue_removal(wb, task.key, other)
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     question = next((q for q in file.questions if q.id == qid), None) if file is not None else None
     answer = harness_answer(question) if question is not None else None
@@ -281,7 +358,7 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
     if answer == "retry":
         drop_held(wb, task.key, check, attempt=attempt, why="retry")
         return None
-    valid = any(o.question == qid for o in accepted_overrides(wb, task.key, check).values())
+    valid = any(o.question == qid for o in accepted_overrides(wb, task.key, check, verify=False).values())
     sha = raised.data.get("patch_sha256")
     stale = any(
         e.type == "unit.restarted" or (e.type == "tasks.reopened" and task.key in (e.data.get("tasks") or []))
@@ -310,21 +387,30 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
     meta = _read(wb.worktree / meta_rel, MAX_META_BYTES)
     if isinstance(meta, str):
         return _refuse(wb, task, role, raised, f"the result `{meta_rel}` is missing or unusable: {meta}")
-    if raised.data.get("result_sha256") and _digest(meta) != raised.data["result_sha256"]:
+    recorded = raised.data.get("result_sha256")
+    if not recorded:
+        return _refuse(
+            wb, task, role, raised, f"no digest of `{meta_rel}` was recorded with the question (result_sha256)"
+        )
+    if _digest(meta) != recorded:
         return _refuse(wb, task, role, raised, f"the digest of `{meta_rel}` differs from the one recorded")
     try:
-        result = parse_result(json.loads(meta)["result"])
+        saved = json.loads(meta)
+        result = parse_result(saved["result"])
     except (ValueError, KeyError, TypeError, ResultInvalid) as exc:
         return _refuse(wb, task, role, raised, f"the saved result is not valid ({exc.__class__.__name__})")
+    agent = saved.get("agent") if isinstance(saved.get("agent"), str) else None
+    if agent is not None and not re.fullmatch(r"[A-Za-z0-9._/@+-]{1,120}", agent):
+        agent = None
     if patch:
-        check_apply = wb.git.run("apply", "--check", "--binary", str(wb.worktree / patch_rel), check=False)
+        check_apply = wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "--check", "-", data=patch, check=False)
         if check_apply.returncode != 0:
             detail = wb.redactor.redact_text(" ".join(check_apply.stderr.split())[:300])
             return _refuse(
                 wb, task, role, raised, f"the patch does not apply cleanly to the branch as it is now: {detail}"
             )
     tests = tuple(str(t) for t in raised.data.get("tests") or [])
-    return Replay(qid, check, patch, sha, result, tests, patch_rel, meta_rel)
+    return Replay(qid, check, patch, sha, result, tests, patch_rel, meta_rel, agent)
 
 
 def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Replay) -> "StepOutcome":
@@ -334,9 +420,11 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     from l4.implementer.tdd import StepOutcome  # the module imports this one
 
     base = wb.head()
+    wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
+    wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
     if replay.patch:
         try:
-            wb.git.run("apply", "--binary", str(wb.worktree / replay.patch_rel))
+            wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=replay.patch)  # the bytes that were verified
         except GitError as exc:  # `--check` passed a moment ago: the work tree changed under us
             wb.discard_changes()
             return StepOutcome("failed", reason=f"the saved step could not be applied: {exc}")
@@ -365,7 +453,7 @@ def accepted_tests_block(wb: Workbench, role: str, task: Task) -> tuple[tuple[st
     """The data block `accepted tests`: the tests a person's accept covers for this task, with their source."""
     tests: list[str] = []
     for check in CHECKS[role]:
-        for override in accepted_overrides(wb, task.key, check).values():
+        for override in accepted_overrides(wb, task.key, check, verify=False).values():
             tests += sorted(t for t in override.tests if t not in tests)
     if not tests:
         return ()

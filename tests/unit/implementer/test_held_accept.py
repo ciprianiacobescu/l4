@@ -372,7 +372,7 @@ def test_m2_the_question_lists_every_changed_path_and_shows_the_diff_of_a_suppor
     text = question_text(bench).split("### Context", 1)[1].split("### Options", 1)[0]
     assert "tests/conftest.py" in text and "tests/test_new.py" in text and "(2 files)" in text
     assert "_support" in text and "autouse=True" in text  # the diff of the non-test file
-    assert "accept replays exactly these changes" in text
+    assert "replays exactly these changes (2 files)" in text
 
 
 def test_m2_an_at_red_question_shows_the_production_diff_and_cuts_a_long_one(make_bench, raw, monkeypatch):
@@ -422,7 +422,13 @@ def test_minor_a_non_python_test_is_redacted_before_the_cut(make_bench):
     pem_body = "\n".join("MIIEowIBAAKCAQEA" + "x" * 48 for _ in range(20))
     pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem_body}\n-----END RSA PRIVATE KEY-----"
     bench = make_bench([])
-    lines = ["describe('loads key', () => {"] + ["  const a = 1;"] * 30 + ["  const key = `" + pem + "`;", "});"]
+    lines = (
+        ["describe('loads key', () => {"]
+        + ["  const a = 1;"] * 30
+        + ["  const key = `" + pem + "`;"]
+        + ["  const b = 2;"] * 30
+        + ["});"]
+    )
     (bench.wb.worktree / "tests" / "key.test.js").write_text("\n".join(lines) + "\n")
     shown = held_patch.test_source(bench.wb, "tests/key.test.js::loads key")
     assert "MIIEowIBAAKCAQEA" not in shown and "[cut: " in shown

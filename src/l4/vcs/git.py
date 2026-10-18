@@ -137,6 +137,24 @@ class Git:
             raise GitError(argv, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout if done.returncode == 0 else b""
 
+    def run_input_bytes(
+        self, *args: str, data: bytes, check: bool = True, timeout: float = DEFAULT_TIMEOUT
+    ) -> GitResult:
+        """`run` with `data` on standard input, byte for byte (`git apply -` of a binary patch)."""
+        argv = self._argv(args, ())
+        try:
+            done = subprocess.run(
+                argv, cwd=self.repo, env=self.env, input=data, capture_output=True, timeout=timeout, check=False
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            raise GitError(argv, 124, "timed out") from None
+        result = GitResult(
+            done.returncode, done.stdout.decode("utf-8", "replace"), done.stderr.decode("utf-8", "replace")
+        )
+        if check and result.returncode != 0:
+            raise GitError(argv, result.returncode, result.stderr)
+        return result
+
     def rev_parse(self, ref: str) -> str | None:
         done = self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
         return done.stdout.strip() if done.returncode == 0 else None

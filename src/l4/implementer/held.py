@@ -57,6 +57,12 @@ class HeldCheck:
     patch: bytes | None = None  # the step's changes (`git diff --binary`), saved before they were discarded
     result: str = ""  # the agent's result for that step, as JSON
     sources: tuple[tuple[str, str], ...] = ()  # (test id, its redacted, cut source) of the tests the question names
+    digests: tuple[tuple[str, str], ...] = ()  # (test id, sha256 of its exact source): what an accept is bound to
+    changes: tuple[str, ...] = ()  # every path the saved step changes, as `added path`, `modified path`, `deleted path`
+    diffs: tuple[
+        tuple[str, str], ...
+    ] = ()  # (path, its redacted, cut diff) of every changed file that is no named test
+    note: str = ""  # why the step could not be saved (too large to show in full)
 
     @property
     def subjects(self) -> tuple[str, ...]:
@@ -72,12 +78,23 @@ class HeldCheck:
 
 
 def _source_lines(held: HeldCheck) -> list[str]:
-    """The tests the person accepts, as they are in the saved step (redacted and cut when the hold was taken)."""
-    if not held.sources:
-        return []
-    lines = ["", f"Source of the tests (redacted; at most {MAX_SOURCE_LINES} lines each):"]
-    for test, text in held.sources:
-        lines += [f"{test}:", *(f"    {line}" for line in text.splitlines())]
+    """What the person accepts: every path the replay applies, the tests as they are in the saved step, and the diff of
+    every other changed file (redacted before they were cut, when the hold was taken)."""
+    lines: list[str] = []
+    if held.changes:
+        lines += ["", f"Changes the replay applies ({len(held.changes)} files):", *(f"    {c}" for c in held.changes)]
+    if held.sources:
+        lines += ["", f"Source of the tests (redacted; at most {MAX_SOURCE_LINES} lines each):"]
+        for test, text in held.sources:
+            lines += [f"{test}:", *(f"    {line}" for line in text.splitlines())]
+    for path, text in held.diffs:
+        lines += [
+            "",
+            f"Diff of {path} (redacted; at most {MAX_SOURCE_LINES} lines):",
+            *(f"    {x}" for x in text.splitlines()),
+        ]
+    if held.note:
+        lines += ["", held.note]
     return lines
 
 
@@ -89,11 +106,12 @@ def _accept_lines(held: HeldCheck) -> list[str]:
             "accepted). A criterion that the check shows not to discriminate still fails the attempt."
         ]
     return [
-        "`accept: <why>` counts these on the evidence of the real run, for exactly the step you see here: the harness "
-        "saved the step's changes on the unit branch, and the next run applies them, with every guard and gate an "
-        "agent's changes get, instead of starting an agent. When the check cannot decide again, the claim is taken "
-        "(the verifier and the judge see that it was accepted). A criterion that the check shows not to discriminate "
-        "still fails the attempt."
+        f"`accept: <why>` replays exactly these changes ({len(held.changes)} files): the harness saved the step on the "
+        "unit branch, and the next run applies it, with every guard and gate an agent's changes get, instead of "
+        "starting an agent. The accept covers each test named above only while its source is the one shown here (a "
+        "digest of it is recorded): the same name with another body is a new question. When the check cannot decide "
+        "again, the claim is taken (the verifier and the judge see that it was accepted). A criterion that the check "
+        "shows not to discriminate still fails the attempt."
     ]
 
 
@@ -138,16 +156,20 @@ class Override:
     answer_sha256: str
     tests: frozenset[str] = frozenset()
     by: str = "human"
+    changed: frozenset[str] = frozenset()  # named tests whose source is no longer the one the answerer saw
 
     def covers(self, tests: Sequence[str]) -> bool:
-        return set(tests) <= self.tests
+        return set(tests) <= self.tests - self.changed
 
 
-def accepted_overrides(wb: Workbench, task_key: str, check: Check) -> dict[str, Override]:
+def accepted_overrides(wb: Workbench, task_key: str, check: Check, *, verify: bool = True) -> dict[str, Override]:
     """subject (criterion id, or test id for `at_red`) -> the person's `accept` that covers it. A harness question
     counts when it blocks `task_key`, a human answered it `accept` with Status `answered`, the ledger recorded that
     answer's digest (`question.answered{by: human}`), and its own `question.raised` event (which the harness wrote:
-    the file's text is never read for the subjects) has this task and this check."""
+    the file's text is never read for the subjects) has this task and this check. A question that recorded the
+    digest of each named test's source (L4-IMP-065) covers a test only while its source in the work tree has that
+    digest (`verify`; a caller that runs before the step has no tests to look at passes False); one without digests
+    keeps the rule by test id."""
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is None:
         return {}
@@ -175,5 +197,17 @@ def accepted_overrides(wb: Workbench, task_key: str, check: Check) -> dict[str, 
             continue
         subjects = event.data.get("tests" if check in _TEST_SUBJECTS else "criteria") or []
         recorded = frozenset(str(t) for t in event.data.get("tests") or [])
-        found.update({str(s): Override(question.id, digest, recorded, by) for s in subjects})
+        changed = _changed_tests(wb, event.data.get("source_sha256"), recorded) if verify else frozenset()
+        if check in _TEST_SUBJECTS:
+            subjects = [s for s in subjects if str(s) not in changed]
+        found.update({str(s): Override(question.id, digest, recorded, by, changed) for s in subjects})
     return found
+
+
+def _changed_tests(wb: Workbench, digests: object, recorded: frozenset[str]) -> frozenset[str]:
+    """The recorded tests whose source now is not the one the answerer saw. No digests (a question of 0.4.16): none."""
+    if not isinstance(digests, dict) or not digests:
+        return frozenset()
+    from l4.implementer.held_patch import source_digest  # the module imports this one
+
+    return frozenset(t for t in recorded if digests.get(t) != source_digest(wb, t))
