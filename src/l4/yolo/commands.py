@@ -55,6 +55,7 @@ from l4.implementer.tdd import RoleLimit
 from l4.planner import facts_of
 from l4.specs.detect import collect_units
 from l4.specs.providers import providers_for
+from l4.state.ledger import LedgerEvent
 from l4.state.next_step import next_step, way_out
 from l4.state.retry import fetch_unit_refs, how_to_start, start_run_line
 from l4.state.status import Activity, OpenRun, _where, discover
@@ -229,6 +230,9 @@ class _Units:
     answer_fixes: dict[str, str] = field(
         default_factory=dict
     )  # unit id -> what to do about an answer that is not valid
+    # unit id -> the events that tell what the delegate decided and spent on it (L4-DLG-011); only units that have a
+    # `delegate.result`, so a repository without the delegate reads nothing more
+    delegate: dict[str, tuple[LedgerEvent, ...]] = field(default_factory=dict)
 
 
 @contextlib.contextmanager
@@ -296,7 +300,16 @@ def _read_units(ctx: _Ctx, rev: str, wanted: Sequence[str], *, intake: bool) -> 
             for _, snapshot in found
             if snapshot.state.phase in ("halted", "escalated")
         }
-    return _Units(infos, phases, costs, activity, answered, halts, fixes)
+    delegate = {}
+    for _, snapshot in found:
+        events = getattr(snapshot, "events", ())  # a unit the delegate never saw has no `delegate.result`
+        if any(e.type == "delegate.result" for e in events):
+            delegate[snapshot.ref.id] = tuple(
+                e for e in events
+                if e.type in ("question.raised", "delegate.result")
+                or (e.type == "budget.cost" and e.data.get("role") == "delegate")
+            )  # fmt: skip
+    return _Units(infos, phases, costs, activity, answered, halts, fixes, delegate)
 
 
 def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
@@ -1452,6 +1465,8 @@ def _describe(
     extensions = _extensions(read.events)
     if extensions:
         out["extensions"] = extensions
+    if (delegate := _delegate_status(ctx, plan, state, units, limits.cost_usd)) is not None:
+        out["delegate"] = delegate
     out["usage"] = {
         "cost_usd": used.cost_usd, "cost_limit": limits.cost_usd, "runs": used.runs,
         "idle_runs": used.idle_runs, "runs_limit": limits.runs,
@@ -1523,6 +1538,28 @@ def _describe(
         answer_fix=units.answer_fixes.get(state.current or "", ""),
     )  # fmt: skip
     out["last_activity"], out["open_run"] = _activity_of(state, read.events, units)
+    return out
+
+
+def _delegate_status(
+    ctx: _Ctx, plan: Plan | None, state: PlanState, units: _Units, cost_limit: float | None
+) -> dict[str, Any] | None:
+    """What the delegate did on the plan's current unit and what it cost the plan against its share of the cost limit
+    in force (L4-DLG-011); None while no unit of the plan has a delegate record, so the output of a plan that never
+    used the delegate does not change."""
+    from l4.delegate.limits import PlanCost, delegate_cost
+    from l4.delegate.lines import summary
+    from l4.delegate.settings import delegate_settings
+
+    if plan is None or not any(u in units.delegate for u in plan.unit_ids()):
+        return None
+    settings = delegate_settings(ctx.git, ctx.cfg.forge.base_branch).delegate
+    spent = sum(delegate_cost(units.delegate.get(u, ()), settings.max_cost_usd_per_answer) for u in plan.unit_ids())
+    share = PlanCost(cost_limit, spent).share_usd(settings)
+    current = state.current if state.current in units.delegate else None
+    out: dict[str, Any] = {"unit": current, "cost_usd": round(spent, 6), "share_usd": share}
+    if current is not None:
+        out.update(summary(units.delegate[current]))
     return out
 
 
@@ -1643,6 +1680,13 @@ def _render(d: dict[str, Any]) -> str:
         f"attempts {attempts} (limit {use['attempts_limit']} each)"
         + (f"; deadline {use['deadline']}" if use["deadline"] else "")
     )
+    if d.get("delegate"):  # the current unit's decisions, then the plan's delegate cost against its share
+        from l4.delegate.lines import cost_line, summary_line
+
+        g = d["delegate"]
+        if g.get("unit"):
+            lines.append(f"  {summary_line(g)}")
+        lines.append(f"  {cost_line(g['cost_usd'], g.get('share_usd'))}")
     if d.get("last_activity"):
         a = d["last_activity"]
         what = (

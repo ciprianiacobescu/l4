@@ -598,7 +598,29 @@ def _block(snapshot: UnitSnapshot, repo: Path, cfg: L4Config, now: datetime, url
     if state.phase == Phase.HALTED.value and state.halt_reason == "max_task_attempts" and state.halt_task:
         of = f" of {state.halt_fix_unit}" if state.halt_fix_unit else ""
         lines.append(f"Retry note: the --reason of l4 retry goes to the implementer of task {state.halt_task}{of}")
+    lines += _delegate_lines(snapshot)
     return "\n".join([*lines, f"Next: {_next(snapshot, repo, cfg.forge.branch_prefix)}"])
+
+
+def _has_delegate(snapshot: UnitSnapshot) -> bool:
+    return any(e.type == "delegate.result" for e in snapshot.events)  # the delegate off: nothing is read or shown
+
+
+def _delegate_lines(snapshot: UnitSnapshot) -> list[str]:
+    """`Delegate:` lines, one per question the delegate answered, escalated or defers (L4-DLG-011)."""
+    if not _has_delegate(snapshot):
+        return []
+    from l4.delegate.lines import status_lines  # the delegate imports this module
+
+    return status_lines(snapshot.events)
+
+
+def _delegate_json(snapshot: UnitSnapshot) -> list[dict[str, Any]]:
+    if not _has_delegate(snapshot):
+        return []
+    from l4.delegate.lines import status_json
+
+    return status_json(snapshot.events)
 
 
 def _activity_json(last: Activity | None) -> dict[str, str] | None:
@@ -717,6 +739,7 @@ def run_status(
                 "next": _next(s, app.repo, cfg.forge.branch_prefix),
                 **({"feedback_counts": s.feedback_counts} if s.feedback_counts else {}),
                 **({"corrupt": s.corrupt} if s.corrupt else {}),
+                **({"delegate": d} if (d := _delegate_json(s)) else {}),
                 "last_activity": _activity_json(s.last_activity),
                 "prompt_cut": s.prompt_cut,
                 "open_run": _open_run_json(s.open_run, urls),
