@@ -14,6 +14,7 @@ from pathlib import Path
 from l4 import recordedversions
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
+from l4.delegate.independence import DELEGATE_SERVES
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, register
 from l4.exitcodes import ExitCode, L4Exit
@@ -39,21 +40,24 @@ def scratch_dir(repo: Path) -> Iterator[str]:
 def _live_001(ctx: DoctorContext) -> CheckResult:
     lines: list[str] = []
     failures: list[str] = []
+    optional: list[str] = []  # the delegate is an optional role (L4-AVL-010): its failure is a warning
+    roles = (*LIVE_ROLES, *(("delegate",) if ctx.cfg.delegate.enabled else ()))
     with scratch_dir(ctx.repo) as scratch:
         probe_ctx = ProbeCtx(environ=ctx.env, cwd=Path(scratch), run=run_process, forbid=(ctx.repo,))
         factory = Factory(ctx.cfg, probe_ctx)
-        for role in LIVE_ROLES:
+        for role in roles:
             try:
-                picked = factory.for_role(role, "doctor")
+                picked = factory.for_role(role, "doctor", serves=DELEGATE_SERVES if role == "delegate" else None)
             except L4Exit as exc:
-                failures.append(str(exc))
+                (optional if role == "delegate" else failures).append(str(exc))
                 continue
             hello = picked.probes.get("hello", {}).get("ms")
             lines.append(f"{role}: {picked.profile_name} ok" + (f" (hello {hello} ms)" if hello is not None else ""))
+    hint = "log in or install the CLI as the runner user (docs/runner/README.md)"
     if failures:
-        return CheckResult(
-            "fail", "; ".join(failures), "log in or install the CLI as the runner user (docs/runner/README.md)"
-        )
+        return CheckResult("fail", "; ".join([*failures, *optional]), hint)
+    if optional:  # only the delegate failed: it escalates to a person, so the run is not blocked
+        return CheckResult("fail", "; ".join([*lines, *optional]), hint, severity="warn")
     return CheckResult("pass", "; ".join(lines))
 
 
@@ -69,7 +73,7 @@ def _live_005(ctx: DoctorContext) -> CheckResult:
     reported with both versions, so a format drift is looked for before it costs a run. Reads `--version` only."""
     unrecorded: list[str] = []
     checked: set[str] = set()
-    for role in LIVE_ROLES:
+    for role in (*LIVE_ROLES, *(("delegate",) if ctx.cfg.delegate.enabled else ())):
         for name in getattr(ctx.cfg.roles, role):
             profile = ctx.cfg.profiles.get(name)
             if name in checked or profile is None or profile.adapter not in ADAPTER_BINARIES:

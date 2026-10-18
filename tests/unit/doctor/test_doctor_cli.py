@@ -115,6 +115,8 @@ def test_json_output_and_resolved_paths(world, capsys):
         "S1-003",
         "TOOL-001",
         "SKL-003",
+        "DLG-001",
+        "DLG-002",
     ]
     assert sorted(ids) == sorted(expected)  # registration order follows the import order of the check modules
     skipped = {
