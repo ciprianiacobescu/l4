@@ -2165,8 +2165,7 @@ the same rule on the commits (§10.2 step 1). A human tag exempts nothing in a f
 harness wrote those titles from model-written findings, whose brackets it turns into parentheses. (8) **report
 cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
 every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
-longer shows, makes the gate fail with `the test report was altered` and the test ids (no record, no check).
-`--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
+longer shows, makes the gate fail with `the test report was altered` and the test ids. A pytest gate whose record is empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`); a runner without the plugin (Go, TypeScript) is held to no record, and a failed row of a phase wins over a later passed one. `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
 depth [I].
 
 The run's own ledger is not a protected path but is restored from the writer's copy after each step. The resulting
@@ -3352,10 +3351,10 @@ and SHALL require each test that passed at the base to pass. One that fails twic
 SHALL be a blocker, unless `tests.superseded` names it. A support file only people changed, a `[test-infra]` task
 changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
 
-**L4-VER-039** Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support and
-helper files `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call`/`pytest_runtest_setup`, an assignment to `.obj` or
-`.runtest`, `atexit.register`, `os._exit`, a session-end hook that writes a file, and a name of the test output. A
-production read of an `L4_*`/`PYTEST_*` variable or a name of the output SHALL block unless allowed (listed).
+**L4-VER-039** Step 1's content scan SHALL flag in support and helper files call/setup hooks that replace tests, `atexit.register`,
+`os._exit`, session-end file writers and names of the test output. It SHALL flag in test, support and production files
+any reference to `l4_trace`, `_OUTCOME`, `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4`, and assignments to
+`.exitstatus`/`.xmlpath`. A production read of an `L4_*`/`PYTEST_*` variable SHALL block unless allowed (listed).
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -7956,6 +7955,13 @@ scenario is a spec defect (§26).
 - **When** the content scan runs
 - **Then** the honest code SHALL raise no finding, the conftest SHALL be a hit, and a unit whose conftest rewrites the
   JUnit report at exit SHALL end FAIL even with the scan bypassed (`the test report was altered`, naming the tests)
+
+- **Given** also a conftest that empties the harness plugin's record through `sys.modules`, keeps the exit status at 0
+  with `setattr` and rewrites `config.option.xmlpath` at unconfigure, and production code that clears the record
+- **When** the unit is verified
+- **Then** the references SHALL be hits (blockers), the gate SHALL fail with `the test report was altered`, and an empty
+  or missing record under a pytest report SHALL fail with `(no outcome record)`
+
 #### SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone · L4-VER-039, L4-VER-038
 - **Given** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for
   `test_total_adds_prices`, or with `pytest_collection_modifyitems` setting its `item.obj`, a green that breaks

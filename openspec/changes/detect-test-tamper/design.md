@@ -701,6 +701,25 @@ The third review of `9d788ba8` found three majors and a precision problem; the f
   The string-building evasions (`"PYTEST" + "_ADDOPTS"`, `base64`, a `.txt` read by `exec`) stay a documented limit:
   the report cross-check is the structural defence.
 
+### 6.9 Fourth adversarial review (2026-10-18)
+
+A conftest emptied the plugin's descriptor list through `sys.modules`, kept the exit status at 0 and rewrote
+`config.option.xmlpath` at unconfigure. The fixes (owner decisions 1 to 4):
+
+- **Fail closed:** for a pytest gate (its command names pytest), an empty, missing or unreadable record while the report
+  holds test cases is the blocker `the test report was altered (no outcome record)` (`Workbench._cross_check`); a runner
+  without the plugin keeps the relaxation (no entry for a case, not checked).
+- **The descriptor is a closure:** `l4_trace` reads `L4_OUTCOME_FILE` at import (loaded with `-p`, before any conftest),
+  pops it from `os.environ` at once and keeps the descriptor inside the hook's closure; no module attribute names it.
+- **A failed row wins:** `read_record` keeps a failed row of a phase over any later row of that phase.
+- **References are hits:** `scan.harness_references` / `harness_reference_lines` flag `l4_trace`, `_OUTCOME*` (not
+  `ORDER_OUTCOME`), `L4_OUTCOME_FILE`, the `xmlpath` option, `sys.modules` lookups of an `l4` module and assignments to
+  `.exitstatus` / `.xmlpath` in test, support and production files (the last as test awareness, with
+  `verifier.test_awareness_allow`).
+- **Accepted residual:** in-process code built to evade the scans by string construction (`"l4" + "_trace"`, reflection
+  through `__closure__`) can still tamper with its own process. The run of the base's tests (a separate process with the
+  unit's test files at the base), the sampled audit and the judge remain the backstops.
+
 ## Appendix A: the reproductions
 
 The reviewer's tests (repro paths in `findings.json`, under the session scratchpad `l4review/`) use the fixtures of this

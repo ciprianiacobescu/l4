@@ -326,4 +326,7 @@ the named test file and flips its assertion to the fixed behaviour, and must fai
   scan precision. Tests: `test_audit_support.py`, `test_outcomes.py`, `test_report_forgery.py`, `test_scan.py`,
   `test_integrity_support_patch.py`, `test_task_tag_injection.py`, `test_integrity_tamper.py`, `test_test_awareness.py`.
   (L4-IMP-006, L4-VER-033, L4-VER-039)
+- [x] 14.10 Fourth review: fail closed on a missing record, the descriptor in a closure, a failed row wins, references
+  to the harness plugin and the report option are hits. Tests: `test_outcomes.py`, `test_report_forgery.py`,
+  `test_scan.py`, `test_test_awareness.py`, `test_integrity_support_patch.py`. (L4-IMP-006, L4-VER-039)
 - [ ] 14.7 One independent re-review of group 14 (left for the next review; 6.2 and 13.2 stay open until then).

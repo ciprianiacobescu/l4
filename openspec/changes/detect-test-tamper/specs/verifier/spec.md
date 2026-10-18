@@ -311,10 +311,10 @@ changed or a `task.unfrozen` frees SHALL stay at head for the run, listed.
   pre-existing test is flaky on the unit's code`, and the row SHALL be `ok`
 
 ### Requirement: L4-VER-039 The content scan reads helper modules and flags test-call replacement
-Step 1's content scan SHALL read a changed test-glob Python file with no test as support, and flag in support and
-helper files `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call`/`pytest_runtest_setup`, an assignment to `.obj` or
-`.runtest`, `atexit.register`, `os._exit`, a session-end hook that writes a file, and a name of the test output. A
-production read of an `L4_*`/`PYTEST_*` variable or a name of the output SHALL block unless allowed (listed).
+Step 1's content scan SHALL flag in support and helper files call/setup hooks that replace tests, `atexit.register`,
+`os._exit`, session-end file writers and names of the test output. It SHALL flag in test, support and production files
+any reference to `l4_trace`, `_OUTCOME`, `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4`, and assignments to
+`.exitstatus`/`.xmlpath`. A production read of an `L4_*`/`PYTEST_*` variable SHALL block unless allowed (listed).
 
 #### Scenario: SCN-VER-129 (−) Hooks that replace a test's call are content-scan hits
 - **GIVEN** changed support files holding a `pytest_pyfunc_call` that returns `True`, a plain `pytest_runtest_call`, a
@@ -341,6 +341,12 @@ production read of an `L4_*`/`PYTEST_*` variable or a name of the output SHALL b
 - **WHEN** the content scan runs
 - **THEN** the honest code SHALL raise no finding, the conftest SHALL be a hit, and a unit whose conftest rewrites the
   JUnit report at exit SHALL end FAIL even with the scan bypassed (`the test report was altered`, naming the tests)
+
+- **GIVEN** also a conftest that empties the harness plugin's record through `sys.modules`, keeps the exit status at 0
+  with `setattr` and rewrites `config.option.xmlpath` at unconfigure, and production code that clears the record
+- **WHEN** the unit is verified
+- **THEN** the references SHALL be hits (blockers), the gate SHALL fail with `the test report was altered`, and an empty
+  or missing record under a pytest report SHALL fail with `(no outcome record)`
 
 #### Scenario: SCN-VER-130 (−) A conftest hook that neuters a pre-existing test fails the run alone
 - **GIVEN** the B2 reproductions: a red that adds a `tests/conftest.py` with `pytest_pyfunc_call` returning `True` for

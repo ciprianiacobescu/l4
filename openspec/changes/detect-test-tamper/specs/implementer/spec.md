@@ -178,7 +178,9 @@ the same rule on the commits (§10.2 step 1). A human tag exempts nothing in a f
 harness wrote those titles from model-written findings, whose brackets it turns into parentheses. (8) **report
 cross-check:** the harness's pytest plugin records every test phase's outcome to a file outside the worktree, and after
 every gate run the JUnit report is compared with it: a pass the record does not hold, or a failure the report no
-longer shows, makes the gate fail with `the test report was altered` and the test ids (no record, no check).
+longer shows, makes the gate fail with `the test report was altered` and the test ids. A pytest gate whose record is
+empty, missing or unreadable while the report holds test cases fails the same way (`no outcome record`); a runner
+without the plugin (Go, TypeScript) is held to no record, and a failed row of a phase wins over a later passed one.
 `--disallowedTools "Edit(./tests/**)"` in green MAY be added as defence in
 depth [I]. The paragraphs of L4-IMP-006 that follow in docs/SPEC.md (the run ledger's restore and the guard notes of the
 next attempt) are unchanged, except that a `guard.test_tamper` with `action: "rejected"` is not a guard note: the failed
