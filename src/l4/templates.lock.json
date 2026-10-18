@@ -29,7 +29,7 @@
   },
   "judge": {
     "sha256": "89e59b67271f5624d2c8776c150fdfe3bad866e6b3d53f7355d7f734c974acea",
-    "version": 9
+    "version": 10
   },
   "testwriter/audit": {
     "sha256": "60b28f79c5b7ca34c9e93edab8c32d2846fb1c416a8f1e46c7f65b52ae887970",
