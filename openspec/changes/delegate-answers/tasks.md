@@ -22,7 +22,7 @@ Every task follows these rules:
       ["technical", "product", "ambiguous", "harness", "verdict"]`, `independence == "model"`,
       `max_attempts_per_question == 2`, `max_answers_per_task == 3`, `max_questions_per_run == 5`,
       `max_cost_usd_per_answer == 3.0`, `max_cost_usd_per_unit == 15.0`, `plan_cost_share == 0.25`,
-      `timeout == "15m"`; `L4Config().roles.delegate == []`.
+      `timeout == "15m"`, `unfreeze is False`; `L4Config().roles.delegate == []`.
     - `test_delegate_rejects_bad_values` (parametrized): `scope: x`, an unknown kind, `independence: vendor`,
       `plan_cost_share` 0 or 1.5, a negative cost, `timeout: 30s`, any `max_*` below 1: each a config error whose
       message names the key and not the value.
@@ -157,7 +157,7 @@ Every task follows these rules:
   - `src/l4/sandbox/base.py` (`worktree_read_only: bool = False`), `bwrap.py`; `none.py` logs one warning that the
     worktree is writable without a sandbox (only where `sandbox.allow_none` lets it run at all).
 
-## 6. The prompt and the result (L4-DLG-004, L4-DLG-005; D5, D7)
+## 6. The prompt and the result (L4-DLG-004, L4-DLG-005, L4-DLG-014; D5, D7, D15)
 
 - [ ] 6.1 Schema `l4/delegate-result@1` and prompt `delegate@1`.
   - Tests first, `tests/unit/delegate/test_prompt.py`:
@@ -183,10 +183,19 @@ Every task follows these rules:
     - `test_escalate_needs_no_checked_entry`.
     - `test_a_reject_of_a_hold_needs_when_then` (SCN-DLG-18; scope and coverage holds exempt).
     - `test_a_frozen_path_discards` (SCN-DLG-19).
+    - `test_unfreeze_false_escalates_an_unfreezing_answer` (SCN-DLG-54: an `accept` whose suggestion names a frozen
+      `tests/conftest.py`, and an `answer` whose text names it, both escalate with the path and
+      `delegate.unfreeze is false`) and `test_unfreeze_true_takes_the_suggestion_only` (SCN-DLG-55: the `accept` is
+      kept under `suggestion_effects`' rules, an ignore file or a path the question does not name still escalates,
+      and a free-text `answer` naming the file still escalates).
+    - `tests/unit/implementer/test_unfreeze_delegate.py`: `test_a_delegate_accept_unfreezes_with_its_label` (the next
+      green step may change the file; `task.unfrozen{reason: delegate_answer, question, answer_sha256, by: delegate,
+      profile, model}`; `l4 status --unit` shows `delegate_override`).
     - `test_the_composed_answers` (`accept <text>`, `reject <text>`, `accept: <text>`, `retry: <text>`).
     - `test_the_text_checks_are_check_text`.
-  - New `src/l4/delegate/reply.py`: `check_reply(reply, question, head_tree, report, frozen, hold_kind) -> Kept |
-    Discarded`.
+  - New `src/l4/delegate/reply.py`: `check_reply(reply, question, head_tree, report, frozen, hold_kind, unfreeze) ->
+    Kept | Discarded` (L4-DLG-014, design D15); `src/l4/implementer/unfreeze.py` records `reason: delegate_answer`
+    for an accepted question the ledger says the delegate answered.
 
 ## 7. Limits and cost (L4-DLG-009; D10)
 
@@ -341,14 +350,14 @@ Every task follows these rules:
       (`claude-opus-5-5`) and `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`); `roles.delegate` (optional).
     - §6: L4-QMD-001, L4-QMD-003 and L4-QMD-009 with this change's text; the grammar block shows the `Answered by:`
       line.
-    - §8.4: L4-AVL-010. §9: L4-CLR-002, L4-CLR-004, L4-CLR-006; a new §9.1 "Delegate" with L4-DLG-001..013.
+    - §8.4: L4-AVL-010. §9: L4-CLR-002, L4-CLR-004, L4-CLR-006; a new §9.1 "Delegate" with L4-DLG-001..014.
     - §10: L4-VER-051. §12.1: `delegate.asked`, `delegate.result`, `by`/`marker`/`profile`/`model` on
       `question.answered` and `human.verdict`, `profile`/`model`/`judges` on `question.raised`, and the plan
       ledger's `plan.run_idle`. §12.5: L4-YOLO-012, L4-YOLO-014.
     - §15: rows `DLG-001`, `DLG-002`; LIVE-002 names the delegate chain.
     - §21: row 49 `delegate-answers`, its outcome in one sentence (requirement ids,
       `openspec/changes/delegate-answers/`), and its live check (task 18).
-    - §23: a subsection "Delegate (DLG)" with SCN-DLG-01..53 (and the lettered ones) from this change's spec files in the
+    - §23: a subsection "Delegate (DLG)" with SCN-DLG-01..55 (and the lettered ones) from this change's spec files in the
       `#### SCN-DLG-NN (+|−) Title · L4-…` form with **Given**/**When**/**Then**; a scenario that names phase
       `awaiting_human` names exit 11.
   - `docs/runbook.md`: §7.1 a procedure "The delegate answered or escalated" (the `Delegate:` lines, the label

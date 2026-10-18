@@ -28,7 +28,7 @@ Three defects of 0.4.16 sit on the same path and are fixed here:
   (availability, fallback, doctor). The default order in the reference configuration is Claude Code with
   `claude-opus-5-5`, then Codex with `gpt-6.1-sol`. `delegate:` in `.l4/config.yaml` (read on the base branch only):
   `enabled` (default `false`), `scope` (`yolo`: the current unit of an active plan; `all`: also units outside plans),
-  `kinds`, `independence`, the per-question attempt limit, the per-task answer limit, the per-answer, per-unit and
+  `kinds`, `independence`, `unfreeze` (default `false`), the per-question attempt limit, the per-task answer limit, the per-answer, per-unit and
   plan-share cost limits, the questions per run and the timeout (L4-DLG-001, L4-DLG-002, L4-DLG-009).
 - **When it runs.** At the end of a run whose unit parks in `awaiting_human` (open blocking questions or verdict
   questions) and is in scope; and in a later run through the new planner action `delegate` when a question is still
@@ -39,7 +39,8 @@ Three defects of 0.4.16 sit on the same path and are fixed here:
   read-only, with the question, the unit's spec, the verification report, the gate log excerpt and the test sources in
   the prompt as data blocks. It returns one strict JSON document `l4/delegate-result@1` `{question, decision, text,
   reason, checked}`. The harness checks it: the decision fits the kind, every `checked` entry resolves at the unit
-  head, a reject of a hold ends with `WHEN … THEN …` where the question asks for it, no frozen path is named. Anything
+  head, a reject of a hold ends with `WHEN … THEN …` where the question asks for it, and nothing is unfrozen unless
+  `delegate.unfreeze: true` lets it accept the clarifier's suggestion (L4-DLG-014). Anything
   else is a discarded reply, and a discarded reply is an escalation (L4-DLG-004, L4-DLG-005).
 - **The same validation and the same commit.** The answer goes through the checks of `l4 questions answer/accept`
   (`check_question`, `check_text`, `round_trip`); `clarifier.answer_by_agents` is not needed, the delegate is its own
@@ -71,7 +72,8 @@ Three defects of 0.4.16 sit on the same path and are fixed here:
   (`## 0.4.19 (unreleased)`) (L4-DLG-011, L4-DLG-012).
 
 Out of the delegate's reach, by construction: activating, cancelling, resuming or extending a plan, restarting a unit,
-editing specs or configuration, replacing an answer, unfreezing a frozen file, merging, and dispatching anything. The
+editing specs or configuration, replacing an answer, merging outside an active `merge: auto` plan's guard, and
+dispatching anything; unfreezing a frozen file only with `delegate.unfreeze: true`. The
 delegate only returns a JSON document; the harness makes the one write.
 
 ## Capabilities
@@ -79,7 +81,8 @@ delegate only returns a JSON document; the harness makes the one write.
 ### New Capabilities
 
 - `delegate`: the delegate role, its configuration, when it runs, its sandbox and result, the shared write path,
-  the next run, escalation, limits, audit, status and doctor checks (L4-DLG-001..013, L4-AVL-010 modified).
+  the next run, escalation, limits, audit, status, doctor checks and unfreezing (L4-DLG-001..014, L4-AVL-010
+  modified).
 - `question-actors`: who answered a question, for every kind, and how the harness writes and labels it
   (L4-QMD-003, L4-QMD-009, L4-CLR-004, L4-CLR-006, L4-VER-051 modified).
 - `plan-run-accounting`: chaining after a delegate answer and idle runs that are not charged (L4-YOLO-012,

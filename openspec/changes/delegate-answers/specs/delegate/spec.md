@@ -8,7 +8,7 @@ person what it cannot check, and starts the run that implements its answer.
 
 ### Requirement: L4-DLG-001 The delegate is off unless the base branch enables it, and acts only in scope
 The top-level `delegate:` section (`enabled`, default `false`; `scope`, `yolo` or `all`; `kinds`; `independence`;
-limits; `timeout`) and `roles.delegate` MUST be read from the base branch only. With `scope: yolo` a unit SHALL be in
+`unfreeze`; limits; `timeout`) and `roles.delegate` MUST be read from the base branch only. With `scope: yolo` a unit SHALL be in
 scope when it is the current unit of an `active` or `waiting` plan, or its fix unit; `scope: all` SHALL add units that
 no plan file lists while no plan is active. Held units, units of a stopped or cancelled plan and finished units MUST NOT
 be in scope.
@@ -149,7 +149,7 @@ redacted before any cut.
 ### Requirement: L4-DLG-005 The delegate returns one strict result, and anything else escalates
 The delegate SHALL return `l4/delegate-result@1` `{question, decision, text, reason, checked}`. A reply SHALL be kept
 only when the decision fits the kind, every decision but `escalate` has `checked` entries that resolve at the unit
-head, `text` passes the text checks of `l4 questions answer` and names no frozen path, and a reject of a hold asks for
+head, `text` passes the text checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for
 `WHEN … THEN …` where the question does. Any other reply MUST be recorded `delegate.result{status: discarded}` and the
 question escalated.
 
@@ -354,6 +354,28 @@ unusable for a cause only a fix ends (binary, login, `hello`, constraint). Defer
 - **GIVEN** Q-003 deferred once for a timeout and `max_attempts_per_question: 2`
 - **WHEN** the next pass's call times out again
 - **THEN** Q-003 escalates with `delegate attempts used (2)`
+
+### Requirement: L4-DLG-014 The delegate unfreezes a file only where the base branch allows it
+`delegate.unfreeze` SHALL default to `false`. With `false`, a question whose effective answer (the `text`, or the
+suggestion an `accept` takes) names a frozen test or test-support file of a held task MUST be escalated with the path
+named. With `true`, the delegate MAY accept the clarifier's suggestion for it under the rules of a person's accepted
+suggestion (L4-IMP-015), recorded and shown as `delegate_override`. A free-text answer naming a frozen file MUST still
+escalate.
+
+#### Scenario: SCN-DLG-54 (−) By default an unfreezing answer goes to a person
+- **GIVEN** `delegate.unfreeze` not set on the base, a green question Q-008 holding task 3.1 whose red step froze
+  `tests/conftest.py`, and a clarifier suggestion that names `tests/conftest.py`
+- **WHEN** the delegate replies `accept`
+- **THEN** no answer is written, Q-008 escalates with `the answer would unfreeze tests/conftest.py of task 3.1
+  (delegate.unfreeze is false)`, and the file stays frozen
+
+#### Scenario: SCN-DLG-55 (+) With unfreeze on, the delegate accepts the suggestion and the unfreeze is audited
+- **GIVEN** `delegate.unfreeze: true` on the base and the same Q-008, whose Context also names `tests/conftest.py`
+- **WHEN** the delegate's `accept` is kept and the next green step runs
+- **THEN** Q-008 is `accepted` with `Answered by: the delegate (…)`, the green step may change `tests/conftest.py`,
+  `task.unfrozen{reason: delegate_answer, question: Q-008, answer_sha256, by: delegate, profile, model}` is recorded,
+  and `l4 status --unit` and `verification.md` show the unfreeze as `delegate_override`; a delegate `answer` whose text
+  names the file still escalates
 
 ## MODIFIED Requirements
 

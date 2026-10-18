@@ -41,7 +41,8 @@ What the code does today, read for this change (0.4.16):
 and no unbounded cost; the actor of every answer right; idle plan runs free.
 
 **Non-goals:** the delegate never replaces an answer (`--replace`), never edits `questions.md` beyond one question's
-spans, never unfreezes a file, never merges, and never acts on a plan or a unit's lifecycle. No change to the
+spans, never unfreezes a file unless `delegate.unfreeze: true` (D15), never merges outside an active `merge: auto`
+plan's guard, and never acts on a plan or a unit's lifecycle. No change to the
 clarifier's routing (L4-CLR-002) or to who may use `l4 questions` by hand.
 
 ## Decisions
@@ -54,8 +55,9 @@ A unit is in scope when:
   active plan no agent work, and the delegate is agent work);
 - never a unit that `yolo.hold` matches, a unit of a `stopped` or `cancelled` plan, or a finished unit.
 Every kind may be answered (`delegate.kinds`, default all five). The delegate MUST answer `escalate` when it cannot
-check a claim itself; a `product` or `ambiguous` question is answered only when the project's own material (proposal,
-design, specs, code, docs) settles it, with that material cited.
+check a claim itself; a `product` or `ambiguous` question is answered only when the spec, the steering (Kiro) or the
+project's own documents (proposal, design, docs, code) settle it, with that material cited; else it escalates (owner
+decision 4).
 Out of reach by construction, not by a prompt rule: the delegate returns one JSON document and has no other output. It
 has no forge token and no CI token (the L4-SEC-001 allow-list), no shell under Claude Code (`Read,Grep,Glob` only), a
 read-only filesystem under Codex, and no tool server. The harness makes the one write, and only for the question asked.
@@ -90,7 +92,7 @@ change (no asker) counts every implementer profile of `profiles_used.implementer
 unit's rounds for a verdict question) as asker: fail safe. A question raised at intake (`source: intake_lint` or
 `intake_open_questions`, `orchestrator.py`) has no agent step behind it, so it has no asker and vetoes nothing. No
 profile left is an escalation (`no independent delegate`).
-This is open question 1.
+The owner chose this default (owner decision 1).
 
 **D4. The next run continues, not the same run (owner D4).** After the delegate answers, the run pushes the answer and
 asks the forge to start the next run on the base branch; the unit is not moved in the same run. Reasons:
@@ -130,7 +132,8 @@ each inside `<l4:data kind=… source=implementer|verifier|harness|person>` bloc
 never instructions:
 - the question section (title, context, options, clarifier suggestion) and the unit's answered questions;
 - the unit's `proposal.md`, `design.md`, specs and `tasks.md` (the clarifier's `collect_sources`, within
-  `implementer.context_budget_tokens`);
+  `implementer.context_budget_tokens`), and for a Kiro unit the steering that applies, as the 0.4.17 implementer prompt
+  carries it;
 - for a `verdict` question: the criterion or finding or hold text, the judge's reason and evidence from `verdict.json`,
   the section of `verification.md` for the target;
 - for a `harness` question: `check.inconclusive{reason, runs, kept}`, the `excerpt` of the gate (L4-IMP-064), and the
@@ -175,8 +178,8 @@ and the question escalates; there is no repair round:
   `test:` id present in the latest test report of the unit; a `spec:` reference to a file of the unit folder with
   `quote` in it;
 - `text` passes `check_text` (not empty, at most `MAX_TEXT_CHARS`, no structure line, no HTML comment, nothing the
-  redactor changes) and names no frozen path of a held task (L4-IMP-015: unfreezing stays a person's decision; open
-  question 3);
+  redactor changes); and the effective answer (the `text`, or the suggestion an `accept` takes) unfreezes nothing
+  unless D15 allows it;
 - a `reject` of a hold that is neither a scope nor a coverage hold ends with a `WHEN … THEN …` sentence (L4-VER-013:
   without it the round ends in `verify_fail_exhausted`, a dead end the delegate must not cause);
 - the composed answer (`answer`: `text`; `verdict`: `accept <text>` / `reject <text>`; `harness`: `accept: <text>` /
@@ -281,7 +284,7 @@ delegate profile is usable now (binary, auth and quota probes; `hello` under `--
 - **A model accepts what the judge disputed, and `merge: auto` merges it.** A delegate `accept` of a verdict question
   turns a NEEDS_HUMAN round into a PASS, and an active `merge: auto` plan then merges by its guard. Mitigations: the
   independence rule, a `checked` claim that must resolve, `delegate_override` in the judge's view, `verification.md`,
-  the PR body and the report. Open question 2 offers a hold of that merge.
+  the PR body and the report. The owner chose to keep the merge (owner decision 2).
 - **Prompt injection from the implementer.** Expected and not preventable by text alone; bounded by D1 (no write, no
   tools that act) and D7 (field checks, resolved claims). A successful injection can at most produce one wrong answer,
   labelled `delegate_override`, inside the answer limits.
@@ -300,14 +303,30 @@ the base branch. The actor fix changes the `by` of new `question.answered` and `
 are read as they are. `plan.run_idle` is a new event that older harnesses ignore (their fold counts the runs as
 before). Roll back: set `delegate.enabled: false` on the base.
 
+**D15. Unfreezing is a configured choice (owner decision 3).** `delegate.unfreeze` (default `false`, read on the base
+branch). A question whose effective answer names a frozen test or test-support file (`task.red_ok.frozen`, and the
+pre-existing tests `existing_tests` adds) of a task it holds:
+- `false`: is escalated with the path named (`the answer would unfreeze <path> of task <k> (delegate.unfreeze is
+  false)`), because unfreezing lets the implementer change the test that proves its own red step;
+- `true`: the delegate may `accept` the clarifier's suggestion for it. The rules of a person's accepted suggestion apply
+  unchanged (`suggestion_effects`: the question itself must name the path, never an ignore file, at most
+  `MAX_PATHS_PER_QUESTION`); the unfreeze is recorded `task.unfrozen{reason: delegate_answer, question, answer_sha256,
+  by: delegate, profile, model}` and shown as `delegate_override` in `l4 status --unit`, `verification.md` and the
+  report. A free-text `answer` that names a frozen file still escalates: only the suggestion's own, already checked
+  text can unfreeze.
+
+## Owner Decisions (2026-10-18)
+
+1. **Independence by model.** `delegate.independence: model` is the default (D3); `profile` stays available.
+2. **A PASS resting on a delegate's verdict accept merges under `merge: auto`.** The plan's guarded merge (L4-YOLO-008)
+   applies as for a person's accept; the accept is labelled `delegate_override` everywhere (the judge's view,
+   `verification.md`, the PR body, `l4 yolo report`). Outside a plan nothing merges (D13).
+3. **Unfreezing is configured.** `delegate.unfreeze` (default `false`): `false` escalates a question whose answer would
+   unfreeze a frozen test or test-support file; `true` lets the delegate take the clarifier's suggestion for it, with the
+   same validation, shown and audited as `delegate_override` (D15, L4-DLG-014).
+4. **`product` is in the default kinds.** A product question is answered only when the spec, the steering or the
+   project's documents settle it; else the delegate escalates (D1).
+
 ## Open Questions
 
-1. Independence by served model (default here) or by profile name only (the owner's words)? Recommendation: by model,
-   since `delegate-opus` and `judge-opus` are one model under two names.
-2. Should a PASS that rests on a delegate `accept` of a verdict question merge under `merge: auto`? Recommendation: yes
-   as specified (the owner's intent is an unattended plan), with the label everywhere; a key
-   `delegate.hold_merge_after_accept` can be added later if a live run shows a wrong accept.
-3. May the delegate's answer unfreeze a frozen test or support file (L4-IMP-015)? Recommendation: no (escalate), because
-   unfreezing lets the implementer change the test that proves its own red step.
-4. Should `product` questions be in the default `delegate.kinds`? Recommendation: yes, with the rule that only the
-   project's own material may settle one; a project that wants every product call made by a person removes `product`.
+None left: the four questions of the first draft are the owner decisions above.
