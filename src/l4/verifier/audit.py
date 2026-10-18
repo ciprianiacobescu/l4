@@ -29,10 +29,10 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from l4.agents.factory import RoleUnavailable
 from l4.gates.dryrun import narrow_ruff_paths
-from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
@@ -43,7 +43,7 @@ from l4.llm.agent_judge import LLMBackend
 from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.verifier.conventions import base_test_header, test_conventions
-from l4.verifier.support_base import NO_SUPPORT, SupportPlan, support_at_base
+from l4.verifier.support_base import NO_SUPPORT, SupportPlan, collect_only_env, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
 from l4.verifier.types import AuditRecord, CriterionEvidence, Finding, Severity
 
@@ -239,63 +239,115 @@ def _judge_written(
     *,
     support: SupportPlan = NO_SUPPORT,
 ) -> None:
-    """Runs the round's audit tests and records each file's fate (L4-VER-033, L4-VER-034). With no support change in
-    the unit, one gate run, as before (`support="unchanged"`). Otherwise the run is made with the unit's test-support
-    files at their base versions, past other files' collection errors, and the zero-value run of each candidate is made
-    in the same block (`support="base"`); a file that did not run that way (no test of it ran, a setup error, a
-    collection error of its own) runs with the support files in place only when step 1's content scan read them and
-    found nothing (`support="head"`), else it is rejected. With `collected`, a file that failed to import when the
-    tests were collected is not rejected yet: it is removed and `collected[cid] = (the error, the code)` is left for
-    the writer's one retry (`_retry_collected`)."""
+    """Runs the round's audit tests and records each file's fate (L4-VER-033, L4-VER-034, design D15). With no test or
+    support change in the unit, one gate run, as before (`support="unchanged"`). Otherwise the run is made with every
+    test and support file the unit added, changed or deleted at its base version, collecting only the audit files,
+    past other collection errors, and the zero-value run of each candidate is made in the same block
+    (`support="base"`). The audit never runs with the unit's files in place. A file with no result in that run is told
+    by `import_failure`: a production module that fails to import, or a cause the log does not show, or no result at
+    all, holds the criterion; a failure in the audit file itself goes back to the writer once (`collected`), and is a
+    minor rejection the second time."""
     if not support.changes:
         _judge_run(wb, written, round_no, out, collected, "unchanged", (), None)
         return
+    env = {**BASE_RUN_ENV, **collect_only_env(list(written.values()))}
     rest: dict[str, str] = {}
-    log_path: Path | None = None
     with support_at_base(wb, support.base_sha, support) as reverted:
+        files = tuple(reverted)
         gate = wb.run_gate("audit-base-support", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports,
-                           extra_env=BASE_RUN_ENV)  # fmt: skip
-        log_path = gate.log_path
+                           extra_env=env)  # fmt: skip
         report = gate.report
         ran: dict[str, str] = {}
         for cid, rel in written.items():
             stem = _stem(cid, round_no)
             ids = _ids_of(report.tests, stem) if report is not None else []
             broken = report is None or any(stem in e for e in report.collection_errors)
-            if ids and not broken and not {report.tests[i].status for i in ids} & {"error"}:  # type: ignore[union-attr]
+            if ids and not broken:
                 ran[cid] = rel
             else:
                 rest[cid] = rel
         if ran:
-            _judge_run(wb, ran, round_no, out, None, "base", tuple(reverted), BASE_RUN_ENV, gate)
-    if not rest:
-        return
-    if support.fallback:
-        _judge_run(wb, rest, round_no, out, collected, "head", tuple(p for p, _ in support.changes), None)
-        return
-    for cid, rel in rest.items():
-        cause = _why_not_ran(gate.report, log_path, _stem(cid, round_no))
-        why = (
-            f"it does not run with the unit's support files at the base ({cause}), and a run with them needs step 1's "
-            f"content scan to have read them: {support.why_not}"
-        )
-        _reject(wb, out, cid, rel, "rejected", why)
+            _judge_run(wb, ran, round_no, out, None, "base", files, env, gate)
+    if rest:
+        _judge_without_result(wb, rest, round_no, out, collected, gate, files)
 
 
 def _stem(cid: str, round_no: int) -> str:
     return f"test_l4_audit_c_{cid.removeprefix('C-')}_r{round_no}"
 
 
-def _why_not_ran(report: TestReport | None, log_path: Path | None, stem: str) -> str:
-    """The first line of why an audit file had no run at the base support: its collection error, the first test of it
-    that errored, or the plain fact."""
-    if report is None:
-        return "no report"
-    if any(stem in e for e in report.collection_errors) and log_path is not None:
-        return _collection_error(log_path, stem).splitlines()[0][:200]
-    if erroring := [i for i in _ids_of(report.tests, stem) if report.tests[i].status == "error"]:
-        return f"{erroring[0]} errored"
-    return "no test of the file ran"
+_FRAME = re.compile(r"^(\S[^\n]*?\.py):(\d+): in (\S.*)$")
+
+
+def import_failure(log_text: str, stem: str, wb: Workbench) -> tuple[Literal["production", "own", "unknown"], str]:
+    """Why the audit file `stem` did not collect, from its section of the gate log: the frames after its own.
+    The deepest frame that is a tracked file of the worktree outside the test and support globs is a production module
+    (`("production", "<path>: <E line>")`); only the audit file's frames, or a helper under the test globs, are its own
+    (`("own", "")`); no frame at all is unknown."""
+    lines = log_text.splitlines()
+    section = _own_section(lines, stem)
+    if section is None:
+        return "unknown", ""
+    frames = [m.group(1) for line in section if (m := _FRAME.match(line.rstrip()))]
+    if not frames:
+        return "unknown", ""
+    marker = next((i for i, f in enumerate(frames) if stem in f), None)
+    root = wb.worktree.resolve()
+    tdd = wb.cfg.tdd
+    deepest = ""
+    for frame in frames[marker + 1 if marker is not None else 0 :]:
+        path = Path(frame)
+        try:
+            rel = (path.resolve() if path.is_absolute() else (root / path).resolve()).relative_to(root).as_posix()
+        except ValueError:
+            continue  # the standard library, a dependency: not the unit's
+        outside = not _matches([*tdd.test_globs, *tdd.test_support_globs], rel)
+        if outside and wb.git.run("ls-files", "--error-unmatch", "--", rel, check=False).returncode == 0:
+            deepest = rel  # the last one is where the error was raised
+    if deepest:
+        problem = next((ln.strip().removeprefix("E").strip() for ln in section if ln.strip().startswith("E ")), "")
+        return "production", f"{deepest}: {problem}" if problem else deepest
+    return "own", ""
+
+
+def _hold(out: AuditOutcome, wb: Workbench, cid: str, rel: str, label: str, files: tuple[str, ...], why: str) -> None:
+    out.records.append(AuditRecord(cid, "failed", rel, (), why, label, files))
+    (wb.worktree / rel).unlink(missing_ok=True)
+
+
+def _judge_without_result(
+    wb: Workbench,
+    rest: Mapping[str, str],
+    round_no: int,
+    out: AuditOutcome,
+    collected: dict[str, tuple[str, str]] | None,
+    gate: GateResult,
+    files: tuple[str, ...],
+) -> None:
+    """The audit files that had no result in the run without the unit's files (design D15)."""
+    try:
+        log_text = gate.log_path.read_text(encoding="utf-8", errors="replace")[-200_000:]
+    except OSError:
+        log_text = ""
+    report = gate.report
+    for cid, rel in rest.items():
+        stem = _stem(cid, round_no)
+        errored = report is not None and any(stem in e for e in report.collection_errors)
+        if not errored:
+            _hold(out, wb, cid, rel, "base", files, "the audit run gave no result for the audit test")
+            continue
+        kind, detail = import_failure(log_text, stem, wb)
+        if kind == "production":
+            why = f"a production module fails to import without the unit's test and support files: {detail}"
+            _hold(out, wb, cid, rel, "base", files, why)
+        elif kind == "own" and collected is not None:
+            code = (wb.worktree / rel).read_text(encoding="utf-8", errors="replace")
+            collected[cid] = (_collection_error(gate.log_path, stem), code)
+            (wb.worktree / rel).unlink(missing_ok=True)
+        elif kind == "own":
+            _reject(wb, out, cid, rel, "rejected", "the audit test could not be collected", label="base", files=files)
+        else:
+            _hold(out, wb, cid, rel, "base", files, "the audit test does not collect and the log does not say why")
 
 
 def _judge_run(

@@ -4,9 +4,11 @@ through `l4 run` (ports of the reviewer's verifier-2 and verifier-6 reproduction
 import json
 from pathlib import Path
 
+import pytest
+
 from l4.agents.fake import Step
 
-from ..implementer.conftest import IMPL, green_step, red_step
+from ..implementer.conftest import IMPL, TESTS, green_step, red_step
 from .test_ladder import judge_step
 from .test_ladder_depth import AUDIT_KNOWN, JUDGE, audited_criterion, steps_of, writer_step
 
@@ -113,9 +115,8 @@ def audit_run(run_l4, with_verifier, conftest, impl=None):
 def test_the_broken_code_is_held_when_the_units_conftest_is_set_aside(run_l4, valid_spec, with_verifier):  # SCN-VER-112
     cid, run = audit_run(run_l4, with_verifier, EVASIVE, BROKEN_IMPL)
     [audit] = run.events("verify.audit")
-    assert (audit["criterion"], audit["status"], audit["support"], audit["support_files"]) == (
-        cid, "failed", "base", ["tests/conftest.py"]
-    )  # fmt: skip
+    assert (audit["criterion"], audit["status"], audit["support"]) == (cid, "failed", "base")
+    assert {"tests/conftest.py", "tests/test_discount.py"} <= set(audit["support_files"])
     verdict = json.loads(run.pushed(AUDIT_DIR))
     assert verdict["verdict"] != "PASS" and "the audit test fails at head" in json.dumps(verdict), verdict["verdict"]
     assert run.pushed("tests/conftest.py") == EVASIVE  # the branch keeps the unit's file
@@ -136,5 +137,77 @@ def test_an_honest_units_audit_test_is_accepted_with_its_support_files_at_the_ba
 ):  # SCN-VER-113
     cid, run = audit_run(run_l4, with_verifier, HARMLESS)
     [audit] = run.events("verify.audit")
-    assert (audit["status"], audit["support"], audit["support_files"]) == ("accepted", "base", ["tests/conftest.py"])
+    assert (audit["status"], audit["support"]) == ("accepted", "base")
+    assert "tests/conftest.py" in audit["support_files"]
     assert run.outcome["units"][0]["verdict"] == "PASS"
+
+
+# --- the amendment (design D15): the unit's own test modules, the handshake, no fallback -------------
+
+HANDSHAKE_CONFTEST = 'import os\n\nos.environ.setdefault("PYTDD_SUPPORT", "1")\n' + EVASIVE
+HANDSHAKE_IMPL = 'import os\n\n_SUPPORT = os.environ["PYTDD_SUPPORT"]\n' + BROKEN_IMPL
+MODULE_PATCH = (
+    TESTS
+    + """
+
+import types as _types
+
+import pytdd.pricing as _p
+
+
+def _good(amount, code):
+    _l4_orig(amount, code)
+    if code not in CODES:
+        raise ValueError(code)
+    return round(amount * (100 - CODES[code]) / 100, 2)
+
+
+if getattr(_p, "CODES", None):
+    _p._l4_orig = _types.FunctionType(_p.apply_discount.__code__, _p.__dict__)
+    _p.apply_discount.__code__ = _good.__code__
+"""
+)
+
+
+@pytest.fixture
+def run_step_1_ok(monkeypatch):
+    """Step 1's run of the base's tests answers `ok`, so that the audit is reached (the audit is the second line)."""
+    from l4.verifier.integrity import Outcome
+
+    monkeypatch.setattr("l4.verifier.base_tests.check_base_tests", lambda *a, **k: Outcome(note="bypassed"))
+
+
+def test_an_import_time_patch_in_the_units_own_test_module_does_not_reach_the_audit(
+    run_l4, valid_spec, with_verifier, run_step_1_ok
+):  # SCN-VER-133
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    red, green = red_step(), green_step()
+    red.writes = {**red.writes, "tests/test_discount.py": MODULE_PATCH}
+    green.writes = {"src/pytdd/pricing.py": BROKEN_IMPL}
+    run = run_l4([red, green, writer_step(cid, AUDIT_KNOWN), JUDGE], **config)
+    [audit] = run.events("verify.audit")
+    assert (audit["status"], audit["support"]) == ("failed", "base") and "tests/test_discount.py" in audit[
+        "support_files"
+    ]
+    assert run.outcome["units"][0]["verdict"] != "PASS"
+
+
+@pytest.mark.parametrize("unread", [False, True], ids=["scan ok", "scan skipped"])
+def test_a_production_module_that_imports_only_with_the_units_conftest_holds_the_criterion(
+    run_l4, valid_spec, with_verifier, run_step_1_ok, unread
+):  # SCN-VER-132
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    red, green = red_step(), green_step()
+    red.writes = {**red.writes, "tests/conftest.py": HANDSHAKE_CONFTEST}
+    if unread:
+        red.writes["tests/helpers/setup.ts"] = "export {};\n"
+    green.writes = {"src/pytdd/pricing.py": HANDSHAKE_IMPL}
+    run = run_l4([red, green, writer_step(cid, AUDIT_KNOWN), JUDGE], **config)
+    [audit] = run.events("verify.audit")
+    assert audit["status"] == "failed" and audit["support"] == "base"
+    assert audit["reason"].startswith(
+        "a production module fails to import without the unit's test and support files: src/pytdd/pricing.py"
+    )
+    assert run.outcome["units"][0]["verdict"] != "PASS"

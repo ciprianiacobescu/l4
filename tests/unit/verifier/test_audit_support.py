@@ -1,10 +1,11 @@
 """detect-test-tamper 4.2 (L4-VER-033, L4-VER-034): which way each audit test ran, and the fallback."""
 
+from l4.config.schema import L4Config
 from l4.verifier.audit import BASE_RUN_ENV, AuditOutcome, _judge_written
 from l4.verifier.support_base import SupportPlan
 
 from ..implementer.conftest import KNOWN, UNKNOWN_TEST, green_step, red_step
-from .test_ladder_depth import JUDGE, audited_criterion, writer_step
+from .test_ladder_depth import JUDGE, audited_criterion, writer_step  # noqa: F401
 
 BUILDERS = "CODE = 'SAVE10'\n"
 USES_BUILDERS = (
@@ -37,27 +38,52 @@ def test_a_unit_test_that_needs_the_units_helper_does_not_stop_the_audit_run(
     cid, run = run_with(run_l4, with_verifier, writes, AUDIT_KNOWN)
     [audit] = run.events("verify.audit")
     assert (audit["criterion"], audit["status"], audit["support"]) == (cid, "accepted", "base")
-    assert audit["support_files"] == ["tests/helpers/builders.py"]
+    assert {"tests/helpers/builders.py", "tests/test_discount.py"} <= set(audit["support_files"])
 
 
-def test_an_audit_test_that_needs_the_units_fixture_falls_back_after_a_clean_scan(
+def test_an_audit_test_that_needs_a_fixture_only_the_unit_defines_is_held(
     run_l4, valid_spec, with_verifier
 ):  # SCN-VER-116
     cid, run = run_with(run_l4, with_verifier, {"tests/conftest.py": CONFTEST_CODES}, AUDIT_NEEDS_CODES)
     [audit] = run.events("verify.audit")
-    assert (audit["status"], audit["support"], audit["support_files"]) == ("accepted", "head", ["tests/conftest.py"])
-    assert run.outcome["units"][0]["verdict"] == "PASS"
+    assert (audit["status"], audit["support"]) == ("failed", "base") and "tests/conftest.py" in audit["support_files"]
+    assert "fixture 'codes' not found" not in audit["reason"] or audit["reason"]
+    assert run.outcome["units"][0]["verdict"] != "PASS"
+    assert all("audit-head" not in str(e.get("name")) for e in run.events("gate.finished"))  # no run with the conftest
 
 
-def test_no_fallback_when_step_1_could_not_read_the_support_files(run_l4, valid_spec, with_verifier):  # SCN-VER-117
+def test_an_audit_test_whose_own_import_fails_twice_is_a_minor_rejection_with_a_support_label(
+    run_l4, valid_spec, with_verifier
+):  # SCN-VER-117
+    from .test_audit_collect_retry import BROKEN
+
     writes = {"tests/conftest.py": CONFTEST_CODES, "tests/helpers/setup.ts": "export const x = 1;\n"}
-    cid, run = run_with(run_l4, with_verifier, writes, AUDIT_NEEDS_CODES)
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    red = red_step()
+    red.writes = {**red.writes, **writes}
+    run = run_l4([red, green_step(), writer_step(cid, BROKEN), writer_step(cid, BROKEN), JUDGE], **config)
     [audit] = run.events("verify.audit")
-    assert audit["status"] == "rejected" and audit["support"] == ""
-    assert audit["reason"].startswith("it does not run with the unit's support files at the base")
-    assert "step 1's content scan did not read them" in audit["reason"]
-    text = run.pushed(f"{UNIT_DIR}/verification.md")
-    assert "an audit test was rejected" in text or "## Rejected audit tests" in text
+    assert audit["status"] == "rejected" and audit["support"] == "base" and "collected" in audit["reason"]
+    assert "## Your previous attempt was rejected" in run.adapter.requests[3].prompt
+    assert run.outcome["units"][0]["verdict"] == "PASS"  # a minor finding, never a hold
+
+
+def test_the_writers_collection_retry_is_kept_and_no_label_is_empty(run_l4, valid_spec, with_verifier):  # SCN-VER-136
+    from .test_audit_collect_retry import BROKEN
+    from .test_ladder_depth import AUDIT_KNOWN
+
+    writes = {"tests/conftest.py": "import pytest\n", "tests/helpers/setup.ts": "export const x = 1;\n"}
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    red = red_step()
+    red.writes = {**red.writes, **writes}
+    run = run_l4([red, green_step(), writer_step(cid, BROKEN), writer_step(cid, AUDIT_KNOWN), JUDGE], **config)
+    retry = run.adapter.requests[3].prompt
+    assert "## Your previous attempt was rejected" in retry and "widget_tools_that_do_not_exist" in retry
+    [audit] = run.events("verify.audit")
+    assert audit["status"] == "accepted" and audit["support"] == "base"
+    assert all(e.get("support") for e in run.events("verify.audit"))
 
 
 def test_the_zero_value_run_uses_the_same_support_files_as_the_head_run(make_bench, monkeypatch):  # SCN-VER-118
@@ -100,6 +126,69 @@ def test_the_zero_value_run_uses_the_same_support_files_as_the_head_run(make_ben
     plan = SupportPlan((("tests/conftest.py", "A"),), True, "", base)
     _judge_written(wb, {cid: rel}, 1, out, support=plan)
     assert [(r.status, r.support, r.reason) for r in out.records] == [("accepted", "base", "")]
-    assert gates == [("audit-base-support", False, BASE_RUN_ENV)]  # the head run: the conftest is set aside
-    assert seen == [(False, BASE_RUN_ENV)]  # and so is the zero-value run's
+    env = {**BASE_RUN_ENV, "L4_COLLECT_ONLY": rel}  # only the audit file is collected
+    assert gates == [("audit-base-support", False, env)]  # the head run: the conftest is set aside
+    assert seen == [(False, env)]  # and so is the zero-value run's
     assert (wb.worktree / "tests/conftest.py").read_text() == "import pytest\n"  # back after the run
+
+
+# --- import_failure on real pytest output (design D15) ----------------------------------------------------------------
+
+STEM = "test_l4_audit_c_aaaaaaaa_r1"
+
+
+def collection_log(tmp_path, git_environ, audit_source, **files):
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from l4.vcs.git import Git
+
+    from ._integrity_helpers import new_repo
+
+    base = {"src/pkg/__init__.py": "", f"tests/{STEM}.py": audit_source, **files}
+    repo, _ = new_repo(tmp_path, git_environ, base)
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q"],
+        cwd=repo.path, env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(repo.path / "src")},
+        capture_output=True, text=True,
+    )  # fmt: skip
+    return done.stdout, SimpleNamespace(worktree=repo.path, git=Git(repo.path, environ=git_environ), cfg=L4Config())
+
+
+def test_a_failure_in_a_production_module_is_told_with_its_file_and_line(tmp_path, git_environ):
+    from l4.verifier.audit import import_failure
+
+    log, wb = collection_log(
+        tmp_path, git_environ, "from pkg.prod import X\n\n\ndef test_a():\n    assert X\n",
+        **{"src/pkg/prod.py": "import os\n\nX = os.environ['L4_NOPE']\n"},
+    )  # fmt: skip
+    kind, detail = import_failure(log, STEM, wb)
+    assert kind == "production" and detail.startswith("src/pkg/prod.py: ") and "KeyError" in detail
+
+
+def test_a_failure_in_the_audit_file_alone_is_its_own(tmp_path, git_environ):
+    from l4.verifier.audit import import_failure
+
+    log, wb = collection_log(tmp_path, git_environ, "import widget_that_does_not_exist\n\n\ndef test_a():\n    pass\n")
+    assert "ImportError while importing test module" in log
+    assert import_failure(log, STEM, wb) == ("own", "")
+
+
+def test_a_failure_in_a_helper_under_tests_is_not_production(tmp_path, git_environ):
+    from l4.verifier.audit import import_failure
+
+    log, wb = collection_log(
+        tmp_path, git_environ, "from helpers import broken\n\n\ndef test_a():\n    pass\n",
+        **{"tests/helpers.py": "raise RuntimeError('x')\n"},
+    )  # fmt: skip
+    assert import_failure(log, STEM, wb)[0] == "own"
+
+
+def test_a_log_that_names_no_frame_is_unknown(tmp_path, git_environ):
+    from l4.verifier.audit import import_failure
+
+    _, wb = collection_log(tmp_path, git_environ, "def test_a():\n    pass\n")
+    assert import_failure("no collection section here\n", STEM, wb) == ("unknown", "")
+    section = f"__ ERROR collecting tests/{STEM}.py __\nE   something odd\n"
+    assert import_failure(section, STEM, wb) == ("unknown", "")
