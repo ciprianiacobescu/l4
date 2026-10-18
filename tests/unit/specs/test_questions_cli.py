@@ -1012,3 +1012,46 @@ def test_replace_through_the_command_refuses_the_other_cases_and_touches_nothing
     with pytest.raises(L4Exit) as caught:
         run_form(qworld, "answer", "Q-001", text="accept it")
     assert "--replace" in str(caught.value).split("\nFix: ", 1)[1] and qworld.origin_head("a") == head
+
+
+def harness_world(world: QWorld) -> None:
+    world.unit_branch(
+        "a",
+        questions_md(
+            "a",
+            {
+                "title": "Task 3.1: the pre-satisfied check could not decide",
+                "kind": "harness",
+                "tasks": ("3.1",),
+                "options": ("accept: count these on the evidence of the real run", "retry: run the check again"),
+            },
+        ),
+    )
+
+
+def test_scn_imp_316_a_harness_answer_must_start_with_accept_or_retry(qworld, capsys, person):
+    harness_world(qworld)
+    head = qworld.origin_head("a")
+    with pytest.raises(L4Exit) as caught:
+        run_questions(qworld.app, words=("answer", "Q-001"), unit=A, text="looks fine", as_json=False, no_push=False)
+    assert caught.value.code is ExitCode.USAGE_ERROR
+    message = str(caught.value)
+    assert "accept" in message and "retry" in message and "\nFix:" in message
+    with pytest.raises(L4Exit) as accepted:
+        run_questions(qworld.app, words=("accept", "Q-001"), unit=A, text=None, as_json=False, no_push=False)
+    assert accepted.value.code is ExitCode.USAGE_ERROR and "retry" in str(accepted.value)
+    assert qworld.origin_head("a") == head
+    done = run_questions(
+        qworld.app, words=("answer", "Q-001"), unit=A, text="accept: the run broke", as_json=False, no_push=False
+    )
+    assert done is ExitCode.OK
+    data = qworld.remote.run_bytes("show", f"{qworld.origin_head('a')}:{FOLDER}/a/questions.md")
+    assert QuestionsFile.parse(data).get("Q-001").status is QuestionStatus.ANSWERED
+
+
+def test_show_names_the_two_answers_of_a_harness_question(qworld, capsys, person):
+    harness_world(qworld)
+    run_questions(qworld.app, words=("show", "Q-001"), unit=A, text=None, as_json=False, no_push=False)
+    out = capsys.readouterr().out
+    assert 'l4 questions answer Q-001 --unit openspec:a --text "accept: <why>"' in out
+    assert 'l4 questions answer Q-001 --unit openspec:a --text "retry: <note>"' in out

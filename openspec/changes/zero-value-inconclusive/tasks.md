@@ -324,7 +324,7 @@ Every task follows these rules:
 
 ## 5. Holding the task (L4-IMP-063, L4-IMP-017, L4-QMD-004, L4-QMD-009, D7, D8)
 
-- [ ] 5.1 The question kind `harness`.
+- [x] 5.1 The question kind `harness`.
   - Tests first:
     - `tests/unit/specs/test_questions_harness.py`: a raised `NewQuestion` of kind `HARNESS` renders `- **Kind:**
       harness` and parses back with `kind is QuestionKind.HARNESS`; `harness_answer` gives `accept` for `accept: the
@@ -357,7 +357,7 @@ Every task follows these rules:
   - `src/l4/clarifier/clarifier.py`: the batch filter excludes `QuestionKind.HARNESS` as it excludes `VERDICT`.
   - `src/l4/implementer/unfreeze.py`: `unfrozen` skips harness questions as it skips verdict ones.
 
-- [ ] 5.2 The hold: no attempt, no escalation, one question.
+- [x] 5.2 The hold: no attempt, no escalation, one question.
   - Tests first, `tests/unit/implementer/test_held_check.py`, on the bench, with `tdd.confirm_pre_satisfied` and
     `tdd.confirmed_by_base_run` monkeypatched (the reason `the test-presatisfied run ran no test (exit 2, 45 collection
     errors): E   TypeError: 'NoneType' object is not callable`), and the two-profile setting `TWO`, `BAD` and `Hook` of
@@ -415,7 +415,7 @@ Every task follows these rules:
     green outcome `held` returns `TaskOutcome("blocked", <phase>, ids)` at once: it never reaches the failure count,
     `task.attempt_failed` or the escalation, and the loop never `continue`s on it.
 
-- [ ] 5.3 The answers: `accept` counts the criteria, `retry` runs the check again.
+- [x] 5.3 The answers: `accept` counts the criteria, `retry` runs the check again.
   - Tests first, `tests/unit/implementer/test_held_answers.py`, on the bench of task 5.2. Answer Q-001 as `with_status`
     of `tests/unit/implementer/test_unfreeze.py` does (Status `answered`, the text in the Answer block), commit it,
     and record `question.answered{id, by: "human", answer_sha256}` with `bench.wb.emit`; then `run_task` again:

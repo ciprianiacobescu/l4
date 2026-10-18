@@ -198,16 +198,16 @@ class Clarifier:
         drafts: Sequence[str] = (),
     ) -> ClarifyOutcome:
         """The open questions in `blocking` that the clarifier has not looked at yet, at most `cfg.max_open_questions`
-        and never a `verdict` question: each becomes `answered-by-clarifier` (every L4-CLR-002 condition held) or a
-        suggestion with Status `open`. The ones left out of the batch have no `clarifier.result`, so a later pass
-        takes them. A reply that is `unavailable` ends the calls: the remaining questions of the batch are recorded as
-        unavailable without asking again. The phase that follows is `implementing` only when nothing that blocks a
-        task is still open. `location` is (path of questions.md, unit branch) for the sticky section."""
+        and never a `verdict` or `harness` question: each becomes `answered-by-clarifier` (every L4-CLR-002 condition
+        held) or a suggestion with Status `open`. The ones left out of the batch have no `clarifier.result`, so a
+        later pass takes them. A reply that is `unavailable` ends the calls: the remaining questions of the batch are
+        recorded as unavailable without asking again. The phase that follows is `implementing` only when nothing that
+        blocks a task is still open. `location` is (path of questions.md, unit branch) for the sticky section."""
         done = clarified_ids(read_ledger(self.unit_dir).events)
         batch = [
             v for v in port.load()
-            if v.id in blocking and v.status is QuestionStatus.OPEN and v.kind is not QuestionKind.VERDICT
-            and v.id not in done
+            if v.id in blocking and v.status is QuestionStatus.OPEN
+            and v.kind not in (QuestionKind.VERDICT, QuestionKind.HARNESS) and v.id not in done
         ][: cfg.max_open_questions]  # fmt: skip
         results: dict[str, QuestionResult] = {}
         available, invalid = True, []

@@ -19,6 +19,7 @@ from typing import Literal
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
+from l4.implementer.held import MAX_SUBJECTS, HeldCheck, held_question
 from l4.implementer.result import ResultQuestion
 from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
@@ -128,6 +129,33 @@ def _raise_blocked(
     )  # fmt: skip
     wb.push()
     return ids
+
+
+def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[str]:
+    """The question of a check L4 could not decide (L4-IMP-063): one `harness` question that blocks the task, the
+    `question.raised` event that names the check and its subjects, and `check.inconclusive` with the evidence. Committed
+    and pushed like a blocked task's questions; no attempt is counted."""
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
+    asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
+    question = held_question(held, {c.id: c for c in wb.provider.criteria(wb.ref)}, asked)
+    [qid] = raise_questions(wb.ref.path, wb.ref.name, [question], redactor=wb.redactor)
+    redact = wb.redactor.redact_text
+    tests = list(held.tests[:MAX_SUBJECTS])
+    wb.emit(
+        "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
+        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests,
+    )  # fmt: skip
+    wb.emit(
+        "check.inconclusive", task=task.key, phase=held.phase, check=held.check, criteria=list(held.criteria),
+        tests=list(held.tests[:20]), reason=redact(held.reason), runs=list(held.runs), kept=list(held.kept[:50]),
+        question=qid,
+    )  # fmt: skip
+    wb.commit(
+        f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
+        paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}"],
+    )  # fmt: skip
+    wb.push()
+    return [qid]
 
 
 def _frozen_tests(red: RedOutcome) -> list[str]:
@@ -256,6 +284,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             if outcome.status == "blocked":
                 ids = _raise_blocked(wb, task, outcome.questions, outcome.summary, attempts["red"])
                 return TaskOutcome("blocked", "red", ids)
+            if outcome.status == "held":  # a check L4 could not decide: no attempt counted, no escalation (D7)
+                assert outcome.held is not None
+                return TaskOutcome("blocked", "red", _raise_held(wb, task, outcome.held, attempts["red"]))
             if outcome.status == "already_satisfied":
                 return TaskOutcome("done")  # the tests exist and pass: there is nothing for green to do
             if outcome.status == "ok":
@@ -270,6 +301,9 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
             if done.status == "blocked":
                 ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], red)
                 return TaskOutcome("blocked", "green", ids)
+            if done.status == "held":  # the test-at-red run could not decide: the red commit stays
+                assert done.held is not None
+                return TaskOutcome("blocked", "green", _raise_held(wb, task, done.held, attempts["green"]))
             phase, failure, excerpt = "green", done.reason, done.excerpt
             if hung_frozen := _hung_frozen(wb, red, done):
                 # a frozen test that hangs once the code works is the owner's to edit: no attempt can change it, and

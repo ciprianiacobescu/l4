@@ -298,3 +298,11 @@ def test_a_person_s_own_answer_opens_a_pre_existing_test_it_names_and_a_red_test
     both = with_status(ask(sub(tmp_path, "b")), QuestionStatus.ANSWERED, suggestion="", answer=f"Edit {OLD}.")
     other = replace(WITH_OLD, preexisting=(TEST, OLD))  # a red test listed twice would still be one grant
     assert unfrozen(both.questions, recorded(both), SCOPE, other).paths == (OLD,)
+
+
+def test_a_harness_answer_never_unfreezes(tmp_path):
+    """L4-IMP-063: `accept: tests/test_notices.py` answers a check L4 could not decide; it opens no frozen file."""
+    file = with_status(
+        ask(tmp_path, kind=QuestionKind.HARNESS), QuestionStatus.ANSWERED, suggestion="", answer=f"accept: {TEST}"
+    )
+    assert unfrozen(file.questions, recorded(file), SCOPE, MANIFEST).paths == ()
