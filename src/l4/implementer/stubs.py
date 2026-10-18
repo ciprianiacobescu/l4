@@ -12,7 +12,7 @@ M1: implementer-tdd-loop 2.9 (other languages: a per-language pattern table).
 import ast
 import shutil
 import textwrap
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -612,14 +612,48 @@ def _zero_body(fn: _Def) -> list[ast.stmt]:
     return [_zero_statement(fn)]
 
 
+_CALLABLE_NAMES = frozenset({"Callable", "type", "Type"})
+
+
+def _returns_callable(annotation: ast.expr | None) -> bool:
+    """Whether a return annotation says the function returns a callable or a class (`Callable[..., X]`, `type[X]`, also
+    as a string, `X | None`, `Optional[X]` or `Union[...]` of one): the zero value of a decorator factory or a class
+    factory is not a value a test can meet, it breaks the import of a module that applies it (L4-IMP-061)."""
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            annotation = ast.parse(annotation.value, mode="eval").body
+        except SyntaxError:
+            return False
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        return _returns_callable(annotation.left) or _returns_callable(annotation.right)
+    if isinstance(annotation, ast.Subscript) and _name(annotation.value) in ("Optional", "Union"):
+        inner = annotation.slice
+        return any(_returns_callable(e) for e in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
+    node = annotation.value if isinstance(annotation, ast.Subscript) else annotation
+    return node is not None and _name(node) in _CALLABLE_NAMES
+
+
+@dataclass(frozen=True)
+class ZeroPlan:
+    source: str
+    zeroed: tuple[str, ...]  # qualnames (`fn`, `Class.fn`, `Outer.Inner.fn`) of the functions that answer a zero value
+    kept: tuple[str, ...]  # qualnames left real because their annotation says they return a callable or a class
+
+
 class _Zero(ast.NodeTransformer):
     """Stub bodies (or, with `public`, every public function and method) answer the zero value of their return type."""
 
-    def __init__(self, public: bool) -> None:
+    def __init__(self, public: bool, keep: Collection[str] = ()) -> None:
         self.public = public
+        self.keep = frozenset(keep)
+        self.stack: list[str] = []
+        self.zeroed: list[str] = []
+        self.kept: list[str] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
+        self.stack.append(node.name)
         node.body = [self._member(n) for n in node.body]
+        self.stack.pop()
         return node
 
     def _member(self, node: ast.stmt) -> ast.stmt:
@@ -629,19 +663,30 @@ class _Zero(ast.NodeTransformer):
 
     def _function(self, fn: _Def) -> _Def:
         doc = len(_docstring(fn.body))
+        qual = ".".join([*self.stack, fn.name])
         if self.public:
             if not fn.name.startswith("_"):
-                fn.body = [*fn.body[:doc], *_zero_body(fn)]
+                if qual in self.keep:
+                    pass  # a function a traceback named: it stays real (neither zeroed nor kept by annotation)
+                elif _returns_callable(fn.returns):
+                    self.kept.append(qual)
+                else:
+                    fn.body = [*fn.body[:doc], *_zero_body(fn)]
+                    self.zeroed.append(qual)
         elif _is_stub_body(fn.body):
             fn.body = [*fn.body[:doc], *_zero_body(fn)]
+            self.zeroed.append(qual)
         elif (
             len(fn.body) > doc
             and isinstance(guard := fn.body[doc], ast.If)
             and _guard_ok(guard, {a.arg for a in _params(fn.args)})
         ):
             guard.body = _zero_body(fn)  # the guard body gets the same treatment
+            self.zeroed.append(qual)
         if not self.public and _ends_with_stub(fn.body):
             fn.body[-1:] = _zero_body(fn)  # a partial stub: its guards stay, its final raise answers the zero value
+            if qual not in self.zeroed:
+                self.zeroed.append(qual)
         return fn
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
@@ -650,15 +695,25 @@ class _Zero(ast.NodeTransformer):
     visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
 
 
-def zero_value_variant(source: str, *, public: bool = False) -> str:
+def zero_value_plan(source: str, *, public: bool = False, keep: Collection[str] = ()) -> ZeroPlan:
     """`source` with each red stub (`public`: each public function and method) answering the zero value of its
     return annotation: `str` "", `int` 0, `float` 0.0, `bool` False, `list` [], `dict` {}, `set` set(), `tuple` (),
     `bytes` b""; unannotated or unknown None; `-> None` nothing. A partial stub (guards, then a final bare
     `raise NotImplementedError`) keeps its guards and answers the zero value in place of that raise, so a test of the
-    unwritten path fails by assertion, not by error (L4-IMP-002 check 5). Nested functions are left alone."""
+    unwritten path fails by assertion, not by error (L4-IMP-002 check 5). Nested functions are left alone.
+    In `public` mode a function annotated to return a callable or a class keeps its body (L4-IMP-061), and so does a
+    function whose qualname is in `keep`. Red-stub mode needs no such rule: a stub applied at import time already
+    fails the real run (a) at collection."""
     tree = ast.parse(source)
-    tree.body = [_Zero(public)._member(n) for n in tree.body]
-    return ast.unparse(ast.fix_missing_locations(tree)) + "\n"
+    zero = _Zero(public, keep)
+    tree.body = [zero._member(n) for n in tree.body]
+    text = ast.unparse(ast.fix_missing_locations(tree)) + "\n"
+    return ZeroPlan(text, tuple(zero.zeroed), tuple(zero.kept))
+
+
+def zero_value_variant(source: str, *, public: bool = False) -> str:
+    """The source of `zero_value_plan(source, public=public)`."""
+    return zero_value_plan(source, public=public).source
 
 
 @dataclass(frozen=True)

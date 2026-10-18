@@ -137,7 +137,7 @@ Every task follows these rules:
 
 ## 3. Zeroing keeps what imports need (L4-IMP-061, D5)
 
-- [ ] 3.1 Keep a function annotated to return a callable or a class.
+- [x] 3.1 Keep a function annotated to return a callable or a class.
   - Tests first, `tests/unit/implementer/test_zero_keep.py` (source level, `exec` of the variant in a namespace that
     provides the imports):
     - `test_scn_imp_302_a_decorator_factory_annotated_to_return_a_callable_keeps_its_body`: a module with
@@ -164,7 +164,7 @@ Every task follows these rules:
     - `zero_value_variant(source, *, public=False)` returns `zero_value_plan(source, public=public).source`.
   - Run also `tests/unit/implementer/test_stubs.py` and `tests/unit/implementer/test_zero_generators.py`.
 
-- [ ] 3.2 Keep the functions the tracebacks name, and run again (at most twice).
+- [x] 3.2 Keep the functions the tracebacks name, and run again (at most twice).
   - Tests first, `tests/unit/implementer/test_zero_keep_loop.py`, on the bench. The files, written into the worktree:
     `src/pytdd/telemetry.py` with `def traced(name: str) -> Callable[[_F], _F]:` (an identity decorator) and
     `def init(out: list) -> bool:` (appends `"on"`, returns True); `src/pytdd/store.py` with

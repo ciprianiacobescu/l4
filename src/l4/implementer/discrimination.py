@@ -14,15 +14,18 @@ M1: implementer-tdd-loop 2.2 for languages other than Python.
 import ast
 import hashlib
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from l4.gates.collection import called_names
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
-from l4.implementer.stubs import _is_inside, has_stub, zero_value_variant
+from l4.implementer import variant
+from l4.implementer.stubs import _is_inside, has_stub, zero_value_plan
+from l4.implementer.variant import VariantRun
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 
@@ -64,11 +67,36 @@ def _already_varied(target: Path, seen: set[tuple[int, int]]) -> bool:
     return False
 
 
+MAX_KEEP_RERUNS = 2  # a zero-value run is made again at most twice, keeping the functions a traceback names
+MAX_KEPT = 50  # functions kept real by tracebacks, per check
+
+
+class ZeroScope(list[str]):
+    """What `zero_values_in_place` yields: the paths that were varied (the list itself, and `varied`), the functions
+    each answers a zero value for (`zeroed`) and the ones kept real because their annotation says they return a
+    callable or a class (`kept`), both path -> qualnames."""
+
+    def __init__(self, varied: Sequence[str] = (), zeroed: Mapping[str, tuple[str, ...]] | None = None,
+                 kept: Mapping[str, tuple[str, ...]] | None = None) -> None:  # fmt: skip
+        super().__init__(varied)
+        self.zeroed: dict[str, tuple[str, ...]] = dict(zeroed or {})
+        self.kept: dict[str, tuple[str, ...]] = dict(kept or {})
+
+    @property
+    def varied(self) -> list[str]:
+        return list(self)
+
+
 @contextmanager
-def zero_values_in_place(wb: Workbench, paths: Sequence[str], *, public: bool) -> Iterator[list[str]]:
+def zero_values_in_place(
+    wb: Workbench, paths: Sequence[str], *, public: bool, keep: Mapping[str, Collection[str]] | None = None
+) -> Iterator[ZeroScope]:
     """Replace the zero-value variants of `paths` (relative to the worktree) for the duration of the block and
-    yield the paths that were varied. `public`: every public function and method; else only the red stubs."""
+    yield the scope (the paths that were varied). `public`: every public function and method; else only the red
+    stubs. `keep`: path -> qualnames of functions that stay real (L4-IMP-061)."""
     originals: dict[Path, bytes] = {}
+    zeroed: dict[str, tuple[str, ...]] = {}
+    kept: dict[str, tuple[str, ...]] = {}
     seen: set[tuple[int, int]] = set()
     try:
         for relative in paths:
@@ -79,13 +107,14 @@ def zero_values_in_place(wb: Workbench, paths: Sequence[str], *, public: bool) -
                 continue  # a second name of a file already varied: its "original" would be the variant
             data = target.read_bytes()
             try:
-                variant = zero_value_variant(data.decode("utf-8"), public=public)
+                plan = zero_value_plan(data.decode("utf-8"), public=public, keep=(keep or {}).get(relative, ()))
             except (SyntaxError, UnicodeDecodeError):
                 continue
             originals[target] = data
-            target.write_bytes(variant.encode("utf-8"))
+            zeroed[relative], kept[relative] = plan.zeroed, plan.kept
+            target.write_bytes(plan.source.encode("utf-8"))
             _drop_bytecode(target)
-        yield [target.relative_to(wb.worktree).as_posix() for target in originals]
+        yield ZeroScope([t.relative_to(wb.worktree).as_posix() for t in originals], zeroed, kept)
     finally:
         broken = []
         for target, data in originals.items():
@@ -97,22 +126,102 @@ def zero_values_in_place(wb: Workbench, paths: Sequence[str], *, public: bool) -
             raise RuntimeError(f"could not restore {', '.join(broken)} after the zero-value run")
 
 
-def zeroed_run(wb: Workbench, name: str, paths: Sequence[str], *, public: bool) -> GateResult | None:
-    """The test gate against the variants; None when no path could be varied (nothing to decide). The reports the gate
+def own_test_files(wb: Workbench) -> frozenset[str]:
+    """The test and support files the unit added or changed: the worktree's changes and the commits since the unit
+    base. A fixture assertion in one of them is the unit's own check of a production answer (L4-IMP-002)."""
+    changed = set(wb.changed_files())
+    base = unit_base(wb)
+    if base is not None:
+        done = wb.git.run("diff", "--name-only", "--no-renames", "--diff-filter=AM", base, "HEAD", check=False)
+        changed |= set(done.stdout.splitlines())
+    return frozenset(p for p in changed if _is_test_path(wb, p))
+
+
+@dataclass(frozen=True)
+class ZeroRun:
+    gate: GateResult  # the last gate run
+    run: VariantRun  # that run, classified against the real run
+    kept: dict[str, tuple[str, ...]]  # path -> qualnames the tracebacks asked to keep real
+    reruns: int
+
+
+def _inconclusive_texts(run: VariantRun, candidates: Collection[str], real: TestReport | None,
+                        own: frozenset[str]) -> tuple[list[str], list[str]]:  # fmt: skip
+    """What an inconclusive run shows of its cause: the tracebacks of its new collection errors and of the candidates'
+    setup assertions outside the unit's files. Empty when no candidate is inconclusive."""
+    if run.report is None:
+        return [], []
+    undecided = [t for t in candidates if variant.test_outcome(run, t, real, own)[0] == "inconclusive"]
+    if not undecided:
+        return [], []
+    collection = [run.report.collection_details.get(e, "") for e in run.new_errors]
+    setup = [
+        case.detail
+        for t in undecided
+        if (case := run.report.tests.get(t)) is not None and case.when == "setup" and case.failure_kind == "assertion"
+    ]
+    return collection, setup
+
+
+def zeroed_run(
+    wb: Workbench,
+    name: str,
+    paths: Sequence[str],
+    *,
+    public: bool,
+    real: TestReport | None = None,
+    candidates: Collection[str] = (),
+) -> ZeroRun | None:
+    """The test gate against the variants, classified against `real`; None when no path could be varied (nothing to
+    decide). Only in `public` mode: while a candidate is inconclusive and a run's tracebacks name zeroed functions,
+    those are kept real and the run is made again, at most `MAX_KEEP_RERUNS` times (L4-IMP-061). The reports the gate
     writes are put back as run (a) left them: the published report must describe the real code, not the variants."""
     reports = [wb.worktree / r for r in wb.cfg.gates.test.reports]
-    kept = {r: r.read_bytes() for r in reports if r.is_file() and not r.is_symlink()}
+    saved = {r: r.read_bytes() for r in reports if r.is_file() and not r.is_symlink()}
+    keep: dict[str, tuple[str, ...]] = {}
+    own = own_test_files(wb) if public and candidates else frozenset()
+    reruns = 0
     try:
-        with zero_values_in_place(wb, paths, public=public) as varied:
-            if not varied:
-                return None
-            return wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING)
+        while True:
+            with zero_values_in_place(wb, paths, public=public, keep=keep) as scope:
+                if not scope:
+                    return None
+                gate = wb.run_gate(
+                    name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING
+                )
+            run = variant.classify(gate, real, redact=wb.redactor.redact_text)
+            if reruns == 0 and any(scope.kept.values()):
+                wb.emit("zero.kept", gate=name, rerun=0, cause="annotation", functions=_listed(scope.kept))
+            result = ZeroRun(gate, run, dict(keep), reruns)
+            if not public or reruns >= MAX_KEEP_RERUNS:
+                return result
+            collection, setup = _inconclusive_texts(run, candidates, real, own)
+            from_collection, from_setup = called_names("\n".join(collection)), called_names("\n".join(setup))
+            room = MAX_KEPT - sum(len(v) for v in keep.values())
+            wanted = [
+                (path, qual, qual.rsplit(".", 1)[-1] in from_collection)
+                for path, quals in scope.zeroed.items()
+                for qual in quals
+                if qual.rsplit(".", 1)[-1] in from_collection | from_setup and qual not in keep.get(path, ())
+            ][: max(room, 0)]
+            if not wanted:
+                return result
+            for path, qual, _ in wanted:
+                keep[path] = (*keep.get(path, ()), qual)
+            reruns += 1
+            cause = "collection" if any(by_collection for _, _, by_collection in wanted) else "setup"
+            wb.emit("zero.kept", gate=name, rerun=reruns, cause=cause,
+                    functions=[f"{path}::{qual}" for path, qual, _ in wanted])  # fmt: skip
     finally:
         for report in reports:
-            if report in kept:
-                report.write_bytes(kept[report])
+            if report in saved:
+                report.write_bytes(saved[report])
             else:
                 report.unlink(missing_ok=True)
+
+
+def _listed(by_path: Mapping[str, Sequence[str]]) -> list[str]:
+    return [f"{path}::{qual}" for path, quals in by_path.items() for qual in quals][:MAX_KEPT]
 
 
 @contextmanager
@@ -247,7 +356,8 @@ def vacuity_check(wb: Workbench, stub_files: Sequence[str], tracing: Mapping[str
     tests that trace it, pre-satisfied ones left out) needs one test that fails."""
     if not tracing:
         return Vacuity()
-    gate = zeroed_run(wb, "test-zero", stub_files, public=False)
+    zero = zeroed_run(wb, "test-zero", stub_files, public=False, real=None)
+    gate = zero.gate if zero else None
     if gate is None or gate.report is None:
         return Vacuity(reason=f"the zero-value run produced no readable report ({gate.reason if gate else 'no stub'})")
     proofs: dict[str, tuple[str, ...]] = {}
@@ -450,7 +560,8 @@ def confirm_pre_satisfied(wb: Workbench, candidates: Mapping[str, Sequence[str]]
     unconfirmed = {c: tuple(t) for c, t in candidates.items()}
     if not scope:
         return PreSatisfied({}, unconfirmed, "no project source module is imported by those tests")
-    gate = zeroed_run(wb, "test-presatisfied", scope, public=True)
+    zero = zeroed_run(wb, "test-presatisfied", scope, public=True, real=None, candidates=everything)
+    gate = zero.gate if zero else None
     if gate is None or gate.report is None:
         return PreSatisfied(
             {},
@@ -511,11 +622,11 @@ def discriminate_extra(wb: Workbench, tests: Sequence[str], base_sha: str) -> Ex
     accepted: dict[str, str] = {}
     runs = 0
     scope = sorted(imported_modules(wb, wanted) | _changed_modules(wb))
-    zero = zeroed_run(wb, "test-extra-zero", scope, public=True) if scope else None
+    zero = zeroed_run(wb, "test-extra-zero", scope, public=True, real=None, candidates=wanted) if scope else None
     if zero is not None:
-        runs += 1
-        if zero.report is not None:
-            accepted |= {t: PROOF_ZERO_VALUE for t in wanted if fails_on_zero(zero.report.tests.get(t))}
+        runs += 1 + zero.reruns
+        if zero.gate.report is not None:
+            accepted |= {t: PROOF_ZERO_VALUE for t in wanted if fails_on_zero(zero.gate.report.tests.get(t))}
     rest = [t for t in wanted if t not in accepted]
     production = production_changes(wb, base_sha)
     if rest and production:
