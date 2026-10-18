@@ -134,26 +134,33 @@ start. Only a merge into the target counts. A merge into another branch does not
 
 **`merge: auto`.** L4 merges a verified unit with the method in `yolo.merge.method` (`.l4/config.yaml`):
 
-- `squash` (the default). L4 calls the forge's merge for the PR, pinned to the verified head: the forge refuses if the PR
-  head is not that commit. The target gets one new commit with the PR title and ` (#<pr>)`, no `[skip ci]`, and the
+- `squash` (the default). L4 calls the forge's merge for the PR, pinned to the recorded hand-off commit H: the forge
+  refuses if the PR head is not that commit. The target gets one new commit with the PR title and ` (#<pr>)`, no `[skip ci]`, and the
   trailers `L4-Unit`, `L4-Verified-Head` and `L4-Run`. The forge's call has no guard on the target, so L4 then checks
   that the new commit sits on the tip it read and has the head's tree. If a person's commit landed in between, the unit
   is recorded with `raced: true`, the step prints a warning, and the acceptance profile on the landed commit decides
   whether the unit is accepted. The merge cannot be undone. The forge's token must be allowed to merge PRs; a forge
   that has squash merging off, or a rule that blocks the merge, stops the plan with `merge_refused` and the forge's text.
   Set `yolo.merge.method: fast-forward` in that case.
-- `fast-forward`. L4 pushes the unit head to the target, without force. The git server accepts the push only if the
+- `fast-forward`. L4 pushes H to the target, without force. The git server accepts the push only if the
   target tip is still part of the head. So a target that moved in the meantime is refused by git, not by a check that
   could be out of date. L4 does not rebase.
 
-The merge happens only when all of this is true:
+The merge lands the hand-off commit H that the hand-off recorded (`pr.ready{head}`), never a commit someone added
+after it. It happens only when all of this is true:
 
 1. The unit is `in_review`, its last verdict is PASS, and it has no open question and no open feedback.
-2. No person made a commit after the hand-off.
-3. The PR is open, and its base is the target.
-4. The target tip is contained in the unit head.
-5. The head to push is the tip of the unit branch on `origin` and the head of the PR. A commit that arrives after the
-   check stops the merge.
+2. No commit was made after H, whatever its author, committer or trailers. Such a commit sends the unit back to
+   verification, like a person's push. So does a red CI that the sweep recorded on H.
+3. H is recorded, and it is the tip of the unit branch on `origin` and the head of the PR. A commit that arrives after
+   the check stops the merge.
+4. The PR is open, and its base is the target.
+5. The target tip is contained in H.
+6. The repository's own CI on H is not running, not red and readable. A job that is red on H and on the base does not
+   block: the unit records `ci: preexisting`. If no CI ran on H at all, the merge goes ahead and `unit.merged` records
+   `ci: not_run`, with a warning line in the plan report and a note on the merged PR; with `yolo.merge.require_ci:
+   true` the plan waits for a CI instead. On GitHub a push made with the workflow's `GITHUB_TOKEN` starts no run, so a
+   repository that wants its CI to gate the merge needs a token that starts runs (a GitHub App) and `require_ci: true`.
 
 L4 records the request, with the lease of the plan ref, before it pushes. It reads the plan again first: a plan that is
 cancelled or stopped does not merge.
@@ -283,7 +290,10 @@ A plan **waits** when the current unit needs a person's answer or has no agent a
 when the cause is gone. `l4 yolo resume` also wakes it.
 
 A plan with `merge: auto` also waits when the merge of the current unit is not ready, for example when the unit has no
-open PR, or the PR is aimed at another branch than the target. The reason is `merge_not_ready`. The detail is recorded
+open PR, or the PR is aimed at another branch than the target, when no hand-off commit H is recorded (`l4 retry --unit
+<id>` hands the unit off again), when the branch head is not H, when the repository's CI on H is still running, is red
+and the sweep has not recorded it yet, cannot be read, or did not run and `yolo.merge.require_ci` is true. The reason is
+`merge_not_ready`. The detail is recorded
 once and `l4 yolo status` shows it. The plan continues by itself when the merge is ready. If the PR shows an old head
 after a push, the step reads the PR again, three times, five seconds apart, before it calls the merge not ready. It does
 so in the run that records the wait, not in a preview and not in later runs while the wait for that head stands.

@@ -6,6 +6,34 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.16 (unreleased)
+
+### Fixed
+- A delivery plan with `merge: auto` no longer merges a commit that nobody verified. The merge lands the hand-off
+  commit H that the hand-off recorded (`pr.ready{head}`), pinned to its sha, and never the branch tip. Any commit after
+  H sends the unit back to verification, whatever author, committer or `L4-Run` trailer it claims: before, a commit that
+  copied the bot's identity and trailer after the review was squash-merged unseen, and a forged second hand-off commit
+  became H (L4-ARC-008, L4-YOLO-040).
+- A plan no longer merges a unit whose repository CI is red. A red CI that the sweep recorded on H is dispatched for
+  verification before any merge, and the merge itself waits while the CI on H is running, is red and not yet recorded,
+  or cannot be read, with a `merge_not_ready` detail that says why (L4-YOLO-041, L4-YOLO-042).
+- On GitHub, a failed job is no longer hidden behind a passing job of the same name in another workflow. A check run is
+  one job of one workflow (and event), a re-run replaces its earlier attempt, and a job red on H is pre-existing only
+  when the same workflow's job is red on the base (L4-CI-010, L4-CI-011).
+- A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
+  (L4-CI-012).
+
+### Changed
+- A plan merge waits for the repository's CI on H when it is running, red or unreadable. The new key
+  `yolo.merge.require_ci` (default `false`) decides only whether a hand-off commit that no CI ran on waits too. With
+  the default it is merged as before, but `unit.merged` records `ci: not_run` and a warning goes to the plan report and
+  to a note on the merged PR or MR. A GitHub repository whose hand-off is pushed with the workflow's `GITHUB_TOKEN`
+  (which starts no runs) that wants its CI to gate the merge gives the push a token that starts runs, such as a GitHub
+  App, and sets `yolo.merge.require_ci: true`. A job red on H and on the base does not block: `unit.merged` records
+  `ci: preexisting` and the job names.
+- GitHub job names in `ci.failed` and `ci.preexisting` are `<workflow file> / <job>` (`tests.yml / build`).
+- On GitLab, a hand-off commit with no pipeline job is `ci_not_run`; it was `ci_green`.
+
 ## 0.4.14 (2026-10-17)
 
 ### Added

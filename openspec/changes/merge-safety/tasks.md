@@ -240,7 +240,7 @@ Every task follows these rules:
 
 ## 7. Docs
 
-- [ ] 7.1 `docs/SPEC.md`.
+- [x] 7.1 `docs/SPEC.md`.
   - **L4-ARC-008 (§11).**
     - After "and marks the PR ready.", add: "It records the sha of H as `pr.ready{head}` on the unit's lock ref
       (L4-STA-004), and that record is H from then on (`UnitState.ready_head`)."
@@ -291,7 +291,7 @@ Every task follows these rules:
     `merge: auto` plan after the upgrade: a hand-off push that starts no CI is now merged on
     record (`ci: not_run`) with a warning; give the push a token that starts runs and set `yolo.merge.require_ci: true`
     to make the CI gate the merge".
-- [ ] 7.2 The other docs.
+- [x] 7.2 The other docs.
   - `docs/runbook.md`, the `merge_not_ready` row: list the new details (no recorded H, a head that is not H, CI
     running, red, unreadable, and not run when `yolo.merge.require_ci` is true) and their fixes (wait for the CI; `l4
     retry --unit`; give the hand-off push a token that starts runs or set `yolo.merge.require_ci: false`; check the
