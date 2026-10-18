@@ -133,6 +133,23 @@ def read_questions_at(git: Git, ref: str, path: str, branch: str) -> tuple[Quest
     return None, None
 
 
+def folder_from_worktree(
+    git: Git, worktree: Path, unit: str, unit_rel: str, ledger_rel: str, branch: str, phase: str, fix: str | None
+) -> Folder:
+    """The folder of a unit as the run's own worktree holds it at `HEAD` (the delegate's edit core, L4-DLG-006): the
+    same `Folder` that `load_folders` builds from the fetched branch, read with `read_questions_at`, with `head` the
+    commit the run stands on. `unit` is the id shown (a fix unit's own for a fix), `unit_rel` the folder that holds
+    `questions.md` and `ledger_rel` the folder of the ledger (the parent unit's for a fix unit)."""
+    here = git.at(worktree)
+    head = here.rev_parse("HEAD")
+    if head is None:
+        raise Refusal(f"{worktree} has no commit", "the run's worktree starts at the unit branch").exit()
+    file, problem = read_questions_at(here, head, f"{unit_rel}/{QUESTIONS_FILENAME}", branch)
+    match = _FIX_NAME.fullmatch(unit.partition(":")[2]) if fix is not None else None
+    parent = f"{unit.partition(':')[0]}:{match.group('parent')}" if match else unit
+    return Folder(unit, parent, branch, head, unit_rel, ledger_rel, phase, fix, file, problem)
+
+
 def _fix_folders(git: Git, head: str, rel: str) -> list[str]:
     """The names of the fix unit folders `<unit folder>-fix-<n>` that sit beside the unit's folder on the branch."""
     path = PurePosixPath(rel)
@@ -876,17 +893,31 @@ def author_name(git: Git) -> str:
     return found.group("name").strip()
 
 
-def commit_message(edit: Edit, name: str, who: str, marker: str | None) -> str:
+@dataclass(frozen=True)
+class DelegateMark:
+    """Who the delegate was for one answer: its model, the CLI that ran it and the profile (L4-DLG-006)."""
+
+    model: str
+    cli: str
+    profile: str
+
+
+def commit_message(edit: Edit, name: str, who: str, marker: str | None, *, mark: DelegateMark | None = None) -> str:
     """The message of design D9: no `L4-` trailer, and a `[skip ci]` line: the push starts neither the unit branch's
     own workflow copy (it can pin an older harness) nor the repository's CI on a mid-TDD branch; the command starts
     the run."""
     unit = edit.folder.unit.partition(":")[2] or edit.folder.unit
     title = " ".join(edit.question.title.split())[:60].rstrip() + (" (answer replaced)" if edit.replaced else "")
     replaced = "Replaced: yes\n" if edit.replaced else ""
-    by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
+    via = "l4 questions"
+    if who == "delegate":
+        assert mark is not None, "a delegate commit names its model, CLI and profile"
+        by, via = f"delegate ({mark.model} via {mark.cli}; profile {mark.profile})", "l4 delegate"
+    else:
+        by = f"{name} (person)" if who == "person" else f"{name} (agent: {marker or 'no terminal on stdin'})"
     return (
         f"{edit.form} {edit.question.id} ({unit}): {title}\n\n"
-        f"Status: {edit.status.value}\n{replaced}By: {by}\nVia: l4 questions\n[skip ci]\n"
+        f"Status: {edit.status.value}\n{replaced}By: {by}\nVia: {via}\n[skip ci]\n"
     )
 
 
