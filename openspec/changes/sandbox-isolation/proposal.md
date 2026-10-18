@@ -40,7 +40,8 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
 - **The login and unit lock files are unreadable in the sandboxes** (sandbox-security-6, owner decision Q3): a
   consequence of the two tmpfs, claimed fixed only because SCN-SEC-99 proves it with the harness's own lock paths.
 - **Doctor `SANDBOX-003`** (L4-SEC-038) plants canaries in the home, in another unit's step directory and in the lock
-  directory and fails closed (exit 3) when either sandbox kind reads one.
+  directory and fails closed (exit 3) when either sandbox kind reads one; **`SANDBOX-004`** warns whenever
+  `sandbox.setup_paths` is set (owner decision Q1).
 - `scripts/runner/sandbox-probe.sh` follows the new argv (parity test); the runbook, the runner README and the SPEC are
   amended.
 
@@ -53,8 +54,8 @@ An independent review of 0.4.13 confirmed four sandbox defects with reproduction
   `src/l4/yolo/{postcheck.py,readiness.py}`, `src/l4/sim/dryrun.py`, `src/l4/agents/{opencode.py,credentials.py}`,
   `src/l4/config/{schema.py,defaults.py}`, `src/l4/doctor/checks_sandbox.py`, `scripts/runner/sandbox-probe.sh`.
 - Spec: L4-SEC-030..038 and L4-PRV-040..041 added; L4-SEC-005 parts b, c, d modified; L4-CFG-005 and the SPEC text of
-  L4-SEC-005 amended in `docs/SPEC.md`; SCN-SEC-70..99, SCN-PRV-100..104; doctor row `SANDBOX-003`; config keys
-  `sandbox.tool_paths`, `sandbox.setup_paths`; event `env.rebuilt`.
+  L4-SEC-005 amended in `docs/SPEC.md`; SCN-SEC-70..99, SCN-PRV-100..107; doctor rows `SANDBOX-003` and `SANDBOX-004`; config keys
+  `sandbox.tool_paths`, `sandbox.setup_paths`; events `env.rebuilt` and `guard.notice`, and `guard.violation` with rule `environment`.
 - Behaviour per environment (design section 4): on Linux with bwrap (GitHub-hosted and self-hosted) all of it; on a mac with
   `sandbox.mode: none` (accepted risk) only the keyed directories, the environment rebuild and the file modes.
 - Migration: per-unit caches start empty under the keyed layout (a new uv cache gets the project's seed copy); the old

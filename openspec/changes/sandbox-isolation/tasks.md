@@ -253,7 +253,7 @@ Every task follows these rules:
 
 ## 6. Docs
 
-- [ ] 6.1 `docs/SPEC.md`:
+- [x] 6.1 `docs/SPEC.md`:
   - §18: append `**L4-SEC-030**` ... `**L4-SEC-038**` after L4-SEC-008 (the requirement texts of this change's
     `specs/security/spec.md`, with the details of design D1-D7 and D10 that a reader of the SPEC needs: the argv order,
     the tool path list, the manifest rule, the classification). In L4-SEC-005 replace "an **empty home**" with "an **empty
@@ -283,7 +283,7 @@ Every task follows these rules:
     `openspec/changes/sandbox-isolation/`) with its acceptance (SANDBOX-003 passes on `l4-runner` and on a GitHub-hosted
     runner; the dummy repository's gates stay green).
   Run `python scripts/check_spec.py docs/SPEC.md`: no uncovered requirement, no undefined reference.
-- [ ] 6.2 `CHANGELOG.md` under `## 0.4.16 (unreleased)` (create the heading above the newest release when it is absent):
+- [x] 6.2 `CHANGELOG.md` under `## 0.4.16 (unreleased)` (create the heading above the newest release when it is absent):
   `### Fixed` for the four findings in consumer words (what an agent's test could read or fake before, and that it no
   longer can), `### Added` for `sandbox.tool_paths`, `sandbox.setup_paths` and doctor `SANDBOX-003`, `### Changed` for
   the keyed cache layout (caches start empty once; the old `units/<fw>/<name>` directories can be deleted by hand) and

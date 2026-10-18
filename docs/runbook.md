@@ -1595,6 +1595,36 @@ These limits make operation more difficult. Know them before you start.
   is open.
 - `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
   pushed at each step commit. A cancelled run shows as an open run until a later run starts.
+- With `bwrap`, a gate and an agent start from an **empty home** and an empty runner cache (0.4.16). The harness puts
+  back, read-only, the tools it finds: the `PATH` entries and the install roots of their symlinks, `$L4_HOME`, uv's
+  Python and tool directories, the corepack home and `~/.serena`. A tool under the home that it does not find fails inside
+  the sandbox with "command not found" or a broken virtual environment. Add its directory to `sandbox.tool_paths` (both
+  sandbox kinds, read-only). An entry that is, holds or lies inside a login is refused when the configuration is loaded.
+  `l4 doctor` row SANDBOX-003 proves on the runner that a file in the home, in another unit's step directory and in the
+  lock directory is not readable. With `sandbox.mode: none` (accepted risk) none of this applies.
+- A `gates.setup` command that needs a private registry login (`~/.npmrc`, `~/.config/pip/pip.conf`, `~/.netrc`) gets
+  it only through `sandbox.setup_paths`, read-only, in the sandbox of the setup command and nowhere else. Setup runs
+  code the agent can influence (a build hook, a `postinstall` script), so that login is in its reach: use a token that can
+  only read packages. Doctor row SANDBOX-004 warns as long as the key is set.
+- `.venv` and every `node_modules` are read-only in every gate but `gates.setup`, and `node_modules/.cache` and
+  `node_modules/.vite` start empty at every gate. A test gate that writes elsewhere in `node_modules` (a code generator
+  such as `prisma generate`) fails with a read-only error: move that command to `gates.setup`.
+- After every agent step and every other gate, the harness compares `.venv` and `node_modules` with what the last
+  successful `gates.setup` built. A directory that differs is **removed** and the next `gates.setup` builds it again, with
+  the ledger events `env.rebuilt` (what differed, and why) and, for a file nothing explains, `guard.violation` with
+  rule `environment`. A dependency change that goes through the manifest and the lock file (`uv add`, `npm install`) is
+  expected and costs only the rebuild. An upgrade whose manifest changed but whose lock file did not is a `guard.notice`
+  (not a failure). A Python startup hook (`*.pth`, `sitecustomize.py`) that no installed package lists is always a
+  violation. The verifier's workbench builds its own environment: its first `gates.setup` removes the implementer's.
+- A project with **no `gates.setup`** gets no baseline: every `.venv` or `node_modules` that a step or a gate leaves is
+  removed, so a test command that builds its own environment (`uv run`) builds it in every gate. Set `gates.setup`.
+- Per-unit directories under `$L4_CACHE` carry the repository key (0.4.16): `units/<key>/<fw>/<name>`,
+  `pending-unpublished/<key>/<fw>/<name>`. A cache starts empty once after the upgrade, and the old
+  `units/<fw>/<name>` directories can be deleted by hand; the harness never touches them. A run file of the earlier
+  `pending-unpublished/<fw>/<name>` layout is published by the repository whose commits it names; any other stays and
+  a warning names its directory and the count.
+- The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
+  sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 
 ## 12. Delivery plans
 

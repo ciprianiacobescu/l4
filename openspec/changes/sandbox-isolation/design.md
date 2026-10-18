@@ -350,14 +350,22 @@ module.
 - R6 Cost: an environment the agent changed is rebuilt (from a warm cache: seconds to a minute); the verifier rebuilds
   once per round.
 
-## 6. Open questions for the owner
+## 6. Owner decisions on the questions of the first draft (2026-10-17)
 
-- Q1 (decided by the owner): keep `sandbox.setup_paths` as an explicit opt-in; doctor `SANDBOX-004` warns whenever it is
-  set (D5), and the docs say so.
-- Q2: close R3 in a follow-up by mounting the caches read-only in agent and test-gate sandboxes (the agent gets a private
-  scratch cache for its own `uv add`), or by giving the verifier a fresh copy of the project seed as its uv cache?
-- Q3: record sandbox-security-6 as fixed by this change (the lock directories are under hidden roots), or keep its own
-  change for a hidden lock directory under `mode: none`?
-- Q4 (decided by the owner): a dependency upgrade without a lock-file change is a non-failing `guard.notice` (rule
-  `environment`) when a dependency manifest changed in the same step, a `guard.violation` otherwise; the rebuild happens
-  in both cases. D7 states the rule; one narrowing is recorded there (a startup hook stays a violation).
+- Q1: `sandbox.setup_paths` stays as an explicit opt-in; doctor `SANDBOX-004` warns whenever it is set (a registry login
+  is exposed to setup code an agent can influence), and the runbook and the SPEC say so (D5, SCN-PRV-105).
+- Q2: out of scope (R3); it is listed under the follow-ups below.
+- Q3: sandbox-security-6 is recorded as fixed, on the condition that SCN-SEC-99 proves it (section 1).
+- Q4: a dependency upgrade without a lock-file change is a non-failing `guard.notice` (rule `environment`) when a
+  dependency manifest changed in the same step, a `guard.violation` otherwise; the rebuild happens in both cases (D7,
+  SCN-PRV-106, SCN-PRV-107).
+
+### Follow-ups
+
+- R3 (Q2, out of scope here): close the poisoning of a unit's own package cache by its own agent-written code in a
+  follow-up change, by mounting the caches read-only in agent and test-gate sandboxes (the agent gets a private scratch
+  cache for its own `uv add`), or by giving the verifier a fresh copy of the project seed as its uv cache.
+- The live checks of tasks 7.1 and 7.2 on `l4-runner` and a GitHub-hosted runner, and a `sandbox.tool_paths` default for
+  any tool they find missing inside the sandbox.
+- `.vite-temp` and other directories a JS tool writes inside `node_modules` (R4): not in `TOOL_CACHE_DIRS` today; add
+  one there, or move the command to `gates.setup`, when a live run shows a tool that needs it.
