@@ -492,7 +492,7 @@ def _judge_run(
         _judge_run(wb, deferred, round_no, out, None, label, files, env)
     if not candidates:
         return
-    confirmation = confirm_pre_satisfied(wb, candidates, real=report, extra_env=env or None)
+    confirmation = confirm_pre_satisfied(wb, candidates, real=report, **({"extra_env": env} if env else {}))
     for cid, ids in candidates.items():
         rel = written[cid]
         if cid in confirmation.confirmed:

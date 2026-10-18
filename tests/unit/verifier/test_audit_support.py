@@ -115,7 +115,7 @@ def test_the_zero_value_run_uses_the_same_support_files_as_the_head_run(make_ben
 
     monkeypatch.setattr(wb, "run_gate", gate)
 
-    def recorder(wb_, candidates, *, extra_env=None):
+    def recorder(wb_, candidates, *, real=None, extra_env=None):
         from l4.implementer.discrimination import PreSatisfied
 
         seen.append(((wb_.worktree / "tests/conftest.py").exists(), dict(extra_env or {})))

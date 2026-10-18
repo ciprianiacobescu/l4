@@ -1528,6 +1528,8 @@ def run_green(
     held: HeldCheck | None = None
     if not reason:
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
+    if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
+        held, reason = None, unsafe
     if held is not None:  # the test-at-red run could not decide: held, or counted on a person's `accept`
         overrides = accepted_overrides(wb, task.key, "at_red")
         open_ = sorted(t for t in held.tests if t not in overrides)
@@ -2039,6 +2041,8 @@ def run_single(
     discriminating: list[str] | None = None
     if adds_tests and not reason and added and CRITERION_IN_TITLE.search(task.title):
         discriminating, reason, held = _discriminating_tests(wb, added, task)
+        if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
+            held, reason = None, unsafe
         if held is not None:
             overrides = {t: o for t, o in accepted_overrides(wb, task.key, "tests").items() if t in held.tests}
             open_ = sorted(t for t in held.tests if t not in overrides)

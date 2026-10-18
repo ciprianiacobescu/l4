@@ -386,8 +386,7 @@ def _failing_module_calls(
             if found is None or not in_repository(found.group("path")) or not found.group("path").endswith(".py"):
                 continue
             relative = found.group("path")
-            rel = _canonical(wb, relative)
-            read = _read(wb, rel) if rel is not None and relative not in own else None
+            read = _read(wb, relative) if relative not in own else None  # a read only: test-support modules are fine
             if read is None:
                 continue
             try:
