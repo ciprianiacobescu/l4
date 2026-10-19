@@ -271,3 +271,54 @@ def test_profile_mode_vetoes_the_implementers_name_for_a_verdict():
     check = delegate_constraint(askers(verdict_events(), "Q-001"), "profile", profiles=PROFILES)
     assert check("codex-sol", PROFILES["codex-sol"]) == "independence: profile codex-sol asked the question"
     assert check("delegate-sol", PROFILES["delegate-sol"]) is None
+
+
+# -- M1: the model the implementer's steps reported is an asker's model too (D3) ---------------------------------
+
+ALIAS_PROFILES = {
+    "claude-impl": Profile(adapter="claude-code", model="opus", vendor="anthropic"),  # an alias the CLI accepts
+    "judge-sol": Profile(adapter="codex", model="gpt-6.1-sol", vendor="openai"),
+    "delegate-opus": Profile(adapter="claude-code", model="claude-opus-5-5", vendor="anthropic"),
+}
+
+
+def alias_events() -> list[LedgerEvent]:
+    served = "claude-opus-5-5"
+    return [
+        selected(1, "implementer", "claude-impl"),
+        event(2, "agent.finished", task="1.1", phase="red", status="ok", model=served),
+        event(3, "agent.finished", task="1.1", phase="green", status="ok", model=served),
+        event(4, "agent.finished", task="1.1", phase="green", status="ok", model=None),
+        judged(5, 1, "judge-sol", "gpt-6.1-sol"),
+        raised(6, kind="verdict", judges=[{"profile": "judge-sol", "model": "gpt-6.1-sol"}]),
+    ]
+
+
+def test_a_verdict_question_counts_the_models_the_implementer_steps_reported():
+    found = askers(alias_events(), "Q-001", ("claude-impl",))
+    assert (None, "claude-opus-5-5", "asked") in [(a.profile, a.model, a.role) for a in found]
+    assert len([a for a in found if a.profile is None]) == 1  # once, whatever the step count; none for a null model
+    check = delegate_constraint(found, "model", profiles=ALIAS_PROFILES)
+    assert (
+        check("delegate-opus", ALIAS_PROFILES["delegate-opus"])
+        == "independence: model claude-opus-5-5 asked the question"
+    )
+
+
+def test_the_alias_implementer_leaves_a_verdict_with_no_independent_delegate(tmp_path):
+    found = askers(alias_events(), "Q-001", ("claude-impl",))
+    check = delegate_constraint(found, "model", profiles=ALIAS_PROFILES)
+    with pytest.raises(RoleUnavailable) as err:
+        factory(tmp_path, ["delegate-opus"]).for_role("delegate", "u", serves=DELEGATE_SERVES, constraints=[check])
+    assert independence_escalation(err.value) == "no independent delegate"
+
+
+def test_the_fail_safe_branches_count_the_reported_models_too():
+    old = [e for e in alias_events() if e.type != "question.raised"] + [raised(7, kind="verdict", source="verifier")]
+    for events in (old, [e for e in alias_events() if e.type != "question.raised"]):
+        assert (None, "claude-opus-5-5") in [(a.profile, a.model) for a in askers(events, "Q-001", ("claude-impl",))]
+
+
+def test_a_technical_question_stays_asked_by_the_step_that_raised_it():
+    events = [*alias_events()[:4], raised(9, profile="claude-impl", model="claude-opus-5-5")]
+    assert names(askers(events, "Q-001")) == [("claude-impl", "claude-opus-5-5")]

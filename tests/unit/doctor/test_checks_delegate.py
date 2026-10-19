@@ -121,6 +121,25 @@ def test_a_usable_chain_passes(make_ctx, monkeypatch):
     assert two.status == "pass" and "delegate-opus is usable" in two.message
 
 
+def test_a_model_alias_is_warned_about(make_ctx, monkeypatch):
+    """M1: a profile on an alias (`opus`) is served as a full id the configuration never names, so independence by model
+    cannot be shown from the configuration alone: DLG-002 (warn) says so, and names the profile."""
+    adapter = FakeAdapter([])
+    monkeypatch.setitem(factory_module.ADAPTERS, "claude-code", lambda: adapter)
+    monkeypatch.setitem(factory_module.ADAPTERS, "codex", lambda: adapter)
+    alias = {"claude-impl": Profile(adapter="claude-code", model="opus", vendor="anthropic")}
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-sonnet"], implementer=["claude-impl"], profiles=alias))
+    result = c._dlg_002(ctx)
+    assert result.status == "fail" and "claude-impl" in result.message and "alias" in result.message
+    assert result.fix_hint and "full model id" in result.fix_hint
+    ctx, _ = make_ctx(
+        cfg=config(delegate=["delegate-sonnet"], implementer=["claude-impl"], profiles=alias, independence="profile")
+    )
+    assert c._dlg_002(ctx).status == "pass"  # profile mode does not compare models
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-sonnet"]))
+    assert c._dlg_002(ctx).status == "pass"  # full ids
+
+
 class Probing(FakeAdapter):
     """Probe results by profile model; records the (model, step) pairs that ran."""
 

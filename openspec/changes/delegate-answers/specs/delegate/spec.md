@@ -46,7 +46,7 @@ be in scope.
 the asker (`profile`, `model`; `judges` for a verdict question). With `delegate.independence: model` (default) the
 selection MUST veto an asker's profile name or model, with `profile` only the name. For a verdict question the askers
 are the round's judges AND the unit's implementer profiles (every implementer profile that ran a step of the unit, from
-its ledger; the configured `roles.implementer` chain when the ledger names none), so the model that wrote the code
+its ledger; the configured `roles.implementer` chain when the ledger names none, and every model those steps reported in `agent.finished`), so the model that wrote the code
 never overturns the judge's dispute of it (owner decision, 2026-10-19). A step's raise with no asker MUST
 count every implementer (and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe); the
 model that served the call (`model_resolved`) MUST be checked against the askers too, and a reply served by an asker's
@@ -65,6 +65,13 @@ model MUST be discarded and escalated. No profile left MUST escalate (`no indepe
 - **WHEN** the delegate pass selects a profile with `independence: model`
 - **THEN** no profile is called and `delegate.result{status: escalated, reason: "no independent delegate"}` is
   recorded: `delegate-sol` is the model that wrote the code and is not asked to overturn the judge's dispute of it
+
+#### Scenario: SCN-DLG-06b (−) The model an implementer step reported counts
+- **GIVEN** an implementer profile `claude-impl` with `model: opus` whose steps reported `claude-opus-5-5`, a judge
+  `judge-sol` and `roles.delegate: [delegate-opus]` (`claude-opus-5-5`)
+- **WHEN** the delegate pass selects a profile for a verdict question with `independence: model`
+- **THEN** `delegate-opus` is skipped with `independence: model claude-opus-5-5 asked the question` and the question
+  escalates with `no independent delegate`
 
 #### Scenario: SCN-DLG-07 (−) No independent delegate escalates
 - **GIVEN** `roles.delegate: [delegate-opus]` and a technical question raised by a step of profile `claude-opus`
@@ -325,7 +332,7 @@ With `delegate.enabled`, doctor `DLG-001` (error) SHALL check that `roles.delega
 `claude-code` or `codex` adapter profiles, that `delegate.kinds` and the limits are valid, and that every profile of
 `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, naming each that has
 none, and that one profile passes it for the judges and the implementers together (else every verdict question
-escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+escalates). `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`), and under `independence: model` SHALL warn that a profile whose `model` is an alias (no digit, such as `opus`) may be served as another model (D3: the model a step reports is the asker's). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
 `ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
 `independence: model`. Both MUST pass silently while the delegate is off.
 

@@ -162,6 +162,22 @@ def _without_hello(cfg: L4Config) -> L4Config:
     return cfg.model_copy(update={"availability": cfg.availability.model_copy(update={"default_ladder": ladder})})
 
 
+def _alias_notes(cfg: L4Config) -> list[str]:
+    """Profiles of the delegate, the implementers and the judges whose `model` has no digit (`opus`, `sonnet`): an alias
+    the CLI resolves to a full id the configuration never names, so `independence: model` cannot be shown from the
+    configuration alone (the model a step reports is what counts, D3)."""
+    if cfg.delegate.independence != "model":
+        return []
+    names = dict.fromkeys([*cfg.roles.delegate, *cfg.roles.implementer, *cfg.roles.judges])
+    return [
+        f"profile {name} (model {profile.model})"
+        for name in names
+        if (profile := cfg.profiles.get(name)) is not None
+        and profile.model
+        and not any(ch.isdigit() for ch in profile.model)
+    ]
+
+
 def _dlg_002(ctx: DoctorContext) -> CheckResult:
     cfg = ctx.cfg
     if not cfg.delegate.enabled:
@@ -179,6 +195,13 @@ def _dlg_002(ctx: DoctorContext) -> CheckResult:
                 "log in or install the CLI as the runner user (docs/runner/README.md); until then the delegate "
                 "escalates its questions to a person",
             )
+    if aliases := _alias_notes(cfg):
+        return CheckResult(
+            "fail",
+            f"delegate profile {picked.profile_name} is usable, but {', '.join(aliases)} is a model alias: the served "
+            "model can be another than the configured one, and delegate.independence: model compares full ids",
+            "set the model to a full model id (for example claude-opus-5-5), or delegate.independence: profile",
+        )
     return CheckResult("pass", f"delegate profile {picked.profile_name} is usable (binary, auth and quota)")
 
 

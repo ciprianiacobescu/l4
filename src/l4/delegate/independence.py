@@ -4,7 +4,7 @@
 `Factory.for_role("delegate", ..., constraints=[...])` applies to each profile of `roles.delegate`, and
 `independence_escalation` says when a chain with no profile left is an escalation for that reason."""
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -18,6 +18,7 @@ from l4.verifier.selection import same_model
 # The adapters whose read-only tool mode L4 defines (D2): an `opencode` profile has none, and a `kiro-cli` read mode is
 # unverified. `fake` is the scripted adapter of the tests.
 DELEGATE_SERVES = ("claude-code", "codex", "fake")
+IMPLEMENTER_PHASES = ("red", "green", "single")  # the `phase` of an implementer step's `agent.finished`
 INTAKE_SOURCES = ("intake_lint", "intake_open_questions")  # raised with no agent step behind them
 NO_INDEPENDENT_DELEGATE = "no independent delegate"
 _VETOES_BY_INDEPENDENCE = {"constraint", "serves"}
@@ -37,7 +38,7 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _implementers(events: Iterable[LedgerEvent], configured: Iterable[str] = ()) -> list[Asker]:
+def _implementers(events: Sequence[LedgerEvent], configured: Iterable[str] = ()) -> list[Asker]:
     """Every implementer profile that ran a step of the unit (its ledger); the configured `roles.implementer` chain when
     the ledger names none."""
     seen: list[str] = []
@@ -48,7 +49,16 @@ def _implementers(events: Iterable[LedgerEvent], configured: Iterable[str] = ())
                 seen.append(profile)
     if not seen:
         seen = list(dict.fromkeys(configured))
-    return [Asker(profile, None, "asked") for profile in seen]
+    found = [Asker(profile, None, "asked") for profile in seen]
+    # D3: an asker's model is the model the step reported, else the profile's: a profile on an alias (`opus`) is served
+    # as a full id the configuration never names, so every model an implementer step reported is an asker's too
+    reported: list[str] = []
+    for e in events:
+        if e.type == "agent.finished" and e.data.get("phase") in IMPLEMENTER_PHASES:
+            model = _text(e.data.get("model"))
+            if model and model not in reported:
+                reported.append(model)
+    return [*found, *(Asker(None, model, "asked") for model in reported)]
 
 
 def _judges(events: Iterable[LedgerEvent]) -> list[Asker]:

@@ -98,7 +98,10 @@ The owner chose this default (owner decision 1).
 **Owner decision F9 (2026-10-19): a verdict question is never answered by the model that wrote the code.** For a
 `verdict` question the askers are the round's judges AND the unit's implementer profiles with their models: every
 implementer profile that ran a step of the unit (`availability.selected{role: implementer}` in its ledger), else the
-configured `roles.implementer` chain when the ledger names none. `independence: model` therefore vetoes those models
+configured `roles.implementer` chain when the ledger names none, plus every model those steps reported
+(`agent.finished{model}` of a `red`, `green` or `single` step): an asker's model is the one the step reported, else the
+profile's, so an implementer profile on an alias (`opus`) served as `claude-opus-5-5` vetoes `delegate-opus`. Doctor
+`DLG-002` warns about a model that looks like an alias. `independence: model` therefore vetoes those models
 too, and `independence: profile` those profile names, so the model that wrote the code can never overturn the judge's
 dispute of it. In the reference configuration (implementer `codex-sol`, `gpt-6.1-sol`; judge `judge-opus`; chain
 `[delegate-opus, delegate-sol]`) a verdict question has no independent delegate and escalates (`no independent

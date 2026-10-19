@@ -352,11 +352,12 @@ delegate:
   enabled: true
   scope: yolo            # yolo: the current unit of an active or waiting plan and its fix unit; all: also units in no plan file while no plan is active
 roles:
-  delegate: [delegate-opus, delegate-sol]   # profiles of claude-code and codex only
+  delegate: [delegate-opus, delegate-sol, delegate-sonnet]   # profiles of claude-code and codex only
 ```
 
-The profiles `delegate-opus` (`claude-opus-5-5`) and `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`) are in the
-reference configuration (SPEC 3.2). `l4 doctor` checks the chain (`DLG-001`, `DLG-002`).
+The profiles `delegate-opus` (`claude-opus-5-5`), `delegate-sol` (`gpt-6.1-sol`, `reasoning_effort: high`) and
+`delegate-sonnet` (`claude-sonnet-5`, a model that is neither the judges' nor the implementers') are in the reference
+configuration (SPEC 3.2). `l4 doctor` checks the chain (`DLG-001`, `DLG-002`).
 
 **What it does.** At the end of the run that parks a unit in `awaiting_human`, after the clarifier, or in a later run
 through the action `delegate`, it takes the open questions of the unit in the kinds of `delegate.kinds` (default all

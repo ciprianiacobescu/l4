@@ -63,9 +63,9 @@ def test_the_reference_configuration_has_the_delegate_section_and_profiles() -> 
     assert cfg["profiles"]["delegate-opus"]["model"] == "claude-opus-5-5"
     assert cfg["profiles"]["delegate-sol"]["model"] == "gpt-6.1-sol"
     assert cfg["profiles"]["delegate-sol"]["options"]["reasoning_effort"] == "high"
-    assert cfg["roles"]["delegate"] == ["delegate-opus", "delegate-sol"]
+    assert cfg["roles"]["delegate"] == ["delegate-opus", "delegate-sol", "delegate-sonnet"]
     cfg["harness"]["commit"] = "0" * 40  # the placeholder of the reference file
-    assert L4Config.model_validate(cfg).roles.delegate == ["delegate-opus", "delegate-sol"]
+    assert L4Config.model_validate(cfg).roles.delegate == ["delegate-opus", "delegate-sol", "delegate-sonnet"]
     assert "L4-DLG-001" in block and "L4-DLG-009" in block and "L4-DLG-014" in block
 
 

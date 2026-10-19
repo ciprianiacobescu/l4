@@ -15,8 +15,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   the current unit of an active or waiting plan, or its fix unit; `scope: all` adds units in no plan file while no plan is
   active. It runs after the clarifier at the end of the run that parks the unit, and in a later run through the planner
   action `delegate`; it asks once per question, oldest first, in the kinds of `delegate.kinds`. The reference
-  configuration has the profiles `delegate-opus` (`claude-opus-5-5`) and `delegate-sol` (`gpt-6.1-sol`,
-  `reasoning_effort: high`), and `roles.delegate` is optional (L4-AVL-010).
+  configuration has the profiles `delegate-opus` (`claude-opus-5-5`), `delegate-sol` (`gpt-6.1-sol`,
+  `reasoning_effort: high`) and `delegate-sonnet` (`claude-sonnet-5`; a verdict question needs a model that is neither
+  the judges' nor the implementers'), and `roles.delegate` is optional (L4-AVL-010).
 - The delegate reads the repository read-only (the adapters' read-only mode: Claude Code `--permission-mode plan` with
   `Read,Grep,Glob`, Codex `-s read-only --ephemeral`; no tool server, no forge or CI token; a detached worktree of the
   pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@1` holds the
@@ -32,7 +33,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - `delegate.independence` (`model` by default: the delegate is not a model or profile that asked or judged the question;
   `profile` vetoes the name only; for a verdict question the implementer profiles and their models are askers too, so
   the model that wrote the code never overturns the judge's dispute of it, and the reference configuration needs a
-  third model in `roles.delegate` or its verdict questions escalate), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
+  third model in `roles.delegate` or its verdict questions escalate; the models the implementer's steps reported count
+  as askers' too, so an alias such as `opus` cannot hide the served model, and `DLG-002` warns about an alias), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
   escalates; `true` lets the delegate accept the clarifier's suggestion for it), and the bounds `max_attempts_per_question`
   (2), `max_answers_per_task` (3), `max_questions_per_run` (5), `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit`
   (15.0), `plan_cost_share` (0.25) and `timeout` (15m). The ledger events `delegate.asked` and `delegate.result`; the

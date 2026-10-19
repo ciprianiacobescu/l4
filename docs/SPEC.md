@@ -759,6 +759,11 @@ profiles:                          # named bindings: adapter|backend + model + o
     auth: subscription
     options: {reasoning_effort: high}
     vendor: openai
+  delegate-sonnet:                 # a third model: a verdict question is neither the judges' nor the implementers' (L4-DLG-002)
+    adapter: claude-code
+    model: claude-sonnet-5
+    auth: subscription
+    vendor: anthropic
   opencode-or:
     adapter: opencode
     model: openrouter/anthropic/claude-sonnet-5.5
@@ -829,7 +834,7 @@ roles:                             # ordered fallback chains; required vs option
   judges: [judge-opus, judge-sol, judge-gemini]                       # required: LLM panel
   s1_judge: [laya]                                                    # optional; `l4 init` writes [laya] unless `--s1 jev|none` (L4-ADO-016)
   spec_writer: [template]          # `template` is a reserved built-in profile (deterministic); an LLM profile may follow it
-  delegate: [delegate-opus, delegate-sol]   # optional (L4-AVL-010): only claude-code and codex adapter profiles serve it; read from the base branch, used only with delegate.enabled (L4-DLG-001, L4-DLG-002)
+  delegate: [delegate-opus, delegate-sol, delegate-sonnet]   # optional (L4-AVL-010): only claude-code and codex adapter profiles serve it; read from the base branch, used only with delegate.enabled (L4-DLG-001, L4-DLG-002)
 
 availability:
   cache_ttl: 15m
@@ -3374,7 +3379,7 @@ factory chain of `claude-code` and `codex` adapter profiles. `question.raised` S
 `model`; `judges` for a verdict question). With `delegate.independence: model` (default) the selection MUST veto an
 asker's profile name or model, with `profile` only the name. For a verdict question the askers are the round's judges
 AND the unit's implementer profiles (every implementer profile that ran a step of the unit, from its ledger; the
-configured `roles.implementer` chain when the ledger names none), so the model that wrote the code never overturns the
+configured `roles.implementer` chain when the ledger names none, and every model those steps reported in `agent.finished`), so the model that wrote the code never overturns the
 judge's dispute of it. A step's raise with no asker MUST count every implementer (and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe); the
 model that served the call (`model_resolved`) MUST be checked against the askers too, and a reply served by an asker's
 model MUST be discarded and escalated. No profile left MUST escalate (`no independent delegate`).
@@ -3439,7 +3444,7 @@ first escalation, and the plan's delegate cost against its share. `--json` SHALL
 `delegate.kinds` and the limits are valid, and that every profile of `roles.implementer` and `roles.judges` has a
 delegate profile that passes the independence rule, naming each that has none, and that one profile passes it for the
 judges and the implementers together (else every verdict question escalates). `DLG-002` (warn) SHALL check that a
-delegate profile is usable now (`hello` with `--live`). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+delegate profile is usable now (`hello` with `--live`), and under `independence: model` SHALL warn that a profile whose `model` is an alias (no digit, such as `opus`) may be served as another model (D3: the model a step reports is the asker's). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
 `ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
 `independence: model`. Both MUST pass silently while the delegate is off.
 
@@ -5425,7 +5430,7 @@ that tools are never installed in CI and agent CLIs are expected pre-installed]
 | TOOL-001 | error in a CI run, warn in `l4 doctor --adoption` | the first word of each configured gate command (`gates.setup`, `build`, `lint`, `typecheck`, `test`, `e2e`, `extra`) is on the gate PATH; builtins, paths and what `uv run` starts are skipped; the message names the tool and the gate and points at `ci.toolchains` (L4-CI-005) | — |
 | SKL-003 | warn | an installed `l4` skill (user scope; project scope inside a repository) is older than the running `l4` (L4-SKL-003) | `l4 skills install` |
 | DLG-001 | error, only with `delegate.enabled` (scope `config`) | the delegate is configured and independent (L4-DLG-012): `roles.delegate` is not empty and names existing `claude-code` or `codex` adapter profiles, `delegate.kinds` and the limits are valid, and every profile of `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule (each that has none is named, for example `no delegate profile is independent of judge profile judge-opus (claude-opus-5-5): its verdict questions would escalate`); passes silently while the delegate is off | — |
-| DLG-002 | warn, only with `delegate.enabled` | a delegate profile is usable now: binary, login and quota probes, and `hello` with `--live` (L4-DLG-012); passes silently while the delegate is off | — |
+| DLG-002 | warn, only with `delegate.enabled` | a delegate profile is usable now: binary, login and quota probes, and `hello` with `--live` (L4-DLG-012); under `independence: model` it also warns when the model of a delegate, implementer or judge profile is an alias (no digit, such as `opus`) because the served model can differ; passes silently while the delegate is off | — |
 | LIVE-001 | error | `hello` probe for the first profile of every required role chain | — |
 | LIVE-002 | warn | `hello` probe for fallback profiles and for the delegate chain (`roles.delegate`, with `delegate.enabled`); quota for all | — |
 | LIVE-003 | warn | MCP servers start (Serena, Playwright) per adapter | — |
@@ -12470,6 +12475,11 @@ scenario is a spec defect (§26).
 - **Given** the reference configuration (implementer `codex-sol` `gpt-6.1-sol`, judge `judge-opus`, `roles.delegate: [delegate-opus, delegate-sol]`) and a verdict question raised by `judge-opus`
 - **When** the delegate pass selects a profile with `independence: model`
 - **Then** no profile is called and `delegate.result{status: escalated, reason: "no independent delegate"}` is recorded: `delegate-sol` is the model that wrote the code and is not asked to overturn the judge's dispute of it
+
+#### SCN-DLG-06b (−) The model an implementer step reported counts · L4-DLG-002
+- **Given** an implementer profile `claude-impl` with `model: opus` whose steps reported `claude-opus-5-5`, a judge `judge-sol` and `roles.delegate: [delegate-opus]` (`claude-opus-5-5`)
+- **When** the delegate pass selects a profile for a verdict question with `independence: model`
+- **Then** `delegate-opus` is skipped with `independence: model claude-opus-5-5 asked the question` and the question escalates with `no independent delegate`
 
 #### SCN-DLG-07 (−) No independent delegate escalates · L4-DLG-002
 - **Given** `roles.delegate: [delegate-opus]` and a technical question raised by a step of profile `claude-opus` (`claude-opus-5-5`)
