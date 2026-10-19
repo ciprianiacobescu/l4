@@ -567,3 +567,24 @@ def test_a_later_run_of_the_current_unit_and_a_preview_carry_the_same_items(worl
     assert again.allow == frozenset({A}) and again.accepted == first.accepted != {}
     preview = world.step({"a": world.snapshot("a", "implementing")}, read_only=True)
     assert preview.allow == frozenset({A}) and preview.accepted == first.accepted
+
+
+FORCE_ITEM = {
+    "findings": [],
+    "reason": "the judge is down; build as written",
+    "by": "alice",
+    "actor": "person",
+    "force": True,
+}
+
+
+def test_a_dispatch_carries_a_force_item_with_force_true(world):
+    """L4-YOLO-062: a force item travels with no findings and `force: true`; an ordinary item has no `force` key."""
+    active(world)
+    _reactivate_with(world, {A: FORCE_ITEM, "batch:b1": _accepted("batch:b1", "order unclear")})
+    step = world.step()
+    items = {i["subject"]: i for i in step.accepted[A]}
+    assert items[A] == {
+        "subject": A, "reason": FORCE_ITEM["reason"], "by": "alice", "actor": "person", "findings": [], "force": True,
+    }  # fmt: skip
+    assert "force" not in items["batch:b1"] and items["batch:b1"]["findings"]

@@ -114,7 +114,7 @@ Every task follows these rules:
   `force_accepted`, also in the empty document). Code: `run_status`/`_describe`/`_render`/`_next_line` and
   `run_findings` in `src/l4/yolo/commands.py`. Run: both files and `tests/unit/yolo/test_yolo_status_activity.py`.
 
-- [ ] 3.3 Carrier, implementer, report, PR body. Tests first:
+- [x] 3.3 Carrier, implementer, report, PR body. Tests first:
   `tests/unit/yolo/test_yolo_cycle_active.py`: `test_a_dispatch_carries_a_force_item_with_force_true` (an activation with
   a force item for A: `step.accepted[A]` has the item with `"force": True` and `findings == []`; an ordinary item has no
   `force` key); `tests/unit/test_accepted_reader.py`: `test_a_force_item_keeps_force_and_an_ordinary_item_has_no_key`;

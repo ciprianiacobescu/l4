@@ -753,6 +753,7 @@ class _Step:
                             }
                             for f in data.get("findings") or ()
                         ],
+                        **({"force": True} if data.get("force") is True else {}),  # only a force item has the key
                     }
                     for subject in (unit.id, f"batch:{batch.id}")
                     if (data := ctx.state.activated_accepted.get(subject)) is not None

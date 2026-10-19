@@ -147,3 +147,27 @@ def test_the_evidence_link_names_the_head_sha_so_it_survives_the_branch(tmp_path
     assert "blob/l4/openspec/x" not in body and "- Branch: `l4/openspec/x`" in body  # the branch is still named
     github = render_pr_body(*args, platform="github", head=sha)
     assert f"(https://h.test/g/p/blob/{sha}/openspec/changes/x/verification.md)" in github
+
+
+def test_the_body_names_a_force_acceptance():
+    args = ("openspec:x", "l4/openspec/x", "openspec/changes/x/verification.md", None)
+    body = render_pr_body(*args, force=("alex@example.com", "the judge is down;\nbuild as written"))
+    lines = body.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith("- Verification:"))
+    assert lines[at + 1] == (
+        "- Force-accepted without review by alex@example.com (the judge is down; build as written): no model "
+        "reviewed this unit's specification before it was built."
+    )
+    assert render_pr_body(*args, force=None) == render_pr_body(*args)
+
+
+def test_a_body_without_the_force_line_is_still_the_harness_body():
+    from l4.archive import harness_body
+
+    args = ("openspec:x", "l4/openspec/x", "openspec/changes/x/verification.md", "https://h.test/g/p")
+    old_body = render_pr_body(*args, head="a" * 40)
+    with_line = render_pr_body(*args, head="b" * 40, force=("alex", "R"))
+    without_line = render_pr_body(*args, head="b" * 40)
+    assert not harness_body(old_body, with_line)
+    assert harness_body(old_body, with_line, without_line)
+    assert not harness_body(old_body + "\nedited by a person", with_line, without_line)

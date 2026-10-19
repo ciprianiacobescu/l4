@@ -321,3 +321,24 @@ def test_scn_yolo_75_the_wait_names_its_ways_out():
     line = _next_line("p1", state, None, None)
     for needle in (f"l4 retry --unit {A}", f"l4 feedback add --unit {A}", "l4 yolo waive p1", "the wait names"):
         assert needle in line
+
+
+FORCE = {"findings": [], "reason": "the judge is down", "by": "alice", "actor": "person", "force": True}
+
+
+def test_the_report_names_a_force_accepted_unit(world):
+    in_review(world, accepted={A: FORCE, "batch:b1": FORCE})
+    text = report_of(world, {})
+    section = text.split(f"### {A}")[1].split("### ")[0]
+    assert f"- {A}: force-accepted without review by alice (the judge is down)" in section
+    assert "- batch:b1: force-accepted without review by alice (the judge is down)" in section
+    assert "Accepted review findings" not in section
+    other = text.split("### openspec:b")[1]
+    assert "openspec:b: force-accepted" not in other and "- batch:b1: force-accepted" in other  # the batch's, shared
+
+
+def test_a_force_accepted_unit_has_no_accepted_finding_open(world):
+    head, snaps = in_review(world, accepted={A: FORCE, "batch:b1": FORCE})
+    world.step(snaps)
+    assert world.landed(head) and "unit.merged" in world.kinds()
+    assert waits(world) == []

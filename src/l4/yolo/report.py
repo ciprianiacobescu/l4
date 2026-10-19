@@ -11,6 +11,7 @@ The text depends only on its arguments, so the same ledger gives the same report
 from collections.abc import Mapping, Sequence
 
 from l4.state.fold import UnitState
+from l4.yolo.accept import force_line
 from l4.yolo.findings import finding_id
 from l4.yolo.model import Plan, PlanEvent, PlanState
 
@@ -50,6 +51,9 @@ def _accepted_lines(plan: Plan, state: PlanState, unit_id: str, batch_id: str, f
     lines: list[str] = []
     for subject in (unit_id, f"batch:{batch_id}"):
         data = state.activated_accepted.get(subject)
+        if data and data.get("force"):  # L4-YOLO-062: no findings, the person's reason
+            lines.append(f"- {force_line(subject, str(data.get('by', '?')), str(data.get('reason', '')))}")
+            continue
         if not data or not data.get("findings"):
             continue
         lines.append(
