@@ -102,6 +102,11 @@ def test_a_named_run_is_never_recorded_idle(world, run, monkeypatch):
         ([led("run.started"), led("delegate.asked", question="Q-001")], False),
         ([led("run.started"), led("budget.cost", usd=1.75, role="clarifier")], False),  # review F8: a paid call is work
         ([led("run.started"), led("budget.cost", usd=0.4, role="s1")], False),
+        # review 3, minor 3: an unpriced clarifier call (a Codex profile with no price table) writes no budget.cost
+        ([led("run.started"), led("clarifier.result", id="Q-001", status="needs_human", profile="c")], False),
+        ([led("run.started"), led("clarifier.result", id="Q-001", status="ok", profile="c")], False),
+        ([led("run.started"), led("clarifier.result", id="Q-001", status="invalid", profile="c")], False),
+        ([led("run.started"), led("clarifier.result", id="Q-001", status="unavailable", profile="c")], True),
         ([led("agent.finished", run_id="r-earlier-0000")], True),  # another run's events are not this run's
     ],
 )

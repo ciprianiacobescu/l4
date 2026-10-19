@@ -242,12 +242,15 @@ def is_idle_run(events: Sequence[LedgerEvent], run_id: str) -> bool:
     `phase.changed` other than into `awaiting_human` or `clarifying` (L4-YOLO-014, D12). A delegate call
     (`delegate.asked`) is an agent call that costs money, and so is a clarifier or System One call, which writes only
     `budget.cost`: any `budget.cost` is work too, because the design's reason for the rule is that an idle run spends
-    no model cost."""
+    no model cost; for the same reason a `clarifier.result` that is not `unavailable` is work (an unpriced call, a
+    Codex profile with no price table, writes no `budget.cost`)."""
     for event in events:
         if event.run_id != run_id:
             continue
         if event.type in _WORK_EVENTS:
             return False
+        if event.type == "clarifier.result" and event.data.get("status") != "unavailable":
+            return False  # a clarifier call that was made is work, also when it is unpriced (no `budget.cost`)
         if event.type == "phase.changed" and event.data.get("to") not in _WAIT_TARGETS:
             return False
     return True

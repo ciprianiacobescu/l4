@@ -33,7 +33,7 @@ Usage (cost, runs, attempts) SHALL be charged into the plan ledger per attempt o
 unit ledger, so the usage of the current attempt is charged as `plan.charged{unit, attempt, cost_usd, runs}`, the fold
 keeps the maximum per (unit, attempt) and sums them, and the cost of the earlier attempts is kept. The attempt number
 of a unit is 1 + the number of its attempt refs on `origin`. The cost of the review is charged as the key `plan:review`.
-A run is *idle* for the unit the step let run when that unit's ledger of the run holds no `agent.finished` (of any role), no `budget.cost` (a clarifier or System One call writes only that), no `gate.finished`, and no `phase.changed` other than into `awaiting_human` or `clarifying`. After an idle run
+A run is *idle* for the unit the step let run when that unit's ledger of the run holds no `agent.finished` (of any role), no `budget.cost` (a clarifier or System One call writes only that), no `clarifier.result` other than `unavailable` (an unpriced call writes no `budget.cost`), no `gate.finished`, and no `phase.changed` other than into `awaiting_human` or `clarifying`. After an idle run
 the harness SHALL record `plan.run_idle{unit, attempt, run}` on the plan ledger with the lease, once per run, and the
 fold SHALL subtract the idle runs of each (unit, attempt) from its charged runs, so that an idle run does not count
 against `max_runs`. A step that dispatches nothing (no unit is eligible, or the current unit waits) MUST charge no run.
