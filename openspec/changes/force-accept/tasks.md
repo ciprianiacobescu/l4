@@ -91,7 +91,7 @@ Every task follows these rules:
 
 ## 3. Activation and visibility (L4-YOLO-061, L4-YOLO-062)
 
-- [ ] 3.1 Activation. Tests first, `tests/unit/yolo/test_yolo_commands_activate.py`:
+- [x] 3.1 Activation. Tests first, `tests/unit/yolo/test_yolo_commands_activate.py`:
   `test_a_force_accepted_plan_never_reviewed_activates` (SCN-YOLO-163: event `review == "force_accepted"`,
   `accepted` items of A, B and `batch:b1` exactly `{"findings": [], "reason": R, "by": "alex@example.com", "actor":
   "person", "force": True}`; the printed force lines); `test_a_later_blocked_review_does_not_undo_it` (SCN-YOLO-164:

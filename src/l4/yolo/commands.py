@@ -340,6 +340,15 @@ class ReviewView:
     problems: tuple[str, ...] = ()
     prompt_changed: bool = False  # stale because the review prompt changed since the review was made
     accepted: tuple[dict[str, Any], ...] = ()  # the acceptances of items that are not READY: subject, by, actor, ...
+    # the subjects a force acceptance overrode (its recorded `skipped` is not empty): subject, by, actor, reason,
+    # holds, skipped (design D5); `covered`: a force acceptance holds for every subject of the plan
+    force: tuple[dict[str, Any], ...] = ()
+    covered: bool = False
+
+    @property
+    def forced(self) -> list[dict[str, Any]]:
+        """The force items that hold: their subjects are cleared whatever a current review says of them."""
+        return [f for f in self.force if f["holds"]]
 
     @property
     def cleared(self) -> list[dict[str, Any]]:
@@ -348,7 +357,7 @@ class ReviewView:
 
     @property
     def ready(self) -> bool:
-        return self.kind == "current" and not self.problems
+        return self.covered or (self.kind == "current" and not self.problems)
 
 
 def _rejected_at(events: Sequence[PlanEvent], state: PlanState) -> str | None:
@@ -387,23 +396,37 @@ def _review_view(
     prompt_matters: bool = True,
 ) -> ReviewView:
     """`prompt_matters` False: show the review as it was made (a plan that needs no new review)."""
-    if state.review_plan_digest is None:
-        return ReviewView("none")
     wanted = [u for u in plan.unit_ids()] + [f"batch:{b.id}" for b in plan.batches if len(b.units) > 1]
+    force_data = state.force_accepted
+    holding = accepting.force_holds(force_data, plan_digest(text), now)
+    force = tuple(
+        {
+            "subject": name, "by": force_data.get("by"), "actor": force_data.get("actor"),
+            "reason": force_data.get("reason"), "holds": holding.get(name, False),
+            "skipped": list(force_data["subjects"][name].get("skipped") or []),
+        }
+        for name in wanted
+        if force_data is not None and name in (force_data.get("subjects") or {})
+        and (force_data["subjects"][name].get("skipped") or [])
+    )  # fmt: skip
+    covered = force_data is not None and all(holding.get(name, False) for name in wanted)
+    cleared_by_force = {f["subject"] for f in force if f["holds"]}
+    if state.review_plan_digest is None:
+        return ReviewView("none", force=force, covered=covered)
     if prompt_matters and state.review_prompt_version != PROMPT_VERSION:
-        return ReviewView("stale", prompt_changed=True)
+        return ReviewView("stale", prompt_changed=True, force=force, covered=covered)
     stale = state.review_plan_digest != plan_digest(text)
     stale = stale or any(state.review_digests.get(u) != now.get(u) for u in plan.unit_ids())
     stale = stale or any(w not in state.review for w in wanted)
     if stale:
-        return ReviewView("stale")
+        return ReviewView("stale", force=force, covered=covered)
     latest: dict[str, Any] = next((e.data for e in reversed(events) if e.type == "plan.reviewed"), {})
     problems = []
     accepted: list[dict[str, Any]] = []
     held = accepting.holds(state, latest)
     for name in wanted:
         verdict = state.review[name]
-        if verdict == "READY":
+        if name in cleared_by_force or verdict == "READY":  # a subject a force acceptance overrode is cleared (D5)
             continue
         given = state.accepted.get(name)
         if given is not None:
@@ -423,7 +446,7 @@ def _review_view(
         if given is not None:
             line += f" (the acceptance by {given.get('by')} was for other material)"
         problems.append(line)
-    return ReviewView("current", tuple(problems), accepted=tuple(accepted))
+    return ReviewView("current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered)
 
 
 # --- limits -------------------------------------------------------------------------------------------------------
@@ -1057,22 +1080,40 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
         )
     now = _digests(ctx, parsed, units)
     view = _review_view(parsed, file.text, state, read.events, now)
-    if view.kind == "none":
-        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: {plan_id} has not been reviewed: run l4 yolo review {plan_id}")
-    if view.kind == "stale":
-        why = "was made with an older review prompt" if view.prompt_changed else "is for other inputs"
-        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: review {why}: run l4 yolo review {plan_id}")
-    if view.problems:
-        raise L4Exit(
-            ExitCode.USAGE_ERROR,
-            "\n".join(
-                [
-                    f"activate: the review is not READY for {len(view.problems)} item(s):",
-                    *(f"  {p}" for p in view.problems),
-                    f"Next: l4 yolo findings {plan_id}",
-                ]
-            ),
-        )
+    voided = ""
+    if (
+        state.force_accepted is not None and not view.covered
+    ):  # D5: name the subjects the acceptance no longer holds for
+        held = accepting.force_holds(state.force_accepted, plan_digest(file.text), now)
+        names = [s for s in [*parsed.unit_ids(), *(f"batch:{b.id}" for b in parsed.batches if len(b.units) > 1)]
+                 if s in held and not held[s]]  # fmt: skip
+        if names:
+            voided = (
+                f"\nthe force acceptance by {state.force_accepted.get('by')} no longer holds for {', '.join(names)}: "
+                "their spec or the plan file changed\n"
+                f"Fix: l4 yolo review {plan_id}, or a person runs "
+                f'l4 yolo accept {plan_id} --all --force --reason "..." again'
+            )
+    if not view.covered:
+        if view.kind == "none":
+            raise L4Exit(
+                ExitCode.USAGE_ERROR, f"activate: {plan_id} has not been reviewed: run l4 yolo review {plan_id}{voided}"
+            )
+        if view.kind == "stale":
+            why = "was made with an older review prompt" if view.prompt_changed else "is for other inputs"
+            raise L4Exit(ExitCode.USAGE_ERROR, f"activate: review {why}: run l4 yolo review {plan_id}{voided}")
+        if view.problems:
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                "\n".join(
+                    [
+                        f"activate: the review is not READY for {len(view.problems)} item(s):",
+                        *(f"  {p}" for p in view.problems),
+                        f"Next: l4 yolo findings {plan_id}",
+                    ]
+                )
+                + voided,
+            )
     if not _branch_on_origin(ctx, parsed.target):
         raise L4Exit(ExitCode.USAGE_ERROR, f"activate: the target {parsed.target} is not on origin")
     other = active_on(_others(ctx, plan_id), plan_files_at(ctx.git, ctx.target_ref), parsed.target)
@@ -1093,15 +1134,26 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
         a["subject"]: {"findings": a["findings"], "reason": a["reason"], "by": a["by"], "actor": a["actor"]}
         for a in cleared
     }
+    for f in view.forced:  # a subject a holding force acceptance overrode: no findings, the person's reason (D5)
+        accepted[f["subject"]] = {
+            "findings": [],
+            "reason": f["reason"],
+            "by": f["by"],
+            "actor": "person",
+            "force": True,
+        }
+    extra = {"review": "force_accepted"} if view.forced else {}
     event = _event(
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
         merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base, current=current,
-        accepted=accepted,
+        accepted=accepted, **extra,
     )  # fmt: skip
     _append(store, [event], read.head)
     for a in cleared:
         mark = " (accepted by an agent)" if a["actor"] == "agent" else ""
         ctx.say(f"accepted: {a['subject']} by {a['by']} ({a['actor']}): {a['reason']}{mark}")
+    for f in view.forced:
+        ctx.say(accepting.force_line(f["subject"], f["by"], f["reason"]))
     ctx.say(f"{plan_id}: activated on {parsed.target} ({len(parsed.unit_ids())} unit(s), merge: {parsed.merge})")
     if not no_run:
         ctx.say(start_run_line(ctx.app, ctx.cfg))

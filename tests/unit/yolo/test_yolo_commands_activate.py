@@ -11,6 +11,7 @@ from l4.yolo.model import PlanMoved, ReviewResult, Verdict
 from l4.yolo.readiness import PROMPT_VERSION
 from l4.yolo.store import PlanStore
 
+from .yolo_actor import person  # noqa: F401
 from .yolo_cmd_world import PURPOSE_B, A, B, auto_world, ev, forge, plan_doc, world  # noqa: F401
 
 
@@ -454,3 +455,80 @@ def test_review_local_passes_a_sandbox_chooser_and_records_the_label(world, forg
         reviewed.data["source"] == "local" and reviewed.data["sandbox"] == "none" and reviewed.data["judge"] == "main"
     )
     assert reviewed.data["units"][A]["material"] == f"k-{A}"
+
+
+# --- activate: a force acceptance (L4-YOLO-061; SCN-YOLO-163 to -165) --------------------------------------
+
+FORCE_REASON = "the judge is down; build as written"
+A_SPEC = "openspec/changes/add-greeting/specs/greeting/spec.md"
+A_SPEC_EDITED = (
+    "## Purpose\n\nThe greeting capability of the simulator fixture: a greeting names the person it greets.\n\n"
+    "## ADDED Requirements\n\n### Requirement: Greet by name\nThe `greet(name)` function SHALL return "
+    "`Hello, <name>!` for a non-blank name.\n\n#### Scenario: Named greeting\n"
+    '- **WHEN** `greet("Ada")` is called\n- **THEN** it returns `"Hello, Ada!"`\n'
+)
+
+
+def force_accept(world, reason=FORCE_REASON):
+    assert world.l4("accept", "p1", "--all", "--force", "--reason", reason) == 0
+
+
+def test_a_force_accepted_plan_never_reviewed_activates(world, forge, person, capsys):
+    """SCN-YOLO-163."""
+    world.push_plan()
+    force_accept(world)
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    out = capsys.readouterr().out
+    for subject in (A, B, "batch:b1"):
+        assert f"{subject}: force-accepted without review by alex@example.com ({FORCE_REASON})" in out
+    assert out.index("force-accepted without review") < out.index("activated on")
+    activated = world.events()[-1]
+    assert activated.type == "plan.activated" and activated.data["review"] == "force_accepted"
+    item = {"findings": [], "reason": FORCE_REASON, "by": "alex@example.com", "actor": "person", "force": True}
+    assert activated.data["accepted"] == {A: item, B: item, "batch:b1": item}
+
+
+def test_a_later_blocked_review_does_not_undo_it(world, forge, person):
+    """SCN-YOLO-164."""
+    world.push_plan()
+    force_accept(world)
+    blocked = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: ok"}
+    world.seed("p1", world.reviewed({A: "BLOCKED"}, findings={A: [blocked]}))
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    activated = world.events()[-1]
+    assert activated.data["accepted"][A]["force"] is True and activated.data["review"] == "force_accepted"
+
+
+def test_a_voided_force_acceptance_is_named_in_the_refusal(world, forge, person, capsys):
+    """SCN-YOLO-165."""
+    world.push_plan()
+    force_accept(world)
+    world.push({A_SPEC: A_SPEC_EDITED}, "A's spec changes")
+    before = world.kinds()
+    err = refused(world, capsys)
+    assert "has not been reviewed: run l4 yolo review p1" in err
+    assert (
+        "the force acceptance by alex@example.com no longer holds for openspec:add-greeting, batch:b1: "
+        "their spec or the plan file changed" in err
+    )
+    assert 'Fix: l4 yolo review p1, or a person runs l4 yolo accept p1 --all --force --reason "..." again' in err
+    assert world.kinds() == before
+
+
+def test_a_ready_subject_of_a_force_acceptance_is_not_cleared_later(world, forge, person, capsys):
+    from .yolo_review_events import TESTABILITY
+
+    reviewed_world(world)  # every subject is READY at the current inputs: the force acceptance overrides nothing
+    force_accept(world)
+    world.push({A_SPEC: A_SPEC_EDITED}, "A's spec changes")
+    world.seed("p1", world.reviewed({B: "NEEDS_REVISION"}, findings={B: [TESTABILITY]}))
+    err = refused(world, capsys)
+    assert f"{B}: NEEDS_REVISION: testability:" in err
+    assert "the force acceptance by alex@example.com no longer holds for openspec:add-greeting, batch:b1" in err
+
+
+def test_activation_without_force_has_no_review_key(world, forge):
+    reviewed_world(world)
+    assert world.l4("activate", "p1", "--reason", "go", "--no-run") == 0
+    assert "review" not in world.events()[-1].data
