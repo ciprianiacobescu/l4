@@ -1,0 +1,38 @@
+# happy-kiro with its judge replayed through KiroCliAdapter (kiro-judge SCN-KJD-27).
+# The same path on a Kiro spec: the dependency graph runs the farewell leaf (wave 0) before the greeting leaf (wave 1),
+# the optional leaf 1.2 is never started, and both parents are ticked once their required leaves are done.
+name: happy-kiro-judge
+fixture: kiro-basic
+profiles:
+  implementer:
+    steps:
+      - when: {phase: red, task: "2.1"}
+        write:
+          tests/test_farewell.py: "@fixture:farewell_red_tests.py"
+          src/greeter.py: "@fixture:farewell_red_stub.py"
+      - when: {phase: green, task: "2.1"}
+        write:
+          src/greeter.py: "@fixture:farewell_impl.py"
+      - when: {phase: red, task: "1.1"}
+        write:
+          tests/test_greet.py: "@fixture:greet_red_tests.py"
+          src/greeter.py: "@fixture:greet_red_stub.py"
+      - when: {phase: green, task: "1.1"}
+        write:
+          src/greeter.py: "@fixture:greet_impl.py"
+judges:
+  judge:  # a kiro-cli profile with no model (--model auto) replaying a recorded stream through the real adapter
+    replay: {adapter: kiro-cli, stream: "@fixture:judge_pass.stream.jsonl"}
+expect:
+  exit_code: 0
+  final_phase: in_review
+  events_include:
+    - {type: task.started, task: "2.1"}
+    - {type: task.done, task: "2.1"}
+    - {type: task.started, task: "1.1"}
+    - {type: task.done, task: "1.1"}
+    - {type: availability.model_unverified, profile: judge}
+    - {type: verify.judge, profile: judge, status: ok, credits: 0.0512}
+    - {type: budget.cost, role: judge, credits: 0.0512, credits_source: kiro.stream}
+    - {type: verify.verdict, verdict: PASS}
+    - {type: phase.changed, to: in_review}

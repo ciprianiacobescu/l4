@@ -216,7 +216,7 @@ Every task follows these rules:
 
 ## 9. Replay in the simulation
 
-- [ ] 9.1 A judge replayed through the real adapter (L4-KJD-010, design D10). Depends on 0.1 and 7.1. CHANGED: the
+- [x] 9.1 A judge replayed through the real adapter (L4-KJD-010, design D10). Depends on 0.1 and 7.1. CHANGED: the
   replayed judge has no model, so it runs `--model auto` and is routed on the built-in set.
   - Tests first: `tests/unit/sim/test_happy_kiro_judge.py` (SCN-KJD-27, the argv with `--model auto`); in
     `tests/unit/sim/test_scenarios.py` (or the file that tests `load_scenario`): `replay` and `verdict` together are a

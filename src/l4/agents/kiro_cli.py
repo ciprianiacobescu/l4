@@ -116,7 +116,11 @@ class KiroCliAdapter:
     model_unverified: ClassVar[bool] = True
     experimental: ClassVar[bool] = True
 
-    def __init__(self, runner: ProcRunner | None = None, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self, runner: ProcRunner | None = None, clock: Callable[[], datetime] | None = None, exe: str | None = None
+    ) -> None:
+        """`exe` is a binary path that skips the PATH lookup: only the simulation's replay passes it."""
+        self._exe = exe
         self._proc = runner or ProcRunner()
         self._clock = clock or (lambda: datetime.now(UTC))
 
@@ -146,7 +150,7 @@ class KiroCliAdapter:
         return [*argv, "--output-format", "stream-json", "--require-mcp-startup", req.prompt]
 
     def run(self, req: RunRequest) -> RunResult:
-        exe = resolve_tool("kiro-cli", req.env, forbid=(req.cwd,))
+        exe = self._exe or resolve_tool("kiro-cli", req.env, forbid=(req.cwd,))
         if exe is None:
             raise AdapterError("kiro-cli was not found on the agent PATH")
         judge = req.permission_policy.mode == "judge"
