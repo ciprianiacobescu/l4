@@ -124,6 +124,7 @@ class ArchiveResult:
     detail: str = ""
     archived_as: str | None = None
     base: str | None = None  # `done`: the base head whose tree the done-gate passed on
+    head: str | None = None  # `opened` by a push: the archive head the harness pushed (`archive.opened{head}`)
 
 
 class ArchiveBlocked(Exception):
@@ -308,7 +309,8 @@ class PostMergeArchiver:
                 redact=self._app.redactor.redact_text,
                 platform=push_platform(self._cfg, self._app.environ, self._git.repo),
             ) from None  # fmt: skip
-        return ArchiveResult("opened", self._open_mr(names), archived_as=report.archived_as)
+        pushed = git.rev_parse("HEAD")
+        return ArchiveResult("opened", self._open_mr(names), archived_as=report.archived_as, head=pushed)
 
     @staticmethod
     def _capabilities(unit_dir: Path) -> list[str]:
@@ -344,11 +346,13 @@ class PostMergeArchiver:
 
 
 def merge_archive_guarded(
-    app: AppContext, cfg: L4Config, git: Git, head: str, target: str, *, pr: PullRequest
+    app: AppContext, cfg: L4Config, git: Git, head: str, target: str, *, pr: PullRequest, recorded_head: str | None
 ) -> "MergeOutcome":
     """Fast-forward `target` to the archive branch `head` under the guard of a unit merge plus the archive's own
     (design D9, R6, L4-YOLO-009): `target` is `forge.base_branch`; `pr`, the archive pull request, is open and aimed
-    at `target`; every commit after the target tip is a strict harness commit (author and committer the bot, an
+    at `target`; `head` is the archive head that `archive.opened` recorded (`recorded_head`, the harness's own push:
+    identity text on a commit proves nothing, rv18-ops MAJOR-2), never a branch tip read now; every commit after the
+    target tip is a strict harness commit (author and committer the bot, an
     `L4-Run` trailer: the review re-entry rule), so a person's edit on the archive branch is never merged unattended;
     the target tip is an ancestor of `head`; the push is never forced. Anything that fails a check is `not_ready` and
     pushes nothing; a refusal of the push is `stale` (the target moved) or `refused` (the forge's redacted message).
@@ -361,6 +365,13 @@ def merge_archive_guarded(
 
     if target != cfg.forge.base_branch:
         return not_ready(f"the target {target} is not the base branch {cfg.forge.base_branch}")
+    if not recorded_head:
+        return not_ready("no archive head is recorded (archive.opened{head}): a person reviews and merges the archive")
+    if head != recorded_head:
+        return not_ready(
+            f"the archive branch head {head[:10]} is not the head the harness pushed and recorded "
+            f"({recorded_head[:10]}): someone pushed to it; a person reviews and merges the archive"
+        )
     if pr.state != "open":
         return not_ready(f"the archive pull request !{pr.number} is {pr.state}, not open")
     if pr.base_branch != target:

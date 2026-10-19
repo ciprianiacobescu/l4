@@ -147,11 +147,13 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   model-written finding text become parentheses before they reach a task (L4-IMP-006).
 - The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
   `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
-- A delivery plan with `merge: auto` no longer merges a commit that nobody verified. The merge lands the hand-off
+- A delivery plan with `merge: auto` no longer merges a unit commit that nobody verified. The merge lands the hand-off
   commit H that the hand-off recorded (`pr.ready{head}`), pinned to its sha, and never the branch tip. Any commit after
   H sends the unit back to verification, whatever author, committer or `L4-Run` trailer it claims: before, a commit that
   copied the bot's identity and trailer after the review was squash-merged unseen, and a forged second hand-off commit
-  became H (L4-ARC-008, L4-YOLO-040).
+  became H (L4-ARC-008, L4-YOLO-040). The archive merge has the same rule: it lands only the archive head that
+  `archive.opened{head}` recorded (the harness's own push); a branch head that is not the recorded one, or an archive
+  with no recorded head, is not merged and `archive.failed` names the reason (a person merges the archive PR).
 - A plan no longer merges a unit whose repository CI is red. A red CI that the sweep recorded on H is dispatched for
   verification before any merge, and the merge itself waits while the CI on H is running, is red and not yet recorded,
   or cannot be read, with a `merge_not_ready` detail that says why (L4-YOLO-041, L4-YOLO-042).

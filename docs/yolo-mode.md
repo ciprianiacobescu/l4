@@ -176,7 +176,8 @@ checks again. If this happens twice for the same attempt, or if the push or the 
 (for example a protected branch), the plan stops with `merge_refused`. With `squash`, a PR head that moved makes the
 unit wait (`merge_not_ready`) until the next run reads it again. After the merge, L4 runs the acceptance profile of the unit on the merged revision. A
 fail or an error stops the plan with `postcheck_failed`. The archive PR of an OpenSpec unit is merged by L4 in the same
-way. After `merge_refused`, `l4 yolo resume` resets the count of stale merges, and the next step tries the merge once more.
+way, but only at the head that `archive.opened` recorded when L4 pushed it: a head that a person (or anyone) pushed later is not
+merged (`archive.failed`), and a person merges that PR. After `merge_refused`, `l4 yolo resume` resets the count of stale merges, and the next step tries the merge once more.
 
 **Merged branches.** With `yolo.merge.delete_branches: true` (the default), L4 deletes a merged unit's branch and, after
 the archive PR merges, its archive branch. It first keeps the verified head at `refs/l4/merged/<framework>/<name>`

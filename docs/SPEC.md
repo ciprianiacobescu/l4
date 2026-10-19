@@ -10926,7 +10926,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-19 (+) The archive PR of a plan unit is merged by the harness · L4-YOLO-009
 - **Given** an OpenSpec plan unit merged by the plan step, and its archive PR opened by the sweep
 - **When** the sweep runs again
-- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived
+- **Then** the archive branch is pushed to the target as a fast-forward and the unit is archived, but only at the head that `archive.opened{head}` recorded; a branch head that is not the recorded one is not merged (`archive.failed`)
 
 #### SCN-YOLO-20 (+) B starts only after A is integrated · L4-YOLO-010
 - **Given** an active plan with `b` depending on `a`, and `a` merged but its post-merge check not yet run
