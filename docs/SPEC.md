@@ -2532,25 +2532,26 @@ forces `core.autocrlf=false` for its own capture and apply, but a checkout that 
 not apply, which is a refused replay (a new question), never a pass. It then does what it does after an agent returns (the
 environment setup runs again, protected paths are put back with `guard.violation`, the run ledger is restored, the secret scan
 fails the step as an agent's would) and hands the saved result to the code that follows the step, so the scope guards, tamper
-checks, gates and checks are the ones an agent step's changes get. The replayed step SHALL commit exactly the saved patch: right before its first gate the harness snapshots the content of
-every non-ignored path (outside its own outputs: `.l4/`, the ledger, `tasks.md`, `questions.md`), and after every gate run,
-including the discrimination runs of a tests chore, it puts every such path back to that snapshot (a new path removed, a
-changed one restored, a deleted one deleted again) and records `held.replay_restored{paths}`. A path that cannot be put back
-fails the step as an attempt. The guard never follows a link: it reaches the folder of each path from the work tree one component at a time with
-`O_NOFOLLOW` and acts only through that folder's file descriptor (read, unlink, rmdir, mkdir, symlink, and file creation
-with `O_EXCL|O_NOFOLLOW`; an entry is removed by its own type, so a FIFO is unlinked and never opened), checking again
-right before acting on each path, and restores modes as well as content. A link is trusted only where the saved patch
-creates it, decided from a temporary index (`GIT_INDEX_FILE`, `read-tree` of the step base, `apply --cached` of the patch,
-`ls-files -s -z`: the entries of mode 120000 that differ from the base), never from text a file name can forge; a patch whose
-paths hold a line break is refused (a retry-only question). A link is trusted as the pair (path, target): the guard takes the target from the patch's blob in that index, treats a
-link at a patch path with another target (setup code re-pointed it) as planted, and always restores a patch link to the
-patch's target. A trusted link is snapshotted and restored as a link. The work
-tree folder is opened once when the guard is armed and every walk starts from that descriptor; before every restore and every
-git call it is checked to be still the same folder (else `held.replay_unsafe`). Whether an entry exists is decided by `lstat`,
-and a file is read only where the snapshot expects a regular file of the same size (and then at most one byte past it); at a
-path the patch deletes, at a link path or at an absent path nothing is read. The snapshot itself reads no file over 64 MiB:
-the step fails with `a file too large to guard: <path> (<size> bytes)`.
-A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
+checks, gates and checks are the ones an agent step's changes get. The replayed step SHALL commit exactly the step base plus the saved patch. The expected state is not read from the work tree
+(setup may run code of the patch, such as a build hook, before the first gate): it is taken from a temporary index
+(`GIT_INDEX_FILE`, `read-tree` of the step base, `apply --cached` of the verified patch bytes, `ls-files -s -z`), as the mode,
+blob id and size of every path the patch changes and an absence for every path it deletes, never from text a file name can
+forge. After every gate run, including the discrimination runs of a tests chore, the harness puts every non-ignored path (outside
+its own outputs: the run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`) back to that state: a path of the patch to
+the patch's blob (streamed in with `git cat-file blob`, never held in memory) with its executable bit or link target, and every
+other path that differs from the step base (a tracked file that setup or a gate changed, a new file) to the base, and records
+`held.replay_restored{paths}`. A tracked file that setup modifies is therefore put back to the base (or to the base plus the patch)
+and the step still passes; ignored files (a setup's environment, caches) are left alone. A file is compared by size first and then
+by the git blob hash computed in chunks, and only where the expected blob has the file's size, so no file is read whole; at any
+other path nothing is read. A path that cannot be put back fails the step as an attempt. The guard never follows a link: it
+reaches the folder of each path from the work tree one component at a time with `O_NOFOLLOW` and acts only through that folder's
+file descriptor (unlink, rmdir, mkdir, symlink, and file creation with `O_EXCL|O_NOFOLLOW`; an entry is removed by its own type,
+so a FIFO is unlinked and never opened), checking again right before acting on each path. A patch whose paths hold a line break is
+refused (a retry-only question). A link is trusted as the pair (path, target): the target comes from the patch's blob in that
+index, a link at a patch path with another target (setup code re-pointed it) or any other link in the tree when the guard is armed
+is planted, and a patch link is always restored to the patch's target. The work tree folder is opened once when the guard is armed
+and every walk starts from that descriptor; before every restore and every git call it is checked to be still the same folder
+(else `held.replay_unsafe`). A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
 mount (`sandbox.caches`) at or above `<cache>/worktrees` is refused, so a writable mount never covers a work tree. Any other link in the snapshot (planted by the
 setup), or a folder a gate replaced by a link above a path of the step, is never followed: the link itself is removed,
 `held.replay_unsafe` is recorded and the step fails with its own message. Only the harness's own outputs are exempt (the

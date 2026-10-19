@@ -106,3 +106,10 @@ temporary index; at arm time a link at a patch path whose target differs from th
 link is always restored to the patch's target. A read happens only when the snapshot expects a regular file of the same size
 (then at most one byte past it); the snapshot itself refuses a file over 64 MiB. The folder-mode repair uses `fchmodat` without
 following where the platform has it and looks at the folder again afterwards (still a folder, same inode).
+
+**D13. The expected state is base plus patch, never the tree.** The guard used to snapshot the tree after setup, so content that
+setup (or a build hook of the patch) had changed in a tracked file was restored after every gate and committed. Now the
+expected entry of each patch path (mode, blob id, size; a link's target; or absent) comes from the temporary index, and every
+other path that differs from the base is put back to the base; ignored files are left alone. A file is compared by size and a
+chunked blob hash, and written from `git cat-file blob` through the confined descriptor, so a 100 MiB fixture replays with
+bounded memory and the old 64 MiB read cap is gone. The work is bounded by the patch limit.
