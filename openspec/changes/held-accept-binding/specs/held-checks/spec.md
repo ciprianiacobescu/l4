@@ -17,8 +17,8 @@ the verified patch, run the guards, gates and checks of an agent step on it (the
 used up (a failed gate, a refuted criterion), it covers nothing, and a later step that meets the same inconclusive check is
 held again with a new question; a task reopened after the question drops it. A missing patch, a digest that differs or a patch that does not apply SHALL give no
 override and a new harness question with `saved: false` that offers only `retry`. Every question records `saved`; only a
-question without it keeps the old rule by test id. A step is always saved whole; the question stays within 200 KB. A replay
-that leaves a path outside its patch SHALL fail as an attempt.
+question without it keeps the old rule by test id. A step is always saved whole; the question stays within 48 KB. A replay
+SHALL commit exactly the saved patch: paths written while its gates ran are put back after each gate run.
 
 #### Scenario: SCN-IMP-320 (+) An accept replays the held step without an agent
 - **GIVEN** a red step held with a harness question, and a second agent step that would write the test under another

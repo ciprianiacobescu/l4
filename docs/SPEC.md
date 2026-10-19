@@ -2519,8 +2519,9 @@ keeps the old rule by test id. The question's Context SHALL list every path the 
 the source of each named test (at most 10) and the diff of the changed paths (at most 100), each redacted by the run's redactor
 before it is cut to 40 lines of at most 400 characters; a cut SHALL say that the cut lines are replayed too and name the patch
 path, and the accept line SHALL say that `accept` replays exactly the saved change of N files (the whole patch being in that
-path). The whole Context is at most 200 KB: over that, the question lists the paths (capped) and the patch path instead of the
-diffs, so `questions.md` stays within its 2 MB limit. When the run reaches the step of that task and the newest harness
+path). The whole Context is at most 48 KB, and less as `questions.md` fills (never below 4 KB, and the writer keeps the file under
+three quarters of its 2 MB limit): over the bound, the question lists the paths (capped) and the patch path instead of the
+diffs, so `questions.md` stays loadable however many large questions it holds. When the run reaches the step of that task and the newest harness
 question of the task and check is answered `accept` by the rules of L4-IMP-063 (a person's answer, or an agent's where
 `clarifier.answer_by_agents` allows it, with its digest in the ledger), has `saved: true`, has not been replayed
 (`held.replayed{question}`) and no `unit.restarted` or `tasks.reopened` of the task follows it, the harness SHALL start no agent:
@@ -2531,9 +2532,12 @@ forces `core.autocrlf=false` for its own capture and apply, but a checkout that 
 not apply, which is a refused replay (a new question), never a pass. It then does what it does after an agent returns (the
 environment setup runs again, protected paths are put back with `guard.violation`, the run ledger is restored, the secret scan
 fails the step as an agent's would) and hands the saved result to the code that follows the step, so the scope guards, tamper
-checks, gates and checks are the ones an agent step's changes get. Before the step can be committed, the paths it changed SHALL
-all be paths of the saved patch (outside the harness's own outputs: `.l4/`, the ledger, `tasks.md`, `questions.md`); any other
-path, written by a test or the setup while the gates ran, fails the step as an attempt with its own message. It records
+checks, gates and checks are the ones an agent step's changes get. The replayed step SHALL commit exactly the saved patch: right before its first gate the harness snapshots the content of
+every non-ignored path (outside its own outputs: `.l4/`, the ledger, `tasks.md`, `questions.md`), and after every gate run,
+including the discrimination runs of a tests chore, it puts every such path back to that snapshot (a new path removed, a
+changed one restored, a deleted one deleted again) and records `held.replay_restored{paths}`. A path that cannot be put back
+fails the step as an attempt. The sidecar holds nothing that grows with the step (`files_changed` and `tests_added` are
+recomputed from the patch at replay), so a large step replays. It records
 `held.replayed{question, task, check, patch_sha256, tests, sources}` after applying; the override covers the tests of the patch
 during that step. The accept of a saved step takes effect ONLY through that replay (no content or digest rule widens it): once
 the replay is used up (it failed a gate, or the check refuted a criterion; a failed replay counts as an attempt, so
@@ -7264,10 +7268,12 @@ scenario is a spec defect (§26).
 - **Then** the whole patch is saved, `questions.md` stays far below 2 MB and loads, the Context lists the paths and the
   patch path, and the replay applies every file
 
-#### SCN-IMP-331 (−) A replay writes nothing outside its patch · L4-IMP-065
-- **Given** an accepted step whose test writes a file only while the saved patch exists
+#### SCN-IMP-331 (+) A replay commits exactly its patch · L4-IMP-065
+- **Given** an accepted step whose test writes a file, or rewrites its own file, only while the saved patch exists, and a tests
+  chore whose discrimination run writes a file
 - **When** it is replayed
-- **Then** the step fails as an attempt with a message naming the extra path, and nothing is committed
+- **Then** the written paths are put back after every gate run (`held.replay_restored`), the step passes and its commit
+  holds exactly the saved patch
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

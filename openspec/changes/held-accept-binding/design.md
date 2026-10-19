@@ -78,9 +78,9 @@ and the rule to keep them unchanged.
 **D9. An explicit `saved` marker, always save, bounded questions, exact replay.** The old id-only rule was decided by a
 missing digest, so a question whose step was not saved (a refusal, a very large step) fell back to it and an unseen body
 could be accepted. Now every question of 0.4.17 records `saved: true|false`; only a question without the field keeps the old
-rule. A step is saved whole whatever its size; a question caps each line (400 characters) and its Context (200 KB), then lists
+rule. A step is saved whole whatever its size; a question caps each line (400 characters) and its Context (48 KB, less as `questions.md` fills), then lists
 the paths and the patch path, so `questions.md` cannot pass its 2 MB limit. A refused replay raises a `saved: false` question
-that offers only `retry`; an `accept` to it is ignored and the run says so. After a replay, the paths the step changed must be
-the patch's paths (outside the harness's outputs): a path written by a test or the setup while the gates ran fails the step as
-an attempt. A global `core.autocrlf=true` is not defended against: a CRLF checkout can make the patch not apply, which is a
+that offers only `retry`; an `accept` to it is ignored and the run says so. A replay commits exactly the saved patch: a `ReplayGuard`, modelled on `ProductionGuard`, snapshots the tree before the first
+gate and puts every non-ignored path back to the snapshot after each gate run (`held.replay_restored`); it fails the step only
+when a path cannot be put back. The sidecar holds nothing that grows with the step. A global `core.autocrlf=true` is not defended against: a CRLF checkout can make the patch not apply, which is a
 refusal, never a pass.

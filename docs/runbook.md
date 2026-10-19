@@ -807,8 +807,9 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
     criterion, the accept is used up, and a later step of the task that meets the same inconclusive check is held again with a
     new question that shows the new step; the agent is told that the earlier accept covers nothing now. A reopened task drops
     every earlier accept. If the saved patch cannot be replayed (missing, changed, no longer applies), the new question has
-    `saved: false` and offers only `retry`: an `accept` to it gives no override. If a test or the setup writes a path that the
-    saved patch does not contain while the replayed step's gates run, the replay fails like an agent's step. A very large
+    `saved: false` and offers only `retry`: an `accept` to it gives no override. A replay commits exactly its saved patch: what a test or the
+    setup writes while the replayed step's gates run (a new path, or a rewrite of a patched file) is put back after each gate run and
+    recorded as `held.replay_restored`. A very large
     step is saved whole; the question then lists the paths and the patch path instead of the diffs.
     A check that now shows a criterion not to discriminate still fails the attempt. The verifier and the judge see that
     the claim was accepted. A question that 0.4.16 raised has no saved patch: its accept works as before (one more agent

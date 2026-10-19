@@ -45,7 +45,8 @@ every guard and gate and starts no agent. The question lists every path the patc
 (a cut says that the cut lines are replayed too; the whole patch is on the unit branch): read it all, because `accept` replays
 exactly these changes, and only through that replay. If the replay fails a gate or the check refutes a criterion, the accept is
 used up: a later step that meets the same inconclusive check is held again with a new question. A reopened task drops every
-earlier accept. A missing, changed or non-applying patch gives a new question that offers only `retry` (an `accept` to it covers nothing), not a pass.
+earlier accept. A missing, changed or non-applying patch gives a new question that offers only `retry` (an `accept` to it covers nothing), not a pass. The replay commits exactly the saved patch: anything a test or the setup writes
+while its gates run is put back.
 `retry` deletes the patch and runs an agent step with your note.
 
 The hand edit is the fallback, for a question the command refuses. Edit the file on the unit branch, then commit and
