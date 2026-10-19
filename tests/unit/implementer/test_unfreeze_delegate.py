@@ -179,6 +179,7 @@ def test_an_agents_answer_unfreezes_like_a_persons(
     for by in ("human", "agent"):
         got = unfrozen(file.questions, answered(file, by), SCOPE, MANIFEST)
         assert got.paths == (TEST,), by
+        assert [g.by for g in got.grants] == [by], by  # review 2, N2: the grant says who answered
     assert unfrozen(file.questions, answered(file, "delegate"), SCOPE, MANIFEST, delegate_unfreeze=True).paths == ()
     assert unfrozen(file.questions, answered(file, "clarifier"), SCOPE, MANIFEST).paths == ()
 

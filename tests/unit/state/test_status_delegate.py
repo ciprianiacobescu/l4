@@ -53,6 +53,17 @@ def test_the_delegate_lines(unit_repo, trailers, capsys):
     assert out.index("Delegate: Q-004") < out.index("Next:")  # the step stays last
 
 
+def test_a_delegates_unfreeze_is_a_status_line(unit_repo, trailers, capsys):  # SCN-DLG-55, review 2 N2
+    unfrozen = ("task.unfrozen", {
+        "task": "1.1", "paths": ["tests/test_a.py"], "reason": "delegate_answer", "by": "delegate",
+        "question": "Q-003", "model": "claude-opus-5-5", "profile": "delegate-opus", "red_sha": "a" * 40,
+    })  # fmt: skip
+    push(unit_repo, trailers, *DECIDED, unfrozen)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    assert "Delegate: task 1.1 unfrozen tests/test_a.py by Q-003 (delegate_override, claude-opus-5-5)" in out
+    assert out.index("Delegate: task 1.1") < out.index("Next:")
+
+
 def test_a_deferred_question_shows_the_time(unit_repo, trailers, capsys):
     deferred = ("delegate.result", {
         "question": "Q-004", "id": "Q-004", "status": "deferred", "reason": "all_profiles_cooling",

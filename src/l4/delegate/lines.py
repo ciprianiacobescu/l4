@@ -61,7 +61,14 @@ def line(event: LedgerEvent) -> str:
 
 def status_lines(events: Sequence[LedgerEvent]) -> list[str]:
     """The `Delegate:` lines of `l4 status --unit`, one per question the delegate decided or defers."""
-    return [f"Delegate: {line(e)}" for e in decided(events)]
+    out = [f"Delegate: {line(e)}" for e in decided(events)]
+    for e in events:  # SCN-DLG-55, D15: a delegate's unfreeze is shown as the delegate's, never as a person's
+        if e.type == "task.unfrozen" and e.data.get("reason") == "delegate_answer":
+            who = e.data.get("model") or e.data.get("profile") or "the delegate"
+            paths = ", ".join(str(p) for p in e.data.get("paths") or [])
+            task, question = e.data.get("task"), e.data.get("question")
+            out.append(f"Delegate: task {task} unfrozen {paths} by {question} (delegate_override, {who})")
+    return out
 
 
 def status_json(events: Sequence[LedgerEvent]) -> list[dict[str, Any]]:

@@ -1519,13 +1519,17 @@ def run_green(
     manifest = red.manifest
     if unfreeze.paths:  # these frozen files are named by a human answer or by the task's own text: the task's to change
         manifest = replace(manifest, files={p: f for p, f in manifest.files.items() if p not in unfreeze.paths})
-    people = Unfreeze(tuple(g for g in human.grants if g.reason == "human_answer"), human.kept)
-    if people.paths:
-        wb.emit(
-            "task.unfrozen", task=task.key, paths=list(people.paths), reason="human_answer", question=people.question,
-            answer_sha256=people.answer_sha256, red_sha=red.manifest.red_sha,
-            kept=[{"path": p, "why": why} for p, why in people.kept],
-        )  # fmt: skip
+    for actor in ("human", "agent"):  # an agent's unfreeze is never recorded as a person's (L4-QMD-009, review 2 N2)
+        people = Unfreeze(
+            tuple(g for g in human.grants if g.reason == "human_answer" and g.by == actor),
+            human.kept if actor == "human" else (),
+        )
+        if people.paths:
+            wb.emit(
+                "task.unfrozen", task=task.key, paths=list(people.paths), reason="human_answer", by=actor,
+                question=people.question, answer_sha256=people.answer_sha256, red_sha=red.manifest.red_sha,
+                kept=[{"path": p, "why": why} for p, why in people.kept],
+            )  # fmt: skip
     for grant in (g for g in human.grants if g.reason == "delegate_answer"):  # L4-DLG-014: its own label
         wb.emit(
             "task.unfrozen", task=task.key, paths=list(grant.paths), reason="delegate_answer", question=grant.question,

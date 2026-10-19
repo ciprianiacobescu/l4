@@ -169,6 +169,13 @@ def recorded_digests(events: Sequence[LedgerEvent], actors: Collection[str] = ("
     return found
 
 
+def by_whom(events: Sequence[LedgerEvent], question: str, digest: str) -> str:
+    """`human` when a person recorded this answer, else `agent` (an agent acts for the person who allowed it,
+    L4-QMD-009, but a grant never passes for a person's: review 2, N2)."""
+    people = recorded_digests(events, ("human",))
+    return "human" if digest in people.get(question, set()) else "agent"
+
+
 def delegate_records(events: Sequence[LedgerEvent]) -> dict[tuple[str, str], tuple[str | None, str | None]]:
     """`(question id, answer_sha256)` -> `(profile, model)` of every `question.answered{by: delegate}`."""
     found: dict[tuple[str, str], tuple[str | None, str | None]] = {}
@@ -235,7 +242,11 @@ def unfrozen(
         for path in tests[MAX_PATHS_PER_QUESTION:]:
             kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named by {question.id}"))
         if tests and digest in digests.get(question.id, set()):
-            grants.append(Grant(question.id, digest, tuple(tests[:MAX_PATHS_PER_QUESTION])))
+            grants.append(
+                Grant(
+                    question.id, digest, tuple(tests[:MAX_PATHS_PER_QUESTION]), by=by_whom(events, question.id, digest)
+                )
+            )
         elif tests and who is not None:
             profile, model = who
             grants.append(
@@ -301,5 +312,9 @@ def config_opened(
         for path in opened[MAX_PATHS_PER_QUESTION:]:
             kept.append((path, f"more than {MAX_PATHS_PER_QUESTION} paths named by {question.id}"))
         if opened:
-            grants.append(Grant(question.id, digest, tuple(opened[:MAX_PATHS_PER_QUESTION])))
+            grants.append(
+                Grant(
+                    question.id, digest, tuple(opened[:MAX_PATHS_PER_QUESTION]), by=by_whom(events, question.id, digest)
+                )
+            )
     return Unfreeze(tuple(grants), tuple(kept))
