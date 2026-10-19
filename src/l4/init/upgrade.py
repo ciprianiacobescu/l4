@@ -8,9 +8,12 @@ configuration (`l4.init.pytest_marker`), once, or the snippet is printed. New co
 M1: forge-and-ci 1.14 and 1.20 (the `uvx` pin form).
 """
 
+import contextlib
 import difflib
 import logging
+import os
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -466,6 +469,16 @@ def stale_branches_note(repo: Path, environ: Mapping[str, str], commit: str) -> 
     )
 
 
+def _say(lines: list[str]) -> None:
+    """Print the report. A closed stdout (`l4 upgrade | head -1`) ends the report, not the command."""
+    try:
+        for line in lines:
+            click.echo(line)
+    except BrokenPipeError:
+        with contextlib.suppress(OSError, ValueError, AttributeError):  # stdout is flushed at exit: aim it at /dev/null
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+
+
 def run_upgrade(
     app: AppContext,
     *,
@@ -476,9 +489,10 @@ def run_upgrade(
     action_repo: str | None = None,
 ) -> ExitCode:
     plan = plan_upgrade(app.repo, app.environ, harness, harness_commit_pin, harness_ref, action_repo)
+    lines: list[str] = []
     verb = "would change" if dry_run else "changed"
     if plan.vendor is not None and plan.vendor_differs:
-        click.echo(
+        lines.append(
             f"{verb} {VENDOR_RELPATH}/ ({len(plan.vendor_added)} added, {len(plan.vendor_changed)} changed, "
             f"{len(plan.vendor_removed)} removed) to the harness at {plan.vendor.commit[:12]}"
         )
@@ -490,25 +504,26 @@ def run_upgrade(
             if planned.path == f"{ACTION_PATH}/action.yml"
             else ""
         )
-        click.echo(f"{verb} {planned.path}{pins}")
+        lines.append(f"{verb} {planned.path}{pins}")
     for planned in plan.seeded:
         verb_new = "would create" if dry_run else "created"
-        click.echo(f"{verb_new} {planned.path} (in Serena's own form, so that its start changes nothing)")
+        lines.append(f"{verb_new} {planned.path} (in Serena's own form, so that its start changes nothing)")
     for note in plan.notes:
-        click.echo(note.replace("re-rendered", "would re-render" if dry_run else "re-rendered", 1))
+        lines.append(note.replace("re-rendered", "would re-render" if dry_run else "re-rendered", 1))
     said = marker_message(plan.marker, dry_run=dry_run)
     if said is not None:
-        click.echo(said)
+        lines.append(said)
     if not plan.vendor_differs and not plan.files and not plan.seeded and said is None:
-        click.echo(
+        lines.append(
             f"up to date: the harness at {plan.commit[:12]} is already {'vendored' if plan.vendor else 'pinned'}"
         )
     if plan.missing:
-        click.echo(f"not in {CONFIG_RELPATH}, the defaults apply (nothing is written): {', '.join(plan.missing)}")
+        lines.append(f"not in {CONFIG_RELPATH}, the defaults apply (nothing is written): {', '.join(plan.missing)}")
     if plan.vendor_differs or plan.files:  # the pin moved (or would): the unit branches have their own copies
         stale = stale_branches_note(app.repo, app.environ, plan.commit)
         if stale is not None:
-            click.echo(stale)
+            lines.append(stale)
     if not dry_run:
-        apply_upgrade(app.repo, plan)
+        apply_upgrade(app.repo, plan)  # first: a reader that quits early (`| head`) must not stop the write
+    _say(lines)
     return ExitCode.OK
