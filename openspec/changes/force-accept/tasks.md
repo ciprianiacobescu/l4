@@ -63,7 +63,7 @@ Every task follows these rules:
   `("yolo", "accept")`, checked on `TOOLS`). Code: the actor check of D2 at the top of `_run_force_accept`, before
   `_sync`. Run: both files.
 
-- [ ] 2.3 What stays refused. Tests first (same new file): `test_a_unit_with_no_folder_is_refused_by_admission`
+- [x] 2.3 What stays refused. Tests first (same new file): `test_a_unit_with_no_folder_is_refused_by_admission`
   (SCN-YOLO-157: `plan_doc({A: [], "openspec:ghost": []})`, `unknown_unit` line, no prompt, nothing recorded);
   `test_a_missing_digest_is_refused_as_unit_missing` (monkeypatch `l4.yolo.commands._now_digest` to return `MISSING`
   for B; the D3 text); `test_a_cycle_is_refused` (SCN-YOLO-158: `plan_doc({A: [B], B: [A]})`); `test_an_active_plan_is_refused`
@@ -71,7 +71,7 @@ Every task follows these rules:
   from `run_activate` (which now calls it), then the status, admission and `unit_missing` checks of D3 in
   `_run_force_accept`. Run: the new file and `tests/unit/yolo/test_yolo_commands_activate.py`.
 
-- [ ] 2.4 Record. Tests first (same new file): `test_a_person_force_accepts_a_blocked_review_and_no_model_is_called`
+- [x] 2.4 Record. Tests first (same new file): `test_a_person_force_accepts_a_blocked_review_and_no_model_is_called`
   (SCN-YOLO-150: `world.reviewed({A: "BLOCKED"}, findings={A: [{"criterion": "schema", "severity": "blocking", "text":
   "schema_invalid: ok"}]})` seeded, the "No model" patches, `person` types `p1`; the D6 summary lines; the event's
   keys and values of D4 including `confirmed: "typed"`, `actor: "person"`, `marker: None`, `subjects[A].skipped ==
@@ -84,7 +84,7 @@ Every task follows these rules:
   summary, `_confirm` of task 4.1 may come later: use `click.prompt(..., err=True)` here and switch to `_confirm` in
   4.1). Run: the new file.
 
-- [ ] 2.5 Withdraw. Tests first (same new file): `test_a_withdrawal_by_an_agent_removes_it` (SCN-YOLO-161);
+- [x] 2.5 Withdraw. Tests first (same new file): `test_a_withdrawal_by_an_agent_removes_it` (SCN-YOLO-161);
   `test_nothing_to_withdraw`; `test_a_withdrawal_after_activation_is_refused`;
   `test_a_second_force_acceptance_replaces_the_first` (SCN-YOLO-162: after a push to A's spec, force-accept again;
   every subject holds). Code: the withdrawal branch of D7. Run: the new file.

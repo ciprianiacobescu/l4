@@ -998,6 +998,30 @@ def _others(ctx: _Ctx, own: str) -> dict[str, PlanState]:
     return states
 
 
+def _admitted(
+    ctx: _Ctx, rev: str, plan: Plan, plan_id: str, state: PlanState, command: str
+) -> tuple[_Units, Admission]:
+    """The units of the target head and the admission of `plan` on them (the one `activate` and `accept --force` share);
+    any finding exits 2 as `<command>: <plan> is not admitted:` with one `  <code>: <text>` line each."""
+    units = _read_units(ctx, rev, plan.known_ids(), intake=True)
+    admission = admit(
+        plan,
+        known_units=units.infos,
+        cfg=ctx.cfg,
+        held=_held(ctx, plan_id, state),
+        state=state,
+        archived=archived_at(ctx.git, rev, ctx.cfg),
+    )
+    if not admission.ok:
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            "\n".join(
+                [f"{command}: {plan_id} is not admitted:", *(f"  {t}" for t in _findings_text(admission, plan_id))]
+            ),
+        )
+    return units, admission
+
+
 def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = False) -> ExitCode:
     """Record `plan.activated` (design D6), then start a run on the target. Refused with exit 2 and the cause unless
     every condition of L4-YOLO-005 holds; nothing is recorded then."""
@@ -1021,7 +1045,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"activate: {plan_id} is stopped ({state.stop_reason}): run l4 yolo status {plan_id}, "
             f"then l4 yolo resume {plan_id} --reason TEXT",
         )
-    units = _read_units(ctx, rev, parsed.known_ids(), intake=True)
+    units, admission = _admitted(ctx, rev, parsed, plan_id, state, "activate")
     seen, rejected = _rejected_at(read.events, state), state.stop_unit
     stays = seen is not None and rejected in units.infos and units.phases.get(rejected) == "rejected"
     if stays and _now_digest(ctx, rejected, units.infos[rejected].folder) == seen:  # a restarted unit has no phase
@@ -1030,21 +1054,6 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             f"activate: {rejected} was rejected, is still rejected and its spec has not changed: fix the spec and "
             f"push it, then l4 yolo review {plan_id} and l4 yolo activate {plan_id} --reason TEXT; or, when the cause "
             f"is the configuration, restart the unit (l4 restart --unit {rejected} --reason TEXT)",
-        )
-    admission = admit(
-        parsed,
-        known_units=units.infos,
-        cfg=ctx.cfg,
-        held=_held(ctx, plan_id, state),
-        state=state,
-        archived=archived_at(ctx.git, rev, ctx.cfg),
-    )
-    if not admission.ok:
-        raise L4Exit(
-            ExitCode.USAGE_ERROR,
-            "\n".join(
-                [f"activate: {plan_id} is not admitted:", *(f"  {t}" for t in _findings_text(admission, plan_id))]
-            ),
         )
     now = _digests(ctx, parsed, units)
     view = _review_view(parsed, file.text, state, read.events, now)
@@ -1979,7 +1988,74 @@ def _run_force_accept(app: AppContext, *, plan_id: str, reason: str, withdraw: b
             "yolo.review.accept_by_agents says\n"
             f'Fix: a person runs, in a terminal: l4 yolo accept {plan_id} --all --force --reason "..."',
         )
-    raise L4Exit(ExitCode.USAGE_ERROR, "accept: --force is not available yet")
+    ctx = _open(app)
+    rev = _sync(ctx, who="accept")
+    file = _file(ctx, plan_id, "accept")
+    parsed = _valid(ctx, file, "accept")
+    store = ctx.store(plan_id)
+    read = store.read()
+    state = fold_plan(plan_id, read.events)
+    if withdraw:  # D7: never refused for who runs it; it only makes the activation stricter
+        if accepting.status_refusal(state) is not None:
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                f"accept: {plan_id} is {state.status}: the acceptances were frozen at its activation and the runs "
+                "read the frozen ones, so a withdrawal now would change nothing\n"
+                f"Fix: cancel the plan (l4 yolo cancel {plan_id}), or change the spec and review again "
+                f"(l4 yolo review {plan_id})",
+            )
+        if state.force_accepted is None:
+            raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {plan_id} has no force acceptance: nothing to withdraw")
+        event = _event("plan.force_acceptance_withdrawn", reason=reason, by=ctx.who(), actor=who[0], marker=who[1])
+        _append(store, [event], read.head)
+        ctx.say(f"{plan_id}: the force acceptance is withdrawn")
+        ctx.say(f"Next: l4 yolo review {plan_id}")
+        return ExitCode.OK
+    refusal = accepting.status_refusal(state)
+    if refusal is not None:
+        raise L4Exit(ExitCode.USAGE_ERROR, f"accept: {refusal.message}\nFix: {refusal.fix}")
+    units, admission = _admitted(ctx, rev, parsed, plan_id, state, "accept")
+    now = _digests(ctx, parsed, units)
+    for unit in parsed.unit_ids():
+        if now.get(unit, MISSING) == MISSING:
+            raise L4Exit(
+                ExitCode.USAGE_ERROR,
+                f"accept: {unit} has no folder with files on its branch or on origin/{ctx.target} (unit_missing): "
+                f"nothing can be built from it\nFix: push its folder, or remove it from .l4/plans/{plan_id}.json",
+            )
+    digest = plan_digest(file.text)
+    subjects = accepting.force_subjects(parsed, digest, now, read.events, _review_cfg(ctx, state)[0], PROMPT_VERSION)
+    ctx.say(
+        f"{plan_id}: force-accept {len(subjects)} subject(s) without a readiness review; "
+        "no model reviews these specifications before they are built:"
+    )
+    for name, row in subjects.items():
+        words = ", ".join(accepting.SKIPPED_WORDS[c] for c in row["skipped"])
+        ctx.say(f"  {name}: {words or 'READY at these inputs: nothing is overridden'}")
+    sys.stdout.flush()
+    answer = click.prompt(
+        f"Type the plan id ({plan_id}) to accept every subject of {plan_id} without a review", default="",
+        show_default=False, err=True,
+    )  # fmt: skip
+    if str(answer).strip() != plan_id:
+        raise L4Exit(ExitCode.USAGE_ERROR, "accept: the plan id was not typed: nothing was recorded")
+    order = list(admission.order)
+    events = []
+    if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
+        events.append(_event("plan.admitted", plan_digest=digest, order=order, merge=parsed.merge))
+    events.append(
+        _event(
+            "plan.force_accepted", plan_digest=digest, subjects=subjects, reason=reason, by=ctx.who(), actor="person",
+            marker=None, confirmed="typed",
+        )
+    )  # fmt: skip
+    _append(store, events, read.head)
+    ctx.say(
+        f"force-accepted: {len(subjects)} subject(s) of {plan_id} without review by {events[-1].data['by']} (person): "
+        f"{reason}"
+    )
+    ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
+    return ExitCode.OK
 
 
 _WAIVABLE = ("active", "waiting", "stopped")
