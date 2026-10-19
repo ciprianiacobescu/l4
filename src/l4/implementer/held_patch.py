@@ -585,7 +585,7 @@ class ReplayGuard:
 
     def _paths(self) -> dict[str, bool]:
         """The paths that differ from the step base: by the base's ignore rules (as `changed_paths` lists them) and by
-        the work tree's (a `.gitignore` of the patch can show a file that the base hides, and a commit would take it)."""
+        the work tree's (a patch's `.gitignore` can show a file the base hides, and a commit would take it)."""
         wb = self.wb
         found = {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
         shown = wb.git.run_bytes("ls-files", "--others", "--exclude-standard", "--exclude-from", str(wb.excludes), "-z")
