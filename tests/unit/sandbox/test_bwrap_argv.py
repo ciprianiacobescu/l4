@@ -34,7 +34,10 @@ def test_gate_argv_shape(make_spec):
     assert pairs(argv, "--bind") == [(str(spec.worktree),) * 2, (str(spec.tmp_dir),) * 2]
     # no login path of any adapter is visible to code the agent wrote
     home = spec.home
-    assert set(pairs(argv, "--tmpfs")) == {("/tmp",), (str(home / ".codex"),), (str(home / ".local/share/opencode"),)}
+    # (and the home itself is a tmpfs, L4-SEC-030, so the login masks sit on top of an empty directory)
+    assert set(pairs(argv, "--tmpfs")) == {
+        ("/tmp",), (str(home),), (str(home / ".codex"),), (str(home / ".local/share/opencode"),),
+    }  # fmt: skip
     assert ("/dev/null", str(home / ".claude.json")) in pairs(argv, "--ro-bind")
 
 
@@ -299,13 +302,16 @@ def test_only_existing_guidance_directories_are_masked_never_created(make_spec):
 
 def test_the_kiro_spec_root_stays_visible(make_spec):
     """`.kiro/specs/**` is the spec root (read by the step, L4-SEC-004): only the Kiro CLI's own guidance
-    (`steering`, `agents`, `settings`, `hooks`, `prompts`) is masked, never `.kiro` as a whole."""
+    (`steering`, `agents`, `settings`, `hooks`, `prompts`, `skills`) is masked, never `.kiro` as a whole."""
     spec = make_spec("agent", "codex")
-    guidance(spec, ".kiro/specs/x", ".kiro/steering", ".kiro/agents", ".kiro/settings", ".kiro/hooks", ".kiro/prompts")
+    guidance(
+        spec, ".kiro/specs/x", ".kiro/steering", ".kiro/agents", ".kiro/settings", ".kiro/hooks", ".kiro/prompts",
+        ".kiro/skills",
+    )  # fmt: skip
     masked = {p for (p,) in pairs(build(spec), "--tmpfs")}
     kiro = spec.worktree / ".kiro"
     assert str(kiro) not in masked and str(kiro / "specs") not in masked
-    assert {str(kiro / d) for d in ("steering", "agents", "settings", "hooks", "prompts")} <= masked
+    assert {str(kiro / d) for d in ("steering", "agents", "settings", "hooks", "prompts", "skills")} <= masked
 
 
 def test_a_guidance_directory_that_is_a_symlink_is_not_mounted_over(tmp_path, make_spec):

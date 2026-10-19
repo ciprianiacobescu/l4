@@ -11,7 +11,6 @@ is not an override (SCN-CLR-06): the new text is recorded as `question.answered`
 
 import hashlib
 import logging
-import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from typing import Any, Literal, Protocol
 
 from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable
+from l4.clarifier.actor import Actor, answer_actor
 from l4.clarifier.backend import BackendClarifier, ClarifierReply
 from l4.clarifier.context import ClarifierPrompt, ContextBuilder
 from l4.clarifier.inject import render_answer_blocks
@@ -37,9 +37,9 @@ from l4.config.schema import ClarifierCfg
 from l4.exitcodes import L4Exit
 from l4.forge.base import forge_platform
 from l4.forge.urls import blob_url, origin_url
-from l4.implementer.prompt import collect_sources
 from l4.implementer.tasks import answers_unblock, open_blocking_questions
 from l4.implementer.tdd import RoleLimit
+from l4.implementer.unit_context import read_sources
 from l4.implementer.workbench import Workbench, make_workbench
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, workbench_request_factory
 from l4.services import HookContext, Services
@@ -51,7 +51,6 @@ from l4.specs.questions import (
     QuestionsFile,
     QuestionStatus,
     answer_sha256,
-    answered_by,
     is_answered,
 )
 from l4.state.fold import fold
@@ -65,7 +64,7 @@ log = logging.getLogger("l4.clarifier")
 @dataclass(frozen=True)
 class Answered:
     id: str
-    by: Literal["human", "agent", "clarifier"]
+    by: Literal["human", "agent", "clarifier", "delegate"]
     answer_sha256: str | None  # None for a dismissed question
 
 
@@ -143,28 +142,14 @@ def _meta(reply: ClarifierReply, decision: RoutingDecision) -> str:
     return f"confidence: {reply.answer.confidence} · kind: {reply.answer.kind} (S1 p={p})"
 
 
-def _written_by_agent(unit_dir: Path) -> bool:
-    """Does the newest commit that touched `questions.md` carry `By: <name> (agent: ...)`? False when git cannot say."""
-    try:
-        done = Git(unit_dir).run("log", "-n", "1", "--format=%B", "--", QUESTIONS_FILENAME, check=False, timeout=30)
-    except (L4Exit, OSError):
-        return False
-    return done.returncode == 0 and re.search(r"(?m)^By: .*\(agent: ", done.stdout) is not None
-
-
 class Clarifier:
     def __init__(self, unit_dir: Path, ledger: LedgerWriter) -> None:
         self.unit_dir = unit_dir
         self.ledger = ledger
 
-    def _actor(self, question: Question) -> Literal["human", "agent", "clarifier"]:
-        """Who answered: the clarifier, a person, or (for a harness question, whose override the judge must be able to
-        weigh, L4-IMP-063) an agent: the commit that last changed `questions.md` names its actor in `By:` (the commit of
-        `l4 questions`, L4-QMD-009)."""
-        by = answered_by(question)
-        if by == "human" and question.kind is QuestionKind.HARNESS and _written_by_agent(self.unit_dir):
-            return "agent"
-        return by
+    def _actor(self, question: Question, events: Sequence[LedgerEvent]) -> Actor:
+        """Who answered, of every kind (L4-QMD-009): `answer_actor` reads the status, the ledger and the `By:` line."""
+        return answer_actor(Git(self.unit_dir), self.unit_dir, question, events)
 
     def reenter(self, tasks: Sequence[Task], *, refresh_index: bool = True) -> Reentry:
         """`refresh_index=False` for a unit whose branch head must not get a harness commit (a unit in review)."""
@@ -187,9 +172,11 @@ class Clarifier:
                     "question.override", id=question.id, previous_sha256=consumed[question.id], answer_sha256=digest
                 )  # fmt: skip
             else:  # new, or edited before any prompt carried it
-                by = self._actor(question)
-                answered.append(Answered(question.id, by, digest))
-                self.ledger.append("question.answered", id=question.id, by=by, answer_sha256=digest)
+                actor = self._actor(question, events)
+                answered.append(Answered(question.id, actor.by, digest))
+                self.ledger.append(
+                    "question.answered", id=question.id, by=actor.by, answer_sha256=digest, **actor.fields()
+                )
         drafts = tuple(i.question_id for i in file.issues if i.kind == "unsubmitted_answer")
         for qid in drafts:  # once per id and text: a run that finds the same draft again says nothing new
             question = file.get(qid)
@@ -439,11 +426,11 @@ def clarify_hook(ctx: HookContext) -> ClarifyOutcome:
         builder = ContextBuilder(
             s.worktree, s.git, budget_tokens=cfg.implementer.context_budget_tokens, redact=redact
         )  # fmt: skip
-        documents = collect_sources(s.ref.path)
+        documents = read_sources(s.ref.path, s.worktree)
         base_specs = builder.base_specs()
 
         def prompt_for(view: QuestionView) -> ClarifierPrompt:
-            texts = [view.title, view.context, *(text for _, text in documents)]
+            texts = [view.title, view.context, *(d.text for d in documents)]
             code = builder.code_context(texts)
             answered = render_answer_blocks(port.file.questions, redact).text  # includes this batch's earlier answers
             prompt = builder.build_prompt(

@@ -82,6 +82,32 @@ def test_human_code_commit_after_handoff_reverifies_and_hands_off_again(
     assert second.outcome["units"][0]["phase_before"] == "in_review"
 
 
+def test_a_bot_identity_commit_after_h_reverifies(in_review, run_l4, tdd_repo, raw, use_fake_gitlab):
+    """SCN-YOLO-100, run side: a commit that copies the bot's identity and an `L4-Run` trailer is still a commit after
+    the recorded H (L4-ARC-008), so the unit is verified again."""
+    from l4.vcs.git import BOT_IDENTITY
+
+    clone = tdd_repo.repo.parent / "forger"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    (clone / "src/pytdd").mkdir(parents=True, exist_ok=True)
+    (clone / "src/pytdd/forged.py").write_text("x = 1\n")
+    raw(clone, "add", "-A")
+    raw(
+        clone, "-c", f"user.name={BOT_IDENTITY.name}", "-c", f"user.email={BOT_IDENTITY.email}", "commit", "-q",
+        "-m", "chore: tidy\n\nL4-Run: r-20261014T1000Z-0002",
+    )  # fmt: skip
+    raw(clone, "push", "-q", "origin", BRANCH)
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+    second = run_l4([JUDGE])
+    assert second.code == 0, second.adapter.requests[-1].prompt[-600:] if second.adapter.requests else ""
+    changes = [(e["from"], e["to"], e["trigger"]) for e in second.events("phase.changed")][-3:]
+    assert changes == [
+        ("in_review", "verifying", "commit_after_handoff"),
+        ("verifying", "verified", "verify_pass"),
+        ("verified", "in_review", "hand_off_pushed"),
+    ]
+
+
 def test_reentry_sets_the_mr_back_to_draft_before_any_push(
     in_review,
     run_l4,
@@ -154,8 +180,8 @@ def bot_commit(tdd, raw, *, run: bool, name: str) -> str:
 
 
 def test_the_harness_never_retriggers_itself(in_review, run_l4, tdd_repo, raw, use_fake_gitlab):
-    """L4-ARC-008 (d) and decision 11: H2 and every harness commit are the harness's, so only a person's commit (or one
-    that only looks like the bot's) starts a round."""
+    """L4-ARC-008 (d) and decision 11: the new hand-off commit is the recorded H, so only a commit after the recorded H
+    starts a round, and every such commit does, whatever identity it claims (SCN-YOLO-100)."""
     pricing = raw(tdd_repo.origin, "show", f"{BRANCH}:src/pytdd/pricing.py")
     human_commit(tdd_repo, raw, {"src/pytdd/pricing.py": pricing + "\n# tidied\n"})
     assert run_l4([JUDGE]).code == 0
@@ -164,16 +190,17 @@ def test_the_harness_never_retriggers_itself(in_review, run_l4, tdd_repo, raw, u
     third = run_l4([], unit=False)
     assert third.code == 0 and third.adapter.requests == []
     assert snapshot_of_remote(tdd_repo, raw, use_fake_gitlab) == before
-    # a bot commit with `L4-Run` after H: still nothing
-    bot_commit(tdd_repo, raw, run=True, name="bot-with-run")
-    before = snapshot_of_remote(tdd_repo, raw, use_fake_gitlab)
-    assert run_l4([], unit=False).code == 0
-    assert snapshot_of_remote(tdd_repo, raw, use_fake_gitlab) == before
-    # an `l4-bot`-named commit without `L4-Run` is foreign: it re-verifies
-    sneaky = bot_commit(tdd_repo, raw, run=False, name="bot-without-run")
+    # a bot commit with `L4-Run` after the recorded H is foreign: it re-verifies (it used to be the harness's)
+    forged = bot_commit(tdd_repo, raw, run=True, name="bot-with-run")
     fourth = run_l4([JUDGE], unit=False)
     assert fourth.code == 0
     edge = [e for e in fourth.events("phase.changed") if e["trigger"] == "commit_after_handoff"][-1]
+    assert [c["sha"] for c in edge["commits"]] == [forged]
+    # an `l4-bot`-named commit without `L4-Run` is foreign too: it re-verifies
+    sneaky = bot_commit(tdd_repo, raw, run=False, name="bot-without-run")
+    fifth = run_l4([JUDGE], unit=False)
+    assert fifth.code == 0
+    edge = [e for e in fifth.events("phase.changed") if e["trigger"] == "commit_after_handoff"][-1]
     assert [c["sha"] for c in edge["commits"]] == [sneaky]
 
 

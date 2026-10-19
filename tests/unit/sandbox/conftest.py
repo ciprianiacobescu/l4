@@ -31,6 +31,8 @@ def make_spec(tmp_path: Path) -> Callable[..., SandboxSpec]:
                 "opencode": (home / ".local" / "share" / "opencode",),
             },
             "adapter": adapter,
+            "cache_root": tmp_path / "runner-cache",  # absent unless a test makes it: no tmpfs for it then
+            "tool_paths": (),
         }
         return SandboxSpec(**{**base, **over})  # type: ignore[arg-type]
 

@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from l4.clarifier.actor import Actor
+from l4.config.schema import L4Config
 from l4.redact import Redactor
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise
@@ -59,6 +61,19 @@ def text_sha256(criterion: Criterion) -> str:
     return hashlib.sha256(normalise(criterion.text).encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class HoldView:
+    """What a `judge view:` hold covers: `sha` binds a person's accept to the head blob of every file the hold covers
+    and to the full list of files the judge did not see (the hold's text names at most five), `paths` is that list.
+    The hold's id stays the hash of its text; the accept is void when this content changes (review M1)."""
+
+    sha: str
+    paths: tuple[str, ...]
+
+
+QUESTION_MAX_PATHS = 100  # the unseen files a hold's question lists; the rest are in verdict.json
+
+
 def hold_id(text: str) -> str:
     """The target of a hold's verdict question: `H-` and eight hex digits of the hold's text."""
     return "H-" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
@@ -73,24 +88,32 @@ def unresolved_holds(holds: Sequence[str], effective: Mapping[str, HumanVerdict]
 _BACKTICKED = re.compile(r"`([^`]+)`")
 _SCOPE_HOLD = re.compile(r"^scope: `[^`]+` changes module `[^`]+`")
 _COVERAGE_HOLD = "diff coverage: changed code not run by any test: "
-HoldKind = Literal["scope", "coverage", "other"]
+_SPEC_VIEW_HOLD = re.compile(r"the spec file .+: the judge (?:saw only|did not see) ")  # L4-KSP-014
+JUDGE_VIEW_PREFIX = "judge view: "  # the holds on what the judge could not see of the diff (L4-VER-043)
+LEGACY_LENGTH_HOLD = "the diff is longer than 120000 characters: the judge saw only the start"  # the 0.4.14 text
+JUDGE_VIEW_REJECTED_TITLE = "Rejected hold: the judge could not see all of the diff"
+HoldKind = Literal["scope", "coverage", "judge_view", "other"]
 
 
 def hold_kind(text: str) -> HoldKind:
-    """What a hold is about, from its text (the texts are fixed by `evidence/scope.py` and `evidence/diffcov.py`): the
-    two kinds a fix task can be derived from, else `other` (not measured, unsafe path, no scope declared, a UI
-    criterion without an e2e test, a judge reply that was discarded...)."""
+    """What a hold is about, from its text (the texts are fixed by `evidence/scope.py`, `evidence/diffcov.py` and the
+    judge step): the two kinds a fix task can be derived from, `judge_view` (what the judge could not see of the diff:
+    a person's decision, never a fix task), else `other` (not measured, unsafe path, no scope declared, a UI criterion
+    without an e2e test, a judge reply that was discarded...)."""
     if _SCOPE_HOLD.match(text):
         return "scope"
+    if text.startswith(JUDGE_VIEW_PREFIX) or text == LEGACY_LENGTH_HOLD or _SPEC_VIEW_HOLD.match(text):
+        return "judge_view"
     return "coverage" if text.startswith(_COVERAGE_HOLD) else "other"
 
 
 def hold_subjects(text: str) -> tuple[str, ...]:
-    """The files (scope) or `path::qualname` functions (coverage) a hold names; none for another kind."""
+    """The files (scope), `path::qualname` functions (coverage) or files the judge did not see (judge view) a hold
+    names; none for another kind."""
     kind = hold_kind(text)
     if kind == "scope":
         return (_BACKTICKED.findall(text)[0],)
-    return tuple(_BACKTICKED.findall(text)) if kind == "coverage" else ()
+    return tuple(_BACKTICKED.findall(text)) if kind in ("coverage", "judge_view") else ()
 
 
 def _names(subject: str) -> tuple[str, str | None]:
@@ -175,10 +198,17 @@ def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -
     it is the human's finding, which the planner lists as not converted, and the round escalates (the answer of a
     verdict that cannot be turned into a fix, never a new question). A hold of any other kind, rejected with a reason
     that holds a `WHEN ... THEN ...` sentence, is a behaviour finding like a rejected judge finding with no criterion:
-    the scenario is the task."""
+    the scenario is the task. A hold on the judge's view (`judge_view`) is always the human's finding, whatever the
+    reason says (L4-VER-044)."""
     kind, subjects = hold_kind(hold), hold_subjects(hold)
     reason = verdict.reason.strip()
     context = " ".join(_quote(f) for f in quoted)
+    if kind == "judge_view":  # a fix unit cannot shrink the diff: whatever the reason says, no task comes from it
+        what = (
+            "A fix unit cannot shrink the diff: split the change, or accept the hold once a person checked the files."
+        )
+        detail = f"{what} Hold: {_flat(hold, 400)} {context}".rstrip() + rejection_note(verdict)
+        return Finding(Severity.MAJOR, JUDGE_VIEW_REJECTED_TITLE, detail, "human", id=hold_id(hold))
     if kind == "scope" and reason:
         what = (
             f"Remove or relocate the change to `{subjects[0]}`: the spec does not name its module. Revert it from "
@@ -234,7 +264,7 @@ def settle_holds(
             continue
         hold, verdict = settled
         why = f": {verdict.reason}" if verdict.reason else ""
-        note = f"settled with hold {hold_id(hold)}, {verdict.decision}ed by {verdict.by}{why}"
+        note = f"settled with hold {hold_id(hold)}, {verdict.decision}ed by {verdict.label}{why}"
         out.append(dataclasses.replace(f, severity=Severity.MINOR, detail=f"{f.detail} ({note})"))
     known = {f.id for f in out}
     for hold in holds:
@@ -243,6 +273,13 @@ def settle_holds(
             quoted = [f for f in findings if (settled := settled_by(f)) is not None and settled[0] == hold]
             out.append(_hold_finding(hold, verdict, quoted))
     return out
+
+
+def hold_sha256(hold: str, views: Mapping[str, Mapping[str, Any]] | None = None) -> str:
+    """The hash a person's accept of `hold` is bound to: the content hash of a `judge view:` hold (`HoldView.sha`), else
+    the hash of the hold's id as before."""
+    view = (views or {}).get(hold)
+    return str(view["sha"]) if view else finding_sha256(hold_id(hold))
 
 
 def finding_sha256(finding_id: str) -> str:
@@ -316,11 +353,17 @@ def _raised(events: Iterable[LedgerEvent]) -> dict[str, Mapping[str, Any]]:
 
 
 def consume_verdicts(
-    file: QuestionsFile | None, events: Sequence[LedgerEvent], ledger: EventSink, criteria: Sequence[Criterion]
+    file: QuestionsFile | None,
+    events: Sequence[LedgerEvent],
+    ledger: EventSink,
+    criteria: Sequence[Criterion],
+    actor_of: Callable[[Question], Actor] | None = None,
 ) -> list[str]:
     """Record `human.verdict` for every validly answered verdict question whose answer is new (or changed since it was
     recorded), and return the question ids it recorded. The text hash is the one the question was raised on; a question
-    the ledger does not know is judged on the criterion's text now."""
+    the ledger does not know is judged on the criterion's text now. `by` (and `marker`, `profile`, `model`) is the real
+    actor of the answer (`actor_of`, L4-QMD-009); a caller that passes none records a person's, as every ledger before
+    0.4.18 did."""
     raised = _raised(events)
     done = {str(e.data.get("question")): e.data.get("answer_sha256") for e in events if e.type == "human.verdict"}
     current = {c.id: text_sha256(c) for c in criteria}
@@ -340,9 +383,10 @@ def consume_verdicts(
         if not target:
             continue
         sha = str(known.get("text_sha256") or current.get(target) or finding_sha256(target))
+        actor = actor_of(q) if actor_of is not None else Actor("human")
         ledger.append(
-            "human.verdict", question=q.id, target=target, decision=parsed[0], by="human", reason=parsed[1][:1000],
-            text_sha256=sha, answer_sha256=digest,
+            "human.verdict", question=q.id, target=target, decision=parsed[0], by=actor.by, reason=parsed[1][:1000],
+            text_sha256=sha, answer_sha256=digest, **actor.fields(),
         )  # fmt: skip
         recorded.append(q.id)
     return recorded
@@ -385,6 +429,9 @@ def effective_verdicts(events: Sequence[LedgerEvent], current: Mapping[str, str]
                 str(d.get("by", "human")),
                 str(d.get("reason", "")),
                 str(d.get("text_sha256", "")),
+                str(d.get("marker") or ""),
+                str(d.get("model") or ""),
+                str(d.get("cli") or ""),
             ),  # fmt: skip
         )
     keep = {}
@@ -448,7 +495,7 @@ def apply_finding_verdicts(findings: Sequence[Finding], effective: Mapping[str, 
         if verdict is None:
             out.append(f)
         elif verdict.decision == "accept":
-            note = f"waived by {verdict.by}" + (f": {verdict.reason}" if verdict.reason else "")
+            note = f"waived by {verdict.label}" + (f": {verdict.reason}" if verdict.reason else "")
             out.append(dataclasses.replace(f, severity=Severity.MINOR, detail=f"{f.detail} ({note})"))
         else:
             out.append(dataclasses.replace(f, source="human", detail=f"{f.detail}{rejection_note(verdict)}"))
@@ -458,7 +505,7 @@ def apply_finding_verdicts(findings: Sequence[Finding], effective: Mapping[str, 
 def rejection_note(verdict: HumanVerdict) -> str:
     """What `apply_finding_verdicts` appends to a rejected finding's detail."""
     reason = f" ({verdict.reason})" if verdict.reason else ""
-    return f" [rejected by {verdict.by}{reason}]"
+    return f" [rejected by {verdict.label}{reason}]"
 
 
 # --- asking -----------------------------------------------------------------------------------------------------------
@@ -526,7 +573,7 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
-def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> NewQuestion:
+def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = (), paths: Sequence[str] = ()) -> NewQuestion:
     judged = [
         line
         for f in quoted
@@ -537,19 +584,34 @@ def _hold_question(hold: str, round_no: int, quoted: Sequence[Finding] = ()) -> 
             f"Detail: {_flat(f.detail)}" + (f"\nSuggested fix: {_flat(f.suggested_fix)}" if f.suggested_fix else ""),
         )
     ]
+    kind = hold_kind(hold)
+    if kind == "judge_view":
+        answer = (
+            "The judge could not see all of the diff, so it could not judge the files this hold names. Answer "
+            "`accept` if you checked those files yourself and the unit can go on as it stands. A fix unit cannot "
+            "shrink the diff, so `reject` stops the unit (escalated with judge_view_rejected): then split the change "
+            "into smaller units."
+        )
+    else:
+        answer = "Answer `accept` if the unit can go on as it stands, " + (
+            "or `reject` and say why: a rejected hold is fixed by a fix unit."
+            if kind != "other"
+            else "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit "
+            "can be made."
+        )
+    listed = []
+    if paths:
+        shown = [f"- {p}" for p in paths[:QUESTION_MAX_PATHS]]
+        more = len(paths) - QUESTION_MAX_PATHS
+        tail = [f"- and {more} more unseen files: see verdict.json"] if more > 0 else []
+        listed = ["", f"The files the judge did not see ({len(paths)}):", *shown, *tail]
     context = "\n".join(
         [
             f"After round {round_no} the verifier cannot decide on its own: {_flat(hold)}",
+            *listed,
             *judged,
             "",
-            "Answer `accept` if the unit can go on as it stands, "
-            + (
-                "or `reject` and say why: a rejected hold is fixed by a fix unit."
-                if hold_kind(hold) != "other"
-                else "or `reject` and say why; end the reason with a sentence WHEN ... THEN ... so that a fix unit "
-                "can be made."
-            )
-            + (" One answer settles both the hold and the judge's finding." if judged else ""),
+            answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
         ]
     )
     return NewQuestion(
@@ -573,11 +635,14 @@ def raise_verdict_questions(
     redactor: Redactor,
     holds: Sequence[str] = (),
     covers: Mapping[str, Collection[str]] | None = None,
+    hold_views: Mapping[str, Mapping[str, Any]] | None = None,
+    judges: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[str]:
     """One question per criterion that is `needs_human` or `disputed`, per judge-only blocker or major finding and
     per hold,
     except where a verdict question for the same target is still waiting (open or invalidly answered). Returns the new
-    question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`."""
+    question ids; each gets a `question.raised{kind: verdict}` so the mirror sets `l4:needs-answers`. `judges` (from
+    `round_judges`) is recorded on each, so the delegate is never a mind that judged the round (L4-DLG-002)."""
     status = verdict_status(existing, consumed)
     unsettled = {*status.open, *status.invalid, *status.ready}
     waiting_q = {t: q.id for q in _verdict_questions(existing) if (t := target_of(q)) and q.id in unsettled}
@@ -605,16 +670,37 @@ def raise_verdict_questions(
     for hold in holds:
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
-            batch.append(_hold_question(hold, round_no, quoted))
-            targets.append((hold_id(hold), finding_sha256(hold_id(hold)), [f.id for f in quoted]))
+            view = (hold_views or {}).get(hold)
+            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else ()))
+            targets.append((hold_id(hold), hold_sha256(hold, hold_views), [f.id for f in quoted]))
     ids = raise_questions(unit_dir, unit_name, batch, redactor=redactor)
     titles = question_titles(unit_dir) if ids else {}
     for qid, (target, sha, quoted_ids) in zip(ids, targets, strict=True):
         ledger.append(
             "question.raised", id=qid, kind="verdict", source="verifier", target=target, text_sha256=sha,
             round=round_no, title=titles.get(qid, ""), **({"covers": quoted_ids} if quoted_ids else {}),
+            **({"judges": [dict(j) for j in judges]} if judges is not None else {}),
         )  # fmt: skip
     return ids
+
+
+def round_judges(events: Iterable[LedgerEvent], round_no: int, cfg: L4Config) -> list[dict[str, Any]]:
+    """Who judged round `round_no`: each distinct `{profile, model}` of its `verify.judge` events, a panel's parts and a
+    fallback judge included. A round that reused an earlier round's judge made no call of its own: the latest earlier
+    round that judged is the one whose mind decided it. The model is the one that served the call, else the profile's
+    configured model, else None."""
+    calls = [e for e in events if e.type == "verify.judge" and isinstance(e.data.get("profile"), str)]
+    rounds = [r for e in calls if isinstance(r := e.data.get("round"), int) and r <= round_no]
+    out: list[dict[str, Any]] = []
+    for e in calls:
+        if not rounds or e.data.get("round") != max(rounds):
+            continue
+        profile = e.data["profile"]
+        configured = cfg.profiles.get(profile)
+        entry = {"profile": profile, "model": e.data.get("model") or (configured.model if configured else None)}
+        if entry not in out:
+            out.append(entry)
+    return out
 
 
 def verdict_targets(

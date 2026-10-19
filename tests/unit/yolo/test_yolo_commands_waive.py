@@ -4,6 +4,7 @@ an accepted finding of an activated plan on record, and can withdraw the waiver.
 
 import pytest
 
+from l4.yolo.digest import plan_digest
 from l4.yolo.findings import finding_id
 
 from .test_yolo_commands_accept import agent, person  # noqa: F401 (fixture)
@@ -19,7 +20,8 @@ def activated(world, *events):
     """An active plan whose activation froze one accepted item of A with two findings."""
     world.push_plan()
     item = {"findings": [TESTABILITY, FAILURES], "reason": "use a plain path", "by": "alice", "actor": "person"}
-    world.seed("p1", ev("plan.activated", plan_digest="x", digests={}, limits={}, by="alice", reason="go",
+    digest = plan_digest(world.plan_text)
+    world.seed("p1", ev("plan.activated", plan_digest=digest, digests={}, limits={}, by="alice", reason="go",
                         accepted={A: item}), *events)  # fmt: skip
     return world
 

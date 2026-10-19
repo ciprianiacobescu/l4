@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from l4.sandbox.bwrap import BwrapSandbox
+from l4.sandbox.env import build_gate_env, cache_env
 
 ARITY = {"--ro-bind": 2, "--bind": 2, "--tmpfs": 1, "--dev": 1, "--proc": 1}
 
@@ -40,8 +43,16 @@ def test_caches_are_bound_into_both_sandboxes_and_exported_to_gates(make_bench):
     wb = make_bench([]).wb
     uv = next(c for c in wb.caches if c.env == "UV_CACHE_DIR")
     sandbox = BwrapSandbox("/usr/bin/bwrap")
+    # changed with L4-SEC-039: only a `gates.setup` command mounts the cache read-write; every other gate and the agent
+    # mount it read-only and name a private scratch cache in the variable
+    setup = wb.gate_spec(network=True, builds_env=True)
+    assert ("--bind", str(uv.path), str(uv.path)) in mounts(sandbox.build_argv(["true"], setup, {}))
+    assert build_gate_env(wb.host_env, setup)["UV_CACHE_DIR"] == str(uv.path)
     for spec in (wb.gate_spec(network=True), wb.agent_spec()):
-        assert ("--bind", str(uv.path), str(uv.path)) in mounts(sandbox.build_argv(["true"], spec, {}))
+        assert ("--ro-bind", str(uv.path), str(uv.path)) in mounts(sandbox.build_argv(["true"], spec, {}))
+        assert ("--bind", str(uv.path), str(uv.path)) not in mounts(sandbox.build_argv(["true"], spec, {}))
+        scratch = Path(cache_env(spec)["UV_CACHE_DIR"])
+        assert scratch != uv.path and spec.tmp_dir in scratch.parents
 
 
 def test_a_long_title_keeps_skip_ci_and_fits_the_subject_limit():

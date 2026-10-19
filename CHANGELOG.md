@@ -6,6 +6,347 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.19 (unreleased)
+
+### Added
+- **The delegate** (L4-DLG-001..014). A strong model that the project configures answers the questions of units in
+  scope inside the harness's own run. It is off unless the base branch says `delegate.enabled: true`, and `delegate:` and
+  `roles.delegate` are read from the base branch only. With `delegate.scope: yolo` (default) a unit is in scope when it is
+  the current unit of an active or waiting plan, or its fix unit; `scope: all` adds units in no plan file while no plan is
+  active. It runs after the clarifier at the end of the run that parks the unit, and in a later run through the planner
+  action `delegate`; it asks once per question, oldest first, in the kinds of `delegate.kinds`. The reference
+  configuration has the profiles `delegate-opus` (`claude-opus-5-5`), `delegate-sol` (`gpt-6.1-sol`,
+  `reasoning_effort: high`) and `delegate-sonnet` (`claude-sonnet-5`; a verdict question needs a model that is neither
+  the judges' nor the implementers'), and `roles.delegate` is optional (L4-AVL-010).
+- The delegate reads the repository read-only (the adapters' read-only mode: Claude Code `--permission-mode plan` with
+  `Read,Grep,Glob`, Codex `-s read-only --ephemeral`; no tool server, no forge or CI token; a detached worktree of the
+  pushed unit head that the sandbox mounts read-only, `SandboxSpec.worktree_read_only`). Its prompt `delegate@1` holds the
+  question and its evidence as `<l4:data>` blocks, redacted before any cut. It returns one `l4/delegate-result@1`; the
+  harness keeps a reply only when the decision fits the kind, every `checked` claim resolves at the unit head, the text
+  passes the checks of `l4 questions answer`, and a reject of a hold has its `WHEN … THEN …`. A reply is also discarded with more than 20 `checked` entries or a `ref` over 300, `quote` or `claim` over 600
+  characters, and an `escalate` reply records only its redacted refs. A person's `--replace` of the delegate's answer drops
+  the `Answered by:` line, and a clarifier call that was made counts as work for the idle-run rule. Any other reply is
+  `discarded` and the question escalates.
+- A kept answer is written by the edit core of `l4 questions` with the new field line `Answered by: the delegate (<model>
+  via <cli>)`, committed with `By: delegate (…)`, `Via: l4 delegate` and `[skip ci]`, pushed, and followed by one run on
+  the base branch that reads it, in a plan and outside one. What it cannot check, it escalates: `Escalated by:`, the
+  label `l4:needs-person`, a sticky section `Needs a person (the delegate escalated)`, and a plan that waits with
+  `unit_awaiting_human` and starts no run.
+- `delegate.independence` (`model` by default: the delegate is not a model or profile that asked or judged the question;
+  `profile` vetoes the name only; for a verdict question the implementer profiles and their models are askers too, so
+  the model that wrote the code never overturns the judge's dispute of it, and the reference configuration needs a
+  third model in `roles.delegate` or its verdict questions escalate; the models the implementer's steps reported count
+  as askers' too, so an alias such as `opus` cannot hide the served model, and `DLG-002` warns about an alias), `delegate.unfreeze` (default `false`: an answer that would unfreeze a frozen test file
+  escalates; `true` lets the delegate accept the clarifier's suggestion for it), and the bounds `max_attempts_per_question`
+  (2), `max_answers_per_task` (3), `max_questions_per_run` (5), `max_cost_usd_per_answer` (3.0), `max_cost_usd_per_unit`
+  (15.0), `plan_cost_share` (0.25) and `timeout` (15m). The ledger events `delegate.asked` and `delegate.result`; the
+  asker (`profile`, `model`, `judges`) on `question.raised`.
+- Doctor `DLG-001` (error: the chain, `delegate.kinds`, the limits, an independent delegate profile for every
+  implementer and judge profile, and one independent of the judges and the implementers together) and `DLG-002` (warn: a delegate profile is usable now), both silent while the delegate is
+  off; the delegate chain is part of `LIVE-002`.
+- `l4 status --unit` prints a `Delegate:` line per decided question; `l4 status` gives the REASON `Q-NNN needs a person
+  (the delegate escalated)`; `l4 yolo status` prints `delegate: <n> answered, <m> escalated` and the delegate's cost
+  against its share of the plan's cost. All have `--json` fields. `verification.md`, the judge's view, the PR note and
+  `l4 yolo report` label the delegate's decisions `delegate_override`.
+- Docs: SPEC 9.1 and 23.25, the runbook's procedure "The delegate answered or escalated", a section "The delegate" in the
+  delivery-plans page, and the delegate in the control-loop page and the skill's operate and plan references.
+
+### Changed
+- The label `l4:needs-person` (created by `l4 setup github`) marks a PR whose open question
+  the delegate escalated; it goes when no escalated question of the unit is open.
+- The status lines name the delegate's answers and escalations (`l4 status`, `l4 status --unit`, `l4 yolo status`).
+- A plan that waits with `unit_awaiting_human` names the escalated questions in its detail. A run in which the delegate
+  wrote an answer for a unit of the plan starts the next run once, also when the plan step waited.
+- The planner may name a new action, `delegate`, for a unit in scope whose open question the delegate has not decided.
+  No lifecycle edge is new: the unit moves in the run that reads the answer.
+
+### Fixed
+- Every answer in `questions.md` now has its real actor, of every kind. Before, a verdict answer an agent gave was
+  recorded `by: human`, and only a harness question could be an agent's. `question.answered` and `human.verdict` carry
+  `by: human | agent | clarifier | delegate` (with `marker`, `profile` and `model`), the implementer's answer blocks carry
+  the same `by`, and a `By: delegate` line that no ledger record backs counts as an agent's. A verdict that is not a
+  person's is no S1 calibration label (`human:verdict` is made only from `by: human`).
+- Idle plan runs are free. A run of the dispatched unit that made no agent call, ran no gate and changed no phase but into
+  `awaiting_human` or `clarifying` is recorded `plan.run_idle`, does not count against `max_runs` and starts no next run,
+  so a plan with a waiting unit no longer spends its runs (`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`).
+  A paid clarifier or System One call (`budget.cost`) is work, so a run that made one is not idle.
+- The delegate's deferrals are bounded: a deferral for lack of time (`reason: soft_deadline`) counts as an attempt, so a
+  `ci.time_budget` shorter than `delegate.timeout` plus `ci.soft_deadline_margin` ends in an escalation instead of
+  chaining free runs; `DLG-001` fails on that setting when the budget is known.
+- Independence fails safe: under `delegate.independence: model` a delegate profile with no `model`, or an asker whose
+  model is unknown, vetoes; the model that actually served the call is checked against the askers too.
+- A fix unit's answers carry their real actor: an agent's answer is recorded `by: agent`, and the delegate's reaches the
+  fix unit's implementer as `by="delegate"`.
+- A `checked` entry of the delegate cannot cite `questions.md`, `verification.md` or `.l4/`, and its quote needs 12
+  characters. The cost of a delegate call that hit a limit is recorded, and a pass killed mid-call no longer leaves a
+  registered worktree that stops the next one. The `Escalated by:` line neutralises HTML comments.
+  `delegate.unfreeze` is read from the base branch where a green step decides. An agent's answer under
+  `clarifier.answer_by_agents` still unfreezes a frozen test or opens gate configuration, as on 0.4.18 (the delegate's
+  never does, except an accepted suggestion under `delegate.unfreeze: true`).
+
+## 0.4.18 (unreleased)
+
+### Added
+- `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
+  find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
+  login such as `~/.npmrc`). An entry that is, holds or lies inside a login is a configuration error.
+- Doctor `SANDBOX-003` plants canaries in the home, in another unit's step directory and in the lock directory and fails
+  (exit 3) when either sandbox kind can read one. Doctor `SANDBOX-004` warns while `sandbox.setup_paths` is set.
+- The ledger events `env.rebuilt` and `guard.notice`, and `guard.violation` with rule `environment`.
+- `yolo.extend_by_agents` (default `false`) in `.l4/config.yaml` on the base branch lets an agent raise a plan's limits
+  with `l4 yolo resume --extend-…`, like `yolo.review.accept_by_agents` does for `l4 yolo accept`. The event
+  (`plan.extended`, or `plan.resumed` that extends) records the actor, its marker and whether the key allowed it
+  (L4-YOLO-051).
+- `l4 yolo status` lists the extensions of a plan (`extended: runs 90 -> 110 by <who> (person): <why>`).
+- Kiro steering reaches the implementer as data. The harness reads `.kiro/steering/*.md` on the host and puts each file
+  that applies under `# Project conventions` as an `<l4:data>` block, by its Kiro front matter: none or `always`
+  (always), `fileMatch` (a pattern matches a path of the task or of the unit branch), `manual` (the task, the
+  requirements or the design names it as `#<file>`) and `auto` (after the others, when the budget has room). An
+  OpenSpec unit gets the `context` of `openspec/config.yaml` the same way, never its `rules`. The sandbox masks stay,
+  and `~/.kiro/steering` is never read. `implementer.include_agents_md: true` adds the repository root's `AGENTS.md`
+  as a convention (never `CLAUDE.md`).
+- Nothing is cut silently any more. A source that is cut by the budget or not read (over 262,144 bytes, a symbolic link,
+  a file that is not regular) is named under `# Not shown in full` with its path, the characters shown and the lines
+  left out, and the run records `prompt.truncated`. `prompt.rendered` records `budget_tokens`, `budget_source` and the
+  steering decisions.
+- `l4 run --dry-run` prints per unit the budget, each steering decision and each cut. `l4 status --unit` prints the
+  last `Prompt cut:` and `--json` has `prompt_cut`. Doctor SPEC-004 warns when the next task's prompt would cut a source.
+- A profile may set `context_budget_tokens` for its own steps, for a small local model in a fallback chain.
+- The step-9 judge gets each done task's whole block (detail bullets included) and is asked whether the diff does what
+  each task's text says; `verifier.judge_context_budget_tokens` (48000) bounds its spec text in the implementer's
+  priority order, and a spec file it did not see whole is named to it.
+
+- A profile may state its model's window (`context_window`, or an opencode provider's `limit.context`): the whole prompt
+  then stays within 60% of it (`budget_source: model_window`), and doctor SPEC-004 warns when a budget exceeds that
+  or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
+- `docs/control-loop.md`, "How L4 runs: branches, events and the control loop": the one control loop, where each kind of state lives (base branch, unit branch, lock ref, plan ref, keep refs, PR), what starts a run, one run step by step, what a stop keeps, redoes or loses, what each local command writes, a worked recovery of a halted unit in a stopped plan, and swimlane diagrams. Linked from the README, the quickstart, the runbook, the delivery-plans page, the architecture page and the skill's operate reference.
+- The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
+
+### Fixed
+- A test that replaced a source directory with a link to a directory outside the repository made the harness write
+  there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file
+  operation of the harness after agent code ran now refuses a link on its path, removes the link and writes nothing
+  through it. The unit halts with the code `planted_link` and the ledger names each link and where it pointed. A guard
+  that used to crash on such a replaced directory (`git rm` without `-r`) can no longer crash a run.
+- A step can no longer pass a gate by editing the configuration the gate reads. Before, a green step that added
+  `ignore_errors = True` to `mypy.ini`, or a red step that added `ignore = ["ALL"]` to `[tool.ruff]` or `addopts =
+  "-p plugin"` to the pytest section of `pyproject.toml`, kept the change and had it committed. `tdd.gate_config_globs`
+  now takes effect.
+- The folders the sandbox masks (`.hermes`, `.kiro/hooks`, `.kiro/prompts`, and now `.kiro/skills`) are protected paths:
+  what a step or a test run wrote there used to be committed.
+- Code an agent wrote can no longer read the runner user's files. The agent and gate sandboxes showed the real home, so
+  a test written by an agent could read `~/.git-credentials`, `~/.netrc`, `~/.ssh/id_*`, `~/.config/gh/hosts.yml` or
+  `~/.docker/config.json` (proved under bubblewrap 0.8.0). Both sandbox kinds now start from an empty home and an
+  empty runner cache and see only the tools, the step's own directories and the caches.
+- A file written into `.venv` or `node_modules` can no longer decide a verdict. A green step that wrote only a `.pth`
+  file into site-packages passed with the production code still a stub, and the verifier ran on that environment too:
+  no guard looked there, `git clean` and `uv sync --frozen` kept the file. The harness now rebuilds an environment that
+  a step or a gate changed, and gates that do not build it see it read-only.
+- Two projects with a unit of the same name on one runner no longer share directories. The step directories, the
+  `uv`, `pip` and `npm` caches, the excludes file and the unpublished run files are keyed by the repository key, so one
+  project's unpublished run file is never pushed into the other's lock ref.
+- A unit's OpenCode provider key file and credential-loader file are no longer readable from another unit's sandbox,
+  are created in 0700 directories, and one left by a killed run is removed before the unit runs again.
+- The login lock files and the unit lock files are no longer readable inside the sandboxes.
+- A package cache can no longer carry a plant into a rebuilt environment. A file an agent step or a gate wrote into the
+  unit's `uv` cache (`zz_marker.pth` in `archive-v0/<id>/`) came back in every environment rebuilt from it. The per-unit
+  caches are now read-only except for `gates.setup`, every step and gate works in a private scratch cache that is
+  discarded, and the verifier builds from caches of its own, emptied at the start of each round.
+- A symlink in a `PATH` directory, or a shim into a project's `node_modules`, can no longer expose the files next to its
+  target: the sandbox binds the target file or the package, and skips any tool path that is or lies inside a login or
+  a known secret location (`~/.config/gh`, `~/.aws`, ...).
+- The outcome record a pytest gate keeps could be emptied by a conftest that reached the plugin through `sys.modules`.
+  The plugin now opens the record when it is imported and keeps the descriptor out of reach; a pytest report with test
+  cases and an empty or missing record fails with `the test report was altered (no outcome record)`; a failed row of a
+  phase wins over a later passed one; and the content scan flags references to `l4_trace`, `_OUTCOME`,
+  `L4_OUTCOME_FILE`, `xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus` / `.xmlpath`.
+  Only those exact names count (a fixture called `xmlpath` or a constant `_OUTCOMES` is fine), `verifier.test_awareness_allow`
+  lists the match instead of blocking it, the record sits outside the gate's temp directory under a random name, and a
+  record the plugin created but left empty fails the gate even when a wrapper (`make test`) ran pytest.
+- A red step that weakened, rewrote or shadowed a test that already existed (a second `def` of its name, a helper, a
+  constant, a fixture or an autouse fixture it uses in its file) used to be committed and judged green. It now fails its
+  attempt with `red changed tests that existed before this step: <path>::<name> (<why>)`, nothing is committed, and the
+  retry prompt says what to do. A `[test-infra]` task and the stale tests of a reopened task are exempt
+  (L4-IMP-045..048).
+- Step 1 never saw a weakened pre-existing test: a unit whose test went from `== 3.75` to `is not None` and whose code
+  then returned a wrong value passed. It now compares each test that exists at the base per test on the AST, by file and
+  qualified name, and a harness commit that changes or deletes one is the blocker `a pre-existing test was changed` or
+  `a pre-existing test was deleted`; a later red commit that changes a test an earlier step wrote is a blocker too.
+  People's changes and the ones a `[test-infra]` task, a `task.unfrozen` or a `tests.superseded` event allows are listed
+  in `verification.md` (L4-VER-030..032).
+- A deleted test was hidden when any other changed test file defined a test of the same name, whatever its body, and a
+  person's deletion was not listed either. A test now counts as moved only when the same definition appears under a new
+  file or name (L4-IMP-047, L4-VER-030, L4-VER-031).
+- Audit tests ran with the unit's own `conftest.py` in place, so an autouse fixture could make the audit of broken code
+  pass. Audit tests, their zero-value run and a generated UI test's head run now use the unit's test-support files at
+  their base versions (the amended entry below widens this to every test file for the audit); the Audit table of
+  `verification.md` has a `Support` column, and `verify.audit` and `verify.generated` carry `support`
+  (L4-VER-033..036).
+- Step 1 now also blocks a test-support file that patches code the unit changed in module-level code or an autouse
+  fixture (it used to check only the files a task opened); a fixture a test requests by name is listed (L4-VER-037).
+- Step 1 now runs the base's tests on the unit's code: the test gate runs at head with every test and support file the
+  unit added or changed at its base version (added ones set aside), and a test that passed at the base must still pass.
+  A weakened helper module, a weakened or hooked conftest, a swap through `__code__` or `globals()`, a production module
+  that imports only with the unit's conftest, and a weakened Go or TypeScript test (any language with a JUnit report)
+  now fail step 1 with `a pre-existing test fails on the unit's code` or `a pre-existing test no longer runs on the
+  unit's code`; the integrity table has the row `pre-existing tests still pass`. A test a `tests.superseded` event, a
+  `task.unfrozen`, a `[test-infra]` task or only people's commits cover is listed (L4-VER-038).
+- The comparison of a pre-existing test now sees statements that are not plain definitions (attribute assignments,
+  `globals()`, `setattr`, a class attribute), inherited tests, real locals, normalised docstrings and moves that keep the
+  closure; the content scan reads helper modules under the test globs and flags `pytest_pyfunc_call`, a plain
+  `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-IMP-045..049,
+  L4-VER-039).
+- The audit runs without any of the unit's test or support files and collects only the audit file; it never falls back
+  to them, holds a criterion whose production module does not import, and keeps the writer's collection retry. A
+  generated UI test's head run keeps app data the unit added under `fixtures/` and no longer crashes when the server
+  does not start without the unit's runner support (L4-VER-033..035).
+- Step 1 scans the unit's production diff: a line that names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*`
+  variable is the blocker `production code reacts to the test run` (code that behaves differently while the verifier runs);
+  `"pytest" in sys.modules`, importing pytest, `atexit.register` and a `sys.argv` check for pytest are listed for the
+  judge in `verification.md`. A support file that only people changed, a `[test-infra]` task changed or a `task.unfrozen`
+  frees stays at head for the run of the base's tests, listed (L4-VER-038, L4-VER-039).
+- The audit file is written under the directory the test command collects (a command narrowed to `tests/unit` used to
+  leave it uncollected and the criterion held); a test command that never collects it is a minor rejection naming the
+  command. A generated UI test's head run reverts a helper named like a test module and no longer falls back to the
+  unit's support files: a server that does not start without them holds the criterion (L4-VER-033..035).
+- New config key `verifier.test_awareness_allow` (list of production path globs, default empty): a match of the test-awareness
+  blocker in a file under one of them is listed for the judge with its glob instead of blocking. It is read from the base
+  branch's `.l4/config.yaml`, never from the unit, and `l4 doctor` shows it (CFG-010) (L4-VER-039).
+- Every pytest gate run is cross-checked: the harness's plugin records what pytest judged for each test outside the
+  worktree, and a JUnit report that disagrees (a pass the record does not hold, a failure removed) fails the gate with
+  `the test report was altered` and the test ids; a conftest or helper with `atexit.register`, `os._exit`, a
+  session-end hook that writes a file, or a name of the report path is a content-scan hit (L4-IMP-006 (8), L4-VER-039).
+- The audit file is written next to the unit's own test files (an option value such as `--ignore tests/legacy` or `--tb
+  short` no longer picks the directory), confirmed by a `--collect-only` run when the unit has no test file there
+  (L4-VER-033).
+- A `[test-infra]` or `[config]` tag in a fix unit's or follow-up unit's task exempts nothing, and brackets in
+  model-written finding text become parentheses before they reach a task (L4-IMP-006).
+- The test-awareness blocker reads Python with the AST: comments and docstrings are ignored, only reads of `L4_*` or
+  `PYTEST_*` variables and names of `.l4-out` or the report path (with word boundaries) block (L4-VER-039).
+- A delivery plan with `merge: auto` no longer merges a commit that nobody verified. The merge lands the hand-off
+  commit H that the hand-off recorded (`pr.ready{head}`), pinned to its sha, and never the branch tip. Any commit after
+  H sends the unit back to verification, whatever author, committer or `L4-Run` trailer it claims: before, a commit that
+  copied the bot's identity and trailer after the review was squash-merged unseen, and a forged second hand-off commit
+  became H (L4-ARC-008, L4-YOLO-040).
+- A plan no longer merges a unit whose repository CI is red. A red CI that the sweep recorded on H is dispatched for
+  verification before any merge, and the merge itself waits while the CI on H is running, is red and not yet recorded,
+  or cannot be read, with a `merge_not_ready` detail that says why (L4-YOLO-041, L4-YOLO-042).
+- On GitHub, a failed job is no longer hidden behind a passing job of the same name in another workflow. A check run is
+  one job of one workflow (and event), a re-run replaces its earlier attempt, and a job red on H is pre-existing only
+  when the same workflow's job is red on the base (L4-CI-010, L4-CI-011).
+- A hand-off commit whose only check run is the harness's own skipped `l4` job is reported `not_run`, not green
+  (L4-CI-012).
+
+- A merge no longer treats CI that is not there yet, or a job that did not pass, as green. A cancelled job, an
+  `action_required` check (a person must act) and a stale run, a failed commit status, a workflow run still queued or in
+  progress, an unfinished GitLab pipeline and a required check that H has not reported are all read: cancelled or held
+  jobs block the merge with "re-run it" and open no fix round (a cancelled push run whose pull_request twin finished
+  does not block), a required check that never reports blocks it whatever `yolo.merge.require_ci` says, and the
+  others are red or running. "No CI" is final only ten minutes after the hand-off, unless the repository has no
+  workflow but `l4.yml`, requires no check and shows no status on H (L4-CI-013, L4-CI-014, L4-CI-015). Only the
+  harness's own job (`l4` of `l4.yml`) is ignored, no job named `l4` in general. A CI read now makes about ten API
+  calls, not more than a hundred: the jobs of `l4.yml` runs and the base head are read only when needed.
+- The recorded hand-off commit H is read from the unit's lock ref only, never from a `pr.ready` in the branch tree.
+  Anyone who can push the lock ref can still forge `pr.ready{head}`: that residual is accepted, and closing it needs
+  signed harness commits or a ref only the harness can write.
+- A PR that a person merged at another head while the plan held H is recorded with the head that was merged.
+- A diff over 120000 characters no longer holds the unit every round. The judge now reads it in parts: whole files,
+  ordered so that a test sits next to the code it is named after, at most 8 parts of at most 120000 characters, one judge
+  call each, and the replies are merged into one verdict (a `fail` of any part wins, then a `pass`). A diff within the
+  cap keeps its one prompt. The prompt template is `judge@11` (`judge@10` added the parts); `verdict.json` lists `judge_parts` and `verification.md`
+  says `judged in N parts` (L4-VER-041, L4-VER-042).
+- The judge's diff leaves out the harness's bookkeeping, named once: every `.l4/` file, `.serena/memories/harness/**`, and
+  the `verification.md`, `questions.md` and `feedback.md` of each unit folder of the family (L4-VER-040). Lock files
+  (`uv.lock`, `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`,
+  `composer.lock`, `Gemfile.lock`) are shown as one line each (path, old and new size, lines added and removed) and never
+  hold the unit (L4-VER-045).
+- What the judge still cannot see (one file longer than one part, a diff that needs more than 8 parts) is a hold
+  `judge view: …` of its own kind. Its question says what `accept` and `reject` mean and asks for no `WHEN … THEN …`. A
+  rejected one is a human finding no fix task is derived from: the unit escalates with `judge_view_rejected`, and
+  `l4 status`, the refusal of `l4 run --unit`, the sticky note and a plan stopped on the unit name the way out (split the
+  change and `l4 restart`, or `--replace` with an accept and `l4 retry`). Before, a reject with a `WHEN … THEN …` made a
+  fix unit that could not shrink the diff, and the same hold came back every round (L4-VER-043, L4-VER-044,
+  L4-YOLO-055).
+- After `l4 questions answer`, `l4 yolo resume` no longer refuses a plan whose answer is pushed and not yet read, and
+  `l4 yolo status` says what happens: while a question is open, how to answer and that the plan continues by itself at
+  the run that reads the answer; once the answer is pushed, that the next run reads it and how to start it now. The
+  wait line shows the live reason, not the stale `open: Q-…` detail. The plan step, the resume and the status decide with
+  one rule (L4-YOLO-052, L4-YOLO-053, L4-YOLO-054).
+- Requirements and the criteria text no longer disappear behind a long `design.md` (a Kiro unit whose design was 125,492
+  characters lost its `requirements.md` to the budget).
+- A spec file over 262,144 bytes was dropped from the implementer's and the judge's prompt without a word; it is now read
+  up to the limit and named, and the judge holds the round.
+- A Kiro leaf's cited criteria were not required in red: a red step that tested one of `_Requirements: 1.1, 1.2_` passed,
+  and the no-new-test path ticked such a leaf without proving the other. Red now fails with a reason that names the
+  criterion and the line; a criterion that an earlier red already proved needs no copy (review finding implementer-5).
+- Red no longer counts a criterion as proved by an earlier test that was merely re-tagged (the proof is per criterion
+  and test, in a file only appended to), accepts new tests and fixtures in an existing test file (a constant computed by a call at import is refused; compute it in the test or use a new file), and accepts a step that
+  reports every cited id. Hostile steering (deep YAML, huge or complex patterns, forged names) and unsafe capability directory names
+  are named and left out; `l4 status` shows the latest prompt's cut; the clarifier charges its line numbers.
+- A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
+  item `2.1` both counted; they resolve against the fix unit's own items.
+
+### Changed
+- A hold about a spec file the judge did not see or saw only in part (`the spec file …: the judge saw only …`) is a hold on the judge's view like the ones about the diff: rejecting it stops the unit with `judge_view_rejected` and never makes a fix unit.
+- Gate configuration and runner configuration now have exact definitions (the gate files at any depth, the gate and runner
+  sections of `pyproject.toml`, `setup.cfg`, `tox.ini` and `package.json`, and the scripts the gate commands run). After
+  every agent step, and after every gate run, a change to them is put back to the step's base unless the task has a
+  `[config]` or `[test-infra]` tag or a person's answer names the file (`task.config_opened`). The whole file goes back, so
+  a dependency added in the same file must be written again. A red or green step may still add a pytest marker. Runner
+  configuration is never changed in green. The verifier's step 1 checks the same rule on the commits.
+- A step that leaves a symbolic link which points outside the worktree (an absolute target or a `..` escape) fails its
+  attempt before the commit, in red, green and fix chores, unless the base held the same link.
+- New default gate globs: `pyrightconfig.json`, `pylintrc`, `.eslintignore`, `.prettierrc*`, `.prettierignore`,
+  `biome.json`, `biome.jsonc`; `.coveragerc` is runner configuration. The new key `tdd.extra_gate_config_globs` adds
+  globs without restating the defaults.
+- Per-unit directories under `$L4_CACHE` carry the repository key (`units/<key>/<fw>/<name>`). Caches start empty once
+  after the upgrade (a new `uv` cache gets the project's seed copy); the old `units/<fw>/<name>` directories can be
+  deleted by hand. A run file of the earlier `pending-unpublished` layout is published by the repository it records (its key, or the
+  project path of its CI link); any other, a local run included, is kept and named in one warning.
+- A project environment (`.venv`, `node_modules`) that an agent step or a gate changed is removed and built again by the
+  next `gates.setup`; the verifier builds its own. A project without `gates.setup` therefore builds its environment in
+  every gate: set `gates.setup`. A test gate that writes into `node_modules` other than `.cache` and `.vite` fails
+  read-only: move that command to `gates.setup`. Every agent step and every gate but `gates.setup` starts from an empty
+  package cache (read-only shared cache plus a scratch), so a test gate that needs a download setup did not make fails
+  under `gates.network: none`: move the download to `gates.setup`. The verifier downloads once per round. A dependency upgrade without a lock-file change is a notice, not a
+  violation, when a dependency manifest changed in the same step.
+- A plan merge waits for the repository's CI on H when it is running, red or unreadable. The new key
+  `yolo.merge.require_ci` (default `false`) decides only whether a hand-off commit that no CI ran on waits too. With
+  the default it is merged, after waiting up to ten minutes for a CI that may still be created (at once in a
+  repository that can start none), and `unit.merged` records `ci: not_run`; a warning goes to the plan report and to a
+  note on the merged PR or MR. A PR a person merged at another head records `ci: unknown`. A GitHub repository whose hand-off is pushed with the workflow's `GITHUB_TOKEN`
+  (which starts no runs) that wants its CI to gate the merge gives the push a token that starts runs, such as a GitHub
+  App, and sets `yolo.merge.require_ci: true`. A job red on H and on the base does not block: `unit.merged` records
+  `ci: preexisting` and the job names.
+- GitHub job names in `ci.failed` and `ci.preexisting` are `<workflow file> / <job>` (`tests.yml / build`).
+- On GitLab, a hand-off commit with no pipeline job is `ci_not_run`; it was `ci_green`.
+- A person's accept of a `judge view:` hold is bound to the head content of every file the hold covers and to the full list of
+  files the judge did not see (the hold's text names five): it is void, and the hold asked again, when that content changes. The
+  question lists every unseen file (L4-VER-046). The file list of a part prompt is capped at 200 files (then
+  `+K more files: see verification.md`, which lists them all) and the diff is read with one `git diff` (L4-VER-047). A test is
+  packed with the code it imports, a part that shows the code judges its criterion, and a part that cannot see a test cannot
+  call it inadequate. A lock file is a lock file only when its old and new names both are, and its line shows the changed lines
+  that touch a source field and the hosts they name (L4-VER-045).
+- The key `yolo.extend_by_agents` (and `yolo.review.accept_by_agents`) is read from the plan's own target branch, and only when the plan file there is the one the plan recorded; an agent that names
+  another base branch in its configuration has no key. `--extend-cost` must be finite. `l4 yolo status` lists the extensions the plan's
+  fold applied, follows the unit's answer step for an invalid, dismissed or draft answer, and describes a unit as answered only when an
+  answer is recorded (L4-YOLO-056). A rejected judge-view hold beside another unconvertible reject names both ways out.
+- `l4 yolo resume PLAN --reason TEXT --extend-…` on an **active** plan raises the limit and records `plan.extended`; it
+  resumes nothing and starts no run. Before, it was refused until the plan stopped. Without an `--extend-…` the refusal
+  names the four options, and an extension that changes no limit is refused (L4-YOLO-050).
+- Every `--extend-…` of `l4 yolo resume` is a person's decision: an agent is refused, with the command a person runs,
+  unless `yolo.extend_by_agents` is true on the base branch. Before, the rule was only written in the docs
+  (L4-YOLO-051).
+- Every implementer prompt carries each criterion's full text and the task's whole block from `tasks.md` (the enclosing
+  headings, the parent tasks' lines, the detail bullets and the `_Requirements:_` line), never cut. The rest of the
+  budget is filled in a fixed order by whole sections: conventions (at most half), the requirements narrative, the
+  design and the proposal, the sections the task names first.
+- `implementer.context_budget_tokens` rises from 24000 to 32000.
+- The clarifier's documents are chosen by the same builder, order and cut list (`clarifier@5`).
+- Step 1's declared scope reads a Kiro unit's `requirements.md` and `bugfix.md`.
+- Templates `contract@12` (conventions, the cut list), `red@11` (every listed criterion needs a new test or an earlier
+  proof) and `judge@11` (the cut-list rule, the done-tasks block; it also holds the diff in parts of `judge@10`).
+
 ## 0.4.16 (2026-10-18)
 
 ### Fixed

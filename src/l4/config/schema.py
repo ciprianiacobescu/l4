@@ -18,6 +18,7 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -171,12 +172,14 @@ class TddCfg(_Strict):
     runner_config_files: list[str] = _list(d.RUNNER_CONFIG_FILES)
     gate_config_globs: list[str] = _list(d.GATE_CONFIG_GLOBS)
     extra_test_globs: list[str] = Field(default_factory=list)  # appended to `test_globs`, whatever it holds
+    extra_gate_config_globs: list[str] = Field(default_factory=list)  # appended to `gate_config_globs`
     extra_test_support_globs: list[str] = Field(default_factory=list)  # appended to `test_support_globs`
 
     @model_validator(mode="after")
     def _merge_extras(self) -> "TddCfg":
         self.test_globs = _append_unique(self.test_globs, self.extra_test_globs)
         self.test_support_globs = _append_unique(self.test_support_globs, self.extra_test_support_globs)
+        self.gate_config_globs = _append_unique(self.gate_config_globs, self.extra_gate_config_globs)
         return self
 
 
@@ -285,9 +288,38 @@ class SandboxCfg(_Strict):
     credential_paths: dict[str, list[str]] = Field(
         default_factory=lambda: {k: list(v) for k, v in d.CREDENTIAL_PATHS.items()}
     )
+    tool_paths: list[str] = Field(default_factory=list)  # read-only into both sandbox kinds (L4-SEC-033)
+    setup_paths: list[str] = Field(default_factory=list)  # read-only into the gate sandbox of a gates.setup command
     user: str = "l4-sandbox"
     image: str | None = None
     allow_none: bool = False
+
+    @field_validator("tool_paths", "setup_paths")
+    @classmethod
+    def _home_paths_hold_no_login(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        """Each entry is `~/...` or absolute, is not `/` or the home, and neither equals, contains nor lies inside any
+        adapter's login path, the built-in or the configured one: a tool bind must never hand over a login. Compared
+        as text against a placeholder home, so no environment is needed; what needs one (the runner cache, an
+        absolute entry that reaches a login once `~` is expanded) is checked in `l4.sandbox.home` (L4-SEC-033)."""
+        placeholder = PurePosixPath("/l4-placeholder-home")
+
+        def expand(raw: str) -> PurePosixPath:
+            return placeholder / raw[2:] if raw.startswith("~/") else PurePosixPath(raw)
+
+        logins = [
+            expand(p)
+            for paths in {**d.CREDENTIAL_PATHS, **(info.data.get("credential_paths") or {})}.values()
+            for p in paths
+        ]
+        for raw in value:
+            if not (raw.startswith("~/") or PurePosixPath(raw).is_absolute()):
+                raise ValueFree("every entry must start with ~/ or be absolute")
+            path = expand(raw)
+            if raw.rstrip("/") in ("", "~") or path in (PurePosixPath("/"), placeholder) or path in placeholder.parents:
+                raise ValueFree("an entry may not be / or the home")
+            if any(path == login or path in login.parents or login in path.parents for login in logins):
+                raise ValueFree("an entry may not be, contain or lie inside a login path")
+        return value
 
     @field_validator("credential_paths")
     @classmethod
@@ -422,6 +454,8 @@ class Profile(_Strict):
     min_version: ToolVersion | None = None
     min_remaining_percent: float | None = Field(None, ge=0, le=100)  # overrides availability.min_remaining_percent
     max_concurrency: int | None = Field(default=None, ge=1)
+    context_budget_tokens: int | None = Field(default=None, ge=1000)  # this profile's steps: replaces the implementer's
+    context_window: int | None = Field(default=None, ge=1000)  # the model's window: caps the whole prompt at 60 % of it
     options: dict[str, Any] = Field(default_factory=dict)
     vendor: str | None = None
     base_url: str | None = None
@@ -479,6 +513,7 @@ class RolesCfg(_Strict):
     judges: list[str] = Field(default_factory=list)
     s1_judge: list[str] = Field(default_factory=list)
     spec_writer: list[str] = Field(default_factory=list)
+    delegate: list[str] = Field(default_factory=list)  # optional (L4-AVL-010): answers the questions of units in scope
 
 
 class AvailabilityCfg(_Strict):
@@ -501,7 +536,8 @@ class AvailabilityCfg(_Strict):
 
 class ImplementerCfg(_Strict):
     task_grouping: Literal["task", "parent"] = "task"
-    context_budget_tokens: int = 24000
+    context_budget_tokens: int = 32000  # tokens of 4 characters (L4-IMP-053)
+    include_agents_md: bool = False  # the repository root's AGENTS.md joins the prompt as a convention (L4-IMP-051)
     max_task_attempts: int = Field(default=3, ge=1)
     escalate_after: int = Field(default=2, ge=0)  # failed attempts of a phase on one profile before the next (0: off)
     result_repair_attempts: int = Field(default=1, ge=0)
@@ -615,7 +651,9 @@ class VerifierCfg(_Strict):
     evidence: EvidenceCfg = Field(default_factory=EvidenceCfg)
     panel: PanelCfg = Field(default_factory=PanelCfg)
     fix_minor_findings: bool = False
+    judge_context_budget_tokens: int = Field(default=48000, ge=1000)  # the step-9 judge's spec text (L4-KSP-014)
     secret_scan: Literal["gitleaks", "none"] = "gitleaks"
+    test_awareness_allow: list[str] = Field(default_factory=list)  # globs of production files; read at the base
 
 
 class GithubAppCfg(_Strict):
@@ -797,6 +835,7 @@ class YoloMergeCfg(_Strict):
 
     method: Literal["squash", "fast-forward"] = "squash"
     delete_branches: bool = True
+    require_ci: bool = False  # true: a hand-off commit that no CI ran on waits for one (L4-YOLO-043)
 
 
 class YoloCfg(_Strict):
@@ -806,6 +845,7 @@ class YoloCfg(_Strict):
     review: YoloReviewCfg = Field(default_factory=YoloReviewCfg)
     merge: YoloMergeCfg = Field(default_factory=YoloMergeCfg)
     hold: list[str] = Field(default_factory=list)
+    extend_by_agents: bool = False  # an agent may raise a plan's limits with `l4 yolo resume --extend-…` (L4-YOLO-051)
 
     @field_validator("hold")
     @classmethod
@@ -828,6 +868,35 @@ class YoloCfg(_Strict):
                         f"yolo.profiles.{name}: {kind!r} is not a gate kind "
                         f"(one of {', '.join(YOLO_GATE_KINDS)}, or extra:<name>)"
                     )
+        return value
+
+
+DELEGATE_KINDS = ("technical", "product", "ambiguous", "harness", "verdict")
+DELEGATE_MIN_TIMEOUT_S = 60
+
+
+class DelegateCfg(_Strict):
+    """The delegate that answers the questions of units in scope (delegate-answers L4-DLG-001, L4-DLG-009; D1, D10).
+    Read from the base branch only (`l4.delegate.settings.delegate_settings`), never from a unit branch."""
+
+    enabled: bool = False
+    scope: Literal["yolo", "all"] = "yolo"
+    kinds: list[Literal["technical", "product", "ambiguous", "harness", "verdict"]] = _list(DELEGATE_KINDS)
+    independence: Literal["model", "profile"] = "model"
+    unfreeze: bool = False  # true: the delegate may accept the clarifier's suggestion that unfreezes a file (D15)
+    max_attempts_per_question: int = Field(default=2, ge=1)
+    max_answers_per_task: int = Field(default=3, ge=1)
+    max_questions_per_run: int = Field(default=5, ge=1)
+    max_cost_usd_per_answer: float = Field(default=3.0, gt=0)
+    max_cost_usd_per_unit: float = Field(default=15.0, gt=0)
+    plan_cost_share: float = Field(default=0.25, gt=0, le=1)
+    timeout: Duration = "15m"
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout(cls, value: str) -> str:
+        if duration_seconds(value) < DELEGATE_MIN_TIMEOUT_S:
+            raise ValueFree("delegate.timeout must be at least 1m")
         return value
 
 
@@ -855,6 +924,7 @@ class L4Config(_Strict):
     budgets: BudgetsCfg = Field(default_factory=BudgetsCfg)
     observability: ObservabilityCfg = Field(default_factory=ObservabilityCfg)
     yolo: YoloCfg = Field(default_factory=YoloCfg)
+    delegate: DelegateCfg = Field(default_factory=DelegateCfg)
 
     @model_validator(mode="after")
     def _no_credential_in_the_forge_token_variable(self) -> "L4Config":

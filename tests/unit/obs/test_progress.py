@@ -427,3 +427,18 @@ def test_the_artefacts_line_says_when_nothing_was_uploaded(caplog):
     first, second = (r.getMessage() for r in caplog.records if "artefacts:" in r.getMessage())
     assert first.endswith("carry the excerpts)") and "(CI: job artifacts)" not in first
     assert second.endswith("(CI: job artifacts)")
+
+
+def test_an_unfreeze_by_the_delegate_is_labelled(console):  # delegate-answers 6.2, L4-DLG-014
+    trace = ProgressTrace()
+    trace(
+        event(
+            "task.unfrozen", task="1.1", paths=["tests/t.py"], reason="delegate_answer", question="Q-008",
+            by="delegate", profile="delegate-opus", model="claude-opus-5-5",
+        )
+    )  # fmt: skip
+    assert (
+        console.getvalue()
+        .splitlines()[0]
+        .endswith("task 1.1 unfrozen by Q-008 (delegate_override, claude-opus-5-5): tests/t.py")
+    )

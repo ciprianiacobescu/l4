@@ -130,3 +130,114 @@ def test_spec_004_lists_pending_leaves_only_not_finished_history(make_ctx):
     kiro(ctx.repo, "hist", "- [x] 1.1 done long ago\n- [ ] 1.2 pending\n")
     result = spec.SPEC_004.run(ctx)
     assert result.status == "fail" and "kiro:hist: 1.2" in result.message and "1.1" not in result.message
+
+
+# -- the next task's prompt would cut a source (kiro-prompt-context, L4-IMP-054; SCN-IMP-289) ----------
+
+
+def probe_ctx(make_ctx, *, long: bool):
+    from .._kiro_probe import probe_tree
+
+    cfg = L4Config.model_validate({"implementer": {"context_budget_tokens": 24000}})
+    ctx, _ = make_ctx(cfg=cfg)
+    probe_tree(ctx.repo, long=long)
+    return ctx
+
+
+def test_spec_004_warns_when_the_next_tasks_prompt_would_cut_a_source(make_ctx):
+    import re
+
+    result = spec.SPEC_004.run(probe_ctx(make_ctx, long=True))
+    assert result.status == "fail"  # a warning: the check is of severity `warn`
+    assert re.search(r"kiro:tip-calc task 1: design\.md \d+ of 125492 characters shown", result.message)
+    assert result.fix_hint == "shorten the file, or raise implementer.context_budget_tokens"
+
+
+def test_spec_004_adds_nothing_when_the_prompt_is_not_cut(make_ctx):
+    result = spec.SPEC_004.run(probe_ctx(make_ctx, long=False))
+    assert result.status == "pass" and "characters shown" not in result.message
+
+
+def test_spec_004_reports_the_missing_links_and_the_cut_together(make_ctx):
+    ctx = probe_ctx(make_ctx, long=True)
+    (ctx.repo / ".kiro" / "specs" / "tip-calc" / "tasks.md").write_text("- [ ] 1. Implement\n  - [ ] 1.1 do it\n")
+    result = spec.SPEC_004.run(ctx)
+    assert "leaves without `_Requirements:_`" in result.message and "task 1.1: design.md" in result.message
+
+
+# -- review of kiro-prompt-context (minors 6 and 7, the model window) ---------------------------------------------
+
+
+def openspec_unit(repo: Path) -> None:
+    unit = repo / "openspec" / "changes" / "add-x"
+    (unit / "specs" / "cap").mkdir(parents=True)
+    (unit / "specs" / "cap" / "spec.md").write_text(
+        "## ADDED Requirements\n\n### Requirement: It works\nIt SHALL.\n\n"
+        "#### Scenario: Works\n- **WHEN** a\n- **THEN** b\n"
+    )
+    (unit / "tasks.md").write_text("## 1. Do\n\n- [ ] 1.1 Do it\n")
+    (unit / "proposal.md").write_text(
+        "## Why\n" + "".join(f"line {n} of a long proposal text here\n" for n in range(2000))
+    )
+
+
+def test_spec_004_warns_about_a_cut_of_an_openspec_unit_too(make_ctx):
+    """Minor 7: L4-IMP-054 covers every unit, not Kiro units only."""
+    cfg = L4Config.model_validate({"implementer": {"context_budget_tokens": 1500}})
+    ctx, _ = make_ctx(cfg=cfg)
+    openspec_unit(ctx.repo)
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail" and "openspec:add-x task 1.1: proposal.md" in result.message
+    assert "characters shown" in result.message
+
+
+def test_the_cut_advice_names_the_key_that_set_the_budget(make_ctx):
+    """Minor 6: a profile's own budget is the one to raise."""
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_budget_tokens": 1500}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    openspec_unit(ctx.repo)
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail" and "profiles.local.context_budget_tokens" in (result.fix_hint or "")
+    assert "implementer.context_budget_tokens" not in (result.fix_hint or "")
+
+
+def test_spec_004_warns_when_a_configured_budget_exceeds_the_models_window_cap(make_ctx):
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_window": 8000}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    result = spec.SPEC_004.run(ctx)
+    assert result.status == "fail"
+    assert "profile local: context_budget_tokens 32000 exceeds 60% of its model window (8000 tokens)" in result.message
+    fits = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_window": 80000}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx2, _ = make_ctx(cfg=fits)
+    assert "model window" not in spec.SPEC_004.run(ctx2).message
+
+
+def test_spec_004_warns_when_the_never_cut_parts_exceed_the_window(make_ctx):
+    cfg = L4Config.model_validate(
+        {
+            "profiles": {"local": {"adapter": "fake", "vendor": "fakeco", "context_window": 1000}},
+            "roles": {"implementer": ["local"]},
+        }
+    )
+    ctx, _ = make_ctx(cfg=cfg)
+    openspec_unit(ctx.repo)
+    result = spec.SPEC_004.run(ctx)
+    assert (
+        result.status == "fail"
+        and "openspec:add-x task 1.1: the criteria, the task and the contract alone" in result.message
+    )

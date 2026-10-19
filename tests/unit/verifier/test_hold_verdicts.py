@@ -12,6 +12,8 @@ from l4.state.ledger import LedgerEvent
 from l4.verifier.fixunit import plan_fix_unit
 from l4.verifier.types import Finding, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.verdicts import (
+    JUDGE_VIEW_REJECTED_TITLE,
+    LEGACY_LENGTH_HOLD,
     hold_covers,
     hold_id,
     hold_kind,
@@ -303,19 +305,25 @@ def _plan(hold: str, reason: str):
     return finding, v, plan_fix_unit(family, r, [v], ordinal=1, fix_minor=False)
 
 
+COVERAGE_REASON = (
+    "Install the coverage plugin in the project. WHEN the coverage plugin is not installed "
+    "THEN the gate SHALL report the missing plugin, not only that coverage was not measured"
+)
+
+
 def test_a_rejected_hold_of_another_kind_with_a_scenario_becomes_a_fix_task():
-    finding, v, plan = _plan(LONG_DIFF, SCENARIO_REASON)
-    assert finding.source == "deterministic" and finding.blocking and finding.id == hold_id(LONG_DIFF)
+    finding, v, plan = _plan(NOT_MEASURED, COVERAGE_REASON)
+    assert finding.source == "deterministic" and finding.blocking and finding.id == hold_id(NOT_MEASURED)
     [group] = plan.groups
     assert plan.consumed == [v.question] and plan.not_converted == [] and not group.chore
     assert group.ids == (finding.id,) and "Decided by human in Q-004" in group.detail
     assert plan.delta is not None
     [scenario] = plan.delta.requirements[0].scenarios
-    assert scenario.text.startswith("- **WHEN** the diff is longer than 120000 characters\n- **THEN** the judge SHALL")
+    assert scenario.text.startswith("- **WHEN** the coverage plugin is not installed\n- **THEN** the gate SHALL")
 
 
 def test_a_rejected_hold_of_another_kind_without_a_scenario_still_escalates():
-    finding, _, plan = _plan(LONG_DIFF, "split the unit in two")
+    finding, _, plan = _plan(NOT_MEASURED, "install coverage in CI")
     assert finding.source == "human"
     assert plan.groups == [] and plan.consumed == [] and len(plan.not_converted) == 1
 
@@ -345,7 +353,7 @@ def test_the_question_of_a_scope_or_coverage_hold_promises_a_fix_unit(tmp_path, 
     assert "a rejected hold is fixed by a fix unit" in _question_text(tmp_path, hold)
 
 
-@pytest.mark.parametrize("hold", [LONG_DIFF, NOT_MEASURED])
+@pytest.mark.parametrize("hold", [NOT_MEASURED])
 def test_the_question_of_any_other_hold_asks_for_a_scenario_and_promises_nothing(tmp_path, hold):
     text = _question_text(tmp_path, hold)
     assert "fixed by a fix unit" not in text
@@ -463,3 +471,115 @@ def test_a_replaced_reject_becomes_an_accept_that_clears_the_fail(tmp_path):
     accepted = effective_verdicts(sink.events, current)
     assert accepted[hid].decision == "accept" and accepted[hid].reason == "the fix is in"
     assert settle_holds([], [LONG_DIFF], accepted) == [] and unresolved_holds([LONG_DIFF], accepted) == []
+
+
+# ---- holds on the judge's view (L4-VER-043, L4-VER-044) ---------------------------------------------------------
+
+CUT_FILE = (
+    "judge view: the diff of `data/seed.json` is longer than one part (120000 characters): the judge saw only its start"
+)
+UNSEEN = "judge view: the diff needs more than 8 parts of 120000 characters: the judge did not see `a.py`, `b.py`"
+WHEN_THEN_REASON = "WHEN the diff is long THEN the judge SHALL see every file"
+
+
+def test_the_0_4_14_length_text_is_the_legacy_judge_view_hold():
+    assert LEGACY_LENGTH_HOLD == LONG_DIFF
+
+
+@pytest.mark.parametrize("hold", [CUT_FILE, UNSEEN, LONG_DIFF])
+def test_scn_ver_137_a_hold_on_the_judge_view_has_its_own_kind(hold):
+    assert hold_kind(hold) == "judge_view"
+
+
+def test_the_subjects_of_a_judge_view_hold_are_its_backticked_paths():
+    assert hold_subjects(CUT_FILE) == ("data/seed.json",)
+    assert hold_subjects(UNSEEN) == ("a.py", "b.py")
+    assert hold_subjects(LONG_DIFF) == ()
+
+
+@pytest.mark.parametrize("hold", [CUT_FILE, UNSEEN, LONG_DIFF])
+def test_scn_ver_137_the_question_of_a_judge_view_hold_says_what_accept_and_reject_do(tmp_path, hold):
+    text = _question_text(tmp_path, hold)
+    assert "checked those files yourself" in text and "A fix unit cannot shrink the diff" in text
+    assert "judge_view_rejected" in text and "split the change into smaller units" in text
+    assert "WHEN" not in text and "fixed by a fix unit" not in text and "a fix unit can be made" not in text
+
+
+@pytest.mark.parametrize("hold", [CUT_FILE, LONG_DIFF])
+def test_scn_ver_138_scn_ver_139_a_rejected_judge_view_hold_is_a_human_finding_no_task_comes_from(hold):
+    from l4.verifier.fixloop import _no_task_cause
+
+    finding, v, plan = _plan(hold, WHEN_THEN_REASON)
+    assert finding.source == "human" and finding.severity is Severity.MAJOR and finding.id == hold_id(hold)
+    assert finding.title == JUDGE_VIEW_REJECTED_TITLE == "Rejected hold: the judge could not see all of the diff"
+    assert "A fix unit cannot shrink the diff" in finding.detail and WHEN_THEN_REASON in finding.detail
+    assert plan.groups == [] and plan.delta is None and plan.consumed == []
+    assert len(plan.not_converted) == 1 and "a fix unit cannot shrink the diff" in plan.not_converted[0]
+    assert _no_task_cause([finding]) == (
+        "a person rejected a hold on the judge's view of the diff: a fix unit cannot shrink the diff",
+        "judge_view_rejected",
+    )
+
+
+def test_a_finding_of_another_title_keeps_the_no_convertible_finding_cause():
+    from l4.verifier.fixloop import _no_task_cause
+
+    other = Finding(Severity.MAJOR, "Rejected hold: something else", "d", "human", id="H-1")
+    assert _no_task_cause([other]) == (
+        "no finding of this round can be converted into a fix task",
+        "no_convertible_finding",
+    )
+    assert _no_task_cause([]) == ("no finding of this round can be converted into a fix task", "no_convertible_finding")
+
+
+def test_a_rejected_judge_view_hold_without_a_reason_is_the_same_human_finding():
+    finding, _, plan = _plan(CUT_FILE, "")
+    assert finding.source == "human" and finding.title == JUDGE_VIEW_REJECTED_TITLE and plan.groups == []
+
+
+def test_a_feedback_only_plan_consumes_the_rejected_judge_view_question():
+    v = verdict(CUT_FILE, "reject", WHEN_THEN_REASON)
+    [human] = settle_holds([], [CUT_FILE], {v.target: v})
+    r = VerifyResult(UNIT, 3, Verdict.FAIL, "b", "h")
+    r.findings = [human, _feedback_finding()]
+    plan = plan_fix_unit([], r, [v], ordinal=1, fix_minor=False)
+    assert plan.feedback_only and len(plan.not_converted) == 1 and plan.consumed == ["Q-004"]
+
+
+def test_review_n7_a_judge_view_reject_beside_another_unconvertible_reject_names_each_way_out():
+    from l4.state.next_step import feedback_way_out, judge_view_way_out, way_out
+    from l4.verifier.fixloop import _no_task_cause
+
+    view = Finding(Severity.MAJOR, JUDGE_VIEW_REJECTED_TITLE, "d", "human", id="H-1")
+    other = Finding(Severity.MAJOR, "Rejected hold: diff coverage: not measured", "d", "human", id="H-2")
+    why, code = _no_task_cause([view, other])
+    assert code == "no_convertible_finding_and_judge_view_rejected"
+    assert "judge's view" in why and "cannot be converted" in why
+    both = way_out("openspec:x", code)
+    assert both is not None and feedback_way_out("openspec:x") in both and judge_view_way_out("openspec:x") in both
+    assert _no_task_cause([view])[1] == "judge_view_rejected"  # alone: its own way out only
+    assert _no_task_cause([other])[1] == "no_convertible_finding"
+
+
+# ---- holds on the judge's view of the spec (L4-KSP-014, L4-VER-043, L4-VER-044) ------------------------
+
+SPEC_HOLDS = [
+    "the spec file .kiro/specs/cart/design.md is larger than 262144 bytes: the judge saw only its start",
+    "the spec file a/requirements.md is a symlink: the judge did not see it",
+    "the spec file openspec/changes/cart/design.md was cut to fit the judge's budget: the judge saw only part of it",
+]
+
+
+@pytest.mark.parametrize("hold", SPEC_HOLDS)
+def test_a_hold_on_a_spec_file_the_judge_did_not_see_is_a_judge_view_hold(hold):
+    assert hold_kind(hold) == "judge_view"
+
+
+@pytest.mark.parametrize("hold", SPEC_HOLDS)
+def test_a_rejected_hold_on_a_spec_file_never_becomes_a_fix_unit(hold):
+    from l4.verifier.fixloop import _no_task_cause
+
+    finding, v, plan = _plan(hold, WHEN_THEN_REASON)
+    assert finding.source == "human" and finding.title == JUDGE_VIEW_REJECTED_TITLE
+    assert plan.groups == [] and plan.delta is None and plan.consumed == []
+    assert _no_task_cause([finding])[1] == "judge_view_rejected"

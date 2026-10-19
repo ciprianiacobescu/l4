@@ -61,7 +61,7 @@ def test_scn_ver_72_the_prompt_lists_only_the_already_satisfied_task():
     refs = satisfied_refs(TASKS, events)
     assert refs == [SatisfiedRef("3.1", TEXT, (("C-00000001", ("tests.test_a::t1",)),))]
     prompt = prompt_of(*refs)
-    assert prompt.version == "judge@9" and judge.PROMPT_VERSION == 9 and prompt.satisfied_ids == ("3.1",)
+    assert prompt.version == "judge@11" and judge.PROMPT_VERSION == 11 and prompt.satisfied_ids == ("3.1",)
     assert "## Tasks ticked as already satisfied (answer each in the reply's satisfied)" in prompt.user
     block = prompt.user.split('<l4:data kind="satisfied">')[1].split("</l4:data>")[0]
     assert "### Task 3.1" in block and TEXT in block

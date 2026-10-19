@@ -10,6 +10,7 @@ Other documents:
 - [quickstart.md](quickstart.md) tells you how to adopt the harness.
 - [feedback.md](feedback.md) tells you how to ask for changes to the code of a unit.
 - [state-diagram.md](state-diagram.md) shows all the phase transitions.
+- [control-loop.md](control-loop.md) explains why you run `l4 retry` on the base branch, and how the unit branch runs again.
 
 ## Contents
 
@@ -219,7 +220,7 @@ The codes of `halt_reason` are:
 
 | State | Codes |
 |---|---|
-| `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `fix_records` |
+| `halted` | `max_task_attempts`, `unselectable_task`, `baseline_failed`, `secret_in_push`, `planted_link`, `fix_records` |
 | `escalated` | `fix_rounds_exhausted`, `no_convertible_finding`, `no_fix_units`, `fix_unit_not_created`, `feedback_rounds_exhausted`, `same_failure`, `verifier_errors` |
 
 ### 4.1 Read the note on the PR
@@ -656,6 +657,9 @@ and `l4 restart` start a run for you, unless you add `--no-run`.
 
 - A check that L4 could not decide (a **harness question**, kind `harness`). The agent was not charged: see the
   procedure below.
+- The **delegate** is on (`delegate.enabled: true` on `<base>`) and it escalated a question to a person: see
+  [the procedure for the delegate](#procedure-the-delegate-answered-or-escalated). Without the delegate, or while it has
+  not yet looked at a question, the unit waits for you as above.
 
 A question of a fix unit does not move the unit to `awaiting_human`. The unit stays in `fixing` with exit 11 and the
 labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you: a human answer (fix unit `<name>`)``.
@@ -711,6 +715,72 @@ the fetch (run the command again).
 > runs every other write. Or set `clarifier.answer_by_agents: true` in `.l4/config.yaml` on `<base>`. The key on the
 > unit branch does not count.
 
+**Procedure: the delegate answered or escalated**
+
+The delegate is a strong model that the project configures (`delegate:` and `roles.delegate` in `.l4/config.yaml`). It
+is **off unless the base branch turns it on** (`delegate.enabled: true`), and it acts only on units in scope: with the
+default `delegate.scope: yolo`, the current unit of an active or waiting plan and its fix unit; with `scope: all` also a
+unit in no plan file while no plan is active. A held unit, a unit of a stopped or cancelled plan and a finished unit are
+never in scope. It runs at the end of the run that parks the unit (after the clarifier), or in a later run through the
+planner action `delegate`, and it asks once per question, oldest first. It reads the repository read-only, checks what it
+claims against the unit head, and writes its answer with the same edit and commit as `l4 questions`. It never answers a
+question twice.
+
+1. Read what it did. `l4 status --unit <unit>` prints one `Delegate:` line per question it decided:
+
+   ```
+   Delegate: Q-003 answered by the delegate (claude-opus-5-5 via claude-code, $0.42)
+   Delegate: Q-004 escalated by the delegate: no project document decides this
+   Delegate: Q-005 deferred until 10:30
+   ```
+
+   `l4 status` gives the unit the REASON `Q-004 needs a person (the delegate escalated)`, and `l4 yolo status` prints
+   `delegate: 1 answered, 1 escalated (Q-004: <reason>)` and the delegate's cost against its share of the plan's cost.
+   On the branch, `questions.md` has a line `Answered by: the delegate (<model> via <cli>)` or `Escalated by: the
+   delegate (<model> via <cli>): <reason>` under the Status of the question. The commit of an answer has the subject of
+   `l4 questions`, the body line `By: delegate (<model> via <cli>; profile <name>)` and `Via: l4 delegate`. The sticky
+   note lists the answers under `Answered by the delegate`, and the escalations under `Needs a person (the delegate
+   escalated)` with the reason.
+2. **An answered question.** Nothing is waiting for you. The delegate pushed the answer and asked the forge to start the
+   next run on `<base>`; that run reads the answer as it reads a person's, and the unit goes on. `l4 plan` shows
+   `answers submitted: Q-NNN`. The implementer sees the answer in a block with `by="delegate"`. Read the answer and the
+   `checked` claims in the ledger (`l4 status --unit <unit> --events --type delegate.result`). If it is wrong, change the
+   answer by hand before the next run reads it ([the hand edit](#procedure-the-hand-edit)): the answer is then yours.
+   After a run read it, a changed answer starts a fix unit "apply clarification Q-NNN".
+3. **A verdict or a harness question the delegate accepted.** The accept is a model's decision and it is labelled so
+   everywhere: `human.verdict{by: delegate}`, proofs with `via: delegate_override`, and `accepted by the delegate
+   (<model> via <cli>) through Q-NNN` in the judge's view, `verification.md`, the PR note and `l4 yolo report`. A
+   person's calibration label is never made from it. Outside a plan the accept only moves the unit on (the next round,
+   then `in_review`): **nothing is merged**. In an active plan with `merge: auto` the plan's guarded merge applies as for
+   a person's accept (L4-YOLO-008). Look at `verification.md` before a merge you do not want.
+4. **An escalated question.** The question stays `open`. The PR has the label `l4:needs-person` (and `l4:needs-answers`),
+   and a plan waits with `unit_awaiting_human`, naming the question, and starts no next run. Read the reason on the
+   `Escalated by:` line. Common reasons: `no project document decides this` (the question needs a decision of the
+   project), `no independent delegate` (every profile asked or judged the question: see `delegate.independence`),
+   `delegate answer limit of task <k> reached (3)`, `delegate attempts used (2)`, a cost cap (the plan's share, the
+   unit cap), `the answer would unfreeze <path> of task <k> (delegate.unfreeze is false)`, `checked <path:line> does
+   not resolve` (the reply is discarded), `no profile is configured for it under roles`, a missing login or CLI of every
+   delegate profile. Answer it like any question, with the command of this section:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "<your answer>"
+   ```
+
+   The next run records `question.answered{by: human}` and the label `l4:needs-person` goes when no escalated question of
+   the unit is open. The plan continues by itself at the run that reads the answer.
+5. **A deferred question** (every delegate profile is cooling, a call timed out, or the job had no time left). The unit
+   stays in `awaiting_human` (exit 11) without the label `l4:needs-person`, and the delegate asks again at the first run
+   after the time shown. After `delegate.max_attempts_per_question` (2) calls and deferrals in all, it escalates. It
+   never parks the unit in `waiting_capacity`.
+6. **To turn the delegate off**, set `delegate.enabled: false` in `.l4/config.yaml` on `<base>` (a key on the unit
+   branch does not count). Answers it wrote stay; an escalated question stays open for you. With `roles.delegate: []`
+   every question escalates with `no profile is configured for it under roles`. To keep it on but narrower, set
+   `delegate.kinds` (for example `[technical]`), `delegate.scope: yolo`, or the limits (`max_answers_per_task`,
+   `max_cost_usd_per_unit`, `plan_cost_share`).
+
+A line `By: delegate` that a person or an agent typed into a commit is not believed: the harness counts it as an agent's
+answer unless its own ledger records the delegate's answer. An agent never writes it.
+
 **Procedure: the hand edit**
 
 The hand edit is the other way. Use it to change a question that the command refuses, or when you cannot run the
@@ -763,9 +833,16 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - To tell the fix what is wrong, end the reason with a sentence `WHEN … THEN …`. Write `WHEN` and `THEN` in capital
   letters. Everything after `THEN` to the end of the answer is the THEN clause. The fix must make the scenario true.
   The scenario is required for a rejected finding that has no criterion, and for a rejected hold of any kind other
-  than scope or coverage (for example `the diff is longer than 120000 characters`). That hold becomes a behaviour
+  than scope, coverage or judge view (for example `diff coverage: not measured: …`). That hold becomes a behaviour
   finding with the scenario as its task. Without the scenario the unit escalates, and the question of such a hold
   says so: it does not promise a fix unit.
+- A hold `judge view: …` (harness 0.4.16 and later) says the judge could not see all of the diff: one file longer than
+  one part (120000 characters), or a diff that needs more than 8 parts. A diff of several files is judged in parts, so
+  most large diffs raise no hold; lock files (`uv.lock`, `package-lock.json`, …) are one line each and never raise
+  one. Answer `accept` when you checked the files the hold names yourself; the question lists every unseen file (the hold's
+  text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
+  (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
+  `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
 - Before you reject, make sure that the criterion id is the one that you mean. `verification.md` shows which
   requirement each id is.
 - A finding `task <key> is ticked as already satisfied, but its text is not done` (harness 0.4.8 and later): the
@@ -826,6 +903,7 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 | ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | `unselectable_task` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
 | `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | `baseline_failed` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
 | `secret in the outgoing commits, push blocked: <path> (<kind>)` | `secret_in_push` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. |
+| `task <k>: a gate run put a symbolic link at <path>[, …] (on the path of a file the harness restores); …` | `planted_link` | A test run replaced a directory or a file of the worktree with a symbolic link. The harness removed the link, wrote nothing through it, discarded the attempt and halted the unit. | Read `breaker.tripped` in the run ledger: `links` names each link and where it pointed (`points_to`). Find the test that makes links in the worktree and have it make them under its own temporary directory (`tmp_path`). Push the correction. |
 | `<unit> is fixing but no fix unit is open`, or `the fix unit <x> is not a fix unit of <unit>` | `fix_records` | The fix records do not agree. | Report it as a harness defect. |
 
 > **CAUTION:** If you do not correct the cause, the unit halts again in the next run.
@@ -833,6 +911,18 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > **NOTE:** For a secret, the run discards its commits that were not pushed. The commits hold the secret. The run then
 > pushes the halt alone, with no code. The remote branch gets no commit with the secret from this run. If the secret
 > comes from the agent, it can come back.
+
+> **NOTE:** After `planted_link`, the worktree is clean: the link is gone, the files the harness restores hold their
+> content from before the test run, and nothing was written outside the worktree. The halt is a stop for a person, not
+> an attempt to retry: the agent's test or code did something a test never needs. A harness restore that fails without a
+> link (`restore failed`) only fails the attempt, and the agent is told in the next prompt.
+
+> **NOTE:** A configuration file that the harness put back is not a halt. The step's `guard.violation` has
+> `rule: "gate configuration"` or `"runner configuration"`, the `path` and the `sections` that changed, and the whole file
+> went back to the step's base (a dependency added in the same file must be written again). To allow the change for one
+> task, write a `[config]` tag (gate configuration) or a `[test-infra]` tag (gate and runner configuration) in the task
+> title, or answer a question of the task with an answer that names the file (`task.config_opened` records it). Runner
+> configuration is never allowed in green. Adding a pytest marker needs none of this.
 
 > **NOTE:** A push that changes the unit folder (the spec or `tasks.md`) sends a halted unit to `implementing` at the
 > next run ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). A push that changes only other files does not
@@ -873,7 +963,8 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > halts as in 0.4.3. `l4 doctor` (CFG-009) warns when the key is not below `max_task_attempts`, or when two profiles run
 > the same model. The key needs harness 0.4.4: move the pin first, because the config schema is strict.
 
-Retry the unit with the command or with the label. Both give the unit new task attempts.
+Retry the unit with the command or with the label. Both give the unit new task attempts. You run the command from a
+clone on `<base>`, and not on the unit branch: [control-loop.md](control-loop.md) tells why, and what a retry keeps.
 
 **The command: `l4 retry`**
 
@@ -986,7 +1077,7 @@ message tells you the correct flag. A retry has no such rule.
 #### 7.3.1 Escalated with no convertible finding
 
 Cause `no_convertible_finding`. The round failed on a finding of a person that no fix task can be derived from: for
-example a rejected hold (`the diff is longer than 120000 characters`) whose reason has no `WHEN … THEN …`. `l4 status
+example a rejected hold (`diff coverage: not measured: …`) whose reason has no `WHEN … THEN …`. `l4 status
 --unit <unit>` ends with `Next:` and names the way out. **A retry alone repeats the same verdict.**
 
 1. Read `verification.md` and the `not converted` lines. Decide what the rejection asks for in the code.
@@ -1013,6 +1104,55 @@ example a rejected hold (`the diff is longer than 120000 characters`) whose reas
    refuses an answered question (exit 2) and its `Fix:` line names the flag. A clarification answer cannot be replaced
    this way (L4-QMD-006: change it by hand). An agent may not do it unless `clarifier.answer_by_agents` is true.
    Then retry the unit (step 3).
+
+#### 7.3.2 Escalated by a test or support-file blocker of step 1
+
+Step 1 (integrity) fails the unit, and the same finding comes back in every fix round, when a harness commit changed the
+tests it must not touch. `verification.md` lists the test as `<path>::<name> (<why>)` under `## Findings`. A fix unit
+cannot restore a test (the test-path freeze), so the unit escalates after the repeated finding.
+
+| Finding | What it means | What to do |
+|---|---|---|
+| `a pre-existing test was changed` | A test that exists at the base was changed or bound again by a harness commit: its body, decorators or parametrisation, a fixture, helper, constant or mark it uses in its file, or a second `def` of its name. | Restore the test on the unit branch in your own commit: `git checkout <base> -- <path>`. If the change is wanted, make it in your own commit after the restore (a person's change is listed, not blocked). |
+| `a pre-existing test was deleted` | A test that exists at the base is gone, and no test with the same definition appears under another name or file. | The same restore. A test that moved with its definition is not deleted. |
+| `a red step changed a test that an earlier step wrote` | A later red commit changed a test that an earlier task of the unit wrote. | The same restore, from the red commit of the earlier task: `git checkout <sha> -- <path>`. |
+| `the test report was altered` | The JUnit report of a gate run disagrees with the record the harness's pytest plugin kept of what pytest judged: a pass the record does not hold, or a failure the report no longer shows, or an empty or missing record under a pytest report (`(no outcome record)`). The finding lists the test ids. Something rewrote the report after the run (an `atexit` hook, `os._exit`, a session-end hook). | Remove the code that touches the report (`l4 doctor` and the content scan name `atexit.register`, `os._exit` and session-end hooks in support files). A runner without the plugin (Go, TypeScript) is not checked. The content scan also names `l4_trace`, `_OUTCOME_FD`, `L4_OUTCOME_FILE`, `config.option.xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus` / `.xmlpath`. |
+| `production code reacts to the test run` | A line of the unit's production diff (neither test nor support) names `.l4-out`, a configured report path, an `L4_*` or `PYTEST_*` variable: code that behaves differently while the verifier's run is going. Lines such as `"pytest" in sys.modules`, `import pytest`, `atexit.register` or a `sys.argv` check for pytest are only listed for the judge. | Remove the line. Production code does not look for the test run. Only reads of `L4_*`/`PYTEST_*` variables and names of `.l4-out` or the report path count (comments and docstrings do not; an xdist worker variable is fine). A repository whose production code legitimately names these (the harness on itself, a tool that writes `.l4-out`) lists the paths in `verifier.test_awareness_allow` in `.l4/config.yaml` **on the base branch** (a key added on the unit branch does not count); a match there is listed for the judge under the allowing glob instead of blocking, and `l4 doctor` (CFG-010) shows the list. |
+| `a construct that can change what the tests report`, with `patches <symbol>, which the unit changed, for every test` | A test-support file (`conftest.py`, a fixture file, a helper) patches code the unit changed in module-level code or in an autouse fixture. | Remove the patch, or move it into a fixture that a test requests by name. A fixture a test requests is listed under `## Fixtures that patch the unit's code when a test requests them`, not blocked. |
+
+| `a pre-existing test fails on the unit's code` | The gate ran at head with every test and support file the unit added or changed at its base version (an added one set aside), and a test that passed at the base failed (twice). The row `pre-existing tests still pass` of the integrity table says how many base tests passed and where the base result came from; the finding lists the ids. | Restore the base version of the weakened test or support file on the unit branch in your own commit (`git checkout <base> -- <path>`), or fix the code so that the base test passes. **An intended behaviour change** (the test must change because the specified behaviour changed): list the test in a `tests.superseded` event (the reopened task's red step records it), or let a person make the change in their own commit or answer. A support file (conftest, fixture, golden data, helper) that only people changed, a `[test-infra]` task changed or a `task.unfrozen` frees stays at head for the run and is listed under `## Pre-existing tests changed with an allowance`, so the tests that depend on it are not blocked. |
+| `a pre-existing test no longer runs on the unit's code` | A base test is missing from that run, or a file no longer collects (for example a production module that imports only while the unit's `conftest.py` is present). A parametrised case whose id vanished counts too, unless a `tests.superseded` event names it. | The same restore. When a production module needs a test file to import, fix the code. |
+| `a construct that can change what the tests report`, with `pytest_pyfunc_call`, `pytest_runtest_call`, `pytest_runtest_setup`, `assignment to .obj` or `.runtest` | A support file or a helper module under the test globs (a `.py` file with no test) replaces or wraps the call of a test. | Remove it, or ask for a `[test-infra]` task. |
+
+Then push and retry the unit (section 7.2). A `[test-infra]` task, a `task.unfrozen` for the same task and a
+`tests.superseded` event (a reopened task's stale test) are allowed and listed under `## Pre-existing tests changed with
+an allowance`.
+
+An audit test is written next to the unit's own test files (else where a `--collect-only` run shows the command collects it, else `tests`), runs with every test and support file the unit added or changed at its base version and collects only its own file; it never runs with the unit's files in place. When its import fails in a production module, when the log does not say why, or when the run gives no result for it, the criterion is held (`failed`, reasons `a production module fails to import without the unit's test and support files: <path>: <error>`, `the audit test does not collect and the log does not say why`, `the audit run gave no result for the audit test`): fix the production module so that it imports on its own. A failure in the audit test's own import goes back to the writer once and is a minor rejection the second time, and so is a test command that never collects the audit file (the reason names the command: change the command or its directory).
+
+The Audit table of `verification.md` has a `Support` column: `base` (the audit test ran with the unit's test and support files at their base versions) or `-` (the unit changed none). `head` appears only in the Generated UI tests table (step 5), where a head run may use the unit's runner support files after a clean content scan.
+
+#### 7.3.3 Escalated with `judge_view_rejected`
+
+Cause `judge_view_rejected` (L4-VER-044). A person rejected a hold `judge view: …`: the judge could not see all of the
+diff. A fix unit cannot shrink a diff, so no task is made from the reject, whatever its reason says, and the unit
+escalates. `l4 status --unit <unit>`, the refusal of `l4 run --unit` and the sticky note name the way out and none names
+`l4 feedback add`. **A retry alone repeats the same hold.**
+
+1. Split the change into smaller units: move part of the work to another spec or unit, then
+   `l4 restart --unit <unit> --reason "<why>"`. The new diff is judged in parts and needs no hold.
+2. Or, once you checked the files that the hold names, replace the answer with an accept (the audited override), then
+   retry the unit:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "accept I read <files>" --replace
+   l4 retry --unit <unit> --reason "<why>"
+   ```
+
+   An agent may not do it unless `clarifier.answer_by_agents` is true.
+
+A plan stopped on the unit (`unit_escalated`) shows the same way out in the `Next:` line of `l4 yolo status`, before the
+retry and the `l4 yolo resume`.
 
 ### 7.4 `waiting_capacity`: no agent is available
 
@@ -1250,6 +1390,22 @@ on the unit.
   the old lock path, so it does not exclude a job of the new one.
 - `l4 unlock` is not available in 0.4.16 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
+
+### 7.11a The prompt cut a spec file, or red names a criterion
+
+Three lines of this kind need no repair of the harness.
+
+- **`Prompt cut:` in `l4 status --unit <unit>`** (for example `Prompt cut: task 1 red attempt 1: .kiro/specs/x/design.md
+  61234 of 125492 characters`). The implementer's prompt did not show a file whole. The prompt names each such file
+  under `# Not shown in full` and the agent can open it, but a long file is read less well. Shorten the file, or raise
+  `implementer.context_budget_tokens` (a profile may set `context_budget_tokens`). `l4 run --dry-run` and `l4 doctor`
+  (SPEC-004) show the same cut before a run. A steering file that is cut cannot be opened by the agent: shorten it.
+- **A red failure `no new test traces <id> (Req N.M), which the task's _Requirements: … line names`.** The task cites a
+  criterion that no new test of the step traces. The next attempt reads the message. If the criterion is already
+  tested by an earlier task, the step may add no copy only when that earlier red proved it; else add a test.
+- **A judge hold `the spec file <path> is larger than 262144 bytes`, `is a symlink` or `was cut to fit the judge's
+  budget`.** The judge did not see that spec file whole. Split or shorten the file, replace the link with the file, or
+  raise `verifier.judge_context_budget_tokens` (default 48000); then retry.
 
 ### 7.12 Red job: exit 1, 2 or 3
 
@@ -1517,6 +1673,7 @@ When a run works on more than one unit, the exit code is the most severe one, in
 |---|---|---|
 | `l4:<phase>` | Harness | The phase of the unit, for example `l4:halted` or `l4:in_review`. One at a time. |
 | `l4:needs-answers` | Harness | The unit has open questions. |
+| `l4:needs-person` | Harness | The delegate escalated an open question of the unit and no person has answered it ([7.1](#71-awaiting_human-a-question-waits-for-you)). It goes when no escalated question of the unit is open. `l4 setup github` creates it with the other labels. |
 | `l4:retry` | A member who is not the user of the forge token | Continue a unit in `halted`, `escalated` or `waiting_capacity`, like `l4 retry`. For an escalation at a limit, it adds one round. The harness removes it after use. |
 | `l4:resume` | A member who is not the user of the forge token | The same as `l4:retry`. |
 | `l4:restart` | A member who is not the user of the forge token | Start the unit over, like `l4 restart`. The PR is open, or it is the closed PR of an `abandoned` unit. |
@@ -1632,6 +1789,49 @@ These limits make operation more difficult. Know them before you start.
   is open.
 - `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
   pushed at each step commit. A cancelled run shows as an open run until a later run starts.
+- With `bwrap`, a gate and an agent start from an **empty home** and an empty runner cache (0.4.16). The harness puts
+  back, read-only, the tools it finds: the `PATH` entries and the install roots of their symlinks, `$L4_HOME`, uv's
+  Python and tool directories, the corepack home and `~/.serena`. A tool under the home that it does not find fails inside
+  the sandbox with "command not found" or a broken virtual environment. Add its directory to `sandbox.tool_paths` (both
+  sandbox kinds, read-only). An entry that is, holds or lies inside a login is refused when the configuration is loaded.
+  `l4 doctor` row SANDBOX-003 proves on the runner that a file in the home, in another unit's step directory and in the
+  lock directory is not readable. With `sandbox.mode: none` (accepted risk) none of this applies.
+- A `gates.setup` command that needs a private registry login (`~/.npmrc`, `~/.config/pip/pip.conf`, `~/.netrc`) gets
+  it only through `sandbox.setup_paths`, read-only, in the sandbox of the setup command and nowhere else. Setup runs
+  code the agent can influence (a build hook, a `postinstall` script), so that login is in its reach: use a token that can
+  only read packages. Doctor row SANDBOX-004 warns as long as the key is set.
+- `.venv` and every `node_modules` are read-only in every gate but `gates.setup`, and `node_modules/.cache` and
+  `node_modules/.vite` start empty at every gate. A test gate that writes elsewhere in `node_modules` (a code generator
+  such as `prisma generate`) fails with a read-only error: move that command to `gates.setup`.
+- After every agent step and every other gate, the harness compares `.venv` and `node_modules` with what the last
+  successful `gates.setup` built. A directory that differs is **removed** and the next `gates.setup` builds it again, with
+  the ledger events `env.rebuilt` (what differed, and why) and, for a file nothing explains, `guard.violation` with
+  rule `environment`. A dependency change that goes through the manifest and the lock file (`uv add`, `npm install`) is
+  expected and costs only the rebuild. An upgrade whose manifest changed but whose lock file did not is a `guard.notice`
+  (not a failure). A Python startup hook (`*.pth`, `sitecustomize.py`) that no installed package lists is always a
+  violation. The verifier's workbench builds its own environment: its first `gates.setup` removes the implementer's.
+- The package caches (`uv`, `pip`, `npm`, `pnpm`, `go`, `gobuild`) are read-only in every sandbox but a `gates.setup`
+  command's, and each agent step and gate works in a private scratch cache that is emptied: `uv add` or `npm install`
+  in a step downloads again, and a test gate with `gates.network: none` that needs a package setup did not download fails
+  (Go's module cache is read where it is). The verifier builds from its own cache, emptied at the start of each round, so a
+  verification costs one download (or the seed copy). Put every download in `gates.setup`.
+- A project with **no `gates.setup`** gets no baseline: every `.venv` or `node_modules` that a step or a gate leaves is
+  removed, so a test command that builds its own environment (`uv run`) builds it in every gate. Set `gates.setup`.
+- Per-unit directories under `$L4_CACHE` carry the repository key (0.4.16): `units/<key>/<fw>/<name>`,
+  `pending-unpublished/<key>/<fw>/<name>`. A cache starts empty once after the upgrade, and the old
+  `units/<fw>/<name>` directories can be deleted by hand; the harness never touches them. A run file of the earlier
+  `pending-unpublished/<fw>/<name>` layout is published by the repository it records (its key, or the project path of its
+  CI link); any other, a run you made locally included, stays and a warning names its directory and the count: move
+  such a file into the keyed directory by hand to have it published.
+- The delegate's read-only mode is new in production. Codex's `-s read-only` runs inside the sandbox like the
+  implementer's mode and is expected to work. Claude Code's `--permission-mode plan` with a structured result in
+  stream-json mode is built and pinned by tests but not exercised on a real run before the live check of the change: [U]
+  until then. If a delegate step fails for that reason, the question is deferred and then escalated; set
+  `delegate.enabled: false` until the cause is fixed. The delegate's `Read`, `Grep` and `Glob` see the unit head in a
+  detached worktree, not the work tree of any person, and it cannot run a test: a claim of the form `test:<id>` is
+  checked against the last test report of the unit only.
+- The login lock files (`~/.cache/l4/locks`) and the unit lock files (`$L4_CACHE/locks`) are not readable inside the
+  sandboxes while they lie under the home or the runner cache. A `$L4_LOCK_DIR` set to a path outside both stays visible.
 
 ## 12. Delivery plans
 
@@ -1837,7 +2037,11 @@ unit.
 
 > **NOTE:** The usage is never reset. A resume, a restart of a unit and a new activation keep the cost, the runs and the
 > attempts that the plan used. The harness charges each attempt of a unit on its own. A restart starts a new attempt and
-> does not remove the cost of the attempts before it. The attempts of a unit count from the activation. A restart before the plan does not count. To give the plan more, use an option `--extend-…` of `l4 yolo resume`.
+> does not remove the cost of the attempts before it. The attempts of a unit count from the activation. A restart before the plan does not count. To give the plan more, use an option `--extend-…` of `l4 yolo resume`. An active plan takes the same option before it stops
+> (`plan.extended`, nothing else changes: the plan is not resumed and no run starts), so a person who sees the plan run out
+> does not wait for the stop. Raising a limit is a person's decision: an agent is refused, unless `yolo.extend_by_agents`
+> is `true` in `.l4/config.yaml` on the base branch (default `false`). The event records who raised the limit and whether
+> the key allowed it.
 
 > **CAUTION:** For `unit_rejected` and `inputs_changed`, the new activation uses the new spec. If you do not want the
 > plan to continue, use `l4 yolo cancel <plan-id> --reason "<why>"`.
@@ -1850,7 +2054,9 @@ reason.
 
 | Wait reason | Cause | What to do |
 |---|---|---|
-| The current unit is `awaiting_human` | A question waits for a person. | Answer it ([7.1](#71-awaiting_human-a-question-waits-for-you)). |
+| The current unit is `awaiting_human` | A question waits for a person. | Answer it with `l4 questions answer` ([7.1](#71-awaiting_human-a-question-waits-for-you)); it pushes the answer and starts a run. The plan continues by itself at the run that reads the answer, so no resume is needed. Once the answer is pushed, `l4 yolo status` says so, and `l4 yolo resume` starts that run at once. While a question is open, a resume is refused. |
+| The current unit is `awaiting_human`, the delegate answered | The delegate pushed an answer and started the next run on `<base>` (`plan: next run on <base>: started`). | Do nothing. The next run's plan step records `plan.resumed` (by the harness) and dispatches the unit, which goes on. If the log says the start was refused or the job has no token, start a run on `<base>` by hand (`l4 yolo resume` starts one at once). |
+| The current unit is `awaiting_human`, the delegate escalated (`unit_awaiting_human`) | `l4 yolo status` names the escalated questions and their reasons. The PR has `l4:needs-person`. The plan starts no next run. | Answer each with `l4 questions answer` ([7.1](#procedure-the-delegate-answered-or-escalated)). The plan continues by itself at the run that reads the answer. |
 | The current unit is `clarifying` | The clarifier works on a question. | Do nothing. The next run continues. |
 | The current unit is `waiting_capacity` | No agent is available ([7.4](#74-waiting_capacity-no-agent-is-available)). | Correct the cause, or `l4 retry --unit <unit> --reason "<why>"`. |
 | `waits for <unit> (not integrated)` | A unit that this unit needs is not in the target yet, or its profile did not pass. | With `merge: human`, merge the PR of that unit into the target. Then wait for the next run. |
@@ -1859,7 +2065,7 @@ reason.
 | `held by plan <id> (<status>)` | The unit is in a plan file on the target, and the plan is not active. | Activate the plan, or remove the unit from the plan file (see 12.5). |
 | `run_not_started` | The last run of the current unit ended before the unit started: a usage error, a worktree or lease failure, a missing CLI. `l4 yolo status` shows the exit and the reason of that run (for example the worktree message) and its `Next:` line repeats the advice below. The harness starts no next run after a run that did not start the unit, so the plan does not loop. | Read the detail. Fix the cause (the configuration, the runner, the unit branch). Do nothing else: the next trigger, a cron run or a push, runs the unit once more (`l4 yolo resume` does the same at once). A run that starts the unit clears the wait; a run that fails to start it again keeps the plan waiting. Each of these runs counts against `max_runs`. |
 | `unit_not_started` | The unit is eligible but has nothing the harness can run: no task in its `tasks.md`, or a ledger that cannot be read. `l4 yolo status` shows what the unit waits for. | Fix the unit on its branch (add the task, repair the ledger). The plan continues by itself at the next run when the unit has something to run. `l4 yolo resume` wakes it at once, but the plan waits again if the unit still has nothing to run. |
-| `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>` or `the pull request !1 is closed, not open`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
+| `merge_not_ready` | A plan with `merge: auto`: the current unit is in review with a PASS, but the harness cannot merge it. `l4 yolo status` shows the detail, for example `the unit has no pull request`, `the pull request !1 is aimed at <x>, not the target <base>`, `the pull request !1 is closed, not open`, `no hand-off commit H is recorded`, `the unit branch head <sha> is not its recorded hand-off commit H <sha>`, `the repository CI is still running on the hand-off commit <sha>`, `the repository CI failed on the hand-off commit <sha>: <job>`, `no CI of the repository ran on the hand-off commit <sha>` or `the repository CI of the hand-off commit <sha> could not be read`. | Open the PR of the unit, or set its base to the target. Do not push to the unit branch. For a missing H run `l4 retry --unit <id>`. For CI that is running, wait: the plan goes on at the next run. For CI that is red on the hand-off commit, the next sweep records it and the unit is verified again; for a job recorded as red on the base that is now red on H alone, `l4 retry --unit <id>` verifies the unit again. For `no CI of the repository ran` (only with `yolo.merge.require_ci: true`), run the repository's CI on the unit branch or its PR, give the hand-off push a token that starts runs (a push made with `GITHUB_TOKEN` starts none), or set `yolo.merge.require_ci: false`. For a CI that could not be read, check that the token has `checks: read`, `actions: read` and `statuses: read`. A cancelled or held job (a cancelled run, an `action_required` check): re-run it or act on it; the sweep opens no fix round for it. `the required check <name> has not reported on the hand-off commit`: make the check report on the unit branch (GitHub refuses the merge until it does). CI that is not created yet counts as running for ten minutes after the hand-off. A PR head that shows an old sha after a push clears by itself: the harness reads the PR again, three times, five seconds apart, in the run that records the wait. The plan continues at the next run when the merge is ready. The detail is recorded once. |
 | `accepted_finding_open` | A plan with `merge: auto`: the current unit is in review with a PASS, but a finding that a person accepted ([12.2a](#122a-procedure-the-review-is-not-ready)) has no `addressed: true` answer of the verifier and no waiver. `l4 yolo status` shows `<unit>: F-… not addressed: <evidence>`, `not answered` (the judge left it out of its reply twice), or `no answer recorded` (a unit adopted in review, verified before the accepted findings reached it, or a `PASS` of an accepted hold on harness 0.4.6 or older, which did not carry the judge's answers into the resumed round). Nothing is pushed. | Read each open finding in the wait. **No answer** (`not answered`, `no answer recorded`): run `l4 retry --unit <unit> --reason "<why>"` so the verifier judges the unit again with the accepted findings in its prompt. **The judge says not addressed and the code must change**: give the fix as feedback (`l4 feedback add --unit <unit> ...`, then the git lines it prints), then `l4 retry --unit <unit> --reason "<why>"`. **The finding needs no handling** (the acceptance's reason gave none, and you checked the code): `l4 yolo waive <plan-id> <F-id> --reason "<why it needs no handling>"`. A person types the plan id; an agent may waive only when `yolo.review.accept_by_agents` is true on the base branch, and passes `--yes`. The waiver is in the plan ledger, the report says who waived it and why, and the harness merges the unit itself at the next run (`--withdraw` takes a waiver back). Merging the pull request yourself also works: the next step integrates a person's merge. A later `PASS` round that addresses every open finding clears the wait by itself. The detail is recorded once. |
 
 With `merge: human`, a PR must be merged into the target. A merge into another branch does not count. The note of the
@@ -1907,6 +2113,18 @@ Three more rules apply:
 - A unit that is already in review when the plan reaches it is adopted. The harness records it as dispatched. Then it
   merges the unit (`merge: auto`), or waits for the merge of a person (`merge: human`).
 - The harness does not merge a unit that a person removed from the plan file.
+- **The delegate pass.** With `delegate.enabled` on `<base>`, a run that leaves a unit of the plan in `awaiting_human`
+  runs the delegate pass before it closes (after the clarifier), and the plan step dispatches the planner action
+  `delegate` for a unit whose open question has no final delegate record and no deferral in the future. If the delegate
+  wrote an answer, the run starts the next run once on `<base>`, also when the plan step waited. If it escalated, no run
+  is started and the plan waits with `unit_awaiting_human` ([7.1](#procedure-the-delegate-answered-or-escalated)).
+- **Idle runs.** A run of the dispatched unit is *idle* when its ledger holds no agent call (`agent.finished`, or a paid `budget.cost` of the clarifier or System One), no gate
+  (`gate.finished`) and no phase change other than into `awaiting_human` or `clarifying`. The harness then records
+  `plan.run_idle` and starts no next run, and the run does not count against `max_runs` (`l4 yolo status` shows
+  `runs: 3 of 10 (9 idle, not counted)`). It stops a plan from spending its runs on a unit that has nothing to do. A run
+  that did not start the unit, a run that parked it in `waiting_capacity` and a step that dispatches nothing are
+  unchanged: the first two count, the third charges nothing. The next trigger after an idle run is a person's command,
+  the delegate's start, a push or the schedule.
 - An error that the harness did not expect in the plan step does not fail the run of the other units. The units of the
   plan stay held. The next run tries the step again.
 

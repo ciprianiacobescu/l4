@@ -30,7 +30,7 @@ import os
 import shutil
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ from l4.agents.base import RunResult
 from l4.agents.factory import RoleUnavailable, Selected, WaitingCapacity
 from l4.availability.vendor import resolve_vendor
 from l4.ci.failing_step import active_ci_steps
+from l4.clarifier.actor import answer_actor
 from l4.config.defaults import cache_root
 from l4.config.preflight import preflight_run_config
 from l4.config.redaction import load_app_config
@@ -59,8 +60,16 @@ from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport
 from l4.implementer.discrimination import discriminate_extra, file_of_test
-from l4.implementer.prompt import collect_sources
 from l4.implementer.tdd import RoleLimit
+from l4.implementer.unit_context import (
+    MAX_SOURCE_BYTES,
+    NOT_READ,
+    Cut,
+    SourceFile,
+    plan_context,
+    read_sources,
+    safe_label,
+)
 from l4.implementer.workbench import Workbench, clip_subject, make_workbench
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, LLMBackend, workbench_request_factory
 from l4.llm.system_one import SystemOneBackend, open_s1_backend
@@ -71,6 +80,7 @@ from l4.planner import facts_of, next_action
 from l4.s1.items import item_keys_by_subject, items_from_evidence, project_key
 from l4.s1.records import append_records
 from l4.s1.shadow import run_shadow
+from l4.sandbox.caches import verifier_caches
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
@@ -87,10 +97,20 @@ from l4.state.lifecycle import Trigger
 from l4.state.status import load_snapshot, select_runnable
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
+from l4.verifier import base_tests, diffparts
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
 from l4.verifier.conventions import test_conventions
+from l4.verifier.diffparts import (
+    DiffPart,
+    DiffParts,
+    blob_ids,
+    bookkeeping_pathspecs,
+    file_rows,
+    judge_parts,
+    part_listing,
+)
 from l4.verifier.evidence import (
     commit_verifier_tests,
     read_verdict,
@@ -114,19 +134,23 @@ from l4.verifier.feedback import (
 from l4.verifier.fixloop import FamilyProvider, after_verdict, decide_fix, family_of, family_tasks, family_units
 from l4.verifier.gates import E2eGateOutcome, e2e_gate_configured, run_build_gates, run_e2e_gate, run_test_gate
 from l4.verifier.generate import generate_ui_tests
-from l4.verifier.integrity import IntegrityContext, run_integrity
+from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrity
 from l4.verifier.judge import (
     CriterionVerdict,
     JudgePrompt,
     JudgeRun,
     JudgeVerdict,
+    PartView,
     RoundOutput,
+    SatisfiedRef,
+    TaskRef,
     accepted_refs,
     build_judge_prompt,
     reply_counts,
     run_judge,
     satisfied_refs,
 )
+from l4.verifier.judge_parts import merge_part_verdicts
 from l4.verifier.notes import verdict_section
 from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
 from l4.verifier.preconditions import check_preconditions, record_ci_steps, record_feedback
@@ -142,6 +166,7 @@ from l4.verifier.selection import (
     seat_of,
     select_judge,
 )
+from l4.verifier.support_base import unit_test_plan
 from l4.verifier.traceability import (
     PROOF_HUMAN,
     apply_adequacy,
@@ -173,6 +198,7 @@ from l4.verifier.ui_step import (
     with_generated,
 )
 from l4.verifier.verdicts import (
+    HoldView,
     apply_finding_verdicts,
     carry_rejects,
     consume_verdicts,
@@ -180,8 +206,10 @@ from l4.verifier.verdicts import (
     finding_sha256,
     hold_covers,
     hold_id,
+    hold_sha256,
     raise_verdict_questions,
     regressions,
+    round_judges,
     settle_holds,
     supersede_stale_verdicts,
     text_sha256,
@@ -195,6 +223,7 @@ TRIGGERS = {Verdict.PASS: Trigger.VERIFY_PASS, Verdict.FAIL: Trigger.VERIFY_FAIL
             Verdict.NEEDS_HUMAN: Trigger.VERIFY_NEEDS_HUMAN}  # fmt: skip
 MAX_DIFF_CHARS = 120_000
 MAX_NOTES_CHARS = 6_000
+MAX_HOLD_PATHS = 5  # the unseen files a `judge view:` hold names
 UNEXECUTED_NOTE = "not executed in M0: the verifier worktree is M1 (verifier 1.5)"
 JUDGE_TIMEOUT_S = 600  # no config key in SPEC section 5; `claude -p` answers in 15-20 s [V]
 VERIFY_PHASES = ("implemented", "verifying")
@@ -246,13 +275,13 @@ class VerifyContext:
 
 
 def _git_diff(wb: Workbench, base_sha: str, head: str) -> tuple[str, bool]:
-    """`git diff <base>...<head>` without the harness's own `.l4/` files and the `verification.md` of each unit of the
-    family (the harness's report of an earlier round, not the unit's work: M1.9 live F4), cut at MAX_DIFF_CHARS. A
-    `verification.md` anywhere else is project content and stays."""
-    reports = [f":(literal,exclude){d}/verification.md" for d in _unit_dirs(wb)]
+    """`git diff <base>...<head>` without the harness's bookkeeping (`bookkeeping_pathspecs`, L4-VER-040: the `.l4/`
+    files, the harness's memories, and the `verification.md`, `questions.md` and `feedback.md` of each unit of the
+    family: the harness's own files, not the unit's work), cut at MAX_DIFF_CHARS. A file of those names anywhere else
+    is project content and stays."""
     raw = wb.git.run_bytes(
         "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{base_sha}...{head}", "--", ".",
-        ":(glob,exclude)**/.l4/**", *reports,
+        *bookkeeping_pathspecs(_unit_dirs(wb)),
     )  # fmt: skip
     text = raw.decode("utf-8", errors="replace")
     return text[:MAX_DIFF_CHARS], len(text) > MAX_DIFF_CHARS
@@ -431,13 +460,44 @@ def _unit_dirs(wb: Workbench) -> list[str]:
     return [u.path.resolve().relative_to(root).as_posix() for u in family_units(wb.provider, wb.ref)]
 
 
-def _family_sources(wb: Workbench) -> tuple[tuple[str, str], ...]:
+def _family_sources(wb: Workbench) -> tuple[SourceFile, ...]:
     """The unit's spec files, then each fix unit's under its own name: the judge reads the regression scenarios and the
-    findings they answer."""
-    found = list(collect_sources(wb.ref.path))
+    findings they answer. A file it cannot read whole (over the size limit, a link) comes back named (L4-KSP-014)."""
+    found = list(read_sources(wb.ref.path, wb.worktree))
     for unit in family_units(wb.provider, wb.ref)[1:]:
-        found += [(f"{unit.name}/{path}", text) for path, text in collect_sources(unit.path)]
+        found += [replace(s, name=f"{unit.name}/{s.name}") for s in read_sources(unit.path, wb.worktree)]
     return tuple(found)
+
+
+def _done_tasks(wb: Workbench, satisfied: Sequence[SatisfiedRef]) -> list[TaskRef]:
+    """Every done task of the unit and of its fix units, with its whole text from its own `tasks.md` (owner decision 7):
+    the judge checks that the diff does what each says. A task of the `satisfied` block is asked there already."""
+    asked = {r.task for r in satisfied}
+    found = []
+    for unit in family_units(wb.provider, wb.ref):
+        own = getattr(wb.provider, "own_tasks", wb.provider.tasks)
+        text = _task_text_of(unit.path, wb.ref.framework)
+        prefix = "" if unit == wb.ref else f"{unit.name}/"
+        found += [TaskRef(f"{prefix}{t.key}", text(t)) for t in own(unit) if t.done and f"{prefix}{t.key}" not in asked]
+    return found
+
+
+def _spec_holds(cuts: Sequence[Cut]) -> list[str]:
+    """What the judge did not see of its spec, as holds (L4-KSP-014): a file over the size limit or not readable, and a
+    requirements, bugfix or spec-delta file cut by the budget (the criteria's source). A design or proposal cut by the
+    budget is only named."""
+    holds = []
+    for cut in cuts:
+        if cut.reason == "oversize":
+            holds.append(
+                f"the spec file {cut.path} is larger than {MAX_SOURCE_BYTES} bytes: the judge saw only its start"
+            )
+        elif cut.reason in NOT_READ:
+            kind = {"symlink": "a symlink", "bad_name": "named unsafely"}.get(cut.reason, "not a regular file")
+            holds.append(f"the spec file {safe_label(cut.path)} is {kind}: the judge did not see it")
+        elif cut.kind == "narrative":
+            holds.append(f"the spec file {cut.path} was cut to fit the judge's budget: the judge saw only part of it")
+    return holds
 
 
 def verify_unit(vc: VerifyContext) -> VerifyResult:
@@ -473,6 +533,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         tasks = [(u.id, t) for u, t in family_tasks(wb.provider, wb.ref)]
         ctx = IntegrityContext(wb.git, wb.cfg, base_sha, head, events, tasks, _unit_dirs(wb), wb.ref.id)
         result.integrity = run_integrity(ctx)
+        ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
+        record_outcome(result.integrity, base_tests.ROW, ran)
         findings.extend(result.integrity.findings)
         blocking = [f.title for f in result.integrity.findings if f.blocking]
         note = "; ".join(blocking) or f"{len(result.integrity.checks)} sub-checks"
@@ -552,8 +614,10 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             _judge_step(vc, run, base_sha, events)
         finally:  # step 8's rows survive a judge that raises (their `judge` column stays empty)
             _calibrate(vc, run)
+        findings.extend(_unsafe_findings(wb))
         _finalize(vc, run, criteria, events)
     else:  # a failed step 0-3 is a FAIL (a blocker came with it); no criterion was judged
+        findings.extend(_unsafe_findings(wb))
         result.verdict = aggregate_unit(findings, result.criteria, result.holds)
     _publish_evidence(run)
     run.records["10"] = StepRecord("10", "aggregation", "ok", note=result.verdict.value)
@@ -563,6 +627,20 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         for step, name, why in LADDER
     ]
     return result
+
+
+def _unsafe_findings(wb: Workbench) -> list[Finding]:
+    """L4-SEC-021 part c: a gate run of the verifier planted a link on a path the harness restores, or the harness could
+    not put a file back. The round ends FAIL; the verifier goes on (a planted link halts the implementer, not the
+    verifier, which has no attempt to retry)."""
+    planted = wb.planted_links()
+    if planted:
+        paths = ", ".join(dict.fromkeys(u.link for u in planted))
+        return [Finding(Severity.BLOCKER, "a gate run planted a symbolic link in the worktree", paths, "deterministic")]
+    if wb.unsafe:
+        paths = ", ".join(dict.fromkeys(u.path for u in wb.unsafe))
+        return [Finding(Severity.BLOCKER, "could not restore a file after a gate run", paths, "deterministic")]
+    return []
 
 
 def _scope_step(vc: VerifyContext, run: _Run, base_sha: str) -> str:
@@ -740,7 +818,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     wb, result = vc.wb, run.result
     current = {c.id: text_sha256(c) for c in criteria}
     current |= {f.id: finding_sha256(f.id) for f in result.findings if f.source == "judge" and f.blocking}
-    current |= {hold_id(h): finding_sha256(hold_id(h)) for h in result.holds}
+    current |= {hold_id(h): hold_sha256(h, result.hold_views) for h in result.holds}
     effective = effective_verdicts(events, current)
     result.findings, effective = carry_rejects(
         result.findings, effective, events, lambda n, target: stored_finding(read_verdict(wb.ref.path, n), target)
@@ -825,9 +903,10 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
 
     def body() -> tuple[bool, str]:
         assert vc.audit_writer is not None
+        support = unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity)
         out = run_audit(
             wb, vc.audit_writer(), {c.id: c for c in criteria}, chosen, skipped, base_sha=base_sha,
-            head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit,
+            head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit, support=support,
         )  # fmt: skip
         result.audit = out.records
         result.findings.extend(out.findings)
@@ -837,7 +916,10 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
             wb.emit("budget.cost", usd=out.cost_usd, profile="verifier_agent", role="audit")
         result.trace = _with_audit(result.trace, out.records)
         counts = {s: sum(a.status == s for a in out.records) for s in {a.status for a in out.records}}
-        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        if support.changes:
+            note += f"; support files at the base: {len(support.changes)}"
+        return True, note
 
     _step(vc, run, "4a", "audit sampling", body)
 
@@ -901,6 +983,7 @@ def _generate_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], 
         out = generate_ui_tests(
             wb, vc.ui_writer(), plan.gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
+            support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
         )  # fmt: skip
         result.generated = out.outcomes
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
@@ -1014,50 +1097,90 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     asked = _asked_feedback(wb)
     accepted = accepted_refs(wb.ref.path)  # the findings a person accepted (L4-YOLO-028)
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
+    done = _done_tasks(wb, satisfied)
+    listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
+    plan = plan_context(  # the spec text has a budget of its own; the criteria and the done tasks are charged first
+        fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done),
+        budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=_family_sources(wb),
+        keys=None,
+    )  # fmt: skip
 
     def judge_body() -> tuple[bool, str]:
-        diff, truncated = _git_diff(wb, base_sha, result.head_sha)
-        prompt = build_judge_prompt(
-            unit_id=wb.ref.id, sources=_family_sources(wb), criteria=criteria, diff=diff,
-            diff_truncated=truncated, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
-            redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
-            owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
-            round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted,
-            satisfied=satisfied,
-        )  # fmt: skip
-        result.prompt_sha256 = prompt.sha256
-        result.prompt_template = prompt.version
-        if truncated:
-            result.holds.append(f"the diff is longer than {MAX_DIFF_CHARS} characters: the judge saw only the start")
-        judged = _ask_judges(vc, prompt, result)
-        if judged.status == "error":
-            raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
-        if judged.verdict is None:
-            result.holds.append(f"the judge's reply was discarded ({judged.status}: {judged.detail})")
-            return False, f"{judged.status}: {judged.detail}"
-        run.judged = judged.verdict
-        result.judge_verdict = judged.verdict.model_dump(mode="json")
-        verdicts = pick_verdicts(judged.verdict)
+        parts = judge_parts(wb.git, base_sha, result.head_sha, _unit_dirs(wb))
+        result.holds.extend(_judge_view_holds(parts))
+        if plan.cuts:  # L4-KSP-014: a cut or unread spec file is named to the judge, held, and on the ledger
+            result.holds.extend(_spec_holds(plan.cuts))
+            wb.emit(
+                "prompt.truncated", role="judge", round=vc.round,
+                budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, sources=[c.as_dict() for c in plan.cuts],
+            )  # fmt: skip
+        many = len(parts.parts) > 1
+        listing, more = part_listing(parts)
+        result.judge_files = [list(row) for row in file_rows(parts)]
+        blobs = blob_ids(wb.git, result.head_sha, _covered(parts))
+        views = _hold_views(parts, lambda path: blobs.get(path, "missing"))
+        result.hold_views = {hold: {"sha": v.sha, "paths": list(v.paths)} for hold, v in views.items()}
+        shown = parts.parts or (DiffPart(1, (), cut=False),)  # an empty diff is one prompt with no files
+        prompts = [
+            build_judge_prompt(
+                unit_id=wb.ref.id, sources=[(b.path, b.body()) for b in plan.sources], criteria=criteria,
+                diff=part.text,
+                diff_truncated=part.cut, gate_report=_gate_summary(result), notes_for_verifier=_notes(events),
+                redact=wb.redactor.redact_text, conventions=test_conventions(wb.git, base_sha, wb.cfg),
+                owner_changes=[(f.path, f.human) for f in run.scope.files if f.human] if run.scope is not None else [],
+                round_outputs=_round_outputs(wb, result), feedback=asked, accepted=accepted, satisfied=satisfied,
+                part=PartView(part.index, len(shown), listing, more) if many else None, tasks=done, unread=plan.cuts,
+            )
+            for part in shown
+        ]  # fmt: skip
+        hashes = [p.sha256 for p in prompts]
+        result.prompt_sha256 = hashes[0] if not many else hashlib.sha256("\n".join(hashes).encode()).hexdigest()
+        result.prompt_template = prompts[0].version
+        replies: list[JudgeVerdict] = []
+        outcomes: list[str] = []
+        for part, prompt in zip(shown, prompts, strict=True):
+            at = (part.index, len(shown)) if many else None
+            judged = _ask_judges(vc, prompt, result, part=at)
+            if judged.status == "error":
+                raise RoleUnavailable("judges", f"profile {vc.judge_profile} cannot answer: {judged.detail}")
+            if judged.verdict is None:
+                where = f"part {part.index} of {len(shown)}, " if many else ""
+                result.holds.append(f"the judge's reply was discarded ({where}{judged.status}: {judged.detail})")
+                return False, f"{judged.status}: {judged.detail}"
+            replies.append(judged.verdict)
+            outcomes.append(judged.reply)
+            if many:
+                result.judge_parts.append(
+                    {"part": part.index, "files": len(part.entries), "chars": len(part.text), "reserve": parts.reserve,
+                     "profile": vc.judge_profile, "calls": judged.calls, "reply": judged.reply,
+                     "prompt_sha256": prompt.sha256}
+                )  # fmt: skip
+        if many:  # the worst reply of the parts is the round's
+            result.judge_reply = next((w for w in ("discarded", "retried", "repaired", "valid") if w in outcomes), "")
+        verdict = merge_part_verdicts(replies)
+        run.judged = verdict
+        result.judge_verdict = verdict.model_dump(mode="json")
+        verdicts = pick_verdicts(verdict)
         for c in criteria:
             _counterexample(wb, result, c.id, verdicts.get(c.id))
         unknown = sorted(set(verdicts) - ids)
         if unknown:
             title = "the judge cited criteria the unit does not have"
             result.findings.append(Finding(Severity.MINOR, title, ", ".join(unknown[:5]), "judge"))
-        result.findings.extend(judge_findings(judged.verdict, known=ids))
-        reviewed = [(a.test, a.criterion, a.adequate) for a in judged.verdict.test_adequacy]
+        result.findings.extend(judge_findings(verdict, known=ids))
+        reviewed = [(a.test, a.criterion, a.adequate) for a in verdict.test_adequacy]
         result.trace = apply_adequacy(result.trace, reviewed)
         result.findings.extend(inadequate_findings(result.trace))
         if asked:
-            _judge_feedback(vc, result, asked, judged.verdict, base_sha)
+            _judge_feedback(vc, result, asked, verdict, base_sha)
         for item in accepted:  # evidence only: the harness's merge guard reads these (L4-YOLO-028)
-            answer = next((a for a in judged.verdict.accepted or [] if a.id == item.id), None)
+            answer = next((a for a in verdict.accepted or [] if a.id == item.id), None)
             wb.emit(
                 "review.accepted_judged", id=item.id, round=vc.round, addressed=answer.addressed if answer else False,
                 evidence=answer.evidence if answer else "not answered", profile=vc.judge_profile,
             )  # fmt: skip
         for ref in satisfied:  # L4-VER-018: a task ticked without a change of its own is checked against its text
-            said = next((a for a in judged.verdict.satisfied or [] if a.task == ref.task), None)
+            said = next((a for a in verdict.satisfied or [] if a.task == ref.task), None)
             holds, evidence = (said.holds, said.evidence) if said else (False, "not answered")
             wb.emit(
                 "verify.satisfied_judged", task=ref.task, round=vc.round, holds=holds, evidence=evidence,
@@ -1069,22 +1192,70 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
             elif not said.holds:
                 title = f"task {ref.task} is ticked as already satisfied, but its text is not done"
                 result.findings.append(Finding(Severity.MAJOR, title, said.evidence, "judge"))
-        return True, f"{judged.calls} call(s)"
+        return True, f"{result.judge_calls} call(s)"
 
     _step(vc, run, "9", "judge", judge_body)
+
+
+def _view_holds(parts: DiffParts) -> list[tuple[str, tuple[str, ...]]]:
+    """Each hold on the judge's view (L4-VER-043) with every file it covers: a file cut to one part, and the files in no
+    part judged (all of them: the text names five). No character count of the diff is in a text, so a small change of
+    size does not make a new hold."""
+    holds = [
+        (
+            f"judge view: the diff of `{part.entries[0].paths[-1]}` is longer than one part "
+            f"({diffparts.MAX_PART_CHARS} characters): the judge saw only its start",
+            (part.entries[0].paths[-1],),
+        )
+        for part in parts.parts
+        if part.cut
+    ]
+    if parts.unseen:
+        named = ", ".join(f"`{path}`" for path in parts.unseen[:MAX_HOLD_PATHS])
+        more = f" (+{len(parts.unseen) - MAX_HOLD_PATHS} more)" if len(parts.unseen) > MAX_HOLD_PATHS else ""
+        holds.append(
+            (
+                f"judge view: the diff needs more than {diffparts.MAX_JUDGE_PARTS} parts of "
+                f"{diffparts.MAX_PART_CHARS} characters: the judge did not see {named}{more}",
+                tuple(parts.unseen),
+            )
+        )
+    return holds
+
+
+def _judge_view_holds(parts: DiffParts) -> list[str]:
+    return [text for text, _ in _view_holds(parts)]
+
+
+def _covered(parts: DiffParts) -> list[str]:
+    return [path for _, paths in _view_holds(parts) for path in paths]
+
+
+def _hold_views(parts: DiffParts, blob_of: Callable[[str], str]) -> dict[str, HoldView]:
+    """The content a person's accept of each hold is bound to: the head blob of every file the hold covers and the full
+    list of unseen files (review M1). The hold's id stays the hash of its text."""
+    views = {}
+    for text, paths in _view_holds(parts):
+        covered = "\n".join(f"{path}\t{blob_of(path)}" for path in paths)
+        views[text] = HoldView(hashlib.sha256(f"{text}\0{covered}".encode()).hexdigest(), paths)
+    return views
 
 
 def _task_text(wb: Workbench) -> Callable[[Task], str]:
     """A task's whole text as `tasks.md` at head holds it (its checkbox line and the lines under it, L4-VER-018): the
     title alone is the first line, and a task's instruction often goes on below it."""
+    return _task_text_of(wb.ref.path, wb.ref.framework)
+
+
+def _task_text_of(unit_dir: Path, framework: Framework) -> Callable[[Task], str]:
     try:
-        data = read_regular_file(wb.ref.path / "tasks.md", limit=MAX_TASKS_BYTES)
+        data = read_regular_file(unit_dir / "tasks.md", limit=MAX_TASKS_BYTES)
     except (OSError, UnsafeFile):
         data = b""
 
     def text(task: Task) -> str:
         try:
-            return task_text(data, task, wb.ref.framework) if data else task.title
+            return task_text(data, task, framework) if data else task.title
         except ValueError:  # the line moved: the title is still the task's own words
             return task.title
 
@@ -1130,7 +1301,9 @@ def _round_outputs(wb: Workbench, result: VerifyResult) -> list[RoundOutput]:
     return found
 
 
-def _ask_judges(vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult) -> JudgeRun:
+def _ask_judges(
+    vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult, *, part: tuple[int, int] | None = None
+) -> JudgeRun:
     """One judge, then the next independent one for as long as the answer is a usage limit, comes from another
     model than the profile names (SCN-AVL-15) or from a served model whose vendor is not independent of the
     implementers (L4-VER-001; an unknown vendor never is): that verdict is dropped and never counted. The calls and
@@ -1164,6 +1337,7 @@ def _ask_judges(vc: VerifyContext, prompt: JudgePrompt, result: VerifyResult) ->
         wb.emit(
             "verify.judge", round=vc.round, profile=vc.judge_profile, status=judged.status, calls=judged.calls,
             model=judged.model_resolved, prompt_sha256=prompt.sha256, template=prompt.version, reply=judged.reply,
+            **({"part": part[0], "parts": part[1]} if part else {}),
         )  # fmt: skip
         if judged.repaired:  # a weak judge's trivial schema breaks, fixed by `judge_repair`; never a verdict
             wb.emit("judge.reply_repaired", round=vc.round, profile=vc.judge_profile, fields=list(judged.repaired))
@@ -1241,6 +1415,7 @@ def _ask_verdicts(
         services.ref.path, services.ref.name, outcomes=result.criteria, criteria=criteria, trace=result.trace,
         findings=result.findings, existing=QuestionsFile.load(path), consumed=consumed, ledger=services.ledger,
         round_no=round_no, redactor=services.app.redactor, holds=result.holds, covers=hold_covers(events),
+        hold_views=result.hold_views, judges=round_judges(events, round_no, wb.cfg),
     )  # fmt: skip
     if (section := verdict_section(ctx, consumed)) is not None:
         ctx.shared["notes"] = (section,)
@@ -1272,9 +1447,11 @@ def verify_hook(ctx: HookContext) -> Trigger:
     criteria = family.criteria(services.ref)
     calibration = cache_root(services.app.environ, repo=services.app.repo) / "s1-calibration.jsonl"
     before = read_ledger(services.ref.path).events
+    unit_git = Git(services.ref.path)
     recorded = consume_verdicts(
-        QuestionsFile.load(services.ref.path / QUESTIONS_FILENAME), before, services.ledger, criteria
-    )
+        QuestionsFile.load(services.ref.path / QUESTIONS_FILENAME), before, services.ledger, criteria,
+        actor_of=lambda question: answer_actor(unit_git, services.ref.path, question, before),
+    )  # fmt: skip
     # a human's verdict on a hold is ground truth: written at once, since the answer is consumed only once and the
     # round can still end before a judge is found (exit 12)
     record_human_labels(
@@ -1293,12 +1470,18 @@ def verify_hook(ctx: HookContext) -> Trigger:
     else:
         selected = select_judge(services.factory, cfg, services.ref.id, implementers, skip=skip)
     logs: list[tuple[Path, Path]] = []
+    # L4-SEC-039: the round builds the project environment from caches of its own, emptied here, that no implementer
+    # step or gate has touched; every workbench of the round (a judge that took over included) shares them
+    round_caches = verifier_caches(
+        cfg.sandbox.caches, cache_root(services.app.environ, repo=services.app.repo), services.ref.id,
+        services.names.repo_key,
+    )  # fmt: skip
 
     def bench(chosen: Selected) -> Workbench:
         return make_workbench(
             cfg=cfg, app=services.app, ref=services.ref, provider=family, worktree=services.worktree,
             git=services.git, ledger=services.ledger, sandbox=services.sandbox, selected=chosen,
-            iteration=state.iteration, push=ctx.push,
+            iteration=state.iteration, push=ctx.push, caches=round_caches,
         )  # fmt: skip
 
     def backend(chosen: Selected, judge_wb: Workbench) -> AgentJudge:

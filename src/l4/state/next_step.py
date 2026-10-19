@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from l4.planner import UnitFacts
 
 NO_CONVERTIBLE_FINDING = "no_convertible_finding"  # `phase.changed{to: escalated, reason}` of the fix loop (L4-OPS-022)
+JUDGE_VIEW_REJECTED = "judge_view_rejected"  # a person rejected a hold on the judge's view of the diff (L4-VER-044)
+UNCONVERTED_AND_JUDGE_VIEW = "no_convertible_finding_and_judge_view_rejected"  # both causes in one round (L4-VER-044)
 CONTINUES = "nothing: the harness continues at the next run"
 RUNBOOK_CORRUPT = "see docs/runbook.md section 7.9"
 CORRUPT_PHASE = "corrupt"  # `l4.state.status.CORRUPT_PHASE`: a status value, not a lifecycle phase
@@ -29,6 +31,32 @@ def feedback_way_out(unit: str) -> str:
     )
 
 
+def judge_view_way_out(unit: str) -> str:
+    """The step of a unit escalated with `judge_view_rejected` (L4-VER-044): a fix unit cannot shrink the diff the judge
+    could not see, so the change is split, or a person who checked the files replaces the answer with an accept."""
+    return (
+        "a fix unit cannot shrink the diff the judge could not see; split the change into smaller units (then "
+        f"l4 restart --unit {unit} --reason TEXT), or, once you checked the files the hold names, replace the answer: "
+        f'l4 questions answer Q-NNN --unit {unit} --text "accept ..." --replace, then l4 retry --unit {unit} '
+        "--reason TEXT"
+    )
+
+
+def way_out(unit: str, halt_reason: str | None) -> str | None:
+    """The unit's own way out of an escalation: `feedback_way_out` for `no_convertible_finding`, `judge_view_way_out`
+    for `judge_view_rejected`, None for every other reason."""
+    if halt_reason == NO_CONVERTIBLE_FINDING:
+        return feedback_way_out(unit)
+    if halt_reason == JUDGE_VIEW_REJECTED:
+        return judge_view_way_out(unit)
+    if halt_reason == UNCONVERTED_AND_JUDGE_VIEW:  # each cause keeps its own way out
+        return (
+            f"two causes. For the finding no fix task can be derived from: {feedback_way_out(unit)}. "
+            f"For the hold on the judge's view: {judge_view_way_out(unit)}"
+        )
+    return None
+
+
 def _unique(*groups: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for group in groups for item in group))
 
@@ -42,6 +70,18 @@ def _harness_reason(qid: str, title: str, why: str) -> str:
     return f"{qid}: {title}" + (f" ({why})" if why else "")
 
 
+NEEDS_PERSON = "needs a person (the delegate escalated)"  # L4-DLG-011
+
+
+def _escalated_ids(facts: "UnitFacts") -> set[str]:
+    """The ids (`Q-004`, also of a fix unit's `<fix unit>/Q-004`) of the open questions the delegate escalated."""
+    return {k.rpartition("/")[2] for k in facts.escalated}
+
+
+def _person(qid: str, escalated: set[str]) -> str:
+    return f"{qid} {NEEDS_PERSON}" if qid in escalated else qid
+
+
 def reason(facts: "UnitFacts") -> str | None:
     """The cause the table shows, whole (the table cuts it): `halt_detail` for a stopped unit, the open question ids
     for `awaiting_human`, the fix unit's open questions for `fixing`, `until <retry_after>` for `waiting_capacity`,
@@ -52,11 +92,18 @@ def reason(facts: "UnitFacts") -> str | None:
     if phase == Phase.AWAITING_HUMAN.value:
         harness = {qid: (title, why) for qid, title, why in facts.harness_open}
         ids = open_questions(facts) or facts.verdicts_invalid
+        escalated = _escalated_ids(facts)
         if any(qid in harness for qid in ids):  # a check L4 could not decide: name it and its cause (L4-OPS-006)
-            return "; ".join(_harness_reason(qid, *harness[qid]) if qid in harness else qid for qid in ids)
-        return ", ".join(ids) or None
+            return "; ".join(
+                (_harness_reason(qid, *harness[qid]) + (f" {NEEDS_PERSON}" if qid in escalated else ""))
+                if qid in harness
+                else _person(qid, escalated)
+                for qid in ids
+            )
+        return ", ".join(_person(qid, escalated) for qid in ids) or None
     if phase == Phase.FIXING.value and facts.fix_questions_open:
-        return f"fix unit questions: {', '.join(facts.fix_questions_open)}"
+        escalated = _escalated_ids(facts)
+        return f"fix unit questions: {', '.join(_person(qid, escalated) for qid in facts.fix_questions_open)}"
     if phase == Phase.WAITING_CAPACITY.value and facts.retry_after:
         return f"until {facts.retry_after}"
     if phase == Phase.IN_REVIEW.value and facts.misdirected:
@@ -102,8 +149,8 @@ def next_step(facts: "UnitFacts", *, branch: str, questions_path: str) -> str:
     """The one command or action that moves the unit. `branch` and `questions_path` say where an answer goes. The
     command stays bare (`l4 retry --unit U --reason TEXT`); the label that does the same is `label_for`."""
     phase, unit = facts.phase, facts.unit
-    if phase == Phase.ESCALATED.value and facts.halt_reason == NO_CONVERTIBLE_FINDING:
-        return feedback_way_out(unit)
+    if phase == Phase.ESCALATED.value and (own := way_out(unit, facts.halt_reason)) is not None:
+        return own
     if phase in _STOPPED:
         return f"l4 retry --unit {unit} --reason TEXT"
     if phase == Phase.ABANDONED.value:

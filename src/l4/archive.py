@@ -21,8 +21,15 @@ from pathlib import Path
 import click
 
 from l4.ci.sweeper import sweep
+from l4.clarifier.notify import (
+    DelegateAnswer,
+    DelegateEscalation,
+    answered_by_delegate_section,
+    needs_person_section,
+)
 from l4.config.redaction import load_app_config
 from l4.context import AppContext
+from l4.delegate.due import delegate_answers, escalations
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import (
     Forge,
@@ -43,6 +50,7 @@ from l4.specs.base import SpecError
 from l4.specs.feedback import FeedbackFile
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import feedback_home, read_follow_up_marker
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.state.fold import fold
 from l4.state.ledger import LedgerClosed, ledger_path, read_ledger
 from l4.state.status import snapshots
@@ -152,8 +160,18 @@ def render_pr_body(
     )
 
 
-def labels_for(prefix: str, phase: str, *, needs_answers: bool) -> list[str]:
-    return [f"{prefix}{phase}", *([f"{prefix}needs-answers"] if needs_answers else [])]
+def _str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def labels_for(prefix: str, phase: str, *, needs_answers: bool, needs_person: bool = False) -> list[str]:
+    """The managed labels of a merge request: the phase, `needs-answers` while a question is open and `needs-person`
+    while one of them is a question the delegate escalated (L4-CLR-004)."""
+    return [
+        f"{prefix}{phase}",
+        *([f"{prefix}needs-answers"] if needs_answers else []),
+        *([f"{prefix}needs-person"] if needs_person else []),
+    ]
 
 
 def operator_labels(prefix: str) -> list[str]:
@@ -271,7 +289,38 @@ class _Mirror:
         self._draft(phase)
         self._labels(phase)
         if notes is not None:
-            self._sticky(compose_sticky(notes, phase, self._feedback(), parent=self._parent()))
+            sections = [*notes, *self._delegate_sections()]
+            self._sticky(compose_sticky(sections, phase, self._feedback(), parent=self._parent()))
+
+    def _delegate_sections(self) -> list[str]:
+        """`Needs a person (the delegate escalated)` and `Answered by the delegate`, from the unit's ledger as it is
+        now (L4-CLR-004): none for a unit the delegate never decided about."""
+        s = self._ctx.services
+        events = read_ledger(s.ref.path).events
+        if not any(e.type == "delegate.result" for e in events):
+            return []
+        titles = {
+            q.id: q for q in (QuestionsFile.load(s.ref.path / QUESTIONS_FILENAME) or QuestionsFile.parse(b"")).questions
+        }
+        redact = s.app.redactor.redact_text
+
+        def title(key: str) -> str:
+            found = titles.get(key)
+            return found.title if found is not None else ""
+
+        open_keys = fold(events, s.ref.id).questions.open
+        escalated = [
+            DelegateEscalation(key, kind, title(key), redact(reason))
+            for key, reason, kind in escalations(events, open_keys)
+        ]
+        answered = [
+            DelegateAnswer(
+                str(e.data.get("question")), _str(e.data.get("kind")), title(str(e.data.get("question"))),
+                str(e.data.get("model") or "?"), str(e.data.get("cli") or "?"),
+            )
+            for e in delegate_answers(events)
+        ]  # fmt: skip
+        return [sec for sec in (needs_person_section(escalated), answered_by_delegate_section(answered)) if sec]
 
     def _parent(self) -> str | None:
         """The parent's id for a follow-up or a fix unit (it takes no feedback of its own), else None."""
@@ -310,8 +359,12 @@ class _Mirror:
         mr, ctx = self._mr, self._ctx
         s = ctx.services
         prefix = ctx.cfg.forge.labels_prefix
-        needs_answers = bool(fold(read_ledger(s.ref.path).events, s.ref.id).questions.open)
-        wanted = tuple(labels_for(prefix, phase, needs_answers=needs_answers))
+        events = read_ledger(s.ref.path).events
+        open_keys = fold(events, s.ref.id).questions.open
+        needs_person = bool(open_keys) and any(e.type == "delegate.result" for e in events) and bool(
+            escalations(events, open_keys)
+        )  # fmt: skip
+        wanted = tuple(labels_for(prefix, phase, needs_answers=bool(open_keys), needs_person=needs_person))
         if wanted == mr.applied:
             return
         try:

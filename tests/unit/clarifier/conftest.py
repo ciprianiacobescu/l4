@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 from typing import Any
 
+import pytest
+
 from l4.agents.base import RunResult, Usage
 from l4.llm.agent_judge import Msg, StructuredResult
 
@@ -44,3 +46,12 @@ def limit_run() -> RunResult:
     from pathlib import Path
 
     return RunResult("quota", Path("/dev/null"), detail="usage limit")
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """An empty git repository on branch `unit` (the actor tests commit `questions.md` into it)."""
+    from .answer_world import sh
+
+    sh(tmp_path, "init", "-q", "-b", "unit")
+    return tmp_path

@@ -137,6 +137,15 @@ class JobResult:
     pipeline_id: int | str | None
     job_id: int | str | None
     web_url: str
+    workflow: str = (
+        ""  # GitHub: the workflow file of the job (`tests.yml`), or the app's slug for another app's check run
+    )
+    event: str = ""  # GitHub: the event of the workflow run (`push`, `pull_request`), told apart from its twin
+
+    @property
+    def key(self) -> str:
+        """The name the job has across commits: `<workflow> / <name>` on GitHub, the bare name elsewhere (L4-CI-011)."""
+        return f"{self.workflow} / {self.name}" if self.workflow else self.name
 
 
 @dataclass(frozen=True)

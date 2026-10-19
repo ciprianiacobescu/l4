@@ -89,7 +89,8 @@ def hook_ctx(bench) -> SimpleNamespace:
     """The parts of a `HookContext` that `bring_in_base` reads, around the bench's own worktree and ledger."""
     wb = bench.wb
     app = AppContext(bench.tdd.repo, None, "human", 0, wb.run_id, bench.tdd.environ, Redactor({}))
-    services = SimpleNamespace(git=wb.git, worktree=wb.worktree, ref=wb.ref, ledger=wb.ledger, app=app)
+    names = SimpleNamespace(unit_cache=wb.unit_cache)  # the keyed unit directory (L4-SEC-034), where `excludes` lives
+    services = SimpleNamespace(git=wb.git, worktree=wb.worktree, ref=wb.ref, ledger=wb.ledger, app=app, names=names)
     return SimpleNamespace(cfg=wb.cfg, services=services, push=wb.push, shared={})
 
 

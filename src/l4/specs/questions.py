@@ -236,6 +236,9 @@ class Question:
     options_text: str = ""
     restarted: bool = False  # the Status is `superseded by restart`: no successor, and nothing is held
     superseded_round: int | None = None  # the Status is `superseded by round <n>`: a later round replaced it
+    answered_by: str = ""  # the text after `**Answered by:**` (the delegate's answer, L4-DLG-006)
+    escalated_by: str = ""  # the text after `**Escalated by:**` (the delegate's escalation, L4-DLG-008)
+    field_lines: tuple[tuple[str, Span], ...] = ()  # (lower-case field name, its whole line with the line break)
 
 
 @dataclass(frozen=True)
@@ -251,8 +254,10 @@ _SUBSECTIONS = ("context", "options", "clarifier suggestion", "answer")
 _HEADING = re.compile(rb"^## (?:Q-(\d+):[ \t]*(.*?)|.*?)[ \t]*\r?$")
 _SUBHEADING = re.compile(rb"^###[ \t]+(Context|Options|Clarifier suggestion|Answer)[ \t]*\r?$", re.IGNORECASE)
 _FIELD = re.compile(
-    rb"^-[ \t]+\*\*(Status|Blocking tasks|Kind|Asked|Criteria):\*\*[ \t]*(.*?)[ \t]*\r?$", re.IGNORECASE
+    rb"^-[ \t]+\*\*(Status|Blocking tasks|Kind|Asked|Criteria|Answered by|Escalated by):\*\*[ \t]*(.*?)[ \t]*\r?$",
+    re.IGNORECASE,
 )
+_DELEGATE_FIELDS = ("Answered by", "Escalated by")
 _FENCE = re.compile(rb"^[ \t]{0,3}(```|~~~)")
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _STATUS_WORD = re.compile(r"[A-Za-z][A-Za-z-]*")
@@ -324,6 +329,7 @@ def _parse_section(
     end = _section_end(data, lines, first, last)
     status_value: Span | None = None
     fields: dict[str, str] = {}
+    field_lines: dict[str, Span] = {}
     marks: list[tuple[str, int, int]] = []  # (subsection name, heading line index, line index after its heading)
     fenced = False
     fence_lines = [
@@ -348,6 +354,7 @@ def _parse_section(
             name = field.group(1).decode().lower()
             if name not in fields:
                 fields[name] = _text(field.group(2))
+                field_lines[name] = Span(start, stop)
                 if name == "status":
                     status_value = Span(start + field.start(2), start + field.end(2))
     blocks: dict[str, Block] = {}
@@ -378,6 +385,8 @@ def _parse_section(
         options_text=_visible(data[options.body.start : options.body.end]) if options else "",
         restarted=bool(_RESTART_SUPERSEDED.search(fields.get("status", ""))) and not successor,
         superseded_round=int(later.group(1)) if (later := _ROUND_SUPERSEDED.search(fields.get("status", ""))) else None,
+        answered_by=fields.get("answered by", ""), escalated_by=fields.get("escalated by", ""),
+        field_lines=tuple(field_lines.items()),
     )  # fmt: skip
 
 
@@ -458,6 +467,29 @@ class QuestionsFile:
             raise SpecError(f"{qid} has no Status line")
         return _edited(self, [(question.status_value, status.value.encode())], row_of=qid)
 
+    def set_field(self, qid: str, name: str, value: str) -> "QuestionsFile":
+        """The harness-owned field line `- **<name>:** <value>` (`Answered by` or `Escalated by`, L4-QMD-003): an
+        existing line of that name is replaced, else the line goes right after the Status line. The value is put on
+        one line, with HTML comment markers neutralised; the caller redacts it. Every other byte, the line endings and a
+        BOM stay."""
+        if name not in _DELEGATE_FIELDS:
+            raise SpecError(f"{name} is not a field the harness writes")
+        question = _require(self, qid)
+        eol = _eol(self.data)
+        shown = _neutralise_comments(" ".join(value.split())).replace("-->", "--&gt;")  # a reply's words reach it
+        line = f"- **{name}:** {shown}".encode()
+        lines = dict(question.field_lines)
+        if (old := lines.get(name.lower())) is not None:
+            tail = self.data[old.start : old.end]
+            kept = tail[len(tail.rstrip(b"\r\n")) :]
+            return _edited(self, [(old, line + kept)])
+        status = lines.get("status")
+        if status is None:
+            raise SpecError(f"{qid} has no Status line")
+        if self.data[status.start : status.end].endswith(b"\n"):
+            return _edited(self, [(Span(status.end, status.end), line + eol)])
+        return _edited(self, [(Span(status.end, status.end), eol + line)])
+
     def supersede_by_restart(self, qid: str) -> "QuestionsFile":
         """Status `superseded by restart` (L4-OPS-004): the question was about the old attempt, and no question took
         over. Unlike a bare `superseded` it holds no task (see `holds`). The index row follows."""
@@ -518,7 +550,7 @@ class QuestionsFile:
         previous answer stays under it in an HTML comment, one for each replacement, oldest first. `_visible` removes
         comments, so the answer, its digest and the reason of the verdict hold the new text only. Each line of the
         old answer is quoted with `> ` (no line reads as structure) and `<!--` and `-->` in it are defused. The
-        Status is `set_status`'s."""
+        Status is `set_status`'s. The harness-owned `Answered by:` line goes: the delegate did not write these words."""
         question = _require(self, qid)
         if question.answer is None:
             raise SpecError(f"{qid} has no Answer block")
@@ -539,7 +571,10 @@ class QuestionsFile:
         body = eol.join(line.encode() for line in re.split(r"\r\n|\r|\n", text.strip("\r\n"))) + eol
         head = marked + eol if marked is not None else b""
         trail = b"".join(entry + eol for entry in history)
-        return _edited(self, [(span, head + body + trail + (eol if more else b""))])
+        edits = [(span, head + body + trail + (eol if more else b""))]
+        if (field := dict(question.field_lines).get("answered by")) is not None:
+            edits.append((field, b""))
+        return _edited(self, edits)
 
     def refresh_index(self) -> "QuestionsFile":
         """Rewrite the index rows whose Status no longer matches their section: a human changes the Status in the

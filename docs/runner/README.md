@@ -256,10 +256,15 @@ Fix applied: pin the test project's network to `203.0.113.0/24` in `<broker comp
   Residual: a daemon socket outside `/run` (for example under the runner's home) stays reachable, and abstract unix
   sockets (dbus, X11) are isolated only by `--unshare-net`, which gates get with `gates.network: none` and agent
   sandboxes (network on) do not.
-* **What the sandboxes do not give yet (HB-14, HB-16).** The sandboxes mount the runner user's real `$HOME` with a
-  deny-list of credential paths, not an empty home, so a credential file outside that list is readable inside them. Doctor
-  `SANDBOX-001` (per-profile credential separation, no ancestor environment) is specified but **not built**; only
-  `SANDBOX-002` (daemon sockets) is. The probe script is a manual canary, not a gate.
+* **What the sandboxes give, and what they do not give yet (HB-14, HB-16).** Since 0.4.16 both bwrap sandboxes cover the
+  runner user's real `$HOME` and the runner cache `$L4_CACHE` with a tmpfs and bind back only the tool paths
+  (read-only), the step's own directories and the caches, so a credential file outside the adapters' login paths
+  (`~/.git-credentials`, `~/.netrc`, `~/.ssh`, `~/.config/gh`, `~/.docker`) and another unit's or project's files are not
+  readable inside them (HB-16 built; L4-SEC-030..032). A tool the harness does not find under the home goes into
+  `sandbox.tool_paths`. Doctor `SANDBOX-003` is the live check on the runner (canaries in the home, in another unit's
+  step directory and in the lock directory), next to `SANDBOX-002` (daemon sockets). Doctor `SANDBOX-001`
+  (per-profile pairwise credential separation, no ancestor environment) is specified but **not built**. The probe script
+  is a manual canary, not a gate.
 * **Forge setup is `l4 setup gitlab` (M1.8).** The bot token, the scoped `L4_FORGE_TOKEN`, `--secret` variables, the
   `l4 sweep` schedule, the runner check and one adoption-check pipeline are one command
   (`.l4/bin/l4 setup gitlab --project group/name --watch`, with a Maintainer's token in `$GITLAB_TOKEN`; through Mintkey

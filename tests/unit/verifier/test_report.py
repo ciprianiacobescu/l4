@@ -171,6 +171,21 @@ def test_the_forge_host_is_the_placeholder_in_the_committed_evidence(tmp_path):
     assert "<forge>/g/p/-/jobs/9" in (unit_dir / "verification.md").read_text()
 
 
+def test_a_delegates_unfreeze_is_not_under_the_human_header():  # review 2, N2
+    from l4.verifier.types import IntegrityReport
+
+    integrity = IntegrityReport(
+        [],
+        unfrozen=[
+            "tests/a.py (task 1.1, unfrozen by Q-002 (delegate_override, claude-opus-5-5))",
+            "tests/b.py (task 1.1, unfrozen by Q-003 (agent))",
+        ],
+    )
+    text = render_verification_md(result(integrity=integrity))
+    assert "## Tests unfrozen by a delegate or an agent" in text and "by human answers" not in text
+    assert "- tests/a.py (task 1.1, unfrozen by Q-002 (delegate_override, claude-opus-5-5))" in text
+
+
 def test_unfrozen_tests_are_listed():
     from l4.verifier.types import IntegrityCheck, IntegrityReport
 

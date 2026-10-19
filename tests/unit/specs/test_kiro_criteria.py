@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from l4.specs.base import CriterionIdCollision, Framework
-from l4.specs.criteria import kiro_criteria
+from l4.specs.base import Criterion, CriterionIdCollision, Framework
+from l4.specs.criteria import kiro_criteria, linked_criteria
 from l4.specs.fixmark import FixMarker, write_fix_marker
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "specs" / "kiro" / "user-auth"
@@ -243,3 +243,30 @@ def test_a_follow_up_unit_drops_the_1n_items_like_a_fix_unit(tmp_path):
     (spec / "bugfix.md").write_text(BUGFIX.replace(" (parent Req 1.2, C-1a2b3c4d)", ""))
     write_follow_up_marker(spec, FollowUpMarker("kiro:login", ()))
     assert [c.alias for c in kiro_criteria(spec)] == ["Req 2.1", "Req 2.2", "Req 3.1"]
+
+
+# -- linked criteria (kiro-e2e K20, moved from the prompt module): the one rule of the prompt, red and doctor
+
+
+def _alias(label: str, n: int) -> Criterion:
+    return Criterion(
+        f"C-{n:08x}", f"Req {label}", Framework.KIRO, "add-bulk", label.split(".")[0], "WHEN a THEN b",
+        "WHEN a THEN b", "requirements.md", n,
+    )  # fmt: skip
+
+
+ALIASES = (_alias("1.1", 1), _alias("1.2", 2), _alias("1.3", 3), _alias("2.1", 4), _alias("2.2", 5))
+
+
+def test_a_dotted_link_names_that_criterion_only():
+    assert [c.alias for c in linked_criteria(ALIASES, ("1.1", "1.3"))] == ["Req 1.1", "Req 1.3"]
+
+
+def test_a_bare_link_names_every_criterion_of_the_requirement():
+    assert [c.alias for c in linked_criteria(ALIASES, ("2",))] == ["Req 2.1", "Req 2.2"]
+
+
+def test_a_link_that_names_no_criterion_names_none():
+    assert linked_criteria(ALIASES, ("9.9",)) == []
+    assert linked_criteria(ALIASES, ()) == []
+    assert linked_criteria(ALIASES, ("1",)) != linked_criteria(ALIASES, ("11",))  # `1` is not a prefix of `11.x`

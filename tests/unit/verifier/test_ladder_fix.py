@@ -321,9 +321,7 @@ def test_a_second_fail_after_the_only_fix_round_escalates(run_l4, valid_spec, wi
     assert "fix rounds used 1/1" in run.pushed(f"{UNIT_DIR}/verification.md")
 
 
-def test_a_fix_unit_that_cannot_be_created_escalates_instead_of_re_verifying_forever(
-    run_l4, valid_spec, monkeypatch
-):
+def test_a_fix_unit_that_cannot_be_created_escalates_instead_of_re_verifying_forever(run_l4, valid_spec, monkeypatch):
     def broken(self, *args, **kwargs):
         raise FixUnitInvalid("add-discount-codes-fix-1 does not validate --strict: nope")
 
@@ -357,9 +355,7 @@ def test_a_pass_stays_a_pass_when_the_optional_minor_fix_unit_cannot_be_created(
     assert "No fix unit." in run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verification.md")
 
 
-def test_a_transient_openspec_failure_on_a_fail_is_retryable_and_does_not_escalate(
-    run_l4, valid_spec, monkeypatch
-):
+def test_a_transient_openspec_failure_on_a_fail_is_retryable_and_does_not_escalate(run_l4, valid_spec, monkeypatch):
     def flaky(self, *args, **kwargs):
         raise OpenSpecCommandError("openspec timed out")
 
@@ -369,9 +365,7 @@ def test_a_transient_openspec_failure_on_a_fail_is_retryable_and_does_not_escala
     assert "verify_fail_exhausted" not in run.triggers() and run.events("fix.spawned") == []
 
 
-def test_a_fix_unit_committed_without_its_event_is_adopted_and_run_not_planned_again(
-    run_l4, valid_spec, monkeypatch
-):
+def test_a_fix_unit_committed_without_its_event_is_adopted_and_run_not_planned_again(run_l4, valid_spec, monkeypatch):
     from l4.state.ledger import LedgerWriter
 
     original = LedgerWriter.append
@@ -527,3 +521,38 @@ def test_an_escalation_names_its_cause_in_the_outcome(run_l4, valid_spec, with_v
     run = run_l4([red_step(), noqa_green()])
     assert run.code == 13
     assert "escalated" in run.outcome["units"][0]["exit_reason"]
+
+
+def test_an_agents_answer_to_a_fix_units_question_is_recorded_as_an_agents(  # review F4
+    run_l4, valid_spec, tdd_repo, raw, capsys
+):
+    from types import SimpleNamespace
+
+    from l4.specs.questions_cli import commit_message
+
+    blocked = chore_fix(
+        status="blocked",
+        questions=[{"title": "Which flag?", "context": "two ways", "kind": "technical", "options": ["a", "b"]}],
+    )
+    assert run_l4([red_step(), noqa_green(), blocked]).code == 11
+    clone = tdd_repo.repo.parent / "agent-fix"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    path = clone / FIX_DIR / "questions.md"
+    file = QuestionsFile.load(path)
+    assert file is not None
+    file = file.set_status("Q-001", QuestionStatus.ANSWERED)
+    body = file.get("Q-001").answer.body
+    done = QuestionsFile.parse(file.data[: body.end] + b"Use the second option.\n" + file.data[body.end :])
+    done.save(path)
+    edit = SimpleNamespace(
+        form="answer", status=QuestionStatus.ANSWERED, replaced=False,
+        folder=SimpleNamespace(unit=f"openspec:{FIX_UNIT}"), question=done.get("Q-001"),
+    )  # fmt: skip
+    raw(clone, "add", "-A")
+    raw(clone, "commit", "-q", "-m", commit_message(edit, "t", "agent", "CLAUDECODE"))
+    raw(clone, "push", "-q", "origin", BRANCH)
+    second = run_l4([chore_fix(), judge()])
+    assert second.code == 0
+    answered = [e for e in second.events("question.answered") if e.get("fix_unit") == FIX_UNIT]
+    assert [(e["id"], e["by"], e.get("marker")) for e in answered] == [("Q-001", "agent", "CLAUDECODE")]
+    assert 'by="agent"' in second.adapter.requests[0].prompt

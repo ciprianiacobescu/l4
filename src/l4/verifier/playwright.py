@@ -73,7 +73,7 @@ def base_checkout(wb: Workbench, base_sha: str) -> Iterator[Path]:
     try:
         for command in wb.cfg.gates.setup:
             spec = GateSpec("setup-base", command, (), "junit", duration_seconds(wb.cfg.gates.timeout))
-            result = run_gate_at(wb, path, spec, network=True)
+            result = run_gate_at(wb, path, spec, network=True, builds_env=True)
             if result.status != "pass":
                 raise L4Exit(ExitCode.INTERNAL_ERROR, f"gates.setup failed at the merge base: {result.reason}")
         yield path

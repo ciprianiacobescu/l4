@@ -22,9 +22,17 @@ lowers the plan's. The attempts used by a unit are the highest attempt charged. 
 ledger) counts as attempt 1. Keys that start with `plan:` (the judge's cost, `plan:review`, attempt 0) count in the
 plan's cost and runs but are not units: they have no entry in `used.attempts`.
 
+`plan.run_idle{unit, attempt, run}` (L4-YOLO-014) names a run of one attempt that did nothing (no agent, no gate, no
+phase change but a wait): the fold subtracts the distinct idle runs of each (unit, attempt) from its charged runs,
+never below zero, and keeps their number as `used.idle_runs`. A record is of one run, so a repeated record counts once.
+An older harness ignores the event and counts the runs as before.
+
 `plan.resumed{extend}` adds to `extended`: `cost_usd` and `runs` numbers, and `attempts` either a number (every unit,
 kept under the key `*`) or a `{unit: n}` mapping. An `extend.deadline` raises `extended_deadline` (the latest wins; a
 time without a zone is read as UTC).
+
+`plan.extended{extend}` (L4-YOLO-050) raises the limits of an activated plan that is not final, in any status, and
+changes nothing else: no status, no wait or stop reason, no `stale_merges`. Before the activation it is ignored.
 
 `plan.activated{current: <unit or null>}` says which unit the plan goes on with: the activation keeps the current unit
 only when the new order holds it and every prerequisite of it is integrated, else it is null. An event without the key
@@ -86,6 +94,7 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
     state = PlanState(plan_id=plan_id)
     cost: dict[tuple[str, int], float] = {}
     runs: dict[tuple[str, int], int] = {}
+    idle: dict[tuple[str, int], set[str]] = {}  # (unit, attempt) -> runs of `plan.run_idle` records
     activated = False
     admitted: tuple[str | None, list[str], str | None] = (None, [], None)  # latest admission: digest, order, merge
     stale_at: dict[str, int] = {}  # unit -> its attempts at its latest `stale` refusal
@@ -212,6 +221,9 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 if data.get("by") != "harness":  # a person's resume: the next step tries the merge once more (R7)
                     state.stale_merges.clear()
                     stale_at.clear()
+        elif kind == "plan.extended":
+            if activated and state.status not in _FINAL:
+                apply_extend(state, data.get("extend"))
         elif kind == "plan.cancelled":
             if state.status not in _FINAL:
                 state.status = "cancelled"
@@ -223,7 +235,13 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             runs[key] = max(runs.get(key, 0), int(_number(data.get("runs"))))
             if is_unit_key(unit):
                 state.used.attempts[unit] = max(state.used.attempts.get(unit, 0), attempt)
-            state.used.cost_usd, state.used.runs = sum(cost.values()), sum(runs.values())
+            state.used.cost_usd = sum(cost.values())
+            state.used.runs, state.used.idle_runs = _runs_used(runs, idle)
+        elif kind == "plan.run_idle" and unit:
+            attempt = int(_number(data["attempt"])) if "attempt" in data else 1
+            known = idle.setdefault((unit, attempt), set())
+            known.add(_text(data.get("run")) or f"#{len(known)}")
+            state.used.runs, state.used.idle_runs = _runs_used(runs, idle)
         elif kind == "plan.completed":
             if state.status not in _FINAL:
                 state.status = "completed"
@@ -233,6 +251,13 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
         else:
             log.debug("plan %s: ignored event %r", plan_id, kind)
     return state
+
+
+def _runs_used(runs: dict[tuple[str, int], int], idle: dict[tuple[str, int], set[str]]) -> tuple[int, int]:
+    """The runs that count against `max_runs` and the idle runs left out of them: per (unit, attempt) the charged
+    maximum less the runs recorded idle, never below zero (L4-YOLO-014)."""
+    used = sum(max(0, n - len(idle.get(key, ()))) for key, n in runs.items())
+    return used, sum(min(n, len(idle.get(key, ()))) for key, n in runs.items())
 
 
 def apply_extend(state: PlanState, extend: Any) -> None:

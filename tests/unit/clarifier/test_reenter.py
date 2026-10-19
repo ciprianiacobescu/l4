@@ -202,3 +202,30 @@ def test_a_status_without_text_is_not_answered_and_is_not_recorded(tmp_path: Pat
     ask(tmp_path, "1.1")
     edit(tmp_path, "Q-001", status=status)
     assert run(tmp_path, "r-20261004T0100Z-0001").answered == ()
+
+
+def test_reenter_records_the_agent_for_a_technical_answer(repo: Path):
+    """SCN-DLG-41: the 0.4.16 bug recorded `human` for every kind but `harness`."""
+    from .answer_world import answer_commit, ask
+
+    ask(repo)
+    answer_commit(repo, "Q-001", "Use cents.", "CLAUDECODE")
+    answer_commit(repo, "Q-002", "Use dollars.", "person")
+    writer = LedgerWriter.open(repo, UNIT, "r-20261004T0100Z-0001", redactor=REDACTOR)
+    result = Clarifier(repo, writer).reenter(TASKS, refresh_index=False)
+    writer.finish(0)
+    assert [(a.id, a.by) for a in result.answered] == [("Q-001", "agent"), ("Q-002", "human")]
+    recorded = {e["id"]: e for e in events(repo, "question.answered")}
+    assert recorded["Q-001"]["by"] == "agent" and recorded["Q-002"]["by"] == "human"
+
+
+def test_reenter_records_the_marker(repo: Path):
+    from .answer_world import answer_commit, ask
+
+    ask(repo, n=1)
+    answer_commit(repo, "Q-001", "Use cents.", "CLAUDECODE")
+    writer = LedgerWriter.open(repo, UNIT, "r-20261004T0100Z-0001", redactor=REDACTOR)
+    Clarifier(repo, writer).reenter(TASKS, refresh_index=False)
+    writer.finish(0)
+    (event,) = events(repo, "question.answered")
+    assert event["by"] == "agent" and event["marker"] == "CLAUDECODE" and "profile" not in event

@@ -2,9 +2,12 @@
 worktree, and leaves a raw events file like the real adapters do."""
 
 import json
+import os
+import shutil
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from l4.agents.base import (
@@ -32,6 +35,9 @@ class Step:
     delay_s: float = 0.0
     writes: Mapping[str, str] = field(default_factory=dict)  # worktree-relative path -> content
     deletes: tuple[str, ...] = ()  # worktree-relative paths the step removes (after the writes)
+    # worktree-relative path -> link target, applied after `writes` and `deletes`: whatever is at the path (a file or a
+    # directory) is removed first, then `os.symlink(target, path)` runs; the target may point anywhere (a test lever)
+    links: Mapping[str, str] = field(default_factory=dict)
     cost_usd: float | None = None  # reported as the run's usage, for tests of budget accounting
     credits: float | None = None  # plan credits (Kiro), a different unit from dollars
     credits_source: str | None = None
@@ -89,6 +95,16 @@ class FakeAdapter:
             if root not in target.parents:
                 raise AdapterError(f"scripted delete {name!r} is outside the worktree")
             target.unlink(missing_ok=True)
+        for name, link_target in step.links.items():
+            where = (root / name).parent.resolve() / Path(name).name
+            if root not in where.parents:
+                raise AdapterError(f"scripted link {name!r} is outside the worktree")
+            if where.is_symlink() or where.is_file():
+                where.unlink()
+            elif where.is_dir():
+                shutil.rmtree(where)
+            where.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(link_target, where)
         if step.structured is not None:
             req.result_path.parent.mkdir(parents=True, exist_ok=True)
             req.result_path.write_text(json.dumps(step.structured), encoding="utf-8")

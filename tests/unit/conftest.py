@@ -2,8 +2,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,6 +126,8 @@ class TddRepo:
         observability: dict | None = None,
         availability: dict | None = None,
         ci: dict | None = None,
+        frameworks: list[str] | None = None,
+        delegate: dict | None = None,
         **gates: object,
     ) -> str:
         """A `.l4/config.yaml` for the fake adapter: no sandbox, a venv launcher instead of `uv sync`."""
@@ -148,6 +151,8 @@ class TddRepo:
             **({"observability": observability} if observability else {}),
             **({"availability": availability} if availability else {}),
             **({"ci": ci} if ci else {}),
+            **({"delegate": delegate} if delegate else {}),
+            **({"spec": {"frameworks": frameworks}} if frameworks else {}),
         }
         return yaml.safe_dump(body)
 
@@ -163,12 +168,24 @@ class TddRepo:
         observability: dict | None = None,
         availability: dict | None = None,
         ci: dict | None = None,
+        frameworks: list[str] | None = None,
+        delegate: dict | None = None,
         **gates: object,
     ) -> None:
         (self.repo / ".l4").mkdir(exist_ok=True)
         text = self.config(
-            implementer=implementer, sandbox=sandbox, judge_vendor=judge_vendor, clarifier=clarifier, roles=roles,
-            profiles=profiles, observability=observability, availability=availability, ci=ci, **gates,
+            implementer=implementer,
+            sandbox=sandbox,
+            judge_vendor=judge_vendor,
+            clarifier=clarifier,
+            roles=roles,
+            profiles=profiles,
+            observability=observability,
+            availability=availability,
+            ci=ci,
+            frameworks=frameworks,
+            delegate=delegate,
+            **gates,
         )
         (self.repo / ".l4" / "config.yaml").write_text(text)
 
@@ -190,3 +207,17 @@ def tdd_repo(tmp_path: Path, git_environ: dict[str, str], raw: Callable[..., str
     script.write_text(MKVENV)
     environ = {**git_environ, "L4_CACHE": str(tmp_path / "cache"), "L4_HOME": str(tmp_path / "l4home")}
     return TddRepo(repo, environ, tmp_path / "cache", script, bare)
+
+
+@pytest.fixture
+def var_tmp_dir() -> Iterator[Path]:
+    """A fresh directory under /var/tmp, removed afterwards; the test is skipped when /var/tmp is not writable. Live
+    bwrap tests make their fake home and runner cache here, never under /tmp (every sandbox covers /tmp with a tmpfs, so
+    a canary there would pass before any fix)."""
+    if not (Path("/var/tmp").is_dir() and os.access(Path("/var/tmp"), os.W_OK)):
+        pytest.skip("/var/tmp is not writable")
+    path = Path(tempfile.mkdtemp(prefix="l4-live-", dir=Path("/var/tmp"))).resolve()
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)

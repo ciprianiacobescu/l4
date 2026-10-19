@@ -551,7 +551,7 @@ class FallbackSelector:
         text = "; ".join(walk.reasons)
         if not required:
             self._unavailable(role, walk, required, None)
-            raise RoleUnavailable(role, text)
+            raise RoleUnavailable(role, text, tuple(s.step for s in walk.skipped))
         # the earliest end of a cool-down in the chain; with none cooling every failure was binary, auth, hello, a
         # constraint or `serves`, which nothing but a fix can end, so the next run probes again (L4-AVL-007)
         retry = self._store.cooldowns.earliest_reset(walk.keys, now) or now

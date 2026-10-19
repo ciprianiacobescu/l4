@@ -129,6 +129,7 @@ CLASSIFIED = {
     "availability/fallback.py": "the probe ladder runs under `_ladder_run`",
     "services.py": "wires `run_process` into the ProbeCtx of the Factory",
     "doctor/checks_agents.py": "LIVE-001 goes through Factory.for_role; LIVE-005 runs `--version` only",
+    "doctor/checks_delegate.py": "DLG-002 goes through Factory.for_role, which probes under the login lock",
     "doctor/checks_provision.py": "PRV-001 goes through adapter_readiness (holding_login)",
     "doctor/context.py": "doctor's run seam: versions of git, node, uv, the agent binaries (no login)",
     "sim/availability.py": "the simulator: fake adapters",

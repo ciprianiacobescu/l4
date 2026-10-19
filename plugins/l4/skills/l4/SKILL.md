@@ -21,6 +21,8 @@ right file with the right command, never to do the harness's work by hand.
 
   "The work is done, mark it addressed" is still a request to refuse: a person's push after the hand-off sends the unit
   back to work and makes the PR later, not sooner.
+- **Restart or continue a unit with `l4 retry` / `l4 yolo resume` from a base-branch clone**; never by checking out or
+  pushing its unit branch (see `references/control-loop.md`).
 - **A person merges.** Never merge an L4 pull request unless the person tells you to.
 - **Never print, paste or commit a secret.** Agent keys go into the GitHub environment `l4` with
   `l4 setup github --secret NAME=ENVVAR`, the value only in that environment variable.
@@ -53,7 +55,10 @@ l4 feedback add --kind config --at src/x.py:12 --env BASE_URL --text "read the U
   feedback on a merged unit.
 - `references/operate.md`: answering `questions.md` with `l4 questions` (the agent rule; verdict questions included),
   reading state, resuming an escalated or halted unit, and the `--reason` of `l4 retry` as the implementer's note.
+- `references/control-loop.md`: the one control loop, what to run for each state of a unit or plan, what a stop keeps
+  and loses, and the MCP tools.
 - `references/adopt.md`: adopting L4 in a repository (private or public), the GitHub setup, a cheap-first implementer chain, and upgrades.
 - `references/plan.md`: making and updating a delivery plan: `l4 yolo draft`, evidence for each dependency, the
   validator, `l4 yolo check`, and what to hand to a person.
 - `references/spec.md`: writing a spec for L4 so that it passes the readiness review on the first try.
+- `references/kiro.md`: what a Kiro unit's prompt carries (criteria text, task block, steering) and how to see and fix a cut.

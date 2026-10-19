@@ -45,6 +45,7 @@ DRAFT_PREFIX = "Draft: "
 LABEL_COLOR = "#6b7280"
 MAX_RETRIES = 3
 MAX_WAIT_S = 60.0
+PIPELINE_UNFINISHED = frozenset({"created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"})
 MAX_PAGES = 100
 PER_PAGE = 100
 TIMEOUT_S = 30.0
@@ -300,8 +301,10 @@ class GitLabForge:
         )  # fmt: skip
         found: dict[str, JobResult] = {}
         for pipeline in pipelines:
+            names: set[str] = set()
             for job in self._pages(f"/pipelines/{int(pipeline['id'])}/jobs"):
                 name = str(job["name"])
+                names.add(name)
                 status = str(job.get("status") or "")
                 if name not in found or (settled and found[name].status in UNFINISHED and status not in UNFINISHED):
                     found[name] = JobResult(
@@ -309,6 +312,12 @@ class GitLabForge:
                         allow_failure=bool(job.get("allow_failure")), pipeline_id=int(pipeline["id"]),
                         job_id=int(job["id"]), web_url=str(job.get("web_url") or ""),
                     )  # fmt: skip
+            if pipeline.get("status") in PIPELINE_UNFINISHED and not names - {"l4"}:
+                # nothing but the harness's own job is listed: the pipeline is still being created (L4-CI-014)
+                found[f"(pipeline {int(pipeline['id'])})"] = JobResult(
+                    name=f"(pipeline {int(pipeline['id'])})", stage="", status="pending", allow_failure=False,
+                    pipeline_id=int(pipeline["id"]), job_id=None, web_url=str(pipeline.get("web_url") or ""),
+                )  # fmt: skip
         return list(found.values())
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:

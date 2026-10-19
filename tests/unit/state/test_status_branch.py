@@ -325,3 +325,46 @@ def test_plan_does_not_take_the_fallback(unit_repo, trailers, capsys, monkeypatc
     _refuse(monkeypatch, "remote: HTTP Basic: Access denied")
     environ = {**unit_repo.environ, "L4_CACHE": str(unit_repo.repo.parent / "c"), "GITLAB_CI": "true"}
     assert main(["plan", "--json", "--repo", str(unit_repo.repo)], environ=environ) != 0
+
+
+def test_the_snapshot_passes_the_recorded_h_to_the_review(unit_repo, trailers, monkeypatch, tmp_path):
+    """L4-ARC-008: `load_snapshot` counts the review from the `pr.ready{head}` of the lock ref's pending files."""
+    import datetime as dt
+
+    import l4.state.status as status
+    from l4.vcs.git import BOT_IDENTITY
+
+    from .conftest import BRANCH
+    from .ready_world import fetch, push_lock, ready_file
+
+    git = unit_repo.git
+    git.run("checkout", "-q", "-b", BRANCH)
+    tick_first_task(unit_repo.repo)
+    git.run("add", "-A")
+    git.commit("work", trailers, BOT_IDENTITY)
+    b = git.rev_parse("HEAD")
+    unit_repo.write_ledger(
+        unit_repo.repo,
+        *IMPLEMENTING,
+        ("phase.changed", {"from": "implementing", "to": "in_review", "trigger": "hand_off_pushed"}),
+    )
+    git.run("add", "-A")
+    git.commit("ledger", trailers, BOT_IDENTITY)
+    git.push("origin", [f"HEAD:refs/heads/{BRANCH}"])
+    when = dt.datetime(2026, 10, 3, 14, 0, tzinfo=dt.UTC)
+    push_lock(git, {"r-20261003T1400Z-0001.jsonl": ready_file(tmp_path / "g", "r-20261003T1400Z-0001", b, when)}, None)
+    git.run("checkout", "-q", "main")
+    git.run("branch", "-q", "-D", BRANCH)
+    fetch(unit_repo)
+
+    seen: dict[str, object] = {}
+    real = status.after_handoff
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(status, "after_handoff", spy)
+    snap = snapshot(unit_repo)
+    assert snap.state.phase == "in_review"
+    assert seen["recorded"] == b and snap.state.ready_head == b and snap.state.ready_at == when

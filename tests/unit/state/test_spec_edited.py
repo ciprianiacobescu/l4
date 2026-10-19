@@ -200,3 +200,20 @@ def test_a_spec_edit_on_a_halted_unit_is_not_hinted_for_a_retry(world):
 
     snapshot = SimpleNamespace(spec_edit=SpecEdit(("a" * 40,), "b" * 40, "a" * 40))
     assert Sweeper._push_hint(SimpleNamespace(), snapshot, "l4:retry") is None  # type: ignore[arg-type]
+
+
+def test_scn_ver_138_a_run_of_a_unit_escalated_with_judge_view_rejected_is_told_its_own_way_out(world):
+    """L4-VER-044: the refusal of `l4 run --unit` names the split, the `accept` and the retry, not feedback."""
+    from l4.orchestrator import _refuse_stopped
+    from l4.specs.base import Framework, UnitRef
+    from l4.state.fold import UnitState
+
+    state = UnitState(
+        unit=UNIT, phase="escalated", halt_reason="judge_view_rejected", halt_detail="a person rejected a hold"
+    )
+    ref = UnitRef(Framework.OPENSPEC, NAME, world.app.repo / UNIT_REL)
+    refused = _refuse_stopped(world.app, state, ref)
+    assert refused is not None
+    said = refused.outcome.exit_reason
+    assert f"l4 restart --unit {UNIT}" in said and "--replace" in said and f"l4 retry --unit {UNIT}" in said
+    assert "l4 feedback add" not in said

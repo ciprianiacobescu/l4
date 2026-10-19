@@ -336,10 +336,17 @@ The `l4` job starts on a merge to the base branch, on a push to a unit branch, o
 `doctor`, `plan --sweep` and `run`; with no unfinished spec task it says `nothing to do`. Add a spec (OpenSpec change or
 Kiro spec) with unchecked tasks and push it: the job implements them test-first on a unit branch and opens an MR/PR.
 Questions for you appear in `questions.md` next to the spec: answer in the file and push. `.l4/bin/l4 status` (also the
-last step of the job) lists each unit with its state and what it waits for.
+last step of the job) lists each unit with its state and what it waits for. [docs/control-loop.md](control-loop.md)
+explains why the job always starts from the base branch, and what starts it.
 To ask for changes to a unit's code once its MR/PR is open (a refactor, a hard-coded value that should be an
 environment variable, a missing test), run `.l4/bin/l4 feedback add`, then commit and push. [docs/feedback.md](feedback.md)
 has one worked example for each kind and says what happens after the push.
+
+For a Kiro spec, the implementer receives each criterion's text, the task's whole block from `tasks.md` and the steering
+in `.kiro/steering/` that applies to the task (by its inclusion mode; the root `AGENTS.md` only with
+`implementer.include_agents_md: true`). Before the first run, check what a long spec loses: `.l4/bin/l4 run --dry-run`
+prints the prompt's budget, each steering decision and each file it would cut. Shorten a cut file, or raise
+`implementer.context_budget_tokens` (default 32000).
 
 When a unit stops or does not move, use the [operations runbook](runbook.md).
 

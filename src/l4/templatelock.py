@@ -3,8 +3,8 @@
 A body that changes without a version bump, or a bump without a regenerated lock, fails
 `tests/unit/test_template_lock.py`. Regenerate after a deliberate change: `uv run python -m l4.templatelock --write`.
 A template change that passes the lock is not thereby shown to be no worse: run `l4 eval --compare` (docs/eval.md).
-The pinned prompts are the five implementer templates, the system text of the judge and the clarifier, and the
-tool-less test writer's system text with the rules of each kind (`testwriter/audit`, `testwriter/e2e`).
+The pinned prompts are the five implementer templates, the system text of the judge, the clarifier and the delegate,
+and the tool-less test writer's system text with the rules of each kind (`testwriter/audit`, `testwriter/e2e`).
 """
 
 import hashlib
@@ -23,6 +23,7 @@ def _sha(text: str) -> str:
 
 def current() -> dict[str, dict[str, object]]:
     from l4.clarifier import context as clarifier
+    from l4.delegate import prompt as delegate
     from l4.implementer.prompt import load_template
     from l4.verifier import judge, testwriter
 
@@ -32,6 +33,7 @@ def current() -> dict[str, dict[str, object]]:
         out[f"implementer/{name}"] = {"version": template.version, "sha256": _sha(template.body)}
     out["judge"] = {"version": judge.PROMPT_VERSION, "sha256": _sha(judge.SYSTEM)}
     out["clarifier"] = {"version": clarifier.PROMPT_VERSION, "sha256": _sha(clarifier.SYSTEM)}
+    out["delegate"] = {"version": delegate.PROMPT_VERSION, "sha256": _sha(delegate.SYSTEM)}
     for kind, rules in testwriter._KIND_RULES.items():
         out[f"testwriter/{kind}"] = {"version": testwriter.TEMPLATE_VERSION, "sha256": _sha(testwriter.SYSTEM + rules)}
     return out

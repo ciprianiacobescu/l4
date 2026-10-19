@@ -1,8 +1,9 @@
 """`l4 plan` (SPEC 2.1, simulation-harness D6): the next action of every unit, from its folded phase and task counts.
 
-Next action is one of implement, clarify, verify, hand_off, follow_up, none. The question facts come from the unit's
-snapshot (`questions.md` of the unit branch, read beside tasks and ledger): an `awaiting_human` unit is actionable
-only when committed answers free a task. The path of the files is never probed here. No resume/sweep duties. `--probe`
+Next action is one of implement, clarify, verify, hand_off, delegate, follow_up, none. The question facts come from
+the unit's snapshot (`questions.md` of the unit branch, read beside tasks and ledger): an `awaiting_human` unit is
+actionable only when committed answers free a task, or when the delegate has a question to decide (`delegate`, only
+for a unit in its scope). The path of the files is never probed here. No resume/sweep duties. `--probe`
 adds what `l4.sim.availability` finds out about the agents the next actions need; without it the plan is the same
 bytes. `facts_of` over `l4.state.status.load_snapshot` plays the part of simulation-harness' `LiveUnitSource`.
 `--sweep` first runs the minimal sweeper (`l4.ci.sweeper`: merged units and their archive merge requests, and the
@@ -95,6 +96,11 @@ class UnitFacts:
     follow_up_items: tuple[str, ...] = ()  # merged: the feedback items (ids) a follow-up should take (L4-FBK-010)
     follow_up_open: str | None = None  # merged: the follow-up that is open, so newer items wait
     misdirected: str | None = None  # in_review: `merged into <x>, not the base <base>` (L4-YOLO-007, SCN-YOLO-13)
+    # (key, the time it may be asked again | None): the open questions the delegate has still to decide, set only for a
+    # unit in its scope while the base branch enables it (L4-DLG-003); the action `delegate` needs one that is due now
+    delegate_due: tuple[tuple[str, str | None], ...] = ()
+    # the open questions the delegate escalated for their current raise: they wait for a person (L4-DLG-008)
+    escalated: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -102,7 +108,7 @@ class PlanEntry:
     unit: str
     framework: str
     phase: str | None
-    next_action: str  # implement | clarify | verify | hand_off | follow_up | none
+    next_action: str  # implement | clarify | verify | hand_off | delegate | follow_up | none
     actionable: bool
     reason: str
     tasks_done: int
@@ -143,6 +149,26 @@ def _in_review(facts: UnitFacts) -> tuple[str, str] | None:
     return None
 
 
+def _delegate_due(facts: UnitFacts, now: datetime | None) -> list[str]:
+    """The questions the delegate may be asked now: those with no deferral in the future."""
+    moment = now or datetime.now(UTC)
+    due = []
+    for key, after in facts.delegate_due:
+        try:
+            later = datetime.fromisoformat(after.replace("Z", "+00:00")) if after else None
+        except ValueError:
+            later = None
+        if later is None or later.tzinfo is None or later <= moment:
+            due.append(key)
+    return due
+
+
+def _escalated_note(facts: UnitFacts, keys: Sequence[str] | None = None) -> str:
+    """` (escalated to a person: Q-004)` for the waiting questions the delegate escalated (L4-DLG-008), else ''."""
+    named = [k for k in facts.escalated if keys is None or k in keys or k.rpartition("/")[2] in keys]
+    return f" (escalated to a person: {', '.join(named)})" if named else ""
+
+
 def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str]:
     """(action, reason), a pure function of the phase and the task counts (SPEC 12.0); `now` only matters for a unit
     waiting for capacity."""
@@ -164,7 +190,10 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
         return "verify", f"{phase}: verification outstanding"
     if phase == Phase.FIXING.value and facts.open_fix_unit:
         if facts.fix_questions_open:
-            return "none", f"fixing: fix unit questions open: {', '.join(facts.fix_questions_open)}"
+            if due := _delegate_due(facts, now):
+                return "delegate", f"delegate: {', '.join(due)} to ask"
+            person = _escalated_note(facts, facts.fix_questions_open)
+            return "none", f"fixing: fix unit questions open: {', '.join(facts.fix_questions_open)}{person}"
         done = f": {facts.fix_progress[0]}/{facts.fix_progress[1]} tasks" if facts.fix_progress else ""
         return "implement", f"fix unit {facts.open_fix_unit}{done}"
     if phase == Phase.VERIFIED.value:
@@ -197,6 +226,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
             return "verify", (
                 f"legacy round {facts.legacy_round}: NEEDS_HUMAN without verdict questions, the run raises them"
             )
+        if due := _delegate_due(facts, now):
+            return "delegate", f"delegate: {', '.join(due)} to ask"
         waiting = f" (open: {', '.join(facts.open_blocking_questions)})" if facts.open_blocking_questions else ""
         if facts.verdicts_open:
             waiting += f" (verdicts open: {', '.join(facts.verdicts_open)})"
@@ -206,6 +237,7 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
             waiting += f" (answer written but Status is still open: {', '.join(facts.drafts)})"
         if facts.unreadable:
             waiting += f" (unreadable in questions.md, all tasks held: {', '.join(facts.unreadable)})"
+        waiting += _escalated_note(facts)
         return "none", f"{_NOT_ACTIONABLE[phase]}{waiting}"
     if phase == Phase.WAITING_CAPACITY.value and (row := _after_capacity(facts, now or datetime.now(UTC))):
         return row
@@ -335,6 +367,15 @@ def _harness_facts(snapshot: UnitSnapshot) -> dict[str, tuple]:
     }
 
 
+def _escalated_keys(snapshot: UnitSnapshot) -> tuple[str, ...]:
+    """The open questions that the delegate escalated (the ledger of the snapshot says it, L4-DLG-008)."""
+    if not any(e.type == "delegate.result" for e in snapshot.events):
+        return ()
+    from l4.delegate.due import escalations  # the delegate imports the planner
+
+    return tuple(key for key, _, _ in escalations(snapshot.events, snapshot.state.questions.open))
+
+
 def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
     verdicts = verdict_status(snapshot.questions, snapshot.state.verdicts_consumed)
     progress, fix_open = _fix_facts(snapshot)
@@ -367,6 +408,8 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         **_spec_edit_facts(snapshot),
         **_follow_up_facts(snapshot),
         misdirected=snapshot.state.misdirected.text if snapshot.state.misdirected else None,
+        delegate_due=snapshot.delegate_due,
+        escalated=_escalated_keys(snapshot),
     )
 
 

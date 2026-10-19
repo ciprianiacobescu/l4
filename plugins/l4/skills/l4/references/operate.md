@@ -64,6 +64,11 @@ push. The harness reads only answers whose Status says they are submitted.
 - The answer's **first word** must be `accept` or `reject` (any case), then your reason.
 - A `reject` fails that criterion and starts a fix round. To pin down exactly what is wrong, end the reason with a
   `WHEN … THEN …` sentence: it becomes a regression scenario that the fix must make true.
+- A hold `judge view: …` means the judge could not see all of the diff (a file longer than one part, or more than 8
+  parts). Never answer it with a `WHEN … THEN …`: no fix unit can shrink a diff. `accept` only after a person checked
+  the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
+  `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
+  accept, then `l4 retry`).
 - Before rejecting, check that the criterion id in the question is the one you mean (`verification.md` maps ids to
   `Req N.M`).
 - The unit moves on only when **every** open verdict question in the file is answered.
@@ -72,7 +77,30 @@ push. The harness reads only answers whose Status says they are submitted.
   keeps the old answer in a comment under the new one and says `(answer replaced)` in the commit. Without `--replace`
   the command refuses an answered question. A clarification answer is changed by hand (L4-QMD-006).
 
+## The delegate
+
+When `delegate.enabled` is true on the base branch, a strong model (the delegate) answers the questions of units in scope
+(a unit of an active or waiting plan; with `delegate.scope: all` also a unit in no plan) at the end of the run that parks
+them, through the same checks and commit as `l4 questions`. It escalates what it cannot check against the repository.
+Read it, do not redo it:
+
+- `l4 status --unit FW:NAME` has one `Delegate:` line per question it decided: `answered by the delegate (<model> via
+  <cli>, $0.42)`, `escalated by the delegate: <reason>`, or `deferred until <time>`. In `questions.md` the question has
+  `Answered by:` or `Escalated by:`; the commit has `By: delegate (…)` and `Via: l4 delegate`.
+- An answered question needs nothing: the run it started reads the answer. An accept of a verdict or harness question is
+  labelled `delegate_override` (`by the delegate … through Q-NNN`) in `verification.md` and `l4 yolo report`.
+- An escalated question is a person's: the PR has `l4:needs-person`, the REASON is `Q-NNN needs a person (the delegate
+  escalated)`, and a plan waits with `unit_awaiting_human`. Give it to the person with its reason. The agent rule above
+  applies to it unchanged.
+- **An agent never writes a `By: delegate` line**, nor `Answered by:` or `Escalated by:` in `questions.md`. The harness
+  counts a `By: delegate` that its ledger does not back as an agent's answer, and refuses an answer text that holds
+  either field line.
+- Turning it on or off (`delegate.enabled`, `roles.delegate`, `delegate.unfreeze`, the limits) is a configuration change
+  on the base branch for a person to approve.
+
 ## Retry or restart a stuck unit
+
+Never check out the unit branch to "restart" it. Run the commands below from a clone on the base branch (docs/control-loop.md).
 
 The note names the reason; so do `l4 status` (the `REASON` column) and `l4 status --unit FW:NAME`, which ends with
 `Next:` and, for a unit a label moves, an `Or:` line. Only a member (Developer on GitLab, write access on GitHub) can
@@ -135,7 +163,9 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
   The plan file is frozen too: an edit of it, or of a unit spec, stops an active plan with `inputs_changed`.
 - `l4 yolo status [PLAN] [--json]`: state, units, usage against limits, stop reason, `Next:`.
 - `l4 yolo cancel PLAN --reason "…"`: no new dispatch or merge, for good.
-- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: after the cause of a
+- `l4 yolo resume PLAN --reason "…" [--extend-cost|--extend-runs|--extend-attempts|--extend-deadline]`: on an active plan
+  an `--extend-…` raises the limit (`plan.extended`) and resumes nothing; raising a limit is a person's, so an agent
+  prints the command for the person unless `yolo.extend_by_agents` is true on the base branch. After the cause of a
   stop is gone (`l4 retry` the unit first for `unit_halted` / `unit_escalated`; `unit_missing` clears when the unit
   folder is back). `inputs_changed` and `unit_rejected` need `review` and `activate` again. Usage is never reset: a
   restart is a new attempt and its cost is added. A `waiting` plan continues by itself when the cause is gone.

@@ -44,9 +44,9 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@11+green@5"
+    assert rendered.template_version == "contract@12+green@5"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
-    assert render_prompt("red", ctx()).template_version == "contract@11+red@10"
+    assert render_prompt("red", ctx()).template_version == "contract@12+red@11"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256
 
 
@@ -140,10 +140,10 @@ def test_a_previous_failure_is_shown_as_data():
 
 
 def test_the_unit_context_is_cut_to_the_budget_with_a_marker():
-    big = ("proposal.md", "x" * 5000)
-    text = render_prompt("red", ctx(sources=(big,), context_budget_tokens=100)).text
-    assert "[truncated:" in text
-    assert text.count("x") < 500
+    big = ("proposal.md", "".join(f"line {i:04d} of the proposal xxxxxxxxxxxxxxxxx\n" for i in range(400)))
+    text = render_prompt("red", ctx(sources=(big,), context_budget_tokens=1000)).text
+    assert "[cut: lines " in text and "# Not shown in full" in text  # L4-IMP-052: the cut is marked and named
+    assert text.count("proposal xxx") < 120
 
 
 def test_a_result_path_is_rendered_literally_when_the_adapter_writes_a_file():
@@ -299,7 +299,8 @@ def test_a_task_without_requirement_links_keeps_the_openspec_wording():
         "# Criteria of this unit\nOpenSpec does not link tasks to scenarios, so all of them are listed; cover those "
         "that this task's requirement names.\n" in text
     )
-    assert "_Requirements:" not in text
+    task_and_criteria = text[text.index("# Task 1.1") : text.index("# Phase")]
+    assert "_Requirements:" not in task_and_criteria  # red@11 names the line itself, in its own rules
 
 
 # -- live M1.5 P3 (job 5528): the red prompt must say where browser tests live (m1.x fix F5)
@@ -365,8 +366,8 @@ def test_a_test_chore_prompt_allows_new_tests_and_names_the_subjects():
     sources = (("proposal.md", f"## Why\nFinding F-aaaaaaaa: {hold}"),)
     plain = render_prompt("single", ctx(sources=sources))
     chore = render_prompt("single", ctx(sources=sources, adds_tests=True))
-    assert "Do not add tests" in plain.text and plain.template_version == "contract@11+single@3"
-    assert "Do not add tests" not in chore.text and chore.template_version == "contract@11+single_tests@5"
+    assert "Do not add tests" in plain.text and plain.template_version == "contract@12+single@3"
+    assert "Do not add tests" not in chore.text and chore.template_version == "contract@12+single_tests@5"
     assert "# Phase: SINGLE (add tests" in chore.text
     assert "new test files" in chore.text and "append new tests to this unit's own test files" in chore.text
     assert "no change to an existing test" in chore.text and "non-test code" in chore.text

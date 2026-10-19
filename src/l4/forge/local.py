@@ -203,16 +203,18 @@ class LocalForge:
             self._save()
 
     def list_pipeline_jobs(self, sha: str, *, settled: bool = False) -> list[JobResult]:
-        """The scripted jobs; `settled`: one per name, the newest (last scripted) finished one, if any."""
+        """The scripted jobs; `settled`: one per (workflow, event, name), the newest (last scripted) finished one, if
+        any."""
         self._log("list_pipeline_jobs", sha, settled)
         jobs = [JobResult(**job) for job in self._jobs.get(sha, [])]
         if not settled:
             return jobs
-        newest: dict[str, JobResult] = {}
+        newest: dict[tuple[str, str, str], JobResult] = {}
         for job in reversed(jobs):
-            kept = newest.get(job.name)
+            key = (job.workflow, job.event, job.name)
+            kept = newest.get(key)
             if kept is None or (kept.status in UNFINISHED and job.status not in UNFINISHED):
-                newest[job.name] = job
+                newest[key] = job
         return list(newest.values())
 
     def job_log_tail(self, job_id: int | str, max_lines: int = 40) -> str:
@@ -292,8 +294,12 @@ class LocalForge:
         *,
         tails: dict[str, str] | None = None,
         steps: dict[str, str] | None = None,
+        replace: bool = False,
     ) -> None:
-        """The project's CI for `sha`: `(name, status[, {stage, allow_failure}])` per job, and some logs by name."""
+        """The project's CI for `sha`: `(name, status[, {stage, allow_failure, workflow, event}])` per job, and some
+        logs by name. `replace` drops the jobs already scripted for `sha` first."""
+        if replace:
+            self._jobs.pop(sha, None)
         listed = self._jobs.setdefault(sha, [])
         for spec in jobs:
             name, status, extra = (*spec, {})[:3]
@@ -302,6 +308,7 @@ class LocalForge:
                 "name": name, "stage": extra.get("stage", "test"), "status": status,
                 "allow_failure": extra.get("allow_failure", False), "pipeline_id": 1, "job_id": job_id,
                 "web_url": f"{self._url}/jobs/{job_id}",
+                "workflow": extra.get("workflow", ""), "event": extra.get("event", ""),
             })  # fmt: skip
             if tails and name in tails:
                 self._tails[job_id] = tails[name]

@@ -12,7 +12,10 @@ def test_hookwrapper_only_counts_when_it_wraps_the_test_call():
     wrapped = "import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_runtest_call(item):\n    yield\n"
     plain = "def pytest_runtest_call(item):\n    pass\n"
     other = "import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_sessionstart(session):\n    yield\n"
-    assert scan.result_hooks(wrapped) and not scan.result_hooks(plain) and not scan.result_hooks(other)
+    assert scan.result_hooks(wrapped) and not scan.result_hooks(other)
+    # L4-VER-039: a plain pytest_runtest_call is no longer harmless; its hit has its own text
+    assert scan.result_hooks(plain) == ["pytest_runtest_call: code around every test call"]
+    assert scan.result_hooks(wrapped) == ["pytest_runtest_call: a hook wrapper around the test call"]
 
 
 def test_a_source_that_does_not_parse_has_no_hits():
@@ -57,3 +60,78 @@ def test_added_lines_carry_their_line_numbers():
 def test_task_tags():
     assert scan.task_tags("Update the docs [Docs] and [test-infra]") == {"docs", "test-infra"}
     assert scan.task_tags("plain [ ] title") == frozenset()
+
+
+def test_hooks_that_replace_a_tests_call_are_hits():  # SCN-VER-129
+    assert scan.result_hooks("def pytest_pyfunc_call(pyfuncitem):\n    return True\n") == [
+        "pytest_pyfunc_call: runs or replaces the test function"
+    ]
+    assert scan.result_hooks("def pytest_runtest_setup(item):\n    pass\n") == [
+        "pytest_runtest_setup: code around every test call"
+    ]
+    modify = "def pytest_collection_modifyitems(items):\n    for item in items:\n        item.obj = lambda: None\n"
+    assert scan.result_hooks(modify) == ["assignment to .obj: replaces a collected test"]
+    assert scan.result_hooks("def f(item):\n    item.runtest = print\n") == [
+        "assignment to .runtest: replaces a collected test"
+    ]
+    wrapped = "import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_runtest_setup(item):\n    yield\n"
+    assert scan.result_hooks(wrapped) == []  # a wrapper of setup is not code around the call
+
+
+def test_an_attribute_that_is_not_obj_or_runtest_is_no_hit():  # SCN-VER-129 control
+    assert scan.result_hooks("def f(item):\n    item.name = 'x'\n    item.obj_count = 1\n") == []
+
+
+# --- third review, item 2: hooks that can rewrite the report after pytest wrote it ------
+
+
+def test_atexit_os_exit_and_session_end_hooks_that_write_files_are_hits():
+    assert scan.result_hooks("import atexit\natexit.register(print)\n") == [
+        "atexit.register: runs code after the test run, when the report is already written"
+    ]
+    assert scan.result_hooks("import atexit as _a\n_a.register(print)\n") != []
+    assert scan.result_hooks("import os\nos._exit(0)\n") == [
+        "os._exit: ends the process without the report being judged"
+    ]
+    assert scan.result_hooks("import os as _o\n_o._exit(0)\n") != []
+    for hook in ("pytest_sessionfinish", "pytest_unconfigure", "pytest_terminal_summary"):
+        writes = f"def {hook}(*a):\n    open('x.xml', 'w').write('')\n"
+        assert scan.result_hooks(writes) == [f"{hook}: writes a file when the run ends"]
+        assert scan.result_hooks(f"def {hook}(*a):\n    print('done')\n") == []
+    assert scan.result_hooks("from pathlib import Path\ndef pytest_unconfigure(c):\n    Path('a').write_text('b')\n")
+
+
+def test_other_register_calls_are_no_hit():
+    assert scan.result_hooks("registry.register(print)\nclass A:\n    def _exit(self):\n        pass\n") == []
+
+
+# --- fourth review: references to the harness's own plugin and to the report option ------
+
+
+def test_references_to_the_harness_plugin_the_record_and_the_report_option_are_hits():
+    forms = {
+        'import sys\nsys.modules.get("l4_trace")': "l4_trace",
+        'x = "L4_OUTCOME_FILE"': "L4_OUTCOME_FILE",
+        "import l4_trace\nl4_trace._OUTCOME_FD.clear()": "l4_trace",
+        "def pytest_unconfigure(config):\n    path = config.option.xmlpath\n": "xmlpath",
+        'def f(config):\n    return getattr(config.option, "xmlpath", None)\n': "xmlpath",
+        'import sys\nm = sys.modules["l4.gates.outcomes"]\n': "sys.modules",
+        "def pytest_sessionfinish(session):\n    session.exitstatus = 0\n": "exitstatus",
+    }
+    for source, word in forms.items():
+        assert any(word in hit for hit in scan.harness_references(source)), source
+    assert scan.harness_references("import os\nx = os.environ.get('HOME')\nORDER_OUTCOME = 1\n") == []
+    assert scan.harness_references("import sys\nm = sys.modules.get('json')\n") == []
+
+
+def test_honest_names_that_only_look_like_the_harness_references_are_not_hits():  # fifth review
+    honest = {
+        "_OUTCOMES = ['win', 'draw', 'loss']\n": "a constant that starts with _OUTCOME",
+        "import pytest\n\n\n@pytest.fixture\ndef xmlpath(tmp_path):\n    return tmp_path / 'a.xml'\n": "a fixture",
+        "def test_parse(xmlpath):\n    assert xmlpath.suffix == '.xml'\n": "a parameter",
+        "class Doc:\n    xmlpath = 'a.xml'\n\n\ndef f(d):\n    return d.xmlpath\n": "an attribute read",
+    }
+    for source, why in honest.items():
+        assert scan.harness_references(source) == [], why
+    assert scan.harness_references("def f(config):\n    return config.option.xmlpath\n")
+    assert scan.harness_references("_OUTCOME_FD = []\n")

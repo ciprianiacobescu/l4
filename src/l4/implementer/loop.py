@@ -123,7 +123,7 @@ def _raise_blocked(
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
     for qid, question in zip(ids, batch, strict=True):
-        wb.emit("question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title)
+        wb.emit("question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **wb.asker())
     wb.commit(
         f"docs({wb.ref.name}): questions [skip ci]", task=task.key, attempt=step, phase="blocked", tdd=None,
         paths=[f"{wb.unit_rel}/{QUESTIONS_FILENAME}"],
@@ -144,7 +144,7 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     tests = list(held.tests[:MAX_SUBJECTS])
     wb.emit(
         "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
-        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests,
+        criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **wb.asker(),
     )  # fmt: skip
     wb.emit(
         "check.inconclusive", task=task.key, phase=held.phase, check=held.check, criteria=list(held.criteria),
@@ -250,6 +250,7 @@ def _has_later(wb: Workbench, profile: str) -> bool:
 
 def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
     wb.emit("task.started", task=task.key, title=task.title)
+    wb.served_model = None  # a model that served an earlier task's step did not ask this task's question
     limit = wb.cfg.implementer.max_task_attempts
     limit_after = wb.cfg.implementer.escalate_after
     # failed attempts per phase and profile, in the order the profiles ran the phase (D3): each profile is held to
@@ -272,6 +273,7 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
         current = "single" if chore else ("red" if red is None else "green")
         if failures[current].get(wb.selected.profile_name, 0) >= limit:
             break
+        wb.unsafe.clear()  # a refused write belongs to the attempt that met it
         wb.guard_notes.clear()  # only what the guards did in this attempt is told to the next one
         if chore:
             attempts["green"] += 1

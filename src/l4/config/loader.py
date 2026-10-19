@@ -64,6 +64,22 @@ def load_config(repo: Path, *, config_path: Path | None = None) -> L4Config:
         raise ConfigSchemaError(_issues(exc)) from None
 
 
+def load_config_text(text: str) -> L4Config:
+    """The configuration a `.l4/config.yaml` text says (a blob read from git, not a file). Raises ConfigSchemaError."""
+    try:
+        loaded = yaml.load(text, Loader=_Yaml12Loader)  # noqa: S506 (SafeLoader subclass)
+    except yaml.YAMLError:
+        raise ConfigSchemaError([ConfigIssue("$", "invalid YAML")]) from None
+    if loaded is None:
+        return L4Config()
+    if not isinstance(loaded, dict):
+        raise ConfigSchemaError([ConfigIssue("$", "the top level must be a mapping")])
+    try:
+        return L4Config.model_validate(loaded)
+    except ValidationError as exc:
+        raise ConfigSchemaError(_issues(exc)) from None
+
+
 def _parse_yaml(path: Path) -> dict[str, Any]:
     try:
         loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=_Yaml12Loader)  # noqa: S506 (SafeLoader subclass)

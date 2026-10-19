@@ -31,6 +31,7 @@ from l4.ci.failing_step import (
     reproduction,
 )
 from l4.ci.gitlab_jobs import GITLAB_CI_RELPATH
+from l4.clarifier.actor import answer_actor
 from l4.clarifier.inject import RenderedAnswers, render_answer_blocks
 from l4.config.schema import duration_seconds
 from l4.evidence.scope import file_kind
@@ -63,6 +64,7 @@ from l4.implementer.discrimination import (
 )
 from l4.implementer.earlier_red import VIA, EarlierRed, confirmed_by_earlier_red
 from l4.implementer.excerpt import failure_excerpt, lint_excerpt
+from l4.implementer.gateconfig import config_files, revert_gate_config
 from l4.implementer.guards import (
     IGNORE_FILE_GLOBS,
     FreezeManifest,
@@ -75,7 +77,7 @@ from l4.implementer.guards import (
 from l4.implementer.held import HeldCheck, Override, accepted_overrides
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_opened, unit_modules
-from l4.implementer.prompt import PromptContext, collect_sources, data_block, defuse, render_prompt, result_values_line
+from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.result import (
     RESULT_SCHEMA,
@@ -89,16 +91,18 @@ from l4.implementer.result import (
 )
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
 from l4.implementer.retrynote import RetryNote, note_block, retry_note
-from l4.implementer.stubs import ProductionGuard, enforce_red_scope, restore_to_base
+from l4.implementer.stubs import ProductionGuard, enforce_red_scope, escaping_links, restore_to_base
+from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.implementer.tasks import task_scope, tick_completed_parents
-from l4.implementer.unfreeze import Unfreeze, named_by_task, unfrozen
+from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
+from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
-from l4.implementer.workbench import PreviousAttempt, Workbench
+from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
-from l4.sandbox.env import build_agent_env
-from l4.security.protected import glob_match, revert_protected
-from l4.specs.base import Framework, Marker, Task
-from l4.specs.criteria import trace_ids
+from l4.sandbox.env import build_agent_env, cache_env
+from l4.security.protected import changed_paths, glob_match, revert_protected
+from l4.specs.base import Framework, Marker, Task, UnitRef
+from l4.specs.criteria import linked_criteria, own_criteria, trace_ids
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import read_follow_up_marker
 from l4.specs.kiro import parse_kiro_tasks
@@ -108,7 +112,7 @@ from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile
 from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
-from l4.verifier.scan import task_tags
+from l4.verifier.scan import has_human_tag
 from l4.yolo.digest import RevisionMissing, unit_digest
 
 log = logging.getLogger("l4.implementer")
@@ -132,6 +136,49 @@ class SetupFailed(L4Exit):
 
 class BaselineFailed(Exception):
     """The test gate cannot run at the step base: no report, a timeout or a collection error. The unit is halted."""
+
+
+class PlantedLink(Exception):
+    """A gate run put a symbolic link on the path of a file the harness restores (L4-SEC-021). The harness removed it
+    and wrote nothing through it, and discarded the attempt; the unit halts at once, like a secret in a push: code that
+    plants a link in the worktree is not an attempt to retry but evidence for a person. `links` is the record."""
+
+    def __init__(self, reason: str, links: Sequence[UnsafeWrite]) -> None:
+        super().__init__(reason)
+        self.links = tuple(links)
+
+
+def stop_on_unsafe(wb: Workbench) -> str:
+    """ "" when no harness write was refused in this attempt. A planted link discards the attempt and raises
+    `PlantedLink`; any other refusal (`restore failed`) returns the reason that fails the attempt."""
+    if links := wb.planted_links():
+        reason = wb.unsafe_reason()
+        wb.discard_changes()
+        raise PlantedLink(reason, links)
+    return wb.unsafe_reason()
+
+
+MAX_LINKS_SHOWN = 5
+
+
+def outside_links_reason(wb: Workbench, base: str, phase: str) -> str:
+    """L4-SEC-020 part e: "" when the step leaves no symbolic link that points outside the worktree (an absolute target
+    or one that climbs above the root) beyond what `base` already held. Else one `guard.violation` per link, and the
+    reason that fails the attempt before its commit; the caller discards the changes."""
+    found = escaping_links(wb, base)
+    for path, target in found:
+        wb.emit(
+            "guard.violation", phase=phase, rule="link outside worktree", path=path, action="refused",
+            target=target, why=f"it points to {target}, outside the worktree",
+        )  # fmt: skip
+    if not found:
+        return ""
+    shown = ", ".join(f"{path} -> {target}" for path, target in found[:MAX_LINKS_SHOWN])
+    more = f" (+{len(found) - MAX_LINKS_SHOWN} more)" if len(found) > MAX_LINKS_SHOWN else ""
+    return (
+        f"the step left a symbolic link that points outside the worktree: {shown}{more}. A link that leaves the "
+        "repository is never committed; nothing of this attempt is kept"
+    )
 
 
 class RoleLimit(Exception):
@@ -269,6 +316,13 @@ def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset
         return frozenset()
     changed = {str(c["new_id"]) for c in pending_stale(events, task.key) if c.get("new_id")}
     return frozenset({i for case in base.tests.values() for i in trace_ids(case)} - changed)
+
+
+def cited_criteria(provider: Any, ref: UnitRef, links: Sequence[str]) -> dict[str, str]:
+    """id -> alias of the criteria a Kiro leaf's `_Requirements:_` links name, read on the task's OWN unit (a fix unit
+    cites the numbers of its own `bugfix.md` items, never the parent's `Req 2.1`). Empty for an OpenSpec task, which
+    has no links, and for links that name no criterion (L4-KSP-012, kiro-prompt-context D8)."""
+    return {c.id: c.alias for c in linked_criteria(own_criteria(provider, ref), links)}
 
 
 def _first_line(case: TestCase) -> str:
@@ -441,7 +495,7 @@ def run_setup(wb: Workbench) -> None:
         wb.seed_checked = True
         ensure_uv_seed(wb)
     for command in wb.cfg.gates.setup:
-        result = wb.run_gate("setup", command, network=True)
+        result = wb.run_gate("setup", command, network=True, builds_env=True)
         if result.status != "pass":
             raise SetupFailed(f"gates.setup failed ({result.reason}); see {result.log_path}")
     wb.setup_at = head
@@ -533,7 +587,12 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
     if file is None:
         return RenderedAnswers("", ())
     scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-    return render_answer_blocks(file.questions, wb.redactor.redact_text, tasks=scope)
+    fix = wb.event_context.get("fix_unit")  # a fix unit's records are in its parent's ledger, under its name
+    events, unit_git = (_answer_events(wb) if fix else read_ledger(wb.ref.path).events), wb.git.at(wb.ref.path)
+    return render_answer_blocks(
+        file.questions, wb.redactor.redact_text, tasks=scope,
+        actor_of=lambda question: answer_actor(unit_git, wb.ref.path, question, events, fix_unit=fix),
+    )  # fmt: skip
 
 
 MAX_REASON = 1000  # one failure headline of an escalation block, cut (escalate-and-note D9)
@@ -599,9 +658,9 @@ def _accepted(wb: Workbench) -> tuple[tuple[str, str], ...]:
     return (("accepted review findings", block),) if block else ()
 
 
-def _lessons(wb: Workbench, task: Task) -> Injection:
+def _lessons(wb: Workbench, task: Task, changed: Sequence[str] | None = None) -> Injection:
     """The lessons that apply to the task, as a data block (SPEC L4-MEM-003); one `lessons.injected` event when any."""
-    paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()])
+    paths = task_paths(task.title, [*wb.branch_changed_files(), *wb.changed_files()] if changed is None else changed)
     injection = inject_for_task(wb.worktree, wb.cfg.memory, paths, writer=wb, redact=wb.redactor.redact_text)
     for problem in injection.skipped:
         log.warning("%s: lessons: %s", wb.ref.id, problem.message)
@@ -621,18 +680,26 @@ def _prompt(
     unfreeze: Unfreeze | None = None,
     adds_tests: bool = False,
     stale: StaleTests | None = None,
+    attempt: int = 1,
 ) -> str:
     answers = _answers(wb, task)
-    lessons = _lessons(wb, task)
+    changed = [*wb.branch_changed_files(), *wb.changed_files()]
+    lessons = _lessons(wb, task, changed)
+    own = getattr(wb.provider, "own_tasks", wb.provider.tasks)  # a fix unit's tasks.md holds its own tasks only
+    inputs = prompt_inputs(
+        root=wb.worktree, provider=wb.provider, ref=wb.ref, task=task, tasks=own(wb.ref), changed=changed,
+        cfg=wb.cfg, profile_name=wb.selected.profile_name, profile=wb.selected.profile,
+    )  # fmt: skip
     redact = wb.redactor.redact_text
     note = retry_note(_ledger_events(wb), task.key, wb.event_context.get("fix_unit"), redact=redact)  # D11
     ctx = PromptContext(
         unit_id=wb.ref.id, adapter=wb.selected.profile.adapter or "", task_key=task.key, task_title=task.title,
-        task_links=task.links,
-        sources=collect_sources(wb.ref.path), criteria=tuple(wb.provider.criteria(wb.ref)),
+        task_links=task.links, source_files=inputs.source_files, conventions=inputs.conventions,
+        task_block=inputs.task_block, unit_rel=inputs.unit_rel, budget_source=inputs.budget_source,
+        criteria=inputs.criteria, own_criteria=inputs.own_criteria,
         gate_command=wb.cfg.gates.test.command, previous_failure=previous_failure,
         result_path=Path(RESULT_ALIAS_PATH) if wb.impl.capabilities().schema_mode == "prompt_contract" else None,
-        context_budget_tokens=wb.cfg.implementer.context_budget_tokens,
+        context_budget_tokens=inputs.budget_tokens, window_tokens=inputs.window_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
         e2e_dir=e2e_test_dir(wb.cfg.gates.e2e, wb.worktree) if e2e_configured(wb.cfg) else None,
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
@@ -655,10 +722,21 @@ def _prompt(
     wb.emit(
         "prompt.rendered", role=role, task=task.key, sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         template_version=rendered.template_version, sources=list(rendered.sources),
+        budget_tokens=rendered.budget_tokens, budget_source=rendered.budget_source, steering=inputs.steering,
         answers=[{"id": qid, "answer_sha256": digest} for qid, digest in answers.consumed],  # L4-QMD-006
         lessons=list(lessons.ids),
         **({"retry_note": {"event": note.event, "ts": note.ts, "sha256": _note_sha(note, redact)}} if note else {}),
     )  # fmt: skip
+    if rendered.over_window and inputs.window_tokens:  # the never-cut parts alone do not fit: nothing can be squeezed
+        wb.emit(
+            "prompt.over_window", role=role, task=task.key, attempt=attempt, window_tokens=inputs.window_tokens,
+            prompt_tokens=len(rendered.text) // CHARS_PER_TOKEN,
+        )  # fmt: skip
+    if rendered.cuts:  # L4-IMP-052: what the prompt does not show whole, by path
+        wb.emit(
+            "prompt.truncated", role=role, task=task.key, attempt=attempt, budget_tokens=rendered.budget_tokens,
+            sources=[c.as_dict() for c in rendered.cuts],
+        )  # fmt: skip
     return text
 
 
@@ -669,17 +747,18 @@ def agent_step(
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out."""
     base = wb.head()  # the revert resets to this commit: it must be taken before the agent runs
+    granted = config_grant(wb, task, role)  # what a person's answer opens, before the agent runs
     spec = wb.agent_spec()
     tmp = wb.reset_agent_tmp()
     trace = trace_env(wb.cfg.gates.test_timeout_seconds())
-    extra = {c.env: str(c.path) for c in wb.caches} | dict(getattr(wb.impl, "extra_env", {})) | trace
+    extra = cache_env(spec) | dict(getattr(wb.impl, "extra_env", {})) | trace  # the step's private caches (L4-SEC-039)
     key = re.sub(r"[^A-Za-z0-9._-]", "_", task.key)
     stem, again = f"{key}-{role}-{attempt}", 1
     while (published := wb.agent_log_paths(stem)[1]).exists() or published.with_suffix(".prompt.md").exists():
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale)
+    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt)
     wb.publish_prompt(published, prompt)
     # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
     prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
@@ -716,9 +795,14 @@ def agent_step(
             wb.publish_agent_logs(raw_events, published)
             wb.setup_at = None  # the agent may have changed the environment: the next step installs again
             # also on an exception: whatever the agent left behind must not be committed or folded by a later step
+            wb.discard_scratch()
             wb.settle_serena_project(base)
             revert_protected(wb.git, wb.protected, base, events=wb, excludes=wb.excludes)
+            revert_gate_config(wb, task, base, phase=role, opened=granted.paths, attempt=attempt)
             wb.restore_ledger(task=task.key, phase=role, attempt=attempt)
+            # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard sees
+            # it: an environment that differs from the one setup built is removed, and setup builds it again
+            wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
@@ -729,6 +813,7 @@ def agent_step(
         model=run.model_resolved, input_tokens=run.usage.input_tokens, output_tokens=run.usage.output_tokens,
         **denial_facts(run), **context_peak_facts(run),
     )  # fmt: skip
+    wb.served_model = run.model_resolved  # who a question raised from this step is asked by (L4-DLG-002)
     for rejected in run.tool_rejections:  # SPEC §8.3: a policy-rejected call the JSON stream omits
         wb.emit("agent.tool_rejected", task=task.key, phase=role, **rejected)
     if run.session_id:
@@ -822,12 +907,100 @@ def red_note(base_report: TestReport) -> Callable[[TestReport], dict]:
     return note
 
 
+_PREEXISTING_ADVICE = (
+    "A red step adds new tests with new names. Leave every existing test as it is, and the fixtures, helpers, "
+    "constants and marks it uses in its file: give a new fixture or helper a new name, or put the new tests in a new "
+    "file. A statement that is not a plain definition (a call at import, a computed constant, a logger) reaches every "
+    "test of its file: compute the value inside the new test, or put the new tests in a new file. If an existing test "
+    "is wrong, report status blocked with a question that names it."
+)
+
+
+def preexisting_test_changes(wb: Workbench, task: Task, base: str, stale: StaleTests | None) -> list[Tampered]:
+    """L4-IMP-048: the tests that existed at `base` and that this red step changed, bound again or deleted, in the test
+    files it changed (compared per test on the AST, L4-IMP-045..047; a deleted test that is the same definition in a new
+    place is moved, not deleted). A `[test-infra]` task is exempt, and so are the stale tests of a reopened task."""
+    if has_human_tag(wb.ref.path, task.title, "test-infra"):
+        return []
+    root, tdd = wb.worktree, wb.cfg.tdd
+    changed = changed_paths(wb.git, base, excludes=wb.excludes)
+    paths = sorted(p for p in changed if p.endswith(".py") and _matches(tdd.test_globs, p))
+
+    def now(path: str) -> str | None:
+        target = root / path
+        if target.is_symlink() or not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8", errors="replace")
+
+    def then(path: str) -> str:
+        if not changed[path]:
+            return ""
+        done = wb.git.run("show", f"{base}:{path}", check=False)
+        return done.stdout if done.returncode == 0 else ""
+
+    found: list[Tampered] = []
+    deleted: dict[tuple[str, str], str] = {}
+    added: dict[tuple[str, str], str] = {}
+    for path in paths:
+        before, after = then(path), now(path)
+        was = facts_of(before) or {}
+        for t in compare(path, before, after):
+            if t.kind == "deleted":
+                deleted[path, t.name] = (was[t.name].definition, was[t.name].closure)
+            found.append(t)
+        if after is not None and (new := facts_of(after)):
+            added |= {
+                (path, n): (f.definition, f.closure)
+                for n, f in new.items()
+                if f.test and not (n in was and was[n].test)
+            }
+    gone = moved(deleted, added)
+    stale_ids = list(stale.tests) if stale else []
+    return [
+        t
+        for t in found
+        if (t.path, t.name) not in gone and not any(names_test_id(i, t.path, t.name) for i in stale_ids)
+    ]
+
+
+def _preexisting_reason(found: Sequence[Tampered]) -> str:
+    shown = "; ".join(f"{t.path}::{t.name} ({t.why})" for t in found[:MAX_LISTED])
+    more = f" (+{len(found) - MAX_LISTED} more)" if len(found) > MAX_LISTED else ""
+    return f"red changed tests that existed before this step: {shown}{more}"
+
+
+def _reject_preexisting(wb: Workbench, found: Sequence[Tampered]) -> RedOutcome:
+    """The attempt fails: one `guard.test_tamper` per file, nothing kept, and a reason and an excerpt that say what to
+    do (putting the file back would also drop the new tests the agent appended to it, and the guard never edits an
+    agent's file in place, L4-IMP-002)."""
+    for path in sorted({t.path for t in found}):
+        mine = [t for t in found if t.path == path]
+        wb.emit(
+            "guard.test_tamper", phase="red", path=path, rule="pre-existing test", action="rejected",
+            tests=[t.name for t in mine], why="; ".join(f"{t.name}: {t.why}" for t in mine),
+        )  # fmt: skip
+    wb.discard_changes()
+    lines = "\n".join(f"- {t.path}::{t.name}: {t.why}" for t in found)
+    return RedOutcome("failed", _preexisting_reason(found), excerpt=f"{_PREEXISTING_ADVICE}\n{lines}")
+
+
 VIA_HUMAN_OVERRIDE = "human_override"
 VIA_AGENT_OVERRIDE = "agent_override"  # an agent answered, where clarifier.answer_by_agents allows it
+VIA_DELEGATE_OVERRIDE = "delegate_override"  # the delegate answered (L4-DLG-010)
 
 
 def override_via(override: Override) -> str:
+    if override.by == "delegate":
+        return VIA_DELEGATE_OVERRIDE
     return VIA_AGENT_OVERRIDE if override.by == "agent" else VIA_HUMAN_OVERRIDE
+
+
+def override_who(override: Override) -> dict[str, str]:
+    """The model and the CLI of a delegate's accept, for the records the judge and the report read; nothing for
+    anyone else (a person's and an agent's records are as they were)."""
+    if override.by != "delegate":
+        return {}
+    return {k: v for k, v in (("model", override.model), ("cli", override.cli)) if v}
 
 
 def _via(
@@ -839,7 +1012,11 @@ def _via(
 ) -> dict:
     """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run."""
     if overridden and criterion in overridden:
-        return {"via": override_via(overridden[criterion]), "question": overridden[criterion].question}
+        return {
+            "via": override_via(overridden[criterion]),
+            "question": overridden[criterion].question,
+            **override_who(overridden[criterion]),
+        }
     if criterion in earlier:
         return {"via": VIA}
     if criterion in confirmation.confirmed:
@@ -867,7 +1044,7 @@ def _accept(wb: Workbench, task: Task, check: str, used: Mapping[str, Override],
         by_question.setdefault(override.question, (override, []))[1].append(subject)
     for question, (override, subjects) in by_question.items():
         wb.emit("check.accepted", task=task.key, check=check, question=question, answer_sha256=override.answer_sha256,
-                by=override.by, **{key: subjects})  # fmt: skip
+                by=override.by, **override_who(override), **{key: subjects})  # fmt: skip
 
 
 def _decide_pre_satisfied(
@@ -924,6 +1101,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
 
     def tampered(where: str) -> RedOutcome | None:
         notes = guard.check(where)
+        if unsafe := stop_on_unsafe(wb):  # a planted link halts the unit (raised); a failed restore fails the attempt
+            wb.discard_changes()
+            return RedOutcome("failed", unsafe)
         if not notes:
             return None
         wb.discard_changes()
@@ -945,6 +1125,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     report = gate.report
     new_ids = new_test_ids(base_report, report)
     family = {c.id for c in wb.provider.criteria(wb.ref)}
+    exempt = unchanged_criteria(wb, task, base_report)
+    named = cited_criteria(wb.provider, wb.ref, task.links)  # L4-KSP-012: the leaf's own cited criteria
+    required = {c for c in named if c not in exempt}
+    proved_earlier: dict[str, EarlierRed] = {}
+    existing: dict[str, tuple[str, ...]] = {}
     tracing: dict[str, tuple[str, ...]] = {}
     pre_satisfied: dict[str, tuple[str, ...]] = {}
     confirmation = PreSatisfied()
@@ -953,12 +1138,23 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     overridden: dict[str, Override] = {}  # criteria a person's `accept` carried (design D8)
     overridden_tests: dict[str, tuple[str, ...]] = {}
     if family and new_ids and not set(report.collection_errors) - set(base_report.collection_errors):
+        # owner decision 4: a cited criterion that an earlier red of the unit proved, and whose tests pass now, needs
+        # no copy among the new tests
+        traced_new = set().union(*(trace_ids(report.tests[i]) for i in new_ids))
+        passing_now = {
+            i: trace_ids(case) for i, case in report.tests.items() if i not in new_ids and case.status == "passed"
+        }
+        existing = {c: tuple(sorted(i for i, ids in passing_now.items() if c in ids)) for c in required - traced_new}
+        proved_earlier = confirmed_by_earlier_red(wb, {c: t for c, t in existing.items() if t}, report, new_ids)
         check = check_criteria(
             result,
             family,
             {i: report.tests[i] for i in new_ids},
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
-            exempt=unchanged_criteria(wb, task, base_report),
+            exempt=exempt | set(proved_earlier),  # M2: an honest step may list a criterion an earlier red proved
+            required=required - set(proved_earlier),
+            aliases=named,
+            links=", ".join(task.links),
         )
         for test in check.untraced:
             wb.emit("test.untraced", task=task.key, test=test)
@@ -967,8 +1163,12 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return RedOutcome("failed", check.error)
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
-        earlier = confirmed_by_earlier_red(wb, passing, report, new_ids)  # L4-IMP-003: no zero-value run for these
+        earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
         confirmation = confirm_pre_satisfied(wb, {c: t for c, t in passing.items() if c not in earlier}, real=report)
+        for criterion in proved_earlier:  # proved by tests that exist already: recorded like the no-new-test path
+            wb.emit(
+                "criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(existing[criterion]), via=VIA
+            )
         if (out := tampered("pre-satisfied confirmation")) is not None:
             return out
         left = {c: passing[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
@@ -1005,7 +1205,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return {
                 "tests": list(tests), "proof": PROOF_PRE_SATISFIED, "discriminating": list(overridden_tests[criterion]),
                 "via": override_via(overridden[criterion]), "question": overridden[criterion].question,
-                "answer_sha256": overridden[criterion].answer_sha256,
+                "answer_sha256": overridden[criterion].answer_sha256, **override_who(overridden[criterion]),
             }  # fmt: skip
         return {
             "tests": list(tests),
@@ -1057,6 +1257,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 )
         if (out := tampered("before the already-satisfied commit")) is not None:
             return out
+        if linked := outside_links_reason(wb, base, "red"):
+            wb.discard_changes()
+            return RedOutcome("failed", linked)
         wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
         parents = tick_completed_parents(wb.provider, wb.ref)
         # contract C22, as for red and green: the proof travels inside the commit and names the base; the sha follows
@@ -1082,10 +1285,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             superseded=replaced,
         )  # fmt: skip
 
-    cited = tuple(sorted(set(result.criteria_ids)))
+    reported = tuple(sorted(set(result.criteria_ids)))
+    cited = tuple(sorted(set(reported) | required))  # L4-KSP-013: the leaf's cited criteria are proved too
     reason = result.tdd_exemption.reason.strip() if result.tdd_exemption else ""
     if (  # L4-IMP-003: no new test, no file changed, and the task says that tests of an earlier task already hold it
-        cited and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
+        reported and reason.startswith(ALREADY_SATISFIED) and not new_ids and not test_files and not scope.stub_files
         and not [p for p in changed if p != wb.ledger_rel]
         and not set(report.collection_errors) - set(base_report.collection_errors)
     ):  # fmt: skip
@@ -1127,7 +1331,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
+    if tampered_tests := preexisting_test_changes(wb, task, base, stale):  # after classify_red: it keeps its reasons
+        return _reject_preexisting(wb, tampered_tests)
     proofs = {criterion: proof_of(criterion, tests) for criterion, tests in pre_satisfied.items()}
+    proofs.update({criterion: proof_of(criterion, ()) for criterion in proved_earlier})
     open_criteria = {c: t for c, t in tracing.items() if c not in pre_satisfied}
     discriminating: Mapping[str, Sequence[str]] = {}
     run_b_overrides: dict[str, Override] = {}  # run (b) criteria a person's `accept` carried
@@ -1174,6 +1381,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 "discriminating": list(tests), "via": override_via(run_b_overrides[criterion]),
                 "question": run_b_overrides[criterion].question,
                 "answer_sha256": run_b_overrides[criterion].answer_sha256,
+                **override_who(run_b_overrides[criterion]),
             }  # fmt: skip
     worse = worse_static_gates(wb, base, "red")  # a lint error in a test file would be frozen and deadlock green
     if (out := tampered("static gates")) is not None:
@@ -1187,6 +1395,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         return finish_already_satisfied(proofs)
     if (out := tampered("before the red commit")) is not None:
         return out
+    if linked := outside_links_reason(wb, base, "red"):
+        wb.discard_changes()
+        return RedOutcome("failed", linked)
     # The proof is recorded BEFORE the commit so that it travels inside it: a run killed right after the push has
     # nothing else on the branch to resume from (the ledger tail after a commit is only ever a local file).
     # The event names the step base instead of the red sha, which does not exist yet.
@@ -1308,11 +1519,22 @@ def run_green(
     manifest = red.manifest
     if unfreeze.paths:  # these frozen files are named by a human answer or by the task's own text: the task's to change
         manifest = replace(manifest, files={p: f for p, f in manifest.files.items() if p not in unfreeze.paths})
-    if human.paths:
+    for actor in ("human", "agent"):  # an agent's unfreeze is never recorded as a person's (L4-QMD-009, review 2 N2)
+        people = Unfreeze(
+            tuple(g for g in human.grants if g.reason == "human_answer" and g.by == actor),
+            human.kept if actor == "human" else (),
+        )
+        if people.paths:
+            wb.emit(
+                "task.unfrozen", task=task.key, paths=list(people.paths), reason="human_answer", by=actor,
+                question=people.question, answer_sha256=people.answer_sha256, red_sha=red.manifest.red_sha,
+                kept=[{"path": p, "why": why} for p, why in people.kept],
+            )  # fmt: skip
+    for grant in (g for g in human.grants if g.reason == "delegate_answer"):  # L4-DLG-014: its own label
         wb.emit(
-            "task.unfrozen", task=task.key, paths=list(human.paths), reason="human_answer", question=human.question,
-            answer_sha256=human.answer_sha256, red_sha=red.manifest.red_sha,
-            kept=[{"path": p, "why": why} for p, why in human.kept],
+            "task.unfrozen", task=task.key, paths=list(grant.paths), reason="delegate_answer", question=grant.question,
+            answer_sha256=grant.answer_sha256, by="delegate", profile=grant.profile, model=grant.model,
+            red_sha=red.manifest.red_sha,
         )  # fmt: skip
     if named.paths or named.kept:  # `kept` is recorded even when nothing opens: it is the only place that says why
         wb.emit(
@@ -1329,7 +1551,7 @@ def run_green(
     _check_opened(wb, red, unfreeze, red.manifest)
     restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
     freeze_test_paths(wb, task, base, keep=unfreeze.paths, phase="green")
-    run_setup(wb)  # `uv sync --frozen` removes what the agent installed: green passes on the locked environment
+    run_setup(wb)  # gates.setup runs on an environment the harness rebuilt after the agent step (L4-SEC-036)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=fix_gate_env(wb))
     reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
     hung = gate_hung(gate) if reason else []
@@ -1340,6 +1562,8 @@ def run_green(
     held: HeldCheck | None = None
     if not reason:
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
+    if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
+        held, reason = None, unsafe
     if held is not None:  # the test-at-red run could not decide: held, or counted on a person's `accept`
         overrides = accepted_overrides(wb, task.key, "at_red")
         open_ = sorted(t for t in held.tests if t not in overrides)
@@ -1348,6 +1572,7 @@ def run_green(
             return GreenOutcome("held", held=held.only(open_))
         _accept(wb, task, "at_red", {t: overrides[t] for t in held.tests}, key="tests")
     reason = reason or worse_static_gates(wb, base, "green")
+    reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt, hung=tuple(hung))
@@ -1370,7 +1595,7 @@ def run_green(
 def freeze_test_paths(wb: Workbench, task: Task, base: str, *, keep: Collection[str] = (), phase: str) -> list[str]:
     """L4-IMP-006 (7): after green or a fix chore no path of the test or support globs differs from `base`, but the
     `keep` paths a human answer unfroze. A task with the human `[test-infra]` tag is exempt."""
-    if "test-infra" in task_tags(task.title):
+    if has_human_tag(wb.ref.path, task.title, "test-infra"):
         return []
     tdd = wb.cfg.tdd
     return restore_test_paths(
@@ -1531,16 +1756,44 @@ def task_source(wb: Workbench, task: Task) -> str | None:
     return named[0] if named else None
 
 
+def _answer_events(wb: Workbench) -> list[LedgerEvent]:
+    """The ledger events that record a person's answers: the run's, and a fix unit's own (its questions file lives in
+    its own folder)."""
+    events = _ledger_events(wb)
+    if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
+        events = [*events, *own]
+    return events
+
+
+def config_grant(wb: Workbench, task: Task, phase: str) -> Unfreeze:
+    """The gate and runner configuration files that a person's answer opens for this step (L4-IMP-041, D8), computed
+    before the agent runs and recorded as `task.config_opened{task, phase, paths, question, answer_sha256, kept}`. A tag
+    in the task title is read by `revert_gate_config` itself."""
+    file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
+    if file is None:
+        return Unfreeze()
+    scope = task_scope(wb.provider.tasks(wb.ref), task.key)
+    got = config_opened(
+        file.questions, _answer_events(wb), scope, config_files(wb.cfg, wb.worktree, wb.git), phase=phase
+    )
+    if got.paths or got.kept:
+        wb.emit(
+            "task.config_opened", task=task.key, phase=phase, paths=list(got.paths), question=got.question,
+            answer_sha256=got.answer_sha256, kept=[{"path": p, "why": why} for p, why in got.kept],
+        )  # fmt: skip
+    return got
+
+
 def _unfreeze_parts(wb: Workbench, task: Task, manifest: FreezeManifest) -> tuple[Unfreeze, Unfreeze, str | None]:
     """(what human answers unfreeze, what the task's own text opens, that text's source)."""
     human = Unfreeze()
     file = QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)
     if file is not None:
-        events = _ledger_events(wb)
-        if (own := read_ledger(wb.ref.path).events) and wb.ref.path != wb.worktree / Path(wb.ledger_rel).parents[2]:
-            events = [*events, *own]  # a fix unit's answers are recorded where its own questions file is
+        from l4.delegate.settings import delegate_settings
+
         scope = task_scope(wb.provider.tasks(wb.ref), task.key)
-        human = unfrozen(file.questions, events, scope, manifest)
+        switch = delegate_settings(wb.git, wb.cfg.forge.base_branch).delegate.unfreeze  # the base branch's (D15)
+        human = unfrozen(file.questions, _answer_events(wb), scope, manifest, delegate_unfreeze=switch)
     named = named_task_text(wb, task)
     if named is None:
         return human, Unfreeze(), None
@@ -1654,13 +1907,7 @@ def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> T
 
 
 def _put_back(wb: Workbench, base: str, path: str, existed: bool) -> None:
-    target = wb.worktree / path
-    if not existed:
-        target.unlink(missing_ok=True)
-        return
-    if target.is_symlink():
-        target.unlink()
-    wb.git.run("checkout", base, "--", f":(literal){path}")
+    restore_to_base(wb, base, path)  # a link at or above the path is removed, never followed
 
 
 def _appended(wb: Workbench, base: str, path: str, target: Path) -> bool:
@@ -1831,6 +2078,8 @@ def run_single(
     discriminating: list[str] | None = None
     if adds_tests and not reason and added and CRITERION_IN_TITLE.search(task.title):
         discriminating, reason, held = _discriminating_tests(wb, added, task)
+        if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
+            held, reason = None, unsafe
         if held is not None:
             overrides = {t: o for t, o in accepted_overrides(wb, task.key, "tests").items() if t in held.tests}
             open_ = sorted(t for t in held.tests if t not in overrides)
@@ -1839,6 +2088,7 @@ def run_single(
                 return GreenOutcome("held", held=held.only(open_))
             _accept(wb, task, "tests", overrides, key="tests")
             discriminating = sorted(held.tests)
+    reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "single")
     if reason:
         wb.discard_changes()
         return GreenOutcome("failed", reason, excerpt=excerpt)

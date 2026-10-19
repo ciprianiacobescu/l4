@@ -38,7 +38,7 @@ from l4.vcs.git import Git
 from l4.verifier.types import Finding
 from l4.verifier.verdicts import hold_id
 
-UNIT_FILES = ("proposal.md", "design.md", "tasks.md")
+UNIT_FILES = ("proposal.md", "design.md", "tasks.md", "requirements.md", "bugfix.md")
 MAX_SOURCE_BYTES = 500_000
 
 

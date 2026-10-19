@@ -89,7 +89,7 @@ def ensure_uv_seed(wb: Workbench) -> None:
 
 
 def _seed_and_copy(wb: Workbench, mount: CacheMount, base: str, key: str, setup: list[str]) -> None:
-    cache = wb.unit_cache.parent.parent.parent  # `$L4_CACHE/units/<framework>/<name>`
+    cache = wb.cache_root
     origin = wb.git.run("config", "--get", "remote.origin.url", check=False).stdout.strip()
     seed = seed_dir(cache, origin)
     with _locked(seed.parent / ".lock"):
@@ -117,7 +117,9 @@ def _fill(wb: Workbench, seed: Path, key: str, base: str, setup: list[str]) -> N
     try:
         for command in setup:
             spec = GateSpec("seed", command, (), "junit", duration_seconds(wb.cfg.gates.timeout))
-            result = wb.run_gate_spec(spec, network=True, tree=tree, caches=(CacheMount(seed, "UV_CACHE_DIR", False),))
+            result = wb.run_gate_spec(
+                spec, network=True, tree=tree, caches=(CacheMount(seed, "UV_CACHE_DIR", False),), builds_env=True
+            )
             if result.status != "pass":
                 raise SeedFailed(f"gates.setup failed on the base ({result.reason})")
     finally:

@@ -21,6 +21,7 @@ from typing import Any
 
 from l4.gates.junit import TestReport
 from l4.implementer.discrimination import PROOF_RED_ASSERTION, PROOF_ZERO_VALUE
+from l4.implementer.guards import appended_only
 from l4.implementer.workbench import Workbench
 from l4.specs.criteria import trace_ids
 from l4.state.ledger import read_ledger
@@ -30,6 +31,7 @@ _FAILED_PROOFS = (PROOF_RED_ASSERTION, PROOF_ZERO_VALUE)
 _NO_EVIDENCE_VIA = (
     "human_override",
     "agent_override",
+    "delegate_override",
     "not_applicable",
 )  # L4-IMP-063, L4-IMP-062: never an earlier red's evidence
 
@@ -83,14 +85,30 @@ def _unchanged_since(wb: Workbench, sha: str, path: str) -> bool:
     return True
 
 
+def _only_appended_since(wb: Workbench, sha: str, path: str) -> bool:
+    """May the earlier red's evidence in `path` still be trusted? For a Python file it must have only been APPENDED to
+    since the red commit (`guards.appended_only`: every old top-level statement kept): a tag inserted above an old test
+    voids the proof of that test. This only VOIDS a proof (the criterion then needs a new test), never refuses a step.
+    Any other file keeps the zero-deletion rule of `_unchanged_since` (a test added inside a Jest `describe` block is
+    no deletion)."""
+    if not path.endswith(".py"):
+        return _unchanged_since(wb, sha, path)
+    before = wb.git.run("show", f"{sha}:{path}", check=False)
+    target = wb.worktree / path
+    if before.returncode != 0 or target.is_symlink() or not target.is_file():
+        return False
+    return appended_only(before.stdout, target.read_text(encoding="utf-8", errors="replace"))
+
+
 def _ancestor(wb: Workbench, commit: Any) -> bool:
     return isinstance(commit, str) and bool(commit) and (
         wb.git.run("merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode == 0
     )  # fmt: skip
 
 
-def _evidence(wb: Workbench) -> dict[str, _Evidence]:
-    """test id -> the earlier red that saw it fail, from the ledger as `resume_red` reads it."""
+def _evidence(wb: Workbench) -> dict[tuple[str, str], _Evidence]:
+    """(criterion, test id) -> the earlier red that saw the test fail for THAT criterion, from the ledger as
+    `resume_red` reads it. A test later tagged with another criterion is no evidence for it (M1)."""
     ledger_unit = wb.worktree / Path(wb.ledger_rel).parents[2]
     events = read_ledger(ledger_unit).events
     fix_unit = wb.event_context.get("fix_unit")
@@ -99,7 +117,7 @@ def _evidence(wb: Workbench) -> dict[str, _Evidence]:
         (e.data.get("task"), str(t))
         for e in events if e.type == "criterion.pre_satisfied" for t in e.data.get("tests") or []
     }  # fmt: skip
-    found: dict[str, _Evidence] = {}
+    found: dict[tuple[str, str], _Evidence] = {}
     on_branch: dict[tuple[str, str], bool] = {}
     for order, event in enumerate(events):
         if event.type != "task.red_ok" or event.data.get("tdd") == "already-satisfied":
@@ -120,14 +138,14 @@ def _evidence(wb: Workbench) -> dict[str, _Evidence]:
         if not on_branch[key]:
             continue
         criteria = event.data.get("criteria")
-        for info in criteria.values() if isinstance(criteria, dict) else ():
+        for proved, info in criteria.items() if isinstance(criteria, dict) else ():
             if not isinstance(info, dict) or info.get("proof") not in _FAILED_PROOFS:
                 continue
             if info.get("via") in _NO_EVIDENCE_VIA:  # a person's acceptance or a dependency check saw nothing fail
                 continue
             for test in info.get("discriminating") or []:  # the ones that red saw fail by assertion
                 if (task, str(test)) not in allowed:
-                    found[str(test)] = _Evidence(sha, task, order)
+                    found[(str(proved), str(test))] = _Evidence(sha, task, order)
     return found
 
 
@@ -142,25 +160,27 @@ def confirmed_by_earlier_red(
         return {}
     unchanged: dict[str, bool] = {}
 
-    def holds(test: str) -> bool:
+    def holds(criterion: str, test: str) -> bool:
         case = report.tests.get(test)
         if test in new_ids or case is None or case.status != "passed":
             return False
-        sha = evidence[test].sha
+        sha = evidence[(criterion, test)].sha
         path = _test_file(wb, sha, test)
         if path is None:
             return False
         key = f"{sha}:{path}"
         if key not in unchanged:
-            unchanged[key] = _unchanged_since(wb, sha, path)
+            unchanged[key] = _only_appended_since(wb, sha, path)
         return unchanged[key]
 
     confirmed: dict[str, EarlierRed] = {}
     for criterion in candidates:
         tests = sorted(
-            t for t in evidence if t in report.tests and criterion in trace_ids(report.tests[t]) and holds(t)
+            t
+            for c, t in evidence
+            if c == criterion and t in report.tests and criterion in trace_ids(report.tests[t]) and holds(c, t)
         )
         if tests:
-            newest = max((evidence[t] for t in tests), key=lambda e: e.order)
+            newest = max((evidence[(criterion, t)] for t in tests), key=lambda e: e.order)
             confirmed[criterion] = EarlierRed(tuple(tests), newest.sha, newest.task)
     return confirmed

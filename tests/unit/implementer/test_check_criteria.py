@@ -66,7 +66,7 @@ def test_suppressions_are_parsed_and_default_to_none():
 
 @pytest.mark.parametrize("role", ["red", "green"])
 def test_contract_5_and_red_3_state_the_trace_stub_and_suppression_rules(role: str):
-    assert load_template("contract").version == 11 and load_template("red").version == 10
+    assert load_template("contract").version == 12 and load_template("red").version == 11
     text = render_prompt(role, ctx()).text  # type: ignore[arg-type]
     for rule in ('@pytest.mark.l4("C-', "`suppressions`", "signature-only", "guarded"):
         assert rule in text, rule
@@ -168,3 +168,34 @@ def test_without_exempt_every_cited_criterion_still_needs_a_new_test():
 def test_an_exempt_criterion_a_new_test_traces_stays_traced():
     check = check_criteria(result(A, B), FAMILY, new(test_a=(A,), test_b=(B,)), exempt={A})
     assert check.error == "" and set(check.tracing) == {A, B}
+
+
+# -- a Kiro leaf's cited criteria (L4-KSP-012, kiro-prompt-context D8) -------------------------------------------
+
+
+def test_a_required_criterion_that_no_new_test_traces_fails_and_names_its_alias_and_the_line():
+    aliases = {A: "Req 1.1", B: "Req 1.2"}
+    check = check_criteria(result(A), FAMILY, new(test_a=(A,)), required={A, B}, aliases=aliases, links="1.1, 1.2")
+    assert check.error == (
+        "no new test traces C-bbbbbbbb (Req 1.2), which the task's _Requirements: 1.1, 1.2_ line names: write a new "
+        "test for each criterion that line names, tagged with its id"
+    )
+
+
+def test_a_required_criterion_is_cited_whatever_the_result_lists():
+    check = check_criteria(result(A), FAMILY, new(test_a=(A,), test_b=(B,)), required={B})
+    assert check.error == "" and check.cited == (A, B)
+    assert check.tracing == {A: ("t::test_a",), B: ("t::test_b",)}
+
+
+def test_an_empty_required_set_behaves_as_before():
+    plain = check_criteria(result(A, B), FAMILY, new(test_a=(A,)))
+    assert check_criteria(result(A, B), FAMILY, new(test_a=(A,)), required=()) == plain
+    assert "C-bbbbbbbb" in plain.error and "_Requirements" not in plain.error
+
+
+def test_several_missing_criteria_are_named_together():
+    check = check_criteria(
+        result(), FAMILY | {"C-cccccccc"}, new(test_x=(A,)), required={A, B, "C-cccccccc"}, aliases={}
+    )
+    assert "C-bbbbbbbb, C-cccccccc" in check.error and "_Requirements" in check.error

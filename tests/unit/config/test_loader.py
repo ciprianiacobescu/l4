@@ -148,3 +148,20 @@ def test_a_custom_validator_that_echoes_its_input_is_not_printed():
     with pytest.raises(ValidationError) as err:
         Leaky(x=SECRET)
     assert SECRET not in repr(_issues(err.value))
+
+
+def test_a_profile_may_set_its_own_context_budget_and_the_default_is_32000(tmp_path: Path):
+    """SCN-IMP-287, L4-IMP-053; owner decision 8: the default rose from 24000 to 32000."""
+    assert load_config(tmp_path).implementer.context_budget_tokens == 32000
+    write_config(tmp_path, "version: 1\nprofiles:\n  local: {adapter: codex, context_budget_tokens: 4000}\n")
+    assert load_config(tmp_path).profiles["local"].context_budget_tokens == 4000
+    write_config(tmp_path, "version: 1\nprofiles:\n  local: {adapter: codex, context_budget_tokens: 999}\n")
+    with pytest.raises(ConfigSchemaError) as err:
+        load_config(tmp_path)
+    assert any("context_budget_tokens" in m for m in messages(err.value))
+
+
+def test_the_agents_md_convention_is_off_by_default(tmp_path: Path):
+    assert load_config(tmp_path).implementer.include_agents_md is False
+    write_config(tmp_path, "version: 1\nimplementer: {include_agents_md: true}\n")
+    assert load_config(tmp_path).implementer.include_agents_md is True

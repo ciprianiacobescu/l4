@@ -65,3 +65,27 @@ def test_a_step_with_idle_s_sets_the_watch_mark_and_returns_timeout(tmp_path):
     assert fake.run(request(tmp_path)).status == "timeout"  # no watch: no mark, no error
     fresh = ActivityWatch(0, lambda beat: None)
     assert fake.run(request(tmp_path, watch=fresh)).status == "ok" and fresh.stopped_idle_s is None
+
+
+def test_a_step_replaces_a_file_a_directory_and_a_missing_path_with_a_link(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    wt = tmp_path / "wt"
+    (wt / "pkg").mkdir(parents=True)
+    (wt / "pkg" / "a.py").write_text("a\n")
+    (wt / "f.py").write_text("f\n")
+    step = Step(
+        writes={"w.py": "w\n"},
+        links={"pkg": str(outside), "f.py": "../x", "new/dir/l": "rel", "w.py": "../w"},
+    )
+    FakeAdapter([step]).run(request(tmp_path))
+    assert (wt / "pkg").is_symlink() and (wt / "pkg").readlink() == outside  # a directory with files in it
+    assert (wt / "f.py").is_symlink() and (wt / "f.py").readlink() == Path("../x")  # a file
+    assert (wt / "new/dir/l").is_symlink()  # a missing path
+    assert (wt / "w.py").is_symlink()  # applied after the writes
+    assert list(outside.iterdir()) == []  # nothing was written through any of them
+
+
+def test_a_scripted_link_outside_the_worktree_is_an_error(tmp_path):
+    with pytest.raises(AdapterError, match="outside the worktree"):
+        FakeAdapter([Step(links={"../escape": "x"})]).run(request(tmp_path))

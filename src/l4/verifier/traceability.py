@@ -40,7 +40,12 @@ PROOF_CHORE = "chore"
 NO_PROOF = "no proof that it discriminates"  # the start of the reason of a test that carries a criterion and has none
 _RED_PROOFS = ("zero_value", "pre_satisfied", "red_assertion")
 NOT_APPLICABLE_NOTE = "not applicable: no project code"  # L4-IMP-062
-UNPROVEN_VIA = ("not_applicable", "human_override", "agent_override")  # proofs that no variant run showed (L4-VER-051)
+UNPROVEN_VIA = (
+    "not_applicable",
+    "human_override",
+    "agent_override",
+    "delegate_override",
+)  # proofs that no variant run showed (L4-VER-051)
 
 
 def _unproven_note(info: Mapping[str, Any]) -> str:
@@ -52,6 +57,11 @@ def _unproven_note(info: Mapping[str, Any]) -> str:
         return f"accepted by {info.get('question') or 'a person'}: the check was inconclusive"
     if info.get("via") == "agent_override":  # the judge must be able to tell an agent's acceptance from a person's
         return f"accepted by an agent through {info.get('question') or 'a question'}: the check was inconclusive"
+    if info.get("via") == "delegate_override":  # ... and the delegate's: with the model and the CLI that answered
+        who = f" ({info['model']} via {info['cli']})" if info.get("model") and info.get("cli") else ""
+        return (
+            f"accepted by the delegate{who} through {info.get('question') or 'a question'}: the check was inconclusive"
+        )
     return ""
 
 

@@ -104,7 +104,21 @@ RUN_NOT_STARTED = "run_not_started"  # the `plan.waiting` reason of a current un
 MERGE_NOT_READY = "merge_not_ready"  # the `plan.waiting` reason of a `merge: auto` plan whose merge is not ready
 ACCEPTED_FINDING_OPEN = "accepted_finding_open"  # ... whose unit has an accepted finding no judge addressed (D8.4)
 MAX_WAIT_DETAIL = 1_000
-_ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off"})  # `orchestrator.ACTIONABLE`, not imported here
+_ACTIONABLE = frozenset({"implement", "clarify", "verify", "hand_off", "delegate"})  # `orchestrator.ACTIONABLE`
+ACTIONABLE = _ACTIONABLE
+
+
+def still_waits(snap: UnitSnapshot) -> bool:
+    """The unit waits for a person or for capacity with nothing to run: the rule of the plan step (`_live`,
+    `_cause_gone`), of `l4 yolo resume` and of `l4 yolo status` (L4-YOLO-052). The phase is a wait phase, not a finished
+    one, and the unit's next action is not one a run can take (an answered question makes it `implement` or
+    `verify`)."""
+    from l4.planner import facts_of, next_action  # the planner is imported late: it imports this module
+
+    phase = snap.state.phase or ""
+    return phase in WAIT_PHASES and phase not in FINISHED_PHASES and next_action(facts_of(snap))[0] not in _ACTIONABLE
+
+
 MAX_TIDY = 5  # branch deletions of earlier merges in one plan step (L4-YOLO-033)
 _REFUSAL_LINES = 10  # findings of a refused plan the log prints one by one
 _NEVER_HELD = frozenset({"merged", "archived"})  # phases `yolo.hold` leaves alone
@@ -807,9 +821,12 @@ class _Step:
         state = fold_plan(ctx.plan_id, [*ctx.read.events, *events])
         revision = self._fetch_target() or self.git.rev_parse(f"refs/remotes/origin/{self.target}")
         units: dict[str, UnitState] = {uid: s.state for uid, s in self.snaps.items()}
+        from l4.delegate.due import final_results  # the delegate's scope reads the plans
+
+        decisions = {uid: final_results(s.events) for uid, s in self.snaps.items() if s.events}
         return render_report(
             repository=self._repository(), plan=ctx.file.plan, state=state, events=[*ctx.read.events, *events],
-            target_revision=revision, units=units, generated_at=self._at(),
+            target_revision=revision, units=units, generated_at=self._at(), delegate=decisions,
         )  # fmt: skip
 
     def _with_report(self, ctx: _Ctx, events: Sequence[PlanEvent]) -> None:
@@ -1114,7 +1131,7 @@ class _Step:
             ended = not_started_pending(ctx.read.events, current)
             if ended is not None and self._unit_action(snap) in _ACTIONABLE:
                 return self._not_started(ctx, snap, ended)
-            if phase not in FINISHED_PHASES and phase in WAIT_PHASES and self._unit_action(snap) not in _ACTIONABLE:
+            if still_waits(snap):
                 return self._wait(ctx, phase, current, snap)
         pending = merged_not_integrated(plan, state, self._phases())  # R10: every merged unit is post-checked first
         for unit in pending:
@@ -1239,7 +1256,7 @@ class _Step:
         if snap is None:
             return f"the cause is gone: {unit or 'the current unit'} is not among the units of the target"
         phase = snap.state.phase or ""
-        if phase in WAIT_PHASES and phase not in FINISHED_PHASES and self._unit_action(snap) not in _ACTIONABLE:
+        if still_waits(snap):
             return None
         return f"the cause is gone: {unit} is {phase or 'not started'}"
 
@@ -1396,6 +1413,8 @@ class _Step:
         verdict = snap.state.last_verdict
         if verdict is None or verdict.verdict != "PASS":
             return None
+        if self._unit_action(snap) in _ACTIONABLE:  # a review edge comes before the merge (L4-YOLO-041)
+            return None
         assert ctx.file.plan is not None
         if (why := unit_blocker(ctx.file.plan, ctx.state, unit)) is not None:  # never out of order (review z1, H2)
             self._line(ctx.plan_id, f"{unit} is not merged: it {why}")
@@ -1434,15 +1453,41 @@ class _Step:
         if not confirm_merged(forge, self.git, self.cfg, out.pr, landed, wait_s=self.confirm_wait_s):
             log.warning("%s: %s landed on %s, but the target does not show it as its tip", unit, landed[:10],
                         self.target)  # fmt: skip
+        extra = {"ci_jobs": list(out.ci_jobs)} if out.ci_jobs else {}
         merged = [self._event("unit.merged", unit=unit, head=out.head, pr=out.pr, merge_commit=landed,
-                              method=self.cfg.yolo.merge.method, raced=out.raced)]  # fmt: skip
+                              method=self.cfg.yolo.merge.method, raced=out.raced, ci=out.ci, **extra)]  # fmt: skip
         self._write(ctx, merged, facts=True)
         self._line(ctx.plan_id, f"{unit} merged into {self.target} at {landed[:10]}")
+        self._ci_warning(ctx, forge, unit, out)
         self._delete_after_merge(ctx, unit, forge, out.head, out.pr)
         if out.raced:
             self._line(ctx.plan_id, f"warning: {unit}: the target moved while the forge merged; the post-merge check "
                                     f"of {landed[:10]} decides")  # fmt: skip
         return self._integrate(ctx, unit, snap, via_merge=landed, reviewed=out.head)
+
+    def _ci_warning(self, ctx: _Ctx, forge: Forge, unit: str, out: MergeOutcome) -> None:
+        """A merge that went ahead without a green CI on H says so: a warning line in the plan report for a CI that
+        was red as on the base, and for a hand-off commit no CI ran on a line in the report and a note on the merged
+        PR/MR (L4-YOLO-042, L4-YOLO-043)."""
+        h10 = (out.head or "")[:10]
+        if out.warning:
+            self._line(ctx.plan_id, f"warning: {unit}: {out.warning}")
+        if out.ci == "unknown":
+            self._line(ctx.plan_id, f"warning: {unit}: the pull request was merged at {h10}, not at the verified head")
+        elif out.ci == "preexisting":
+            keys = ", ".join(out.ci_jobs)
+            self._line(ctx.plan_id, f"warning: {unit}: the repository CI on {h10} is red as on the base: {keys}")
+        elif out.ci == "not_run":
+            why = f"no CI of the repository ran on {h10}; merged because yolo.merge.require_ci is false"
+            self._line(ctx.plan_id, f"warning: {unit}: {why}")
+            note = (
+                f"### Merged without a repository CI\n\nNo CI of the repository ran on `{h10}`; the plan merged it "
+                "because `yolo.merge.require_ci` is false."
+            )
+            try:
+                forge.upsert_sticky_note(int(out.pr or 0), note)
+            except (ForgeError, ForgeUnavailable) as exc:
+                log.info("%s: the PR note was not written: %s", unit, self.app.redactor.redact_text(str(exc)))
 
     def _delete_after_merge(self, ctx: _Ctx, unit: str, forge: Forge, head: str, pr: int) -> None:
         """L4-YOLO-033: the merged unit's branch goes, its verified head kept at `refs/l4/merged/...`, once the forge
@@ -1708,7 +1753,8 @@ class _Step:
         snap = self.snaps.get(unit)
         if snap is None:
             return self._stop(ctx, "unit_missing", f"{unit} is not among the units of the target", unit)
-        actionable = self._unit_action(snap) in _ACTIONABLE
+        action = self._unit_action(snap)
+        actionable = action in _ACTIONABLE
         phase = snap.state.phase or ""
         adopt = not actionable and unit != state.current and self._adoptable(snap)
         if not actionable and not adopt:
@@ -1727,8 +1773,11 @@ class _Step:
         self._write(ctx, self._dispatch_events(ctx, unit, snap, adopted=adopt))
         if not adopt:
             self._line(ctx.plan_id, f"dispatched {unit} ({phase or 'not started'})")
-            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035)
-            return self._result(frozenset({unit}), start_next_run=not parked, plan_id=ctx.plan_id)
+            # a unit parked for capacity chains no run: the next trigger probes again (L4-YOLO-035); the run that takes
+            # the action `delegate` does the pass only, and starts the next run itself when it answered (L4-DLG-007)
+            return self._result(
+                frozenset({unit}), start_next_run=not parked and action != "delegate", plan_id=ctx.plan_id
+            )
         self._line(ctx.plan_id, f"adopted {unit} ({phase}): it is past implementation")
         if plan.merge == "auto":  # a person merges under `merge: human`; the plan waits for it as for any current unit
             merged = self._merge(ctx, snap)
@@ -1846,6 +1895,51 @@ def record_run_starts(
     return False
 
 
+def record_idle_runs(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, idle: Collection[str]) -> bool:
+    """After the run: the current unit of the plan that the step let run and whose run was idle (no agent step, no
+    gate, no phase change but a wait) gets `plan.run_idle{unit, attempt, run}` on the plan ledger, with the lease, once
+    per run: the fold leaves the run out of `used.runs` (L4-YOLO-014). True when a record was written or is there
+    already: the caller then chains no next run. The attempt is the one the dispatch charged. A failure is a warning: a
+    run counted that did nothing only brings the run limit nearer, and it chains no run either way."""
+    units = [u for u in idle if step.plan_id and step.allow and u in step.allow]
+    if not units:
+        return False
+    assert step.plan_id is not None
+    store = _store(app, cfg, git, step.plan_id)
+    try:
+        for _ in range(3):
+            read = store.read()
+            state = fold_plan(step.plan_id, read.events)
+            if state.status not in ("active", "waiting") or state.current not in units:
+                return False
+            unit = state.current
+            if any(
+                e.type == "plan.run_idle" and e.data.get("unit") == unit and e.data.get("run") == app.run_id
+                for e in read.events
+            ):
+                return True  # recorded already
+            charged = _last(read.events, "plan.charged", unit)
+            dispatched = any(
+                e.type == "unit.dispatched" and e.data.get("unit") == unit and e.data.get("run") == app.run_id
+                for e in read.events
+            )
+            if charged is None or not dispatched:  # a named run is not the plan's dispatch: nothing to subtract
+                return False
+            attempt = int(charged.data["attempt"]) if isinstance(charged.data.get("attempt"), int) else 1
+            at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            event = PlanEvent("plan.run_idle", at, {"unit": unit, "attempt": attempt, "run": app.run_id})
+            try:
+                store.append([event], expect=read.head)
+            except PlanMoved:
+                continue
+            log.info("plan %s: %s ran idle (run %s): not counted", step.plan_id, unit, app.run_id)
+            return True
+        log.warning("plan %s: the idle run of %s was not recorded (the ref moved)", step.plan_id, ", ".join(units))
+    except (GitError, ValueError, L4Exit) as exc:
+        log.warning("plan %s: the idle run of %s was not recorded: %s", step.plan_id, ", ".join(units), exc)
+    return False
+
+
 def record_rejections(app: AppContext, cfg: L4Config, git: Git, step: PlanStep, rejected: Mapping[str, str]) -> None:
     """After the run: a unit of the plan that the run rejected (exit 14, no phase to show it) gets `unit.rejected{unit,
     run, detail}` on the plan ledger, so the next plan step stops the plan with `unit_rejected` instead of dispatching
@@ -1934,6 +2028,7 @@ __all__ = [
     "local_states",
     "not_started_pending",
     "plan_holds",
+    "record_idle_runs",
     "record_rejections",
     "record_run_starts",
     "rejection_pending",

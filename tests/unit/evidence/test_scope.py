@@ -70,7 +70,8 @@ def test_kiro_unit():
          "requirements.md": "`src/other/r.py`"},
         TREE,
     )  # fmt: skip
-    assert scope.paths == ("src/shop/tax.py", "tests/test_tax.py")
+    # owner decision 7 (kiro-prompt-context): a Kiro unit's requirements.md declares scope too, as the design does
+    assert scope.paths == ("src/shop/tax.py", "src/other/r.py", "tests/test_tax.py")
 
 
 @pytest.mark.parametrize(
@@ -356,3 +357,14 @@ def test_scope_evidence_attributes_each_file_to_its_commits(make_repo, raw, git_
     assert files["src/inventory/stock.py"].reason == f"changed by human commit {human[:10]}"
     assert files["src/inventory/ours.py"].label == "out_of_scope"  # the harness changed it: held to the spec
     assert [h.subjects for h in step1.holds] == [("src/inventory/ours.py",)]
+
+
+def test_a_kiro_units_requirements_and_bugfix_files_declare_scope_like_the_design():
+    """Owner decision 7: a path named only in a Kiro unit's `requirements.md` or `bugfix.md` is declared."""
+    files = {
+        ".kiro/specs/tip/requirements.md": "1. WHEN asked THEN `src/shop/pricing.py` SHALL answer.\n",
+        ".kiro/specs/tip/bugfix.md": "2.1 WHEN x THEN `src/inventory/stock.py` SHALL hold.\n",
+        ".kiro/specs/tip/design.md": "# Design\n",
+    }
+    scope = unit_declared_scope(files.get, ".kiro/specs/tip", TREE)
+    assert {"src/shop/pricing.py", "src/inventory/stock.py"} <= set(scope.paths)

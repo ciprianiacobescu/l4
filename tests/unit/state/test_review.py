@@ -237,3 +237,50 @@ def test_a_unit_folder_file_the_same_at_the_boundary_and_at_the_head_is_no_spec_
     b.commit("edit", {f"{UNIT_REL}/tasks.md": "- [ ] 9.9 changed\n"}, bot=False, run=False)
     b.commit("undo", {f"{UNIT_REL}/tasks.md": before}, bot=False, run=False)
     assert spec_edit_since_harness(b.git, "HEAD", UNIT_REL) is None
+
+
+def test_a_recorded_h_off_the_branch_is_lost(make_repo, raw, git_for):
+    """SCN-YOLO-103: the recorded H is no longer an ancestor of the branch head, which is rewritten history."""
+    from l4.state.fold import UnitState
+    from l4.state.lifecycle import Trigger
+    from l4.state.review import review_trigger
+
+    b = _branch(make_repo, raw, git_for)
+    h = b.handoff()
+    raw(b.repo, "reset", "-q", "--hard", f"{h}~1")
+    b.commit("a person's commit", {"src/a.py": "a = 5\n"}, bot=False, run=False)
+    found = after_handoff(b.git, "HEAD", NAME, UNIT_REL, recorded=h)
+    assert found.lost and found.reentry
+    trigger = review_trigger(found, UnitState(unit="openspec:add-x", phase="in_review"))
+    assert trigger is not None and trigger.trigger is Trigger.COMMIT_AFTER_HANDOFF and trigger.context["lost"] is True
+
+
+def test_without_a_recorded_h_the_identity_rule_stays(make_repo, raw, git_for):
+    """SCN-YOLO-104: no `pr.ready` in the ledger keeps the subject-and-identity rule; a recorded H counts every
+    commit after it."""
+    b = _branch(make_repo, raw, git_for)
+    h = b.handoff()
+    bot = b.commit("bot again", {"src/b.py": "b\n"}, bot=True)
+    human = b.commit("fix the thing", {"src/a.py": "a = 2\n"}, bot=False, run=False)
+    found = after_handoff(b.git, "HEAD", NAME, UNIT_REL)
+    assert found.handoff == h and [c.sha for c in found.foreign] == [human]
+    recorded = after_handoff(b.git, "HEAD", NAME, UNIT_REL, recorded=h)
+    assert recorded.handoff == h and [c.sha for c in recorded.foreign] == [bot, human]
+
+
+def test_a_forged_second_handoff_commit_does_not_move_a_recorded_h(make_repo, raw, git_for):
+    """SCN-YOLO-101: the newest commit with the hand-off subject is not H when H is recorded."""
+    b = _branch(make_repo, raw, git_for)
+    h = b.handoff()
+    forged = b.handoff({f"{UNIT_REL}/verification.md": "forged\n"})
+    found = after_handoff(b.git, "HEAD", NAME, UNIT_REL, recorded=h)
+    assert found.handoff == h and not found.at_handoff and found.reentry
+    assert [c.sha for c in found.foreign] == [forged]
+    assert after_handoff(b.git, "HEAD", NAME, UNIT_REL).handoff == forged  # the fallback still takes the newest
+
+
+def test_a_recorded_h_unknown_to_the_clone_is_lost(make_repo, raw, git_for):
+    b = _branch(make_repo, raw, git_for)
+    b.handoff()
+    found = after_handoff(b.git, "HEAD", NAME, UNIT_REL, recorded="0" * 40)
+    assert found.lost and found.reentry

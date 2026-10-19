@@ -19,6 +19,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from l4.fsutil import (
+    LinkedPath,
+    UnsafeFile,
+    linked_component,
+    read_inside,
+    unlink_inside,
+    unlink_matching_inside,
+    write_inside,
+)
 from l4.gates.collection import LOCATION, called_names, in_repository
 from l4.gates.coverage import merge_pytest_env
 from l4.gates.junit import TestCase, TestReport
@@ -52,11 +61,13 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _drop_bytecode(source: Path) -> None:
+def _drop_bytecode(root: Path, rel: str) -> None:
     """A cached `.pyc` is validated by the source's mtime (in seconds) and size: a variant of the same size written
-    within the second of the original could be served the original's bytecode."""
-    for cached in (source.parent / "__pycache__").glob(f"{source.stem}.*.pyc"):
-        cached.unlink(missing_ok=True)
+    within the second of the original could be served the original's bytecode. Works on directory descriptors
+    (L4-SEC-020): a `__pycache__` that is a link is removed itself, and no `.pyc` outside the worktree is touched."""
+    parent, _, name = rel.rpartition("/")
+    cache = f"{parent}/__pycache__" if parent else "__pycache__"
+    unlink_matching_inside(root, cache, f"{Path(name).stem}.*.pyc")
 
 
 def _already_varied(target: Path, seen: set[tuple[int, int]]) -> bool:
@@ -91,15 +102,87 @@ class ZeroScope(list[str]):
         return list(self)
 
 
+MAX_VARIED_BYTES = 8 * 1024 * 1024  # a source file or a report the harness varies, keeps or puts back
+
+
+def _canonical(wb: Workbench, relative: str) -> str | None:
+    """The real path inside the worktree of a file the harness varies, resolved before the gate (L4-SEC-020 part c): a
+    link that the repository itself holds is followed now and never after the gate. None: the real path is outside the
+    worktree, under the test or test-support globs, or not a regular file."""
+    try:
+        real = (wb.worktree / relative).resolve()
+        rel = real.relative_to(wb.worktree.resolve()).as_posix()
+    except (OSError, ValueError, RuntimeError):
+        return None
+    if rel in ("", ".") or not real.is_file() or _is_test_path(wb, rel):
+        return None
+    return rel
+
+
+def _put(wb: Workbench, rel: str, data: bytes, mode: int | None, where: str) -> bool:
+    """Write `data` over `rel` without following a link (D3). A planted link is removed and recorded, and the write is
+    made once more into a real directory. A link as the last component is checked first: the rename in `write_inside`
+    would replace it silently, and a plant must be recorded like every other. Nothing is raised: this runs in
+    `finally` blocks."""
+    if (link := linked_component(wb.worktree, rel)) is not None:
+        wb.refused_write(LinkedPath(link), path=rel, where=where)
+    try:
+        write_inside(wb.worktree, rel, data, mode=mode)
+        return True
+    except LinkedPath as exc:
+        wb.refused_write(exc, path=rel, where=where)
+    except (UnsafeFile, OSError, ValueError) as exc:
+        wb.refused_write(exc if isinstance(exc, UnsafeFile) else UnsafeFile(str(exc)), path=rel, where=where)
+        return False
+    try:
+        write_inside(wb.worktree, rel, data, mode=mode)
+        return True
+    except (UnsafeFile, OSError, ValueError) as again:
+        wb.refused_write(again if isinstance(again, UnsafeFile) else UnsafeFile(str(again)), path=rel, where=where)
+        return False
+
+
+def _unlink(wb: Workbench, rel: str, where: str) -> None:
+    try:
+        unlink_inside(wb.worktree, rel)
+    except (UnsafeFile, OSError, ValueError) as exc:
+        wb.refused_write(exc if isinstance(exc, UnsafeFile) else UnsafeFile(str(exc)), path=rel, where=where)
+
+
+def _read(wb: Workbench, rel: str, where: str | None = None) -> tuple[bytes, int] | None:
+    """(bytes, mode) of a regular file below the worktree, or None when it is absent, too large or not a regular file.
+    With `where`, a refusal is recorded (the file is one the harness has to put back)."""
+    try:
+        return read_inside(wb.worktree, rel, limit=MAX_VARIED_BYTES)
+    except (UnsafeFile, OSError, ValueError) as exc:
+        if where is not None:
+            wb.refused_write(exc if isinstance(exc, UnsafeFile) else UnsafeFile(str(exc)), path=rel, where=where)
+        return None
+
+
+def _restore(wb: Workbench, originals: Mapping[str, tuple[bytes, int]], where: str) -> None:
+    """Put every original back and check it by sha256, reading through the same no-follow walk. A mismatch is
+    `restore failed`, never an exception."""
+    for rel, (data, mode) in originals.items():
+        put = _put(wb, rel, data, mode, where)
+        _drop_bytecode(wb.worktree, rel)
+        if not put:
+            continue  # the refusal is recorded already
+        back = _read(wb, rel)
+        if back is None or _digest(back[0]) != _digest(data):
+            wb.refused_write(UnsafeFile(f"{rel} differs after the restore"), path=rel, where=where)
+
+
 def _applied_names(wb: Workbench, paths: Sequence[str]) -> frozenset[str]:
     """The names the varied modules apply or call while they are imported (`import_time_names`), over all of them."""
     names: set[str] = set()
     for relative in paths:
-        target = wb.worktree / relative
-        if _is_inside(wb.worktree, target) and target.is_file():
+        rel = _canonical(wb, relative)
+        read = _read(wb, rel) if rel is not None else None
+        if read is not None:
             try:
-                names |= import_time_names(target.read_text(encoding="utf-8"))
-            except (UnicodeDecodeError, OSError):
+                names |= import_time_names(read[0].decode("utf-8"))
+            except UnicodeDecodeError:
                 continue
     return frozenset(names)
 
@@ -112,44 +195,42 @@ def zero_values_in_place(
     public: bool,
     keep: Mapping[str, Collection[str]] | None = None,
     annotation: bool = True,
+    where: str = "zero-value run",
 ) -> Iterator[ZeroScope]:
     """Replace the zero-value variants of `paths` (relative to the worktree) for the duration of the block and
     yield the scope (the paths that were varied). `public`: every public function and method; else only the red
     stubs. `keep`: path -> qualnames of functions that stay real (L4-IMP-061); `annotation` False leaves out the keep of
-    callable-returning functions the varied modules apply at import time."""
-    originals: dict[Path, bytes] = {}
+    callable-returning functions the varied modules apply at import time. Every target is taken by its real path inside
+    the worktree, resolved before the gate (L4-SEC-020 part c)."""
+    originals: dict[str, tuple[bytes, int]] = {}
     zeroed: dict[str, tuple[str, ...]] = {}
     kept: dict[str, tuple[str, ...]] = {}
     seen: set[tuple[int, int]] = set()
     applied = _applied_names(wb, paths) if public and annotation else frozenset()
     try:
         for relative in paths:
-            target = wb.worktree / relative
-            if not _is_inside(wb.worktree, target) or not target.is_file():
-                continue  # a symlinked directory in the repo must not let the gate rewrite a file outside it
-            if _already_varied(target, seen):
+            rel = _canonical(wb, relative)
+            if rel is None or rel in originals:
+                continue  # outside the worktree, a test file, not a file; or a second spelling of one already varied
+            if _already_varied(wb.worktree / rel, seen):
                 continue  # a second name of a file already varied: its "original" would be the variant
-            data = target.read_bytes()
+            read = _read(wb, rel)
+            if read is None:
+                continue
+            data, mode = read
             try:
                 plan = zero_value_plan(
                     data.decode("utf-8"), public=public, keep=(keep or {}).get(relative, ()), applied=applied
                 )
             except (SyntaxError, UnicodeDecodeError):
                 continue
-            originals[target] = data
+            originals[rel] = (data, mode)
             zeroed[relative], kept[relative] = plan.zeroed, plan.kept
-            target.write_bytes(plan.source.encode("utf-8"))
-            _drop_bytecode(target)
-        yield ZeroScope([t.relative_to(wb.worktree).as_posix() for t in originals], zeroed, kept)
+            _put(wb, rel, plan.source.encode("utf-8"), mode, where)
+            _drop_bytecode(wb.worktree, rel)
+        yield ZeroScope(list(originals), zeroed, kept)
     finally:
-        broken = []
-        for target, data in originals.items():
-            target.write_bytes(data)
-            _drop_bytecode(target)
-            if _digest(target.read_bytes()) != _digest(data):
-                broken.append(target.name)
-        if broken:
-            raise RuntimeError(f"could not restore {', '.join(broken)} after the zero-value run")
+        _restore(wb, originals, where)
 
 
 def own_test_files(wb: Workbench) -> frozenset[str]:
@@ -193,6 +274,22 @@ def _inconclusive_texts(run: VariantRun, candidates: Collection[str], real: Test
     return collection, setup
 
 
+def _keep_reports(wb: Workbench, where: str) -> dict[str, tuple[bytes, int]]:
+    kept: dict[str, tuple[bytes, int]] = {}
+    for rel in wb.cfg.gates.test.reports:
+        if (got := _read(wb, rel, where)) is not None:
+            kept[rel] = got
+    return kept
+
+
+def _put_reports_back(wb: Workbench, kept: Mapping[str, tuple[bytes, int]], where: str) -> None:
+    for rel in wb.cfg.gates.test.reports:
+        if rel in kept:
+            _put(wb, rel, kept[rel][0], kept[rel][1], where)
+        else:
+            _unlink(wb, rel, where)
+
+
 def zeroed_run(
     wb: Workbench,
     name: str,
@@ -201,13 +298,13 @@ def zeroed_run(
     public: bool,
     real: TestReport | None = None,
     candidates: Collection[str] = (),
+    extra_env: Mapping[str, str] | None = None,
 ) -> ZeroRun | None:
     """The test gate against the variants, classified against `real`; None when no path could be varied (nothing to
     decide). Only in `public` mode: while a candidate is inconclusive and a run's tracebacks name zeroed functions,
     those are kept real and the run is made again, at most `MAX_KEEP_RERUNS` times (L4-IMP-061). The reports the gate
     writes are put back as run (a) left them: the published report must describe the real code, not the variants."""
-    reports = [wb.worktree / r for r in wb.cfg.gates.test.reports]
-    saved = {r: r.read_bytes() for r in reports if r.is_file() and not r.is_symlink()}
+    saved = _keep_reports(wb, name)
     keep: dict[str, tuple[str, ...]] = {}
     own = own_test_files(wb)
     reruns = 0
@@ -215,11 +312,14 @@ def zeroed_run(
     annotation_kept = False
     try:
         while True:
-            with zero_values_in_place(wb, paths, public=public, keep=keep) as scope:
+            with zero_values_in_place(wb, paths, public=public, keep=keep, where=name) as scope:
                 if not scope:
                     return None
                 gate = wb.run_gate(
-                    name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING
+                    name,
+                    wb.cfg.gates.test.command,
+                    reports=wb.cfg.gates.test.reports,
+                    extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
                 )
             run = variant.classify(gate, real, redact=wb.redactor.redact_text)
             if reruns == 0 and any(scope.kept.values()):
@@ -248,11 +348,7 @@ def zeroed_run(
             wb.emit("zero.kept", gate=name, rerun=reruns, cause=cause,
                     functions=[f"{path}::{qual}" for path, qual, _ in wanted])  # fmt: skip
     finally:
-        for report in reports:
-            if report in saved:
-                report.write_bytes(saved[report])
-            else:
-                report.unlink(missing_ok=True)
+        _put_reports_back(wb, saved, name)
 
 
 def _proofs(run: VariantRun, candidates: Collection[str], real: TestReport | None, own: frozenset[str]) -> set[str]:
@@ -268,7 +364,7 @@ def _with_plain_pass(wb: Workbench, name: str, paths: Sequence[str], real: TestR
     test that fails by assertion with more code zeroed is still a zero-value failure, as in 0.4.15."""
     if not annotation_kept or all(t in result.proved for t in candidates):
         return result
-    with zero_values_in_place(wb, paths, public=True, keep=result.kept, annotation=False) as scope:
+    with zero_values_in_place(wb, paths, public=True, keep=result.kept, annotation=False, where=name) as scope:
         if not scope:
             return result
         gate = wb.run_gate(name, wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=KEEP_GOING)
@@ -290,12 +386,12 @@ def _failing_module_calls(
             if found is None or not in_repository(found.group("path")) or not found.group("path").endswith(".py"):
                 continue
             relative = found.group("path")
-            target = wb.worktree / relative
-            if relative in own or not _is_inside(wb.worktree, target) or not target.is_file():
+            read = _read(wb, relative) if relative not in own else None  # a read only: test-support modules are fine
+            if read is None:
                 continue
             try:
-                names |= import_time_names(target.read_text(encoding="utf-8"))
-            except (UnicodeDecodeError, OSError):
+                names |= import_time_names(read[0].decode("utf-8"))
+            except UnicodeDecodeError:
                 continue
     return frozenset(names)
 
@@ -305,41 +401,39 @@ def _listed(by_path: Mapping[str, Sequence[str]]) -> list[str]:
 
 
 @contextmanager
-def red_code_in_place(wb: Workbench, red_sha: str, paths: Sequence[str] | None = None) -> Iterator[list[str]]:
+def red_code_in_place(
+    wb: Workbench, red_sha: str, paths: Sequence[str] | None = None, *, where: str = "run at the red code"
+) -> Iterator[list[str]]:
     """The production files green changed are swapped to their content at the red commit for the duration of the block,
     and put back with a sha256 check (the pattern of `zero_values_in_place`, D7). A module green added has no red
     version: it is set aside. Test and support files are not touched, the corrected test stays as it is. Yields the
     paths that were swapped or set aside. `paths` (M1.11, the verifier's step 4): swap these files to `red_sha`
     instead of the files the worktree has changed since HEAD, which is none when the verifier looks at a commit."""
     ledger = wb.ledger_rel
-    originals: dict[Path, bytes] = {}
+    originals: dict[str, tuple[bytes, int]] = {}
     seen: set[tuple[int, int]] = set()
     try:
         for relative in sorted(wb.changed_files() if paths is None else paths):
-            if relative == ledger or _is_test_path(wb, relative) or relative.startswith((".l4-out/", ".l4/")):
+            if relative == ledger or relative.startswith((".l4-out/", ".l4/")):
                 continue
-            target = wb.worktree / relative
-            if not _is_inside(wb.worktree, target) or target.is_symlink() or not target.is_file():
-                continue  # a deleted file stays deleted; a link must not let the gate rewrite a file outside
-            if _already_varied(target, seen):
+            rel = _canonical(wb, relative)  # a deleted file stays deleted; a test file is not touched
+            if rel is None or rel == ledger or rel.startswith((".l4-out/", ".l4/")) or rel in originals:
                 continue
-            exists_at_red = wb.git.run("cat-file", "-e", f"{red_sha}:{relative}", check=False).returncode == 0
-            originals[target] = target.read_bytes()
+            if _already_varied(wb.worktree / rel, seen):
+                continue
+            read = _read(wb, rel)
+            if read is None:
+                continue
+            exists_at_red = wb.git.run("cat-file", "-e", f"{red_sha}:{rel}", check=False).returncode == 0
+            originals[rel] = read
             if exists_at_red:
-                target.write_bytes(wb.git.run_bytes("show", f"{red_sha}:{relative}"))
+                _put(wb, rel, wb.git.run_bytes("show", f"{red_sha}:{rel}"), read[1], where)
             else:
-                target.unlink()
-            _drop_bytecode(target)
-        yield [target.relative_to(wb.worktree).as_posix() for target in originals]
+                _unlink(wb, rel, where)
+            _drop_bytecode(wb.worktree, rel)
+        yield list(originals)
     finally:
-        broken = []
-        for target, data in originals.items():
-            target.write_bytes(data)
-            _drop_bytecode(target)
-            if _digest(target.read_bytes()) != _digest(data):
-                broken.append(target.name)
-        if broken:
-            raise RuntimeError(f"could not restore {', '.join(broken)} after the run at the red commit's code")
+        _restore(wb, originals, where)
 
 
 @dataclass(frozen=True)
@@ -385,10 +479,9 @@ def run_with_code_of(
     """The test gate with the production files swapped to their content at `sha` (`red_code_in_place`), going on past
     collection errors; the gate result tells no report, no test and a missing id apart. The reports the gate writes
     are put back as the real run left them."""
-    reports = [wb.worktree / r for r in wb.cfg.gates.test.reports]
-    kept = {r: r.read_bytes() for r in reports if r.is_file() and not r.is_symlink()}
+    kept = _keep_reports(wb, name)
     try:
-        with red_code_in_place(wb, sha, paths):
+        with red_code_in_place(wb, sha, paths, where=name):
             gate = wb.run_gate(
                 name,
                 wb.cfg.gates.test.command,
@@ -396,11 +489,7 @@ def run_with_code_of(
                 extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
             )
     finally:
-        for report in reports:
-            if report in kept:
-                report.write_bytes(kept[report])
-            else:
-                report.unlink(missing_ok=True)
+        _put_reports_back(wb, kept, name)
     return gate
 
 
@@ -672,7 +761,11 @@ def _criterion_texts(wb: Workbench) -> dict[str, str]:
 
 
 def confirm_pre_satisfied(
-    wb: Workbench, candidates: Mapping[str, Sequence[str]], *, real: TestReport | None = None
+    wb: Workbench,
+    candidates: Mapping[str, Sequence[str]],
+    *,
+    real: TestReport | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> PreSatisfied:
     """`candidates`: criterion -> its new tests, all of which passed in run (a) (`real`). With every public function of
     the modules those tests import, and of the modules changed since the unit base, answering its zero value, at least
@@ -701,7 +794,9 @@ def confirm_pre_satisfied(
     scope = sorted(imported_modules(wb, everything) | _changed_modules(wb))
     if not scope:
         return PreSatisfied({}, rest, "no project source module is imported by those tests", inconclusive=dependency)
-    zero = zeroed_run(wb, "test-presatisfied", scope, public=True, real=real, candidates=everything)
+    zero = zeroed_run(
+        wb, "test-presatisfied", scope, public=True, real=real, candidates=everything, extra_env=extra_env
+    )
     if zero is None:
         return PreSatisfied(
             {},

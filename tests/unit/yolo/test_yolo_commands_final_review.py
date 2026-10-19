@@ -23,7 +23,8 @@ def attempt_refs(world, name, count):
 # --- #6: resume and status use the figures of the step --------------------------------------------------------------
 
 
-def test_resume_is_refused_for_the_attempt_a_restart_made_after_the_stop(world, capsys):
+def test_resume_is_refused_for_the_attempt_a_restart_made_after_the_stop(world, monkeypatch, capsys):
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: True)  # a person raises a limit (L4-YOLO-051)
     active_world(
         world,
         ev("unit.dispatched", unit=B),

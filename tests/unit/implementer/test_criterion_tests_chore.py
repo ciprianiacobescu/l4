@@ -72,7 +72,7 @@ def test_single_tests_tells_the_agent_to_tag_with_the_cited_criterion_and_to_use
     assert template.version == 5
     assert "cites a criterion" in template.body and "fail by assertion" in template.body
     assert "interface the design names" in template.body and "new names" in template.body
-    assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@11+single_tests@5"
+    assert render_prompt("single", ctx(adds_tests=True)).template_version == "contract@12+single_tests@5"
 
 
 def test_a_chore_whose_tests_the_runs_could_not_decide_is_held_and_no_attempt_is_used(make_bench, monkeypatch):

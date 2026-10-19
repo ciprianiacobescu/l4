@@ -46,6 +46,26 @@ def test_a_baseline_that_fails_halts_as_baseline_failed(run_l4, monkeypatch):
     )
 
 
+def test_a_planted_link_halts_the_unit_at_once_with_the_evidence(run_l4, tmp_path):
+    """L4-SEC-021 (owner decision 1): like a secret in a push, a link a gate planted is not a failed attempt to retry"""
+    from ..implementer.test_planted_links import nothing_in, swap_cmd
+
+    outside = tmp_path / "host-dir"
+    outside.mkdir()
+    cond = "grep -q apply_discount src/pytdd/pricing.py && ! grep -q NotImplementedError src/pytdd/pricing.py"
+    run = run_l4([red_step(), red_step(), red_step()], test={"command": swap_cmd(outside, cond)})
+    assert run.code == 13
+    event = halt_event(run)
+    assert event["reason"] == "planted_link"
+    assert event["detail"].startswith("task 1.1: a gate run put a symbolic link at src/pytdd")
+    breaker = run.local_events("breaker.tripped")[-1]
+    assert breaker["reason"] == "planted_link" and breaker["task"] == "1.1"
+    assert breaker["links"][0]["path"] == "src/pytdd" and breaker["links"][0]["points_to"] == str(outside)
+    assert len(run.adapter.requests) == 1  # no second attempt
+    assert nothing_in(outside)
+    assert run.outcome["units"][0]["exit_reason"].startswith("halted: task 1.1: a gate run put a symbolic link")
+
+
 def test_the_fold_of_a_halted_unit_keeps_code_and_detail(run_l4):
     from l4.state.ledger import read_ledger
 

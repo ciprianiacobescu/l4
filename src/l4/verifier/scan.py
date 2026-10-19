@@ -13,9 +13,12 @@ import re
 from collections import Counter
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 _REPORT_HOOKS = ("pytest_runtest_makereport", "pytest_report_teststatus", "pytest_runtest_logreport")
 _WRAPPED_HOOKS = ("pytest_runtest_call", "pytest_runtest_protocol")
+_PLAIN_CALL_HOOKS = ("pytest_runtest_call", "pytest_runtest_setup")  # a plain implementation runs around every test
+_REPLACING_ATTRIBUTES = ("obj", "runtest")  # `item.obj = f` / `item.runtest = f` replace a collected test
 _DESELECTING_CALLS = ("remove", "pop", "clear", "pytest_deselected")
 _SKIP_MARK = re.compile(
     r"(?:^|\.)mark\.(?:skip|skipif|xfail)\b|\bunittest\.(?:skip|skipIf|skipUnless|expectedFailure)\b"
@@ -62,6 +65,52 @@ def _deselects(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return False
 
 
+_SESSION_END_HOOKS = ("pytest_sessionfinish", "pytest_unconfigure", "pytest_terminal_summary")
+
+
+def _writes_files(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "open":
+                return True
+            if isinstance(func, ast.Attribute) and func.attr in ("write_text", "write_bytes", "open"):
+                return True
+    return False
+
+
+def _exit_hooks(tree: ast.Module) -> list[str]:
+    """Code that runs after pytest wrote the report and can rewrite it (third review): `atexit.register`, `os._exit`
+    (also through an alias or a `from` import) and a session-end hook that writes a file."""
+    modules: dict[str, str] = {}  # local name -> module, for `import atexit as _a`
+    names: dict[str, str] = {}  # local name -> "module.name", for `from os import _exit`
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update({(a.asname or a.name).split(".")[0]: a.name for a in node.names})
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names})
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        target = ""
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            target = f"{modules.get(func.value.id, func.value.id)}.{func.attr}"
+        elif isinstance(func, ast.Name):
+            target = names.get(func.id, "")
+        if target == "atexit.register":
+            found.append("atexit.register: runs code after the test run, when the report is already written")
+        elif target == "os._exit":
+            found.append("os._exit: ends the process without the report being judged")
+    found += [
+        f"{f.name}: writes a file when the run ends"
+        for f in _functions(tree)
+        if f.name in _SESSION_END_HOOKS and _writes_files(f)
+    ]
+    return list(dict.fromkeys(found))
+
+
 def result_hooks(source: str) -> list[str]:
     """The result-manipulating constructs a conftest or plugin source contains, one short description each."""
     tree = _parse(source)
@@ -73,14 +122,28 @@ def result_hooks(source: str) -> list[str]:
             found.append(f"{function.name}: rewrites what the run reports")
         elif function.name == "pytest_collection_modifyitems" and _deselects(function):
             found.append("pytest_collection_modifyitems: removes or skips collected tests")
+        elif function.name == "pytest_pyfunc_call":
+            found.append("pytest_pyfunc_call: runs or replaces the test function")
         elif function.name in _WRAPPED_HOOKS and _is_wrapper(function):
             found.append(f"{function.name}: a hook wrapper around the test call")
+        elif function.name in _PLAIN_CALL_HOOKS and not _is_wrapper(function):
+            found.append(f"{function.name}: code around every test call")
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Attribute) and t.attr == "exitstatus" for t in node.targets
-        ):
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.target]
+            if isinstance(node, ast.AnnAssign | ast.AugAssign)
+            else []
+        )
+        if any(isinstance(t, ast.Attribute) and t.attr == "exitstatus" for t in targets):
             found.append("assignment to exitstatus: decides the exit code of the run")
-    return found
+        found += [
+            f"assignment to .{t.attr}: replaces a collected test"
+            for t in targets
+            if isinstance(t, ast.Attribute) and t.attr in _REPLACING_ATTRIBUTES
+        ]
+    return [*found, *_exit_hooks(tree)]
 
 
 _HARNESS_PLUGINS = ("l4_trace", "l4_cov")
@@ -236,3 +299,75 @@ def added_lines(diff: str) -> list[AddedLine]:
 def task_tags(title: str) -> frozenset[str]:
     """The `[docs]`, `[config]`, `[test-infra]` ... tags a task title carries (lower case)."""
     return frozenset(m.group(1).lower() for m in _TAG.finditer(title))
+
+
+def has_human_tag(unit_dir: Path, title: str, tag: str) -> bool:
+    """Whether the task title carries the human tag `[tag]` that exempts a rule (`test-infra`, `config`). A fix unit's
+    or a follow-up unit's titles are written by the harness from model-written findings: no tag is a person's."""
+    from l4.specs.fixmark import task_marker
+
+    return tag in task_tags(title) and task_marker(unit_dir) is None
+
+
+_HARNESS_WORDS = re.compile(r"(?:l4_trace(?:\.\w+)*|_OUTCOME(?:_FD)?|L4_OUTCOME_FILE)")  # a whole name, not a prefix
+_REPORT_ATTRIBUTES = ("exitstatus", "xmlpath")
+
+
+def _is_xmlpath_option(node: ast.AST) -> bool:
+    """`<x>.option.xmlpath`, or `getattr(<x>.option, "xmlpath", ...)`: the option that names the JUnit report. A name or
+    fixture called `xmlpath` is not it."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "xmlpath" and isinstance(node.value, ast.Attribute) and node.value.attr == "option"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "setattr"):
+        args = node.args
+        return (
+            len(args) >= 2
+            and isinstance(args[0], ast.Attribute)
+            and args[0].attr == "option"
+            and isinstance(args[1], ast.Constant)
+            and args[1].value == "xmlpath"
+        )
+    return False
+
+
+def harness_reference_lines(tree: ast.Module) -> list[tuple[int, str]]:
+    """(line, why) for each reference to the harness's own plugin and report machinery in a parsed file (fourth review):
+    `l4_trace`, `_OUTCOME*`, `L4_OUTCOME_FILE`, the `xmlpath` option, a `sys.modules` lookup of an `l4` module, and an
+    assignment to `.exitstatus` / `.xmlpath`. Names, attributes and strings count; comments and docstrings do not."""
+    docs = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        words = ""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
+            words = node.value
+        elif isinstance(node, ast.Name):
+            words = node.id
+        elif isinstance(node, ast.Attribute):
+            words = node.attr
+        elif isinstance(node, ast.alias):
+            words = node.name
+        if words and (m := _HARNESS_WORDS.fullmatch(words)):
+            found.append((line, f"{m.group(0)}: names the harness's own plugin or report option"))
+        if _is_xmlpath_option(node):
+            found.append((line, "xmlpath: reads the report path option"))
+        if isinstance(node, ast.Subscript | ast.Call):
+            text = ast.unparse(node)
+            if "sys.modules" in text[:80] and re.search(r"""['"]_?l4(?:\.|_|['"])""", text):
+                found.append((line, "sys.modules: looks up a module of the harness"))
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        else:
+            targets = [node.target] if isinstance(node, ast.AugAssign) else []
+        found += [
+            (line, f"assignment to .{t.attr}: decides what the run reports")
+            for t in targets
+            if isinstance(t, ast.Attribute) and t.attr in _REPORT_ATTRIBUTES
+        ]
+    return found
+
+
+def harness_references(source: str) -> list[str]:
+    """The distinct reasons of `harness_reference_lines` for a source (empty when it does not parse)."""
+    tree = _parse(source)
+    return list(dict.fromkeys(why for _, why in harness_reference_lines(tree))) if tree is not None else []

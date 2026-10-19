@@ -206,11 +206,11 @@ class OpenCodeAdapter:
         if not model:
             raise AdapterError("an opencode profile needs a model (provider/model)")
         step_dir = req.result_path.parent
-        step_dir.mkdir(parents=True, exist_ok=True)
+        step_dir.mkdir(mode=0o700, parents=True, exist_ok=True)  # the key's directory is the step's own (L4-PRV-040)
         req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
         config_dir = step_dir / CONFIG_DIR
         shutil.rmtree(config_dir, ignore_errors=True)
-        config_dir.mkdir()
+        config_dir.mkdir(mode=0o700)
         judge = req.permission_policy.mode == "judge"
         # no tool can read the repository, and its AGENTS.md need not be loaded as instructions either
         workdir = judge_workdir(req) if judge else req.cwd
@@ -399,7 +399,7 @@ def _hello(
     with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode-probe-") as scratch:
         work, config_dir = Path(scratch) / "cwd", Path(scratch) / "config"
         work.mkdir()
-        config_dir.mkdir()
+        config_dir.mkdir(mode=0o700)  # the scratch directory is 0700 already (tempfile); the key's own is too
         key_path = write_key_file(config_dir, key) if key is not None else None
         content = config_content(PermissionPolicy("judge"), work, model, options, key_path)
         env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env(config_dir, content)})

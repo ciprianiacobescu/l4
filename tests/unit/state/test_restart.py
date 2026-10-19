@@ -444,11 +444,18 @@ def test_a_restart_clears_the_local_unpublished_tails(world, forge):
 
     poisoned(world, forge)
     cache = cache_root(world.app.environ, repo=world.app.repo)
-    tail = cache / UNPUBLISHED_DIR / "openspec" / NAME / "r-20261013T1000Z-aaaa.jsonl"
+    from l4.vcs.repokey import repository_key
+
+    key = repository_key(world.app.repo, world.app.environ)
+    tail = cache / UNPUBLISHED_DIR / key / "openspec" / NAME / "r-20261013T1000Z-aaaa.jsonl"
     tail.parent.mkdir(parents=True)
     tail.write_text("{}\n")
+    legacy = cache / UNPUBLISHED_DIR / "openspec" / NAME / "r-20261013T1000Z-bbbb.jsonl"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("{}\n")
     restart(world)
     assert not tail.exists()
+    assert legacy.exists()  # the earlier layout is never written or removed (L4-SEC-034)
 
 
 def test_a_restart_is_refused_while_a_run_works_on_the_unit(world, forge, tmp_path):
