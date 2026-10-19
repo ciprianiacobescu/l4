@@ -92,7 +92,11 @@ def test_hello_rejects_another_reply_and_times_out(make_ctx):
     out, _ = probe(FREE, "hello", {("run",): CmdResult(0, other, "")}, make_ctx)
     assert not out.ok and out.reason == "unexpected reply"
     slow, _ = probe(FREE, "hello", {("run",): CmdResult(124, "", "timed out")}, make_ctx)
-    assert not slow.ok and slow.reason == "timeout"
+    assert not slow.ok and slow.failure_class == "transient"
+    assert slow.reason == (
+        "opencode did not answer within 60 s (hello step); an OpenCode v2 daemon or a login prompt can cause this: "
+        "run l4 doctor"
+    )
 
 
 def test_hello_402_is_a_credits_limit_and_401_is_not_a_limit(make_ctx):

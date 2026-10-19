@@ -31,6 +31,7 @@ from l4.agents.base import (
 from l4.agents.contract import attach_file_result
 from l4.agents.proc import ProcRunner
 from l4.availability.probes import _timed, probe_env
+from l4.availability.steps import timeout_reason
 from l4.config.schema import PLACEHOLDER, Profile
 from l4.safepath import resolve_tool
 from l4.sandbox.base import WrappedCommand
@@ -77,7 +78,7 @@ class CommandAdapter:
             return ProbeResult(step, False, reason="probe_argv executable not found")
         done, millis = _timed(ctx, [exe, *command_argv(probe_argv[1:], model=profile.model or "")], probe_env(ctx))
         if done.returncode == 124:
-            return ProbeResult(step, False, reason="timeout")
+            return ProbeResult(step, False, reason=timeout_reason(Path(exe).name, ctx.timeout_s, "hello"))
         if done.returncode != 0:
             return ProbeResult(step, False, reason=f"probe command exited with code {done.returncode}")
         return ProbeResult(step, True, {"ms": millis})

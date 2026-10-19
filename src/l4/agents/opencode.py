@@ -51,6 +51,7 @@ from l4.availability.probes import (
     status_class,
 )
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
+from l4.availability.steps import step_run, timeout_reason
 from l4.config.schema import OpencodeOptions, Profile
 from l4.safepath import resolve_tool
 from l4.schemacheck import validate
@@ -384,7 +385,7 @@ def probe_opencode(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeRes
         if model.startswith(FREE_PREFIX):
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
-        done = ctx.run([exe, "auth", "list"], ctx.cwd, probe_env(ctx), ctx.timeout_s)
+        done = step_run(ctx, "opencode", "auth", [exe, "auth", "list"], probe_env(ctx))
         if done.returncode == 0 and _norm(provider) in _auth_providers(done.stdout or ""):
             return ProbeResult(step, True, {"logged_in": True, "provider": provider})
         reason = f"opencode has no credential for provider {provider} (opencode auth login)"
@@ -450,4 +451,6 @@ def _hello(
         rejected = _unsupported_version(done.stderr or "")
         failure = rejected or f"opencode exited with code {done.returncode}"
         kind = "unsupported_version" if rejected else "transient"
-    return _hello_verdict(reply, millis, done.returncode == 124, failure, limit, kind)
+    return _hello_verdict(
+        reply, millis, done.returncode == 124, failure, limit, kind, timeout_reason("opencode", ctx.timeout_s, "hello")
+    )

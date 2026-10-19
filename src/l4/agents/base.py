@@ -122,6 +122,7 @@ class ProbeCtx:
     cwd: Path
     run: Runner
     timeout_s: float = 60.0
+    step_timeout_s: float = 20.0  # binary, auth and quota steps (`availability.probe_step_timeout`)
     hello_prompt: str = "Reply with exactly: L4-OK"
     forbid: tuple[Path, ...] = ()  # checkouts a binary must not resolve into
     min_remaining_percent: float = 10  # `availability.min_remaining_percent`, set by the Factory

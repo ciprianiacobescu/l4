@@ -823,6 +823,7 @@ availability:
   cache_ttl: 15m
   auth_failure_ttl: 2m             # a failed hello that was an auth refusal (HTTP 401/403) is remembered this long (L4-AVL-005)
   probe_timeout: 60s
+  probe_step_timeout: 20s          # the binary, auth and quota steps (capped by probe_timeout); a step that does not answer in time is named (L4-AVL-012)
   default_ladder: [binary, auth, quota, hello]
   min_remaining_percent: 10        # a window with less remaining counts as exhausted (any window, L4-AVL-009)
   default_cooldown: 30m            # when a limit is hit but no reset time is known

@@ -45,7 +45,14 @@ def probe_identity(profile: Profile, cfg: AvailabilityCfg, environ: Mapping[str,
     """The key a cached ladder outcome is valid for: who the profile acts as (`identity_hash`) and every setting that
     changes what a probe concludes (version floor, reserve, model, options, the ladder, the hello prompt...). A
     changed reserve must not be answered by a result judged against the old one."""
-    timing = {"cache_ttl", "auth_failure_ttl", "probe_timeout", "default_cooldown", "credits_cooldown"}
+    timing = {
+        "cache_ttl",
+        "auth_failure_ttl",
+        "probe_timeout",
+        "probe_step_timeout",
+        "default_cooldown",
+        "credits_cooldown",
+    }
     settings = {
         "profile": profile.model_dump(mode="json", exclude={"max_concurrency", "vendor"}),
         "availability": cfg.model_dump(mode="json", exclude=timing),

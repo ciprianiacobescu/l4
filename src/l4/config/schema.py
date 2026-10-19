@@ -519,6 +519,7 @@ class AvailabilityCfg(_Strict):
     cache_ttl: Duration = "15m"
     auth_failure_ttl: Duration = "2m"  # a failed hello that was an auth refusal (401/403) is remembered this long
     probe_timeout: Duration = "60s"
+    probe_step_timeout: Duration = "20s"  # the binary, auth and quota steps; the hello keeps probe_timeout
     default_ladder: list[str] = Field(default_factory=lambda: ["binary", "auth", "quota", "hello"])
     min_remaining_percent: float = 10
     default_cooldown: Duration = "30m"

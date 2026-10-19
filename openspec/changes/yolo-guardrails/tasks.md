@@ -79,7 +79,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   the bounded wait, closing the read ends). Run: `tests/unit/test_run_process.py tests/unit/agents/test_proc.py
   tests/unit/specs/test_openspec_cli.py tests/unit/provision`.
 
-- [ ] 2.2 The step timeout and the named reason. Tests first:
+- [x] 2.2 The step timeout and the named reason. Tests first:
   - `tests/unit/config/test_schema.py`: `test_probe_step_timeout_defaults_to_20s` (`L4Config().availability.
     probe_step_timeout == "20s"`, and `"probe_step_timeout"` is in `fallback`'s `timing` set: a change of it does not
     change a probe cache identity).

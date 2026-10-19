@@ -59,3 +59,31 @@ def test_sanitize_status_keeps_three_fields_and_word_values_only():
         "logged_in": False, "auth_method": None, "plan": None,
     }  # fmt: skip
     assert sanitize_status({}) == {"logged_in": False, "auth_method": None, "plan": None}
+
+
+def _timed_out(step: str) -> Scripted:
+    from l4.availability.probes import StepTimedOut, timeout_reason
+
+    class Slow(Scripted):
+        def probe(self, profile, name, ctx):
+            self.steps.append(name)
+            if name == step:
+                raise StepTimedOut(timeout_reason("codex", 20, name))
+            return ProbeResult(name, True)
+
+    return Slow(True, None)
+
+
+def test_a_binary_step_that_times_out_is_missing_with_the_reason():
+    out = check(_timed_out("binary"))
+    assert out.state is AdapterState.MISSING
+    assert out.detail == (
+        "codex did not answer within 20 s (binary step); a login prompt or a helper process that keeps the output "
+        "open can cause this: run l4 doctor"
+    )
+
+
+def test_an_auth_step_that_times_out_is_not_authenticated_with_the_reason():
+    out = check(_timed_out("auth"))
+    assert out.state is AdapterState.INSTALLED_NOT_AUTHENTICATED
+    assert out.detail is not None and out.detail.startswith("codex did not answer within 20 s (auth step)")
