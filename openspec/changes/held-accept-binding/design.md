@@ -100,3 +100,9 @@ tree's parent (`cache_dir`). Absence is decided by `lstat`; a guarded file is co
 one byte past its expected length. An `OSError` (a folder made unreadable) fails the step cleanly and the folders are given their
 owner access back so the step can be discarded. A hard link planted before the snapshot (R2b) needs no change: under the bwrap
 sandbox a hard link across mounts is `EXDEV`, and without a sandbox the agent already has access to that file.
+
+**D12. Trust the pair (path, target); read only what is compared.** `links_added` returns each trusted link's blob id from the
+temporary index; at arm time a link at a patch path whose target differs from that blob is planted (the step fails), and a patch
+link is always restored to the patch's target. A read happens only when the snapshot expects a regular file of the same size
+(then at most one byte past it); the snapshot itself refuses a file over 64 MiB. The folder-mode repair uses `fchmodat` without
+following where the platform has it and looks at the folder again afterwards (still a folder, same inode).
