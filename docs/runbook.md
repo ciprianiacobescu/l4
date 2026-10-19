@@ -1913,7 +1913,7 @@ CI only when the branch holds the same folder. Otherwise CI reviews it again.
 l4 yolo accept <plan-id> <subject> --reason "<what the implementer should do>"
 ```
 
-The command prints every finding, then asks for the plan id to be typed. It records the subject's latest verdict, with
+The command prints every finding, then asks for the plan id to be typed (a person's `--yes` replaces that; the prompt goes to stderr). It records the subject's latest verdict, with
 its findings, the reason, who accepted and whether a person or an agent. The reason goes to the implementer and to the
 verifier ([12.2b](#122b-where-an-accepted-finding-goes)); write what to do where the spec is silent, for example
 `keep the thresholds; run the timing tests with a 3x tolerance`. Then run `l4 yolo activate <plan-id> --reason "<why>"`.
@@ -1934,7 +1934,26 @@ The command is refused (exit 2, with the cause and the fix) when:
 
 An acceptance holds while the latest review keeps the same material and findings. Any change of the unit folder, a
 prerequisite, the plan entry or the review prompt voids it: the subject must be reviewed, and accepted again if
-needed.
+needed. The status and the activation refusal say why in one line (`other material`, or `other findings of the same
+material`, with the accepted and the latest material and findings and when each was judged).
+
+**When the judge cannot run.** If no judge can answer (a usage limit, a failing tool chain) there is no review to
+iterate on. First ask CI: `l4 yolo review <plan-id>`. If that cannot work either, a person may accept the whole plan as
+it is, with no model review:
+
+```sh
+l4 yolo accept <plan-id> --all --force --reason "<what the implementer should know>"
+```
+
+The command prints each unit and batch with what it overrides, then asks the person to type the plan id (`--yes`
+replaces that). It appends `plan.admitted` (when the plan is not yet admitted) and `plan.force_accepted`, with the
+digests it holds for, and calls no model. Specifications that no model reviewed get built: the implementer and the
+verifier are the only checks. It is refused for an agent whatever `accept_by_agents` says, and for a plan file that is
+not a plan, an active plan, an unknown unit, a cycle, an open question or a unit with no files. Then run
+`l4 yolo activate <plan-id> --reason "<why>"`: the activation prints
+`<subject>: force-accepted without review by <who> (<reason>)` for each subject. A change of the plan file or of a
+unit's spec voids the force acceptance for that subject, and the refusal names the subjects; run the command again, or
+`--withdraw` it. `l4 yolo status` and `l4 yolo findings` show it.
 
 **macOS and other hosts without `bwrap`.** Outside CI, `--worktree` and `--local` run the judge unsandboxed when its
 adapter has no tools (`claude-code`, `opencode`), and print `judge unsandboxed (bwrap was not found on PATH): it has no
@@ -1947,7 +1966,9 @@ review of it costs. The output ends with `cost: $x.xx (n judged, m reused)` and 
 
 ### 12.2b Where an accepted finding goes
 
-An accepted subject carries its findings through the run. Do nothing unless the plan waits.
+An accepted subject carries its findings through the run. Do nothing unless the plan waits. A force-accepted unit carries
+the reason and no findings: the implementer's prompt says that no model reviewed its specification, and the report and
+the pull request say so.
 - The unit run writes `.l4/review-accepted.json` in the unit folder. The implementer's prompt holds the accepted
   findings and the reason. The verifier's judge answers for each finding whether the work addressed it.
 - With `merge: auto`, a unit with a `PASS` is not merged while an accepted finding has no `addressed: true` answer and

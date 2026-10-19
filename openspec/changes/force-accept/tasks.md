@@ -198,7 +198,7 @@ Every task follows these rules:
 
 ## 6. Documentation and SPEC (L4-YOLO-067)
 
-- [ ] 6.1 Tests first, new `tests/unit/docs/test_force_accept_docs.py` on the model of
+- [x] 6.1 Tests first, new `tests/unit/docs/test_force_accept_docs.py` on the model of
   `test_plan_run_lessons_docs.py`: `test_the_spec_has_the_eleven_requirements_and_their_scenarios_in_order`
   (`**L4-YOLO-057 ` to `**L4-YOLO-067 ` after `**L4-YOLO-056 `; `#### SCN-YOLO-150 ` to `#### SCN-YOLO-176 ` after
   `#### SCN-YOLO-149 ` and before `### 23.21`; `| 53 | \`force-accept\` |`; the `yolo accept` CLI row has

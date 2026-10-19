@@ -123,6 +123,11 @@ A person may need an `l4 yolo accept` when the judge keeps finding more after re
 - Otherwise stop and ask the person. Print the exact command for them:
   `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
 
+When no judge can run, first ask CI: `l4 yolo review <id>`. Never run `--force` (`l4 yolo accept <id> --all --force`),
+not even when `accept_by_agents` is true: it accepts the plan with no model review and is a person's decision. Print
+the command for the person:
+`l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
+
 `l4 yolo waive <id> <F-id> --reason "..."` follows the same rule. It is for a plan that waits with
 `accepted_finding_open` on a finding the judge found not addressed. Never waive a finding the judge did not answer:
 run `l4 retry` for it. Never waive a finding whose fix the code needs: give it as feedback. Waive only after you have

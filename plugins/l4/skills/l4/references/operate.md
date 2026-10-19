@@ -145,7 +145,9 @@ A plan is `.l4/plans/<id>.json` on the base branch: units, `depends_on`, batches
   and what changed since the previous judgement. Reads only.
 - `l4 yolo accept PLAN SUBJECT --reason "…"`: a person accepts a subject's remaining findings on record (never for
   BLOCKED, a blocking finding or a cut of the unit's folder; agents only if `yolo.review.accept_by_agents` is true on
-  the base branch). Not an agent's command by default.
+  the base branch). Not an agent's command by default. Never run its `--all --force` form (accept the whole plan with
+  no model review, even with `accept_by_agents`): when the judge cannot run, ask CI (`l4 yolo review PLAN`), then give
+  the person `l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
 - `l4 yolo activate PLAN --reason "…"`: freezes the reviewed spec digests and the limits, then starts a run. Refused unless
   the review is for the current inputs, was made with the current review prompt, and everything is READY. After a
   harness upgrade CI reviews again (and charges for) every plan not yet activated and every plan stopped with

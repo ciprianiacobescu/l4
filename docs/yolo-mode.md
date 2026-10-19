@@ -258,7 +258,14 @@ The runbook has the procedure (section 12.2a). These are the rules.
   record. It needs at least `yolo.review.accept_after_rounds` (2) versions of the subject's text judged not READY. It is
   never allowed for BLOCKED, a blocking finding or a cut of the subject's own folder. An agent may accept only when
   `yolo.review.accept_by_agents` is true in the configuration on the base branch. The acceptance holds while the
-  material and the findings stay the same. The activation lists every acceptance.
+  material and the findings stay the same. The activation lists every acceptance. A person types the plan id, or passes
+  `--yes` and is not asked (the event records `confirmed: typed` or `confirmed: --yes`). Every prompt goes to stderr and
+  runs only on a terminal; without one the command exits 2 and names `--yes`.
+- **An acceptance that does not hold.** `l4 yolo status`, `l4 yolo findings` and the activation refusal say why in one
+  line: `other material` (the accepted material and findings, when they were judged, the latest review's, and whether
+  the subject's own spec changed) or `other findings of the same material`. An accepted subject that holds says so on
+  its verdict line (`accepted by <who>: it does not stop the activation`), and a reused verdict shows when it was
+  judged. When the ledger holds two judgements of one material, a new review reuses the one the acceptance is bound to.
 - **Where an accepted finding goes.** The unit folder gets `.l4/review-accepted.json`. The implementer's prompt holds
   the findings and the reason. The verifier's judge answers for each finding whether the work addressed it. With
   `merge: auto`, a unit with a PASS whose accepted finding is not addressed is not merged: the plan waits with
@@ -267,6 +274,38 @@ The runbook has the procedure (section 12.2a). These are the rules.
   accepted finding needs no handling. The merge guard then counts it as answered and the harness merges the unit
   itself. The same rules as accept decide who may waive. The report shows who waived a finding and why. A new
   activation clears the waivers.
+
+## When the reviewer is unavailable
+
+The review needs a judge. When no judge can run (a usage limit, a tool chain that fails, a host without a working
+judge), no review is recorded and the plan cannot be activated. Try the alternative first: ask CI for the review with
+`l4 yolo review <plan>` (without `--local`), because CI's judge may work where the local one does not. CI may also
+still review a force-accepted plan before the activation.
+
+When no judge can answer, a person can accept the plan as it is:
+
+```sh
+l4 yolo accept <plan> --all --force --reason "<what the implementer should know>"
+```
+
+- **The risk.** Specifications that no model reviewed get built: the implementer and the verifier are the only checks.
+  The command prints, for each unit and each batch, what it overrides (no review, a review for other inputs, BLOCKED, a
+  blocking finding, a material finding, too few judged versions, or nothing), then asks the person to type the plan id.
+  The reason goes to the implementer's prompt with the rule that no model reviewed the specification, to the report and
+  to the PR body.
+- **Who.** Only a person in a terminal. An agent is refused even when `yolo.review.accept_by_agents` is true, and the MCP
+  server has no tool for it. `--yes` skips the typed plan id; the summary is still printed.
+- **What it never overrides.** A plan file that is missing or not a plan, a plan that is active or past the point where
+  an acceptance is possible, every refusal of the admission that `l4 yolo activate` runs (an unknown unit, a cycle, an
+  open question, the intake checks) and a unit whose folder has no files.
+- **The binding.** It holds for a subject while the plan file and the unit's spec (a batch: each of its units) keep the
+  digests it recorded. An edit of the plan file voids it for every subject; an edit of one unit's spec voids that unit
+  and its batches. Task ticks do not. A later force acceptance replaces the earlier one. `l4 yolo status` and
+  `l4 yolo findings` show each overriding subject as `force-accepted without review by <who> (<reason>)`.
+- **Activation.** A force acceptance that holds for every subject replaces the review at `l4 yolo activate`; every other
+  refusal stays. `plan.activated` records `review: force_accepted`.
+- **Withdraw.** `l4 yolo accept <plan> --all --force --withdraw --reason "<why>"` removes it, before the activation,
+  whoever runs it.
 
 ## What runs in each CI run
 

@@ -478,9 +478,9 @@ of the harness package.
 | `l4 yolo check PLAN [--worktree]` | Load the plan file and admit it at the target head (L4-YOLO-001, L4-YOLO-002): print the findings and the order. Exit 0, or 2 with the findings. `--worktree` reads the plan files and the units from the working tree, before the push, and adds `uncovered` and `covered_twice` (L4-YOLO-034) | none |
 | `l4 yolo review PLAN [--local] [--worktree [--record] [--fresh SUBJECT]… [--json]]` | Ask CI to review the plan now (readiness review, L4-YOLO-004); with `--local`, run the review here; with `--worktree`, review the working tree before the push, `--record` records it (clean tree only), `--fresh` judges a subject again, `--json` prints the findings document (L4-YOLO-026) | forge call (a run), or a plan ledger commit with `--local` or `--worktree --record` |
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
-| `l4 yolo accept PLAN SUBJECT --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027) | `plan.accepted` or `plan.acceptance_withdrawn` (push with a lease) |
-| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive (L4-YOLO-031) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
-| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests, every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
+| `l4 yolo accept PLAN (SUBJECT \| --all --force) --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027). `--all --force` is a person's decision for every subject of the plan, with no model review (L4-YOLO-057). A person's `--yes` replaces the typed plan id (L4-YOLO-063) | `plan.accepted` or `plan.acceptance_withdrawn`; `plan.admitted` and `plan.force_accepted` or `plan.force_acceptance_withdrawn` (push with a lease) |
+| `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive; a person's `--yes` replaces the typed plan id (L4-YOLO-031, L4-YOLO-063) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
+| `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests (a force acceptance that holds for every subject replaces the review, L4-YOLO-061), every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
 | `l4 yolo cancel PLAN --reason TEXT` | Stop new dispatch and merges for good (L4-YOLO-013); a unit already running finishes its run and is not merged | `plan.cancelled` (push with a lease) |
 | `l4 yolo resume PLAN --reason TEXT [--extend-cost USD] [--extend-runs N] [--extend-attempts N] [--extend-deadline ISO]` | Leave `stopped` or `waiting` when the cause is gone (L4-YOLO-013, L4-YOLO-014); refused with exit 2 while the cause is still there; `inputs_changed` needs a new review and activation; on an active plan, an `--extend-…` raises the limit and resumes nothing (`plan.extended`, L4-YOLO-050); an `--extend-…` is a person's (L4-YOLO-051) | `plan.resumed` (push with a lease), `plan.extended`, forge call |
@@ -4561,7 +4561,7 @@ MUST count as stale wherever currency is decided (the CI step, `l4 yolo status`,
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest, the
 limits and the acceptances that hold (`accepted`), and then start a run on the target. It MUST be refused, with exit 2
 and the cause, unless: the plan is admitted; the latest review is for the current digests; every unit and batch is READY,
-or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027); `merge` and `forge.merge_policy` agree; the target exists
+or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027), unless a force acceptance that holds for every subject replaces the review (L4-YOLO-061); `merge` and `forge.merge_policy` agree; the target exists
 on `origin`; no other plan is active on the target. Its output MUST list every accepted subject with who accepted it,
 whether a person or an agent, and the reason. Nothing MUST run from a plan before activation. Activation freezes the
 plan digest (`activated_digest`) with the unit digests. From then on, `plan.admitted`, `plan.refused` and
@@ -4777,7 +4777,8 @@ adapter is tool-less, and say so.
 findings, hash, reason, `by`, `actor`) after the person types the plan id. It MUST be refused for
 BLOCKED, a blocking finding, the subject's `material_cut`, fewer than `yolo.review.accept_after_rounds` (2)
 versions of its text not READY, an active plan and an agent unless `yolo.review.accept_by_agents` is true at
-`origin/<base>`. It holds while the latest entry keeps the key and hash.
+`origin/<base>`. It holds while the latest entry keeps the key and hash. A person's `--yes` replaces the typed plan id
+(L4-YOLO-063).
 
 **L4-YOLO-028** Accepted findings travel with the unit. The run of a plan unit with an acceptance SHALL write `.l4/review-accepted.json` in the unit folder. The implementer's
 prompt MUST hold the accepted findings and the reason. The verifier's judge MUST get them and answer `accepted: [{id,
@@ -4805,7 +4806,7 @@ pushed with the lease, then start the harness's CI on the base branch unless `--
 nothing recorded, for a plan that is not `active`, `waiting` or `stopped` (before the activation the command is
 `l4 yolo accept`), for an id that is not a finding of the activation's accepted items, for an empty reason, and for an
 agent unless `yolo.review.accept_by_agents` is true at `origin/<base>` and `--yes` is given. A person MUST type the
-plan id after the finding and its acceptance are shown. `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
+plan id after the finding and its acceptance are shown, or pass `--yes` (L4-YOLO-063). `--withdraw` SHALL record `plan.waiver_withdrawn{finding,
 reason, by, actor}` for a waived id. A new activation clears the waivers. With `merge: auto`, the merge guard of
 L4-YOLO-028 SHALL count a waived finding as answered, so the harness merges the unit through its guarded merge. The
 report SHALL show `waived by <by> (<actor>): <reason>` for a waived finding the verifier did not answer
@@ -4937,6 +4938,28 @@ the live reason (the answer is recorded and the next run reads it), not the deta
 **L4-YOLO-056 The next line of a waiting plan follows the unit's answer step.** For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
 `Next:` line of `l4 yolo status` SHALL give the step `l4 status --unit` gives (fix the answer, answer the question) and
 how to replace a recorded answer (`l4 questions answer Q-NNN --unit U --text "accept ..." --replace`).
+
+**L4-YOLO-057 A person can force-accept every subject of a plan without a review.** `l4 yolo accept PLAN --all --force --reason TEXT [--yes]` SHALL accept every unit of the plan and every batch with more than one unit as it stands, whatever the review says or lacks: no review, a review for other inputs, BLOCKED, a blocking finding, a material finding and fewer than `yolo.review.accept_after_rounds` judged versions are all overridden. It MUST NOT call a model. It SHALL print each subject with what it overrides, then take the person's confirmation (L4-YOLO-063), then append in one leased write `plan.admitted` (unless the plan is already admitted or reviewed at this digest with this order) and `plan.force_accepted{plan_digest, subjects, reason, by, actor: person, marker: null, confirmed}`, where each subject has its digest (a batch: its units' digests), `skipped` (`no_review`, `stale_review`, `blocked`, `blocking`, `material`, `rounds`, `not_ready`, or none), `review_at`, `verdict` and `material`. `--force` without `--all`, `--all` without `--force`, `--all` with a SUBJECT, and neither a SUBJECT nor `--all` MUST exit 2 before anything is read.
+
+**L4-YOLO-058 Only a person in a terminal force-accepts.** `l4 yolo accept --all --force` SHALL be refused (exit 2, before the plan is fetched, nothing written) for every caller that `l4.actor.actor` does not name a person: an agent marker is set, or stdin is not a terminal. It MUST be refused for an agent even when `yolo.review.accept_by_agents` is true, and for every MCP caller (the server runs the CLI with `AI_AGENT=l4-mcp` and no terminal); the MCP server MUST offer no tool that runs `l4 yolo accept`. The refusal SHALL say that it is a person's decision, why the caller is not one, and the command a person runs.
+
+**L4-YOLO-059 What a force acceptance never overrides.** `l4 yolo accept --all --force` SHALL keep, with their own refusal and nothing recorded: a missing plan file or one that is not a plan; the plan status rule of L4-YOLO-027 (before the activation, or stopped with `inputs_changed` or `unit_rejected`); every finding of the admission that `l4 yolo activate` runs (among them `unknown_unit` for a unit folder that does not exist on the target, `cycle`, `unknown_dependency`, `intake`, `open_questions`); and a unit whose current digest is missing (`unit_missing`).
+
+**L4-YOLO-060 A force acceptance is bound to the text it accepted.** A force acceptance SHALL hold for a subject while the plan file's digest is the one it recorded and the subject's current unit digest (a batch: each of its units') is the one it recorded, by the digest rule of the activation and of `inputs_changed`. A change of the plan file MUST void it for every subject; a change of a unit's spec MUST void it for that unit and every batch that holds the unit. A later `plan.force_accepted` SHALL replace the earlier one. `l4 yolo accept PLAN --all --force --withdraw --reason TEXT` SHALL record `plan.force_acceptance_withdrawn{reason, by, actor, marker}`; it MUST NOT be refused for who runs it, and is refused after the activation and when no force acceptance is recorded.
+
+**L4-YOLO-061 Activation of a force-accepted plan.** `l4 yolo activate` SHALL NOT require a review when a force acceptance holds for every subject of the plan; every other refusal of L4-YOLO-005 stays. Otherwise the review rules of L4-YOLO-005 apply, and a subject that a holding force acceptance overrode (its recorded `skipped` is not empty) MUST count as cleared whatever a current review says of it. `plan.activated{accepted}` SHALL hold each such subject as `{findings: [], reason, by, actor: person, force: true}` and the event SHALL record `review: force_accepted` when it holds one. A refusal while a force acceptance is recorded MUST name the subjects it no longer holds for.
+
+**L4-YOLO-062 A force acceptance is shown wherever the plan and its units are.** `l4 yolo status` and `l4 yolo findings` (text and `--json`) SHALL show each overriding subject of a recorded force acceptance as `<subject>: force-accepted without review by <by> (<reason>)`, with `; no longer holds: its spec or the plan file changed` when it does not hold, and `l4 yolo status` SHALL name `l4 yolo activate` in its `Next:` line when it covers the plan. After the activation the status, the plan report and each force-accepted unit's PR body SHALL name it, and the unit's implementer prompt SHALL carry the reason with the rule that no model reviewed the specification.
+
+**L4-YOLO-063 A person's --yes replaces the typed plan id.** For a person, `--yes` SHALL replace the typed plan id in `l4 yolo accept PLAN SUBJECT`, in `l4 yolo accept PLAN --all --force` and in `l4 yolo waive`; the command MUST still print what it prints today before recording (the findings, the waived finding and its acceptance, the force summary). `plan.accepted`, `plan.finding_waived` and `plan.force_accepted` SHALL record `confirmed: typed` or `confirmed: --yes`. For an agent, `--yes` SHALL keep its rule: `l4 yolo accept PLAN SUBJECT` and `l4 yolo waive` only with `yolo.review.accept_by_agents` true at `origin/<base>`; `--force` never.
+
+**L4-YOLO-064 No confirmation prompt waits unseen.** `l4 yolo accept` and `l4 yolo waive` SHALL prompt only when stdin is a terminal; without one and without `--yes` they MUST exit 2 at once with a message that names `--yes`, and MUST NOT read stdin. Every prompt SHALL be written to stderr and flushed before stdin is read, so that a pipe or a wrapper on stdout cannot hide it.
+
+**L4-YOLO-065 A reuse keeps the judgement a person accepted.** When a review reuses a recorded judgement of a material (the CI step, `l4 yolo review --local`, `l4 yolo review --worktree` with or without `--record`) and an acceptance of the plan is bound to that material, the review SHALL reuse the newest recorded judgement of that material whose findings have the acceptance's `findings_sha`, when the ledger holds one, and otherwise the newest judgement of the material. The binding of L4-YOLO-027 MUST NOT change: an acceptance holds only on the same material and the same findings.
+
+**L4-YOLO-066 An acceptance says whether it holds, and why not.** Where the verdict of an accepted subject is printed (`l4 yolo findings`, `l4 yolo review --worktree`, `l4 yolo review --local`, the CI review log line) an acceptance that holds SHALL be said on that line, and a reused entry SHALL show when it was judged. An acceptance that does not hold SHALL be explained in one line in `l4 yolo status`, `l4 yolo findings` (text and `--json`) and the activation refusal: `other material` or `other findings of the same material`, the accepted material and findings (8 characters each) and when they were judged, the latest review's material and findings, when they were judged and whether they were `reused` or `new`, and for other material whether the subject's own spec changed.
+
+**L4-YOLO-067 Documentation of the force path and of the confirmation.** `docs/yolo-mode.md` SHALL have a section "When the reviewer is unavailable" with the force path, who may run it, what it never overrides, the risk that specifications no model reviewed get built, and the alternative of reviewing in CI with `l4 yolo review <plan>` without `--local`. The runbook SHALL give the procedure. The skill's `plan.md` and `operate.md` MUST tell an agent never to run `--force` and to give the person the exact command. The CHANGELOG's 0.4.18 section and the SPEC SHALL name the force path, a person's `--yes` and the acceptance binding fix.
 
 ## 13. Memory and lessons
 
@@ -6053,6 +6076,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 46 | `plan-run-lessons` | a diff longer than one prompt is judged in parts of whole files and their replies merged, with the harness's bookkeeping and lock files left out, and what the judge cannot see is a `judge_view` hold that never becomes a fix unit (L4-VER-040 to L4-VER-047); a limit of an active plan is raised without waiting for the stop, by a person or, with `yolo.extend_by_agents`, an agent (L4-YOLO-050, L4-YOLO-051); `l4 yolo resume` and the hints after an answer say what happens, and a stopped plan names its unit's own way out (L4-YOLO-052 to L4-YOLO-056; `openspec/changes/plan-run-lessons/`) | the consumer repository's next plan run: a unit over the cap judged in parts; a limit raised while the plan is active; a resume after an answer |
 | 47 | `kiro-prompt-context` | the implementer's prompt always carries each criterion's text and the task's whole block (detail bullets included), fills the rest of a budget (`implementer.context_budget_tokens`, now 32000; a profile may set its own) in priority order by whole sections, names every cut or unread source under `Not shown in full` and in `prompt.truncated`, and carries the Kiro steering that applies as data (the root `AGENTS.md` with `implementer.include_agents_md`); the dry run, `l4 status --unit` and doctor SPEC-004 show the cuts; a red step of a Kiro leaf must trace every criterion its `_Requirements:_` line names (or prove it by an earlier red), the no-new-test path proves them all; the step-9 judge gets the spec text within `verifier.judge_context_budget_tokens`, each done task's block, and holds on a spec file it did not see; the clarifier uses the same builder; step 1's scope reads a Kiro unit's requirements (L4-IMP-050..054, L4-KSP-010..014; `openspec/changes/kiro-prompt-context/`) | the probe's dry-run prompt holds the criteria text, the detail bullets, the steering and the cut list |
 | 48 | `held-accept-binding` | a held step is kept and an `accept` replays it: the step's changes are saved as `.l4/held/<task>-<check>.patch` before they are discarded, the question shows the redacted source of the tests, and the next run applies the patch with every guard, gate and check instead of starting an agent; a missing, changed or non-applying patch is a new question; `retry` drops it; a later agent step is told the accepted tests (L4-IMP-065, L4-IMP-063; `openspec/changes/held-accept-binding/`) | an accepted version-pin hold on a consumer repository: the next run takes the accept without a second question |
+| 53 | `force-accept` | a person force-accepts every unit and batch of a plan without a model review, bound to the plan file and unit digests, shown in status, findings, the report, the implementer's prompt and the PR body, and never an agent's (L4-YOLO-057 to L4-YOLO-062); a person's `--yes` replaces the typed plan id and every prompt goes to stderr on a terminal only (L4-YOLO-063, L4-YOLO-064); a reuse keeps the judgement an acceptance is bound to, an accepted subject is shown as accepted and an acceptance that no longer holds says why (L4-YOLO-065, L4-YOLO-066; `openspec/changes/force-accept/`) | a plan force-accepted and activated while the judge is down; a person's `--yes` in a terminal |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -11545,6 +11569,141 @@ scenario is a spec defect (§26).
 - **Given** a failed round with a rejected `judge view:` hold and another finding of a person that no fix task can be derived from
 - **When** the fix loop decides
 - **Then** the unit escalates with a cause that names both, and `l4 status --unit` gives the feedback way out and the way out of the hold on the judge's view
+
+#### SCN-YOLO-150 (+) A person force-accepts a plan whose review is BLOCKED by the judge · L4-YOLO-057
+- **Given** plan `p1` with units A and B in batch `b1`, reviewed at the current digests with A BLOCKED (`schema_invalid`) and B READY, and a judge factory that fails the test if it is built
+- **When** a person in a terminal runs `l4 yolo accept p1 --all --force --reason "the judge is down; build as written"` and types `p1`
+- **Then** it prints A with `BLOCKED` and B with `READY at these inputs: nothing is overridden`, records `plan.force_accepted` with `subjects.A.skipped == ["blocked"]`, `subjects.B.skipped == []`, the review's `at` as `review_at`, `actor: person`, `confirmed: typed`, no judge is built and no review is recorded, and it exits 0
+
+#### SCN-YOLO-151 (+) A plan with no review is force-accepted and admitted · L4-YOLO-057
+- **Given** plan `p1` pushed and never reviewed (no ledger event)
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R` and types `p1`
+- **Then** `plan.admitted` and then `plan.force_accepted` are recorded, every subject has `skipped: ["no_review"]` and `review_at: null`, and `l4 yolo status p1` shows the plan `admitted`
+
+#### SCN-YOLO-152 (−) Any answer other than the plan id records nothing · L4-YOLO-057
+- **Given** plan `p1` that a person may force-accept
+- **When** the person answers `yes` to the prompt
+- **Then** it exits 2 with `the plan id was not typed: nothing was recorded`, and the plan ref does not move
+
+#### SCN-YOLO-153 (−) The flags are checked before anything is read · L4-YOLO-057
+- **Given** any repository
+- **When** `l4 yolo accept p1 --force --reason R`, `l4 yolo accept p1 --all --reason R`, `l4 yolo accept p1 openspec:a --all --force --reason R` and `l4 yolo accept p1 --reason R` run
+- **Then** each exits 2 naming what is missing or too much, and nothing is fetched or written
+
+#### SCN-YOLO-154 (−) An agent is refused even when the target lets agents accept · L4-YOLO-058
+- **Given** `yolo.review.accept_by_agents: true` in `.l4/config.yaml` on the base branch and `CLAUDECODE=1`
+- **When** `l4 yolo accept p1 --all --force --reason R --yes` runs
+- **Then** it exits 2 with `accept: --force is a person's decision, never an agent's (CLAUDECODE is set)` and `l4 yolo accept p1 --all --force --reason "..."`, and the plan ref does not move
+
+#### SCN-YOLO-155 (−) An MCP caller is refused · L4-YOLO-058
+- **Given** the environment the MCP server gives a tool (`AI_AGENT=l4-mcp`, no terminal)
+- **When** `l4 yolo accept p1 --all --force --reason R` runs in it
+- **Then** it exits 2 naming `AI_AGENT is set`, and no tool of the server's tool list runs `yolo accept`
+
+#### SCN-YOLO-156 (−) Without a terminal it is refused · L4-YOLO-058
+- **Given** no agent marker and stdin that is not a terminal
+- **When** `l4 yolo accept p1 --all --force --reason R --yes` runs
+- **Then** it exits 2 naming `stdin is not a terminal`, and nothing prompts
+
+#### SCN-YOLO-157 (−) A unit with no folder on the target is still refused · L4-YOLO-059
+- **Given** a plan that names `openspec:ghost`, which has no folder on the target
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with `accept: p1 is not admitted:` and a line `unknown_unit: …`, before any prompt, and nothing is recorded; a known unit whose current digest is missing is refused with `(unit_missing)` the same way
+
+#### SCN-YOLO-158 (−) A dependency cycle is still refused · L4-YOLO-059
+- **Given** a plan where A depends on B and B on A
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with a `cycle: dependency cycle: …` line and records nothing
+
+#### SCN-YOLO-159 (−) An active plan cannot be force-accepted · L4-YOLO-059
+- **Given** an active plan `p1`
+- **When** a person runs `l4 yolo accept p1 --all --force --reason R`
+- **Then** it exits 2 with `p1 is active: an acceptance is possible before activation, or when the plan is stopped with inputs_changed or unit_rejected` and records nothing
+
+#### SCN-YOLO-160 (−) A spec change voids it for that unit and its batch · L4-YOLO-060
+- **Given** a force acceptance of `p1` (A and B in batch `b1`), after which a person pushes a change to A's specification file
+- **When** the holds are computed
+- **Then** A and `batch:b1` do not hold and B holds; after a change of the plan file none holds; a tick in A's `tasks.md` changes nothing
+
+#### SCN-YOLO-161 (+) A withdrawal removes it, whoever runs it · L4-YOLO-060
+- **Given** a force acceptance of `p1` before the activation, and an agent (`AI_AGENT=1`)
+- **When** the agent runs `l4 yolo accept p1 --all --force --withdraw --reason "spec reworked"`
+- **Then** `plan.force_acceptance_withdrawn{actor: agent}` is recorded, the state has no force acceptance, and a second withdrawal exits 2 with `nothing to withdraw`
+
+#### SCN-YOLO-162 (+) A later force acceptance replaces the earlier one · L4-YOLO-060
+- **Given** a force acceptance of `p1` voided for A by a spec change
+- **When** a person force-accepts `p1` again
+- **Then** the state holds only the new one and every subject holds
+
+#### SCN-YOLO-163 (+) A plan never reviewed is activated after a force acceptance · L4-YOLO-061
+- **Given** plan `p1` never reviewed and force-accepted by a person
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 0, prints `openspec:add-greeting: force-accepted without review by <by> (<reason>)` for each subject, and `plan.activated` has `review: force_accepted` and `accepted.<subject> == {findings: [], reason, by, actor: person, force: true}` for A, B and `batch:b1`
+
+#### SCN-YOLO-164 (+) A review recorded after the force acceptance does not undo it · L4-YOLO-061
+- **Given** a force acceptance of `p1`, then a CI review at the same digests that says A is BLOCKED
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 0 and A is a force item of `plan.activated{accepted}`
+
+#### SCN-YOLO-165 (−) Activation after a voiding change is refused and names the subjects · L4-YOLO-061
+- **Given** a force acceptance of `p1`, then a pushed change to A's spec and no review since
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** it exits 2 with the review refusal and `the force acceptance by <by> no longer holds for openspec:add-greeting, batch:b1: their spec or the plan file changed`, and records nothing
+
+#### SCN-YOLO-166 (+) Status and findings name the force acceptance · L4-YOLO-062
+- **Given** plan `p1` force-accepted while its review was BLOCKED for A
+- **When** `l4 yolo status p1`, `l4 yolo status p1 --json`, `l4 yolo findings p1` and `l4 yolo findings p1 --json` run
+- **Then** the text shows `openspec:add-greeting: force-accepted without review by alex@example.com (R)` and `Next: l4 yolo activate p1 --reason TEXT`; the JSON has `force_accepted` with `covered: true` and each subject's `holds`, `skipped`, `review_at` and `verdict`
+
+#### SCN-YOLO-167 (+) The implementer gets the reason; the report and the PR body name it · L4-YOLO-062
+- **Given** a plan activated with a force item for unit A
+- **When** A is dispatched, its implementer prompt is built, its PR is opened and the plan report is written
+- **Then** `.l4/review-accepted.json` has the item with `force: true` and no findings, the prompt's block `accepted review findings` holds the force rule and `Accepted without review (<by>): <reason>`, the PR body has `- Force-accepted without review by <by> (<reason>): no model reviewed this unit's specification before it was built.`, and the report has `- openspec:add-greeting: force-accepted without review by <by> (<reason>)`; the merge guard has no accepted finding open for A
+
+#### SCN-YOLO-168 (+) A person's --yes replaces the typed plan id · L4-YOLO-063
+- **Given** a subject a person may accept, and an accepted finding of an active plan a person may waive
+- **When** the person runs `l4 yolo accept p1 openspec:add-greeting --reason R --yes` and `l4 yolo waive p1 F-… --reason R --yes --no-run` in a terminal
+- **Then** no prompt is shown, the findings are printed, and `plan.accepted` and `plan.finding_waived` record `confirmed: --yes`; without `--yes` the person types `p1` and the events record `confirmed: typed`
+
+#### SCN-YOLO-169 (+) A person's --yes with --force · L4-YOLO-063
+- **Given** plan `p1` a person may force-accept
+- **When** the person runs `l4 yolo accept p1 --all --force --reason R --yes` in a terminal
+- **Then** the summary is printed, no prompt is shown, and `plan.force_accepted` records `confirmed: --yes`
+
+#### SCN-YOLO-170 (−) An agent's --yes keeps today's rule · L4-YOLO-063
+- **Given** an agent (`CLAUDECODE=1`) and no `accept_by_agents` on the base branch
+- **When** it runs `l4 yolo accept p1 openspec:add-greeting --reason R --yes`
+- **Then** it exits 2 with `acceptance is a person's decision`; with `accept_by_agents: true` it records `plan.accepted{actor: agent, confirmed: --yes}`
+
+#### SCN-YOLO-171 (−) Without a terminal nothing prompts · L4-YOLO-064
+- **Given** stdin that is not a terminal, no agent marker, `accept_by_agents: true` on the base branch, and a prompt function that fails the test when called
+- **When** `l4 yolo accept p1 openspec:add-greeting --reason R` and `l4 yolo waive p1 F-… --reason R --no-run` run
+- **Then** each exits 2 at once with a message that names `--yes`, and nothing is recorded
+
+#### SCN-YOLO-172 (+) The prompt goes to stderr · L4-YOLO-064
+- **Given** a person in a terminal without `--yes`
+- **When** `l4 yolo accept`, `l4 yolo accept --all --force` and `l4 yolo waive` ask for the plan id
+- **Then** each prompt is called with `err=True` and its text names the plan id
+
+#### SCN-YOLO-173 (+) A reuse keeps the judgement a person accepted · L4-YOLO-065
+- **Given** a ledger where material M of unit A was judged NEEDS_REVISION with findings F1, a person accepted it, and a later `plan.reviewed` holds a second judgement of the same M with findings F2
+- **When** a new review runs (the plan file's limits changed, so the plan digest did, and A's material did not) and no judge is called
+- **Then** A's entry is the reuse of the F1 judgement (`reused_from` its time), the acceptance holds, and `l4 yolo activate` lists it; with no acceptance the newest judgement (F2) is reused as before
+
+#### SCN-YOLO-174 (−) Other findings of the same material are named as such · L4-YOLO-066
+- **Given** an acceptance of A bound to material M with findings F1 on the ledger, and a dry run `l4 yolo review p1 --worktree --fresh openspec:add-greeting` whose judge returns F3 for the same M
+- **When** the dry run prints A, and then a person commits and runs `l4 yolo review p1 --worktree --record`
+- **Then** the dry run's line says `no longer holds: it was for other findings of the same material: accepted findings <f8 of F1> …; the latest review shows findings <f8 of F3> judged <t> (new)`, never `the material changed`; the recorded review reuses F1 from the ledger (the local cache is not read) and the acceptance holds
+
+#### SCN-YOLO-175 (+) An accepted subject is shown as accepted where its verdict is printed · L4-YOLO-066
+- **Given** an acceptance of A that holds on the latest review, where A is NEEDS_REVISION and reused
+- **When** `l4 yolo findings p1`, `l4 yolo review p1 --worktree` and `l4 yolo review p1 --local` run
+- **Then** A's line in each says `accepted by <by>: it does not stop the activation`, the findings view has `reused: judged <t> on the same material`, the worktree line has `(reused), judged <t>`, and the `--local` review's `Next:` line names `l4 yolo activate` when every other subject is READY
+
+#### SCN-YOLO-176 (+) The docs teach the force path and keep agents off it · L4-YOLO-067
+- **Given** the repository's docs and skill
+- **When** they are read
+- **Then** `docs/yolo-mode.md` has "When the reviewer is unavailable" with `l4 yolo accept <plan> --all --force` and `l4 yolo review <plan>`, the runbook's 12.2a has the procedure, `plan.md` and `operate.md` say never to run `--force`, and the CHANGELOG's 0.4.18 section names `plan.force_accepted`
 
 ### 23.21 Experience graph (KG)
 
