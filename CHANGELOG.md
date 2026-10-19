@@ -46,6 +46,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
 
 ### Fixed
+- A replayed step (an accept of a held question) runs the post-step guards of an agent step: the scratch drop, the runner-configuration revert (`guard.violation`) and the environment check. A patch saved by 0.4.17 that loosens `[tool.pytest.ini_options]` no longer reaches the commit.
+- The replay guard no longer re-applies the saved patch's version of a frozen test or a test-support file that the freeze (green, single) or the test-chore review put back.
+- A step that weakens a pre-existing test is refused before a pre-satisfied hold is taken: a person is never asked to accept it.
+- A hold on a spec file the judge could not read whole is bound to the content of that file, and its question names `verifier.judge_context_budget_tokens` and the file instead of the wording of a diff hold.
 - `support_at_base` restores a link original by its real path through the confined helpers (a committed directory link re-pointed during the block no longer makes the harness create an entry outside the work tree), checks each restored link's target, and counts two plan paths that resolve to one file once.
 - A test that replaced a source directory with a link to a directory outside the repository made the harness write
   there when it restored files after the test run (the zero-value runs, the run at the red code, the reports). Every file

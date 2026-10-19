@@ -1222,7 +1222,8 @@ with `no test traces <id> yet: write a new test for each`, and the task SHALL NO
 **L4-KSP-014** The judges see a unit's criteria, tasks and spec files, and say what they did not see. The step-9 judge SHALL receive each criterion's full text, each done task's whole block, and the spec files of the unit
 and its fix units, in the implementer's priority order within `verifier.judge_context_budget_tokens` (48000). It SHALL
 name every file not shown whole under `Not shown in full`; an unread file, or a cut requirements, bugfix or spec file,
-SHALL hold the round. It SHALL check each task's text against the diff. Step 1's scope SHALL read a Kiro unit's
+SHALL hold the round; a person's `accept` of that hold is bound to the content of the spec file (its hash, size and why it
+was cut), so editing the file voids it, and the question names `verifier.judge_context_budget_tokens` and the file. It SHALL check each task's text against the diff. Step 1's scope SHALL read a Kiro unit's
 requirements and bugfix files.
 
 ### 4.6 Byte-safe task marker writes
@@ -2685,7 +2686,7 @@ executed no test SHALL NOT say `(expected: zero values must fail)`, and the arte
 `ci.upload_artifacts` is false in GitHub Actions. [V: the same consumer sets `ci.upload_artifacts: false`, so no gate log
 was kept, the ledger held only a log path (`excerpt_lines: 0`), and the console still printed `(CI: job artifacts)`.]
 
-**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. When a step is held with a harness question
+**L4-IMP-065** A held step is kept, and an `accept` takes effect only by replaying it. A replayed step meets the same guards as an agent step after the agent returns (scratch dropped, protected paths and runner configuration put back, environment checked), and the replay guard's expected state follows what the test-path freeze and the test-chore review put back. A step that the pre-existing-test check refuses is refused before any hold is taken. When a step is held with a harness question
 (`check`: `pre_satisfied`, `vacuity`, `at_red` or `tests`, L4-IMP-063), the harness SHALL, before it discards the step's changes,
 save them, whatever their size, as `git diff --binary --unified=3` of the step against its start, with the agent's result
 beside it, at `<unit folder>/.l4/held/<task key>-<check>.patch` and `.json`, and commit both with the questions commit.
