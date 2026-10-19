@@ -56,7 +56,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 2. Group A: probes never hang (design D8; L4-AVL-012)
 
-- [ ] 2.1 `run_process`, bounded. Tests first, in a new file `tests/unit/test_run_process.py`. Each test uses small
+- [x] 2.1 `run_process`, bounded. Tests first, in a new file `tests/unit/test_run_process.py`. Each test uses small
   Python child scripts run by `sys.executable` and a pid file:
   - `test_a_helper_in_its_own_session_holding_stdout_does_not_hang` (SCN-AVL-21): the child prints `1.18.34`, starts a
     grandchild with `start_new_session=True` that inherits stdout and sleeps 60 s, and exits 0. `run_process(...,
