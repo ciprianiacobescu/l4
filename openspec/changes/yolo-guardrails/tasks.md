@@ -115,7 +115,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   `src/l4/availability` and `src/l4/agents`: each non-hello use moves to `step_seconds(ctx)`. Run:
   `tests/unit/availability tests/unit/agents tests/unit/provision tests/unit/config tests/unit/doctor`.
 
-- [ ] 2.3 `ProcRunner`, bounded. Tests first, `tests/unit/agents/test_proc.py`:
+- [x] 2.3 `ProcRunner`, bounded. Tests first, `tests/unit/agents/test_proc.py`:
   `test_an_escaped_helper_holding_stdout_does_not_hang_the_run` (SCN-AVL-24): the agent starts a grandchild with
   `start_new_session=True` that holds stdout and sleeps 60 s, then exits. `ProcRunner().run(...)` returns within
   5 + 5 + 2 s with the agent's return code and logs the D8 warning (caplog). The test kills the grandchild. The existing
