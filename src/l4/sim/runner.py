@@ -88,10 +88,10 @@ def sim_config(scenario: Scenario) -> dict[str, Any]:
     what the scenario's own `config:` says on top. Roles default to the implementer profiles and the judge profiles
     that no role named in `config` already uses."""
     profiles: dict[str, Any] = {
-        **{n: _profile(n, IMPLEMENTER_VENDOR) for n in scenario.profiles},
-        **{n: _profile(n, JUDGE_VENDOR) for n in scenario.judges},
-        **{n: {**_profile(n, DELEGATE_VENDOR), "model": DELEGATE_MODEL} for n in scenario.delegates},
-        **({S1_PROFILE: _profile(S1_PROFILE, JUDGE_VENDOR)} if scenario.s1 else {}),
+        **{n: _profile(n, IMPLEMENTER_VENDOR, "sim-implementer-model") for n in scenario.profiles},
+        **{n: _profile(n, JUDGE_VENDOR, "sim-judge-model") for n in scenario.judges},
+        **{n: _profile(n, DELEGATE_VENDOR, DELEGATE_MODEL) for n in scenario.delegates},
+        **({S1_PROFILE: _profile(S1_PROFILE, JUDGE_VENDOR, "sim-judge-model")} if scenario.s1 else {}),
     }
     named = {p for chain in scenario.config.get("roles", {}).values() for p in chain}
     roles: dict[str, list[str]] = {
@@ -114,8 +114,10 @@ def sim_config(scenario: Scenario) -> dict[str, Any]:
     return _merged(base, scenario.config)
 
 
-def _profile(name: str, vendor: str) -> dict[str, Any]:
-    return {"adapter": "fake", "vendor": vendor, "options": {PROFILE_OPTION: name}}
+def _profile(name: str, vendor: str, model: str) -> dict[str, Any]:
+    """Every scripted profile has a model of its own: the delegate's independence is checked by model (D3), and an
+    unknown model vetoes it, so a profile without one would never be independent of the delegate."""
+    return {"adapter": "fake", "vendor": vendor, "model": model, "options": {PROFILE_OPTION: name}}
 
 
 def _scripted_probes(profile: str, probe: ProbeScript | None) -> dict[ProbeStep, ProbeResult]:
