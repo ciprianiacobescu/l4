@@ -2540,7 +2540,14 @@ fails the step as an attempt. The guard never follows a link: it reaches the fol
 `O_NOFOLLOW` and acts only through that folder's file descriptor (read, unlink, rmdir, mkdir, symlink, and file creation
 with `O_EXCL|O_NOFOLLOW`; an entry is removed by its own type, so a FIFO is unlinked and never opened), checking again
 right before acting on each path, and restores modes as well as content. A link is trusted only where the saved patch
-creates it (`create mode 120000`): it is snapshotted and restored as a link. Any other link in the snapshot (planted by the
+creates it, decided from a temporary index (`GIT_INDEX_FILE`, `read-tree` of the step base, `apply --cached` of the patch,
+`ls-files -s -z`: the entries of mode 120000 that differ from the base), never from text a file name can forge; a patch whose
+paths hold a line break is refused (a retry-only question). A trusted link is snapshotted and restored as a link. The work
+tree folder is opened once when the guard is armed and every walk starts from that descriptor; before every restore and every
+git call it is checked to be still the same folder (else `held.replay_unsafe`). Whether an entry exists is decided by `lstat`,
+and a guarded file of another size than the snapshot's is not read (a file is read at most one byte past the expected size).
+A path the guard cannot read (a gate removed a folder's permissions) fails the step cleanly, never as an exception. A cache
+mount (`sandbox.caches`) at or above `<cache>/worktrees` is refused, so a writable mount never covers a work tree. Any other link in the snapshot (planted by the
 setup), or a folder a gate replaced by a link above a path of the step, is never followed: the link itself is removed,
 `held.replay_unsafe` is recorded and the step fails with its own message. Only the harness's own outputs are exempt (the
 run ledger, the unit folder's `.l4/`, `tasks.md`, `questions.md`), not every path with a `.l4` component. This relies on

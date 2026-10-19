@@ -92,3 +92,11 @@ guard re-created itself) cannot redirect anything. The check is repeated right b
 saved patch creates (`git apply --summary`, `create mode 120000`) are trusted; modes are restored; only the unit folder's own
 `.l4/` is exempt. Linux and macOS both provide these primitives. The sidecar holds nothing that grows with the step. A global `core.autocrlf=true` is not defended against: a CRLF checkout can make the patch not apply, which is a
 refusal, never a pass.
+
+**D11. Trust from an index, the root fd, bounded reads.** `links_added` applies the patch to a temporary index of the step base
+and lists the new mode-120000 entries (`ls-files -s -z`); `git apply --summary` is text a file name can forge. The guard opens
+the work tree folder once and checks it is the same folder before each restore and git call; a cache mount may not cover a work
+tree's parent (`cache_dir`). Absence is decided by `lstat`; a guarded file is compared by size and mode first and read at most
+one byte past its expected length. An `OSError` (a folder made unreadable) fails the step cleanly and the folders are given their
+owner access back so the step can be discarded. A hard link planted before the snapshot (R2b) needs no change: under the bwrap
+sandbox a hard link across mounts is `EXDEV`, and without a sandbox the agent already has access to that file.
