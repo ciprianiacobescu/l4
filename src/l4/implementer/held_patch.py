@@ -22,21 +22,20 @@ import os
 import re
 import stat
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.implementer.confined import (
-    NO_EXPECTATION,
     Entry,
     LinkedParent,
-    TooLarge,
     check_parents,
+    describe_entry,
     exists_entry,
+    put_blob,
     put_entry,
-    read_entry,
     remove_entry,
     remove_link,
     repair_dir_modes,
@@ -493,65 +492,68 @@ _NOISE = ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
 
 
 class ReplayGuard:
-    """The tree of a replayed step as it was when its first gate was about to run (SPEC L4-IMP-065), modelled on
-    `ProductionGuard`: gates run test code with a writable work tree, so after every gate run the content and mode of
-    every non-ignored path is put back to what it was (a new path removed, a changed one restored, a deleted one deleted
-    again) and what was restored is recorded as `held.replay_restored`. The commit then holds exactly the saved patch.
+    """What a replayed step may leave in the work tree (SPEC L4-IMP-065), modelled on `ProductionGuard`: the step base
+    plus the saved patch, and nothing else. The expected state is not read from the tree (setup may have run code of the
+    patch before the guard was armed): `wb.replay_expected` comes from a temporary index (`expected_state`), and after
+    every gate run each non-ignored path is put back to it: a path of the patch to the patch's blob (streamed in), mode
+    and link target; every other path that differs from the step base (a tracked file setup or a gate changed, a new
+    file) to the base. Ignored files (a setup's `.venv`, caches) are left alone. What was restored is recorded as
+    `held.replay_restored`, so the commit holds exactly the saved patch.
 
     The guard never follows a link (`confined.py`): the work tree folder is opened once when the guard is armed and
     every walk starts from that descriptor. Each path is read and acted on through the descriptor of its folder, reached
     one component at a time with `O_NOFOLLOW`, right before it is acted on; before every restore and every git call the
-    work tree is checked to be still the same folder. A link is trusted only where the saved patch creates it
-    (`wb.replay_links`); a link in the snapshot that the patch does not create, or a folder a gate replaced by a link
-    above a guarded path, fails the step (`held.replay_unsafe`) and the link itself is removed. A path the guard cannot
-    read (permission) fails the step cleanly at the first restore."""
+    work tree is checked to be still the same folder. A link is trusted only where the saved patch creates it, with the
+    patch's target; any other link in the tree when the guard is armed, or a folder a gate replaced by a link above a
+    path of the step, fails the step (`held.replay_unsafe`) and the link itself is removed. A file is hashed in chunks,
+    and only where the expected blob has the file's size. A path the guard cannot read fails the step cleanly."""
 
     def __init__(self, wb: Workbench) -> None:
         self.wb = wb
         self.base = wb.head()
-        self.trusted: Mapping[str, str] = dict(wb.replay_links)  # link path -> blob of the patch's target
-        self.guarded: dict[str, Entry | None] = {}
-        self.too_large = ""  # the first file the snapshot would have had to read whole
+        self.expected: dict[str, tuple | None] = {}  # path -> ("blob", id, exec, size) | ("link", target) | None
         self.planted: list[str] = []  # links in the tree before the first gate that the saved patch does not create
         self.unreadable: list[str] = []  # what the snapshot could not read: the first restore fails the step
         self.root_fd = os.open(wb.worktree, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         st = os.fstat(self.root_fd)
         self.root_id = (st.st_dev, st.st_ino)
+        self.fmt = self._object_format()
+        for path, entry in dict(wb.replay_expected).items():
+            if wb.protected.match(path) is None:  # a protected path of the patch was put back to the base: it stays so
+                self.expected[path] = self._expect(entry)
         try:
             paths = self._paths()
         except (OSError, GitError) as exc:
             paths = {}
             self.unreadable.append(exc.__class__.__name__)
-        patch_targets = self._patch_targets()
-        for path in paths:
+        for path in paths:  # only what is there: a link must be the patch's
             try:
-                entry = self._read(path)
+                now = describe_entry(self.root_fd, path, None, self.fmt)
             except LinkedParent:
-                entry = None
-            except TooLarge as big:
-                entry = None
-                self.too_large = self.too_large or f"a file too large to guard: {path} ({big.size} bytes)"
+                continue
             except OSError as exc:
-                entry = None
                 self.unreadable.append(exc.__class__.__name__)
-            self.guarded[path] = entry
-            if entry is not None and entry[0] == "link" and entry[1] != patch_targets.get(path):
+                continue
+            if now is not None and now[0] == "link" and now != self.expected.get(path):
                 self.planted.append(path)  # a link the patch does not create, or one re-pointed since the patch
-        for path, target in patch_targets.items():
-            self.guarded[path] = (
-                "link",
-                target,
-            )  # restored to the patch's target, never another
 
-    def _patch_targets(self) -> dict[str, str]:
-        """link path -> the target text the saved patch gives it (the blob of its entry in the temporary index)."""
-        targets = {}
-        for path, blob in self.trusted.items():
+    def _object_format(self) -> str:
+        try:
+            return self.wb.git.run("rev-parse", "--show-object-format").stdout.strip() or "sha1"
+        except GitError:
+            return "sha1"
+
+    def _expect(self, entry: tuple | None) -> tuple | None:
+        """The guard's form of a (mode, blob, size) entry of the temporary index."""
+        if entry is None:
+            return None
+        mode, blob, size = entry
+        if mode == "120000":
             try:
-                targets[path] = os.fsdecode(self.wb.git.run_bytes("cat-file", "blob", blob))
+                return ("link", os.fsdecode(self.wb.git.run_bytes("cat-file", "blob", blob)))
             except GitError:
-                continue  # unknown target: the link stays untrusted
-        return targets
+                return ("link", "\0unknown")  # nothing matches it: the link stays untrusted
+        return ("blob", blob, mode == "100755", size)
 
     def close(self) -> None:
         if self.root_fd >= 0:
@@ -585,20 +587,13 @@ class ReplayGuard:
         wb = self.wb
         return {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
 
-    def _read(self, path: str, expect: object = NO_EXPECTATION) -> Entry | None:
-        return read_entry(self.root_fd, path, expect=expect)
+    def _describe(self, path: str) -> Entry | None:
+        return describe_entry(self.root_fd, path, self.expected.get(path), self.fmt)
 
     def release(self, paths: Sequence[str]) -> None:
-        """The harness itself changed these paths (an unused stub put back to the base): guard the state they are in."""
-        now = self._paths()
+        """The harness itself put these paths back to the step base (an unused stub): they are expected unchanged."""
         for path in paths:
-            if path in now:
-                try:
-                    self.guarded[path] = self._read(path)
-                except (LinkedParent, OSError):
-                    self.guarded[path] = None
-            else:
-                self.guarded.pop(path, None)
+            self.expected.pop(path, None)
 
     def _fail(self, where: str, links: Sequence[str], paths: Sequence[str], why: str) -> str:
         """Remove each link itself (by its folder's descriptor, never what it points to), record it, give the reason."""
@@ -626,15 +621,13 @@ class ReplayGuard:
                 where, self.planted, self.planted,
                 f"a link {shown} was in the work tree before the first gate and the saved patch does not create it",
             )  # fmt: skip
-        if self.too_large:
-            return f"{self.too_large} ({where}): the step fails"
         if self.unreadable:
             return f"the replayed step could not be put back to its saved patch ({where}): {self.unreadable[0]}"
         try:
             now = self._paths()
         except (OSError, GitError) as exc:
             return self._put_back_failed(where, exc)
-        everything = sorted(set(now) | set(self.guarded))
+        everything = sorted(set(now) | set(self.expected))
         for path in everything:  # before any action: a link above any path of the step fails it, whatever the order
             try:
                 check_parents(self.root_fd, path)
@@ -663,8 +656,9 @@ class ReplayGuard:
         return None
 
     def _beneath_own_link(self, rel: str) -> bool:
-        """`rel` is a link the saved patch creates and the snapshot holds: what stood below it went with the folder."""
-        return rel in self.trusted and isinstance(self.guarded.get(rel), tuple)
+        """`rel` is a link the saved patch creates: what stood below it went with the folder that it replaced."""
+        entry = self.expected.get(rel)
+        return entry is not None and entry[0] == "link"
 
     @staticmethod
     def _why(rel: str) -> str:
@@ -676,7 +670,8 @@ class ReplayGuard:
         self.wb.git.run(*args)
 
     def _restore_one(self, path: str, existed: bool | None, restored: list[str]) -> None:
-        if path not in self.guarded:  # not part of the step: a gate wrote it, or changed a tracked file
+        wb = self.wb
+        if path not in self.expected:  # not part of the saved patch: it must be as at the step base
             if not existed and not exists_entry(self.root_fd, path):  # decided by lstat, nothing is read
                 return
             remove_entry(self.root_fd, path)
@@ -686,10 +681,21 @@ class ReplayGuard:
                 self._git("rm", "--quiet", "--cached", "--ignore-unmatch", "--", f":(literal){path}")
             restored.append(path)
             return
-        expected = self.guarded[path]
-        if self._read(path, expected) == expected:  # size and mode first: a file of another size is not read
-            return
-        put_entry(self.root_fd, path, expected)
+        expected = self.expected[path]
+        now = self._describe(path)
+        if expected is None:
+            if now is None:
+                return
+            remove_entry(self.root_fd, path)
+        elif expected[0] == "link":
+            if now == expected:
+                return
+            put_entry(self.root_fd, path, expected)
+        else:  # a blob of the patch
+            if now is not None and now[0] == "blob" and now[1] == expected[1] and now[2] == expected[2]:
+                return
+            blob = expected[1]
+            put_blob(self.root_fd, path, lambda out: wb.git.stream_blob(blob, out), expected[2])
         restored.append(path)
 
 
@@ -697,22 +703,22 @@ class _RootChanged(Exception):
     pass
 
 
-def _index_links(git: Git) -> dict[str, str]:
-    """path -> blob id of every entry of the index that is a symbolic link (mode 120000)."""
+def _index_entries(git: Git) -> dict[str, tuple[str, str]]:
+    """path -> (mode, blob id) of every entry of the index."""
     out = git.run_bytes("ls-files", "-s", "-z")
-    links = {}
+    entries = {}
     for record in out.split(b"\0"):
         meta, _, name = record.partition(b"\t")
         parts = meta.split()
-        if len(parts) == 3 and parts[0] == b"120000":
-            links[os.fsdecode(name)] = parts[1].decode()
-    return links
+        if len(parts) == 3:
+            entries[os.fsdecode(name)] = (parts[0].decode(), parts[1].decode())
+    return entries
 
 
-def links_added(wb: Workbench, patch: bytes) -> dict[str, str]:
-    """The links the saved patch creates or changes, path -> blob id of the target it gives: the only links the guard
-    trusts, and only with that target. Taken from a temporary index (the step base, the patch applied to it,
-    `ls-files -s -z`), never from text that a file name can forge. A patch that does not apply there trusts nothing."""
+def expected_state(wb: Workbench, patch: bytes) -> dict[str, tuple[str, str, int] | None]:
+    """The paths the saved patch changes, as (mode, blob id, size) of the entry it leaves (None: deleted). Taken from a
+    temporary index (the step base, the patch applied to it, `ls-files -s -z`), never from text that a file name
+    can forge, and never from the tree. A patch that does not apply there expects nothing."""
     if not patch:
         return {}
     with tempfile.TemporaryDirectory(prefix="l4-index-") as tmp:
@@ -720,12 +726,36 @@ def links_added(wb: Workbench, patch: bytes) -> dict[str, str]:
         git.env = {**git.env, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
         try:
             git.run("read-tree", wb.head())
-            before = _index_links(git)
+            before = _index_entries(git)
             git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "--cached", "-", data=patch)
-            after = _index_links(git)
+            after = _index_entries(git)
+            changed = {p: after.get(p) for p in set(before) | set(after) if before.get(p) != after.get(p)}
+            blobs = sorted({entry[1] for entry in changed.values() if entry is not None and entry[0] != "160000"})
+            sizes = _blob_sizes(git, blobs)
         except GitError:
             return {}
-    return {path: blob for path, blob in after.items() if before.get(path) != blob}
+    return {
+        path: None if entry is None else (entry[0], entry[1], sizes.get(entry[1], -1))
+        for path, entry in changed.items()
+        if entry is None or entry[0] != "160000"
+    }
+
+
+def _blob_sizes(git: Git, blobs: Sequence[str]) -> dict[str, int]:
+    if not blobs:
+        return {}
+    out = git.run_input_bytes("cat-file", "--batch-check", data=("\n".join(blobs) + "\n").encode()).stdout
+    sizes = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[2].isdigit():
+            sizes[parts[0]] = int(parts[2])
+    return sizes
+
+
+def links_added(wb: Workbench, patch: bytes) -> dict[str, str]:
+    """The links the saved patch creates or changes, path -> blob id of the target it gives."""
+    return {path: entry[1] for path, entry in expected_state(wb, patch).items() if entry and entry[0] == "120000"}
 
 
 def arm_replay_guard(wb: Workbench) -> None:
@@ -761,7 +791,8 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
     wb.replay_question = replay.question  # the accept applies in this step only
-    wb.replay_links = links_added(wb, replay.patch)
+    wb.replay_expected = expected_state(wb, replay.patch)
+    wb.replay_links = {p: e[1] for p, e in wb.replay_expected.items() if e and e[0] == "120000"}
     if replay.patch:
         try:
             wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=replay.patch)  # the bytes that were verified

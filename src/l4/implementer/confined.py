@@ -11,6 +11,7 @@ two platforms the harness runs on); Windows is not supported by the harness.
 """
 
 import errno
+import hashlib
 import os
 import shutil
 import stat
@@ -228,5 +229,65 @@ def repair_dir_modes(root: Root, rel: str) -> None:
             fd = nxt
     except OSError:
         return
+    finally:
+        os.close(fd)
+
+
+_CHUNK = 1 << 20
+
+
+def describe_entry(root: Root, rel: str, expect: object = None, fmt: str = "sha1") -> Entry | None:
+    """What `rel` is, for comparing with an expected state, without following anything: ("link", target), ("dir",),
+    ("blob", id, executable) for a regular file, None for an absent entry or one that is none of these. The id is the
+    git blob id of the content (`blob <size>\\0` and the bytes, hashed in chunks, never held in memory), computed only
+    when `expect` is a blob entry (`("blob", id, executable, size)`) of the file's size; for any other file it is None
+    (nothing is read). `LinkedParent` as `open_parent`."""
+    try:
+        fd, name = open_parent(root, rel)
+    except FileNotFoundError:
+        return None
+    try:
+        st = _lstat(fd, name)
+        if st is None:
+            return None
+        if stat.S_ISLNK(st.st_mode):
+            return ("link", os.readlink(name, dir_fd=fd))
+        if stat.S_ISDIR(st.st_mode):
+            return ("dir",)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        executable = bool(st.st_mode & 0o111)
+        if not (isinstance(expect, tuple) and expect[0] == "blob" and st.st_size == expect[3]):
+            return ("blob", None, executable)
+        out = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        with os.fdopen(out, "rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if size != expect[3]:
+                return ("blob", None, executable)
+            digest = hashlib.new(fmt)
+            digest.update(f"blob {size}\0".encode())
+            left = size
+            while left:
+                chunk = handle.read(min(_CHUNK, left))
+                if not chunk:
+                    return ("blob", None, executable)
+                digest.update(chunk)
+                left -= len(chunk)
+            return ("blob", digest.hexdigest(), executable)
+    finally:
+        os.close(fd)
+
+
+def put_blob(root: Root, rel: str, write, executable: bool) -> None:
+    """Make `rel` a regular file whose content `write(fd)` streams in, removing what is there first (any type)."""
+    fd, name = open_parent(root, rel, create=True)
+    try:
+        _remove(fd, name)
+        out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+        try:
+            write(out)
+            os.fchmod(out, 0o755 if executable else 0o644)
+        finally:
+            os.close(out)
     finally:
         os.close(fd)

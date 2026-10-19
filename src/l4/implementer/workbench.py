@@ -166,6 +166,7 @@ class Workbench:
     activated_digest: str | None = None  # the unit folder's digest frozen at the plan's activation (plan step), if any
     activated_plan: str | None = None  # the plan that froze it
     held_removals: list[str] = field(default_factory=list)  # saved held steps (L4-IMP-065) the next step commit deletes
+    replay_expected: Any = ()  # path -> (mode, blob id, size) | None: base plus the saved patch (held_patch.py)
     replay_links: Any = ()  # the links the saved patch creates (path -> blob of its target)
     replay_guard: Any = None  # the `ReplayGuard` of a replayed step (held_patch.py), armed before its first gate
     replay_question: str | None = None  # the question whose saved step this step replays: its accept applies now

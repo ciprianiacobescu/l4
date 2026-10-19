@@ -85,7 +85,7 @@ def replayed(bench: Bench, patch: dict, *, base: dict | None = None, delete: tup
     wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=data)  # exactly what replay_step does
     wb.replay_question = "Q-001"
     wb.replay_links = held_patch.links_added(wb, data)  # the real trust computation
-    wb.replay_expected = held_patch.expected_state(wb, data) if hasattr(held_patch, "expected_state") else {}
+    wb.replay_expected = held_patch.expected_state(wb, data)
     return root
 
 
@@ -117,7 +117,6 @@ def test_a_link_planted_before_the_snapshot(make_bench, tmp_path, with_tracked):
     root = replayed(bench, PATCH, base=BASE if with_tracked else None)
     relink(root / "tests" / "fixtures", outside)  # between setup and the first gate
     arm_replay_guard(bench.wb)
-    _ = bench.wb.replay_guard.guarded
     # the gate does nothing; every later restore runs
     reasons = [restore_replay(bench.wb, w) for w in ("test run", "before the red commit")]
     assert state(outside) == before  # never read/written/removed outside
@@ -309,7 +308,7 @@ def test_g_patch_symlink_retargeted(make_bench, tmp_path, change):
     root = replayed(bench, patch)
     assert (root / "tests" / "alias.py").is_symlink() and (root / "tests" / "linkdir").is_symlink()
     arm_replay_guard(bench.wb)
-    assert bench.wb.replay_guard.guarded["tests/alias.py"] == ("link", "test_new.py")
+    assert bench.wb.replay_guard.expected["tests/alias.py"] == ("link", "test_new.py")
     if change == "retarget-to-outside-file":
         relink(root / "tests" / "alias.py", outside / "victim.txt")
         relink(root / "tests" / "linkdir", outside / "data.txt")
@@ -339,17 +338,17 @@ def test_h_simulated_window_between_check_and_write(make_bench, tmp_path, monkey
     root = replayed(bench, PATCH, base=BASE)
     arm_replay_guard(bench.wb)
     (root / "tests" / "fixtures" / "data.txt").write_text("changed by the gate\n")
-    real_read = ReplayGuard._read
+    real_read = ReplayGuard._describe
     fired = []
 
-    def racing_read(self, path, expect=None):
-        value = real_read(self, path, expect)
+    def racing_read(self, path):
+        value = real_read(self, path)
         if path == "tests/fixtures/data.txt" and not fired:
             fired.append(path)
             relink(root / "tests" / "fixtures", outside)  # the attacker wins the race here
         return value
 
-    monkeypatch.setattr(ReplayGuard, "_read", racing_read)
+    monkeypatch.setattr(ReplayGuard, "_describe", racing_read)
     _ = restore_replay(bench.wb, "test run")
     after = state(outside)
     assert after == before
@@ -417,7 +416,9 @@ def test_g2_link_recreated_then_child_removed_through_it(make_bench, tmp_path, o
         root = replayed(bench, PATCH)
         os.symlink(outside, root / "tests" / "linkdir")
     arm_replay_guard(bench.wb)
-    assert bench.wb.replay_guard.guarded["tests/linkdir"] == ("link", str(outside))
+    guard = bench.wb.replay_guard
+    assert guard.expected.get("tests/linkdir") == (("link", str(outside)) if origin == "patch-adds-the-link" else None)
+    assert ("tests/linkdir" in guard.planted) == (origin != "patch-adds-the-link")
     # the gate (inside the sandbox it may only write the work tree): the link becomes a folder with a same-named file
     (root / "tests" / "linkdir").unlink()
     (root / "tests" / "linkdir").mkdir()
@@ -589,7 +590,7 @@ def test_r2_a_hard_link_to_an_outside_file_is_never_written_or_chmodded(make_ben
     reason = restore_replay(bench.wb, "test run")
     st1 = os.stat(outside / "victim.txt")
     assert reason is None and state(outside) == before and st1.st_mode == st0.st_mode and st1.st_nlink == 1
-    assert stat.S_IMODE(os.stat(root / "tests" / "run.sh").st_mode) == 0o755
+    assert stat.S_IMODE(os.stat(root / "tests" / "run.sh").st_mode) == 0o644  # the patch's mode, not the tree's
 
 
 # --- R3: odd names in the patch summary -----------------------------------------------------------
@@ -950,7 +951,7 @@ def test_t3_a_large_file_is_never_read_whole(make_bench, where):
         _sparse(root / rel)
         _, peak = _peak(lambda: arm_replay_guard(bench.wb))
         reason = restore_replay(bench.wb, "test run")
-        assert reason is not None and "too large to guard" in reason and rel in reason
+        assert reason is None and not os.path.lexists(root / rel)  # setup wrote it: not the patch's, so removed unread
     else:
         arm_replay_guard(bench.wb)
         if os.path.lexists(root / rel):
@@ -1016,10 +1017,10 @@ def test_v1_a_setup_hook_of_the_patch_cannot_put_more_than_the_patch_into_the_co
     make_bench, tdd_repo, monkeypatch, raw, tmp_path
 ):
     runner = tmp_path / "hook_runner.py"
-    runner.write_text("import os\nif os.path.exists('hook.py'):\n    exec(open('hook.py').read())\n")
+    runner.write_text("import os\nif os.path.exists('tests/hook.py'):\n    exec(open('tests/hook.py').read())\n")
     zero_says(monkeypatch)
     bench = held_bench(
-        make_bench, [new_step(("hook.py", HOOK))], setup=[tdd_repo.setup_command, f"{sys.executable} {runner}"]
+        make_bench, [new_step(("tests/hook.py", HOOK))], setup=[tdd_repo.setup_command, f"{sys.executable} {runner}"]
     )
     (bench.wb.worktree / "tests" / "fixtures").mkdir()
     (bench.wb.worktree / "tests" / "fixtures" / "old.txt").write_text("tracked\n")

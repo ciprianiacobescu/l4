@@ -282,6 +282,26 @@ class Git:
                 raise PushRejected(exc.argv, exc.returncode, exc.stderr) from None
             raise
 
+    def stream_blob(self, blob: str, out_fd: int, *, timeout: float = DEFAULT_TIMEOUT) -> None:
+        """Copy the content of a blob to the open file `out_fd` in chunks, never holding it whole in memory."""
+        argv = self._argv(("cat-file", "blob", blob), ())
+        with subprocess.Popen(
+            argv, cwd=self.repo, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as proc:  # fmt: skip
+            assert proc.stdout is not None and proc.stderr is not None
+            while chunk := proc.stdout.read(1 << 20):
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(out_fd, view) :]
+            error = proc.stderr.read()
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise GitError(argv, 124, "timed out") from None
+        if code != 0:
+            raise GitError(argv, code, error.decode("utf-8", "replace"))
+
     def write_blob(self, data: bytes, *, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Store `data` as a blob, byte for byte (no filters), and return its id; no index or worktree is involved."""
         argv = self._argv(("hash-object", "-w", "--no-filters", "--stdin"), ())
