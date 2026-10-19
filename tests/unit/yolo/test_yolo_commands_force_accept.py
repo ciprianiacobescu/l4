@@ -59,3 +59,57 @@ def test_the_flags_are_checked_before_anything_is_read(world, monkeypatch, capsy
     assert world.l4("accept", *argv) == 2
     assert words in capsys.readouterr().err
     assert world.store().read().head == before
+
+
+# --- 2.2 who ----------------------------------------------------------------------------------------------------------
+
+
+def test_an_agent_is_refused_even_when_agents_may_accept(world, monkeypatch, capsys):
+    """SCN-YOLO-154."""
+    world.push_plan()
+    world.push({".l4/config.yaml": "yolo:\n  review:\n    accept_by_agents: true\n"}, "agents may accept")
+    agent(world, monkeypatch)
+    before = world.store().read().head
+    assert force(world, "--yes") == 2
+    err = capsys.readouterr().err
+    assert "accept: --force is a person's decision, never an agent's (CLAUDECODE is set)" in err
+    assert "whatever yolo.review.accept_by_agents says" in err
+    assert 'Fix: a person runs, in a terminal: l4 yolo accept p1 --all --force --reason "..."' in err
+    assert world.store().read().head == before
+
+
+def test_an_mcp_caller_is_refused(world, monkeypatch, capsys):
+    """SCN-YOLO-155."""
+    world.push_plan()
+    agent(world, monkeypatch, "AI_AGENT")
+    world.app.environ["AI_AGENT"] = "l4-mcp"
+    before = world.store().read().head
+    assert force(world) == 2
+    assert "AI_AGENT is set" in capsys.readouterr().err
+    assert world.store().read().head == before
+
+
+def test_no_terminal_is_refused_and_nothing_prompts(world, monkeypatch, capsys):
+    """SCN-YOLO-156."""
+    world.push_plan()
+    monkeypatch.setattr("l4.yolo.commands._stdin_tty", lambda: False)
+
+    def no_prompt(*args, **kwargs):
+        raise AssertionError("nothing prompts")
+
+    monkeypatch.setattr("l4.yolo.commands.click.prompt", no_prompt)
+    before = world.store().read().head
+    assert force(world, "--yes") == 2
+    assert "stdin is not a terminal" in capsys.readouterr().err
+    assert world.store().read().head == before
+
+
+def test_the_actor_is_checked_before_the_plan_is_fetched(world, monkeypatch, capsys):
+    agent(world, monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("nothing is fetched for an agent")
+
+    monkeypatch.setattr("l4.yolo.commands._sync", boom)
+    assert force(world) == 2
+    assert "never an agent's" in capsys.readouterr().err

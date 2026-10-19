@@ -1970,6 +1970,15 @@ def run_accept(
 
 def _run_force_accept(app: AppContext, *, plan_id: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
     """`l4 yolo accept PLAN --all --force --reason TEXT [--withdraw] [--yes]` (L4-YOLO-057 to -062, design D1 to D8)."""
+    who = accepting.actor(app.environ, _stdin_tty())
+    if not withdraw and who[0] != "person":  # D2: before anything is fetched; accept_by_agents does not apply
+        why = f"{who[1]} is set" if who[1] else "stdin is not a terminal"
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"accept: --force is a person's decision, never an agent's ({why}), whatever "
+            "yolo.review.accept_by_agents says\n"
+            f'Fix: a person runs, in a terminal: l4 yolo accept {plan_id} --all --force --reason "..."',
+        )
     raise L4Exit(ExitCode.USAGE_ERROR, "accept: --force is not available yet")
 
 

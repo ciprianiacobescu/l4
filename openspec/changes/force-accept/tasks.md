@@ -54,7 +54,7 @@ Every task follows these rules:
   `src/l4/yolo/commands.py` checks D1's usage rules first and routes `--all --force` to a new `_run_force_accept`.
   Run: both files.
 
-- [ ] 2.2 Who. Tests first (same new file): `test_an_agent_is_refused_even_when_agents_may_accept` (SCN-YOLO-154:
+- [x] 2.2 Who. Tests first (same new file): `test_an_agent_is_refused_even_when_agents_may_accept` (SCN-YOLO-154:
   push `.l4/config.yaml` with `accept_by_agents: true`, `agent(world, monkeypatch)`, `--yes`; exit 2; the D2 text with
   `CLAUDECODE is set` and the command; ref unchanged); `test_an_mcp_caller_is_refused` (SCN-YOLO-155: `agent(world,
   monkeypatch, "AI_AGENT")` with value `l4-mcp`; `AI_AGENT is set`); `test_no_terminal_is_refused_and_nothing_prompts`
