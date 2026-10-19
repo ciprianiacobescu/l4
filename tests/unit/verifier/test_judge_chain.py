@@ -27,7 +27,7 @@ PROFILES = {
     "wrong-model": {"adapter": "fake", "vendor": "alpha", "model": "claude-haiku-4-5"},
     "free": {"adapter": "fake", "vendor": "beta"},
     "last": {"adapter": "fake", "vendor": "gamma"},
-    "kiro": {"adapter": "kiro-cli", "vendor": "amazon"},
+    "api": {"backend": "openai-chat", "model": "x"},  # no adapter: it cannot judge, and a kiro-cli one no longer loads
 }
 
 
@@ -130,7 +130,7 @@ def test_mismatches_until_nothing_is_left_wait_and_never_pass(run_chain):
 
 
 def test_a_chain_without_a_profile_that_can_judge_is_a_usage_error(run_chain):
-    run = run_chain(IMPLEMENT, ["kiro"])
+    run = run_chain(IMPLEMENT, ["api"])
     assert run.code == ExitCode.USAGE_ERROR and len(run.adapter.requests) == 2
 
 

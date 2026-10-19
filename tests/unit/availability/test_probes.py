@@ -56,7 +56,10 @@ def test_hello_accepts_wrapped_reply_rejects_other_and_times_out(make_ctx):
         {("exec",): CmdResult(124, "", "timed out"), ("--version",): CmdResult(0, "codex-cli 0.160.0", "")}
     )
     slow = CodexAdapter().probe(codex_profile, "hello", ctx4)
-    assert not slow.ok and slow.reason == "timeout"
+    assert not slow.ok and slow.reason == (
+        "codex did not answer within 60 s (hello step); a login prompt or a helper process that keeps the output open "
+        "can cause this: run l4 doctor"
+    )
 
 
 def test_codex_hello_with_a_bad_model_fails_with_a_fixed_reason(make_ctx):

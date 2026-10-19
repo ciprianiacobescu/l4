@@ -142,8 +142,11 @@ check_codex() { local v; v=$(as_runner 'codex --version' 2>/dev/null </dev/null 
 apply_codex() { as_runner "set -e; mkdir -p $L4_HOME/npm ~/.local/bin; npm install --prefix $L4_HOME/npm --no-fund --no-audit --save-exact @openai/codex@$CODEX_VERSION; ln -sf $L4_HOME/npm/node_modules/.bin/codex ~/.local/bin/codex" </dev/null; }
 step PRQ-10 "Codex CLI $CODEX_VERSION" check_codex apply_codex
 
-# PRQ-11 — OpenCode: keep an existing install if it is at least the pinned version, else install it user-locally.
-check_opencode() { local v; v=$(as_runner 'opencode --version' 2>/dev/null </dev/null | tail -1); DETAIL="opencode ${v:-missing} at $(as_runner 'command -v opencode' 2>/dev/null </dev/null) (need >= $OPENCODE_VERSION)"; [ -n "$v" ] && ver_ge "$v" "$OPENCODE_VERSION"; }
+# PRQ-11 — OpenCode v1: keep an existing install if it is major 1 and at least the pinned version, else install the pin
+# user-locally. `opencode --version` prints `1.18.34` (v1) or `opencode v2.0.32` (v2); v2 has the same binary name and
+# rejects --pure and --dir, and `sort -V` ranks 2.0.32 above 1.18.34, so the major is compared first (L4-OCG-004).
+check_opencode() { local v p; v=$(as_runner 'opencode --version' 2>/dev/null </dev/null | tail -1 | sed -E 's/^(opencode )?v?//'); p=$(as_runner 'command -v opencode' 2>/dev/null </dev/null)
+  DETAIL="opencode ${v:-missing} at ${p:-none} (need 1.x >= $OPENCODE_VERSION)"; [ -n "$v" ] && [ "${v%%.*}" = 1 ] && ver_ge "$v" "$OPENCODE_VERSION"; }
 apply_opencode() { as_runner "set -e; mkdir -p $L4_HOME/npm ~/.local/bin; npm install --prefix $L4_HOME/npm --no-fund --no-audit --save-exact opencode-ai@$OPENCODE_VERSION; ln -sf $L4_HOME/npm/node_modules/.bin/opencode ~/.local/bin/opencode" </dev/null; }
 step PRQ-11 "OpenCode >= $OPENCODE_VERSION" check_opencode apply_opencode
 
@@ -229,7 +232,10 @@ fi
 auth_line() { as_runner "$1 >/dev/null 2>&1 && echo AUTH_OK" </dev/null 2>/dev/null | grep -q AUTH_OK && echo "$2" || echo "$3"; }
 report PRQ-15 INFO "auth: claude" "$(auth_line "claude auth status | python3 -c 'import sys,json; sys.exit(0 if json.load(sys.stdin).get(\"loggedIn\") else 1)'" 'logged in (claude auth status)' 'not logged in — run as the runner user: claude, then /login; or provide CLAUDE_CODE_OAUTH_TOKEN as a masked CI variable (claude setup-token)')"
 report PRQ-15 INFO "auth: codex" "$(auth_line 'codex login status' 'logged in' "not logged in — run as $RUNNER_USER: codex login --device-auth")"
-report PRQ-15 INFO "auth: opencode" "providers: $(as_runner 'python3 -c "import json,os;print(\",\".join(sorted(json.load(open(os.path.expanduser(\"~/.local/share/opencode/auth.json\"))))))"' 2>/dev/null </dev/null || echo none); free models (no login): $(as_runner 'opencode models 2>/dev/null | grep -c -- "-free\$\|^opencode/big-pickle\$"' 2>/dev/null </dev/null) (API keys may also come from CI variables, e.g. OPENROUTER_API_KEY)"
+# v2's `models` starts a shared per-user daemon that outlives the call, so it runs only for an OpenCode v1 (PRQ-11)
+if check_opencode; then oc_free="free models (no login): $(as_runner 'opencode models 2>/dev/null | grep -c -- "-free\$\|^opencode/big-pickle\$"' 2>/dev/null </dev/null)"
+else oc_free="free models: skipped (opencode at $(as_runner 'command -v opencode' 2>/dev/null </dev/null) is not OpenCode v1)"; fi
+report PRQ-15 INFO "auth: opencode" "providers: $(as_runner 'python3 -c "import json,os;print(\",\".join(sorted(json.load(open(os.path.expanduser(\"~/.local/share/opencode/auth.json\"))))))"' 2>/dev/null </dev/null || echo none); $oc_free (API keys may also come from CI variables, e.g. OPENROUTER_API_KEY)"
 # kiro-cli answers `whoami --format json` with a flat {"accountType", "email"} (2.27.1, 2.28.0); logged out is exit 1.
 # The login is a human step and is never copied or moved: a second copy of a refresh token kills the first (L4-FAC-008).
 if as_runner "kiro-cli whoami --format json | python3 -c 'import sys,json; sys.exit(0 if json.load(sys.stdin).get(\"accountType\") else 1)'" </dev/null >/dev/null 2>&1; then

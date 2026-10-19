@@ -6,7 +6,7 @@ from l4.config.defaults import openspec_entrypoint, openspec_env, openspec_prefi
 from l4.config.schema import RolesCfg
 from l4.doctor.context import DoctorContext
 from l4.doctor.registry import Check, CheckResult, Severity, register
-from l4.provision.catalog import ADAPTER_BINARIES
+from l4.provision.catalog import ADAPTER_BINARIES, ADAPTER_PINS, SUPPORTED_MAJORS, major_problem
 from l4.versions import parse_version, version_at_least
 
 MIN_PYTHON = (3, 11)
@@ -84,13 +84,19 @@ ENV_003 = register(Check("ENV-003", "Node and the pinned OpenSpec", "error", _en
 HEAD_ROLES = ("implementer", "judges")  # an unusable first profile of these stops the run (SCN-DOC-02)
 
 
-def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None) -> str | None:
+def _cli_problem(ctx: DoctorContext, binary: str, minimum: str | None, adapter: str | None = None) -> str | None:
     exe = ctx.which(binary)
     if exe is None:
         return f"{binary} not found"
-    if not minimum:
+    gated = adapter in SUPPORTED_MAJORS
+    if not minimum and not gated:
         return None
     found = ctx.run([exe, "--version"]).stdout
+    if gated and adapter is not None:  # the major first, whatever min_version says (L4-OCG-001)
+        if (wrong := major_problem(adapter, binary, found, ADAPTER_PINS[adapter])) is not None:
+            return wrong
+        if not minimum:
+            return None
     meets = version_at_least(found, minimum)
     if meets is None:
         return f"{binary} reports no version that can be compared with {minimum}"
@@ -118,7 +124,7 @@ def _env_004(ctx: DoctorContext) -> CheckResult:
                 continue
             if name not in checked:
                 checked.add(name)
-                problem = _cli_problem(ctx, ADAPTER_BINARIES[profile.adapter], profile.min_version)
+                problem = _cli_problem(ctx, ADAPTER_BINARIES[profile.adapter], profile.min_version, profile.adapter)
                 if problem:
                     problems[name] = problem
             if name in problems:

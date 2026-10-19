@@ -11,6 +11,7 @@ from l4.config.schema import Profile
 from l4.sandbox.base import WrappedCommand
 
 RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "opencode" / "1.18.33"
+CLI_MAJOR = Path(__file__).parents[2] / "fixtures" / "cli_major" / "opencode"
 PROFILE = Profile(adapter="opencode", model="opencode/big-pickle", vendor="unknown")
 
 
@@ -28,8 +29,8 @@ def request(tmp_path: Path, **kw) -> RunRequest:
 
 
 class FakeProc:
-    def __init__(self, stdout: str = "", outcome: ProcOutcome | None = None) -> None:
-        self.stdout, self.outcome, self.calls = stdout, outcome or ProcOutcome(0), []
+    def __init__(self, stdout: str = "", outcome: ProcOutcome | None = None, stderr: str = "") -> None:
+        self.stdout, self.outcome, self.calls, self.stderr = stdout, outcome or ProcOutcome(0), [], stderr
 
     def run(self, argv, env, cwd, *, stdout_path, timeout_s, stdin=None, stderr_path=None, interrupt=None,
             on_line=None, stall_timeout_s=None, watch=None, reader=None):  # fmt: skip
@@ -37,6 +38,9 @@ class FakeProc:
                            "watch": watch, "reader": reader})  # fmt: skip
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text(self.stdout)
+        if stderr_path is not None:
+            stderr_path.parent.mkdir(parents=True, exist_ok=True)
+            stderr_path.write_text(self.stderr)
         return self.outcome
 
 
@@ -203,3 +207,28 @@ def test_a_judge_request_has_no_watch(tmp_path):
     proc = FakeProc()
     OpenCodeAdapter(proc).run(request(tmp_path))
     assert proc.calls[0]["watch"] is None
+
+
+def _help_lines() -> list[str]:
+    return (CLI_MAJOR / "v2-2.0.32.run-help.stdout.txt").read_text().splitlines()
+
+
+def test_a_rejected_v1_flag_is_an_unsupported_version_error(tmp_path):
+    """SCN-OCG-07: the recorded v2 help as raw events, the --dir rejection as the stderr tail."""
+    stderr = (CLI_MAJOR / "v2-2.0.32.run-dir.stderr.txt").read_text()
+    out = OpenCodeAdapter().parse(_help_lines(), exit_code=1, raw_events_path=tmp_path / "e", stderr_tail=stderr)
+    assert out.status == "error" and (out.detail or "").startswith("unsupported_version:")
+    assert "opencode --version" in (out.detail or "")
+
+
+def test_without_a_stderr_tail_the_exit_code_detail_is_unchanged(tmp_path):
+    out = OpenCodeAdapter().parse(_help_lines(), exit_code=1, raw_events_path=tmp_path / "e")
+    assert out.status == "error" and out.detail == "opencode exited with code 1"
+
+
+def test_run_passes_the_stderr_file_tail_to_parse(tmp_path):
+    stderr = (CLI_MAJOR / "v2-2.0.32.run-pure.stderr.txt").read_text()
+    padded = "x" * 20000 + stderr  # only the last 8 KiB is read, and the rejection is at the end
+    proc = FakeProc("", ProcOutcome(1), stderr=padded)
+    out = OpenCodeAdapter(proc).run(request(tmp_path))
+    assert out.status == "error" and (out.detail or "").startswith("unsupported_version:")

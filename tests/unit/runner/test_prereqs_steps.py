@@ -110,3 +110,43 @@ def test_no_step_moves_or_copies_a_kiro_login():
         if re.search(r"\b(mv|cp|rsync|install -D)\b", ln):
             assert "kiro" not in ln.lower() and ".aws/sso" not in ln, ln
     assert not re.search(r"adopt_one\s+kiro", TEXT)
+
+
+def _bash_function(name: str) -> str:
+    match = re.search(rf"^{name}\(\) \{{.*?\n?\}}(?=\n)", TEXT, re.M | re.S)
+    assert match, f"{name} is not a function of the script"
+    return match.group(0)
+
+
+def _check_opencode(version_output: str) -> subprocess.CompletedProcess:
+    """`check_opencode` and `ver_ge` from the script, with an `as_runner` stub that prints `version_output`."""
+    program = "\n".join(
+        [
+            f"OPENCODE_VERSION={pin('OPENCODE_VERSION')}",
+            f"as_runner() {{ echo '{version_output}'; }}",
+            re.search(r"^ver_ge\(\) \{.*\}", TEXT, re.M).group(0),
+            _bash_function("check_opencode"),
+            'if check_opencode; then echo "rc=0"; else echo "rc=1"; fi',
+            'echo "DETAIL=$DETAIL"',
+        ]
+    )
+    return subprocess.run(["bash", "-c", program], capture_output=True, text=True, check=False)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_prq_11_refuses_an_opencode_of_major_2_and_names_the_floor():  # SCN-OCG-10
+    out = _check_opencode("opencode v2.0.32").stdout
+    assert "rc=1" in out and "need 1.x >= 1.18.34" in out and "2.0.32" in out
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_prq_11_accepts_the_pinned_v1_and_a_newer_v1_and_refuses_an_older_one():
+    assert "rc=0" in _check_opencode("1.18.34").stdout
+    assert "rc=0" in _check_opencode("1.19.3").stdout
+    assert "rc=1" in _check_opencode("1.18.0").stdout
+
+
+def test_prq_15_runs_opencode_models_only_when_prq_11_passes():  # SCN-OCG-10
+    lines = [line for line in TEXT.splitlines() if "opencode models" in line]
+    assert len(lines) == 1 and re.match(r"\s*if check_opencode; then .*opencode models", lines[0])
+    assert "free models: skipped (opencode at " in TEXT and "is not OpenCode v1)" in TEXT

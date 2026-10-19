@@ -289,3 +289,13 @@ def test_the_intake_of_a_plans_unit_is_asked_with_the_plans_target(tmp_path, mon
     monkeypatch.setattr(cycle, "unit_infos", spy)
     world.step()
     assert "main" in seen
+
+
+def test_the_ci_review_records_target_rev_and_unit_revs(world):
+    world.plan()
+    branch_head = world.unit_branch("b")  # b has a branch on origin: its folder is read there
+    world.step()
+    reviewed = next(e.data for e in world.events() if e.type == "plan.reviewed")
+    target = world.git.rev_parse("refs/remotes/origin/main")
+    assert reviewed["target_rev"] == target
+    assert reviewed["unit_revs"] == {A: target, B: branch_head}

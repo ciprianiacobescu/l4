@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from l4.agents.base import ProbeCtx, RunRequest
 from l4.agents.factory import Factory, RoleUnavailable
@@ -57,12 +58,19 @@ def test_clarifier_and_s1_roles_resolve_adapter_profiles(probe_ctx):
     assert "claude-code" in JUDGE_ADAPTERS
 
 
-@pytest.mark.parametrize("name", ["kiro-x", "api"])
+@pytest.mark.parametrize("name", ["api"])
 def test_a_profile_that_cannot_serve_a_toolless_call_is_unavailable_not_a_usage_error(probe_ctx, name):
     config = cfg(**roles(s1_judge=[name]))
     with pytest.raises(RoleUnavailable) as err:
         open_role_judge(Factory(config, probe_ctx), "s1_judge", UNIT, make_request)
     assert name in str(err.value) and "tool-less" in str(err.value)
+
+
+def test_a_kiro_cli_s1_judge_is_a_load_error():
+    with pytest.raises(
+        ValidationError, match="profiles.kiro-x is in roles.s1_judge, but its adapter kiro-cli cannot judge"
+    ):
+        cfg(**roles(s1_judge=["kiro-x"]))
 
 
 def test_an_empty_chain_is_unavailable(probe_ctx):

@@ -10,7 +10,7 @@ from typing import Literal
 
 from l4.config.defaults import LAYA_VERSION, OPENSPEC_PACKAGE, OPENSPEC_VERSION
 from l4.config.schema import L4Config
-from l4.versions import parse_version
+from l4.versions import major_of, parse_version
 
 PLATFORMS = ("linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64")
 UV_VERSION = "0.12.22"
@@ -38,6 +38,24 @@ INSTALLER_URLS = {
 }
 ADAPTER_BINARIES = {"claude-code": "claude", "codex": "codex", "opencode": "opencode", "kiro-cli": "kiro-cli"}
 ADAPTER_PINS = {"claude-code": CLAUDE_VERSION, "codex": CODEX_VERSION, "opencode": OPENCODE_VERSION}
+# The major of each agent CLI the harness supports where a wrong major is a different program under the same name
+# (L4-OCG-001). Only `opencode`: Claude Code updates itself and Codex is 0.x. It follows the pin.
+SUPPORTED_MAJORS = {"opencode": (parse_version(OPENCODE_VERSION) or (0, 0, 0))[0]}
+
+
+def major_problem(adapter: str, binary: str, version_text: str, pin: str) -> str | None:
+    """Why `binary`'s `--version` output (`version_text`) is of a major the adapter does not run, or None: the
+    adapter is not gated, the text holds no version, or the major is the supported one. The one text every caller
+    (probe, doctor, provisioning) prints (L4-OCG-002)."""
+    supported = SUPPORTED_MAJORS.get(adapter)
+    found, major = parse_version(version_text), major_of(version_text)
+    if supported is None or found is None or major is None or major == supported:
+        return None
+    return (
+        f"{binary} {found[0]}.{found[1]}.{found[2]} is OpenCode v{major}; this profile runs v{supported} "
+        f"(opencode-ai {supported}.x): install opencode-ai@{pin} (l4 doctor --fix installs it user-locally) "
+        "or set options.cli_major: 2 when supported"
+    )
 
 
 def catalog_pins() -> dict[str, str]:

@@ -9,6 +9,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 ## 0.4.18 (unreleased)
 
 ### Added
+- `scripts/yolo_preflight.py` in the `l4` skill, beside `validate_plan.py`, standard library only. It checks a clean
+  tree, HEAD equal to `origin/<base>`, the plan file and the unit folders on origin, the judge roles, the installed
+  OpenCode major, `yolo.review.accept_by_agents` and the caller. It asks the harness for the admission and the review
+  state, and prints exactly one `Next:` command (`--json` too) (L4-SKL-005).
+- The skill's `references/operate.md` starts with "origin is what counts", a numbered runbook from the draft to an
+  active plan, and an error table (message, cause, fix). The runbook allows at most two rounds of spec fixes per
+  subject, then accepting what this stack cannot fix, and a person activates (L4-SKL-004).
+- `plan.reviewed` records `target_rev` and `unit_revs`, the revisions the review read. A stale review's messages name
+  the changed files from them (L4-YOLO-068).
 - Doctor `SANDBOX-005` warns when a Go project's `gates.setup` has no `go mod download`: `GOMODCACHE` and the checksum cache are read-only in every other gate. The runbook and the adopt skill say to run `go mod download all && go mod verify` in setup and to point tool caches (`GOLANGCI_LINT_CACHE`) at `.l4-out/`.
 - `sandbox.tool_paths` (read-only paths for both sandbox kinds, for a tool under the home that the harness does not
   find) and `sandbox.setup_paths` (read-only paths for the sandbox of a `gates.setup` command only, for a registry
@@ -43,6 +52,8 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   or when the never-cut parts alone exceed it (`prompt.over_window` at run time).
 - `docs/control-loop.md`, "How L4 runs: branches, events and the control loop": the one control loop, where each kind of state lives (base branch, unit branch, lock ref, plan ref, keep refs, PR), what starts a run, one run step by step, what a stop keeps, redoes or loses, what each local command writes, a worked recovery of a halted unit in a stopped plan, and swimlane diagrams. Linked from the README, the quickstart, the runbook, the delivery-plans page, the architecture page and the skill's operate reference.
 - The skill reference `references/control-loop.md` (at most 900 words, for coding agents: rules, a table of what to run for each state, what a stop keeps, the MCP tools), a rule in `SKILL.md`, and one sentence in the MCP server instructions: continue a unit with `l4_retry` or `l4_plan_resume`, never by a checkout or push of its unit branch.
+- `availability.probe_step_timeout` (default `20s`, capped by `probe_timeout`): the timeout of the `binary`, `auth` and
+  `quota` steps of a probe. The `hello` keeps `probe_timeout` (L4-AVL-012).
 
 ### Fixed
 - A replayed step (an accept of a held question) runs the post-step guards of an agent step: the scratch drop, the runner-configuration revert (`guard.violation`) and the environment check. A patch saved by 0.4.17 that loosens `[tool.pytest.ini_options]` no longer reaches the commit.
@@ -218,8 +229,38 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   are named and left out; `l4 status` shows the latest prompt's cut; the clarifier charges its line numbers.
 - A fix unit's `_Requirements:_` links resolved against the whole family, so the parent's own `Req 2.1` and the fix
   item `2.1` both counted; they resolve against the fix unit's own items.
+- PRQ-11 accepted `opencode v2.0.32` as at least 1.18.34 (`sort -V` ranks the digit first); it now needs major 1.
+- A hello that OpenCode 2 rejected (`Unrecognized flag: --pure` or `--dir`, exit 1) was classed `transient`, so the
+  profile looked unavailable with no named cause. It is now `unsupported_version`, is never cached, and a run that ends
+  the same way has a detail beginning `unsupported_version:` (L4-OCG-003).
+- `l4 doctor --fix` kept an OpenCode 2 `opencode` that met the profile's `min_version`.
+- A probe no longer hangs on a helper that holds its output. `run_process` reads until the child has exited plus a
+  2 s grace, then kills the group, and never waits on a pipe that a process outside the group holds (an OpenCode v2
+  daemon started by `auth list` did this) (L4-AVL-012).
+- A probe step that times out names the CLI, the seconds, the step, the likely cause and `l4 doctor`, as `transient`:
+  `opencode did not answer within 20 s (auth step); an OpenCode v2 daemon or a login prompt can cause this: run l4
+  doctor`. The hello that timed out no longer says only `timeout`. `l4 doctor` readiness shows the text.
+- An agent run ends when an escaped helper holds its output: `ProcRunner` joins its readers with a bound and logs that
+  the raw events end there.
 
 ### Changed
+- `l4 yolo review PLAN --worktree --record` fetches and records only when HEAD is `origin/<base>`: commit, push, then
+  `--record`. HEAD ahead, behind or diverged is refused before any judge call, with both short shas, the counts, the
+  paths and the command (`git push origin HEAD:<base>` or the pull). A unit whose branch on origin holds another spec is
+  refused too. The last line names `l4 yolo findings` or the person's `l4 yolo activate` (L4-YOLO-069).
+- A stale review names what differs: `activate: the review of <plan> is stale against origin/<base> (<sha>):`, one line
+  per cause and a `Fix:` line. The causes are the review prompt, the plan file's digests, each changed unit's digests
+  (where it is read, and its changed files), a subject not judged, and unpushed commits. `l4 yolo status` shows the
+  same lines (`--json`: `review.stale`), and `l4 yolo review` prints them before it asks CI. A plan file that is only
+  in HEAD is named with the push. The `inputs_changed` stop details name the frozen and the current digests
+  (L4-YOLO-068).
+- `l4 yolo review PLAN` and `--local` print a `warning:` when HEAD is ahead of `origin/<base>` and the unpushed commits
+  change the plan file or a unit folder: CI reviews origin, not your commits (L4-YOLO-070).
+- **Breaking:** an adapter profile that cannot judge in `roles.judges`, `roles.verifier_agent`, `roles.clarifier` or
+  `roles.s1_judge` is a configuration error at load. An adapter that can judge is `claude-code`, `codex`, `opencode` or
+  `fake`; one that cannot is, for example, `kiro-cli`. The error says the profile `cannot judge`, names the role and the
+  allowlist. Before, such a profile was skipped at selection. Remove it from the role: kiro-cli becomes a judge in
+  0.4.19. Backend profiles are not affected (L4-CFG-006).
 - Upgrade note: reading the CI of a hand-off commit (merge-safety, `yolo.merge.require_ci`) needs more of the forge token
   than the pushes did. On GitHub a fine-grained token needs checks, actions and commit statuses READ on top of contents
   and pull requests write (the workflow's own `GITHUB_TOKEN` gets them from the generated `permissions`). Without them the
@@ -283,6 +324,17 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - Step 1's declared scope reads a Kiro unit's `requirements.md` and `bugfix.md`.
 - Templates `contract@12` (conventions, the cut list), `red@11` (every listed criterion needs a new test or an earlier
   proof) and `judge@11` (the cut-list rule, the done-tasks block; it also holds the diff in parts of `judge@10`).
+- An `opencode` whose `--version` is not major 1 is refused by name where the harness reads a version, whether or not
+  the profile sets `min_version`: the probe's `binary` step, doctor `ENV-004`, doctor `LIVE-005` (now an error, never
+  the `unrecorded version` warning) and `prereqs.sh` PRQ-11. The reason reads `opencode 2.0.32 is OpenCode v2; this
+  profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 (l4 doctor --fix installs it user-locally) or set
+  options.cli_major: 2 when supported`. The supported major follows the pinned `OPENCODE_VERSION` (L4-OCG-001, -002).
+- `l4 doctor --fix` treats an `opencode` of another major as not satisfied and installs the pinned `opencode-ai` into
+  the harness npm prefix, linked as `~/.local/bin/opencode`. It never replaces a regular file at that path (the action
+  fails and names the path and the manual command), and it fails when the `opencode` the harness path resolves is still
+  the wrong major. The Node, `laya-serve` and codex links are unchanged (L4-OCG-004).
+- `prereqs.sh` PRQ-15 runs `opencode models` only when PRQ-11 passes, because OpenCode 2's `models` starts a shared
+  daemon that outlives the call.
 
 ## 0.4.17 (2026-10-19)
 

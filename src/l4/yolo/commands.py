@@ -62,7 +62,7 @@ from l4.vcs.errors import GitError
 from l4.vcs.git import Git
 from l4.yolo import accept as accepting
 from l4.yolo import findings as fnd
-from l4.yolo import judge_sandbox
+from l4.yolo import judge_sandbox, staleness
 from l4.yolo.admit import admit, done_units, next_eligible, unit_blocker
 from l4.yolo.coverage import coverage_findings
 from l4.yolo.cycle import REVIEW_KEY, fetch_cause, plan_source, review_batches, still_waits
@@ -204,7 +204,16 @@ def _file(ctx: _Ctx, plan_id: str, who: str) -> PlanFile:
     for file in plan_files_at(ctx.git, ctx.target_ref):
         if file.plan_id == plan_id:
             return file
-    raise L4Exit(ExitCode.USAGE_ERROR, f"{who}: no plan file .l4/plans/{plan_id}.json on origin/{ctx.target}")
+    rel = f".l4/plans/{plan_id}.json"
+    sha = (ctx.git.rev_parse(ctx.target_ref) or "")[: staleness.SHA_CHARS]
+    lines = [f"{who}: no plan file {rel} on origin/{ctx.target}" + (f" ({sha})" if sha else "")]
+    if ctx.git.run("cat-file", "-e", f"HEAD:{rel}", check=False).returncode == 0:
+        d = staleness.divergence(ctx.git, ctx.target_ref)
+        if d is not None and d.ahead > 0:
+            lines.append(f"Fix: {staleness.divergence_fix(d, ctx.target, 'run the command again')}")
+    elif (ctx.app.repo / rel).is_file():
+        lines.append(f"Fix: commit and push {rel}, then run the command again")
+    raise L4Exit(ExitCode.USAGE_ERROR, "\n".join(lines))
 
 
 def _valid(ctx: _Ctx, file: PlanFile, who: str) -> Plan:
@@ -311,6 +320,40 @@ def _now_digest(ctx: _Ctx, unit_id: str, folder: str) -> str:
 
 def _digests(ctx: _Ctx, plan: Plan, units: _Units) -> dict[str, str]:
     return {u: _now_digest(ctx, u, units.infos[u].folder) for u in plan.unit_ids() if u in units.infos}
+
+
+def _folders(plan: Plan, units: _Units) -> dict[str, str]:
+    return {u: units.infos[u].folder for u in plan.unit_ids() if u in units.infos}
+
+
+def _revs(ctx: _Ctx, plan: Plan, units: _Units) -> dict[str, Any]:
+    """The two keys every `plan.reviewed` carries (L4-YOLO-068): the target revision and each unit's revision."""
+    return {
+        "target_rev": ctx.git.rev_parse(ctx.target_ref) or "",
+        "unit_revs": staleness.unit_revs(ctx.git, ctx.cfg, plan.unit_ids(), ctx.target_ref, _folders(plan, units)),
+    }
+
+
+def _stale_lines(
+    ctx: _Ctx,
+    plan: Plan,
+    file: PlanFile,
+    state: PlanState,
+    events: Sequence[PlanEvent],
+    now: Mapping[str, str],
+    units: _Units,
+    *,
+    prompt_matters: bool = True,
+) -> list[str]:
+    return staleness.stale_reasons(
+        ctx.git, ctx.cfg, plan, file.text, file.path, state, events, now, ctx.target_ref, _folders(plan, units),
+        prompt_matters=prompt_matters,
+    )  # fmt: skip
+
+
+def _stale_header(ctx: _Ctx, lead: str) -> str:
+    sha = (ctx.git.rev_parse(ctx.target_ref) or "")[: staleness.SHA_CHARS]
+    return f"{lead} is stale against origin/{ctx.target} ({sha}):"
 
 
 def _append(store: PlanStore, events: Sequence[PlanEvent], head: str | None) -> str:
@@ -876,6 +919,13 @@ def run_review(
             ExitCode.USAGE_ERROR, f"review: {plan_id} is {state.status}: a plan is reviewed before it is activated"
         )
     units = _read_units(ctx, rev, parsed.known_ids(), intake=True)
+    ahead = staleness.divergence(ctx.git, ctx.target_ref, [file.path, *_folders(parsed, units).values()])
+    if ahead is not None and ahead.ahead > 0 and ahead.paths:  # D4: the review reads origin, not these commits
+        reads = "--local reviews" if local else "CI reviews"
+        ctx.say(
+            f"warning: {staleness.divergence_text(ahead, ctx.target)}: {reads} origin/{ctx.target}, not your "
+            f"commits: {staleness.divergence_verb(ahead)}, then review"
+        )
     admission = admit(
         parsed,
         known_units=units.infos,
@@ -910,6 +960,12 @@ def run_review(
             if view.problems:
                 ctx.say(f"Next: l4 yolo findings {plan_id}")
             return ExitCode.OK
+        if view.kind == "stale":  # M4: the causes, before the request (the unpushed commits are M6's)
+            reasons = _stale_lines(ctx, parsed, file, state, read.events, now, units)
+            ctx.say(_stale_header(ctx, f"{plan_id}: the recorded review"))
+            for r in reasons:
+                if not r.startswith("local: "):
+                    ctx.say(f"  {r}")
         if seen is not None:
             ctx.say(
                 f"{plan_id}: the spec of {unit} changed; the next run on {ctx.target} records inputs_changed and CI "
@@ -963,7 +1019,7 @@ def run_review(
         _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
         _event(
             "plan.reviewed", plan_digest=digest, prompt_version=PROMPT_VERSION, cost_usd=cost, by=ctx.who(),
-            source="local", **chosen,
+            source="local", **chosen, **_revs(ctx, parsed, units),
             units={u: _verdict_json(v) for u, v in result.units.items()},
             batches=batch_entries(parsed, result, batches),
         ),
@@ -1051,8 +1107,19 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     if view.kind == "none":
         raise L4Exit(ExitCode.USAGE_ERROR, f"activate: {plan_id} has not been reviewed: run l4 yolo review {plan_id}")
     if view.kind == "stale":
-        why = "was made with an older review prompt" if view.prompt_changed else "is for other inputs"
-        raise L4Exit(ExitCode.USAGE_ERROR, f"activate: review {why}: run l4 yolo review {plan_id}")
+        reasons = _stale_lines(ctx, parsed, file, state, read.events, now, units)
+        fix = f"l4 yolo review {plan_id}"
+        if any(r.startswith("local: ") for r in reasons):
+            folders = _folders(parsed, units)
+            d = staleness.divergence(ctx.git, ctx.target_ref, [file.path, *folders.values()])
+            if d is not None:
+                fix = staleness.divergence_fix(d, ctx.target, fix)
+        raise L4Exit(
+            ExitCode.USAGE_ERROR,
+            "\n".join(
+                [_stale_header(ctx, f"activate: the review of {plan_id}"), *(f"  {r}" for r in reasons), f"Fix: {fix}"]
+            ),
+        )
     if view.problems:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
@@ -1463,9 +1530,8 @@ def _describe(
         needs_review = state.status in _BEFORE_ACTIVATION or (
             state.status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")
         )  # only there a review under an older prompt means a new review
-        view = _review_view(
-            plan, file.text, state, read.events, _digests(ctx, plan, units), prompt_matters=needs_review
-        )
+        now = _digests(ctx, plan, units)
+        view = _review_view(plan, file.text, state, read.events, now, prompt_matters=needs_review)
         out["review"] = {
             "state": view.kind,
             "problems": list(view.problems),
@@ -1473,6 +1539,10 @@ def _describe(
         }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
+        if view.kind == "stale":
+            out["review"]["stale"] = _stale_lines(
+                ctx, plan, file, state, read.events, now, units, prompt_matters=needs_review
+            )
         waiting = next_eligible(plan, state, units.phases).waiting
         rows = []
         for uid in plan.unit_ids():
@@ -1597,6 +1667,7 @@ def _render(d: dict[str, Any]) -> str:
     if "review" in d and d["status"] in (*_BEFORE_ACTIVATION, "stopped"):
         changed = " (the review prompt changed)" if d["review"].get("prompt_changed") else ""
         lines.append(f"  review: {d['review']['state']}{changed}")
+        lines += [f"    {r}" for r in d["review"].get("stale", [])]
         lines += [f"    {p}" for p in d["review"]["problems"]]
         lines += [
             f"    {a['subject']}: accepted by {a['by']} ({a['actor']}): {a['reason']}"

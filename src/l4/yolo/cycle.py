@@ -91,6 +91,7 @@ from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_file
 from l4.yolo.postcheck import run_profile
 from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
+from l4.yolo.staleness import frozen_rev, plan_change, unit_change, unit_revs
 from l4.yolo.state import fold_plan, is_unit_key
 from l4.yolo.store import PlanRead, PlanStore, list_plans, parse_ledger, plan_ref
 from l4.yolo.tidy import branch_tips, tidy_archive_branch, tidy_unit_branch
@@ -972,6 +973,10 @@ class _Step:
                 prompt_version=PROMPT_VERSION,
                 units=units,
                 batches=batches,
+                target_rev=rev,
+                unit_revs=unit_revs(
+                    self.git, self.cfg, plan.unit_ids(), self._target_ref(), {u: i.folder for u, i in folders.items()}
+                ),
                 **extra,
             )
         )
@@ -1081,6 +1086,27 @@ class _Step:
                 return unit
         return None
 
+    def _plan_changed(self, ctx: _Ctx) -> str:
+        """M11: the plan file changed after the activation, with both digests and the revision it is read on."""
+        change = plan_change(
+            ctx.state.activated_digest, plan_digest(ctx.file.text), self.target, self._target_rev(),
+            "frozen at the activation",
+        )  # fmt: skip
+        return f"the plan file {ctx.file.path} changed after the activation: {change}"
+
+    def _spec_changed(self, ctx: _Ctx, unit: str, frozen: str, label: str, text: str) -> str:
+        """M12, M13: `text`, then the unit's two digests, where it is read now and the files that changed (known when
+        the review that froze the digest recorded the revisions it read)."""
+        info = unit_infos(self.app.repo, self.found, [unit], check_intake=False).get(unit)
+        if info is None:
+            return text
+        now = self._digest(unit, info.folder)
+        old_rev = frozen_rev(ctx.read.events, unit, frozen)
+        change = unit_change(
+            self.git, self.cfg, unit, info.folder, frozen, now, old_rev, self._target_ref(), label
+        )  # fmt: skip
+        return f"{text}: {change}"
+
     def _file_changed(self) -> PlanStep | None:
         """An active plan that `live_plan` does not pick because its file is no longer a plan, or no longer aims at this
         target (R2): stopped as `inputs_changed`, subject `plan`. A valid file on this target is checked in `_live`."""
@@ -1090,7 +1116,7 @@ class _Step:
             if ctx.file.plan is None:
                 detail = f"the plan file {ctx.file.path} is no longer a valid plan"
             elif ctx.file.plan.target != self.target and plan_digest(ctx.file.text) != ctx.state.activated_digest:
-                detail = f"the plan file {ctx.file.path} changed after the activation"
+                detail = self._plan_changed(ctx)
             else:
                 continue
             return self._stop(ctx, "inputs_changed", detail, "plan")
@@ -1107,11 +1133,16 @@ class _Step:
         if remote_tip(self.git, self.cfg, self.app.environ, self.target) is None:
             return self._stop(ctx, "target_missing", f"the target branch {self.target} does not exist on origin")
         if state.activated_digest is not None and plan_digest(ctx.file.text) != state.activated_digest:
-            return self._stop(
-                ctx, "inputs_changed", f"the plan file {ctx.file.path} changed after the activation", "plan"
-            )
+            return self._stop(ctx, "inputs_changed", self._plan_changed(ctx), "plan")
         if (unit := self._inputs_changed(ctx)) is not None:
-            return self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after the activation", unit)
+            detail = self._spec_changed(
+                ctx,
+                unit,
+                state.digests[unit],
+                "frozen at the activation",
+                f"the spec of {unit} changed after the activation",
+            )
+            return self._stop(ctx, "inputs_changed", detail, unit)
         self._tidy(ctx)
         current = state.current if state.current in plan.unit_ids() else None  # a unit out of the plan is nobody's
         if (limit := self._limit_reached(ctx, current)) is not None:
@@ -1231,7 +1262,10 @@ class _Step:
             stopped = _last(ctx.read.events, "plan.stopped", unit)
             seen = (stopped.data.get("digest") if stopped is not None else None) or state.digests.get(unit)
             if info is not None and seen is not None and self._digest(unit, info.folder) != seen:
-                self._stop(ctx, "inputs_changed", f"the spec of {unit} changed after it was rejected", unit)
+                detail = self._spec_changed(
+                    ctx, unit, seen, "at the rejection", f"the spec of {unit} changed after it was rejected"
+                )
+                self._stop(ctx, "inputs_changed", detail, unit)
 
     def _cause_gone(self, ctx: _Ctx) -> str | None:
         """For a waiting plan: why it may go on (`the cause is gone: <unit> is <phase>`), None while its current unit

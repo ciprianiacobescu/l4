@@ -65,11 +65,9 @@ def normalise_tasks(name: str, content: bytes) -> bytes:
     return _MARKER.sub(rb"\1 \2", content) if name == "tasks.md" else content
 
 
-def unit_digest(git: Git, rev: str, folder: str) -> str:
-    """The digest of `folder` at `rev` (sha256, 16 hex characters): every file but the excluded ones, sorted by path
-    relative to the folder, hashed as `path\\0content\\0`. A folder of only excluded files gives the digest of
-    the empty set; a folder with no file at all in the revision raises `FolderMissing`, and a revision that is not there
-    raises `RevisionMissing` (R3, L4-YOLO-003)."""
+def _entries(git: Git, rev: str, folder: str) -> list[tuple[str, str]]:
+    """The files `unit_digest` hashes: (path relative to the folder, blob id), sorted by path. Raises
+    `RevisionMissing` for a revision that is not there and `FolderMissing` for a folder with no entry at all."""
     if not rev or git.rev_parse(rev) is None:
         raise RevisionMissing(f"the revision {rev!r} does not exist in this repository (fetch it first)")
     root = folder.strip("/")
@@ -92,11 +90,28 @@ def unit_digest(git: Git, rev: str, folder: str) -> str:
         entries.append((rel, sha))
     if not present:
         raise FolderMissing(f"the folder {folder!r} does not exist at {rev!r}")
+    return sorted(entries, key=lambda e: e[0].encode("utf-8", "surrogateescape"))
+
+
+def unit_digest(git: Git, rev: str, folder: str) -> str:
+    """The digest of `folder` at `rev` (sha256, 16 hex characters): every file but the excluded ones, sorted by path
+    relative to the folder, hashed as `path\\0content\\0`. A folder of only excluded files gives the digest of
+    the empty set; a folder with no file at all in the revision raises `FolderMissing`, and a revision that is not there
+    raises `RevisionMissing` (R3, L4-YOLO-003)."""
     h = hashlib.sha256()
-    for rel, sha in sorted(entries, key=lambda e: e[0].encode("utf-8", "surrogateescape")):
+    for rel, sha in _entries(git, rev, folder):
         content = normalise_tasks(rel.rsplit("/", 1)[-1], git.run_bytes("cat-file", "blob", sha))
         h.update(rel.encode("utf-8", "surrogateescape") + b"\0" + content + b"\0")
     return h.hexdigest()[:DIGEST_CHARS]
+
+
+def file_digests(git: Git, rev: str, folder: str) -> dict[str, str]:
+    """`{path relative to the folder: sha256 hex of the normalised content}` over the entries `unit_digest` hashes, with
+    its errors. It tells which files differ between two revisions (L4-YOLO-068)."""
+    return {
+        rel: hashlib.sha256(normalise_tasks(rel.rsplit("/", 1)[-1], git.run_bytes("cat-file", "blob", sha))).hexdigest()
+        for rel, sha in _entries(git, rev, folder)
+    }
 
 
 def current_unit_ref(git: Git, cfg: L4Config, unit_id: str, target_ref: str) -> str:

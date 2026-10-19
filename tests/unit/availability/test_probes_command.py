@@ -42,4 +42,5 @@ def test_hello_fails_on_a_nonzero_exit_and_a_timeout(make_ctx):
     bad, _ = probe("hello", prof, {("ping",): CmdResult(3, "", "boom")}, make_ctx)
     assert not bad.ok and "3" in (bad.reason or "") and "boom" not in (bad.reason or "")
     slow, _ = probe("hello", prof, {("ping",): CmdResult(124, "", "timed out")}, make_ctx)
-    assert not slow.ok and slow.reason == "timeout"
+    assert not slow.ok and slow.failure_class is None
+    assert (slow.reason or "").startswith("opencode did not answer within 60 s (hello step)")
