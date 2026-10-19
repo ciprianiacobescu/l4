@@ -230,7 +230,7 @@ Every task follows these rules:
 
 ## 10. Docs
 
-- [ ] 10.1 SPEC (design D12). Depends on 1.1 to 9.1 (1.3 included). CHANGED: `auto` routed, the served model, the
+- [x] 10.1 SPEC (design D12). Depends on 1.1 to 9.1 (1.3 included). CHANGED: `auto` routed, the served model, the
   requirement and scenario ranges.
   - `docs/SPEC.md`: §8.1 "CLI judge" (kiro-cli, prompt contract on stdin); §8.3 the `kiro-cli` row (the judge argv of
     D1 with `--model auto` by default, stdin, the reply of D3, the auth rule of D6, the model listing of D14, the
