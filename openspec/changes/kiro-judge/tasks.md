@@ -58,7 +58,7 @@ Every task follows these rules:
 
 ## 2. The shared judge reply
 
-- [ ] 2.1 One slicer for prompt-contract judges (L4-KJD-003, design D3 step 2). No dependency.
+- [x] 2.1 One slicer for prompt-contract judges (L4-KJD-003, design D3 step 2). No dependency.
   - Tests first, `tests/unit/agents/test_contract_judge_reply.py`: `attach_judge_reply(result, text, schema)` with a
     fenced object, prose around an object, no object (`… missing: the reply holds no JSON object`), an object that
     breaks the schema (`… invalid: …`, `rejected` set, status unchanged), a valid object (`ok`, `structured`).

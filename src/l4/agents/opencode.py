@@ -35,8 +35,7 @@ from l4.agents.base import (
     read_result_file,
     wrap_command,
 )
-from l4.agents.claude_code import STRUCTURED_DETAIL
-from l4.agents.contract import attach_file_result
+from l4.agents.contract import attach_file_result, attach_judge_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.opencode_provider import key_from, provider_config, provider_host, reachable, write_key_file
 from l4.agents.proc import ProcRunner
@@ -53,7 +52,6 @@ from l4.availability.probes import (
 from l4.availability.quota import is_openrouter, now_of, openrouter_quota
 from l4.config.schema import OpencodeOptions, Profile
 from l4.safepath import resolve_tool
-from l4.schemacheck import validate
 
 FREE_PREFIX = "opencode/"  # OpenCode Zen's own models: no login needed [V, runner]
 DISABLE_SWITCHES = (
@@ -305,29 +303,9 @@ class OpenCodeAdapter:
     @staticmethod
     def _attach_result(result: RunResult, judge: bool, result_text: str | None, schema: dict[str, Any] | None) -> None:
         if judge:
-            OpenCodeAdapter._attach_judge_reply(result, schema)
+            attach_judge_reply(result, result.final_text, schema)
             return
         attach_file_result(result, result_text, schema, "opencode")
-
-    @staticmethod
-    def _attach_judge_reply(result: RunResult, schema: dict[str, Any] | None) -> None:
-        """The reply may wrap its JSON in prose or a fence: slice from the first `{` to the last `}` (SPEC 8.3.1)."""
-        text = result.final_text or ""
-        start, end = text.find("{"), text.rfind("}")
-        try:
-            parsed = json.loads(text[start : end + 1]) if 0 <= start < end else None
-        except ValueError:
-            parsed = None
-        if not isinstance(parsed, dict):
-            result.detail = f"{STRUCTURED_DETAIL} missing: the reply holds no JSON object"
-            return
-        problems = validate(parsed, schema) if schema is not None else []
-        if problems:
-            result.detail = f"{STRUCTURED_DETAIL} invalid: " + "; ".join(problems[:3])
-            result.rejected = parsed
-            return
-        result.structured = parsed
-        result.status = "ok"
 
 
 def _auth_providers(output: str) -> set[str]:
