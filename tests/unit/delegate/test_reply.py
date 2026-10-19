@@ -298,3 +298,21 @@ def test_harness_written_files_and_one_character_quotes_do_not_resolve(tmp_path)
         got = check(tmp_path, reply(checked=[entry]), head=head, context=context)
         assert isinstance(got, Discarded) and got.reason == f"checked {entry['ref']} does not resolve", entry
     assert isinstance(check(tmp_path, reply(), head=head), Kept)  # a real document still resolves
+
+
+def test_a_test_entry_is_exempt_from_the_quote_rule_but_must_name_an_existing_test(tmp_path):
+    """Review 3, minor 1 (L4-DLG-005, D7): a verdict accept may cite the disputed tracing test by id, with no quote; the
+    id must be one of the unit's verification evidence (`test_ids`)."""
+    entry = {"ref": "test:tests/test_store.py::test_add", "quote": "", "claim": ""}
+    got = check(
+        tmp_path, reply(decision="accept", text="the test covers it", checked=[entry]), kind=QuestionKind.VERDICT
+    )
+    assert isinstance(got, Kept) and not got.escalates
+    ghost = {**entry, "ref": "test:tests/test_store.py::test_ghost"}
+    got = check(
+        tmp_path, reply(decision="accept", text="the test covers it", checked=[ghost]), kind=QuestionKind.VERDICT
+    )
+    assert isinstance(got, Discarded) and "test_ghost" in got.reason
+    got = check(tmp_path, reply(decision="accept", text="the test covers it", checked=[entry]),
+                kind=QuestionKind.VERDICT, test_ids=())  # fmt: skip
+    assert isinstance(got, Discarded)

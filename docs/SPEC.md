@@ -3402,7 +3402,7 @@ its evidence inside `<l4:data>` blocks that the system text calls data, never in
 the kind, every decision but `escalate` has `checked` entries that resolve at the unit head, `text` passes the text
 checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for `WHEN … THEN …` where the
 question does. A `checked` entry MUST NOT cite `questions.md`, `verification.md` or a path under `.l4/` (the
-harness's and the asker's own words), and its quote MUST have at least 12 characters. Any other reply MUST be recorded `delegate.result{status: discarded}` and the question escalated.
+harness's and the asker's own words), and the quote of a `path:line` or `spec:` entry MUST have at least 12 characters (a `test:` entry has no quote: it MUST name a test id of the unit's verification evidence). Any other reply MUST be recorded `delegate.result{status: discarded}` and the question escalated.
 
 **L4-DLG-006 The delegate's answer takes the path and the commit of `l4 questions`.** A kept reply SHALL be written by
 the edit core of `l4 questions` on the run's worktree, without `clarifier.answer_by_agents`, as `text`, `accept|reject

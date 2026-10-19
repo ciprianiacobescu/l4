@@ -169,7 +169,7 @@ The delegate SHALL return `l4/delegate-result@1` `{question, decision, text, rea
 only when the decision fits the kind, every decision but `escalate` has `checked` entries that resolve at the unit
 head, `text` passes the text checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for
 `WHEN … THEN …` where the question does. A `checked` entry MUST NOT cite `questions.md`, `verification.md` or a path under `.l4/` (the
-harness's and the asker's own words), and its quote MUST have at least 12 characters. Any other reply MUST be recorded `delegate.result{status: discarded}` and the
+harness's and the asker's own words), and the quote of a `path:line` or `spec:` entry MUST have at least 12 characters (a `test:` entry has no quote: it MUST name a test id of the unit's verification evidence). Any other reply MUST be recorded `delegate.result{status: discarded}` and the
 question escalated.
 
 #### Scenario: SCN-DLG-16 (−) A claim that does not resolve discards the reply
