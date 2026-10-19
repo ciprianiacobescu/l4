@@ -53,11 +53,12 @@ An agent may answer only a question of a kind in `clarifier.auto_accept_kinds` t
 ## Kept, redone, lost
 
 - Kept: every pushed red and green commit, the ticks, the ledger lines in them, `questions.md`, the PR, a person's commits.
-- A halted task: earlier tasks stay; only that task gets new attempts. Its red commit stays; only green runs again.
-- After a kill, timeout or cancel, the next run starts from the last pushed commit. Nothing is pushed after a cancel signal.
-- Lost: the uncommitted edits of the one running agent step.
-- WIP snapshots (`refs/l4/wip/…`) are local, never pushed. On a hosted runner they are gone with the machine.
-- A changed criterion reopens the tasks that cite it: they are redone.
+- A halted task: earlier tasks stay; only it gets new attempts, and its red commit stays.
+- After a kill, timeout or cancel, the next run starts from the last pushed commit.
+- Lost: the running agent step's uncommitted edits.
+- WIP snapshots (`refs/l4/wip/…`) are local only.
+- A Kiro unit redoes tasks citing a changed criterion; an OpenSpec unit reopens nothing.
+- A base spec change does not reach a unit with its branch: `git merge origin/<base>` on `l4/<fw>/<name>`, push, `l4 retry`. An active plan stops with `inputs_changed`: re-activate.
 
 ## MCP tools
 
@@ -65,4 +66,4 @@ Read: `l4_status`, `l4_unit_events`, `l4_verification`, `l4_questions`, `l4_ques
 `l4_plan_findings`, `l4_plan_report`. Write: `l4_question_answer`, `l4_retry`, `l4_plan_resume` (each has `no_run`),
 `l4_plan_review`, `l4_plan_draft`. No tool activates or cancels a plan, restarts a unit or dispatches a run.
 
-Full explanation and swimlane diagrams: `docs/control-loop.md` in the L4 harness repository.
+Full page: `docs/control-loop.md` in the harness repository.

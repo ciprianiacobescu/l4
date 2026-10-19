@@ -65,3 +65,11 @@ def test_the_mcp_instructions_point_to_the_reference() -> None:
 def test_the_page_exists_and_the_readme_links_it() -> None:
     assert (ROOT / "docs" / "control-loop.md").is_file()
     assert "docs/control-loop.md" in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_the_reopen_and_base_merge_facts_are_stated() -> None:
+    page = (ROOT / "docs" / "control-loop.md").read_text(encoding="utf-8")
+    text = REFERENCE.read_text(encoding="utf-8")
+    assert "An OpenSpec unit reopens" in page and "OpenSpec unit reopens nothing" in text
+    for doc in (page, text):
+        assert "git merge" in doc and "origin/<base>" in doc and "inputs_changed" in doc

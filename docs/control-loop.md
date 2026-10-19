@@ -198,8 +198,14 @@ and the tick are in that commit in the same way.
 | **A runner crash or `SIGKILL`** | Everything pushed. The kernel drops the lease file when the process dies, so the next run takes the unit at once. | The step that was running (see 6.3). |
 | **A secret in the unpushed commits** | The ledger. | The commits that hold the secret are discarded, and the run goes on (`_discard_unpushed`). |
 
-A person's change to the spec folder can reopen work. A change to a criterion reopens the tasks that cite it
-(`tasks.reopened`, L4-OPS-015). Those tasks are redone, and the others are kept.
+A person's change to the spec folder can reopen work. In a Kiro unit, a change to a criterion reopens the tasks that
+cite it (`tasks.reopened`, L4-OPS-015). Those tasks are redone, and the others are kept. An OpenSpec unit reopens
+nothing: the verifier judges its changed scenarios (`src/l4/implementer/reopen.py`).
+
+**A spec change on the base branch does not reach a unit that already has its branch.** L4 reads the unit from its own
+branch (`current_unit_ref`, `src/l4/yolo/digest.py`). A person merges the base into the unit branch (`git merge
+origin/<base>` in a checkout of `l4/<fw>/<name>`, then push) and runs `l4 retry`. In an active plan that change then
+stops the plan with `inputs_changed`, and a person activates it again.
 
 ### 6.3 What can be lost, and how much
 
