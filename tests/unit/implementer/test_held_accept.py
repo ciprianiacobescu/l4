@@ -884,3 +884,74 @@ def test_r18_the_carried_text_matches_what_the_code_does(make_bench, monkeypatch
     ctx = question_text(bench).split("## Q-002", 1)[1].split("### Options", 1)[0]
     assert "replay of the step you accepted with Q-001" in ctx and "the same paths" in ctx
     assert "its own gates" in ctx and "rewrote" in ctx
+
+
+# --- round 5: the guard never follows a link a gate planted ------------------------------------------------------
+
+
+def linking_step(outside: Path, kind: str) -> Step:
+    """A step whose test, only while the saved patch exists, replaces `tests/fixtures` by a link to `outside`."""
+    data = ("tests/fixtures/data.txt", "patched\n") if kind != "rmtree" else ("tests/fixtures/sub.txt", "patched\n")
+    evil = (
+        "import pathlib, shutil\n"
+        "_held = pathlib.Path('openspec/changes/add-discount-codes/.l4/held/1.1-pre_satisfied.patch')\n"
+        "if _held.exists():\n"
+        "    fixtures = pathlib.Path('tests/fixtures')\n"
+        "    shutil.rmtree(fixtures)\n"
+        f"    fixtures.symlink_to({str(outside)!r})\n"
+    )
+    return new_step(data, ("tests/test_new.py", evil + NEW))
+
+
+@pytest.mark.parametrize("kind", ["write", "new-path", "rmtree"])
+def test_u1_the_guard_never_follows_a_link_planted_in_a_parent_folder(make_bench, monkeypatch, raw, tmp_path, kind):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "data.txt").write_text("outside\n")  # same name as a patched file: the old guard rewrote it
+    (outside / "extra.txt").write_text("outside extra\n")
+    (outside / "sub.txt").mkdir()  # a directory where the patch has a file: the old guard rmtree'd it
+    (outside / "sub.txt" / "keep.txt").write_text("keep\n")
+    before = sorted(
+        (p.relative_to(outside).as_posix(), p.read_bytes() if p.is_file() else None) for p in outside.rglob("*")
+    )
+    zero_says(monkeypatch)
+    bench = held_bench(make_bench, [linking_step(outside, kind), new_step()])
+    (bench.wb.worktree / "tests" / "fixtures").mkdir()
+    (bench.wb.worktree / "tests" / "fixtures" / "old.txt").write_text("tracked\n")
+    bench.wb.git.run("add", "tests/fixtures/old.txt")
+    bench.wb.commit("test: fixture", task="0.9", attempt=1, phase="red", tdd="red")
+    assert run_task(bench.wb, TASK).question_ids == ["Q-001"]
+    answer(bench, raw, "accept: fine")
+    run_task(bench.wb, TASK)
+    after = sorted(
+        (p.relative_to(outside).as_posix(), p.read_bytes() if p.is_file() else None) for p in outside.rglob("*")
+    )
+    assert after == before  # nothing was written, removed or followed outside the work tree
+    [failed] = [e for e in bench.events("task.attempt_failed")][:1]
+    assert "symbolic link" in failed["reason"] and "tests/fixtures" in failed["reason"]
+    assert bench.events("held.replay_unsafe")
+
+
+def test_u1_minor_a_symlink_the_patch_adds_is_kept_as_a_link(make_bench, monkeypatch, raw):
+    import os
+
+    bench = held_new(make_bench, monkeypatch)
+    wb = bench.wb
+    (wb.worktree / "tests").mkdir(exist_ok=True)
+    (wb.worktree / "tests" / "test_new.py").write_text(NEW)
+    os.symlink("test_new.py", wb.worktree / "tests" / "alias.py")
+    wb.git.run("add", "-A", "-f", "--", "tests/test_new.py", "tests/alias.py")
+    data = wb.git.run_bytes("diff", "--cached", "--binary", "HEAD")
+    wb.git.run("reset", "-q")
+    wb.discard_changes()
+    patch = patch_of(bench)
+    patch.write_bytes(data)
+    keep = ("id", "task", "kind", "title", "check", "criteria", "tests", "result_sha256", "saved")
+    last = {k: v for k, v in bench.events("question.raised")[-1].items() if k in keep}
+    bench.writer.append("question.raised", **{**last, "patch_sha256": hashlib.sha256(data).hexdigest()})
+    commit_all(bench, raw, "forged hold with a link")
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done", outcome.reason
+    mode = bench.wb.git.run("ls-tree", "HEAD", "tests/alias.py").stdout.split()[0]
+    assert mode == "120000"  # kept as a link, not deleted at the first restore

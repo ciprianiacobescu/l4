@@ -124,3 +124,12 @@ def test_scn_imp_319_a_harness_question_names_its_cause_and_both_answers():
 def test_an_invalid_harness_answer_is_named():
     got = step("awaiting_human", open_blocking_questions=("Q-007",), harness_invalid=("Q-007",))
     assert got == f"fix the answer of Q-007 in {QPATH} on {BRANCH}: start it with accept or retry, then push"
+
+
+def test_a_harness_question_whose_step_was_not_saved_offers_only_retry():
+    title, why = "Task 3.1: the pre-satisfied check could not decide", "the saved step cannot be replayed"
+    got = step(
+        "awaiting_human", open_blocking_questions=("Q-007",), harness_open=(("Q-007", title, why),),
+        harness_unsaved=("Q-007",),
+    )  # fmt: skip
+    assert '--text "retry: <note>"' in got and "accept: <why>" not in got
