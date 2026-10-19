@@ -382,7 +382,7 @@ def run_review_worktree(
             "review": _review_data(result, batches),
         },
     )
-    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None)
+    _show(ctx, parsed, state, read.events, infos, result, batches, subjects, reused, emit if as_json else None, stamp)
     shown = parsed.limits.max_cost_usd
     recorded = _review_total(read.events)
     limit = f"${shown:.2f}" if shown is not None else "no limit"
@@ -477,6 +477,7 @@ def _show(
     subjects: Mapping[str, tuple[str, Verdict]],
     reused: Mapping[str, Verdict],
     json_out: Any = None,
+    review_at: str | None = None,
 ) -> None:
     for name, (kind, verdict) in subjects.items():
         mark = " (reused)" if name in reused else ""
@@ -498,6 +499,7 @@ def _show(
             units=_unit_infos_for_render(parsed, infos),
             accepted=state.accepted,
             holds=accept.holds(state, review),
+            why=accept.whys(state, review, review_at),
         )
         json_out(json.dumps(document, indent=2))
         return
@@ -509,6 +511,7 @@ def _show(
         units=_unit_infos_for_render(parsed, infos),
         accepted=state.accepted,
         holds=accept.holds(state, review),
+        why=accept.whys(state, review, review_at),
     )
     for line in lines:
         ctx.say(line)

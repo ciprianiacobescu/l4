@@ -24,6 +24,7 @@ __all__ = [
     "Refusal",
     "actor",
     "check",
+    "entry_of",
     "force_holds",
     "force_line",
     "force_subjects",
@@ -31,6 +32,8 @@ __all__ = [
     "status_refusal",
     "target_config",
     "target_full_config",
+    "why_not_holds",
+    "whys",
 ]
 
 _RESTARTABLE_STOPS = ("inputs_changed", "unit_rejected")  # the stopped plans a review can still be made on
@@ -166,6 +169,9 @@ def _entry_of(latest_review: Mapping[str, Any], subject: str) -> Mapping[str, An
     return entry if isinstance(entry, Mapping) else None
 
 
+entry_of = _entry_of  # public: the commands read a review's entry with it
+
+
 def holds(state: PlanState, latest_review: Mapping[str, object]) -> dict[str, bool]:
     """Per accepted subject: the latest review's entry has the same `material` and `findings_sha`."""
     result: dict[str, bool] = {}
@@ -179,6 +185,57 @@ def holds(state: PlanState, latest_review: Mapping[str, object]) -> dict[str, bo
             sha = findings_mod.findings_sha(entry.get("findings") or [])
         result[subject] = accepted.get("findings_sha") == sha
     return result
+
+
+def _short(value: object) -> str:
+    return str(value)[:8] if value else "none"
+
+
+def _bound_digests(subject: str, entry: Mapping[str, Any]) -> dict[str, str]:
+    """The unit digests an entry stands for: `{subject: digest}` for a unit, the entry's `digests` for a batch."""
+    if subject.startswith("batch:"):
+        raw = entry.get("digests")
+        return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, Mapping) else {}
+    return {subject: str(entry["digest"])} if entry.get("digest") else {}
+
+
+def why_not_holds(accepted: Mapping[str, Any], entry: Mapping[str, Any] | None, review_at: str | None) -> str:
+    """One line that says why `accepted` (a `plan.accepted`'s data) does not hold on the latest review's `entry`
+    (L4-YOLO-066, design D9.2). `review_at` is the `at` of the review that holds the entry."""
+    subject = str(accepted.get("subject") or "this subject")
+    if entry is None:
+        return f"no entry: the latest review does not judge {subject}"
+    old = _short(accepted.get("findings_sha") or findings_mod.findings_sha(accepted.get("findings") or []))
+    sha = entry.get("findings_sha") or findings_mod.findings_sha(entry.get("findings") or [])
+    when = f" judged {accepted['judged_at']}" if accepted.get("judged_at") else ""
+    at = entry.get("reused_from") or review_at
+    latest = f"judged {at} " if at else ""
+    kind = "reused" if entry.get("reused_from") else "new"
+    if accepted.get("material") == entry.get("material"):
+        return (
+            f"other findings of the same material: accepted findings {old}{when}; the latest review shows findings "
+            f"{_short(sha)} {latest}({kind})"
+        )
+    text = (
+        f"other material: accepted on material {_short(accepted.get('material'))} with findings {old}{when}; the "
+        f"latest review shows material {_short(entry.get('material'))} with findings {_short(sha)} {latest}({kind})"
+    )
+    recorded = accepted.get("digests")
+    if isinstance(recorded, Mapping) and recorded:
+        if {str(k): str(v) for k, v in recorded.items()} != _bound_digests(subject, entry):
+            return f"{text}; its own spec changed"
+        return f"{text}; a prerequisite, its plan entry, its task marks or the review prompt changed"
+    return text
+
+
+def whys(state: PlanState, latest_review: Mapping[str, object], review_at: str | None) -> dict[str, str]:
+    """`why_not_holds` for each accepted subject whose acceptance does not hold on `latest_review`."""
+    held = holds(state, latest_review)
+    return {
+        s: why_not_holds(a, _entry_of(latest_review, s), review_at)
+        for s, a in state.accepted.items()
+        if not held.get(s)
+    }
 
 
 # --- the force acceptance (L4-YOLO-057, -060; design D4, D6) --------------------------------------------------------

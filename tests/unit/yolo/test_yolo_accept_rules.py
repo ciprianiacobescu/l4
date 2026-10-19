@@ -587,3 +587,76 @@ def test_force_line_holds_and_void():
         f"{A}: force-accepted without review by alex@example.com (judge down); "
         "no longer holds: its spec or the plan file changed"
     )
+
+
+# --- why an acceptance does not hold (L4-YOLO-066, design D9.2) -------------------------------------------------------
+
+SHA_OLD, SHA_NEW = "a" * 16, "b" * 16
+
+
+def given(**over):
+    return {
+        "subject": A, "material": "m1234567890", "findings_sha": SHA_OLD, "digests": {A: "d1"}, **over,
+    }  # fmt: skip
+
+
+def latest(**over):
+    return {"verdict": "NEEDS_REVISION", "digest": "d1", "material": "m1234567890", "findings_sha": SHA_NEW, **over}
+
+
+def test_why_not_holds_other_material_own_spec():
+    why = accept.why_not_holds(given(judged_at="t1"), latest(material="m9999999999", digest="d2"), "t2")
+    assert why == (
+        "other material: accepted on material m1234567 with findings aaaaaaaa judged t1; the latest review shows "
+        "material m9999999 with findings bbbbbbbb judged t2 (new); its own spec changed"
+    )
+
+
+def test_why_not_holds_other_material_prerequisite():
+    why = accept.why_not_holds(given(), latest(material="m9999999999", reused_from="t0"), "t2")
+    assert why == (
+        "other material: accepted on material m1234567 with findings aaaaaaaa; the latest review shows material "
+        "m9999999 with findings bbbbbbbb judged t0 (reused); a prerequisite, its plan entry, its task marks or the "
+        "review prompt changed"
+    )
+
+
+def test_why_not_holds_other_material_without_recorded_digests_has_no_cause():
+    why = accept.why_not_holds(given(digests=None), latest(material="m9999999999"), "t2")
+    assert why.endswith("judged t2 (new)") and "; its own spec" not in why and "prerequisite" not in why
+
+
+def test_why_not_holds_a_batch_compares_the_digests_of_its_units():
+    batch = {"subject": "batch:b1", "material": "m1", "findings_sha": SHA_OLD, "digests": {A: "d1", B: "d2"}}
+    same = {"material": "m2", "digests": {A: "d1", B: "d2"}, "findings_sha": SHA_NEW}
+    assert "prerequisite" in accept.why_not_holds(batch, same, None)
+    assert accept.why_not_holds(batch, {**same, "digests": {A: "d1", B: "d3"}}, None).endswith("its own spec changed")
+
+
+@pytest.mark.parametrize(
+    ("judged_at", "entry_over", "review_at", "want"),
+    [
+        (
+            "t1", {}, "t2",
+            "other findings of the same material: accepted findings aaaaaaaa judged t1; the latest review shows "
+            "findings bbbbbbbb judged t2 (new)",
+        ),
+        (
+            None, {"reused_from": "t0"}, "t2",
+            "other findings of the same material: accepted findings aaaaaaaa; the latest review shows findings "
+            "bbbbbbbb judged t0 (reused)",
+        ),
+        (
+            None, {}, None,
+            "other findings of the same material: accepted findings aaaaaaaa; the latest review shows findings "
+            "bbbbbbbb (new)",
+        ),
+    ],
+)  # fmt: skip
+def test_why_not_holds_other_findings_same_material(judged_at, entry_over, review_at, want):
+    accepted = given(**({"judged_at": judged_at} if judged_at else {}))
+    assert accept.why_not_holds(accepted, latest(**entry_over), review_at) == want
+
+
+def test_why_not_holds_no_entry():
+    assert accept.why_not_holds(given(), None, "t2") == f"no entry: the latest review does not judge {A}"

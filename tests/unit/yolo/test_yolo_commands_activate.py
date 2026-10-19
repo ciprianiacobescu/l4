@@ -409,7 +409,7 @@ def test_a_change_of_the_material_voids_the_acceptance(world, capsys):
     world.seed("p1", review(world, "2026-10-14T12:00:00Z", {A: entry(world, A, "NEEDS_REVISION", [TESTABILITY], "m3")}))
     err = refused(world, capsys)
     assert f"{A}: NEEDS_REVISION: testability:" in err
-    assert "(the acceptance by alex@example.com was for other material)" in err
+    assert "(the acceptance by alex@example.com was for other material: accepted on material m2 with findings " in err
     assert err.rstrip().endswith("Next: l4 yolo findings p1")
 
 

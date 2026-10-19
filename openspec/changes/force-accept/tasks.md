@@ -168,7 +168,7 @@ Every task follows these rules:
   `commands.run_review` `--local`, `review_worktree.run_review_worktree`) pass `state.accepted`. Run: both files and
   `tests/unit/yolo/test_yolo_cycle_review.py`.
 
-- [ ] 5.2 Hypothesis (ii) and the why-line. Tests first: `tests/unit/yolo/test_yolo_accept_rules.py`:
+- [x] 5.2 Hypothesis (ii) and the why-line. Tests first: `tests/unit/yolo/test_yolo_accept_rules.py`:
   `test_why_not_holds_other_material_own_spec`, `…_other_material_prerequisite`, `…_other_findings_same_material`
   (with and without `judged_at`, `reused` and `new`), `…_no_entry` (texts of D9.2);
   `tests/unit/yolo/test_yolo_review_worktree.py`: `test_a_fresh_dry_run_names_other_findings_and_record_keeps_the_ledger`

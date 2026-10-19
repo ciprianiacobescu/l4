@@ -336,6 +336,7 @@ class _Facts:
     holds: bool
     accept_available: bool
     accept_refusal: Any = None  # the `accept.Refusal` (message, fix) of a not-READY subject that cannot be accepted
+    why: str | None = None  # `accept.why_not_holds` of an acceptance that no longer holds
 
 
 def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
@@ -354,6 +355,7 @@ def _facts(
     accepted: Mapping[str, Mapping[str, Any]] | None,
     holds: Mapping[str, bool] | None,
     can_accept: Callable[[str], Any] | None,
+    why: Mapping[str, str] | None = None,
 ) -> list[_Facts]:
     out: list[_Facts] = []
     for subject, entry in _subjects(review):
@@ -390,6 +392,7 @@ def _facts(
                 holds=accept_holds,
                 accept_available=available,
                 accept_refusal=refusal,
+                why=(why or {}).get(subject) if accept and not accept_holds else None,
             )
         )
     return out
@@ -429,6 +432,7 @@ def render(
     holds: Mapping[str, bool] | None = None,
     can_accept: Callable[[str], Any] | None = None,
     only: str | None = None,
+    why: Mapping[str, str] | None = None,
 ) -> list[str]:
     """The text of `l4 yolo findings` for the latest review (`review` is the data of its `plan.reviewed` event;
     `history_of(subject)` is `history(...)` of the ledger). `can_accept(subject)` is the caller's `accept.check`:
@@ -436,7 +440,7 @@ def render(
     resolver = _resolver(plan_id, base, units)
     lines: list[str] = []
     for fact in _facts(
-        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept
+        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept, why=why
     ):
         lines.append(f"{fact.subject}: {fact.verdict}")
         shown = _by_severity(fact.findings)
@@ -458,7 +462,7 @@ def render(
         if fact.persistent:
             lines.append("  persistent: " + ", ".join(f"{c} ×{n}" for c, n in fact.persistent.items()))
         if fact.accepted is not None:
-            state = "holds" if fact.holds else "no longer holds: the material changed"
+            state = "holds" if fact.holds else f"no longer holds: it was for {fact.why or 'other material'}"
             lines.append(
                 f"  accepted by {fact.accepted.get('by')} ({fact.accepted.get('actor')}): "
                 f"{fact.accepted.get('reason')} ({state})"
@@ -482,13 +486,14 @@ def render_json(
     holds: Mapping[str, bool] | None = None,
     can_accept: Callable[[str], Any] | None = None,
     only: str | None = None,
+    why: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The same facts as `render`, as a JSON-serialisable document (`schema: l4/yolo-findings@1`). Every finding of a
     shown subject is listed, minor ones too, in the order of `render`."""
     resolver = _resolver(plan_id, base, units)
     subjects: list[dict[str, Any]] = []
     for fact in _facts(
-        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept
+        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept, why=why
     ):
         since = None
         if fact.since is not None:
@@ -527,6 +532,7 @@ def render_json(
                         "actor": fact.accepted.get("actor"),
                         "reason": fact.accepted.get("reason"),
                         "holds": fact.holds,
+                        "why": fact.why,
                     }
                     if fact.accepted is not None
                     else None

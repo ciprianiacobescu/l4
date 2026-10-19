@@ -609,3 +609,23 @@ def test_a_reuse_keeps_the_accepted_judgement_of_the_same_material(world, monkey
     assert world.l4("activate", "p1", "--reason", "go") == 0
     assert "accepted" in capsys.readouterr().out.lower()
     assert world.events()[-1].data["accepted"][A]["findings"] == [GAP]
+
+
+def test_a_fresh_dry_run_names_other_findings_and_record_keeps_the_ledger(world, monkeypatch, capsys):
+    """SCN-YOLO-174."""
+    accepted_ledger(world, monkeypatch, second=False)
+    capsys.readouterr()
+    judge(monkeypatch, answer("NEEDS_REVISION", [OTHER]))
+    world.l4("review", "p1", "--worktree", "--fresh", A)
+    out = capsys.readouterr().out
+    assert "no longer holds: it was for other findings of the same material: accepted findings " in out
+    assert f"accepted findings {findings_sha([GAP])[:8]}" in out
+    assert f"the latest review shows findings {findings_sha([OTHER])[:8]} judged " in out and "(new)" in out
+    assert "the material changed" not in out
+    none = judge(monkeypatch)  # no call allowed: the ledger answers, the local cache is not read
+    world.l4("review", "p1", "--worktree", "--record")
+    assert none.requests == []
+    data = _reviews(world)[-1].data
+    assert data["units"][A]["findings"] == [GAP] and data["units"][A]["reused_from"] == T1
+    capsys.readouterr()
+    assert world.l4("activate", "p1", "--reason", "go") == 0

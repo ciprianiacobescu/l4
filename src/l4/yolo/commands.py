@@ -420,7 +420,9 @@ def _review_view(
     stale = stale or any(w not in state.review for w in wanted)
     if stale:
         return ReviewView("stale", force=force, covered=covered)
-    latest: dict[str, Any] = next((e.data for e in reversed(events) if e.type == "plan.reviewed"), {})
+    latest_event = next((e for e in reversed(events) if e.type == "plan.reviewed"), None)
+    latest: dict[str, Any] = latest_event.data if latest_event is not None else {}
+    review_at = latest_event.at if latest_event is not None else None
     problems = []
     accepted: list[dict[str, Any]] = []
     held = accepting.holds(state, latest)
@@ -444,7 +446,8 @@ def _review_view(
         label = f"batch {ident}" if group == "batch" else name
         line = f"{label}: {verdict}: {_first_line(entry.get('findings'))}"
         if given is not None:
-            line += f" (the acceptance by {given.get('by')} was for other material)"
+            why = accepting.why_not_holds(given, accepting.entry_of(latest, name), review_at)
+            line += f" (the acceptance by {given.get('by')} was for {why})"
         problems.append(line)
     return ReviewView("current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered)
 
@@ -1977,6 +1980,7 @@ def run_findings(
         "units": _subject_infos(parsed, units),
         "accepted": state.accepted,
         "holds": accepting.holds(state, review),
+        "why": accepting.whys(state, review, _latest_review_at(read.events)),
         "can_accept": _acceptor(ctx, state, read.events, review),
         "only": subject,
     }
@@ -2300,6 +2304,7 @@ def _show_and_confirm(
     lines = fnd.render(
         plan_id, ctx.target, review, lambda name: fnd.history(events, name, PROMPT_VERSION), show_all=True,
         only=subject, accepted=state.accepted, holds=accepting.holds(state, review),
+        why=accepting.whys(state, review, _latest_review_at(events)),
     )  # fmt: skip
     for line in lines:
         ctx.say(line)
