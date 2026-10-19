@@ -172,7 +172,7 @@ Every task follows these rules:
 
 ## 6. The hello
 
-- [ ] 6.1 The hello runs the judge invocation (L4-KJD-007, design D7). Depends on 3.1 and 5.1. CHANGED: a profile with
+- [x] 6.1 The hello runs the judge invocation (L4-KJD-007, design D7). Depends on 3.1 and 5.1. CHANGED: a profile with
   no model runs `auto`.
   - Tests first in `tests/unit/availability/test_probes_kiro.py`: SCN-KJD-22 (a fake `ctx.run` that records argv, env
     and cwd, reads the agent file under the env's `KIRO_HOME` while it runs, and answers `2.28.0/hello.stream.jsonl`; a

@@ -1,4 +1,6 @@
+import dataclasses
 import json
+from pathlib import Path
 
 import pytest
 
@@ -90,7 +92,8 @@ def test_hello_is_the_final_text_of_the_stream(make_ctx):
     out, run = probe("hello", {**VERSION, ("chat",): CmdResult(0, stream, "")}, make_ctx)
     assert out.ok
     argv = run.calls[-1][0]
-    assert argv[1:4] == ["chat", "--no-interactive", "--trust-tools=read"] and "stream-json" in argv
+    assert argv[1:4] == ["chat", "--no-interactive", "--v2"] and "stream-json" in argv
+    assert not any(a.startswith("--trust") for a in argv) and argv[-1] == "Reply with exactly: L4-OK"
 
 
 def test_hello_reports_a_run_error_and_a_wrong_answer(make_ctx):
@@ -210,3 +213,85 @@ def test_scn_kjd_21_an_invalid_token_on_usage_fails_the_quota_step_as_auth(make_
     assert not out.ok and not out.skipped and out.failure_class == "auth"
     assert out.reason == "kiro-cli usage: authentication failed"
     assert "quota_unrecognised" not in out.detail
+
+
+# --- the hello runs the judge invocation (kiro-judge L4-KJD-007, task 6.1) ---
+
+
+def _recording_run(tmp_path, answer):
+    """A runner that answers the version check, records every other call and, while it runs, the agent file under the
+    env's KIRO_HOME, the contents of that home and of the working directory."""
+    seen = []
+
+    def run(argv, cwd, env, timeout):
+        if argv[1:] == ["--version"]:
+            return CmdResult(0, (R32 / "version.stdout.txt").read_text(), "")
+        home = env.get("KIRO_HOME")
+        agent = argv[argv.index("--agent") + 1] if "--agent" in argv else None
+        file = None
+        if home and agent:
+            path = Path(home) / "agents" / f"{agent}.json"
+            file = json.loads(path.read_text()) if path.is_file() else None
+        listing = sorted(str(p.relative_to(home)) for p in Path(home).rglob("*") if p.is_file()) if home else []
+        seen.append(
+            {
+                "argv": list(argv), "cwd": Path(cwd), "env": dict(env), "agent_file": file, "home_files": listing,
+                "cwd_files": sorted(p.name for p in Path(cwd).iterdir()), "agent": agent,
+            }
+        )  # fmt: skip
+        return answer
+
+    return run, seen
+
+
+@pytest.mark.parametrize("model", ["glm-5", None])
+def test_the_hello_runs_the_tool_less_judge_agent(make_ctx, tmp_path, model):
+    """SCN-KJD-22: the judge argv plus the hello prompt, no trust flag, an empty cwd, a private KIRO_HOME."""
+    ctx, _ = make_ctx({})
+    run, seen = _recording_run(tmp_path, CmdResult(0, (R28 / "hello.stream.jsonl").read_text(), ""))
+    ctx = dataclasses.replace(ctx, run=run)
+    profile = Profile(adapter="kiro-cli", model=model, vendor="zhipu") if model else Profile(adapter="kiro-cli")
+    out = KiroCliAdapter().probe(profile, "hello", ctx)
+    assert out.ok
+    (call,) = seen
+    expected = model or "auto"
+    argv = call["argv"]
+    assert argv[1:] == [
+        "chat", "--no-interactive", "--v2", "--agent", call["agent"], "--model", expected,
+        "--output-format", "stream-json", ctx.hello_prompt,
+    ]  # fmt: skip
+    assert call["agent"].startswith("l4-judge-")
+    assert not any("trust" in a for a in argv)
+    assert call["cwd_files"] == [] and call["cwd"].parent.name.startswith("l4-kiro-probe-")
+    assert call["home_files"] == [f"agents/{call['agent']}.json", "settings/cli.json"]
+    assert call["agent_file"]["model"] == expected and call["agent_file"]["tools"] == []
+    assert "KIRO_LOG_LEVEL" not in call["env"]
+    assert not call["cwd"].parent.exists()  # the private directory is gone
+
+
+def test_the_hello_makes_no_model_listing_call(make_ctx, tmp_path):
+    ctx, _ = make_ctx({})
+    run, seen = _recording_run(tmp_path, CmdResult(0, (R28 / "hello.stream.jsonl").read_text(), ""))
+    KiroCliAdapter().probe(Profile(adapter="kiro-cli"), "hello", dataclasses.replace(ctx, run=run))
+    assert all("--list-models" not in c["argv"] for c in seen)
+
+
+def test_a_hello_with_an_invalid_key_is_an_auth_failure(make_ctx):
+    """SCN-KJD-23."""
+    stream = (R32 / "auth-invalid-key.stream.jsonl").read_text()
+    out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(1, stream, "")}, make_ctx)
+    assert not out.ok and out.failure_class == "auth" and out.limit is None
+
+
+def test_a_throttle_that_also_says_access_denied_stays_a_limit(make_ctx):
+    stream = (
+        '{"type":"runError","data":{"stage":"prompt","message":"The request was throttled by the service: '
+        'AccessDenied"}}'
+    )
+    out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(1, stream, "")}, make_ctx)
+    assert out.failure_class == "limit"
+
+
+def test_a_hello_with_no_stream_that_asks_for_a_login_is_an_auth_failure(make_ctx):
+    out, _ = probe("hello", {**VERSION, ("chat",): CmdResult(1, "", "run kiro-cli login")}, make_ctx)
+    assert not out.ok and out.failure_class == "auth"

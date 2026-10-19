@@ -24,6 +24,7 @@ import json
 import re
 import secrets
 import shutil
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -132,10 +133,7 @@ class KiroCliAdapter:
         model = effective_model(profile)
         if req.permission_policy.mode == "judge":
             assert harness_agent is not None
-            return [
-                exe, "chat", "--no-interactive", "--v2", "--agent", harness_agent, "--model", model,
-                "--output-format", "stream-json",
-            ]  # fmt: skip
+            return judge_argv(exe, harness_agent, model)
         if len(req.prompt.encode("utf-8")) > MAX_ARG_BYTES:
             raise AdapterError("the prompt is too large to pass as one argument to kiro-cli")
         if harness_agent is not None:
@@ -363,6 +361,13 @@ def effective_model(profile: Profile) -> str:
     return AUTO_MODEL if not model or model.lower() == AUTO_MODEL else model
 
 
+def judge_argv(exe: str, agent: str, model: str) -> list[str]:
+    """The judge argv (D1): no prompt (stdin carries it, or the hello appends it) and no trust flag."""
+    return [
+        exe, "chat", "--no-interactive", "--v2", "--agent", agent, "--model", model, "--output-format", "stream-json",
+    ]  # fmt: skip
+
+
 def judge_agent_config(name: str, model: str) -> dict[str, Any]:
     """The agent file of a judge (D1): no tool, no server, no resource, no hook, the given model."""
     return {
@@ -467,19 +472,33 @@ def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
         return _with_routed(checked, profile, exe, env, ctx)
     if step == "quota":
         return kiro_quota(profile, exe, env, ctx)
-    argv = [exe, "chat", "--no-interactive", "--trust-tools=read"]  # no tool is needed to say the word; shell is denied
-    if profile.model:
-        argv += ["--model", profile.model]
-    argv += ["--output-format", "stream-json", ctx.hello_prompt]
-    done, millis = _timed(ctx, argv, env)
+    # D7: the hello is the judge invocation, from a private KIRO_HOME and an empty cwd, with the prompt as the last
+    # argument (the probe runner has no stdin).
+    with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-kiro-probe-") as tmp:
+        base = Path(tmp)
+        (base / "cwd").mkdir()
+        agent = JUDGE_PREFIX + secrets.token_hex(6)
+        home = write_judge_home(base / KIRO_HOME_DIR, agent, effective_model(profile))
+        argv = [*judge_argv(exe, agent, effective_model(profile)), ctx.hello_prompt]
+        hello_env = {**env, "KIRO_HOME": str(home)}
+        hello_env.pop("KIRO_LOG_LEVEL", None)
+        done, millis = _timed(ctx, argv, hello_env, base / "cwd")
+    lines = (done.stdout or "").splitlines()
     facts = stream_facts(stream_events(done.stdout or ""))
+    run_error = facts.get("run_error")
     failure, kind = None, None
     limit = None
-    if "run_error" in facts:
-        stage, message = facts["run_error"]
+    if run_error is not None:
+        stage, message = run_error
         failure, kind = f"kiro-cli reported runError ({stage or 'unknown'})", text_class(message)
         if _THROTTLE_WORDS.search(message):
             limit = throttle_signal(message, ctx.now() if ctx.now else datetime.now(UTC))
+        elif _CREDITS_WORDS.search(message) and _EXHAUSTED_WORDS.search(message):
+            limit = LimitSignal("kiro-cli", None, "credits", None, "kiro.run_error", "")
+        elif _auth_failed(run_error, done.returncode, lines, done.stderr):
+            failure, kind = AUTH_DETAIL, "auth"
+    elif _auth_failed(None, done.returncode, lines, done.stderr):
+        failure, kind = AUTH_DETAIL, "auth"
     elif done.returncode not in (0, 124):
         failure, kind = f"kiro-cli exited with code {done.returncode}", "transient"
     return _hello_verdict(facts.get("final_text"), millis, done.returncode == 124, failure, limit, kind)
