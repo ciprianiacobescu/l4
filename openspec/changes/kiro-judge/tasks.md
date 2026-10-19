@@ -21,7 +21,7 @@ Every task follows these rules:
 
 ## 0. Fixtures
 
-- [ ] 0.1 The kiro-cli 2.32.0 shapes (L4-KJD-010). No dependency.
+- [x] 0.1 The kiro-cli 2.32.0 shapes (L4-KJD-010). No dependency.
   - Write `tests/fixtures/recorded/kiro-cli/2.32.0/` exactly as design §2.4 lists: `auth-invalid-key.stream.jsonl` and
     `.exit.txt`, `input-missing.stream.jsonl` and `.exit.txt`, `no-login.stdout.txt`, `.stderr.txt` and `.exit.txt`,
     `usage-invalid-key.stdout.txt`, `whoami-api-key.stdout.txt`, `version.stdout.txt`, `judge-agent.json`,
