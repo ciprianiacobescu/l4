@@ -145,7 +145,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 4. Group B: judge roles at load (design D6; L4-CFG-006)
 
-- [x] 4.1 Tests first:
+- [ ] 4.1 Tests first:
   - New `tests/unit/config/test_judge_roles.py`:
     `test_a_kiro_cli_judge_fails_at_load_by_name` (SCN-CFG-05: `load_config_text` raises `ConfigSchemaError` whose text
     equals the D6 message for `kiro`/`judges` plus ` at $`);
@@ -174,7 +174,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 5. Group B: what a review read, and the staleness module (design D1, D2; L4-YOLO-068)
 
-- [ ] 5.1 Tests first, new `tests/unit/yolo/test_yolo_staleness.py`, on a scratch git repository (`tmp_path`, `git
+- [x] 5.1 Tests first, new `tests/unit/yolo/test_yolo_staleness.py`, on a scratch git repository (`tmp_path`, `git
   init`, a bare `origin`, commits with fixed author env):
   - `file_digests`: a folder with `tasks.md`, `spec.md`, `verification.md`, `.l4/x`: the keys leave out the harness
     files, and a check-mark change gives the same value for `tasks.md`; `unit_digest` of every existing digest test
