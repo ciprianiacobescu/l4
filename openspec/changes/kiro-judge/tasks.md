@@ -130,7 +130,7 @@ Every task follows these rules:
 
 ## 4. The Kiro judge reply
 
-- [ ] 4.1 Parse a judge run; the served model (L4-KJD-003, L4-KJD-015, design D3, D15). Depends on 1.3, 2.1 and 3.1.
+- [x] 4.1 Parse a judge run; the served model (L4-KJD-003, L4-KJD-015, design D3, D15). Depends on 1.3, 2.1 and 3.1.
   CHANGED: the session file gives the served model under `auto`; the stderr warning; `model_mismatch` plumbing.
   - Tests first in `tests/unit/agents/test_kiro_judge.py`: SCN-KJD-06 (the `judge-pass` fixture through `parse(…,
     judge=True, schema=JUDGE_SCHEMA)`: `ok`, the object, `model_resolved` None, credits 0.0512), SCN-KJD-07 (through

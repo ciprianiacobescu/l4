@@ -222,6 +222,9 @@ class JudgeSeat:
 def seat_of(selected: Selected) -> JudgeSeat:
     reports = selected.impl.capabilities().served_model
     model = selected.profile.model
+    if selected.profile.adapter == "kiro-cli":  # any pinned model is checked against the session file (L4-KJD-015)
+        pinned = (model or "").strip()
+        return JudgeSeat(pinned if reports and pinned and pinned.lower() != "auto" else None, reports)
     return JudgeSeat(model if reports and is_full_model_id(model) else None, reports)
 
 

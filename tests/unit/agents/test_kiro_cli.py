@@ -96,10 +96,10 @@ def test_other_exit_codes_timeouts_and_interrupts(tmp_path):
     assert adapter.parse([], exit_code=0, raw_events_path=tmp_path / "e", interrupted=True).status == "cancelled"
 
 
-def test_the_run_is_experimental_and_does_not_report_the_served_model():
+def test_the_run_is_experimental_and_a_judge_run_may_report_the_served_model():
     assert KiroCliAdapter.experimental is True and KiroCliAdapter.model_unverified is True
     caps = KiroCliAdapter().capabilities()
-    assert caps.schema_mode == "prompt_contract" and not caps.resume and not caps.served_model
+    assert caps.schema_mode == "prompt_contract" and not caps.resume and caps.served_model
 
 
 R28 = Path(__file__).parents[2] / "fixtures" / "recorded" / "kiro-cli" / "2.28.0"

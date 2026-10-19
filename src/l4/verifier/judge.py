@@ -42,6 +42,7 @@ PROMPT_VERSION = (
 )
 NOT_IN_PART = "not in this part"  # what a part's reply says of an item whose code is in another part (L4-VER-041)
 MAX_REPAIR_ECHO_CHARS = 8_000
+MODEL_MISMATCH_DETAIL = "model_mismatch:"  # the detail of an adapter that ran another model than the profile names
 MAX_CALLS = 2  # the first answer and one repair or retry
 MAX_RETRY_PROBLEM_CHARS = 800  # the validation error a retry shows the judge (paths and rules, never values)
 
@@ -635,6 +636,8 @@ def run_judge(
             assert result.run is not None
             raise RoleLimit(result.run)
         status, detail, verdict, repaired = _classify(result)
+        if status == "error" and detail.startswith(MODEL_MISMATCH_DETAIL):  # an adapter that could not set the model
+            status = "model_mismatch"
         out.calls, out.detail, out.verdict, out.repaired = call, detail, verdict, repaired
         out.model_resolved = result.model_resolved or out.model_resolved
         out.cost_usd = (out.cost_usd or 0.0) + (result.usage.cost_usd or 0.0)
@@ -645,6 +648,8 @@ def run_judge(
             out.status, out.verdict = "model_mismatch", None
             out.detail = f"requested {expect_model}, served {result.model_resolved}"
             return out
+        if status == "model_mismatch":
+            return out if kept is None else replace(kept, calls=out.calls, cost_usd=out.cost_usd)
         if status == "ok":
             out.reply = "retried" if retried else ("repaired" if repaired else "valid")
             assert verdict is not None

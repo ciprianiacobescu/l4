@@ -371,3 +371,22 @@ def test_the_factory_knows_the_latest_recorded_set_whatever_its_age(tmp_path):
     f.availability.probes.put("other", "id", report.to_json(), datetime(2026, 10, 4, 11, 30, tzinfo=UTC))
     assert f.routed("kiro-auto", profile) == grown
     assert f.routed("kiro-auto-2", profile) == ROUTED_DEFAULT  # another profile's record is not this one's
+
+
+# --- the judge seat of a kiro-cli profile (kiro-judge 4.1, L4-KJD-015) ---
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [("glm-5", "glm-5"), ("claude-sonnet-5.5", "claude-sonnet-5.5"), (None, None), ("AUTO", None)],
+)
+def test_seat_of_a_kiro_profile_expects_its_pinned_model_and_reports_served(model, expected):
+    from types import SimpleNamespace
+
+    from l4.agents.kiro_cli import KiroCliAdapter
+    from l4.config.schema import Profile
+    from l4.verifier.selection import seat_of
+
+    selected = SimpleNamespace(impl=KiroCliAdapter(), profile=Profile(adapter="kiro-cli", model=model))
+    seat = seat_of(selected)  # type: ignore[arg-type]
+    assert seat.reports_served is True and seat.expect_model == expected

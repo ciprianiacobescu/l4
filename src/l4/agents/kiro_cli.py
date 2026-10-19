@@ -11,8 +11,9 @@ from a private `KIRO_HOME` with no trust flag and its prompt on stdin:
     kiro-cli chat --no-interactive --v2 --agent A --model M --output-format stream-json
 
 The stream-json events (`runStarted`, `metadata`, `sessionUpdate`, `runFinished`, `runError`) are recorded and parsed
-for the session id, the final text and a `runError`; the stream never says which model served the run. The result is
-still a prompt contract (the file `$L4_RESULT_PATH` names) and the run is announced once as `agent.experimental`.
+for the session id, the final text and a `runError`; the stream never says which model served the run (a judge run
+reads it from the session file, D15). The result is still a prompt contract (the file `$L4_RESULT_PATH` names) and the
+run is announced once as `agent.experimental`.
 Open: the harness agent for the judge and read-only modes (K3, K13), the `~/.kiro` credential mount that the private
 `KIRO_HOME` makes unnecessary for an implementer step (K5), `--resume-id`, and exit 4 as a configuration failure that
 falls back (K8).
@@ -43,7 +44,8 @@ from l4.agents.base import (
     read_result_file,
     wrap_command,
 )
-from l4.agents.contract import attach_file_result
+from l4.agents.claude_code import STRUCTURED_DETAIL
+from l4.agents.contract import attach_file_result, attach_judge_reply
 from l4.agents.credentials import credential_loader
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import excerpt, parse_reset
@@ -58,8 +60,9 @@ from l4.availability.probes import (
     text_class,
 )
 from l4.availability.quota import kiro_quota
-from l4.availability.vendor import built_in_with_reason, is_routed, routed_from_listing
+from l4.availability.vendor import built_in_with_reason, is_routed, normalise_model, routed_from_listing
 from l4.config.schema import Profile
+from l4.fsutil import read_regular_file
 from l4.safepath import resolve_tool
 
 MCP_STARTUP_EXIT = 3  # SPEC 8.3, [V doc]
@@ -85,6 +88,12 @@ JUDGE_SETTINGS = {
     "chat.enableAutoAgentUpgrade": False, "app.disableAutoupdates": True,
 }  # fmt: skip
 AUTO_MODEL = "auto"
+SESSION_LIMIT = 1_048_576  # the session file of R11 is read up to 1 MiB (D15)
+STDERR_LIMIT = 262_144
+_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+# R20 is not recorded yet: a standard-error line that mentions the model together with one of these says that Kiro could
+# not set the requested model (D15).
+_MODEL_WARNING = re.compile(r"warn|could not|cannot|can't|unable|unavailable|not available|failed|fall", re.I)
 _CREDITS_WORDS = re.compile(r"credit", re.I)
 # Kiro FREE-tier throttling: `runError` (stage "prompt" or "turn") with "Internal error (code -32603): ... The
 # request was throttled by the service" [V, dummy-agentic job 6146]. It is a rate limit like a 429: the profile cools
@@ -108,7 +117,7 @@ class KiroCliAdapter:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def capabilities(self) -> AgentCaps:
-        return AgentCaps("prompt_contract", False, False, False, False, False, False, True)
+        return AgentCaps("prompt_contract", False, False, False, False, False, False, True, served_model=True)
 
     def probe(self, profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
         return probe_kiro(profile, step, ctx)
@@ -146,10 +155,11 @@ class KiroCliAdapter:
         req.result_path.unlink(missing_ok=True)  # a leftover from an earlier step must not pass for this one's result
         env = dict(req.env)
         agent = None
+        home: Path | None = None
         if judge:
             agent = JUDGE_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a known name
-            home = req.result_path.parent / KIRO_HOME_DIR
-            env["KIRO_HOME"] = str(write_judge_home(home, agent, effective_model(req.profile)))
+            home = write_judge_home(req.result_path.parent / KIRO_HOME_DIR, agent, effective_model(req.profile))
+            env["KIRO_HOME"] = str(home)
             env.pop("KIRO_LOG_LEVEL", None)  # a trace log holds the whole prompt (R8)
         elif req.permission_policy.mode == "implement" and not req.profile.options.get("agent"):
             agent = AGENT_PREFIX + secrets.token_hex(6)  # a workspace `.kiro/agents/<name>.json` shadows a known name
@@ -168,10 +178,12 @@ class KiroCliAdapter:
             lines = req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             lines = []
+        stderr_text = _read_stderr(req.raw_events_path.with_suffix(".stderr")) if judge else None
         return self.parse(
             lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
-            interrupted=outcome.interrupted, result_text=read_result_file(req.result_path), schema=req.result_schema,
-            raw_events_path=req.raw_events_path,
+            interrupted=outcome.interrupted, result_text=None if judge else read_result_file(req.result_path),
+            schema=req.result_schema, raw_events_path=req.raw_events_path, judge=judge, kiro_home=home,
+            model=effective_model(req.profile), stderr_text=stderr_text,
         )  # fmt: skip
 
     def parse(
@@ -184,10 +196,16 @@ class KiroCliAdapter:
         interrupted: bool = False,
         result_text: str | None = None,
         schema: dict[str, Any] | None = None,
+        judge: bool = False,
+        kiro_home: Path | None = None,
+        model: str | None = None,
+        stderr_text: str | None = None,
     ) -> RunResult:
         """The exit code and the result file decide; the stream (`lines`, kiro-cli 2.28.0 stream-json) adds the session
         id, the final text and a `runError`: its stage goes into the detail, its message does not (it is kept in the
-        raw events file), and a message that says the credits are used up is a credits limit, not a failed attempt."""
+        raw events file), and a message that says the credits are used up is a credits limit, not a failed attempt.
+        A judge run (`judge`) has no result file: its reply is the stream's text (D3), and `kiro_home`, `model` (the
+        profile's, `auto` or None for none) and `stderr_text` give the served model and the model warning (D15)."""
         facts = stream_facts(stream_events("\n".join(lines)))
         result = RunResult(status="error", raw_events_path=raw_events_path, exit_code=exit_code)
         result.session_id, result.final_text = facts.get("session_id"), facts.get("final_text")
@@ -219,9 +237,80 @@ class KiroCliAdapter:
             result.detail = f"kiro-cli exited with code {exit_code}" + (
                 f" (runError at {run_error[0] or 'unknown'})" if run_error else ""
             )
+        elif judge:
+            self._judge_reply(result, facts, schema, kiro_home, model, stderr_text)
         else:
             attach_file_result(result, result_text, schema, "kiro-cli")
         return result
+
+    @staticmethod
+    def _judge_reply(
+        result: RunResult,
+        facts: dict[str, Any],
+        schema: dict[str, Any] | None,
+        kiro_home: Path | None,
+        model: str | None,
+        stderr_text: str | None,
+    ) -> None:
+        """A judge run that exited 0 (D3, D15): never a verdict after a tool call, on another engine or on another
+        selected model; else the reply text sliced into the verdict object."""
+        pinned = None if not model or model.strip().lower() == AUTO_MODEL else model.strip()
+        if facts.get("tool_name") is not None:
+            result.detail = f"kiro-cli judge called a tool ({facts['tool_name']})"
+            return
+        engine = facts.get("engine")
+        if engine is not None and engine != "v2":
+            result.detail = f"kiro-cli ran engine {engine}; a judge runs v2"
+            return
+        served = _served_model(kiro_home, result.session_id)
+        if served is not None:
+            result.model_resolved = served
+        if pinned and served is not None and normalise_model(served) != normalise_model(pinned):
+            result.detail = f"model_mismatch: kiro-cli selected {served}, the profile names {pinned}"
+            return
+        if (
+            pinned
+            and stderr_text
+            and any("model" in line.lower() and _MODEL_WARNING.search(line) for line in stderr_text.splitlines())
+        ):
+            result.detail = f"model_mismatch: kiro-cli could not set {pinned}"
+            return
+        if facts.get("status") != "success":
+            result.detail = f"kiro-cli judge run did not finish (status {facts.get('status') or 'none'})"
+            return
+        text = facts.get("final_text")
+        if facts.get("final_truncated") or text is None:
+            text = facts.get("all_text")
+        attach_judge_reply(result, text, schema)
+        stop = facts.get("stop_reason")
+        missing = result.structured is None and result.detail.startswith(STRUCTURED_DETAIL + " missing:")
+        if missing and isinstance(stop, str) and stop and stop != "end_turn":
+            result.detail = f"{STRUCTURED_DETAIL} missing: the reply stopped at {stop}"
+
+
+def _read_stderr(path: Path) -> str:
+    try:
+        return read_regular_file(path, limit=STDERR_LIMIT).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _served_model(home: Path | None, session_id: str | None) -> str | None:
+    """`session_state.rts_model_state.model_info.model_id` of the run's session file (R11), when it is a regular file of
+    at most 1 MiB and names a concrete model (not empty, not `auto`); else None (D15)."""
+    if home is None or not session_id or not _SESSION_ID.match(session_id):
+        return None
+    try:
+        data = json.loads(read_regular_file(home / "sessions" / "cli" / f"{session_id}.json", limit=SESSION_LIMIT))
+    except (OSError, ValueError):
+        return None
+    try:
+        model_id = data["session_state"]["rts_model_state"]["model_info"]["model_id"]
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(model_id, str) or not model_id.strip() or model_id.strip().lower() == AUTO_MODEL:
+        return None
+    return model_id.strip()
 
 
 def throttle_signal(message: str, now: datetime) -> LimitSignal:
@@ -300,8 +389,11 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     `metadata.contextUsagePercentage`."""
     facts: dict[str, Any] = {}
     chunks: list[str] = []
+    every: list[str] = []
     for event in events:
         data = event["data"]
+        if event["type"] == "runStarted" and isinstance(data.get("engine"), str):
+            facts["engine"] = data["engine"]
         percent = data.get("contextUsagePercentage") if event["type"] == "metadata" else None
         if isinstance(percent, int | float) and not isinstance(percent, bool):
             facts["context_peak_percent"] = max(float(percent), facts.get("context_peak_percent", 0.0))
@@ -309,10 +401,13 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if isinstance(update, dict):
             kind = update.get("sessionUpdate")
             content = update.get("content")
+            if kind == "tool_call" and "tool_name" not in facts:
+                facts["tool_name"] = _tool_name(update)
             if kind in ("tool_call", "tool_call_update"):
                 chunks.clear()
             elif kind == "agent_message_chunk" and isinstance(content, dict) and isinstance(content.get("text"), str):
                 chunks.append(content["text"])
+                every.append(content["text"])
         for meter in data.get("meteringUsage") or []:
             value = meter.get("value") if isinstance(meter, dict) else None
             if isinstance(value, int | float) and not isinstance(value, bool) and meter.get("unit") == "credit":
@@ -322,11 +417,25 @@ def stream_facts(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if event["type"] == "runFinished":
             facts["status"] = data.get("status")
             facts["final_text"] = data.get("finalText") if isinstance(data.get("finalText"), str) else None
+            facts["final_truncated"] = data.get("finalTextTruncated") is True
+            facts["stop_reason"] = data.get("stopReason") if isinstance(data.get("stopReason"), str) else None
         elif event["type"] == "runError":
             facts["run_error"] = (str(data.get("stage", "")), str(data.get("message", "")))
     if text := "".join(chunks):
         facts["last_message"] = text
+    if text := "".join(every):
+        facts["all_text"] = text
     return facts
+
+
+def _tool_name(update: Mapping[str, Any]) -> str:
+    """The tool of a `tool_call` update: `_meta.kiro.toolName`, else its `title`, else `unknown`."""
+    meta = update.get("_meta")
+    kiro = meta.get("kiro") if isinstance(meta, dict) else None
+    for name in (kiro.get("toolName") if isinstance(kiro, dict) else None, update.get("title")):
+        if isinstance(name, str) and name:
+            return name
+    return "unknown"
 
 
 def probe_kiro(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
