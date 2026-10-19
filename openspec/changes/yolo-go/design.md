@@ -370,6 +370,15 @@ L4-MCP-003 lists it under Write.
 
 ## Contracts (what the tasks share; do not change one without the orchestrator)
 
+How `go` reaches the existing code (the tests' patches depend on it): `go` determines the caller as
+`accepting.actor(ctx.app.environ, commands._stdin_tty())` and calls `commands._sync`, `commands.run_review`,
+`commands.run_accept`, `commands.run_activate` and `commands._confirm` through the module attribute (`from l4.yolo
+import commands` then `commands.run_accept(...)`), never through a `from l4.yolo.commands import run_accept`, so that
+a test's `monkeypatch.setattr("l4.yolo.commands.<name>", …)` reaches `go` (the `person` and `agent` helpers patch
+`l4.yolo.commands._stdin_tty` and `l4.yolo.commands.click.prompt` [V]). The `_relay` writer is an `io.TextIOBase`
+subclass (`writable()` true, `write` returns the length), installed with `contextlib.redirect_stdout`, so that
+`click.echo` resolves it as stdout at each call.
+
 New, `src/l4/yolo/go.py`:
 - `class GoStop(IntEnum)`: `ACTIVE = 0`, `PREFLIGHT = 20`, `PUSH = 21`, `NOT_ADMITTED = 22`, `PLAN_STATE = 23`,
   `REVIEW_PENDING = 24`, `REVIEW_FAILED = 25`, `FINDINGS = 26`, `PERSON = 27`, `REFUSED = 28`, `NOT_CONFIRMED = 29`
@@ -436,3 +445,18 @@ Changed (behaviour unchanged for their own commands):
 - `go` fetches several times (each called command runs `_sync`) [V]: seconds per run, accepted for reuse.
 - The hand-off scope may stop an agent's legitimate push (a fix of another plan's spec): it then is a person's push,
   named as such.
+
+## Open questions (for the owner; the design follows the recommendation until answered)
+
+1. **Stop codes 20 to 29, or the existing codes?** The brief asks for a distinct code per stop. The design keeps a
+   separate `GoStop` enum (20..29) returned through `CommandResult(code=int)`: `ExitCode`, `SEVERITY_ORDER`,
+   `CI_ALLOWED`, `map_exit` and their tests do not change, and L4-CLI-001 gains one sentence. The alternative reuses
+   0/2/10/11/12 and lets `step_reached` tell the stops apart, at the price of "distinct". Recommendation: keep 20..29.
+2. **An agent's push: the hand-off scope, or a key `yolo.push_by_agents`?** The design lets an agent's `go` push only
+   the plan file and the plan's unit folders, with no key (D12). A key defaulting to false would stop every agent at
+   the push the skill already makes it do; one defaulting to true would bind `go` and not `git push`. Recommendation:
+   the scope rule, no key.
+3. **A prompt before the activation?** `l4 yolo activate` asks nothing, so `go` asks nothing before it either (D8):
+   one command means one decision, the `--reason`. The alternative types the plan id before `go` activates (`--yes`
+   to skip), which protects a person who runs `go` only to look, at the price of a prompt on every person's run.
+   Recommendation: no prompt; the docs name `l4 yolo status` as the read-only view, and an agent never activates.

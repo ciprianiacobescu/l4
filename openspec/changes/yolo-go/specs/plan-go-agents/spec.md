@@ -26,7 +26,7 @@ activates.
 
 #### Scenario: SCN-YOLO-237 (+) The MCP tool runs go read-mostly
 - **GIVEN** the MCP server's tool list
-- **WHEN** `l4_plan_go` is called with `plan: p1`, `reason: R` and `wait: 0`
+- **WHEN** `l4_plan_go` is called with `plan: "p1"`, `reason: "R"` and `wait: "0"` (`wait` is a string parameter)
 - **THEN** it runs `l4 yolo go --json --reason=R --wait=0 --no-push -- p1` with `AI_AGENT=l4-mcp` and no terminal, its
   schema has no `accept_findings`, `force`, `yes` or `local`, its description says it never pushes, accepts or
   activates, and no tool of the list runs `yolo accept` or `yolo activate`
