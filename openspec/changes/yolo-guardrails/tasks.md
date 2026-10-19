@@ -190,7 +190,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   Code: `src/l4/yolo/digest.py` (`_entries`, `file_digests`; `unit_digest` uses `_entries`), new
   `src/l4/yolo/staleness.py`. Run: that file and `tests/unit/yolo/test_yolo_digest*.py`.
 
-- [x] 5.2 Every review records what it read (SCN-YOLO-183). Tests first:
+- [ ] 5.2 Every review records what it read (SCN-YOLO-183). Tests first:
   `tests/unit/yolo/test_yolo_staleness_messages.py` (new; it uses the `world` of `yolo_cmd_world.py`):
   `test_a_local_review_records_target_rev_and_unit_revs`; `tests/unit/yolo/test_yolo_review_worktree.py`:
   `test_record_writes_target_rev_and_unit_revs` (after the push of 7.1's helper; write it in 7.1 if that helper is not
@@ -200,7 +200,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 6. Group B: the messages (design D1: M1 to M5, M11 to M13)
 
-- [x] 6.1 Activate, status and the CI review (M1 to M4). Tests first, `tests/unit/yolo/test_yolo_staleness_messages.py`:
+- [ ] 6.1 Activate, status and the CI review (M1 to M4). Tests first, `tests/unit/yolo/test_yolo_staleness_messages.py`:
   `test_a_stale_activation_names_the_spec_its_digests_and_files` (SCN-YOLO-177), `…_the_plan_file` (SCN-YOLO-178),
   `…_an_unpushed_commit_and_the_push` (SCN-YOLO-179), `test_status_shows_the_same_causes` (SCN-YOLO-180, text and
   JSON, and no `review.stale` key for a current review), `test_a_prompt_change_names_both_versions` (SCN-YOLO-181),
@@ -216,12 +216,12 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   `view.kind == "stale"`. Do not change `_review_view` or `ReviewView`. Run: the three files and
   `tests/unit/yolo/test_yolo_status_activity.py`.
 
-- [x] 6.2 The plan file that is not on origin (M5, SCN-YOLO-182). Tests first, same new file:
+- [ ] 6.2 The plan file that is not on origin (M5, SCN-YOLO-182). Tests first, same new file:
   `test_a_plan_file_only_in_head_says_push`, `test_a_plan_file_only_in_the_working_tree_says_commit_and_push`,
   `test_no_plan_file_anywhere_keeps_the_old_text` (only ` (<sha7>)` is added). Code: `commands._file`. Run: that file,
   `tests/unit/yolo/test_yolo_commands_activate.py`, `tests/unit/yolo/test_yolo_check_worktree.py`.
 
-- [x] 6.3 The stop details (M11 to M13, SCN-YOLO-184). Tests first, `tests/unit/yolo/test_yolo_cycle_active.py` (or a
+- [ ] 6.3 The stop details (M11 to M13, SCN-YOLO-184). Tests first, `tests/unit/yolo/test_yolo_cycle_active.py` (or a
   new `tests/unit/yolo/test_yolo_cycle_stop_details.py` with `CycleWorld`):
   `test_a_spec_change_after_the_activation_is_named_in_the_stop_detail` (a review event seeded with `unit_revs`, the
   activation, a pushed change of `spec.md`: the detail is the M12 text with `changed:`),
@@ -233,7 +233,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 7. Group B: --record reviews what origin holds; the CI review warns (design D3, D4; L4-YOLO-069, -070)
 
-- [x] 7.1 Tests first, new `tests/unit/yolo/test_yolo_record_origin.py` (the worlds and helpers of
+- [ ] 7.1 Tests first, new `tests/unit/yolo/test_yolo_record_origin.py` (the worlds and helpers of
   `test_yolo_review_worktree.py`; add a helper `push_edit(world)` = `commit_edit(world)` then
   `world.clone.run("push", "-q", "origin", "HEAD:main")`):
   `test_a_record_with_head_ahead_is_refused_before_any_judge_call` (SCN-YOLO-185: `judge(monkeypatch)` with no answer,
@@ -250,7 +250,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
   Code: `review_worktree.run_review_worktree` (D3 checks 1 and 2 after the uncommitted check and before
   `worktree.snapshot`; M8, M9, M10). Run: the two files and `tests/unit/yolo/test_yolo_contract.py`.
 
-- [x] 7.2 The CI review warns (SCN-YOLO-190, -191). Tests first, `tests/unit/yolo/test_yolo_record_origin.py`:
+- [ ] 7.2 The CI review warns (SCN-YOLO-190, -191). Tests first, `tests/unit/yolo/test_yolo_record_origin.py`:
   `test_the_ci_review_warns_about_an_unpushed_plan_commit`, `test_local_warns_too` (with `fake_judge` or the `judge`
   helper), `test_an_unrelated_unpushed_commit_gives_no_warning`, `test_head_behind_gives_no_warning` (exit codes
   unchanged). Code: `commands.run_review` (D4, before any other line). Run: that file and
@@ -258,7 +258,7 @@ batch `b1`, `plan_doc`, `ev`, `world.push`, `world.push_plan`, `world.pull`, `wo
 
 ## 8. Group B: `scripts/yolo_preflight.py` (design D10; L4-SKL-005)
 
-- [ ] 8.1 Tests first, new `tests/unit/yolo/test_yolo_preflight_script.py`, on the model of
+- [x] 8.1 Tests first, new `tests/unit/yolo/test_yolo_preflight_script.py`, on the model of
   `tests/unit/yolo/test_yolo_validate_plan.py`. It runs the script as `[sys.executable, "-I", SCRIPT, "p1", "--repo",
   …]` with a controlled `env`: `PATH` = a `tmp_path` bin folder plus the system git's folder, `HOME`, and the fixed git
   identity variables.
