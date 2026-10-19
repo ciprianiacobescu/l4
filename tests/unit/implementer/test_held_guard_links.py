@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from l4.implementer import held_patch
 from l4.implementer.held_patch import APPLY_FLAGS, GIT_PLAIN, ReplayGuard, arm_replay_guard, restore_replay
 
 from .conftest import Bench
@@ -78,10 +79,7 @@ def replayed(bench: Bench, patch: dict, *, base: dict | None = None, delete: tup
         assert not os.path.lexists(root / rel)
     wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=data)  # exactly what replay_step does
     wb.replay_question = "Q-001"
-    summary = wb.git.run_input_bytes(*GIT_PLAIN, "apply", "--summary", "-", data=data).stdout
-    wb.replay_links = frozenset(  # the links the saved patch itself creates: the only ones the guard trusts
-        line.split(" create mode 120000 ", 1)[1] for line in summary.splitlines() if " create mode 120000 " in line
-    )
+    wb.replay_links = held_patch.links_added(wb, data)  # the real trust computation
     return root
 
 
@@ -525,3 +523,343 @@ def test_a_path_with_an_l4_component_elsewhere_is_guarded(make_bench):
     unit_l4.parent.mkdir(parents=True, exist_ok=True)
     unit_l4.write_text("{}")
     assert restore_replay(bench.wb, "test run") is None and unit_l4.exists()
+
+
+# --- round 2 of the link-attack review: trust, the root, memory, unreadable folders ---------------------------------
+
+import errno  # noqa: E402
+import tracemalloc  # noqa: E402
+
+from l4.implementer import confined  # noqa: E402
+from l4.implementer.confined import LinkedParent, open_parent, put_entry, read_entry, remove_entry  # noqa: E402
+
+
+def fds() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+# --- R1: a link at the work-tree root (the root path is re-opened by name at every call) ----------
+
+
+def test_r1_the_work_tree_root_swapped_for_a_link_to_another_checkout(make_bench, tmp_path):
+    """Needs write access to the folder that holds the work tree (no sandbox, or a writable mount above it)."""
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    arm_replay_guard(bench.wb)
+    other = bench.tdd.repo  # the main checkout of the same repository, with someone's uncommitted work
+    (other / "precious.txt").write_text("uncommitted work in another checkout\n")
+    listing = sorted(p.name for p in other.iterdir())
+    real = root.with_name(root.name + ".real")
+    os.rename(root, real)
+    os.symlink(other, root)
+    try:
+        try:
+            restore_replay(bench.wb, "test run")
+        except Exception as exc:  # noqa: BLE001
+            f"raised {exc!r}"[:200]
+        after = sorted(p.name for p in other.iterdir())
+        precious = (other / "precious.txt").exists()
+    finally:
+        os.unlink(root)
+        os.rename(real, root)
+    assert precious and after == listing
+
+
+# --- R2: hard links -------------------------------------------------------------------------------
+
+
+def test_r2_a_hard_link_to_an_outside_file_is_never_written_or_chmodded(make_bench, tmp_path):
+    outside = make_outside(tmp_path)
+    os.chmod(outside / "victim.txt", 0o640)
+    bench = make_bench([])
+    root = replayed(bench, {**PATCH, "tests/run.sh": "#!/bin/sh\n"}, base=BASE)
+    os.chmod(root / "tests" / "run.sh", 0o755)
+    arm_replay_guard(bench.wb)
+    for rel in ("tests/fixtures/data.txt", "tests/run.sh", "tests/fixtures/old.txt"):
+        (root / rel).unlink()
+        os.link(outside / "victim.txt", root / rel)  # three names of the outside inode
+    before = state(outside)
+    st0 = os.stat(outside / "victim.txt")
+    reason = restore_replay(bench.wb, "test run")
+    st1 = os.stat(outside / "victim.txt")
+    assert reason is None and state(outside) == before and st1.st_mode == st0.st_mode and st1.st_nlink == 1
+    assert stat.S_IMODE(os.stat(root / "tests" / "run.sh").st_mode) == 0o755
+
+
+# --- R3: odd names in the patch summary -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ['tests/q"uote', "tests/tab\there", "tests/back\\slash", "tests/ünï"])
+def test_r3_a_patch_link_with_an_odd_name_is_trusted_or_the_step_fails_closed(make_bench, tmp_path, name):
+    bench = make_bench([])
+    root = replayed(bench, {**PATCH, name: (LINK, "test_new.py")})
+    arm_replay_guard(bench.wb)
+    reason = restore_replay(bench.wb, "test run")
+    assert (root / name).is_symlink() or reason is not None  # never followed; at worst fails closed
+    assert reason is None, "the patch's own link is not trusted: a legitimate step fails"
+
+
+def test_r3b_summary_paths_are_only_compared_never_opened(make_bench, tmp_path):
+    """`..`, absolute or crafted names in `wb.replay_links` are inert: trust needs the path git lists as a link."""
+    outside = make_outside(tmp_path)
+    before = state(outside)
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    bench.wb.replay_links = frozenset({"../outside", str(outside), "tests/../tests/fixtures", "tests/fixtures/"})
+    arm_replay_guard(bench.wb)
+    os.symlink(outside, root / "tests" / "fixtures2")
+    (root / "tests" / "fixtures").rename(root / "tests" / "moved")
+    os.symlink(outside, root / "tests" / "fixtures")
+    reason = restore_replay(bench.wb, "test run")
+    assert state(outside) == before and reason is not None
+
+
+# --- R4: a folder that becomes a file (or link, FIFO) mid-walk ------------------------------------
+
+
+class _OsProxy:
+    """`os` for confined.py, with one swap of `tests/fixtures` right before the walk opens it."""
+
+    def __init__(self, root: Path, swap):
+        self._root, self._swap, self.fired = root, swap, False
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+    def open(self, path, flags, *args, dir_fd=None, **kw):
+        if not self.fired and path == "fixtures" and dir_fd is not None:
+            self.fired = True
+            self._swap(self._root / "tests" / "fixtures")
+        return os.open(path, flags, *args, dir_fd=dir_fd, **kw)
+
+
+def _to_file(p: Path) -> None:
+    os.rename(p, p.with_name("fixtures.moved"))
+    p.write_text("a file now\n")
+
+
+def _to_link(target):
+    def swap(p: Path) -> None:
+        os.rename(p, p.with_name("fixtures.moved"))
+        os.symlink(target, p)
+
+    return swap
+
+
+def _to_fifo(p: Path) -> None:
+    os.rename(p, p.with_name("fixtures.moved"))
+    os.mkfifo(p)
+
+
+@pytest.mark.parametrize("swap", ["file", "link", "fifo"])
+@pytest.mark.parametrize("op", ["read", "put", "remove"])
+def test_r4_folder_swapped_mid_walk(tmp_path, monkeypatch, swap, op):
+    outside = make_outside(tmp_path)
+    root = tmp_path / "wt"
+    (root / "tests" / "fixtures").mkdir(parents=True)
+    (root / "tests" / "fixtures" / "data.txt").write_text("patched\n")
+    swaps = {"file": _to_file, "link": _to_link(outside), "fifo": _to_fifo}
+    proxy = _OsProxy(root, swaps[swap])
+    monkeypatch.setattr(confined, "os", proxy)
+    before, n0 = state(outside), fds()
+    rel = "tests/fixtures/data.txt"
+    try:
+        if op == "read":
+            read_entry(root, rel)
+        elif op == "put":
+            put_entry(root, rel, ("file", b"restored\n", 0o644))
+        else:
+            remove_entry(root, rel)
+    except Exception:  # noqa: BLE001
+        pass
+    monkeypatch.undo()
+    stat.filemode(os.lstat(root / "tests" / "fixtures").st_mode)
+    assert proxy.fired and state(outside) == before and fds() == n0
+
+
+# --- R5: ELOOP / ENOTDIR / EMLINK: every kind of link on the way is a LinkedParent ----------------
+
+
+@pytest.mark.parametrize("kind", ["to-dir", "to-file", "dangling", "loop", "to-root"])
+def test_r5_every_link_on_the_way_is_refused(tmp_path, kind):
+    outside = make_outside(tmp_path)
+    root = tmp_path / "wt"
+    (root / "tests").mkdir(parents=True)
+    link = root / "tests" / "fixtures"
+    target = {"to-dir": outside, "to-file": outside / "victim.txt", "dangling": outside / "missing",
+              "loop": link, "to-root": root}[kind]  # fmt: skip
+    os.symlink(target, link)
+    try:
+        os.open("fixtures", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=os.open(root / "tests", os.O_RDONLY))
+    except OSError as exc:
+        errno.errorcode[exc.errno]
+    results = []
+    for create in (False, True):
+        try:
+            open_parent(root, "tests/fixtures/data.txt", create=create)
+            results.append("opened!")
+        except LinkedParent as exc:
+            results.append(f"LinkedParent({exc.rel})")
+        except OSError as exc:
+            results.append(f"{exc.__class__.__name__}")
+    assert results == ["LinkedParent(tests/fixtures)"] * 2
+
+
+# --- R6: fd leaks over every error path -----------------------------------------------------------
+
+
+def test_r6_no_fd_leak_on_any_path(make_bench, tmp_path):
+    outside = make_outside(tmp_path)
+    before = state(outside)
+    root = tmp_path / "wt"
+    (root / "a" / "b").mkdir(parents=True)
+    (root / "a" / "b" / "f").write_text("x")
+    (root / "a" / "file").write_text("x")
+    os.symlink(outside, root / "a" / "link")
+    (root / "locked").mkdir()
+    (root / "locked" / "f").write_text("x")
+    os.mkfifo(root / "a" / "fifo")
+    calls = [
+        lambda: read_entry(root, "a/link/data.txt"),  # LinkedParent
+        lambda: read_entry(root, "a/missing/x"),  # FileNotFoundError
+        lambda: read_entry(root, "a/file/x"),  # ENOTDIR, not create
+        lambda: read_entry(root, "a/fifo"),  # a FIFO is not opened
+        lambda: read_entry(root, "locked/f"),  # EACCES on the folder
+        lambda: put_entry(root, "a/link/x", ("file", b"y", 0o644)),
+        lambda: put_entry(root, "locked/g", ("file", b"y", 0o644)),
+        lambda: put_entry(root, "a/b/f", ("file", b"y", 0o644)),
+        lambda: remove_entry(root, "a/link/x"),
+        lambda: remove_entry(root, "locked/f"),
+        lambda: confined.check_parents(root, "a/link/x"),
+    ]
+    os.chmod(root / "locked", 0)
+    try:
+        n0 = fds()
+        outcomes = set()
+        for _ in range(50):
+            for call in calls:
+                try:
+                    call()
+                    outcomes.add("ok")
+                except Exception as exc:  # noqa: BLE001
+                    outcomes.add(exc.__class__.__name__)
+        n1 = fds()
+    finally:
+        os.chmod(root / "locked", 0o755)
+    assert n1 == n0 and state(outside) == before
+
+
+# --- R7: rmtree(dir_fd) never follows links inside the removed folder -----------------------------
+
+
+def test_r7_rmtree_of_a_folder_full_of_links(tmp_path):
+    outside = make_outside(tmp_path)
+    before = state(outside)
+    root = tmp_path / "wt"
+    d = root / "tests" / "data.txt"  # a folder where the snapshot has a file
+    (d / "deep" / "deeper").mkdir(parents=True)
+    os.symlink(outside, d / "to_outside")
+    os.symlink(outside / "victim.txt", d / "deep" / "to_victim")
+    os.symlink(outside / "sub.txt", d / "deep" / "deeper" / "to_sub")
+    os.mkfifo(d / "deep" / "fifo")
+    put_entry(root, "tests/data.txt", ("file", b"restored\n", 0o644))
+    assert (root / "tests" / "data.txt").read_bytes() == b"restored\n"
+    assert state(outside) == before
+
+
+# --- R8: availability: a huge sparse file a gate writes is read whole -----------------------------
+
+
+def test_r8_a_gate_written_sparse_file_is_read_whole(make_bench, tmp_path):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    arm_replay_guard(bench.wb)
+    size = 256 * 1024 * 1024
+    with open(root / "tests" / "fixtures" / "big.bin", "wb") as handle:  # a new path: removed by the restore
+        handle.truncate(size)  # sparse: costs the gate nothing
+    tracemalloc.start()
+    restore_replay(bench.wb, "test run")
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert peak < size // 4, "the guard reads a gate-written file whole to decide it is not absent"
+
+
+# --- R9: an OSError other than a link in the pre-scan or the snapshot -----------------------------
+
+
+def test_r9_a_folder_made_unreadable_by_a_gate(make_bench, tmp_path):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    arm_replay_guard(bench.wb)
+    os.chmod(root / "tests" / "fixtures", 0)
+    try:
+        try:
+            out = restore_replay(bench.wb, "test run")
+        except Exception as exc:  # noqa: BLE001
+            out = f"raised {exc.__class__.__name__}: {str(exc)[:120]}"
+    finally:
+        os.chmod(root / "tests" / "fixtures", 0o755)
+    assert not str(out).startswith("raised"), "an exception escapes restore(): the run crashes, no attempt is counted"
+
+
+def test_r9b_a_patched_file_made_unreadable_before_the_snapshot(make_bench, tmp_path):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    os.chmod(root / "tests" / "fixtures" / "data.txt", 0)  # setup code, before the guard is armed
+    try:
+        try:
+            arm_replay_guard(bench.wb)
+            out = restore_replay(bench.wb, "test run")
+        except Exception as exc:  # noqa: BLE001
+            out = f"raised {exc.__class__.__name__}: {str(exc)[:120]}"
+    finally:
+        os.chmod(root / "tests" / "fixtures" / "data.txt", 0o644)
+    assert not str(out).startswith("raised"), "an exception escapes the guard: the run crashes"
+
+
+def test_r9c_end_to_end_what_a_crash_leaves(make_bench, monkeypatch, raw, tmp_path):
+    """Through run_task: a gate chmods a folder 000 while the saved step is replayed."""
+    from l4.implementer.loop import run_task
+
+    from .test_earlier_red import NEW, TASK, new_step
+    from .test_held_accept import held_new
+    from .test_held_answers import answer
+
+    evil = (
+        "import os, pathlib\n"
+        "_held = pathlib.Path('openspec/changes/add-discount-codes/.l4/held/1.1-pre_satisfied.patch')\n"
+        "if _held.exists():\n"
+        "    os.chmod('tests/fixtures', 0)\n"
+    )
+    bench = held_new(make_bench, monkeypatch, [new_step(("tests/fixtures/data.txt", "patched\n"),
+                                                        ("tests/test_new.py", evil + NEW)), new_step()])  # fmt: skip
+    answer(bench, raw, "accept: fine")
+    try:
+        try:
+            outcome = run_task(bench.wb, TASK)
+            out = (outcome.status, outcome.reason)
+        except Exception as exc:  # noqa: BLE001
+            out = f"raised {exc.__class__.__name__}: {str(exc)[:160]}"
+    finally:
+        fixtures = bench.wb.worktree / "tests" / "fixtures"
+        if fixtures.exists():
+            os.chmod(fixtures, 0o755)
+    assert not str(out).startswith("raised")
+
+
+# --- R3c: a newline in a patch link's name splits the `git apply --summary` line ------------------
+
+
+def test_r3c_a_newline_in_a_link_name_makes_another_path_trusted(make_bench, tmp_path):
+    outside = make_outside(tmp_path)
+    before = state(outside)
+    bench = make_bench([])
+    root = replayed(bench, {**PATCH, "tests/notes\n create mode 120000 tests/planted": "a regular file\n"})
+    trusted = bench.wb.replay_links
+    os.symlink(outside, root / "tests" / "planted")  # setup code, before the guard is armed
+    arm_replay_guard(bench.wb)
+    reasons = [restore_replay(bench.wb, w) for w in ("test run", "before the red commit")]
+    if reasons == [None, None]:
+        bench.wb.commit("replay", task="1.1", attempt=1, phase="red", tdd="red")
+    assert state(outside) == before
+    assert "tests/planted" not in trusted, "a line of the summary names a link the patch does not create"

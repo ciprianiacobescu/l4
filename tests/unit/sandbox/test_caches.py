@@ -33,3 +33,11 @@ def test_a_path_outside_the_cache_root_is_refused(tmp_path: Path):
 def test_a_unit_that_is_not_a_unit_id_is_refused(tmp_path: Path):
     with pytest.raises(ValueError):
         mount_caches(SandboxCfg().caches, tmp_path / "cache", "../../etc")
+
+
+@pytest.mark.parametrize("path", ["$L4_CACHE", "$L4_CACHE/worktrees", "$L4_CACHE/worktrees/key/openspec/x"])
+def test_a_cache_at_or_above_the_worktrees_is_refused(tmp_path: Path, path: str):
+    """A writable cache mount must never cover a work tree or the folder that holds one (SPEC L4-IMP-065)."""
+    caches = {"evil": CacheCfg(path=path, env="X_CACHE")}
+    with pytest.raises(ValueError, match="inside the runner cache"):
+        mount_caches(caches, tmp_path / "cache", "openspec:add-x")

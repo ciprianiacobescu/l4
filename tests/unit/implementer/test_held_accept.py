@@ -955,3 +955,13 @@ def test_u1_minor_a_symlink_the_patch_adds_is_kept_as_a_link(make_bench, monkeyp
     assert outcome.status == "done", outcome.reason
     mode = bench.wb.git.run("ls-tree", "HEAD", "tests/alias.py").stdout.split()[0]
     assert mode == "120000"  # kept as a link, not deleted at the first restore
+
+
+def test_r3c_a_patch_whose_path_holds_a_newline_is_refused_with_a_retry_only_question(make_bench, monkeypatch, raw):
+    bench = held_new(make_bench, monkeypatch, [new_step(), new_step()])
+    forge_hold(bench, raw, {"tests/notes\n create mode 120000 tests/planted": "a regular file\n"})
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.question_ids == ["Q-002"] and bench.events("held.replayed") == []
+    assert bench.events("question.raised")[-1]["saved"] is False
+    assert "newline" in question_text(bench).split("## Q-002", 1)[1]
