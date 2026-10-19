@@ -1064,11 +1064,13 @@ def _decide_pre_satisfied(
     confirmation: PreSatisfied,
     based: BaseRunResult,
     result: ImplementerResult,
+    refuse: Callable[[], RedOutcome | None] = lambda: None,
 ) -> tuple[RedOutcome | None, dict[str, Override]]:
     """What the zero-value run and the base run leave of the pre-satisfied candidates (design D2, D3, D7, D8): a
     refuted criterion fails the attempt (the message lists the inconclusive ones apart); only inconclusive ones hold
     the task, except the ones a person's `accept` covers, which count on the evidence of the real run. Returns the
-    outcome that ends the step, or None and the overrides that carried criteria."""
+    outcome that ends the step, or None and the overrides that carried criteria. `refuse` runs right before a hold is
+    taken: a step the tamper check refuses is never held, so a person is not asked to accept it (L4-IMP-065)."""
     decision = combine(confirmation, based)
     if decision.refuted:
         wb.discard_changes()
@@ -1082,6 +1084,8 @@ def _decide_pre_satisfied(
     }
     open_ = sorted(c for c in decision.inconclusive if c not in overrides)
     if open_:
+        if (refused := refuse()) is not None:
+            return refused, {}
         held = HeldCheck(
             task.key, "red", "pre_satisfied", tuple(open_), tuple(sorted({t for c in open_ for t in candidates[c]})),
             decision.inconclusive[open_[0]], _runs_of(confirmation, based), _kept_of(confirmation.kept),
@@ -1127,6 +1131,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             "test code changed production files while a gate ran (a test may not write outside its own files): "
             + "; ".join(notes[:5]),
         )
+
+    def refuse_tampering() -> RedOutcome | None:  # before a hold: the person is never shown a tampering step
+        found = preexisting_test_changes(wb, task, base, stale)
+        return _reject_preexisting(wb, found) if found else None
 
     run_setup(wb)  # an agent-edited environment must not decide the gate
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
@@ -1192,7 +1200,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             based = confirmed_by_base_run(wb, left, new_ids, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result)
+        out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result, refuse_tampering)
         if out is not None:
             return out
         overridden_tests = {c: tuple(passing[c]) for c in overridden}
@@ -1330,7 +1338,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             based = confirmed_by_base_run(wb, left, every, real=report)
             if (out := tampered("base run")) is not None:
                 return out
-        out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result)
+        out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result, refuse_tampering)
         if out is not None:
             return out
         overridden_tests = {c: tuple(candidates[c]) for c in overridden}
