@@ -19,6 +19,7 @@ from l4.agents.factory import Factory
 from l4.agents.gate import held_keys
 from l4.agents.proc import ProcOutcome, ProcRunner
 from l4.availability.cooldown import AvailabilityStore
+from l4.config.roles import JUDGE_ADAPTERS
 from l4.config.schema import L4Config, Profile, RolesCfg
 from l4.doctor.context import CmdResult
 from l4.provision.readiness import AdapterState, adapter_readiness
@@ -58,7 +59,8 @@ def world(tmp_path):
 
 
 def factory_for(profile: Profile, ctx: ProbeCtx, tmp_path: Path) -> Factory:
-    cfg = L4Config(profiles={"p": profile}, roles=RolesCfg(implementer=["p"], judges=["p"]))
+    judges = ["p"] if profile.adapter in JUDGE_ADAPTERS else []  # a profile that cannot judge is no judge (L4-CFG-006)
+    cfg = L4Config(profiles={"p": profile}, roles=RolesCfg(implementer=["p"], judges=judges))
     return Factory(cfg, ctx, availability=AvailabilityStore(tmp_path / "cache"))
 
 

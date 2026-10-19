@@ -49,7 +49,7 @@ def test_only_needed_tools_are_planned(paths, env):
 
 
 def test_profile_in_any_role_chain_counts_and_kiro_is_unpinned(paths, env):
-    cfg = config(roles={"implementer": ["impl"], "judges": ["judge"], "clarifier": ["kiro"]})
+    cfg = config(roles={"implementer": ["impl", "kiro"], "judges": ["judge"]})
     actions = plan(cfg, paths, env, FakeRunner(), openspec_active=False)
     assert "kiro-cli" in actions and "codex" not in actions
     assert actions["kiro-cli"].commands[0] == "curl -fsSL https://cli.kiro.dev/install | bash"
