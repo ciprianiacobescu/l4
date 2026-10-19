@@ -5,6 +5,7 @@ process that outlived it) does is simulated on the file system. Ported from an i
 import os
 import shutil
 import stat
+import sys
 import threading
 from pathlib import Path
 
@@ -12,9 +13,13 @@ import pytest
 
 from l4.implementer import held_patch
 from l4.implementer.held_patch import APPLY_FLAGS, GIT_PLAIN, ReplayGuard, arm_replay_guard, restore_replay
+from l4.implementer.loop import run_task
 
 from .conftest import Bench
-from .test_earlier_red import NEW
+from .test_earlier_red import NEW, TASK, new_step
+from .test_held_accept import held_new
+from .test_held_answers import answer
+from .test_held_check import held_bench, zero_says
 
 LINK = object()
 
@@ -80,6 +85,7 @@ def replayed(bench: Bench, patch: dict, *, base: dict | None = None, delete: tup
     wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=data)  # exactly what replay_step does
     wb.replay_question = "Q-001"
     wb.replay_links = held_patch.links_added(wb, data)  # the real trust computation
+    wb.replay_expected = held_patch.expected_state(wb, data) if hasattr(held_patch, "expected_state") else {}
     return root
 
 
@@ -971,3 +977,73 @@ def test_t4_the_folder_mode_repair_stays_in_the_tree_and_adds_owner_bits_only(tm
         os.chmod(outside / "sub.txt", 0o755)
         os.chmod(root / "a" / "locked", 0o755)
     assert outside_mode == 0o050 and locked_mode == 0o750
+
+
+# --- the expected state is the step base plus the saved patch, not the tree after setup -------------------------------
+
+
+def test_v1_a_tracked_file_the_setup_changed_is_put_back_to_the_base(make_bench):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    (root / "tests" / "fixtures" / "old.txt").write_text("rewritten by a setup hook\n")  # before the guard is armed
+    (root / "tests" / "fixtures" / "setup_made.txt").write_text("a new file setup wrote\n")
+    arm_replay_guard(bench.wb)
+    assert restore_replay(bench.wb, "test run") is None
+    assert (root / "tests" / "fixtures" / "old.txt").read_text() == "tracked\n"
+    assert not (root / "tests" / "fixtures" / "setup_made.txt").exists()
+    assert (root / "tests" / "fixtures" / "data.txt").read_text() == "patched\n"
+    restored = [p for e in bench.events("held.replay_restored") for p in e["paths"]]
+    assert "tests/fixtures/old.txt" in restored and "tests/fixtures/setup_made.txt" in restored
+
+
+def test_v1_a_patched_file_the_setup_changed_is_put_back_to_the_patch(make_bench):
+    bench = make_bench([])
+    root = replayed(bench, PATCH, base=BASE)
+    (root / "tests" / "fixtures" / "data.txt").write_text("rewritten by a setup hook\n")
+    arm_replay_guard(bench.wb)
+    assert restore_replay(bench.wb, "test run") is None
+    assert (root / "tests" / "fixtures" / "data.txt").read_text() == "patched\n"
+
+
+HOOK = (
+    "import pathlib\n"
+    "if pathlib.Path('openspec/changes/add-discount-codes/.l4/held/1.1-pre_satisfied.patch').exists():\n"
+    "    pathlib.Path('tests/fixtures/old.txt').write_text('rewritten by the setup hook of the patch\\n')\n"
+)
+
+
+def test_v1_a_setup_hook_of_the_patch_cannot_put_more_than_the_patch_into_the_commit(
+    make_bench, tdd_repo, monkeypatch, raw, tmp_path
+):
+    runner = tmp_path / "hook_runner.py"
+    runner.write_text("import os\nif os.path.exists('hook.py'):\n    exec(open('hook.py').read())\n")
+    zero_says(monkeypatch)
+    bench = held_bench(
+        make_bench, [new_step(("hook.py", HOOK))], setup=[tdd_repo.setup_command, f"{sys.executable} {runner}"]
+    )
+    (bench.wb.worktree / "tests" / "fixtures").mkdir()
+    (bench.wb.worktree / "tests" / "fixtures" / "old.txt").write_text("tracked\n")
+    bench.wb.git.run("add", "tests/fixtures/old.txt")
+    bench.wb.commit("test: fixture", task="0.9", attempt=1, phase="red", tdd="red")
+    assert run_task(bench.wb, TASK).question_ids == ["Q-001"]
+    answer(bench, raw, "accept: fine")
+    outcome = run_task(bench.wb, TASK)
+    assert outcome.status == "done", outcome.reason
+    assert bench.wb.git.run("show", "HEAD:tests/fixtures/old.txt").stdout == "tracked\n"
+    assert "tests/fixtures/old.txt" in [p for e in bench.events("held.replay_restored") for p in e["paths"]]
+
+
+def test_v2_a_hundred_megabyte_fixture_of_the_patch_replays_with_bounded_memory(make_bench, monkeypatch, raw):
+    big = "\0" * (100 * 1024 * 1024)  # binary: the saved patch is a small compressed literal
+    bench = held_new(make_bench, monkeypatch, [new_step(("tests/fixtures/big.dat", big))])
+    del big
+    answer(bench, raw, "accept: fine")
+    tracemalloc.start()
+    try:
+        outcome = run_task(bench.wb, TASK)
+    finally:
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+    assert outcome.status == "done", outcome.reason
+    assert (bench.wb.worktree / "tests" / "fixtures" / "big.dat").stat().st_size == 100 * 1024 * 1024
+    assert peak < 40 * 1024 * 1024
