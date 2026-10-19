@@ -153,7 +153,7 @@ Every task follows these rules:
 - [x] 6.1 Merge the branches of groups 1-5 (groups 3 and 4 both edit `verifier/types.py` and `verifier/report.py`, in
   different classes and sections); run `tests/unit` in full, `ruff`, `mypy`, `check_spec.py`, and
   `npx --yes @fission-ai/openspec@1.14.1 validate detect-test-tamper --strict`. Re-run the reviewer's four
-  reproductions from the session scratchpad against the merged branch, unchanged and not committed, and record their new
+  reproductions from the review's scratch directory against the merged branch, unchanged and not committed, and record their new
   output lines in the merge commit message (expected: impl-4 `red: failed`; v2[True] a run that does not PASS; v6_full
   audit `failed`; v8 `SAME_NAME_ELSEWHERE=True` a blocker for the harness and a listing for a person).
 - [x] 6.2 One independent adversarial review of the whole change (session model): a weakening the comparison misses, an
@@ -189,7 +189,7 @@ Every task follows these rules:
 ## 8. Amendment: the comparison (L4-IMP-045, L4-IMP-046, L4-IMP-047, L4-IMP-049; design D12)
 
 Groups 8 to 13 apply the amendment of design section 6, after the adversarial review of `ae802740`. The reproductions
-are in `/private/tmp/claude-501/-Users-alexandruiacobescu-gooseProjects-agentic-L4-development/95921d2c-9fc5-43bf-a16f-1c552b9ad0e8/scratchpad/review-tamper/` (named below relative to it; design 6.1 lists them). Each asserts the bug today: a port copies it into
+are in the directory `review-tamper/` of the review's local scratch directory, outside the repository (named below relative to it; design 6.1 lists them). Each asserts the bug today: a port copies it into
 the named test file and flips its assertion to the fixed behaviour, and must fail before the fix. Order: 8.1 then 8.2;
 9.1 before 9.2-9.4, 11.1 and 12.1; 10.1 needs 9.2 for its end-to-end part; 13 last. Groups 1-7 stay as they are.
 

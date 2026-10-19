@@ -6,7 +6,7 @@ Every task follows these rules:
 - The reproductions, for reference: `test_verify_impl1_symlink.py` and `test_verify_impl3_config.py` under
   `$SCRATCH/l4review/verify-implementer/repo/tests/unit/implementer/`, and `r3_protected_guard.py` under
   `$SCRATCH/l4review/verify-sandbox-security/`. `$SCRATCH` is
-  `/private/tmp/claude-501/-Users-alexandruiacobescu-gooseProjects-agentic-L4-development/95921d2c-9fc5-43bf-a16f-1c552b9ad0e8/scratchpad`.
+  the review's local scratch directory, outside the repository.
   When the files are gone, the scenario texts in `specs/` hold everything a test needs.
 - A gate command that plants a link is a `sh -c '… ; exec <TEST_COMMAND>'` string, where `TEST_COMMAND` comes from
   `tests/unit/conftest.py`, as in the reproductions. Outside directories are under `tmp_path`.
