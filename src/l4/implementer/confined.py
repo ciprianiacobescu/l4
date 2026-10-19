@@ -1,0 +1,163 @@
+"""File operations that never follow a link (SPEC L4-IMP-065, the replay guard).
+
+Test code run by a gate can replace a folder of the work tree by a link while the harness is restoring files. So every
+operation here reaches the folder that holds the entry one component at a time from the work tree root, each time with
+`O_NOFOLLOW | O_DIRECTORY`, and then acts relative to that folder's file descriptor (`dir_fd=`): there is no moment at
+which a path string is resolved by the system, so a link planted before or during the operation is refused (or, if it
+appears after the folder was opened, cannot redirect anything: the descriptor names the folder itself). An entry is
+removed by its own type (a link, a FIFO, a socket or a device is unlinked, never opened or followed), and a file is
+created `O_CREAT | O_EXCL | O_NOFOLLOW`. `os.O_NOFOLLOW`, `O_DIRECTORY` and `dir_fd` exist on Linux and macOS alike (the
+two platforms the harness runs on); Windows is not supported by the harness.
+"""
+
+import errno
+import os
+import shutil
+import stat
+from pathlib import Path
+
+Entry = tuple  # ("link", target) | ("file", bytes, mode) | ("dir",): what an entry is; None: absent
+_LINKED = (errno.ELOOP, errno.EMLINK)  # O_NOFOLLOW met a link (EMLINK: FreeBSD's spelling)
+
+
+class LinkedParent(Exception):
+    """A folder above the entry is a link: `rel` is the path of that link (relative to the work tree)."""
+
+    def __init__(self, rel: str) -> None:
+        super().__init__(rel)
+        self.rel = rel
+
+
+def open_parent(root: Path, rel: str, *, create: bool = False) -> tuple[int, str]:
+    """(fd of the folder that holds `rel`, the entry's name). Raises `LinkedParent` when a folder on the way is a link,
+    `FileNotFoundError` when one is absent (and `create` is false). With `create`, a missing folder is made and a
+    non-folder (a file, a FIFO) standing where a folder belongs is removed first."""
+    parts = rel.rstrip("/").split("/")
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    walked: list[str] = []
+    try:
+        for part in parts[:-1]:
+            walked.append(part)
+            while True:
+                try:
+                    nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                    break
+                except FileNotFoundError:
+                    if not create:
+                        raise
+                    os.mkdir(part, dir_fd=fd)
+                except OSError as exc:
+                    if exc.errno in _LINKED:
+                        raise LinkedParent("/".join(walked)) from exc
+                    if exc.errno == errno.ENOTDIR:
+                        if stat.S_ISLNK(os.stat(part, dir_fd=fd, follow_symlinks=False).st_mode):
+                            raise LinkedParent("/".join(walked)) from exc
+                        if not create:
+                            raise FileNotFoundError(errno.ENOENT, "not a folder", part) from exc
+                        os.unlink(part, dir_fd=fd)  # a stray file where a folder belongs
+                        continue
+                    raise
+            os.close(fd)
+            fd = nxt
+        return fd, parts[-1]
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _lstat(fd: int, name: str) -> os.stat_result | None:
+    try:
+        return os.stat(name, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def read_entry(root: Path, rel: str) -> Entry | None:
+    """What `rel` is, without following anything: a link and its target, a regular file with its bytes and mode, a
+    folder; None for an absent entry or one that is none of these (a FIFO, a socket, a device are never opened).
+    `LinkedParent` when a folder above it is a link."""
+    try:
+        fd, name = open_parent(root, rel)
+    except FileNotFoundError:
+        return None
+    try:
+        st = _lstat(fd, name)
+        if st is None:
+            return None
+        if stat.S_ISLNK(st.st_mode):
+            return ("link", os.readlink(name, dir_fd=fd))
+        if stat.S_ISDIR(st.st_mode):
+            return ("dir",)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        out = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        with os.fdopen(out, "rb") as handle:
+            return ("file", handle.read(), stat.S_IMODE(st.st_mode))
+    finally:
+        os.close(fd)
+
+
+def remove_entry(root: Path, rel: str) -> None:
+    """Remove `rel` whatever it is (a folder with all it holds, by a walk that follows no link); nothing if absent."""
+    try:
+        fd, name = open_parent(root, rel)
+    except FileNotFoundError:
+        return
+    try:
+        _remove(fd, name)
+    finally:
+        os.close(fd)
+
+
+def _remove(fd: int, name: str) -> None:
+    st = _lstat(fd, name)
+    if st is None:
+        return
+    if stat.S_ISDIR(st.st_mode):
+        shutil.rmtree(name, dir_fd=fd)
+    else:
+        os.unlink(name, dir_fd=fd)  # a file, a link, a FIFO, a socket: the entry, never what it points to
+
+
+def put_entry(root: Path, rel: str, expected: Entry | None) -> None:
+    """Make `rel` hold `expected` (None: nothing) by removing what is there and creating the entry anew."""
+    try:
+        fd, name = open_parent(root, rel, create=expected is not None)
+    except FileNotFoundError:
+        return  # a folder is absent and there is nothing to create
+    try:
+        _remove(fd, name)
+        if expected is None or expected[0] == "dir":
+            return
+        if expected[0] == "link":
+            os.symlink(expected[1], name, dir_fd=fd)
+            return
+        out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+        with os.fdopen(out, "wb") as handle:
+            handle.write(expected[1])
+            os.fchmod(handle.fileno(), expected[2])
+    finally:
+        os.close(fd)
+
+
+def remove_link(root: Path, rel: str) -> None:
+    """Remove `rel` only if it is a link (the link itself, never what it points to); nothing otherwise."""
+    try:
+        fd, name = open_parent(root, rel)
+    except (FileNotFoundError, LinkedParent):
+        return
+    try:
+        st = _lstat(fd, name)
+        if st is not None and stat.S_ISLNK(st.st_mode):
+            os.unlink(name, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
+def check_parents(root: Path, rel: str) -> None:
+    """Raise `LinkedParent` if a folder above `rel` is a link; return quietly when they are folders or absent."""
+    try:
+        fd, _ = open_parent(root, rel)
+    except FileNotFoundError:
+        return
+    os.close(fd)

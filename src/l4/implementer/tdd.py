@@ -803,6 +803,7 @@ def step_or_replay(
     wb.commit_agent = None
     wb.replay_question = None  # an accept of a saved step takes effect only in its replay
     wb.replay_guard = None
+    wb.replay_links = frozenset()
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:
         return agent_step(wb, role, task, attempt, previous_failure, unfreeze, adds_tests=adds_tests, stale=stale)
