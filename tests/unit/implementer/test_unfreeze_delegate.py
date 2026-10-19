@@ -193,3 +193,63 @@ def test_the_switch_is_the_base_branchs_not_the_checkouts(make_bench, raw, monke
     run_green(bench.wb, TASK, red, attempt=1)
     assert bench.events("task.unfrozen") == []
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() != CORRECTED
+
+
+def record_agent(bench, raw) -> None:
+    """An agent answered with `l4 questions` (clarifier.answer_by_agents) and the answer names the test."""
+    unit = bench.wb.ref.path
+    raise_questions(
+        unit,
+        "add-discount-codes",
+        [discount_question()],
+        redactor=Redactor({}),
+    )
+    file = QuestionsFile.load(unit / "questions.md")
+    file = file.set_answer("Q-001", "Change tests/test_discount.py:9 to use a 100.0 amount.")
+    file.set_status("Q-001", QuestionStatus.ANSWERED).save(unit / "questions.md")
+    raw(bench.wb.worktree, "add", "-A")
+    raw(bench.wb.worktree, "-c", "user.name=L4", "-c", "user.email=l4@example.invalid", "commit", "-q", "-m", "answer")
+    digest = answer_sha256(QuestionsFile.load(unit / "questions.md").get("Q-001"))
+    bench.writer.append("question.answered", id="Q-001", by="agent", answer_sha256=digest)
+    bench.wb.cfg = bench.wb.cfg.model_copy(
+        update={"clarifier": bench.wb.cfg.clarifier.model_copy(update={"answer_by_agents": True})}
+    )
+
+
+def discount_question() -> NewQuestion:
+    return NewQuestion(
+        "The test freezes a wrong value", QuestionKind.TECHNICAL, ("1.1",),
+        "tests/test_discount.py:9 expects 45.0 for 50.0", "now", ("a", "b"),
+    )  # fmt: skip
+
+
+def test_an_agents_unfreeze_is_emitted_and_labelled_as_the_agents(make_bench, raw, monkeypatch, tmp_path, git_environ):
+    """Review 3: the one gap left by the last round: the emitted `task.unfrozen` of an AGENT grant says `by: agent`
+    (never `human`), and the freeze check and verification.md list it as `(agent)`."""
+    base_says(monkeypatch, unfreeze=False)
+    fix = Step(writes={"tests/test_discount.py": CORRECTED, "src/pytdd/pricing.py": IMPL}, structured=result("green"))
+    bench = make_bench([two_test_red(), fix])
+    red = run_red(bench.wb, TASK, attempt=1)
+    assert red.status == "ok", red.reason
+    record_agent(bench, raw)
+    green = run_green(bench.wb, TASK, red, attempt=1)
+    assert green.status == "ok", green.reason
+    assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == CORRECTED  # kept, not restored
+    [event] = bench.events("task.unfrozen")
+    assert event["by"] == "agent" and event["reason"] == "human_answer" and event["question"] == "Q-001"
+    assert event["paths"] == ["tests/test_discount.py"] and event["red_sha"] == red.sha
+
+    from l4.verifier.integrity import check_freeze, run_integrity
+    from l4.verifier.report import render_verification_md
+
+    from ..verifier.test_integrity import _unfrozen_history
+    from ..verifier.test_report import result as verdict_result
+
+    repo, base, head = _unfrozen_history(
+        tmp_path, git_environ, reason=event["reason"], by=event["by"], question=event["question"]
+    )  # the same event fields over a repo history with a red and a green commit
+    out = check_freeze(repo.context(base, head))
+    assert out.unfrozen == ["tests/test_a.py (task 1.1, unfrozen by Q-001 (agent))"]
+    text = render_verification_md(verdict_result(integrity=run_integrity(repo.context(base, head))))
+    assert "## Tests unfrozen by a delegate or an agent" in text and "by human answers" not in text
+    assert "- tests/test_a.py (task 1.1, unfrozen by Q-001 (agent))" in text
