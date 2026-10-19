@@ -93,7 +93,8 @@ def delegate_constraint(
 ) -> Constraint:
     """The veto for each delegate profile (`Constraint` of the factory): the reason it is not independent, else None.
     `profile` vetoes a profile that is an asker's by name; `model` also one that serves an asker's model. An asker that
-    recorded no model takes the configured model of its profile when `profiles` is given."""
+    recorded no model takes the configured model of its profile when `profiles` is given; a delegate profile with no
+    model, or an asker whose model cannot be resolved, is a veto under `model` (the verifier's rule: fail safe)."""
     minds = tuple(found)
 
     def model_of(asker: Asker) -> str | None:
@@ -107,11 +108,16 @@ def delegate_constraint(
             if asker.profile == name:
                 subject = (model_of(asker) or name) if mode == "model" else name
                 return f"independence: {mode} {subject} {asker.role} the question"
-        if mode == "model" and profile.model:
-            for asker in minds:
-                theirs = model_of(asker)
-                if theirs and same_model(profile.model, theirs):
-                    return f"independence: model {theirs} {asker.role} the question"
+        if mode != "model":
+            return None
+        if not profile.model:  # the CLI would run its default model, which can be an asker's: fail safe (D3)
+            return f"independence: model: delegate profile {name} has no known model"
+        for asker in minds:
+            theirs = model_of(asker)
+            if not theirs:
+                return f"independence: model: {asker.role} profile {asker.profile or 'unknown'} has no known model"
+            if same_model(profile.model, theirs):
+                return f"independence: model {theirs} {asker.role} the question"
         return None
 
     return check

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from l4.agents.base import ProbeCtx
 from l4.agents.factory import Factory
-from l4.config.schema import DELEGATE_KINDS, L4Config
+from l4.config.schema import DELEGATE_KINDS, L4Config, duration_seconds
 from l4.delegate.independence import DELEGATE_SERVES, Asker, delegate_constraint
 from l4.doctor.checks_agents import scratch_dir
 from l4.doctor.context import DoctorContext
@@ -61,7 +61,29 @@ def _shape_problems(cfg: L4Config) -> tuple[list[str], list[str]]:
         "plan_cost_share": settings.plan_cost_share,
     }
     problems += [f"delegate.{key} must be positive" for key, value in limits.items() if value <= 0]
+    problems += _budget_problems(cfg)
+    if settings.independence == "model":
+        problems += [
+            f"profile {name} has no model (delegate.independence: model cannot show it is not the asker's model)"
+            for name in serving
+            if not cfg.profiles[name].model
+        ]
     return problems, serving
+
+
+def _budget_problems(cfg: L4Config) -> list[str]:
+    """A call that cannot finish before the soft deadline is deferred, and every pass would defer it (review F1): the
+    budget known here must leave room for one call. `auto` is the runner's, which this check cannot see."""
+    ci = cfg.ci
+    if ci.time_budget == "auto":
+        return []
+    room = duration_seconds(ci.time_budget) - duration_seconds(ci.soft_deadline_margin)
+    if duration_seconds(cfg.delegate.timeout) < room:
+        return []
+    return [
+        f"delegate.timeout ({cfg.delegate.timeout}) is not less than ci.time_budget ({ci.time_budget}) minus "
+        f"ci.soft_deadline_margin ({ci.soft_deadline_margin}): no delegate call would fit before the soft deadline"
+    ]
 
 
 def _independence_problems(cfg: L4Config, serving: list[str]) -> list[str]:
@@ -73,6 +95,11 @@ def _independence_problems(cfg: L4Config, serving: list[str]) -> list[str]:
             mind = cfg.profiles.get(name)
             if mind is None:
                 continue  # CFG-002 names a profile that does not exist
+            if cfg.delegate.independence == "model" and not mind.model:
+                problems.append(
+                    f"{noun} profile {name} has no model: the delegate cannot be shown to be another model than it"
+                )
+                continue
             asker = Asker(name, mind.model, "judged" if noun == "judge" else "asked")
             check = delegate_constraint((asker,), cfg.delegate.independence, profiles=cfg.profiles)
             if any(check(candidate, cfg.profiles[candidate]) is None for candidate in serving):

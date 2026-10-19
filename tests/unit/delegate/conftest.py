@@ -24,7 +24,11 @@ from ..orchestrator.conftest import (  # noqa: F401  (the fixtures `run_l4` need
 QUOTE = "Unknown codes are rejected with `ValueError`."  # proposal.md of the fixture unit
 DELEGATE = {"enabled": True, "scope": "all"}
 CHAIN = {"delegate": ["dlg"]}
-PROFILES = {"dlg": {"adapter": "fake", "vendor": "dlgco", "model": "delegate-model-1"}}
+PROFILES = {
+    "dlg": {"adapter": "fake", "vendor": "dlgco", "model": "delegate-model-1"},
+    # the implementer's model is known: an asker with no known model vetoes every delegate (review F2, D3)
+    "impl": {"adapter": "fake", "vendor": "fakeco", "model": "impl-model-1"},
+}
 
 
 def blocked(*kinds: str) -> Step:

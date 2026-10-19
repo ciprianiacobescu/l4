@@ -174,3 +174,47 @@ def test_the_live_hello_ignores_the_delegate_while_it_is_off(make_ctx, probing):
     ctx, _ = make_ctx(cfg=config(enabled=False, delegate=["delegate-sol"]))
     [live] = [o for o in run_checks(ctx, live=True) if o.id == "LIVE-001"]
     assert "delegate" not in live.message
+
+
+# -- review fixes (F1, F2) -----------------------------------------------------------------------------------------
+
+
+def test_a_delegate_timeout_that_never_fits_the_budget_is_an_error(make_ctx):  # review F1
+    cfg = config(delegate=["delegate-sol"], implementer=["claude-opus"]).model_copy(
+        update={"ci": L4Config().ci.model_copy(update={"time_budget": "30m", "soft_deadline_margin": "20m"})}
+    )
+    ctx, _ = make_ctx(cfg=cfg)  # 10 minutes left, delegate.timeout defaults to 15m
+    result = c._dlg_001(ctx)
+    assert result.status == "fail" and "delegate.timeout (15m)" in result.message and "soft deadline" in result.message
+    ok = config(delegate=["delegate-sol"], implementer=["claude-opus"]).model_copy(
+        update={"ci": L4Config().ci.model_copy(update={"time_budget": "60m", "soft_deadline_margin": "20m"})}
+    )
+    assert c._dlg_001(make_ctx(cfg=ok)[0]).status == "pass"
+    assert (
+        c._dlg_001(make_ctx(cfg=config(delegate=["delegate-sol"], implementer=["claude-opus"]))[0]).status == "pass"
+    )  # auto: not known here
+
+
+def test_a_delegate_profile_with_no_model_fails_under_model_independence(make_ctx):  # review F2
+    profiles = {"dlg-nomodel": Profile(adapter="claude-code", vendor="anthropic")}
+    ctx, _ = make_ctx(
+        cfg=config(delegate=["delegate-sol", "dlg-nomodel"], implementer=["claude-opus"], profiles=profiles)
+    )
+    result = c._dlg_001(ctx)
+    assert result.status == "fail" and "profile dlg-nomodel has no model" in result.message
+    ctx, _ = make_ctx(
+        cfg=config(
+            delegate=["delegate-sol", "dlg-nomodel"],
+            implementer=["claude-opus"],
+            profiles=profiles,
+            independence="profile",
+        )
+    )
+    assert c._dlg_001(ctx).status == "pass"
+
+
+def test_an_implementer_with_no_model_cannot_be_shown_independent(make_ctx):  # review F2
+    profiles = {"impl-nomodel": Profile(adapter="claude-code", vendor="anthropic")}
+    ctx, _ = make_ctx(cfg=config(delegate=["delegate-sol"], implementer=["impl-nomodel"], profiles=profiles))
+    result = c._dlg_001(ctx)
+    assert result.status == "fail" and "implementer profile impl-nomodel has no model" in result.message

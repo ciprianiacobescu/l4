@@ -127,7 +127,8 @@ def test_model_mode_ignores_a_date_suffix_and_the_context_marker():
 
 def test_model_mode_takes_the_configured_model_of_an_asker_that_recorded_none():
     asker = (Asker("claude-opus", None, "asked"),)
-    assert delegate_constraint(asker, "model")("delegate-opus", PROFILES["delegate-opus"]) is None
+    # with no configuration to resolve it from, an unknown model vetoes (review F2: fail safe, D3)
+    assert delegate_constraint(asker, "model")("delegate-opus", PROFILES["delegate-opus"]) is not None
     check = delegate_constraint(asker, "model", profiles=PROFILES)
     assert check("delegate-opus", PROFILES["delegate-opus"]) == "independence: model claude-opus-5-5 asked the question"
 

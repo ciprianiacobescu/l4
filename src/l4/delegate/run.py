@@ -244,14 +244,14 @@ class _Pass:
         raised = next((e for e in reversed(events) if e.type == "question.raised" and question_key(e) == key), None)
         verdict_target = str(raised.data["target"]) if raised and question.kind is QuestionKind.VERDICT else None
         shared = dict(tasks=list(question.blocking_tasks), target=verdict_target, kind=question.kind.value)  # type: ignore[union-attr]
-        if self._soft_deadline():
-            self.calls += 1
-            self._defer(target, key, shared, "soft_deadline", self._now())
-            self.start_run = True
-            return
         plan = self._plan_cost(events)
         if (reason := limit_reached(key, question.blocking_tasks, verdict_target, events, plan, self.cfg)) is not None:
             self._escalate(target, question, key, shared, reason, who=None)
+            return
+        if self._soft_deadline():  # after the limits: a deferral is an attempt, so the chain of runs ends (D9)
+            self.calls += 1
+            self._defer(target, key, shared, "soft_deadline", self._now())
+            self.start_run = True
             return
         try:
             selected = select_delegate(self.factory, self.s.ref.id, events, key, self.cfg, self.profiles)
