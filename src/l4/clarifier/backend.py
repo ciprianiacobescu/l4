@@ -32,6 +32,8 @@ class ClarifierReply:
     answer: ClarifierAnswer | None = None
     model_resolved: str | None = None
     cost_usd: float | None = None
+    credits: float | None = None  # plan credits a CLI metered (Kiro): never added to `cost_usd`
+    credits_source: str | None = None
     calls: int = 0
     detail: str = ""
     limit: RunResult | None = None
@@ -63,6 +65,9 @@ class BackendClarifier:
             out.model_resolved = result.model_resolved or out.model_resolved
             if result.usage.cost_usd is not None:  # None is "not reported" (codex), which is not "free"
                 out.cost_usd = (out.cost_usd or 0.0) + result.usage.cost_usd
+            if result.usage.credits is not None:
+                out.credits = (out.credits or 0.0) + result.usage.credits
+                out.credits_source = result.usage.credits_source or out.credits_source
             if result.status in ("limit", "error"):
                 return _unavailable(out, result)
             if result.status == "timeout":

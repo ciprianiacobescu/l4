@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from l4.agents.base import Usage
 from l4.clarifier.answer import CLARIFIER_ANSWER_SCHEMA
 from l4.clarifier.backend import MAX_ANSWER_TOKENS, BackendClarifier
 from l4.clarifier.context import ClarifierPrompt
@@ -79,3 +80,20 @@ def test_an_error_is_unavailable_and_a_timeout_is_retried_once():
     assert out.status == "ok" and out.calls == 2 and [m.content for m in slow.calls[1]["messages"]] == ["USER"]
     dead = ScriptedBackend(StructuredResult("timeout", detail="late"), StructuredResult("timeout", detail="late"))
     assert BackendClarifier(dead, redact=str).answer(VIEW, PROMPT).status == "unavailable"
+
+
+def test_credits_are_summed_over_the_calls_with_their_source_and_no_dollars():
+    """SCN-KJD-12 (backend part): a kiro-cli call meters credits, not dollars; a repair call adds to them."""
+    first = StructuredResult(
+        "schema_invalid", detail="confidence: bad", raw=reply(confidence="certain"),
+        usage=Usage(credits=0.03, credits_source="kiro.stream"),
+    )  # fmt: skip
+    second = StructuredResult("ok", parsed=reply(), usage=Usage(credits=0.02, credits_source="kiro.stream"))
+    out = BackendClarifier(ScriptedBackend(first, second), redact=lambda t: t).answer(VIEW, PROMPT)
+    assert out.status == "ok" and out.calls == 2
+    assert out.credits == pytest.approx(0.05) and out.credits_source == "kiro.stream" and out.cost_usd is None
+
+
+def test_a_call_without_credits_leaves_them_unset():
+    out = BackendClarifier(ScriptedBackend(ok(reply())), redact=lambda t: t).answer(VIEW, PROMPT)
+    assert out.credits is None and out.credits_source is None

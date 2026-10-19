@@ -200,7 +200,7 @@ Every task follows these rules:
     - The `kiro_serves_judges` monkeypatches of 1.1, 1.3 and 4.1 are no longer needed; remove them.
   - Code: `src/l4/llm/agent_judge.py` (`JUDGE_ADAPTERS`), `src/l4/verifier/judge.py` (`JudgeRun.credits`),
     `src/l4/verifier/ladder.py` (`_ask_judges` events).
-- [ ] 7.2 Clarifier credits (L4-KJD-004). Depends on 4.1.
+- [x] 7.2 Clarifier credits (L4-KJD-004). Depends on 4.1.
   - Tests first in `tests/unit/clarifier/test_backend_clarifier.py` and `test_clarifier_run.py`: SCN-KJD-12.
   - Code: `src/l4/clarifier/backend.py` (`ClarifierReply.credits`), `src/l4/clarifier/clarifier.py` (the event).
 
