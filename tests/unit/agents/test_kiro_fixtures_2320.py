@@ -26,6 +26,7 @@ def test_every_listed_file_exists():
         "input-missing.stream.jsonl",
         "judge-agent.json",
         "judge-pass.stream.jsonl",
+        "list-models.json",
         "no-login.exit.txt",
         "no-login.stderr.txt",
         "no-login.stdout.txt",
