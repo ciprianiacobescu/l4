@@ -2118,7 +2118,7 @@ Three more rules apply:
   `delegate` for a unit whose open question has no final delegate record and no deferral in the future. If the delegate
   wrote an answer, the run starts the next run once on `<base>`, also when the plan step waited. If it escalated, no run
   is started and the plan waits with `unit_awaiting_human` ([7.1](#procedure-the-delegate-answered-or-escalated)).
-- **Idle runs.** A run of the dispatched unit is *idle* when its ledger holds no agent call (`agent.finished`), no gate
+- **Idle runs.** A run of the dispatched unit is *idle* when its ledger holds no agent call (`agent.finished`, or a paid `budget.cost` of the clarifier or System One), no gate
   (`gate.finished`) and no phase change other than into `awaiting_human` or `clarifying`. The harness then records
   `plan.run_idle` and starts no next run, and the run does not count against `max_runs` (`l4 yolo status` shows
   `runs: 3 of 10 (9 idle, not counted)`). It stops a plan from spending its runs on a unit that has nothing to do. A run

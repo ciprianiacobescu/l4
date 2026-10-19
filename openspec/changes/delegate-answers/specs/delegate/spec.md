@@ -45,8 +45,9 @@ be in scope.
 `roles.delegate` SHALL be a factory chain of `claude-code` and `codex` adapter profiles. `question.raised` SHALL record
 the asker (`profile`, `model`; `judges` for a verdict question). With `delegate.independence: model` (default) the
 selection MUST veto an asker's profile name or model, with `profile` only the name. A step's raise with no asker MUST
-count every implementer (and judge) profile of the unit; an intake raise has no asker. No profile left MUST escalate
-(`no independent delegate`).
+count every implementer (and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe); the
+model that served the call (`model_resolved`) MUST be checked against the askers too, and a reply served by an asker's
+model MUST be discarded and escalated. No profile left MUST escalate (`no independent delegate`).
 
 #### Scenario: SCN-DLG-06 (+) The verdict a Claude judge raised goes to Codex
 - **GIVEN** `roles.delegate: [delegate-opus, delegate-sol]` and a verdict question raised by a round judged by
@@ -150,7 +151,8 @@ redacted before any cut.
 The delegate SHALL return `l4/delegate-result@1` `{question, decision, text, reason, checked}`. A reply SHALL be kept
 only when the decision fits the kind, every decision but `escalate` has `checked` entries that resolve at the unit
 head, `text` passes the text checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for
-`WHEN … THEN …` where the question does. Any other reply MUST be recorded `delegate.result{status: discarded}` and the
+`WHEN … THEN …` where the question does. A `checked` entry MUST NOT cite `questions.md`, `verification.md` or a path under `.l4/` (the
+harness's and the asker's own words), and its quote MUST have at least 12 characters. Any other reply MUST be recorded `delegate.result{status: discarded}` and the
 question escalated.
 
 #### Scenario: SCN-DLG-16 (−) A claim that does not resolve discards the reply
@@ -246,7 +248,7 @@ escalated questions and no chained run. The label SHALL go when no escalated que
 The harness SHALL bound, from the base branch: attempts per question (`max_attempts_per_question`, 2), answers per task
 or verdict target (`max_answers_per_task`, 3), questions per run (5), cost per answer (3.0 USD), per unit (15.0 USD)
 and, in a plan with a cost limit, the delegate's share of it (`plan_cost_share`, 0.25). A call SHALL need one answer's
-cost left in each cost limit, an unknown cost counting at that figure. A limit reached MUST escalate. The cost SHALL
+cost left in each cost limit, an unknown cost counting at that figure (also for a call that hit a limit before the next profile answered). A limit reached MUST escalate. The cost SHALL
 be unit cost.
 
 #### Scenario: SCN-DLG-27 (−) The fourth question on a task goes to a person
@@ -312,8 +314,9 @@ and cost; escalated with the reason; deferred with the time). `l4 yolo status` S
 With `delegate.enabled`, doctor `DLG-001` (error) SHALL check that `roles.delegate` is not empty, names existing
 `claude-code` or `codex` adapter profiles, that `delegate.kinds` and the limits are valid, and that every profile of
 `roles.implementer` and `roles.judges` has a delegate profile that passes the independence rule, naming each that has
-none. `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`). Both MUST pass
-silently while the delegate is off.
+none. `DLG-002` (warn) SHALL check that a delegate profile is usable now (`hello` with `--live`). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+`ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
+`independence: model`. Both MUST pass silently while the delegate is off.
 
 #### Scenario: SCN-DLG-33 (−) A delegate that is the judge's model is reported
 - **GIVEN** `delegate.enabled: true`, `roles.delegate: [delegate-opus]`, `roles.judges: [judge-opus]` and
@@ -337,7 +340,8 @@ silently while the delegate is off.
 With no usable delegate profile the pass SHALL defer the question (`delegate.result{status: deferred, retry_after}`)
 when every profile is cooling with a known reset, or a call timed out or failed, and SHALL escalate when a profile is
 unusable for a cause only a fix ends (binary, login, `hello`, constraint). Deferrals and calls SHALL be bounded by
-`max_attempts_per_question`. The unit MUST stay in `awaiting_human`, never `waiting_capacity`.
+`max_attempts_per_question`, a deferral for lack of time (`reason: soft_deadline`) included, so that runs started for it
+end in an escalation. The unit MUST stay in `awaiting_human`, never `waiting_capacity`.
 
 #### Scenario: SCN-DLG-35 (+) A cooling delegate is deferred
 - **GIVEN** both delegate profiles cooling until 10:30

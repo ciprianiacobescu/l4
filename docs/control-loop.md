@@ -140,7 +140,7 @@ The job runs these steps, in this order (`l4.github.yml`, `l4.gitlab-ci.yml`):
    4. **Each unit that can move**, one after the other (`run_units`). For each unit: the lease, the worktree, the work,
       the final ledger push (`run_unit_in_worktree`). Section 6 explains the work.
    5. **Maybe start the next run.** After a plan step that leaves work, the run asks the forge for one more run on
-      `<base>`, with two exceptions. After an **idle** run of the unit the step let run (no agent call, no gate, no phase
+      `<base>`, with two exceptions. After an **idle** run of the unit the step let run (no agent or paid model call, no gate, no phase
       change but into `awaiting_human` or `clarifying`) it records `plan.run_idle`, does not count the run against
       `max_runs` and asks for none, so a unit that has nothing to do cannot loop. After a run in which the delegate wrote
       an answer, it asks for one next run, also when the plan step waited. After the soft deadline it can ask for a continuation (L4-IMP-012, `ci.continuation: dispatch`).

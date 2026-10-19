@@ -408,7 +408,7 @@ backs counts as an agent's answer.
 `limits` has `max_cost_usd`, `max_unit_attempts` (default 2), `max_runs` and `deadline`. L4 charges the usage in the plan
 ledger, per attempt of a unit, and checks it before each dispatch and each merge. The figures include the cost of the
 attempt that stopped the plan. A restart starts a new attempt and counts as one. The attempts of a unit count from the
-activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. A run in which the dispatched unit did nothing is *idle* (no agent call, no gate, no phase change but into
+activation: restarts before the plan do not count. The cost of the earlier attempts stays in the total, and so does the cost of the review. A run in which the dispatched unit did nothing is *idle* (no agent or paid model call, no gate, no phase change but into
 `awaiting_human` or `clarifying`): L4 records `plan.run_idle`, does not count the run against `max_runs`
 (`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`) and starts no next run, so a plan does not spend its runs
 on a unit that waits. The usage is never reset:

@@ -46,7 +46,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   delivery-plans page, and the delegate in the control-loop page and the skill's operate and plan references.
 
 ### Changed
-- The label `l4:needs-person` (created by `l4 setup github`, checked by doctor FORGE-003) marks a PR whose open question
+- The label `l4:needs-person` (created by `l4 setup github`) marks a PR whose open question
   the delegate escalated; it goes when no escalated question of the unit is open.
 - The status lines name the delegate's answers and escalations (`l4 status`, `l4 status --unit`, `l4 yolo status`).
 - A plan that waits with `unit_awaiting_human` names the escalated questions in its detail. A run in which the delegate
@@ -63,6 +63,20 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - Idle plan runs are free. A run of the dispatched unit that made no agent call, ran no gate and changed no phase but into
   `awaiting_human` or `clarifying` is recorded `plan.run_idle`, does not count against `max_runs` and starts no next run,
   so a plan with a waiting unit no longer spends its runs (`l4 yolo status` shows `runs: 3 of 10 (9 idle, not counted)`).
+  A paid clarifier or System One call (`budget.cost`) is work, so a run that made one is not idle.
+- The delegate's deferrals are bounded: a deferral for lack of time (`reason: soft_deadline`) counts as an attempt, so a
+  `ci.time_budget` shorter than `delegate.timeout` plus `ci.soft_deadline_margin` ends in an escalation instead of
+  chaining free runs; `DLG-001` fails on that setting when the budget is known.
+- Independence fails safe: under `delegate.independence: model` a delegate profile with no `model`, or an asker whose
+  model is unknown, vetoes; the model that actually served the call is checked against the askers too.
+- A fix unit's answers carry their real actor: an agent's answer is recorded `by: agent`, and the delegate's reaches the
+  fix unit's implementer as `by="delegate"`.
+- A `checked` entry of the delegate cannot cite `questions.md`, `verification.md` or `.l4/`, and its quote needs 12
+  characters. The cost of a delegate call that hit a limit is recorded, and a pass killed mid-call no longer leaves a
+  registered worktree that stops the next one. The `Escalated by:` line neutralises HTML comments.
+  `delegate.unfreeze` is read from the base branch where a green step decides. An agent's answer under
+  `clarifier.answer_by_agents` still unfreezes a frozen test or opens gate configuration, as on 0.4.18 (the delegate's
+  never does, except an accepted suggestion under `delegate.unfreeze: true`).
 
 ## 0.4.18 (unreleased)
 

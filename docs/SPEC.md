@@ -1965,6 +1965,10 @@ names, under the same conditions:
 - the question is not a verdict question, and it holds the task;
 - at most 3 files per question.
 
+The recorded answer counts when it is `by: human` or `by: agent` (an agent that answered through `l4 questions` where
+`clarifier.answer_by_agents` allows it acts for the person, L4-QMD-009); `by: delegate` and `by: clarifier` never do,
+except the delegate's accepted suggestion under `delegate.unfreeze` (L4-DLG-014). L4-IMP-041 reads the same actors.
+
 A human answer SHALL also open a pre-existing test file that it names: a tracked regular file at the red commit that
 matches `tdd.test_globs` and that no red step of the task added or changed (the task needs it to change, for example an
 old assertion on a type the task now wraps). It opens under the same conditions, goes into the `keep` set of the
@@ -3345,7 +3349,8 @@ escalated an open question (L4-DLG-008), the forge MUST also get the label `l4:n
 section `Needs a person (the delegate escalated)` that lists each such question with the delegate's reason; when the
 delegate answered questions, the sticky comment SHALL list them under `Answered by the delegate` with the model and the
 CLI. `l4:needs-person` SHALL be removed when no escalated question of the unit is open, and SHALL be in the label set
-that setup creates and doctor FORGE-003 checks.
+that setup creates (`managed_labels`). No doctor check reads the `l4:*` labels yet: the `FORGE-003` row lists the check
+that is still to come.
 
 **L4-CLR-005** If no clarifier profile is available or its output stays invalid after one repair, the questions stay
 `open` without suggestion, the unit goes to `awaiting_human` (exit 11, not 12 — humans can always answer), and the
@@ -3368,8 +3373,9 @@ while no plan is active. Held units, units of a stopped or cancelled plan and fi
 factory chain of `claude-code` and `codex` adapter profiles. `question.raised` SHALL record the asker (`profile`,
 `model`; `judges` for a verdict question). With `delegate.independence: model` (default) the selection MUST veto an
 asker's profile name or model, with `profile` only the name. A step's raise with no asker MUST count every implementer
-(and judge) profile of the unit; an intake raise has no asker. No profile left MUST escalate (`no independent
-delegate`).
+(and judge) profile of the unit; an intake raise has no asker. A profile with no `model`, and an asker whose model cannot be resolved, MUST veto under `model` (fail safe); the
+model that served the call (`model_resolved`) MUST be checked against the askers too, and a reply served by an asker's
+model MUST be discarded and escalated. No profile left MUST escalate (`no independent delegate`).
 
 **L4-DLG-003 The delegate answers at the end of the run that parks the unit, and in a later run.** A run that leaves a
 unit in scope in `awaiting_human` (or `fixing` with a waiting fix unit) SHALL run the delegate pass before it closes,
@@ -3388,7 +3394,8 @@ its evidence inside `<l4:data>` blocks that the system text calls data, never in
 `l4/delegate-result@1` `{question, decision, text, reason, checked}`. A reply SHALL be kept only when the decision fits
 the kind, every decision but `escalate` has `checked` entries that resolve at the unit head, `text` passes the text
 checks of `l4 questions answer` and unfreezes nothing (L4-DLG-014), and a reject asks for `WHEN … THEN …` where the
-question does. Any other reply MUST be recorded `delegate.result{status: discarded}` and the question escalated.
+question does. A `checked` entry MUST NOT cite `questions.md`, `verification.md` or a path under `.l4/` (the
+harness's and the asker's own words), and its quote MUST have at least 12 characters. Any other reply MUST be recorded `delegate.result{status: discarded}` and the question escalated.
 
 **L4-DLG-006 The delegate's answer takes the path and the commit of `l4 questions`.** A kept reply SHALL be written by
 the edit core of `l4 questions` on the run's worktree, without `clarifier.answer_by_agents`, as `text`, `accept|reject
@@ -3411,8 +3418,7 @@ label SHALL go when no escalated question of the unit is open.
 **L4-DLG-009 The delegate's calls and cost are bounded.** The harness SHALL bound, from the base branch: attempts per
 question (`max_attempts_per_question`, 2), answers per task or verdict target (`max_answers_per_task`, 3), questions per
 run (5), cost per answer (3.0 USD), per unit (15.0 USD) and, in a plan with a cost limit, the delegate's share of it
-(`plan_cost_share`, 0.25). A call SHALL need one answer's cost left in each cost limit, an unknown cost counting at that
-figure. A limit reached MUST escalate. The cost SHALL be unit cost.
+(`plan_cost_share`, 0.25). A call SHALL need one answer's cost left in each cost limit, an unknown cost counting at that figure (also for a call that hit a limit before the next profile answered). A limit reached MUST escalate. The cost SHALL be unit cost.
 
 **L4-DLG-010 Every delegate decision is audited and labelled.** A delegate's accept of a harness question SHALL give
 proofs `via: delegate_override` with `question` and `answer_sha256`; a delegate's verdict SHALL be recorded
@@ -3430,12 +3436,15 @@ first escalation, and the plan's delegate cost against its share. `--json` SHALL
 (error) SHALL check that `roles.delegate` is not empty, names existing `claude-code` or `codex` adapter profiles, that
 `delegate.kinds` and the limits are valid, and that every profile of `roles.implementer` and `roles.judges` has a
 delegate profile that passes the independence rule, naming each that has none. `DLG-002` (warn) SHALL check that a
-delegate profile is usable now (`hello` with `--live`). Both MUST pass silently while the delegate is off.
+delegate profile is usable now (`hello` with `--live`). `DLG-001` also fails when `ci.time_budget` is known and `delegate.timeout` is not less than it minus
+`ci.soft_deadline_margin` (no call would fit), and when a profile it needs has no `model` under
+`independence: model`. Both MUST pass silently while the delegate is off.
 
 **L4-DLG-013 An unusable delegate defers or escalates, and never parks the unit.** With no usable delegate profile the
 pass SHALL defer the question (`delegate.result{status: deferred, retry_after}`) when every profile is cooling with a
 known reset, or a call timed out or failed, and SHALL escalate when a profile is unusable for a cause only a fix ends
-(binary, login, `hello`, constraint). Deferrals and calls SHALL be bounded by `max_attempts_per_question`. The unit MUST
+(binary, login, `hello`, constraint). Deferrals and calls SHALL be bounded by `max_attempts_per_question`, a deferral for lack of time
+(`reason: soft_deadline`) included, so that runs started for it end in an escalation. The unit MUST
 stay in `awaiting_human`, never `waiting_capacity`.
 
 **L4-DLG-014 The delegate unfreezes a file only where the base branch allows it.** `delegate.unfreeze` SHALL default to
@@ -4265,7 +4274,7 @@ delegate` and the `question`, `by` (`human | agent | clarifier | delegate`), `ma
 `model` (the delegate's) on `question.answered` and on `human.verdict`, `profile`, `model` and, for a verdict question,
 `judges` (`[{profile, model}]`) on `question.raised` (the asker the independence rule reads; a record from before has
 none), `reason: "delegate_answer"` with `by`, `profile` and `model` on `task.unfrozen`, and, on the plan ledger,
-`plan.run_idle` (`{unit, attempt, run}`: a run of the unit that made no agent call, ran no gate and changed no phase
+`plan.run_idle` (`{unit, attempt, run}`: a run of the unit that made no model call, ran no gate and changed no phase
 but into `awaiting_human` or `clarifying`; the fold subtracts it from the charged runs).
 
 **L4-STA-004** Between the hand-off commit H and the next unit-branch commit, ledger events are written into the
@@ -4764,8 +4773,7 @@ prerequisites are not integrated. The attempts of a unit that is no longer in th
 unit ledger, so the usage of the current attempt is charged as `plan.charged{unit, attempt, cost_usd, runs}`, the fold
 keeps the maximum per (unit, attempt) and sums them, and the cost of the earlier attempts is kept. The attempt number
 of a unit is 1 + the number of its attempt refs on `origin`. The cost of the review is charged as the key `plan:review`.
-A run is *idle* for the unit the step let run when that unit's ledger of the run holds no `agent.finished` (of any
-role), no `gate.finished`, and no `phase.changed` other than into `awaiting_human` or `clarifying`. After an idle run
+A run is *idle* for the unit the step let run when that unit's ledger of the run holds no `agent.finished` (of any role), no `budget.cost` (a clarifier or System One call writes only that), no `gate.finished`, and no `phase.changed` other than into `awaiting_human` or `clarifying`. After an idle run
 the harness SHALL record `plan.run_idle{unit, attempt, run}` on the plan ledger with the lease, once per run, and the
 fold SHALL subtract the idle runs of each (unit, attempt) from its charged runs, so that an idle run does not count
 against `max_runs`. A step that dispatches nothing (no unit is eligible, or the current unit waits) MUST charge no run.

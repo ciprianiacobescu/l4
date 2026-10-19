@@ -24,6 +24,8 @@ from l4.verifier.verdicts import ends_with_scenario
 
 MAX_REASON_CHARS = 1000
 LINE_WINDOW = 3  # a quote may be this many lines from the line a `path:line` reference names
+MIN_QUOTE_CHARS = 12  # a shorter quote (after whitespace is folded) is in nearly any file: it shows nothing
+HARNESS_WRITTEN = ("questions.md", "verification.md")  # the harness's own words, and the asker's: no evidence
 FIT: Mapping[QuestionKind, tuple[str, ...]] = {
     QuestionKind.TECHNICAL: ("answer", "accept", "escalate"),
     QuestionKind.PRODUCT: ("answer", "accept", "escalate"),
@@ -98,21 +100,28 @@ def _safe_relative(ref: str) -> str | None:
     return path.as_posix()
 
 
+def _harness_written(path: str) -> bool:
+    """The questions file (the asker's own text), the harness's verification summary and anything under `.l4/` say what
+    the harness or the asker wrote: citing them proves nothing about the repository (review F6)."""
+    parts = PurePosixPath(path).parts
+    return ".l4" in parts or parts[-1] in HARNESS_WRITTEN
+
+
 def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str]) -> bool:
     ref, quote = entry["ref"].strip(), _flat(entry["quote"])
     if ref.startswith("test:"):
         return ref.removeprefix("test:").strip() in test_ids
     if ref.startswith("spec:"):
         name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
-        if name is None or not quote:
+        if name is None or len(quote) < MIN_QUOTE_CHARS or _harness_written(name):
             return False
         text = head.read(f"{head.unit_rel}/{name}") if head.tracked.get(f"{head.unit_rel}/{name}") else None
         return text is not None and quote in _flat(text)
     found = _LINE_REF.fullmatch(ref)
-    if found is None or not quote:
+    if found is None or len(quote) < MIN_QUOTE_CHARS:
         return False
     path, line = _safe_relative(found["path"]), int(found["line"])
-    if path is None or not head.tracked.get(path):
+    if path is None or not head.tracked.get(path) or _harness_written(path):
         return False
     text = head.read(path)
     if text is None:

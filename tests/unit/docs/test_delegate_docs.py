@@ -203,3 +203,15 @@ def test_the_changelog_entry_sits_above_the_newest() -> None:
     assert entry.index("### Added") < entry.index("### Changed") < entry.index("### Fixed")
     for needle in ("delegate", "roles.delegate", "l4:needs-person", "plan.run_idle", "delegate_override", "L4-DLG"):
         assert needle in entry, needle
+
+
+def test_the_change_claims_only_doctor_checks_that_exist() -> None:  # review F13
+    from l4.doctor.registry import REGISTRY, load_check_modules
+
+    load_check_modules()
+    known = {check.id for check in REGISTRY.checks()}
+    changelog = _read("CHANGELOG.md")
+    unreleased = changelog[changelog.index("## 0.4.19") : changelog.index("## 0.4.18")]
+    for text in (unreleased, _change_text(), _section(SPEC, "**L4-CLR-004", level="**L4-CLR-005")):
+        claimed = set(re.findall(r"\b(?:doctor|Doctor)[ `]+([A-Z]+-\d{3})", text))
+        assert claimed <= known, sorted(claimed - known)

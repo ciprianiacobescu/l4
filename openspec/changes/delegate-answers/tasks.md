@@ -293,7 +293,7 @@ Every task follows these rules:
 - [ ] 12.1 Label, sticky note and wait detail.
   - Tests first:
     - `tests/unit/archive/test_needs_person_label.py`: `test_the_label_follows_escalated_questions` (SCN-DLG-45; a person's answer removes it, SCN-DLG-26).
-    - `tests/unit/setup/test_github_labels.py`: `test_needs_person_is_in_the_label_set` (and FORGE-003 lists it).
+    - `tests/unit/setup/test_github_labels.py`: `test_needs_person_is_in_the_label_set`.
     - `tests/unit/clarifier/test_notify_delegate.py`: `test_needs_a_person_section` and
       `test_answered_by_the_delegate_section`.
     - `tests/unit/yolo/test_yolo_wait_detail.py`: `test_the_wait_detail_names_escalated_questions` (SCN-DLG-25).

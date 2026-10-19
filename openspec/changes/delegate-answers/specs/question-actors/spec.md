@@ -109,8 +109,8 @@ with `accept` or `retry`: it was not read. Please answer again.` When the delega
 (L4-DLG-008), the forge MUST also get the label `l4:needs-person` and the sticky comment a section `Needs a person (the
 delegate escalated)` that lists each such question with the delegate's reason; when the delegate answered questions,
 the sticky comment SHALL list them under `Answered by the delegate` with the model and the CLI. `l4:needs-person` SHALL
-be removed when no escalated question of the unit is open, and SHALL be in the label set that setup creates and doctor
-FORGE-003 checks.
+be removed when no escalated question of the unit is open, and SHALL be in the label set that setup creates
+(`managed_labels`).
 
 #### Scenario: SCN-DLG-45 (+) The label follows the escalated questions
 - **GIVEN** unit A with escalated Q-004 open
