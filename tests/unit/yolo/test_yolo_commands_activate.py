@@ -61,7 +61,9 @@ def test_review_of_an_active_plan_is_refused(world, forge, capsys):
     assert "p1 is active" in capsys.readouterr().err
 
 
-def fake_judge(monkeypatch, verdicts):
+def fake_judge(monkeypatch, verdicts, materials=None, findings=None, batches=None):
+    """A judge that answers `verdicts` (default READY); `materials` and `findings` give a unit's verdict the material
+    key and the findings of an acceptance, `batches` the batch verdicts (default none: a batch is not reviewed)."""
     seen = {}
 
     def review(app, cfg, plan, units, *, git, rev, digest_of=None, **kw):  # the judge's own digest rule (R3)
@@ -69,8 +71,13 @@ def fake_judge(monkeypatch, verdicts):
         result = {}
         for uid, info in units.items():
             digest = current_unit_digest(git, cfg, uid, info.folder, rev)
-            result[uid] = Verdict(verdicts.get(uid, "READY"), digest=digest)
-        return ReviewResult(result, {}), 0.25
+            result[uid] = Verdict(
+                verdicts.get(uid, "READY"),
+                tuple((findings or {}).get(uid, ())),
+                digest=digest,
+                material=(materials or {}).get(uid),
+            )
+        return ReviewResult(result, dict(batches or {})), 0.25
 
     monkeypatch.setattr("l4.yolo.commands.review_plan_costed", review)
     return seen
@@ -93,6 +100,29 @@ def test_review_local_records_admitted_and_reviewed_like_ci(world, forge, monkey
     out = capsys.readouterr().out
     assert f"{B}: NEEDS_REVISION" in out
     assert forge.called("start_run") == []  # the review ran here
+
+
+def test_review_local_names_a_holding_acceptance_and_says_activate(world, forge, monkeypatch, capsys):
+    """SCN-YOLO-175, the --local part."""
+    from .yolo_review_events import TESTABILITY
+
+    world.push_plan()
+    world.seed(
+        "p1",
+        ev("plan.admitted", plan_digest=plan_digest(world.plan_text), order=[A, B]),
+        accepted_event(B, "mb", [TESTABILITY]),
+    )
+    fake_judge(monkeypatch, {B: "NEEDS_REVISION"}, {B: "mb"}, {B: [TESTABILITY]}, {"b1": Verdict("READY")})
+    assert world.l4("review", "p1", "--local") == 0
+    out = capsys.readouterr().out
+    assert f"  {B}: NEEDS_REVISION: " in out
+    assert "(accepted by alex@example.com: it does not stop the activation)" in out
+    assert "Next: l4 yolo activate p1 --reason TEXT" in out
+    fake_judge(monkeypatch, {B: "NEEDS_REVISION"}, {B: "other"}, {B: [TESTABILITY]}, {"b1": Verdict("READY")})
+    capsys.readouterr()
+    assert world.l4("review", "p1", "--local") == 0
+    out = capsys.readouterr().out
+    assert "accepted by" not in out and "Next: l4 yolo findings p1" in out  # another material: not held
 
 
 def test_review_local_of_a_refused_plan_records_plan_refused(world, monkeypatch, capsys):

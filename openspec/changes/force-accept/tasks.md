@@ -184,7 +184,7 @@ Every task follows these rules:
   `findings.render`/`render_json` take `why`; `run_findings`, `_show_and_confirm` and `review_worktree._show` pass it.
   Run: the four files.
 
-- [ ] 5.3 An accepted subject is shown as accepted. Tests first: `tests/unit/yolo/test_yolo_findings_render.py`:
+- [x] 5.3 An accepted subject is shown as accepted. Tests first: `tests/unit/yolo/test_yolo_findings_render.py`:
   `test_a_holding_acceptance_is_on_the_subject_line` and `test_a_reused_entry_says_when_it_was_judged`;
   `tests/unit/yolo/test_yolo_review_worktree.py`: `test_the_worktree_line_names_the_acceptance_and_the_judgement_time`
   (`(reused), judged <t>; accepted by <by>: it does not stop the activation`; the `(reused)` counts of the existing

@@ -629,3 +629,17 @@ def test_a_fresh_dry_run_names_other_findings_and_record_keeps_the_ledger(world,
     assert data["units"][A]["findings"] == [GAP] and data["units"][A]["reused_from"] == T1
     capsys.readouterr()
     assert world.l4("activate", "p1", "--reason", "go") == 0
+
+
+def test_the_worktree_line_names_the_acceptance_and_the_judgement_time(world, monkeypatch, capsys):
+    accepted_ledger(world, monkeypatch, second=False)
+    capsys.readouterr()
+    judge(monkeypatch)
+    world.l4("review", "p1", "--worktree")
+    out = capsys.readouterr().out
+    line = next(x for x in out.splitlines() if x.startswith(f"  {A}:"))
+    assert line.endswith(
+        f"NEEDS_REVISION (reused), judged {T1}; accepted by alex@example.com: it does not stop the activation"
+    )
+    ready = next(x for x in out.splitlines() if x.startswith(f"  {B}:"))
+    assert ready.endswith(f"READY (reused), judged {T1}") and out.count("(reused)") == 3

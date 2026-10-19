@@ -479,8 +479,15 @@ def _show(
     json_out: Any = None,
     review_at: str | None = None,
 ) -> None:
+    review = _review_data(result, batches)
+    held = accept.holds(state, review)
     for name, (kind, verdict) in subjects.items():
-        mark = " (reused)" if name in reused else ""
+        mark = f" (reused), judged {verdict.reused_from}" if name in reused else ""
+        if held.get(name) and verdict.verdict != "READY":
+            mark += (
+                f"{'; ' if name in reused else ' '}accepted by {state.accepted[name].get('by')}: "
+                "it does not stop the activation"
+            )
         if kind == "unit":
             ctx.say(
                 f"  {name}: digest {verdict.digest or 'none'}, material {verdict.material or 'none'}: "
@@ -488,7 +495,6 @@ def _show(
             )
         else:
             ctx.say(f"  {name}: material {verdict.material or 'none'}: {verdict.verdict}{mark}")
-    review = _review_data(result, batches)
     plan_id = parsed.plan_id
     if json_out is not None:
         document = findings.render_json(

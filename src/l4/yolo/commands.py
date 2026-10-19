@@ -1003,10 +1003,23 @@ def run_review(
         events.append(_event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(before + cost, 6), runs=0))
     _append(store, events, read.head)
     ctx.say(f"{plan_id}: reviewed here (${cost:.2f})")
-    for name, verdict in [*result.units.items(), *((f"batch {b}", v) for b, v in batches.items())]:
+    held = accepting.holds(state, events[1].data)  # the acceptances that hold on this review (L4-YOLO-066)
+    open_subjects = 0
+    for key, name, verdict in [
+        *((u, u, v) for u, v in result.units.items()),
+        *((f"batch:{b}", f"batch {b}", v) for b, v in batches.items()),
+    ]:
         line = f"  {name}: {verdict.verdict}"
-        ctx.say(line if verdict.verdict == "READY" else f"{line}: {_first_line(verdict.findings)}")
-    if any(v.verdict != "READY" for v in (*result.units.values(), *batches.values())):
+        if verdict.verdict == "READY":
+            ctx.say(line)
+            continue
+        line = f"{line}: {_first_line(verdict.findings)}"
+        if held.get(key):
+            line += f" (accepted by {state.accepted[key].get('by')}: it does not stop the activation)"
+        else:
+            open_subjects += 1
+        ctx.say(line)
+    if open_subjects:
         ctx.say(f"Next: l4 yolo findings {plan_id}")
     else:
         ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")

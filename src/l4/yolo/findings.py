@@ -337,6 +337,7 @@ class _Facts:
     accept_available: bool
     accept_refusal: Any = None  # the `accept.Refusal` (message, fix) of a not-READY subject that cannot be accepted
     why: str | None = None  # `accept.why_not_holds` of an acceptance that no longer holds
+    reused_from: str | None = None  # the time of the judgement a reused entry stands for
 
 
 def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
@@ -393,6 +394,7 @@ def _facts(
                 accept_available=available,
                 accept_refusal=refusal,
                 why=(why or {}).get(subject) if accept and not accept_holds else None,
+                reused_from=str(entry["reused_from"]) if entry.get("reused_from") else None,
             )
         )
     return out
@@ -442,7 +444,11 @@ def render(
     for fact in _facts(
         review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept, why=why
     ):
-        lines.append(f"{fact.subject}: {fact.verdict}")
+        held = fact.accepted is not None and fact.holds and fact.verdict != "READY"
+        note = f" (accepted by {fact.accepted.get('by')}: it does not stop the activation)" if held else ""
+        lines.append(f"{fact.subject}: {fact.verdict}{note}")
+        if fact.reused_from:
+            lines.append(f"  reused: judged {fact.reused_from} on the same material")
         shown = _by_severity(fact.findings)
         minors = [f for f in shown if f.get("severity") == "minor"]
         for f in shown if show_all else [f for f in shown if f.get("severity") != "minor"]:
@@ -511,6 +517,7 @@ def render_json(
                 "subject": fact.subject,
                 "verdict": fact.verdict,
                 "material": fact.material,
+                "reused_from": fact.reused_from,
                 "findings": [
                     {
                         "id": finding_id(fact.subject, f),
