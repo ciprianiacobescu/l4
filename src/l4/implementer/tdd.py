@@ -78,6 +78,7 @@ from l4.implementer.held_patch import (
     accepted_tests_block,
     arm_replay_guard,
     capture,
+    close_replay_guard,
     find_replay,
     release_replay,
     replay_step,
@@ -802,7 +803,7 @@ def step_or_replay(
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
     wb.commit_agent = None
     wb.replay_question = None  # an accept of a saved step takes effect only in its replay
-    wb.replay_guard = None
+    close_replay_guard(wb)
     wb.replay_links = frozenset()
     found = find_replay(wb, role, task, attempt=attempt)
     if found is None:

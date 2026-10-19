@@ -336,8 +336,8 @@ def test_h_simulated_window_between_check_and_write(make_bench, tmp_path, monkey
     real_read = ReplayGuard._read
     fired = []
 
-    def racing_read(self, path):
-        value = real_read(self, path)
+    def racing_read(self, path, expect=None):
+        value = real_read(self, path, expect)
         if path == "tests/fixtures/data.txt" and not fired:
             fired.append(path)
             relink(root / "tests" / "fixtures", outside)  # the attacker wins the race here

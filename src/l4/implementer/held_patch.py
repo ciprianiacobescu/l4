@@ -14,18 +14,31 @@ named was lost with them, because the next agent wrote the tests again under oth
 """
 
 import ast
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import re
+import stat
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
-from l4.implementer.confined import Entry, LinkedParent, check_parents, put_entry, read_entry, remove_entry, remove_link
+from l4.implementer.confined import (
+    Entry,
+    LinkedParent,
+    check_parents,
+    exists_entry,
+    put_entry,
+    read_entry,
+    remove_entry,
+    remove_link,
+    repair_dir_modes,
+)
 from l4.implementer.held import (
     MAX_SHOWN_TESTS,
     MAX_SOURCE_LINES,
@@ -42,7 +55,7 @@ from l4.security.protected import changed_paths, revert_protected
 from l4.specs.base import Task
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, harness_answer
 from l4.state.ledger import LedgerEvent, read_ledger
-from l4.vcs.git import GitError
+from l4.vcs.git import Git, GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
 
 if TYPE_CHECKING:  # a type only: tdd.py imports this module
@@ -442,6 +455,9 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
     agent = saved.get("agent") if isinstance(saved.get("agent"), str) else None
     if agent is not None and not re.fullmatch(r"[A-Za-z0-9._/@+-]{1,120}", agent):
         agent = None
+    odd = [p for p in _patch_paths(wb, patch) if "\n" in p or "\r" in p]
+    if odd:
+        return _refuse(wb, task, role, raised, "a path of the saved patch contains a line break")
     if patch:
         check_apply = wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "--check", "-", data=patch, check=False)
         if check_apply.returncode != 0:
@@ -480,11 +496,13 @@ class ReplayGuard:
     every non-ignored path is put back to what it was (a new path removed, a changed one restored, a deleted one deleted
     again) and what was restored is recorded as `held.replay_restored`. The commit then holds exactly the saved patch.
 
-    The guard never follows a link (`confined.py`): each path is read and acted on through the file descriptor of its
-    folder, reached from the work tree one component at a time with `O_NOFOLLOW`, right before it is acted on. A link is
-    trusted only where the saved patch creates it (`wb.replay_links`); a link in the snapshot that the patch does not
-    create, or a folder a gate replaced by a link above a guarded path, fails the step (`held.replay_unsafe`) and the
-    link itself is removed."""
+    The guard never follows a link (`confined.py`): the work tree folder is opened once when the guard is armed and
+    every walk starts from that descriptor. Each path is read and acted on through the descriptor of its folder, reached
+    one component at a time with `O_NOFOLLOW`, right before it is acted on; before every restore and every git call the
+    work tree is checked to be still the same folder. A link is trusted only where the saved patch creates it
+    (`wb.replay_links`); a link in the snapshot that the patch does not create, or a folder a gate replaced by a link
+    above a guarded path, fails the step (`held.replay_unsafe`) and the link itself is removed. A path the guard cannot
+    read (permission) fails the step cleanly at the first restore."""
 
     def __init__(self, wb: Workbench) -> None:
         self.wb = wb
@@ -492,14 +510,43 @@ class ReplayGuard:
         self.trusted: frozenset[str] = frozenset(wb.replay_links)
         self.guarded: dict[str, Entry | None] = {}
         self.planted: list[str] = []  # links in the tree before the first gate that the saved patch does not create
-        for path in self._paths():
+        self.unreadable: list[str] = []  # what the snapshot could not read: the first restore fails the step
+        self.root_fd = os.open(wb.worktree, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        st = os.fstat(self.root_fd)
+        self.root_id = (st.st_dev, st.st_ino)
+        try:
+            paths = self._paths()
+        except (OSError, GitError) as exc:
+            paths = {}
+            self.unreadable.append(exc.__class__.__name__)
+        for path in paths:
             try:
                 entry = self._read(path)
             except LinkedParent:
                 entry = None
+            except OSError as exc:
+                entry = None
+                self.unreadable.append(exc.__class__.__name__)
             self.guarded[path] = entry
             if entry is not None and entry[0] == "link" and path not in self.trusted:
                 self.planted.append(path)
+
+    def close(self) -> None:
+        if self.root_fd >= 0:
+            os.close(self.root_fd)
+            self.root_fd = -1
+
+    def __del__(self) -> None:
+        with contextlib.suppress(OSError, AttributeError):
+            self.close()
+
+    def _root_ok(self) -> bool:
+        """The work tree is still the folder the guard started in (not swapped for a link to another checkout)."""
+        try:
+            st = os.stat(self.wb.worktree, follow_symlinks=False)
+        except OSError:
+            return False
+        return stat.S_ISDIR(st.st_mode) and (st.st_dev, st.st_ino) == self.root_id
 
     def _own(self, path: str) -> bool:
         """The harness's own outputs: the run's ledger, the unit folder's `.l4/`, `tasks.md` and `questions.md`."""
@@ -516,6 +563,9 @@ class ReplayGuard:
         wb = self.wb
         return {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
 
+    def _read(self, path: str, expect: Entry | None = None) -> Entry | None:
+        return read_entry(self.root_fd, path, expect=expect)
+
     def release(self, paths: Sequence[str]) -> None:
         """The harness itself changed these paths (an unused stub put back to the base): guard the state they are in."""
         now = self._paths()
@@ -523,7 +573,7 @@ class ReplayGuard:
             if path in now:
                 try:
                     self.guarded[path] = self._read(path)
-                except LinkedParent:
+                except (LinkedParent, OSError):
                     self.guarded[path] = None
             else:
                 self.guarded.pop(path, None)
@@ -533,29 +583,44 @@ class ReplayGuard:
         wb = self.wb
         for link in links:
             try:
-                remove_link(wb.worktree, link)
+                remove_link(self.root_fd, link)
             except OSError:
                 continue
         wb.emit("held.replay_unsafe", where=where, links=list(links)[:20], paths=list(paths)[:20])
         return f"{why} ({where}): the replay does not follow it, so the step fails"
 
+    @staticmethod
+    def _put_back_failed(where: str, exc: Exception) -> str:
+        return f"the replayed step could not be put back to its saved patch ({where}): {exc.__class__.__name__}"
+
     def restore(self, where: str) -> str | None:
         """Put back what a gate run changed; the reason when the step must fail, else None."""
         wb = self.wb
+        if not self._root_ok():
+            return self._fail(where, [], [], "the work tree folder is no longer the one the replay started in")
         if self.planted:
             shown = ", ".join(f"`{p}`" for p in self.planted[:5])
             return self._fail(
                 where, self.planted, self.planted,
                 f"a link {shown} was in the work tree before the first gate and the saved patch does not create it",
             )  # fmt: skip
-        now = self._paths()
+        if self.unreadable:
+            return f"the replayed step could not be put back to its saved patch ({where}): {self.unreadable[0]}"
+        try:
+            now = self._paths()
+        except (OSError, GitError) as exc:
+            return self._put_back_failed(where, exc)
         everything = sorted(set(now) | set(self.guarded))
         for path in everything:  # before any action: a link above any path of the step fails it, whatever the order
             try:
-                check_parents(wb.worktree, path)
+                check_parents(self.root_fd, path)
             except LinkedParent as linked:
                 if not self._beneath_own_link(linked.rel):
                     return self._fail(where, [linked.rel], [path], self._why(linked.rel))
+            except OSError as exc:
+                if isinstance(exc, PermissionError):  # a folder a gate made unreadable would also stop the discard
+                    repair_dir_modes(self.root_fd, path)
+                return self._put_back_failed(where, exc)
         restored: list[str] = []
         try:
             for path in everything:
@@ -565,8 +630,10 @@ class ReplayGuard:
                     if self._beneath_own_link(linked.rel):
                         continue
                     return self._fail(where, [linked.rel], [path], self._why(linked.rel))
+        except _RootChanged:
+            return self._fail(where, [], [], "the work tree folder is no longer the one the replay started in")
         except (OSError, GitError) as exc:
-            return f"the replayed step could not be put back to its saved patch ({where}): {exc.__class__.__name__}"
+            return self._put_back_failed(where, exc)
         if restored:
             wb.emit("held.replay_restored", where=where, count=len(restored), paths=restored[:50])
         return None
@@ -579,41 +646,74 @@ class ReplayGuard:
     def _why(rel: str) -> str:
         return f"a gate run replaced the folder `{rel}` by a symbolic link above a path of the replayed patch"
 
-    def _read(self, path: str) -> Entry | None:
-        return read_entry(self.wb.worktree, path)
+    def _git(self, *args: str) -> None:
+        if not self._root_ok():  # git runs in the work tree by name: never in another checkout
+            raise _RootChanged
+        self.wb.git.run(*args)
 
     def _restore_one(self, path: str, existed: bool | None, restored: list[str]) -> None:
-        wb = self.wb
-        root = wb.worktree
         if path not in self.guarded:  # not part of the step: a gate wrote it, or changed a tracked file
-            if self._read(path) is None and not existed:
+            if not existed and not exists_entry(self.root_fd, path):  # decided by lstat, nothing is read
                 return
-            remove_entry(root, path)
+            remove_entry(self.root_fd, path)
             if existed:
-                wb.git.run("checkout", self.base, "--", f":(literal){path}")
+                self._git("checkout", self.base, "--", f":(literal){path}")
             else:
-                wb.git.run("rm", "--quiet", "--cached", "--ignore-unmatch", "--", f":(literal){path}")
+                self._git("rm", "--quiet", "--cached", "--ignore-unmatch", "--", f":(literal){path}")
             restored.append(path)
             return
         expected = self.guarded[path]
-        if self._read(path) == expected:
+        if self._read(path, expected) == expected:  # size and mode first: a file of another size is not read
             return
-        put_entry(root, path, expected)
+        put_entry(self.root_fd, path, expected)
         restored.append(path)
 
 
+class _RootChanged(Exception):
+    pass
+
+
+def _index_links(git: Git) -> dict[str, str]:
+    """path -> blob id of every entry of the index that is a symbolic link (mode 120000)."""
+    out = git.run_bytes("ls-files", "-s", "-z")
+    links = {}
+    for record in out.split(b"\0"):
+        meta, _, name = record.partition(b"\t")
+        parts = meta.split()
+        if len(parts) == 3 and parts[0] == b"120000":
+            links[os.fsdecode(name)] = parts[1].decode()
+    return links
+
+
 def links_added(wb: Workbench, patch: bytes) -> frozenset[str]:
-    """The paths the saved patch creates as a symbolic link (`create mode 120000`): the only links the guard trusts."""
+    """The paths the saved patch creates or changes as a symbolic link: the only links the guard trusts. Taken from a
+    temporary index (the step base, the patch applied to it, `ls-files -s -z`), never from text that a file name can
+    forge. A patch that does not apply there trusts nothing."""
     if not patch:
         return frozenset()
-    summary = wb.git.run_input_bytes(*GIT_PLAIN, "apply", "--summary", "-", data=patch).stdout
-    marker = " create mode 120000 "
-    return frozenset(line.split(marker, 1)[1] for line in summary.splitlines() if line.startswith(marker))
+    with tempfile.TemporaryDirectory(prefix="l4-index-") as tmp:
+        git = wb.git.at(wb.worktree)
+        git.env = {**git.env, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        try:
+            git.run("read-tree", wb.head())
+            before = _index_links(git)
+            git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "--cached", "-", data=patch)
+            after = _index_links(git)
+        except GitError:
+            return frozenset()
+    return frozenset(path for path, blob in after.items() if before.get(path) != blob)
 
 
 def arm_replay_guard(wb: Workbench) -> None:
     """Called right before the first gate of a step: a replayed step is guarded from here on."""
+    close_replay_guard(wb)
     wb.replay_guard = ReplayGuard(wb) if wb.replay_question is not None else None
+
+
+def close_replay_guard(wb: Workbench) -> None:
+    if wb.replay_guard is not None:
+        wb.replay_guard.close()
+    wb.replay_guard = None
 
 
 def restore_replay(wb: Workbench, where: str) -> str | None:
@@ -631,6 +731,8 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     after the step in `run_red`, `run_green` and `run_single` is the same code. Returns a `StepOutcome`."""
     from l4.implementer.tdd import StepOutcome  # the module imports this one
 
+    if wb.worktree.is_symlink():
+        return StepOutcome("failed", reason="the work tree folder is a link: the saved step is not applied")
     base = wb.head()
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step

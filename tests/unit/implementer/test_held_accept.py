@@ -964,4 +964,4 @@ def test_r3c_a_patch_whose_path_holds_a_newline_is_refused_with_a_retry_only_que
     outcome = run_task(bench.wb, TASK)
     assert outcome.question_ids == ["Q-002"] and bench.events("held.replayed") == []
     assert bench.events("question.raised")[-1]["saved"] is False
-    assert "newline" in question_text(bench).split("## Q-002", 1)[1]
+    assert "line break" in question_text(bench).split("## Q-002", 1)[1]

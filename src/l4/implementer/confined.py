@@ -28,12 +28,15 @@ class LinkedParent(Exception):
         self.rel = rel
 
 
-def open_parent(root: Path, rel: str, *, create: bool = False) -> tuple[int, str]:
+Root = Path | int  # the work tree by name, or the descriptor of the folder the caller opened (and keeps)
+
+
+def open_parent(root: Root, rel: str, *, create: bool = False) -> tuple[int, str]:
     """(fd of the folder that holds `rel`, the entry's name). Raises `LinkedParent` when a folder on the way is a link,
     `FileNotFoundError` when one is absent (and `create` is false). With `create`, a missing folder is made and a
     non-folder (a file, a FIFO) standing where a folder belongs is removed first."""
     parts = rel.rstrip("/").split("/")
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    fd = os.dup(root) if isinstance(root, int) else os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     walked: list[str] = []
     try:
         for part in parts[:-1]:
@@ -72,10 +75,24 @@ def _lstat(fd: int, name: str) -> os.stat_result | None:
         return None
 
 
-def read_entry(root: Path, rel: str) -> Entry | None:
+def exists_entry(root: Root, rel: str) -> bool:
+    """Whether anything stands at `rel` (decided by `lstat`, nothing is read). `LinkedParent` as `open_parent`."""
+    try:
+        fd, name = open_parent(root, rel)
+    except FileNotFoundError:
+        return False
+    try:
+        return _lstat(fd, name) is not None
+    finally:
+        os.close(fd)
+
+
+def read_entry(root: Root, rel: str, *, expect: Entry | None = None) -> Entry | None:
     """What `rel` is, without following anything: a link and its target, a regular file with its bytes and mode, a
     folder; None for an absent entry or one that is none of these (a FIFO, a socket, a device are never opened).
-    `LinkedParent` when a folder above it is a link."""
+    `LinkedParent` when a folder above it is a link. With `expect` (a file), a file of another size is not read at all
+    (its bytes come back as None, which equals nothing) and one of the expected size is read at most one byte past
+    it."""
     try:
         fd, name = open_parent(root, rel)
     except FileNotFoundError:
@@ -90,14 +107,18 @@ def read_entry(root: Path, rel: str) -> Entry | None:
             return ("dir",)
         if not stat.S_ISREG(st.st_mode):
             return None
+        mode = stat.S_IMODE(st.st_mode)
+        want = expect[1] if expect is not None and expect[0] == "file" and expect[1] is not None else None
+        if want is not None and st.st_size != len(want):
+            return ("file", None, mode)
         out = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
         with os.fdopen(out, "rb") as handle:
-            return ("file", handle.read(), stat.S_IMODE(st.st_mode))
+            return ("file", handle.read() if want is None else handle.read(len(want) + 1), mode)
     finally:
         os.close(fd)
 
 
-def remove_entry(root: Path, rel: str) -> None:
+def remove_entry(root: Root, rel: str) -> None:
     """Remove `rel` whatever it is (a folder with all it holds, by a walk that follows no link); nothing if absent."""
     try:
         fd, name = open_parent(root, rel)
@@ -119,7 +140,7 @@ def _remove(fd: int, name: str) -> None:
         os.unlink(name, dir_fd=fd)  # a file, a link, a FIFO, a socket: the entry, never what it points to
 
 
-def put_entry(root: Path, rel: str, expected: Entry | None) -> None:
+def put_entry(root: Root, rel: str, expected: Entry | None) -> None:
     """Make `rel` hold `expected` (None: nothing) by removing what is there and creating the entry anew."""
     try:
         fd, name = open_parent(root, rel, create=expected is not None)
@@ -140,7 +161,7 @@ def put_entry(root: Path, rel: str, expected: Entry | None) -> None:
         os.close(fd)
 
 
-def remove_link(root: Path, rel: str) -> None:
+def remove_link(root: Root, rel: str) -> None:
     """Remove `rel` only if it is a link (the link itself, never what it points to); nothing otherwise."""
     try:
         fd, name = open_parent(root, rel)
@@ -154,10 +175,32 @@ def remove_link(root: Path, rel: str) -> None:
         os.close(fd)
 
 
-def check_parents(root: Path, rel: str) -> None:
+def check_parents(root: Root, rel: str) -> None:
     """Raise `LinkedParent` if a folder above `rel` is a link; return quietly when they are folders or absent."""
     try:
         fd, _ = open_parent(root, rel)
     except FileNotFoundError:
         return
     os.close(fd)
+
+
+def repair_dir_modes(root: Root, rel: str) -> None:
+    """Best effort after a `PermissionError`: give the folders above `rel` that a gate made unreadable their owner's
+    access back, so the step can be discarded. Links are never followed; a folder that is not ours is left alone."""
+    fd = os.dup(root) if isinstance(root, int) else os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in rel.rstrip("/").split("/")[:-1]:
+            try:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except PermissionError:
+                st = _lstat(fd, part)
+                if st is None or not stat.S_ISDIR(st.st_mode):
+                    return
+                os.chmod(part, stat.S_IMODE(st.st_mode) | 0o700, dir_fd=fd)
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+    except OSError:
+        return
+    finally:
+        os.close(fd)
