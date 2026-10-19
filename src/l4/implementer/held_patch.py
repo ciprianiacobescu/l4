@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -36,8 +37,9 @@ from l4.implementer.held import (
 )
 from l4.implementer.prompt import data_block
 from l4.implementer.result import ImplementerResult, ResultInvalid, parse_result
+from l4.implementer.stubs import restore_to_base
 from l4.implementer.workbench import Workbench
-from l4.security.protected import revert_protected
+from l4.security.protected import changed_paths, revert_protected
 from l4.specs.base import Task
 from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, harness_answer
 from l4.state.ledger import LedgerEvent, read_ledger
@@ -51,7 +53,7 @@ log = logging.getLogger("l4.held")
 
 HELD_DIR = ".l4/held"  # relative to the unit folder
 MAX_PATCH_BYTES = 64 * 1024 * 1024
-MAX_META_BYTES = 256 * 1024
+MAX_META_BYTES = 8 * 1024 * 1024
 MAX_DIFF_FILES = 100  # changed paths whose diff is read and shown; the others are listed
 _NOT_SHOWN = "[diff not shown here: it is in `{where}` on the unit branch and is replayed too]"
 MAX_EVENT_SOURCE_CHARS = 20_000  # what `held.replayed` carries of the sources
@@ -246,7 +248,7 @@ def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, Any
     agent = f"{wb.selected.profile_name}/{profile.model}" if profile.model else wb.selected.profile_name
     meta = json.dumps(
         {"schema": "l4/held@1", "task": held.task, "check": held.check, "agent": agent,
-         "result": json.loads(held.result)},
+         "result": _small(json.loads(held.result))},
         sort_keys=True,
     ).encode()  # fmt: skip
     rels = [held_rel(wb, held.task, held.check, "patch"), held_rel(wb, held.task, held.check, "json")]
@@ -256,6 +258,11 @@ def write_held(wb: Workbench, held: HeldCheck) -> tuple[list[str], dict[str, Any
         if target.is_symlink():
             target.unlink()
         atomic_write_bytes(target, data)
+    for rel, limit in zip(rels, (MAX_PATCH_BYTES, MAX_META_BYTES), strict=True):
+        if isinstance(_read(wb.worktree / rel, limit), str):  # what cannot be read back cannot be replayed
+            for leftover in rels:
+                (wb.worktree / leftover).unlink(missing_ok=True)
+            return [], {}
     return rels, {
         "saved": True, "patch_sha256": _digest(held.patch), "result_sha256": _digest(meta),
         "source_sha256": dict(held.digests),
@@ -430,6 +437,9 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
         result = parse_result(saved["result"])
     except (ValueError, KeyError, TypeError, ResultInvalid) as exc:
         return _refuse(wb, task, role, raised, f"the saved result is not valid ({exc.__class__.__name__})")
+    result = result.model_copy(
+        update={"files_changed": sorted(_patch_paths(wb, patch)), "tests_added": list(raised.data.get("tests") or [])}
+    )  # what grows with the step is not in the sidecar: it is the patch's, recomputed
     agent = saved.get("agent") if isinstance(saved.get("agent"), str) else None
     if agent is not None and not re.fullmatch(r"[A-Za-z0-9._/@+-]{1,120}", agent):
         agent = None
@@ -442,6 +452,11 @@ def find_replay(wb: Workbench, role: str, task: Task, *, attempt: int) -> Replay
             )
     tests = tuple(str(t) for t in raised.data.get("tests") or [])
     return Replay(qid, check, patch, sha, result, tests, patch_rel, meta_rel, agent)
+
+
+def _small(result: dict[str, Any]) -> dict[str, Any]:
+    """The agent's result without the fields that grow with the step (the patch holds them)."""
+    return {**result, "files_changed": [], "tests_added": []}
 
 
 def _patch_paths(wb: Workbench, patch: bytes) -> frozenset[str]:
@@ -457,24 +472,94 @@ def _patch_paths(wb: Workbench, patch: bytes) -> frozenset[str]:
     return frozenset(paths)
 
 
-def replay_extra(wb: Workbench) -> str | None:
-    """After a replay: the paths the step changed that its saved patch does not contain (a test or the setup wrote them
-    while the gates ran), outside the harness's own outputs; None when there are none or no replay is running."""
-    if wb.replay_paths is None:
+_NOISE = ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
+
+
+class ReplayGuard:
+    """The tree of a replayed step as it was when its first gate was about to run (SPEC L4-IMP-065), modelled on
+    `ProductionGuard`: gates run test code with a writable work tree, so after every gate run the content of every
+    non-ignored path is put back to what it was (a new path removed, a changed one restored, a deleted one deleted
+    again) and what was restored is recorded as `held.replay_restored`. The commit then holds exactly the saved
+    patch."""
+
+    def __init__(self, wb: Workbench) -> None:
+        self.wb = wb
+        self.base = wb.head()
+        self.guarded: dict[str, bytes | None] = {path: self._read(path) for path in self._paths()}
+
+    def _own(self, path: str) -> bool:
+        wb, parts = self.wb, path.split("/")
+        return (
+            path in (wb.ledger_rel, f"{wb.unit_rel}/tasks.md", f"{wb.unit_rel}/questions.md")
+            or ".l4" in parts
+            or any(part in _NOISE for part in parts)
+            or path.endswith(".pyc")
+        )
+
+    def _paths(self) -> dict[str, bool]:
+        wb = self.wb
+        return {p: e for p, e in changed_paths(wb.git, self.base, excludes=wb.excludes).items() if not self._own(p)}
+
+    def _read(self, path: str) -> bytes | None:
+        target = self.wb.worktree / path
+        try:
+            if target.is_symlink() or not target.is_file():
+                return None
+            return target.read_bytes()
+        except OSError:
+            return None
+
+    def release(self, paths: Sequence[str]) -> None:
+        """The harness itself changed these paths (an unused stub put back to the base): guard the state they are in."""
+        now = self._paths()
+        for path in paths:
+            if path in now:
+                self.guarded[path] = self._read(path)
+            else:
+                self.guarded.pop(path, None)
+
+    def restore(self, where: str) -> str | None:
+        """Put back what a gate run changed; the reason when a path cannot be put back, else None."""
+        wb = self.wb
+        now = self._paths()
+        restored: list[str] = []
+        try:
+            for path in sorted(set(now) | set(self.guarded)):
+                target = wb.worktree / path
+                if path not in self.guarded:
+                    restore_to_base(wb, self.base, path, now[path])
+                    restored.append(path)
+                    continue
+                expected = self.guarded[path]
+                if self._read(path) == expected and (expected is not None or not target.is_symlink()):
+                    continue
+                if target.is_symlink() or target.is_file():
+                    target.unlink()
+                elif target.is_dir():
+                    shutil.rmtree(target)
+                if expected is not None:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(expected)
+                restored.append(path)
+        except (OSError, GitError) as exc:
+            return f"the replayed step could not be put back to its saved patch ({where}): {exc.__class__.__name__}"
+        if restored:
+            wb.emit("held.replay_restored", where=where, count=len(restored), paths=restored[:50])
         return None
-    unit = wb.unit_rel
-    own = {wb.ledger_rel, f"{unit}/tasks.md", f"{unit}/questions.md", *wb.held_removals}
-    extra = sorted(
-        p for p in wb.changed_files() if p not in own and p not in wb.replay_paths and ".l4" not in p.split("/")
-    )
-    if not extra:
-        return None
-    shown = ", ".join(extra[:10]) + (f" (+{len(extra) - 10} more)" if len(extra) > 10 else "")
-    return (
-        f"the replayed step changed paths that its saved patch does not contain: {shown}. Something that ran after it "
-        "(a test or the setup) wrote them; a replay applies exactly the saved change, so it fails like an agent's step "
-        "and the next attempt is an agent step"
-    )
+
+
+def arm_replay_guard(wb: Workbench) -> None:
+    """Called right before the first gate of a step: a replayed step is guarded from here on."""
+    wb.replay_guard = ReplayGuard(wb) if wb.replay_question is not None else None
+
+
+def restore_replay(wb: Workbench, where: str) -> str | None:
+    return wb.replay_guard.restore(where) if wb.replay_guard is not None else None
+
+
+def release_replay(wb: Workbench, paths: Sequence[str]) -> None:
+    if wb.replay_guard is not None:
+        wb.replay_guard.release(paths)
 
 
 def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Replay) -> "StepOutcome":
@@ -487,7 +572,6 @@ def replay_step(wb: Workbench, role: str, task: Task, attempt: int, replay: Repl
     wb.setup_at = None  # as after an agent: the setup runs again on what the step changed (a lock file, a manifest)
     wb.commit_agent = replay.agent  # the commit names the profile that wrote the step
     wb.replay_question = replay.question  # the accept applies in this step only
-    wb.replay_paths = _patch_paths(wb, replay.patch)
     if replay.patch:
         try:
             wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=replay.patch)  # the bytes that were verified

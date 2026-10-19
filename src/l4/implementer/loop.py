@@ -12,7 +12,7 @@ and same-error detection, 1.24 (iteration cap), the "state your blocking questio
 import logging
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -20,7 +20,7 @@ from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
-from l4.implementer.held import MAX_SUBJECTS, HeldCheck, held_question
+from l4.implementer.held import MAX_CONTEXT_BYTES, MAX_SUBJECTS, MIN_CONTEXT_BYTES, HeldCheck, held_question
 from l4.implementer.held_patch import write_held
 from l4.implementer.result import ResultQuestion
 from l4.implementer.tdd import (
@@ -37,7 +37,14 @@ from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
-from l4.specs.questions import QUESTIONS_FILENAME, NewQuestion, QuestionKind, QuestionsFile, raise_questions
+from l4.specs.questions import (
+    MAX_QUESTIONS_BYTES,
+    QUESTIONS_FILENAME,
+    NewQuestion,
+    QuestionKind,
+    QuestionsFile,
+    raise_questions,
+)
 
 log = logging.getLogger("l4.implementer")
 MAX_HUNG_SHOWN = 3
@@ -139,12 +146,17 @@ def _raise_held(wb: Workbench, task: Task, held: HeldCheck, step: int) -> list[s
     and pushed like a blocked task's questions; no attempt is counted."""
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
-    question = held_question(held, {c.id: c for c in wb.provider.criteria(wb.ref)}, asked)
+    saved, digests = write_held(wb, held)  # the step's changes, kept for an `accept` to replay (L4-IMP-065)
+    if not saved:  # a refusal, or a step that could not be read back: only `retry` is offered
+        held = replace(held, patch=None)
+        digests = {"saved": False}
+    size = (wb.ref.path / QUESTIONS_FILENAME).stat().st_size if (wb.ref.path / QUESTIONS_FILENAME).is_file() else 0
+    room = MAX_QUESTIONS_BYTES * 3 // 4 - size  # questions.md is read up to MAX_QUESTIONS_BYTES: never grow past it
+    limit = max(MIN_CONTEXT_BYTES, min(MAX_CONTEXT_BYTES, room // 2))
+    question = held_question(held, {c.id: c for c in wb.provider.criteria(wb.ref)}, asked, limit=limit)
     [qid] = raise_questions(wb.ref.path, wb.ref.name, [question], redactor=wb.redactor)
     redact = wb.redactor.redact_text
     tests = list(held.tests[:MAX_SUBJECTS])
-    saved, digests = write_held(wb, held)  # the step's changes, kept for an `accept` to replay (L4-IMP-065)
-    digests = digests or {"saved": False}  # a refusal: nothing was saved, only `retry` is offered
     wb.emit(
         "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, check=held.check,
         criteria=list(held.criteria[:MAX_SUBJECTS]), tests=tests, **digests,

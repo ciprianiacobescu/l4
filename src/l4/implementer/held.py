@@ -30,7 +30,8 @@ Check = Literal["pre_satisfied", "vacuity", "at_red", "tests"]
 MAX_SHOWN_TESTS = 10
 MAX_SOURCE_LINES = 40  # lines of one test a question shows
 MAX_LINE_CHARS = 400  # characters of one shown line; a longer one is cut and says so
-MAX_CONTEXT_BYTES = 200_000  # a harness question's Context (questions.md is read up to 2 MB)
+MAX_CONTEXT_BYTES = 48_000  # a harness question's Context (questions.md is read up to 2 MB)
+MIN_CONTEXT_BYTES = 4_000  # what a question keeps when questions.md is nearly full: the listing and the patch path
 MAX_SUBJECTS = 50  # criteria or tests a `question.raised` event names
 _LABEL = {
     "pre_satisfied": "pre-satisfied",
@@ -133,10 +134,10 @@ def _accept_lines(held: HeldCheck) -> list[str]:
     ]
 
 
-def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str]) -> str:
+def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str], limit: int) -> str:
     """The Context, or, over `MAX_CONTEXT_BYTES`, the same question with the path listing and the patch path in place of
     the diffs and sources (a harness question must stay readable whatever the step changed)."""
-    if len(context.encode()) <= MAX_CONTEXT_BYTES:
+    if len(context.encode()) <= limit:
         return context
     where = f"`{held.patch_path}` on the unit branch" if held.patch_path else "the saved patch"
     paths: list[str] = []
@@ -144,7 +145,7 @@ def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str]) ->
     for change in held.changes:
         line = f"    {cap_line(change)}"
         used += len(line.encode()) + 1
-        if used > MAX_CONTEXT_BYTES // 2:
+        if used > limit // 3:
             paths.append(f"    ... {len(held.changes) - len(paths)} more paths; the whole list is in the patch")
             break
         paths.append(line)
@@ -161,7 +162,9 @@ def _bounded(context: str, held: HeldCheck, head: list[str], tail: list[str]) ->
     )
 
 
-def held_question(held: HeldCheck, criteria: Mapping[str, Criterion], asked: str) -> NewQuestion:
+def held_question(
+    held: HeldCheck, criteria: Mapping[str, Criterion], asked: str, *, limit: int = MAX_CONTEXT_BYTES
+) -> NewQuestion:
     label = _LABEL[held.check]
     shown = ", ".join(held.tests[:MAX_SHOWN_TESTS]) + (
         f" (+{len(held.tests) - MAX_SHOWN_TESTS} more)" if len(held.tests) > MAX_SHOWN_TESTS else ""
@@ -179,7 +182,7 @@ def held_question(held: HeldCheck, criteria: Mapping[str, Criterion], asked: str
         "`retry: <note>` runs the check again, for example after an L4 upgrade; the note reaches the agent.",
         "A person answers; an agent only where `clarifier.answer_by_agents` is true on the base branch.",
     ]
-    context = _bounded("\n".join([*head, *_source_lines(held), "", *tail]), held, head, tail)
+    context = _bounded("\n".join([*head, *_source_lines(held), "", *tail]), held, head, tail, limit)
     return NewQuestion(
         title=f"Task {held.task}: the {label} check could not decide",
         kind=QuestionKind.HARNESS,
